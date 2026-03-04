@@ -7,7 +7,7 @@ import { getPaytrToken, getIframeUrl, PRICES_KURUS } from "@/lib/services/paytr"
 import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { users } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -39,7 +39,10 @@ export async function POST(request: NextRequest) {
       const preview = await db.query.previews.findFirst({
         where: and(
           eq(previews.id, previewId),
-          eq(previews.userId, session.userId)
+          or(
+            eq(previews.userId, session.userId),
+            isNull(previews.userId)
+          )
         ),
       });
       if (!preview || (preview.status !== "ready" && preview.status !== "approved")) {
@@ -48,10 +51,10 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      // Mark preview as approved
+      // Assign anonymous preview to the current user and mark as approved
       await db
         .update(previews)
-        .set({ status: "approved", updatedAt: new Date() })
+        .set({ userId: session.userId, status: "approved", updatedAt: new Date() })
         .where(eq(previews.id, previewId));
     }
 

@@ -36,18 +36,18 @@ export function OrderStatusTracker({
 
   if (isFailed) {
     return (
-      <div className="card bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-amber-400 p-6">
+      <div className="card bg-bg-elevated border-l-4 border-beige-600 p-6">
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center shrink-0">
-            <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="w-12 h-12 bg-beige-600/20 rounded-full flex items-center justify-center shrink-0">
+            <svg className="w-6 h-6 text-beige-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-amber-800">
+            <h3 className="text-lg font-semibold text-beige-400">
               {d["tracker.failed.title"]}
             </h3>
-            <p className="text-amber-700 mt-1">
+            <p className="text-text-secondary mt-1">
               {d["tracker.failed.message"]}
             </p>
           </div>
@@ -69,10 +69,10 @@ export function OrderStatusTracker({
               <div
                 className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                   isCompleted
-                    ? "bg-gradient-to-br from-green-400 to-emerald-500 text-white shadow-sm"
+                    ? "bg-green-600 text-white shadow-sm"
                     : isCurrent
-                      ? "bg-gradient-to-br from-primary-500 to-accent-500 text-white ring-4 ring-primary-100"
-                      : "bg-surface-200 text-gray-400"
+                      ? "bg-green-500 text-white ring-4 ring-green-500/20"
+                      : "bg-bg-muted text-text-muted"
                 }`}
               >
                 {isCompleted ? (
@@ -97,8 +97,8 @@ export function OrderStatusTracker({
                 <div
                   className={`w-1 h-8 rounded-full ${
                     isCompleted
-                      ? "bg-gradient-to-b from-green-400 to-emerald-500"
-                      : "bg-surface-200"
+                      ? "bg-green-600"
+                      : "bg-bg-muted"
                   }`}
                 />
               )}
@@ -106,22 +106,35 @@ export function OrderStatusTracker({
             <div className={`pb-6 ${isPending ? "opacity-40" : ""}`}>
               <p
                 className={`font-semibold ${
-                  isCurrent ? "text-primary-600 font-bold" : "text-gray-900"
+                  isCurrent ? "text-green-500 font-bold" : "text-text-primary"
                 }`}
               >
                 {step.label}
               </p>
-              <p className="text-sm text-gray-500">{step.description}</p>
+              <p className="text-sm text-text-muted">{step.description}</p>
               {step.key === "shipped" && isCurrent && trackingNumber && (
-                <p className="mt-1.5 inline-flex items-center gap-1.5">
-                  <svg className="w-4 h-4 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  <span className="bg-primary-50 text-primary-700 font-mono px-3 py-1 rounded-lg text-sm">
-                    {d["tracker.tracking"]} {trackingNumber}
-                  </span>
-                </p>
+                <div className="mt-1.5 space-y-1.5">
+                  <p className="inline-flex items-center gap-1.5">
+                    <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <span className="bg-bg-elevated text-green-500 font-mono px-3 py-1 rounded-lg text-sm border border-bg-subtle">
+                      {d["tracker.tracking"]} {trackingNumber}
+                    </span>
+                  </p>
+                  <a
+                    href={`https://www.yurticikargo.com/tr/online-servisler/gonderi-sorgula?code=${encodeURIComponent(trackingNumber)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-green-500 hover:text-green-400 font-medium transition-colors"
+                  >
+                    {d["tracker.trackOnYurtici"]}
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
               )}
             </div>
           </div>

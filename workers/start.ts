@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { startAiGenerationWorker } from "../src/lib/queue/workers/ai-generation.worker";
 import { startMeshProcessingWorker } from "../src/lib/queue/workers/mesh-processing.worker";
 import { startEmailWorker } from "../src/lib/queue/workers/email.worker";

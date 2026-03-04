@@ -17,7 +17,7 @@ export function LanguageSwitcher() {
   return (
     <button
       onClick={toggle}
-      className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+      className="text-sm font-medium text-text-muted hover:text-green-400 transition-colors"
       title={locale === "en" ? "Türkçe'ye geç" : "Switch to English"}
     >
       {locale === "en" ? "TR" : "EN"}

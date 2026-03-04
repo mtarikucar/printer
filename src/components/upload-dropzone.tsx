@@ -82,14 +82,14 @@ export function UploadDropzone({
         <img
           src={preview}
           alt={d["upload.preview"]}
-          className="w-full max-h-80 object-contain bg-surface-50"
+          className="w-full max-h-80 object-contain bg-bg-elevated"
         />
         {uploading && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
             <div className="text-center">
-              <div className="w-48 h-2.5 bg-gray-700 rounded-full overflow-hidden">
+              <div className="w-48 h-2.5 bg-bg-muted rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-300"
+                  className="h-full rounded-full bg-gradient-to-r from-green-500 to-beige-400 transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -100,7 +100,7 @@ export function UploadDropzone({
         {!uploading && (
           <button
             onClick={() => setPreview(null)}
-            className="absolute top-3 right-3 bg-white text-gray-600 hover:text-gray-900 rounded-full px-3 py-1.5 text-sm font-medium shadow-md hover:shadow-lg transition-all flex items-center gap-1"
+            className="absolute top-3 right-3 bg-bg-elevated text-text-muted hover:text-text-primary rounded-full px-3 py-1.5 text-sm font-medium shadow-md hover:shadow-lg transition-all flex items-center gap-1"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -116,19 +116,19 @@ export function UploadDropzone({
       {...getRootProps()}
       className={`card cursor-pointer transition-all border-2 border-dashed overflow-hidden ${
         isDragActive
-          ? "border-primary-400 bg-primary-50/50 shadow-glow-primary"
-          : "border-primary-200 hover:border-primary-300 hover:bg-surface-50"
+          ? "border-green-500/50 bg-green-500/5"
+          : "border-bg-subtle hover:border-green-500/50 hover:bg-bg-elevated"
       }`}
     >
       {/* Accent bar */}
-      <div className="h-1 bg-gradient-to-r from-primary-400 to-accent-400 rounded-t-2xl opacity-60" />
+      <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400 rounded-t-2xl opacity-60" />
 
       <input {...getInputProps()} />
       <div className="p-8 space-y-5">
-        {/* Icon in gradient ring */}
-        <div className="mx-auto bg-gradient-to-br from-primary-50 to-accent-50 w-20 h-20 rounded-2xl flex items-center justify-center">
+        {/* Icon */}
+        <div className="mx-auto bg-bg-elevated w-20 h-20 rounded-2xl flex items-center justify-center border border-bg-subtle">
           <svg
-            className="h-10 w-10 text-primary-400 animate-float"
+            className="h-10 w-10 text-green-500 animate-float"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -142,29 +142,29 @@ export function UploadDropzone({
           </svg>
         </div>
         <div className="text-center">
-          <p className="text-lg font-medium text-gray-700">
+          <p className="text-lg font-medium text-text-primary">
             {isDragActive ? d["upload.dropHere"] : d["upload.dragOrClick"]}
           </p>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-text-muted mt-1">
             {d["upload.hint"]}
           </p>
         </div>
         {/* Tip bullets */}
         <div className="flex flex-wrap justify-center gap-2">
           <span className="trust-pill">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
             {d["upload.tipBullet1"]}
           </span>
           <span className="trust-pill">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
             {d["upload.tipBullet2"]}
           </span>
           <span className="trust-pill">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
             {d["upload.tipBullet3"]}

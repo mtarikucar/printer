@@ -19,9 +19,6 @@ export async function POST(request: NextRequest) {
 
   try {
     const session = await getSessionUser();
-    if (!session) {
-      return NextResponse.json({ error: d["api.auth.required"] }, { status: 401 });
-    }
 
     const body = await request.json();
     const validated = generateSchema.parse(body);
@@ -30,7 +27,7 @@ export async function POST(request: NextRequest) {
     const [preview] = await db
       .insert(previews)
       .values({
-        userId: session.userId,
+        userId: session?.userId ?? null,
         photoKey: validated.photoKey,
         photoUrl,
         figurineSize: validated.figurineSize,
@@ -41,6 +38,7 @@ export async function POST(request: NextRequest) {
     await getPreviewGenerationQueue().add("generate-preview", {
       previewId: preview.id,
       imageUrl: photoUrl,
+      photoKey: validated.photoKey,
     });
 
     return NextResponse.json({ previewId: preview.id });

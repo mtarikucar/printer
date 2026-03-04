@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { previews } from "@/lib/db/schema";
-import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -14,13 +13,9 @@ export async function GET(
   const d = getDictionary(locale);
   const { id } = await params;
 
-  const session = await getSessionUser();
-  if (!session) {
-    return NextResponse.json({ error: d["api.auth.required"] }, { status: 401 });
-  }
-
+  // Preview ID is a UUID — unguessable, so no auth required for polling
   const preview = await db.query.previews.findFirst({
-    where: and(eq(previews.id, id), eq(previews.userId, session.userId)),
+    where: eq(previews.id, id),
   });
 
   if (!preview) {

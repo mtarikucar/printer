@@ -137,6 +137,11 @@ const tr: Dictionary = {
   "nav.create": "Oluştur",
   "nav.account": "Hesap",
   "nav.login": "Giriş Yap",
+  "nav.logout": "Çıkış Yap",
+  "nav.myAccount": "Hesabım",
+  "nav.myOrders": "Siparişlerim",
+  "nav.createNew": "Yeni Oluştur",
+  "nav.userMenu": "Kullanıcı menüsü",
   "nav.menu": "Menü",
 
   // Gallery
@@ -238,6 +243,7 @@ const tr: Dictionary = {
   "create.step4": "Ödeme",
   "create.photoTip": "En iyi sonuç için net, iyi aydınlatılmış ve yüzün görünür olduğu bir fotoğraf kullanın. Tam boy çekimler en iyi sonucu verir.",
   "create.generatePreview": "Önizleme Oluştur",
+  "create.loginRequired": "Siparişinize devam etmek için giriş yapmanız gerekiyor.",
 
   // Preview generation
   "create.preview.generating": "3D figurine'iniz oluşturuluyor...",
@@ -371,6 +377,7 @@ const tr: Dictionary = {
   "tracker.failed.message":
     "Ekibimiz siparişinizi inceliyor ve en kısa sürede güncelleme yapacak. Gelişmeler olduğunda size e-posta göndereceğiz.",
   "tracker.tracking": "Kargo Takip:",
+  "tracker.trackOnYurtici": "Yurtici Kargo'da Takip Et",
 
   // Admin - Login
   "admin.login.title": "Yönetici Girişi",
@@ -461,6 +468,10 @@ const tr: Dictionary = {
   "admin.orderDetail.trackingPlaceholder": "Kargo takip numarası girin",
   "admin.orderDetail.ship": "Kargola",
   "admin.orderDetail.shipping": "Kargolaniyor...",
+  "admin.orderDetail.kargoShip": "Yurtici Kargo ile Gönder",
+  "admin.orderDetail.kargoCreating": "Gönderi oluşturuluyor...",
+  "admin.orderDetail.kargoFailed": "Yurtici Kargo gönderisi oluşturulamadı",
+  "admin.orderDetail.orManual": "veya manuel girin",
   "admin.orderDetail.actionFailed": "işlemi başarısız",
 
   // Admin - Print Queue
@@ -517,6 +528,9 @@ const tr: Dictionary = {
   "api.order.notFound": "Sipariş bulunamadı",
   "api.order.rejectedDefault": "Yönetici tarafından reddedildi",
   "api.order.shipFailed": "Sipariş kargolanamadı",
+  "api.kargo.createFailed": "Gönderi oluşturulamadı",
+  "api.kargo.shipFailed": "Gönderim başarısız",
+  "api.order.notInPrinting": "Sipariş baskıda durumunda değil",
   "api.order.notInReview": "Sipariş inceleme durumunda değil",
   "api.order.noPhoto": "Fotoğraf bulunamadı",
   "api.auth.unauthorized": "Yetkisiz erişim",

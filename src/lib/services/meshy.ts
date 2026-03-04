@@ -4,10 +4,10 @@ interface MeshyResult {
   durationMs: number;
 }
 
-export async function generateWithMeshy(imageUrl: string): Promise<MeshyResult> {
+export async function generateWithMeshy(imageBase64: string): Promise<MeshyResult> {
   const startTime = Date.now();
 
-  // Create task — Meshy v1 API with Meshy-6 model
+  // Create task — Meshy v1 API with Meshy-6 model (base64 image)
   const createRes = await fetch("https://api.meshy.ai/openapi/v1/image-to-3d", {
     method: "POST",
     headers: {
@@ -15,7 +15,7 @@ export async function generateWithMeshy(imageUrl: string): Promise<MeshyResult> 
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      image_url: imageUrl,
+      image_url: imageBase64,
       ai_model: "meshy-6",
       enable_pbr: false,
       should_remesh: true,

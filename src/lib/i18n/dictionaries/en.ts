@@ -135,6 +135,11 @@ const en = {
   "nav.create": "Create",
   "nav.account": "Account",
   "nav.login": "Log In",
+  "nav.logout": "Log Out",
+  "nav.myAccount": "My Account",
+  "nav.myOrders": "My Orders",
+  "nav.createNew": "Create New",
+  "nav.userMenu": "User menu",
   "nav.menu": "Menu",
 
   // Gallery
@@ -236,6 +241,7 @@ const en = {
   "create.step4": "Payment",
   "create.photoTip": "For best results, use a clear, well-lit photo with the face visible. Full body shots work best.",
   "create.generatePreview": "Generate Preview",
+  "create.loginRequired": "You need to log in to continue with your order.",
 
   // Preview generation
   "create.preview.generating": "Creating your 3D figurine...",
@@ -369,6 +375,7 @@ const en = {
   "tracker.failed.message":
     "Our team is reviewing your order and will update you as soon as possible. We'll send you an email when there's news.",
   "tracker.tracking": "Tracking:",
+  "tracker.trackOnYurtici": "Track on Yurtici Kargo",
 
   // Admin - Login
   "admin.login.title": "Admin Login",
@@ -459,6 +466,10 @@ const en = {
   "admin.orderDetail.trackingPlaceholder": "Enter tracking number",
   "admin.orderDetail.ship": "Ship",
   "admin.orderDetail.shipping": "Shipping...",
+  "admin.orderDetail.kargoShip": "Ship via Yurtici Kargo",
+  "admin.orderDetail.kargoCreating": "Creating shipment...",
+  "admin.orderDetail.kargoFailed": "Yurtici Kargo shipment failed",
+  "admin.orderDetail.orManual": "or enter manually",
   "admin.orderDetail.actionFailed": "action failed",
 
   // Admin - Print Queue
@@ -515,6 +526,9 @@ const en = {
   "api.order.notFound": "Order not found",
   "api.order.rejectedDefault": "Rejected by admin",
   "api.order.shipFailed": "Failed to ship order",
+  "api.kargo.createFailed": "Failed to create shipment",
+  "api.kargo.shipFailed": "Shipping failed",
+  "api.order.notInPrinting": "Order is not in printing status",
   "api.order.notInReview": "Order is not in review status",
   "api.order.noPhoto": "No photo found",
   "api.auth.unauthorized": "Unauthorized",

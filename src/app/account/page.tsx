@@ -64,8 +64,8 @@ export default function AccountPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-surface-50 flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-primary-600 border-t-transparent rounded-full" />
+      <main className="min-h-screen bg-bg-base flex items-center justify-center">
+        <div className="animate-spin w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full" />
       </main>
     );
   }
@@ -78,22 +78,31 @@ export default function AccountPage() {
     .toUpperCase() || "?";
 
   return (
-    <main className="min-h-screen bg-surface-50">
-      <SiteHeader showAuth={false} />
+    <main className="min-h-screen bg-bg-base">
+      <SiteHeader />
 
       <div className="max-w-3xl mx-auto px-4 py-12">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-sm text-text-muted mb-6">
+          <Link href="/" className="hover:text-green-500 transition-colors">
+            {d["nav.home"]}
+          </Link>
+          <span>/</span>
+          <span className="text-text-primary font-medium">{d["account.title"]}</span>
+        </nav>
+
         {/* Profile card */}
         {user && (
           <div className="card overflow-hidden animate-fade-in-up">
-            <div className="h-2 bg-gradient-to-r from-primary-500 to-accent-500" />
+            <div className="h-2 bg-gradient-to-r from-green-500 to-beige-400" />
             <div className="p-6 sm:p-8">
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white text-lg font-bold shrink-0">
+                <div className="w-14 h-14 rounded-full bg-green-500 flex items-center justify-center text-white text-lg font-bold shrink-0">
                   {initials}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h1 className="text-2xl font-bold text-gray-900">{user.fullName}</h1>
-                  <p className="text-sm text-gray-500">{user.email}</p>
+                  <h1 className="text-2xl font-serif text-text-primary">{user.fullName}</h1>
+                  <p className="text-sm text-text-muted">{user.email}</p>
                 </div>
                 <button
                   onClick={handleLogout}
@@ -112,7 +121,7 @@ export default function AccountPage() {
         {/* Orders */}
         <div className="mt-8 animate-fade-in-up delay-100">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">{d["account.orders.title"]}</h2>
+            <h2 className="text-xl font-serif text-text-primary">{d["account.orders.title"]}</h2>
             <Link href="/create" className="btn-primary text-sm !py-2 !px-4">
               {d["account.orders.new"]}
             </Link>
@@ -120,10 +129,10 @@ export default function AccountPage() {
 
           {orders.length === 0 ? (
             <div className="card p-12 text-center">
-              <svg className="w-16 h-16 text-surface-300 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-16 h-16 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               </svg>
-              <p className="mt-4 text-gray-500">{d["account.orders.empty"]}</p>
+              <p className="mt-4 text-text-muted">{d["account.orders.empty"]}</p>
               <Link href="/create" className="btn-primary mt-6 inline-flex">
                 {d["account.orders.createFirst"]}
               </Link>
@@ -131,24 +140,24 @@ export default function AccountPage() {
           ) : (
             <div className="card overflow-hidden">
               <table className="w-full">
-                <thead className="bg-surface-50 border-b border-surface-200">
+                <thead className="bg-bg-elevated border-b border-bg-subtle">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{d["account.orders.table.order"]}</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{d["account.orders.table.size"]}</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{d["account.orders.table.status"]}</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden sm:table-cell">{d["account.orders.table.gallery"]}</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{d["account.orders.table.amount"]}</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden sm:table-cell">{d["account.orders.table.date"]}</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted uppercase">{d["account.orders.table.order"]}</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted uppercase">{d["account.orders.table.size"]}</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted uppercase">{d["account.orders.table.status"]}</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted uppercase hidden sm:table-cell">{d["account.orders.table.gallery"]}</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted uppercase">{d["account.orders.table.amount"]}</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-text-muted uppercase hidden sm:table-cell">{d["account.orders.table.date"]}</th>
                     <th className="px-4 py-3"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-surface-100">
+                <tbody className="divide-y divide-bg-subtle">
                   {orders.map((order) => (
-                    <tr key={order.orderNumber} className="hover:bg-primary-50/50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-sm font-medium">{order.orderNumber}</td>
-                      <td className="px-4 py-3 text-sm">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</td>
+                    <tr key={order.orderNumber} className="hover:bg-bg-elevated transition-colors">
+                      <td className="px-4 py-3 font-mono text-sm font-medium text-text-primary">{order.orderNumber}</td>
+                      <td className="px-4 py-3 text-sm text-text-secondary">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</td>
                       <td className="px-4 py-3 text-sm">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-50 text-primary-700">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-bg-elevated text-green-500 border border-bg-subtle">
                           {d[`status.${order.status}` as keyof typeof d] || order.status}
                         </span>
                       </td>
@@ -156,8 +165,8 @@ export default function AccountPage() {
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             order.isPublic
-                              ? "bg-success-50 text-green-700"
-                              : "bg-surface-100 text-gray-500"
+                              ? "bg-success-50 text-success"
+                              : "bg-bg-muted text-text-muted"
                           }`}
                         >
                           {order.isPublic
@@ -165,16 +174,16 @@ export default function AccountPage() {
                             : d["account.orders.private"]}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm">
+                      <td className="px-4 py-3 text-sm font-mono text-text-secondary">
                         {formatCurrency(order.amountKurus, locale)}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">
+                      <td className="px-4 py-3 text-sm text-text-muted hidden sm:table-cell">
                         {formatDate(order.createdAt, locale)}
                       </td>
                       <td className="px-4 py-3">
                         <Link
                           href={`/track/${order.orderNumber}`}
-                          className="text-sm text-primary-600 hover:text-primary-800 font-semibold"
+                          className="text-sm text-green-500 hover:text-green-400 font-semibold"
                         >
                           {d["account.orders.track"]}
                         </Link>

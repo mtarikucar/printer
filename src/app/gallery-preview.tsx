@@ -9,13 +9,15 @@ export function GalleryPreview({ items }: { items: GalleryItem[] }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+      {/* Masonry layout with CSS columns */}
+      <div className="columns-2 md:columns-3 gap-4 sm:gap-6 [&>*]:mb-4 sm:[&>*]:mb-6">
         {items.map((item) => (
-          <GalleryCard
-            key={item.id}
-            item={item}
-            onClick={() => setSelectedItem(item)}
-          />
+          <div key={item.id} className="break-inside-avoid">
+            <GalleryCard
+              item={item}
+              onClick={() => setSelectedItem(item)}
+            />
+          </div>
         ))}
       </div>
       {selectedItem && (

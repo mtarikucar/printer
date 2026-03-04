@@ -37,10 +37,10 @@ export function GalleryGrid({
   if (items.length === 0) {
     return (
       <div className="card p-12 text-center">
-        <svg className="w-20 h-20 text-surface-300 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className="w-20 h-20 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
         </svg>
-        <p className="mt-6 text-lg font-medium text-gray-700">{d["gallery.empty"]}</p>
+        <p className="mt-6 text-lg font-medium text-text-secondary">{d["gallery.empty"]}</p>
         <Link
           href="/create"
           className="btn-primary mt-6 inline-flex"
@@ -53,13 +53,15 @@ export function GalleryGrid({
 
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+      {/* Masonry layout */}
+      <div className="columns-2 md:columns-3 lg:columns-4 gap-4 sm:gap-6 [&>*]:mb-4 sm:[&>*]:mb-6">
         {items.map((item) => (
-          <GalleryCard
-            key={item.id}
-            item={item}
-            onClick={() => setSelectedItem(item)}
-          />
+          <div key={item.id} className="break-inside-avoid">
+            <GalleryCard
+              item={item}
+              onClick={() => setSelectedItem(item)}
+            />
+          </div>
         ))}
       </div>
 

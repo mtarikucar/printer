@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { previews, users } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
@@ -21,16 +21,12 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const session = await getSessionUser();
-    if (!session) {
-      return NextResponse.json({ error: d["api.auth.required"] }, { status: 401 });
-    }
-
     const body = await request.json();
     const validated = revisionSchema.parse(body);
 
+    // Preview ID is a UUID — unguessable, no auth required
     const preview = await db.query.previews.findFirst({
-      where: and(eq(previews.id, id), eq(previews.userId, session.userId)),
+      where: eq(previews.id, id),
     });
 
     if (!preview) {
@@ -47,10 +43,11 @@ export async function POST(
       })
       .where(eq(previews.id, id));
 
-    // Get user info for email
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, session.userId),
-    });
+    // Send email notification if user is known
+    const session = await getSessionUser();
+    const user = session
+      ? await db.query.users.findFirst({ where: eq(users.id, session.userId) })
+      : null;
 
     const adminEmail = process.env.ADMIN_EMAIL;
     if (adminEmail && user) {

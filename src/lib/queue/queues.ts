@@ -16,6 +16,7 @@ export interface MeshProcessingJobData {
 export interface PreviewGenerationJobData {
   previewId: string;
   imageUrl: string;
+  photoKey: string;
 }
 
 export interface EmailJobData {

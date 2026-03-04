@@ -34,7 +34,7 @@ export function GalleryModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 animate-fade-in"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -43,7 +43,7 @@ export function GalleryModal({
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 p-2 bg-white/80 backdrop-blur-sm rounded-full text-gray-600 hover:text-gray-900 transition-colors shadow-md hover:shadow-lg"
+          className="absolute top-4 right-4 z-10 p-2 bg-bg-elevated/80 backdrop-blur-sm rounded-full text-text-muted hover:text-text-primary transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -54,10 +54,10 @@ export function GalleryModal({
         {item.glbUrl ? (
           <ModelViewer
             url={item.glbUrl}
-            className="w-full h-80 sm:h-96 bg-gray-900 rounded-t-2xl"
+            className="w-full h-80 sm:h-96 rounded-t-2xl"
           />
         ) : item.thumbnailUrl ? (
-          <div className="w-full h-80 sm:h-96 bg-surface-100 relative">
+          <div className="w-full h-80 sm:h-96 bg-bg-elevated relative">
             <img
               src={item.thumbnailUrl}
               alt=""
@@ -70,11 +70,11 @@ export function GalleryModal({
         <div className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className="text-lg font-semibold text-text-primary">
                 {item.publicDisplayName || d["gallery.anonymous"]}
               </h3>
-              <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-                <span className="bg-primary-50 text-primary-600 px-2 py-0.5 rounded-full text-xs font-medium">
+              <div className="flex items-center gap-3 mt-1 text-sm text-text-muted">
+                <span className="bg-bg-elevated text-green-500 px-2 py-0.5 rounded-full text-xs font-medium border border-bg-subtle">
                   {sizeLabel}
                 </span>
                 {item.publishedAt && (

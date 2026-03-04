@@ -81,9 +81,7 @@ export const users = pgTable("users", {
 
 export const previews = pgTable("previews", {
   id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
+  userId: uuid("user_id").references(() => users.id),
   photoKey: text("photo_key").notNull(),
   photoUrl: text("photo_url").notNull(),
   figurineSize: figurineSizeEnum("figurine_size").notNull(),

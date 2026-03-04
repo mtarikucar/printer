@@ -114,25 +114,49 @@ export function OrderDetailClient({
           </div>
 
           {canShip && (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={trackingNumber}
-                onChange={(e) => setTrackingNumber(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                placeholder={d["admin.orderDetail.trackingPlaceholder"]}
-              />
+            <div className="space-y-3">
+              {/* Yurtici Kargo button */}
               <button
-                onClick={() => {
-                  if (trackingNumber.trim()) {
-                    performAction("ship", { trackingNumber: trackingNumber.trim() });
-                  }
-                }}
-                disabled={!!loading || !trackingNumber.trim()}
-                className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:bg-gray-400"
+                onClick={() => performAction("ship-kargo")}
+                disabled={!!loading}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 transition-colors"
               >
-                {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+                </svg>
+                {loading === "ship-kargo"
+                  ? d["admin.orderDetail.kargoCreating"]
+                  : d["admin.orderDetail.kargoShip"]}
               </button>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 border-t border-gray-200" />
+                <span className="text-xs text-gray-400">{d["admin.orderDetail.orManual"]}</span>
+                <div className="flex-1 border-t border-gray-200" />
+              </div>
+
+              {/* Manual tracking input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={trackingNumber}
+                  onChange={(e) => setTrackingNumber(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  placeholder={d["admin.orderDetail.trackingPlaceholder"]}
+                />
+                <button
+                  onClick={() => {
+                    if (trackingNumber.trim()) {
+                      performAction("ship", { trackingNumber: trackingNumber.trim() });
+                    }
+                  }}
+                  disabled={!!loading || !trackingNumber.trim()}
+                  className="px-4 py-2 bg-gray-500 text-white text-sm font-medium rounded-lg hover:bg-gray-600 disabled:bg-gray-400"
+                >
+                  {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
+                </button>
+              </div>
             </div>
           )}
         </div>

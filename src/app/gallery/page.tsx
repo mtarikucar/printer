@@ -69,19 +69,15 @@ export default async function GalleryPage() {
     : null;
 
   return (
-    <main className="min-h-screen bg-surface-50">
+    <main className="min-h-screen bg-bg-base">
       <SiteHeader />
 
-      <section className="relative mesh-gradient overflow-hidden">
-        <div className="absolute inset-0 dot-grid -z-0" />
-        <div className="relative max-w-6xl mx-auto px-4 py-16 text-center">
-          <span className="inline-block text-xs font-semibold tracking-wider text-primary-600 bg-primary-50 px-3 py-1 rounded-full">
-            {d["section.gallery"]}
-          </span>
-          <h1 className="mt-4 text-4xl md:text-5xl font-bold text-gradient">
+      <section className="relative overflow-hidden">
+        <div className="max-w-6xl mx-auto px-4 py-16 text-center">
+          <h1 className="text-4xl md:text-5xl font-serif text-text-primary">
             {d["gallery.title"]}
           </h1>
-          <p className="mt-4 text-lg text-gray-600 max-w-xl mx-auto">
+          <p className="mt-4 text-lg text-text-secondary max-w-xl mx-auto">
             {d["gallery.subtitle"]}
           </p>
         </div>

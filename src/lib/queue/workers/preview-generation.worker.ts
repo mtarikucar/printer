@@ -1,12 +1,22 @@
 import { Worker, Job } from "bullmq";
 import { eq } from "drizzle-orm";
+import { extname } from "path";
 import { getRedisConnection } from "../connection";
 import type { PreviewGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
-import { saveFile, getPublicUrl } from "../../services/storage";
+import { saveFile, getPublicUrl, getFileBuffer } from "../../services/storage";
 import { db } from "../../db";
 import { previews } from "../../db/schema";
 import { nanoid } from "nanoid";
+
+function getMimeType(filePath: string): string {
+  const ext = extname(filePath).toLowerCase();
+  const types: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png", ".webp": "image/webp",
+  };
+  return types[ext] || "image/jpeg";
+}
 
 async function downloadFile(url: string): Promise<Buffer> {
   const res = await fetch(url);
@@ -15,11 +25,17 @@ async function downloadFile(url: string): Promise<Buffer> {
 }
 
 async function processJob(job: Job<PreviewGenerationJobData>) {
-  const { previewId, imageUrl } = job.data;
+  const { previewId, photoKey } = job.data;
 
   try {
     job.log("Starting Meshy preview generation...");
-    const result = await generateWithMeshy(imageUrl);
+
+    // Read image from disk and convert to base64 data URI
+    const imageBuffer = await getFileBuffer(photoKey);
+    const mimeType = getMimeType(photoKey);
+    const imageBase64 = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+
+    const result = await generateWithMeshy(imageBase64);
 
     // Download GLB and save to local storage
     const glbBuffer = await downloadFile(result.glbUrl);

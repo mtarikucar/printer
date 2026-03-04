@@ -61,24 +61,24 @@ export default function TrackPage({
   }, [orderNumber, d]);
 
   return (
-    <main className="min-h-screen bg-surface-50">
-      <SiteHeader showAuth={false} />
+    <main className="min-h-screen bg-bg-base">
+      <SiteHeader />
 
       <div className="max-w-3xl mx-auto px-4 py-12">
         {loading ? (
           <div className="text-center py-12 animate-fade-in">
-            <div className="animate-spin w-10 h-10 border-4 border-primary-600 border-t-transparent rounded-full mx-auto" />
-            <p className="mt-4 text-gray-600">{d["track.loading"]}</p>
+            <div className="animate-spin w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full mx-auto" />
+            <p className="mt-4 text-text-secondary">{d["track.loading"]}</p>
           </div>
         ) : error ? (
           <div className="text-center py-12 animate-fade-in-up">
-            <div className="w-16 h-16 bg-surface-100 rounded-full flex items-center justify-center mx-auto">
-              <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-16 h-16 bg-bg-elevated rounded-full flex items-center justify-center mx-auto">
+              <svg className="w-8 h-8 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h1 className="mt-4 text-2xl font-bold text-gray-900">{d["track.notFound"]}</h1>
-            <p className="mt-2 text-gray-600">{error}</p>
+            <h1 className="mt-4 text-2xl font-serif text-text-primary">{d["track.notFound"]}</h1>
+            <p className="mt-2 text-text-secondary">{error}</p>
             <a href="/" className="btn-primary mt-6 inline-flex">
               {d["common.backHome"]}
             </a>
@@ -89,17 +89,17 @@ export default function TrackPage({
             <div className="card p-6 sm:p-8">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">
+                  <h1 className="text-2xl font-serif text-text-primary">
                     {d["track.order"]}{" "}
-                    <span className="font-mono text-primary-600">{order.orderNumber}</span>
+                    <span className="font-mono text-green-500">{order.orderNumber}</span>
                   </h1>
-                  <p className="text-gray-600 mt-1">
+                  <p className="text-text-secondary mt-1">
                     {d["track.greeting"].replace("{name}", order.customerName)}
                   </p>
                 </div>
               </div>
               {order.paidAt && (
-                <p className="mt-3 text-sm text-gray-500">
+                <p className="mt-3 text-sm text-text-muted">
                   {d["track.orderDate"]}{" "}
                   {formatDateLong(order.paidAt, locale)}
                 </p>
@@ -119,7 +119,7 @@ export default function TrackPage({
               <div className="card overflow-hidden">
                 <ModelViewer
                   url={order.glbUrl}
-                  className="w-full h-72 sm:h-96 bg-gray-900"
+                  className="w-full h-72 sm:h-96"
                 />
               </div>
             )}

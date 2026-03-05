@@ -5,15 +5,72 @@ services:
       POSTGRES_USER: printer
       POSTGRES_PASSWORD: printer
       POSTGRES_DB: printer
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printer"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker
+    command: ["npx", "drizzle-kit", "push"]
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://printer:printer@postgres:5432/printer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: app
     ports:
-      - "6379:6379"
+      - "3000:3000"
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://printer:printer@postgres:5432/printer
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://printer:printer@postgres:5432/printer
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
 volumes:
   pgdata:
+  uploads:

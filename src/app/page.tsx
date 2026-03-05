@@ -56,6 +56,9 @@ export default async function HomePage() {
     thumbnailUrl: order.photos[0]?.originalUrl ?? null,
   }));
 
+  // Find first gallery item that has both photo + GLB for hero showcase
+  const heroItem = galleryItems.find((item) => item.thumbnailUrl && item.glbUrl) ?? null;
+
   const steps = [
     {
       number: "01",
@@ -119,7 +122,33 @@ export default async function HomePage() {
     .map((item) => ({
       src: item.thumbnailUrl!,
       alt: item.publicDisplayName || "Figurine",
+      hasModel: !!item.glbUrl,
     }));
+
+  const testimonials = [
+    {
+      quote: d["landing.testimonials.quote1"],
+      name: d["landing.testimonials.name1"],
+      location: d["landing.testimonials.location1"],
+    },
+    {
+      quote: d["landing.testimonials.quote2"],
+      name: d["landing.testimonials.name2"],
+      location: d["landing.testimonials.location2"],
+    },
+    {
+      quote: d["landing.testimonials.quote3"],
+      name: d["landing.testimonials.name3"],
+      location: d["landing.testimonials.location3"],
+    },
+  ];
+
+  const communityStats = [
+    { value: 500, suffix: "+", label: d["landing.stats.figurines"], display: null },
+    { value: 4.9, suffix: "/5", label: d["landing.stats.reviews"], display: null },
+    { value: 48, suffix: d["landing.stats.processingValue"] === "48h" ? "h" : "s", label: d["landing.stats.processing"], display: null },
+    { value: 0, suffix: "", label: d["landing.stats.shipping"], display: d["landing.stats.processingValue"] === "48h" ? "Free" : d["landing.stats.shipping"] },
+  ];
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -135,9 +164,6 @@ export default async function HomePage() {
           sectionGallery: d["section.gallery"],
           galleryTitle: d["landing.gallery.title"],
           gallerySubtitle: d["landing.gallery.subtitle"],
-          testimonialQuote: d["landing.testimonials.quote1"],
-          testimonialName: d["landing.testimonials.name1"],
-          testimonialLocation: d["landing.testimonials.location1"],
           pricingTitle: d["landing.pricing.title"],
           pricingSubtitle: d["landing.pricing.subtitle"],
           pricingSelect: d["landing.pricing.select"],
@@ -158,6 +184,10 @@ export default async function HomePage() {
           navGallery: d["nav.gallery"],
           navCreate: d["nav.create"],
           pricingTitle2: d["landing.pricing.title"],
+          heroShowcasePhoto: d["landing.hero.showcase.photo"],
+          heroShowcaseFigurine: d["landing.hero.showcase.figurine"],
+          testimonialsTitle: d["landing.testimonials.title"],
+          testimonialsSubtitle: d["landing.testimonials.subtitle"],
         }}
         steps={steps}
         sizes={sizes}
@@ -165,6 +195,9 @@ export default async function HomePage() {
         faqs={faqs}
         marqueeItems={marqueeItems}
         galleryItems={galleryItems}
+        heroItem={heroItem}
+        testimonials={testimonials}
+        communityStats={communityStats}
       />
     </main>
   );

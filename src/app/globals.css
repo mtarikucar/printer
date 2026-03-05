@@ -373,6 +373,41 @@ details[open] > .accordion-content {
 }
 
 /* ============================================
+   Flip Card (Gallery)
+   ============================================ */
+
+.flip-card {
+  perspective: 1000px;
+}
+
+.flip-card-front,
+.flip-card-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  transition: transform 0.6s ease;
+  border-radius: inherit;
+}
+
+.flip-card-front {
+  transform: rotateY(0deg);
+}
+
+.flip-card-back {
+  transform: rotateY(180deg);
+}
+
+/* Desktop: flip on hover */
+@media (hover: hover) {
+  .group:hover .flip-card-front {
+    transform: rotateY(-180deg);
+  }
+  .group:hover .flip-card-back {
+    transform: rotateY(0deg);
+  }
+}
+
+/* ============================================
    Accessibility
    ============================================ */
 
@@ -398,5 +433,10 @@ details[open] > .accordion-content {
 
   .marquee-track {
     animation: none !important;
+  }
+
+  .flip-card-front,
+  .flip-card-back {
+    transition: none !important;
   }
 }

@@ -7,11 +7,13 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 interface UploadDropzoneProps {
   onUploadComplete: (key: string, previewUrl: string) => void;
   onError?: (error: string) => void;
+  onFileSelected?: (file: File) => void;
 }
 
 export function UploadDropzone({
   onUploadComplete,
   onError,
+  onFileSelected,
 }: UploadDropzoneProps) {
   const d = useDictionary();
   const [uploading, setUploading] = useState(false);
@@ -30,6 +32,12 @@ export function UploadDropzone({
 
       if (file.size > 10 * 1024 * 1024) {
         onError?.(d["upload.fileTooLarge"]);
+        return;
+      }
+
+      // If onFileSelected is provided, hand off the file without uploading
+      if (onFileSelected) {
+        onFileSelected(file);
         return;
       }
 
@@ -66,7 +74,7 @@ export function UploadDropzone({
         setUploading(false);
       }
     },
-    [onUploadComplete, onError, d]
+    [onUploadComplete, onError, onFileSelected, d]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

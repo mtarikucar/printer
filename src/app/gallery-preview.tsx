@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { GalleryCard, type GalleryItem } from "@/components/gallery-card";
+import { FlipGalleryCard } from "@/components/flip-gallery-card";
+import type { GalleryItem } from "@/components/gallery-card";
 import { GalleryModal } from "@/components/gallery-modal";
 
 export function GalleryPreview({ items }: { items: GalleryItem[] }) {
@@ -13,7 +14,7 @@ export function GalleryPreview({ items }: { items: GalleryItem[] }) {
       <div className="columns-2 md:columns-3 gap-4 sm:gap-6 [&>*]:mb-4 sm:[&>*]:mb-6">
         {items.map((item) => (
           <div key={item.id} className="break-inside-avoid">
-            <GalleryCard
+            <FlipGalleryCard
               item={item}
               onClick={() => setSelectedItem(item)}
             />

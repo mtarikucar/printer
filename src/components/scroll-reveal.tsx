@@ -8,11 +8,13 @@ export function ScrollReveal({
   className,
   delay = 0,
   direction = "up",
+  wobble = false,
 }: {
   children: React.ReactNode;
   className?: string;
   delay?: number;
   direction?: "up" | "down" | "left" | "right" | "none";
+  wobble?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-80px" });
@@ -25,12 +27,22 @@ export function ScrollReveal({
     none: {},
   };
 
+  const initial = {
+    opacity: 0,
+    ...directionMap[direction],
+    ...(wobble ? { rotate: -2 } : {}),
+  };
+
+  const animateTo = isInView
+    ? { opacity: 1, x: 0, y: 0, ...(wobble ? { rotate: 0 } : {}) }
+    : undefined;
+
   return (
     <motion.div
       ref={ref}
       className={className}
-      initial={{ opacity: 0, ...directionMap[direction] }}
-      animate={isInView ? { opacity: 1, x: 0, y: 0 } : undefined}
+      initial={initial}
+      animate={animateTo}
       transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}
     >
       {children}

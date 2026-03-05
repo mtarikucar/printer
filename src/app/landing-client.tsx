@@ -8,12 +8,21 @@ import { TextReveal } from "@/components/text-reveal";
 import { MagneticButton } from "@/components/magnetic-button";
 import { ProcessScrollytelling } from "@/components/process-scrollytelling";
 import { Marquee } from "@/components/marquee";
+import type { MarqueeItem } from "@/components/marquee";
 import { SectionDivider } from "@/components/section-divider";
 import { GalleryPreview } from "./gallery-preview";
+import { SocialProofSection } from "@/components/social-proof";
+import { CommunityCounter } from "@/components/community-counter";
+import { GoldParticles } from "@/components/gold-particles";
 import type { GalleryItem } from "@/components/gallery-card";
 
 const HeroModel = dynamic(
   () => import("@/components/hero-model").then((m) => m.HeroModel),
+  { ssr: false }
+);
+
+const HeroShowcase = dynamic(
+  () => import("@/components/hero-showcase").then((m) => m.HeroShowcase),
   { ssr: false }
 );
 
@@ -41,9 +50,6 @@ interface LandingTexts {
   sectionGallery: string;
   galleryTitle: string;
   gallerySubtitle: string;
-  testimonialQuote: string;
-  testimonialName: string;
-  testimonialLocation: string;
   pricingTitle: string;
   pricingSubtitle: string;
   pricingSelect: string;
@@ -64,6 +70,22 @@ interface LandingTexts {
   navGallery: string;
   navCreate: string;
   pricingTitle2: string;
+  heroShowcasePhoto: string;
+  heroShowcaseFigurine: string;
+  testimonialsTitle: string;
+  testimonialsSubtitle: string;
+}
+
+interface Testimonial {
+  quote: string;
+  name: string;
+  location: string;
+}
+
+interface CommunityStat {
+  value: number;
+  suffix: string;
+  label: string;
 }
 
 export function LandingClient({
@@ -74,15 +96,23 @@ export function LandingClient({
   faqs,
   marqueeItems,
   galleryItems,
+  heroItem,
+  testimonials,
+  communityStats,
 }: {
   d: LandingTexts;
   steps: Step[];
   sizes: Size[];
   features: string[];
   faqs: { q: string; a: string }[];
-  marqueeItems: { src: string; alt: string }[];
+  marqueeItems: MarqueeItem[];
   galleryItems: GalleryItem[];
+  heroItem: GalleryItem | null;
+  testimonials: Testimonial[];
+  communityStats: CommunityStat[];
 }) {
+  const [ctaHover, setCtaHover] = useState(false);
+
   return (
     <>
       {/* Hero (100vh) */}
@@ -119,9 +149,17 @@ export function LandingClient({
                 </p>
               </ScrollReveal>
             </div>
-            {/* 3D hero sphere */}
+            {/* Hero right: showcase or fallback sphere */}
             <div className="hidden md:block">
-              <HeroModel className="w-full h-[500px]" />
+              {heroItem ? (
+                <HeroShowcase
+                  item={heroItem}
+                  photoLabel={d.heroShowcasePhoto}
+                  figurineLabel={d.heroShowcaseFigurine}
+                />
+              ) : (
+                <HeroModel className="w-full h-[500px]" />
+              )}
             </div>
           </div>
         </div>
@@ -136,6 +174,9 @@ export function LandingClient({
 
       {/* Process Scrollytelling */}
       <ProcessScrollytelling steps={steps} />
+
+      {/* Community Counter Stats */}
+      <CommunityCounter stats={communityStats} />
 
       {/* Gallery Masonry */}
       {galleryItems.length > 0 && (
@@ -168,21 +209,12 @@ export function LandingClient({
         </section>
       )}
 
-      {/* Testimonial (single editorial) */}
-      <section className="section-spacing">
-        <div className="max-w-3xl mx-auto px-4 text-center">
-          <ScrollReveal>
-            <blockquote className="text-2xl md:text-3xl font-serif italic text-text-primary leading-relaxed">
-              &ldquo;{d.testimonialQuote}&rdquo;
-            </blockquote>
-          </ScrollReveal>
-          <SectionDivider className="my-6" />
-          <ScrollReveal delay={0.1}>
-            <p className="text-text-secondary font-medium">{d.testimonialName}</p>
-            <p className="text-text-muted text-sm">{d.testimonialLocation}</p>
-          </ScrollReveal>
-        </div>
-      </section>
+      {/* Social Proof: 3 Testimonials */}
+      <SocialProofSection
+        title={d.testimonialsTitle}
+        subtitle={d.testimonialsSubtitle}
+        testimonials={testimonials}
+      />
 
       {/* Pricing (horizontal bars) */}
       <section className="section-spacing" id="pricing">
@@ -285,8 +317,9 @@ export function LandingClient({
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="py-20">
+      {/* CTA with confetti on hover */}
+      <section className="py-20 relative">
+        {ctaHover && <GoldParticles />}
         <div className="max-w-4xl mx-auto px-4 text-center">
           <ScrollReveal>
             <h2 className="text-3xl md:text-5xl font-serif text-text-primary">
@@ -299,7 +332,11 @@ export function LandingClient({
             </p>
           </ScrollReveal>
           <ScrollReveal delay={0.2}>
-            <div className="mt-8">
+            <div
+              className="mt-8"
+              onMouseEnter={() => setCtaHover(true)}
+              onMouseLeave={() => setCtaHover(false)}
+            >
               <MagneticButton href="/create" className="btn-primary text-lg !px-8 !py-3.5">
                 {d.ctaButton}
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

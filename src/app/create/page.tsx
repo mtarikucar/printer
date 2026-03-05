@@ -73,6 +73,7 @@ export default function CreatePage() {
   const [loadingStage, setLoadingStage] = useState(0);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const editorExportRef = useRef<(() => Promise<Blob | null>) | null>(null);
 
   const SIZES = [
     { key: "kucuk", label: d["sizes.kucuk"], price: "1.199", height: "~60mm" },
@@ -159,7 +160,45 @@ export default function CreatePage() {
   };
 
   const handleGeneratePreview = async () => {
-    if (!photoKey) {
+    let currentPhotoKey = photoKey;
+
+    // If editor is active, auto-export and upload first
+    if (isEditing && selectedFile && !currentPhotoKey) {
+      setSubmitting(true);
+      setError(null);
+
+      try {
+        const blob = await editorExportRef.current?.();
+        if (!blob) {
+          setSubmitting(false);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", blob, "edited-photo.png");
+
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || d["upload.failed"]);
+        }
+
+        const { key } = await res.json();
+        setPhotoKey(key);
+        setIsEditing(false);
+        currentPhotoKey = key;
+      } catch (err: any) {
+        setError(err.message || d["upload.failed"]);
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    if (!currentPhotoKey) {
       setError(d["create.photoRequired"]);
       return;
     }
@@ -167,7 +206,7 @@ export default function CreatePage() {
     if (loggedIn === false) {
       sessionStorage.setItem(
         "createFlowState",
-        JSON.stringify({ photoKey, selectedSize, step: 0 })
+        JSON.stringify({ photoKey: currentPhotoKey, selectedSize, step: 0 })
       );
       router.push("/login?redirect=/create");
       return;
@@ -181,7 +220,7 @@ export default function CreatePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          photoKey,
+          photoKey: currentPhotoKey,
           figurineSize: selectedSize,
         }),
       });
@@ -447,31 +486,7 @@ export default function CreatePage() {
                 <div className="animate-fade-in-up delay-300">
                   <PhotoEditor
                     file={selectedFile}
-                    onConfirm={async (blob) => {
-                      setIsEditing(false);
-                      setError(null);
-
-                      try {
-                        const formData = new FormData();
-                        formData.append("file", blob, "edited-photo.png");
-
-                        const res = await fetch("/api/upload", {
-                          method: "POST",
-                          body: formData,
-                        });
-
-                        if (!res.ok) {
-                          const data = await res.json();
-                          throw new Error(data.error || d["upload.failed"]);
-                        }
-
-                        const { key } = await res.json();
-                        setPhotoKey(key);
-                      } catch (err: any) {
-                        setError(err.message || d["upload.failed"]);
-                        setSelectedFile(null);
-                      }
-                    }}
+                    exportRef={editorExportRef}
                     onCancel={() => {
                       setIsEditing(false);
                       setSelectedFile(null);
@@ -536,7 +551,7 @@ export default function CreatePage() {
               <button
                 type="button"
                 onClick={handleGeneratePreview}
-                disabled={submitting || !photoKey || loggedIn === null}
+                disabled={submitting || (!photoKey && !selectedFile) || loggedIn === null}
                 className="btn-primary w-full text-lg !py-3.5 animate-fade-in-up delay-400"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

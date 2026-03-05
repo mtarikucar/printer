@@ -291,6 +291,7 @@ const tr: Dictionary = {
   // Create — Upload
   "create.upload.title": "Fotoğrafınızı Yükleyin",
   "create.upload.subtitle": "Net ve iyi aydınlatılmış bir fotoğraf en iyi sonucu verir",
+  "create.changePhoto": "Fotoğrafı Değiştir",
 
   // Create — Upload tips
   "upload.tipBullet1": "Yüz net görünür olsun",
@@ -604,6 +605,59 @@ const tr: Dictionary = {
   "email.refunded.orderNumber": "Sipariş Numarası:",
   "email.refunded.apology":
     "Bu siparişi tamamlayamadığımız için üzgünüz. Farklı bir fotoğrafla tekrar denemek isterseniz memnuniyetle yardımcı oluruz!",
+
+  // Hero Showcase
+  "landing.hero.showcase.photo": "Fotoğrafın",
+  "landing.hero.showcase.figurine": "Figürinin",
+
+  // Gallery - 3D view
+  "landing.gallery.viewModel3D": "3D Olarak Gör",
+
+  // Gallery Modal - Before/After
+  "gallery.modal.originalPhoto": "Orijinal Fotoğraf",
+  "gallery.modal.yourFigurine": "Figürininiz",
+
+  // Photo Editor
+  "editor.title": "Fotoğrafı Düzenle",
+  "editor.apply": "Onayla",
+  "editor.cancel": "İptal",
+  "editor.reset": "Sıfırla",
+  "editor.tool.crop": "Kırp",
+  "editor.tool.rotateLeft": "Sola Döndür",
+  "editor.tool.rotateRight": "Sağa Döndür",
+  "editor.tool.flipH": "Yatay Çevir",
+  "editor.tool.flipV": "Dikey Çevir",
+  "editor.tool.zoomIn": "Yakınlaştır",
+  "editor.tool.zoomOut": "Uzaklaştır",
+  "editor.tool.removeBg": "Arka Planı Sil",
+  "editor.tool.removeBg.loading": "Arka plan siliniyor...",
+  "editor.tool.removeBg.modelLoading": "AI modeli yükleniyor...",
+  "editor.tool.removeBg.success": "Arka plan silindi!",
+  "editor.tool.removeBg.failed": "Arka plan silme başarısız",
+  "editor.tool.detectPerson": "Otomatik Algıla",
+  "editor.tool.detectPerson.loading": "Kişi algılanıyor...",
+  "editor.tool.detectPerson.found": "Kişi algılandı!",
+  "editor.tool.detectPerson.notFound": "Kişi algılanamadı",
+  "editor.aspect.free": "Serbest",
+  "editor.aspect.portrait": "3:4",
+  "editor.aspect.square": "1:1",
+  "editor.aspect.figurine": "4:5",
+  "editor.adjust.brightness": "Parlaklık",
+  "editor.adjust.contrast": "Kontrast",
+  "editor.adjust.saturation": "Doygunluk",
+  "editor.adjust.reset": "Ayarları Sıfırla",
+  "editor.processing": "İşleniyor...",
+  "editor.uploading": "Düzenlenen fotoğraf yükleniyor...",
+  "editor.tool.cut": "Kes",
+  "editor.cut.modeLasso": "Serbest Kesim",
+  "editor.cut.modeEraser": "Silgi",
+  "editor.cut.instructionLasso": "Tutmak istediğiniz alanın etrafını çizin",
+  "editor.cut.instructionEraser": "Silmek istediğiniz alanları boyayın",
+  "editor.cut.brushSize": "Fırça Boyutu",
+  "editor.cut.undo": "Geri Al",
+  "editor.cut.apply": "Kesimi Uygula",
+  "editor.cut.cancel": "İptal",
+  "editor.cut.tooFewPoints": "Daha büyük bir alan çizin",
 };
 
 export default tr;

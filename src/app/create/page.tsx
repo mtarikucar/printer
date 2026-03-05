@@ -1,11 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { ModelViewer } from "@/components/model-viewer";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
+
+const PhotoEditor = dynamic(
+  () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
+  { ssr: false }
+);
 
 const ILLER = [
   "Adana", "Adıyaman", "Afyonkarahisar", "Ağrı", "Amasya", "Ankara", "Antalya", "Artvin",
@@ -36,6 +42,8 @@ export default function CreatePage() {
   const d = useDictionary();
   const [photoKey, setPhotoKey] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
@@ -153,6 +161,15 @@ export default function CreatePage() {
   const handleGeneratePreview = async () => {
     if (!photoKey) {
       setError(d["create.photoRequired"]);
+      return;
+    }
+
+    if (loggedIn === false) {
+      sessionStorage.setItem(
+        "createFlowState",
+        JSON.stringify({ photoKey, selectedSize, step: 0 })
+      );
+      router.push("/login?redirect=/create");
       return;
     }
 
@@ -425,21 +442,87 @@ export default function CreatePage() {
                 </div>
               </div>
 
-              {/* Photo Upload Card */}
-              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
-                <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
-                <div className="p-6">
-                  <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
-                  <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
-                  <UploadDropzone
-                    onUploadComplete={(key, _previewUrl) => {
-                      setPhotoKey(key);
+              {/* Photo Upload / Editor Card */}
+              {isEditing && selectedFile ? (
+                <div className="animate-fade-in-up delay-300">
+                  <PhotoEditor
+                    file={selectedFile}
+                    onConfirm={async (blob) => {
+                      setIsEditing(false);
                       setError(null);
+
+                      try {
+                        const formData = new FormData();
+                        formData.append("file", blob, "edited-photo.png");
+
+                        const res = await fetch("/api/upload", {
+                          method: "POST",
+                          body: formData,
+                        });
+
+                        if (!res.ok) {
+                          const data = await res.json();
+                          throw new Error(data.error || d["upload.failed"]);
+                        }
+
+                        const { key } = await res.json();
+                        setPhotoKey(key);
+                      } catch (err: any) {
+                        setError(err.message || d["upload.failed"]);
+                        setSelectedFile(null);
+                      }
                     }}
-                    onError={setError}
+                    onCancel={() => {
+                      setIsEditing(false);
+                      setSelectedFile(null);
+                    }}
                   />
                 </div>
-              </div>
+              ) : photoKey && !selectedFile ? (
+                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
+                  <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
+                  <div className="p-6">
+                    <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
+                    <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
+                      <img
+                        src={`/api/files/${photoKey}`}
+                        alt="Uploaded photo"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <div className="mt-4 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => { setPhotoKey(null); }}
+                        className="btn-secondary"
+                      >
+                        {d["create.changePhoto"]}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
+                  <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
+                  <div className="p-6">
+                    <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
+                    <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
+                    <UploadDropzone
+                      onUploadComplete={(key, _previewUrl) => {
+                        setPhotoKey(key);
+                        setError(null);
+                      }}
+                      onError={setError}
+                      onFileSelected={(file) => {
+                        setSelectedFile(file);
+                        setIsEditing(true);
+                        setPhotoKey(null);
+                        setError(null);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
@@ -453,7 +536,7 @@ export default function CreatePage() {
               <button
                 type="button"
                 onClick={handleGeneratePreview}
-                disabled={submitting || !photoKey}
+                disabled={submitting || !photoKey || loggedIn === null}
                 className="btn-primary w-full text-lg !py-3.5 animate-fade-in-up delay-400"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -461,6 +544,15 @@ export default function CreatePage() {
                 </svg>
                 {submitting ? d["common.loading"] : d["create.generatePreview"]}
               </button>
+
+              {loggedIn === false && photoKey && (
+                <div className="flex items-center gap-2 justify-center text-sm text-amber-500 animate-fade-in-up delay-400">
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {d["create.loginRequired"]}
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -289,6 +289,7 @@ const en = {
   // Create — Upload
   "create.upload.title": "Upload Your Photo",
   "create.upload.subtitle": "A clear, well-lit photo gives the best results",
+  "create.changePhoto": "Change Photo",
 
   // Create — Upload tips
   "upload.tipBullet1": "Face clearly visible",
@@ -599,6 +600,59 @@ const en = {
   "email.refunded.orderNumber": "Order Number:",
   "email.refunded.apology":
     "We're sorry we couldn't complete this order. If you'd like to try again with a different photo, we'd be happy to help!",
+
+  // Hero Showcase
+  "landing.hero.showcase.photo": "Your Photo",
+  "landing.hero.showcase.figurine": "Your Figurine",
+
+  // Gallery - 3D view
+  "landing.gallery.viewModel3D": "View in 3D",
+
+  // Gallery Modal - Before/After
+  "gallery.modal.originalPhoto": "Original Photo",
+  "gallery.modal.yourFigurine": "Your Figurine",
+
+  // Photo Editor
+  "editor.title": "Edit Photo",
+  "editor.apply": "Confirm",
+  "editor.cancel": "Cancel",
+  "editor.reset": "Reset",
+  "editor.tool.crop": "Crop",
+  "editor.tool.rotateLeft": "Rotate Left",
+  "editor.tool.rotateRight": "Rotate Right",
+  "editor.tool.flipH": "Flip Horizontal",
+  "editor.tool.flipV": "Flip Vertical",
+  "editor.tool.zoomIn": "Zoom In",
+  "editor.tool.zoomOut": "Zoom Out",
+  "editor.tool.removeBg": "Remove Background",
+  "editor.tool.removeBg.loading": "Removing background...",
+  "editor.tool.removeBg.modelLoading": "Loading AI model...",
+  "editor.tool.removeBg.success": "Background removed!",
+  "editor.tool.removeBg.failed": "Background removal failed",
+  "editor.tool.detectPerson": "Auto Detect",
+  "editor.tool.detectPerson.loading": "Detecting person...",
+  "editor.tool.detectPerson.found": "Person detected!",
+  "editor.tool.detectPerson.notFound": "No person detected",
+  "editor.aspect.free": "Free",
+  "editor.aspect.portrait": "3:4",
+  "editor.aspect.square": "1:1",
+  "editor.aspect.figurine": "4:5",
+  "editor.adjust.brightness": "Brightness",
+  "editor.adjust.contrast": "Contrast",
+  "editor.adjust.saturation": "Saturation",
+  "editor.adjust.reset": "Reset Adjustments",
+  "editor.processing": "Processing...",
+  "editor.uploading": "Uploading edited photo...",
+  "editor.tool.cut": "Cut",
+  "editor.cut.modeLasso": "Freehand Cut",
+  "editor.cut.modeEraser": "Eraser",
+  "editor.cut.instructionLasso": "Draw around the area you want to keep",
+  "editor.cut.instructionEraser": "Paint over the areas you want to remove",
+  "editor.cut.brushSize": "Brush Size",
+  "editor.cut.undo": "Undo",
+  "editor.cut.apply": "Apply Cut",
+  "editor.cut.cancel": "Cancel",
+  "editor.cut.tooFewPoints": "Draw a larger outline",
 } as const;
 
 export type DictionaryKey = keyof typeof en;

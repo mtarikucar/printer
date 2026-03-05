@@ -1,11 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { ModelViewer } from "@/components/model-viewer";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
+
+const PhotoEditor = dynamic(
+  () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
+  { ssr: false }
+);
 
 const ILLER = [
   "Adana", "Adıyaman", "Afyonkarahisar", "Ağrı", "Amasya", "Ankara", "Antalya", "Artvin",
@@ -36,6 +42,8 @@ export default function CreatePage() {
   const d = useDictionary();
   const [photoKey, setPhotoKey] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
@@ -435,7 +443,42 @@ export default function CreatePage() {
               </div>
 
               {/* Photo Upload / Editor Card */}
-              {photoKey ? (
+              {isEditing && selectedFile ? (
+                <div className="animate-fade-in-up delay-300">
+                  <PhotoEditor
+                    file={selectedFile}
+                    onConfirm={async (blob) => {
+                      setIsEditing(false);
+                      setError(null);
+
+                      try {
+                        const formData = new FormData();
+                        formData.append("file", blob, "edited-photo.png");
+
+                        const res = await fetch("/api/upload", {
+                          method: "POST",
+                          body: formData,
+                        });
+
+                        if (!res.ok) {
+                          const data = await res.json();
+                          throw new Error(data.error || d["upload.failed"]);
+                        }
+
+                        const { key } = await res.json();
+                        setPhotoKey(key);
+                      } catch (err: any) {
+                        setError(err.message || d["upload.failed"]);
+                        setSelectedFile(null);
+                      }
+                    }}
+                    onCancel={() => {
+                      setIsEditing(false);
+                      setSelectedFile(null);
+                    }}
+                  />
+                </div>
+              ) : photoKey && !selectedFile ? (
                 <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
                   <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
                   <div className="p-6">
@@ -470,6 +513,12 @@ export default function CreatePage() {
                         setError(null);
                       }}
                       onError={setError}
+                      onFileSelected={(file) => {
+                        setSelectedFile(file);
+                        setIsEditing(true);
+                        setPhotoKey(null);
+                        setError(null);
+                      }}
                     />
                   </div>
                 </div>

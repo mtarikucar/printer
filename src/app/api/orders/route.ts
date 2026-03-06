@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
       email: user.email,
       paymentAmount: amountKurus,
       userName: user.fullName,
-      userAddress: `${validated.shippingAddress.adres}, ${validated.shippingAddress.ilce}/${validated.shippingAddress.il}`,
+      userAddress: `${validated.shippingAddress.mahalle} ${validated.shippingAddress.adres}, ${validated.shippingAddress.ilce}/${validated.shippingAddress.il}`,
       userPhone: validated.shippingAddress.telefon,
       userIp,
       figurineSize: validated.figurineSize,

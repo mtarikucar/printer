@@ -221,7 +221,13 @@ const en = {
   "create.shippingAddress": "Shipping Address",
   "create.address": "Address",
   "create.address.placeholder": "Street, Building No, Apartment No",
+  "create.neighborhood": "Neighborhood",
+  "create.neighborhood.placeholder": "Search neighborhood...",
+  "create.neighborhood.loading": "Loading...",
+  "create.neighborhood.selectDistrict": "Select a district first",
   "create.district": "District",
+  "create.district.placeholder": "Select district",
+  "create.district.selectCity": "Select a city first",
   "create.city": "City",
   "create.city.placeholder": "Select city",
   "create.postalCode": "Postal Code",
@@ -497,6 +503,7 @@ const en = {
 
   // Validators
   "validator.address.required": "Address is required",
+  "validator.neighborhood.required": "Neighborhood is required",
   "validator.district.required": "District is required",
   "validator.city.required": "City is required",
   "validator.postalCode.required": "Postal code is required",
@@ -611,6 +618,19 @@ const en = {
   // Gallery Modal - Before/After
   "gallery.modal.originalPhoto": "Original Photo",
   "gallery.modal.yourFigurine": "Your Figurine",
+
+  // Account Gallery
+  "account.gallery.generating": "Generating...",
+  "account.gallery.processing": "Processing...",
+  "account.gallery.awaitingPayment": "Awaiting Payment",
+  "account.gallery.createAnother": "Create Another",
+  "account.gallery.trackOrder": "Track Order",
+  "account.gallery.orderThis": "Order This Figurine",
+  "account.gallery.failed": "Failed",
+  "account.gallery.readyToOrder": "Ready to Order",
+  "account.gallery.loadMore": "Load More",
+  "account.gallery.loading": "Loading...",
+  "account.creations.title": "My Creations",
 
   // Photo Editor
   "editor.title": "Edit Photo",

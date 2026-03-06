@@ -12,6 +12,7 @@ import { relations } from "drizzle-orm";
 
 export interface TurkishAddress {
   adres: string;
+  mahalle?: string;
   ilce: string;
   il: string;
   postaKodu: string;

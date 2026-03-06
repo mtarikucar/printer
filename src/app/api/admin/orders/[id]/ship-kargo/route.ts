@@ -50,7 +50,7 @@ export async function POST(
     const result = await createShipment({
       cargoKey: order.orderNumber,
       receiverName: order.customerName,
-      receiverAddress: addr.adres,
+      receiverAddress: addr.mahalle ? `${addr.mahalle} ${addr.adres}` : addr.adres,
       receiverPhone: addr.telefon,
       receiverCity: addr.il,
       receiverDistrict: addr.ilce,

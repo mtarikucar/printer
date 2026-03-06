@@ -2,32 +2,22 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { ModelViewer } from "@/components/model-viewer";
 import { SiteHeader } from "@/components/site-header";
+import { SearchableSelect } from "@/components/searchable-select";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 
 const PhotoEditor = dynamic(
   () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
   { ssr: false }
 );
 
-const ILLER = [
-  "Adana", "Adıyaman", "Afyonkarahisar", "Ağrı", "Amasya", "Ankara", "Antalya", "Artvin",
-  "Aydın", "Balıkesir", "Bilecik", "Bingöl", "Bitlis", "Bolu", "Burdur", "Bursa",
-  "Çanakkale", "Çankırı", "Çorum", "Denizli", "Diyarbakır", "Edirne", "Elazığ", "Erzincan",
-  "Erzurum", "Eskişehir", "Gaziantep", "Giresun", "Gümüşhane", "Hakkari", "Hatay", "Isparta",
-  "Mersin", "İstanbul", "İzmir", "Kars", "Kastamonu", "Kayseri", "Kırklareli", "Kırşehir",
-  "Kocaeli", "Konya", "Kütahya", "Malatya", "Manisa", "Kahramanmaraş", "Mardin", "Muğla",
-  "Muş", "Nevşehir", "Niğde", "Ordu", "Rize", "Sakarya", "Samsun", "Siirt", "Sinop",
-  "Sivas", "Tekirdağ", "Tokat", "Trabzon", "Tunceli", "Şanlıurfa", "Uşak", "Van",
-  "Yozgat", "Zonguldak", "Aksaray", "Bayburt", "Karaman", "Kırıkkale", "Batman", "Şırnak",
-  "Bartın", "Ardahan", "Iğdır", "Yalova", "Karabük", "Kilis", "Osmaniye", "Düzce",
-];
-
 interface FormData {
   adres: string;
+  mahalle: string;
   ilce: string;
   il: string;
   postaKodu: string;
@@ -39,6 +29,7 @@ type Step = 0 | 1 | 2 | 3;
 
 export default function CreatePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const d = useDictionary();
   const [photoKey, setPhotoKey] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
@@ -51,11 +42,15 @@ export default function CreatePage() {
   const [step, setStep] = useState<Step>(0);
   const [form, setForm] = useState<FormData>({
     adres: "",
+    mahalle: "",
     ilce: "",
     il: "",
     postaKodu: "",
     telefon: "",
   });
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
+  const [neighborhoodLoading, setNeighborhoodLoading] = useState(false);
 
   // Preview state
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -115,6 +110,23 @@ export default function CreatePage() {
     }
   }, []);
 
+  // Restore from ?previewId= query param (e.g. from account page)
+  useEffect(() => {
+    const qPreviewId = searchParams.get("previewId");
+    if (!qPreviewId) return;
+    fetch(`/api/preview/${qPreviewId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setPreviewId(qPreviewId);
+        if (data.status === "ready" || data.status === "approved") {
+          setPreviewGlbUrl(data.glbUrl);
+          setStep(2);
+        }
+      })
+      .catch(() => {});
+  }, [searchParams]);
+
   // Loading stage cycle
   useEffect(() => {
     if (step !== 1 || previewError) return;
@@ -156,7 +168,24 @@ export default function CreatePage() {
   }, []);
 
   const updateField = (field: keyof FormData, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    if (field === "il") {
+      setForm((prev) => ({ ...prev, il: value, ilce: "", mahalle: "" }));
+      setDistrictOptions(value ? DISTRICTS[value] ?? [] : []);
+      setNeighborhoodOptions([]);
+    } else if (field === "ilce") {
+      setForm((prev) => ({ ...prev, ilce: value, mahalle: "" }));
+      setNeighborhoodOptions([]);
+      if (value && form.il) {
+        setNeighborhoodLoading(true);
+        fetch(`/api/address/neighborhoods?il=${encodeURIComponent(form.il)}&ilce=${encodeURIComponent(value)}`)
+          .then((res) => res.json())
+          .then((data) => setNeighborhoodOptions(data.neighborhoods ?? []))
+          .catch(() => setNeighborhoodOptions([]))
+          .finally(() => setNeighborhoodLoading(false));
+      }
+    } else {
+      setForm((prev) => ({ ...prev, [field]: value }));
+    }
   };
 
   const handleGeneratePreview = async () => {
@@ -746,6 +775,54 @@ export default function CreatePage() {
                 <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
                 <div className="p-6">
                   <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.city"]}</label>
+                      <select
+                        required
+                        value={form.il}
+                        onChange={(e) => updateField("il", e.target.value)}
+                        className="input-base"
+                      >
+                        <option value="">{d["create.city.placeholder"]}</option>
+                        {PROVINCES.map((il) => (
+                          <option key={il} value={il}>{il}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.district"]}</label>
+                      {form.il ? (
+                        <select
+                          required
+                          value={form.ilce}
+                          onChange={(e) => updateField("ilce", e.target.value)}
+                          className="input-base"
+                        >
+                          <option value="">{d["create.district.placeholder"]}</option>
+                          {districtOptions.map((district) => (
+                            <option key={district} value={district}>{district}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="input-base opacity-60 cursor-not-allowed text-text-muted">
+                          {d["create.district.selectCity"]}
+                        </div>
+                      )}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.neighborhood"]}</label>
+                      <SearchableSelect
+                        options={neighborhoodOptions}
+                        value={form.mahalle}
+                        onChange={(val) => setForm((prev) => ({ ...prev, mahalle: val }))}
+                        placeholder={d["create.neighborhood.placeholder"]}
+                        disabled={!form.ilce}
+                        disabledPlaceholder={d["create.neighborhood.selectDistrict"]}
+                        loading={neighborhoodLoading}
+                        loadingText={d["create.neighborhood.loading"]}
+                        required
+                      />
+                    </div>
                     <div className="sm:col-span-2">
                       <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.address"]}</label>
                       <input
@@ -756,30 +833,6 @@ export default function CreatePage() {
                         className="input-base"
                         placeholder={d["create.address.placeholder"]}
                       />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.district"]}</label>
-                      <input
-                        type="text"
-                        required
-                        value={form.ilce}
-                        onChange={(e) => updateField("ilce", e.target.value)}
-                        className="input-base"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.city"]}</label>
-                      <select
-                        required
-                        value={form.il}
-                        onChange={(e) => updateField("il", e.target.value)}
-                        className="input-base"
-                      >
-                        <option value="">{d["create.city.placeholder"]}</option>
-                        {ILLER.map((il) => (
-                          <option key={il} value={il}>{il}</option>
-                        ))}
-                      </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.postalCode"]}</label>

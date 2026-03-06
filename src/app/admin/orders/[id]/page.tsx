@@ -152,6 +152,7 @@ export default async function AdminOrderDetailPage({
             </h2>
             {addr && (
               <div className="text-sm text-gray-700">
+                {addr.mahalle && <p>{addr.mahalle}</p>}
                 <p>{addr.adres}</p>
                 <p>{addr.ilce} / {addr.il}</p>
                 <p>{addr.postaKodu}</p>

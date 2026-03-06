@@ -7,6 +7,7 @@ export function createTurkishAddressSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
   return z.object({
     adres: z.string().min(1, d["validator.address.required"]),
+    mahalle: z.string().min(1, d["validator.neighborhood.required"]),
     ilce: z.string().min(1, d["validator.district.required"]),
     il: z.string().min(1, d["validator.city.required"]),
     postaKodu: z

@@ -222,8 +222,14 @@ const tr: Dictionary = {
   "create.photo": "Fotoğrafınız",
   "create.shippingAddress": "Teslimat Adresi",
   "create.address": "Adres",
-  "create.address.placeholder": "Mahalle, Sokak, Bina No, Daire No",
+  "create.address.placeholder": "Sokak, Bina No, Daire No",
+  "create.neighborhood": "Mahalle",
+  "create.neighborhood.placeholder": "Mahalle arayın...",
+  "create.neighborhood.loading": "Mahalleler yükleniyor...",
+  "create.neighborhood.selectDistrict": "Önce ilçe seçin",
   "create.district": "İlçe",
+  "create.district.placeholder": "İlçe seçin",
+  "create.district.selectCity": "Önce il seçin",
   "create.city": "İl",
   "create.city.placeholder": "İl seçin",
   "create.postalCode": "Posta Kodu",
@@ -499,6 +505,7 @@ const tr: Dictionary = {
 
   // Validators
   "validator.address.required": "Adres zorunludur",
+  "validator.neighborhood.required": "Mahalle zorunludur",
   "validator.district.required": "İlçe zorunludur",
   "validator.city.required": "İl zorunludur",
   "validator.postalCode.required": "Posta kodu zorunludur",
@@ -616,6 +623,19 @@ const tr: Dictionary = {
   // Gallery Modal - Before/After
   "gallery.modal.originalPhoto": "Orijinal Fotoğraf",
   "gallery.modal.yourFigurine": "Figürininiz",
+
+  // Account Gallery
+  "account.gallery.generating": "Olusturuluyor...",
+  "account.gallery.processing": "Isleniyor...",
+  "account.gallery.awaitingPayment": "Odeme Bekleniyor",
+  "account.gallery.createAnother": "Bir Tane Daha Olustur",
+  "account.gallery.trackOrder": "Siparisi Takip Et",
+  "account.gallery.orderThis": "Bu Figurini Siparis Ver",
+  "account.gallery.failed": "Basarisiz",
+  "account.gallery.readyToOrder": "Siparis Verilebilir",
+  "account.gallery.loadMore": "Daha Fazla Yukle",
+  "account.gallery.loading": "Yukleniyor...",
+  "account.creations.title": "Olusturmalarim",
 
   // Photo Editor
   "editor.title": "Fotoğrafı Düzenle",

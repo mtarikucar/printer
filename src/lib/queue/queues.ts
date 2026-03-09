@@ -41,6 +41,7 @@ let aiGenerationQueue: Queue | null = null;
 let meshProcessingQueue: Queue | null = null;
 let emailQueue: Queue | null = null;
 let previewGenerationQueue: Queue | null = null;
+let previewCleanupQueue: Queue | null = null;
 
 export function getAiGenerationQueue(): Queue {
   if (!aiGenerationQueue) {
@@ -85,6 +86,19 @@ export function getPreviewGenerationQueue(): Queue {
     });
   }
   return previewGenerationQueue;
+}
+
+export function getPreviewCleanupQueue(): Queue {
+  if (!previewCleanupQueue) {
+    previewCleanupQueue = new Queue("preview-cleanup", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        removeOnComplete: { count: 10 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return previewCleanupQueue;
 }
 
 export function getEmailQueue(): Queue {

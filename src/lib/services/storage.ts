@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir } from "fs/promises";
+import { writeFile, readFile, mkdir, rm } from "fs/promises";
 import { join, resolve, relative, dirname } from "path";
 
 const UPLOAD_DIR = resolve(process.env.UPLOAD_DIR || "./uploads");
@@ -22,6 +22,15 @@ export async function getFileBuffer(relativePath: string): Promise<Buffer> {
     throw new Error("Invalid file path");
   }
   return readFile(fullPath);
+}
+
+export async function deleteFile(relativePath: string): Promise<void> {
+  const fullPath = resolve(UPLOAD_DIR, relativePath);
+  // Prevent path traversal
+  if (!fullPath.startsWith(UPLOAD_DIR)) {
+    throw new Error("Invalid file path");
+  }
+  await rm(fullPath, { force: true });
 }
 
 export function getPublicUrl(relativePath: string): string {

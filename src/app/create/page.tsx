@@ -71,9 +71,9 @@ export default function CreatePage() {
   const editorExportRef = useRef<(() => Promise<Blob | null>) | null>(null);
 
   const SIZES = [
-    { key: "kucuk", label: d["sizes.kucuk"], price: "1.199", height: "~60mm" },
-    { key: "orta", label: d["sizes.orta"], price: "1.799", height: "~80mm" },
-    { key: "buyuk", label: d["sizes.buyuk"], price: "1.999", height: "~120mm" },
+    { key: "kucuk", label: d["sizes.kucuk"], price: "999", height: "~60mm" },
+    { key: "orta", label: d["sizes.orta"], price: "1.399", height: "~80mm" },
+    { key: "buyuk", label: d["sizes.buyuk"], price: "1.799", height: "~120mm" },
   ] as const;
 
   const stepLabels = [d["create.step1"], d["create.step2"], d["create.step3"], d["create.step4"]];

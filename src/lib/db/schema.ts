@@ -72,7 +72,8 @@ export const previewStatusEnum = pgEnum("preview_status", [
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  passwordHash: text("password_hash"),
+  googleId: text("google_id"),
   fullName: text("full_name").notNull(),
   phone: text("phone"),
   defaultAddress: jsonb("default_address").$type<TurkishAddress>(),

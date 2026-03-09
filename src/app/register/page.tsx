@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
+import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export default function RegisterPage() {
@@ -107,7 +108,20 @@ export default function RegisterPage() {
                 {d["register.title"]}
               </h1>
 
-              <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+              <div className="mt-6">
+                <GoogleSignInButton
+                  label={d["register.google"]}
+                  redirect={redirect || undefined}
+                />
+              </div>
+
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-border-default" />
+                <span className="text-xs text-text-muted uppercase">{d["register.orEmail"]}</span>
+                <div className="flex-1 h-px bg-border-default" />
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-text-secondary mb-1.5">
                     {d["register.fullName"]}

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
+import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export default function LoginPage() {
@@ -16,6 +17,16 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Show Google OAuth errors from redirect
+  useEffect(() => {
+    const googleError = searchParams.get("error");
+    if (googleError === "google_email_not_verified") {
+      setError(d["api.auth.googleEmailNotVerified"]);
+    } else if (googleError === "google_verify_failed") {
+      setError(d["api.auth.googleVerifyFailed"]);
+    }
+  }, [searchParams, d]);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -98,7 +109,20 @@ export default function LoginPage() {
                 {d["login.title"]}
               </h1>
 
-              <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+              <div className="mt-6">
+                <GoogleSignInButton
+                  label={d["login.google"]}
+                  redirect={redirect || undefined}
+                />
+              </div>
+
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-border-default" />
+                <span className="text-xs text-text-muted uppercase">{d["login.orEmail"]}</span>
+                <div className="flex-1 h-px bg-border-default" />
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-text-secondary mb-1.5">
                     {d["common.email"]}

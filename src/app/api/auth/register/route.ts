@@ -32,6 +32,32 @@ export async function POST(request: NextRequest) {
     });
 
     if (existing) {
+      // Google-only user wants to add a password
+      if (existing.googleId && !existing.passwordHash) {
+        const passwordHash = await hashPassword(validated.password);
+        await db
+          .update(users)
+          .set({
+            passwordHash,
+            fullName: validated.fullName,
+            phone: validated.phone,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, existing.id));
+
+        const token = createSessionToken(existing.id, existing.email);
+        await setSessionCookie(token);
+
+        return NextResponse.json({
+          user: {
+            id: existing.id,
+            email: existing.email,
+            fullName: validated.fullName,
+            phone: validated.phone,
+          },
+        });
+      }
+
       return NextResponse.json(
         { error: d["api.auth.emailExists"] },
         { status: 409 }

@@ -181,6 +181,8 @@ const en = {
   "login.submit": "Log In",
   "login.submitting": "Logging in...",
   "login.failed": "Login failed",
+  "login.google": "Sign in with Google",
+  "login.orEmail": "or with email",
   "login.noAccount": "Don't have an account?",
   "login.register": "Sign up",
 
@@ -195,6 +197,8 @@ const en = {
   "register.submit": "Sign Up",
   "register.submitting": "Signing up...",
   "register.failed": "Registration failed",
+  "register.google": "Sign up with Google",
+  "register.orEmail": "or with email",
   "register.hasAccount": "Already have an account?",
   "register.login": "Log in",
 
@@ -526,6 +530,9 @@ const en = {
   "api.auth.phoneMin": "Phone number must be at least 10 characters",
   "api.auth.emailExists": "This email is already registered",
   "api.auth.registerFailed": "Registration failed",
+  "api.auth.googleOnlyAccount": "This account was created with Google. Please sign in with Google.",
+  "api.auth.googleVerifyFailed": "Google account verification failed",
+  "api.auth.googleEmailNotVerified": "Your Google account email is not verified",
   "api.auth.notLoggedIn": "Not logged in",
   "api.upload.noFile": "No file found",
   "api.upload.invalidFormat": "Only JPG and PNG files are accepted",

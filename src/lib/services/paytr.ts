@@ -8,9 +8,9 @@ const MERCHANT_KEY = () => process.env.PAYTR_MERCHANT_KEY!;
 const MERCHANT_SALT = () => process.env.PAYTR_MERCHANT_SALT!;
 
 export const PRICES_KURUS: Record<string, number> = {
-  kucuk: 119900,
-  orta: 179900,
-  buyuk: 199900,
+  kucuk: 99900,
+  orta: 139900,
+  buyuk: 179900,
 };
 
 function getSizeLabel(figurineSize: string, locale: Locale): string {

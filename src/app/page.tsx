@@ -94,9 +94,9 @@ export default async function HomePage() {
   ];
 
   const sizes = [
-    { key: "kucuk", label: d["sizes.kucuk"], price: "1.199", height: "~60mm", popular: false },
-    { key: "orta", label: d["sizes.orta"], price: "1.799", height: "~80mm", popular: true },
-    { key: "buyuk", label: d["sizes.buyuk"], price: "1.999", height: "~120mm", popular: false },
+    { key: "kucuk", label: d["sizes.kucuk"], price: "999", height: "~60mm", popular: false },
+    { key: "orta", label: d["sizes.orta"], price: "1.399", height: "~80mm", popular: true },
+    { key: "buyuk", label: d["sizes.buyuk"], price: "1.799", height: "~120mm", popular: false },
   ];
 
   const features = [

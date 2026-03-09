@@ -183,6 +183,8 @@ const tr: Dictionary = {
   "login.submit": "Giriş Yap",
   "login.submitting": "Giriş yapılıyor...",
   "login.failed": "Giriş başarısız",
+  "login.google": "Google ile Giriş Yap",
+  "login.orEmail": "veya e-posta ile",
   "login.noAccount": "Hesabınız yok mu?",
   "login.register": "Kayıt olun",
 
@@ -197,6 +199,8 @@ const tr: Dictionary = {
   "register.submit": "Kayıt Ol",
   "register.submitting": "Kayıt yapılıyor...",
   "register.failed": "Kayıt başarısız",
+  "register.google": "Google ile Kayıt Ol",
+  "register.orEmail": "veya e-posta ile",
   "register.hasAccount": "Zaten hesabınız var mı?",
   "register.login": "Giriş yapın",
 
@@ -528,6 +532,9 @@ const tr: Dictionary = {
   "api.auth.phoneMin": "Telefon numarası en az 10 karakter olmalıdır",
   "api.auth.emailExists": "Bu e-posta adresi zaten kayıtlı",
   "api.auth.registerFailed": "Kayıt başarısız",
+  "api.auth.googleOnlyAccount": "Bu hesap Google ile oluşturuldu. Lütfen Google ile giriş yapın.",
+  "api.auth.googleVerifyFailed": "Google hesabı doğrulanamadı",
+  "api.auth.googleEmailNotVerified": "Google hesabınızın e-posta adresi doğrulanmamış",
   "api.auth.notLoggedIn": "Giriş yapılmamış",
   "api.upload.noFile": "Dosya bulunamadı",
   "api.upload.invalidFormat": "Sadece JPG ve PNG dosyaları kabul edilir",

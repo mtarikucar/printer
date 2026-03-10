@@ -9,7 +9,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 
 const STATUS_COLORS: Record<string, string> = {
-  pending_payment: "bg-gray-100 text-gray-700",
+  pending_payment: "bg-amber-100 text-amber-700",
   paid: "bg-blue-100 text-blue-700",
   generating: "bg-indigo-100 text-indigo-700",
   processing_mesh: "bg-indigo-100 text-indigo-700",
@@ -44,6 +44,7 @@ export default async function AdminOrdersPage({
 
   const statuses = [
     "all",
+    "pending_payment",
     "review",
     "approved",
     "printing",

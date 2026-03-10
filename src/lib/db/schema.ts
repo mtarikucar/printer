@@ -52,6 +52,7 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "regenerate",
   "print",
   "ship",
+  "confirm",
 ]);
 
 export const figurineSizeEnum = pgEnum("figurine_size", [

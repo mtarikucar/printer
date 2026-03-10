@@ -22,7 +22,7 @@ const en = {
   "sizes.buyuk": "Large",
 
   // Status labels
-  "status.pending_payment": "Awaiting Payment",
+  "status.pending_payment": "Awaiting Confirmation",
   "status.paid": "Payment Received",
   "status.generating": "Generating Model",
   "status.processing_mesh": "Processing",
@@ -240,11 +240,11 @@ const en = {
   "create.photoRequired": "Please upload a photo",
   "create.orderFailed": "Order creation failed",
   "create.submitting": "Creating order...",
-  "create.submitButton": "Proceed to Payment",
+  "create.submitButton": "Order via WhatsApp",
   "create.shippingNote":
-    "Free shipping (Domestic). You will pay via PayTR secure payment.",
+    "Free shipping (Domestic). Complete your order via WhatsApp.",
   "create.payment": "Payment",
-  "create.paymentTitle": "PayTR Payment",
+  "create.paymentTitle": "Payment",
   "create.step1": "Size & Photo",
   "create.step2": "Preview",
   "create.step3": "Approve",
@@ -283,8 +283,8 @@ const en = {
   "create.trustBadge.secure": "Secure Payment",
   "create.trustBadge.shipping": "Free Shipping",
   "create.trustBadge.guarantee": "Quality Guarantee",
-  "create.trustBadge.paytr": "Secured by PayTR",
-  "create.securePayment": "Secure checkout powered by PayTR",
+  "create.trustBadge.paytr": "Secure Checkout",
+  "create.securePayment": "Secure checkout",
 
   // Create — Eyebrow badges
   "create.step0.eyebrow": "STEP 1 OF 4",
@@ -320,6 +320,12 @@ const en = {
   "create.loading.stage2": "Building 3D structure...",
   "create.loading.stage3": "Adding surface details...",
   "create.loading.stage4": "Final polish...",
+
+  // Create — Order submitted
+  "create.orderSubmitted.title": "Order Submitted!",
+  "create.orderSubmitted.message": "WhatsApp has been opened. Send the message to complete your order.",
+  "create.orderSubmitted.resend": "Open WhatsApp Again",
+  "create.orderSubmitted.track": "Track Your Order",
 
   // Create — Payment
   "create.payment.secure": "256-bit SSL encrypted checkout",
@@ -428,7 +434,7 @@ const en = {
   "admin.status.failed_generation": "Generation Failed",
   "admin.status.failed_mesh": "Mesh Failed",
   "admin.status.rejected": "Rejected",
-  "admin.status.pending_payment": "Awaiting Payment",
+  "admin.status.pending_payment": "Awaiting Confirmation",
   "admin.status.paid": "Payment Received",
   "admin.status.generating": "Generating",
   "admin.status.processing_mesh": "Processing",
@@ -469,10 +475,12 @@ const en = {
   "admin.orderDetail.approving": "Approving...",
   "admin.orderDetail.regenerate": "Regenerate",
   "admin.orderDetail.regenerating": "Regenerating...",
+  "admin.orderDetail.confirm": "Confirm Order",
+  "admin.orderDetail.confirming": "Confirming...",
   "admin.orderDetail.rejectConfirm":
-    "Are you sure? The customer will be refunded.",
+    "Are you sure? The order will be rejected.",
   "admin.orderDetail.rejectDefault": "Rejected by admin",
-  "admin.orderDetail.reject": "Reject & Refund",
+  "admin.orderDetail.reject": "Reject",
   "admin.orderDetail.rejecting": "Rejecting...",
   "admin.orderDetail.trackingPlaceholder": "Enter tracking number",
   "admin.orderDetail.ship": "Ship",
@@ -652,8 +660,8 @@ const en = {
   "editor.tool.zoomIn": "Zoom In",
   "editor.tool.zoomOut": "Zoom Out",
   "editor.tool.removeBg": "Remove Background",
+  "editor.tool.removeBg.uploading": "Uploading image...",
   "editor.tool.removeBg.loading": "Removing background...",
-  "editor.tool.removeBg.modelLoading": "Loading AI model...",
   "editor.tool.removeBg.success": "Background removed!",
   "editor.tool.removeBg.failed": "Background removal failed",
   "editor.tool.detectPerson": "Auto Detect",

@@ -86,15 +86,17 @@ export default async function AdminOrderDetailPage({
             </div>
           )}
 
-          {/* 3D Model Viewer */}
-          {latestGeneration?.outputGlbUrl && (
+          {/* 3D Model Viewer / Actions */}
+          {(latestGeneration?.outputGlbUrl || order.status === "pending_payment") && (
             <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                {d["admin.orderDetail.modelPreview"]}
-              </h2>
+              {latestGeneration?.outputGlbUrl && (
+                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
+                  {d["admin.orderDetail.modelPreview"]}
+                </h2>
+              )}
               <OrderDetailClient
-                glbUrl={latestGeneration.outputGlbUrl}
-                stlUrl={latestGeneration.outputStlUrl}
+                glbUrl={latestGeneration?.outputGlbUrl}
+                stlUrl={latestGeneration?.outputStlUrl}
                 orderId={order.id}
                 orderStatus={order.status}
               />

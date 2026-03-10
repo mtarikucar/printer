@@ -24,7 +24,7 @@ const tr: Dictionary = {
   "sizes.buyuk": "Büyük",
 
   // Status labels
-  "status.pending_payment": "Ödeme Bekleniyor",
+  "status.pending_payment": "Onay Bekleniyor",
   "status.paid": "Ödeme Alındı",
   "status.generating": "Model Oluşturuluyor",
   "status.processing_mesh": "İşleniyor",
@@ -242,11 +242,11 @@ const tr: Dictionary = {
   "create.photoRequired": "Lütfen bir fotoğraf yükleyin",
   "create.orderFailed": "Sipariş oluşturulamadı",
   "create.submitting": "Sipariş oluşturuluyor...",
-  "create.submitButton": "Ödemeye Geç",
+  "create.submitButton": "WhatsApp ile Sipariş Ver",
   "create.shippingNote":
-    "Ücretsiz kargo (Yurtiçi). PayTR güvenli ödeme altyapısı ile ödeyeceksiniz.",
+    "Ücretsiz kargo (Yurtiçi). Siparişinizi WhatsApp üzerinden tamamlayın.",
   "create.payment": "Ödeme",
-  "create.paymentTitle": "PayTR Ödeme",
+  "create.paymentTitle": "Ödeme",
   "create.step1": "Boyut & Fotoğraf",
   "create.step2": "Önizleme",
   "create.step3": "Onay",
@@ -285,8 +285,8 @@ const tr: Dictionary = {
   "create.trustBadge.secure": "Güvenli Ödeme",
   "create.trustBadge.shipping": "Ücretsiz Kargo",
   "create.trustBadge.guarantee": "Kalite Garantisi",
-  "create.trustBadge.paytr": "PayTR ile Güvenli",
-  "create.securePayment": "PayTR güvenli ödeme altyapısı",
+  "create.trustBadge.paytr": "Güvenli Alışveriş",
+  "create.securePayment": "Güvenli alışveriş",
 
   // Create — Eyebrow badges
   "create.step0.eyebrow": "ADIM 1 / 4",
@@ -322,6 +322,12 @@ const tr: Dictionary = {
   "create.loading.stage2": "3D yapı oluşturuluyor...",
   "create.loading.stage3": "Yüzey detayları ekleniyor...",
   "create.loading.stage4": "Son rötuşlar yapılıyor...",
+
+  // Create — Order submitted
+  "create.orderSubmitted.title": "Sipariş Oluşturuldu!",
+  "create.orderSubmitted.message": "WhatsApp açıldı, mesajı göndererek siparişi tamamlayın.",
+  "create.orderSubmitted.resend": "WhatsApp'ı Tekrar Aç",
+  "create.orderSubmitted.track": "Siparişi Takip Et",
 
   // Create — Payment
   "create.payment.secure": "256-bit SSL şifreli ödeme",
@@ -430,7 +436,7 @@ const tr: Dictionary = {
   "admin.status.failed_generation": "Oluşturma Başarısız",
   "admin.status.failed_mesh": "Mesh Başarısız",
   "admin.status.rejected": "Reddedildi",
-  "admin.status.pending_payment": "Ödeme Bekleniyor",
+  "admin.status.pending_payment": "Onay Bekleniyor",
   "admin.status.paid": "Ödeme Alındı",
   "admin.status.generating": "Model Oluşturuluyor",
   "admin.status.processing_mesh": "İşleniyor",
@@ -471,10 +477,12 @@ const tr: Dictionary = {
   "admin.orderDetail.approving": "Onaylanıyor...",
   "admin.orderDetail.regenerate": "Yeniden Oluştur",
   "admin.orderDetail.regenerating": "Yeniden oluşturuluyor...",
+  "admin.orderDetail.confirm": "Siparişi Onayla",
+  "admin.orderDetail.confirming": "Onaylanıyor...",
   "admin.orderDetail.rejectConfirm":
-    "Emin misiniz? Müşteriye iade yapılacak.",
+    "Emin misiniz? Sipariş reddedilecek.",
   "admin.orderDetail.rejectDefault": "Yönetici tarafından reddedildi",
-  "admin.orderDetail.reject": "Reddet ve İade Et",
+  "admin.orderDetail.reject": "Reddet",
   "admin.orderDetail.rejecting": "Reddediliyor...",
   "admin.orderDetail.trackingPlaceholder": "Kargo takip numarası girin",
   "admin.orderDetail.ship": "Kargola",
@@ -657,8 +665,8 @@ const tr: Dictionary = {
   "editor.tool.zoomIn": "Yakınlaştır",
   "editor.tool.zoomOut": "Uzaklaştır",
   "editor.tool.removeBg": "Arka Planı Sil",
+  "editor.tool.removeBg.uploading": "Fotoğraf yükleniyor...",
   "editor.tool.removeBg.loading": "Arka plan siliniyor...",
-  "editor.tool.removeBg.modelLoading": "AI modeli yükleniyor...",
   "editor.tool.removeBg.success": "Arka plan silindi!",
   "editor.tool.removeBg.failed": "Arka plan silme başarısız",
   "editor.tool.detectPerson": "Otomatik Algıla",

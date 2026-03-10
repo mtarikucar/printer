@@ -69,19 +69,27 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
 
   const handleRemoveBg = useCallback(async () => {
     setRemoveBgLoading(true);
-    setRemoveBgStatus(d["editor.tool.removeBg.modelLoading"]);
+    setRemoveBgStatus(d["editor.tool.removeBg.uploading"]);
 
     try {
-      const { initializeModel, removeBackground } = await import("@/lib/background-removal");
-      await initializeModel((progress) => {
-        setRemoveBgStatus(progress.message);
-      });
+      const formData = new FormData();
+      formData.append("image", currentFile);
 
       setRemoveBgStatus(d["editor.tool.removeBg.loading"]);
 
-      const resultFile = await removeBackground(currentFile, (progress) => {
-        setRemoveBgStatus(progress.message);
+      const response = await fetch("/api/remove-background", {
+        method: "POST",
+        body: formData,
       });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.error || "Background removal failed");
+      }
+
+      const blob = await response.blob();
+      const originalName = currentFile.name.replace(/\.[^/.]+$/, "");
+      const resultFile = new File([blob], `${originalName}_nobg.png`, { type: "image/png" });
 
       setCurrentFile(resultFile);
       setRemoveBgStatus(d["editor.tool.removeBg.success"]);
@@ -175,7 +183,6 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
   // Cleanup AI models on unmount
   useEffect(() => {
     return () => {
-      import("@/lib/background-removal").then((m) => m.disposeModel()).catch(() => {});
       import("@/lib/person-detection").then((m) => m.disposeDetector()).catch(() => {});
     };
   }, []);

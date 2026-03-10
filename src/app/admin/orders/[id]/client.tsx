@@ -11,7 +11,7 @@ export function OrderDetailClient({
   orderId,
   orderStatus,
 }: {
-  glbUrl: string;
+  glbUrl?: string | null;
   stlUrl?: string | null;
   orderId: string;
   orderStatus: string;
@@ -44,6 +44,7 @@ export function OrderDetailClient({
     }
   };
 
+  const canConfirm = orderStatus === "pending_payment";
   const canApprove = orderStatus === "review";
   const canReject = ["review", "approved", "failed_generation", "failed_mesh"].includes(orderStatus);
   const canRegenerate = ["review", "failed_generation", "failed_mesh"].includes(orderStatus);
@@ -51,7 +52,9 @@ export function OrderDetailClient({
 
   return (
     <div>
-      <ModelViewer url={glbUrl} className="w-full h-80 bg-gray-900 rounded-lg" />
+      {glbUrl && (
+        <ModelViewer url={glbUrl} className="w-full h-80 bg-gray-900 rounded-lg" />
+      )}
 
       {stlUrl && (
         <a
@@ -64,7 +67,7 @@ export function OrderDetailClient({
       )}
 
       {/* Admin Actions */}
-      {(canApprove || canReject || canRegenerate || canShip) && (
+      {(canConfirm || canApprove || canReject || canRegenerate || canShip) && (
         <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -80,6 +83,15 @@ export function OrderDetailClient({
           </div>
 
           <div className="flex gap-2 flex-wrap">
+            {canConfirm && (
+              <button
+                onClick={() => performAction("confirm")}
+                disabled={!!loading}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+              >
+                {loading === "confirm" ? d["admin.orderDetail.confirming"] : d["admin.orderDetail.confirm"]}
+              </button>
+            )}
             {canApprove && (
               <button
                 onClick={() => performAction("approve")}

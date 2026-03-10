@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
-import { getEmailQueue } from "@/lib/queue/queues";
+import { confirmOrder } from "@/lib/services/order-confirm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -30,30 +30,20 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  await db
-    .update(orders)
-    .set({
-      status: "rejected",
-      failureReason: body.reason || d["api.order.rejectedDefault"],
-      adminNotes: body.notes,
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, id));
+  if (order.status !== "pending_payment") {
+    return NextResponse.json(
+      { error: "Order is not in pending_payment status" },
+      { status: 400 }
+    );
+  }
+
+  await confirmOrder(id, locale);
 
   await db.insert(adminActions).values({
     orderId: id,
-    action: "reject",
+    action: "confirm",
     adminEmail: session.user.email,
     notes: body.notes,
-  });
-
-  // Email customer about refund
-  await getEmailQueue().add("refund", {
-    type: "order_refunded",
-    to: order.email,
-    orderNumber: order.orderNumber,
-    customerName: order.customerName,
-    locale,
   });
 
   return NextResponse.json({ success: true });

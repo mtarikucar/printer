@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, previews } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
-import { getPaytrToken, getIframeUrl, PRICES_KURUS } from "@/lib/services/paytr";
+import { PRICES_KURUS } from "@/lib/config/prices";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { users } from "@/lib/db/schema";
@@ -74,7 +74,6 @@ export async function POST(request: NextRequest) {
         figurineSize: validated.figurineSize,
         shippingAddress: validated.shippingAddress,
         amountKurus,
-        paytrMerchantOid: orderNumber,
         status: "pending_payment",
       })
       .returning();
@@ -84,27 +83,25 @@ export async function POST(request: NextRequest) {
       originalUrl: photoUrl,
     });
 
-    // Get user IP from headers
-    const userIp =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      "127.0.0.1";
+    // Build WhatsApp message
+    const sizeLabel = d[`sizes.${validated.figurineSize}` as keyof typeof d] || validated.figurineSize;
+    const priceFormatted = `₺${(amountKurus / 100).toLocaleString("tr-TR")}`;
+    const addr = validated.shippingAddress;
+    const message = [
+      `Siparis No: ${orderNumber}`,
+      `Boyut: ${sizeLabel}`,
+      `Fiyat: ${priceFormatted}`,
+      `Isim: ${user.fullName}`,
+      `Telefon: ${addr.telefon}`,
+      `Adres: ${addr.mahalle ? addr.mahalle + ", " : ""}${addr.adres}, ${addr.ilce}/${addr.il} ${addr.postaKodu}`,
+    ].join("\n");
 
-    const paytrToken = await getPaytrToken({
-      merchantOid: orderNumber,
-      email: user.email,
-      paymentAmount: amountKurus,
-      userName: user.fullName,
-      userAddress: `${validated.shippingAddress.mahalle} ${validated.shippingAddress.adres}, ${validated.shippingAddress.ilce}/${validated.shippingAddress.il}`,
-      userPhone: validated.shippingAddress.telefon,
-      userIp,
-      figurineSize: validated.figurineSize,
-      locale,
-    });
+    const phone = process.env.WHATSAPP_PHONE;
+    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 
     return NextResponse.json({
       orderNumber,
-      paytrToken,
-      iframeUrl: getIframeUrl(paytrToken),
+      whatsappUrl,
     });
   } catch (error: any) {
     if (error.name === "ZodError") {

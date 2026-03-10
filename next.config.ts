@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["bullmq", "ioredis"],
+  serverExternalPackages: ["bullmq", "ioredis", "onnxruntime-node", "sharp"],
   // Turbopack handles node module resolution automatically — empty config silences the warning
   turbopack: {},
   webpack: (config, { isServer }) => {

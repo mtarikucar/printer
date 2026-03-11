@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { eq, and } from "drizzle-orm";
+import { eq, and, count } from "drizzle-orm";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { db } from "@/lib/db";
 import { users, orders, generationAttempts, digitalOrders, giftCards, giftCardRedemptions } from "@/lib/db/schema";
@@ -108,13 +108,26 @@ export async function POST(request: NextRequest) {
         })
         .returning();
 
-      // Apply gift card inside same transaction
+      // Apply gift card inside same transaction (row lock prevents race condition)
       if (giftCardId && giftCardAmountKurus > 0) {
-        const card = await tx.query.giftCards.findFirst({
-          where: eq(giftCards.id, giftCardId),
-        });
+        const [card] = await tx
+          .select()
+          .from(giftCards)
+          .where(eq(giftCards.id, giftCardId))
+          .for('update');
         if (!card || card.balanceKurus < giftCardAmountKurus) {
           throw new Error("INSUFFICIENT_BALANCE");
+        }
+
+        // Check redemption limit
+        if (card.maxRedemptions !== null) {
+          const [{ value: redemptionCount }] = await tx
+            .select({ value: count() })
+            .from(giftCardRedemptions)
+            .where(eq(giftCardRedemptions.giftCardId, card.id));
+          if (redemptionCount >= card.maxRedemptions) {
+            throw new Error("LIMIT_REACHED");
+          }
         }
 
         const newBalance = card.balanceKurus - giftCardAmountKurus;
@@ -139,7 +152,11 @@ export async function POST(request: NextRequest) {
 
     // Auto-confirm if fully covered
     if (fullyCovered) {
-      await confirmDigitalOrder(digitalOrder.id, locale);
+      try {
+        await confirmDigitalOrder(digitalOrder.id, locale);
+      } catch (err) {
+        console.error("Auto-confirm failed for digital order", digitalOrder.orderNumber, err);
+      }
       return NextResponse.json({
         orderNumber: digitalOrder.orderNumber,
         digitalOrderId: digitalOrder.id,
@@ -177,6 +194,12 @@ export async function POST(request: NextRequest) {
     if (error.message === "INSUFFICIENT_BALANCE") {
       return NextResponse.json(
         { error: d["giftCard.error.insufficient"] },
+        { status: 400 }
+      );
+    }
+    if (error.message === "LIMIT_REACHED") {
+      return NextResponse.json(
+        { error: d["giftCard.error.limit_reached"] },
         { status: 400 }
       );
     }

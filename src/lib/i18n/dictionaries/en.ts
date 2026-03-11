@@ -690,37 +690,6 @@ const en = {
   "editor.cut.cancel": "Cancel",
   "editor.cut.tooFewPoints": "Draw a larger outline",
 
-  // Nav - Gift Cards
-  "nav.giftCards": "Gift Cards",
-
-  // Gift Card - Themes
-  "giftCard.theme.ramazan": "Ramadan",
-  "giftCard.theme.dogum_gunu": "Birthday",
-  "giftCard.theme.yeni_yil": "New Year",
-  "giftCard.theme.sevgililer_gunu": "Valentine's Day",
-  "giftCard.theme.genel": "General",
-
-  // Gift Card - Purchase
-  "giftCard.title": "Gift Cards",
-  "giftCard.subtitle": "Give the gift of creativity. Send a Figurine Studio gift card.",
-  "giftCard.selectTheme": "Select Theme",
-  "giftCard.selectAmount": "Select Amount",
-  "giftCard.recipientToggle.self": "For myself",
-  "giftCard.recipientToggle.other": "Send to someone",
-  "giftCard.recipientEmail": "Recipient Email",
-  "giftCard.recipientName": "Recipient Name",
-  "giftCard.recipientMessage": "Personal Message",
-  "giftCard.recipientMessage.placeholder": "Write a message for the recipient (optional)",
-  "giftCard.summary": "Summary",
-  "giftCard.submitButton": "Purchase via WhatsApp",
-  "giftCard.submitting": "Processing...",
-  "giftCard.success.title": "Gift Card Ordered!",
-  "giftCard.success.message": "WhatsApp has been opened. Send the message to complete your purchase.",
-  "giftCard.success.code": "Gift Card Code",
-  "giftCard.success.copied": "Copied!",
-  "giftCard.success.copy": "Copy Code",
-  "giftCard.success.resend": "Open WhatsApp Again",
-
   // Gift Card - Validation
   "giftCard.apply": "Apply",
   "giftCard.applying": "Applying...",
@@ -737,6 +706,7 @@ const en = {
   "giftCard.error.fully_used": "Gift card has been fully used",
   "giftCard.error.expired": "Gift card has expired",
   "giftCard.error.insufficient": "Insufficient gift card balance",
+  "giftCard.error.limit_reached": "This code has reached its usage limit",
 
   // Gift Card - Status
   "giftCard.status.pending_payment": "Pending Payment",
@@ -766,28 +736,43 @@ const en = {
   "digital.status.paid": "Paid",
   "digital.status.ready": "Ready to Download",
 
-  // Account - Digital & Gift Cards
+  // Account - Digital Orders
   "account.digitalOrders.title": "My Digital Purchases",
   "account.digitalOrders.empty": "No digital purchases yet.",
-  "account.giftCards.title": "My Gift Cards",
-  "account.giftCards.empty": "No gift cards yet.",
-  "account.giftCards.purchased": "Purchased",
-  "account.giftCards.received": "Received",
 
   // Admin - Gift Cards
   "admin.nav.giftCards": "Gift Cards",
   "admin.giftCards.title": "Gift Cards",
-  "admin.giftCards.subtitle": "Manage gift card orders",
+  "admin.giftCards.subtitle": "Create and manage gift cards",
+  "admin.giftCards.createTitle": "Create Gift Card",
+  "admin.giftCards.amountTL": "Amount (TL)",
+  "admin.giftCards.note": "Note",
+  "admin.giftCards.notePlaceholder": "Internal note (optional)",
+  "admin.giftCards.create": "Create",
+  "admin.giftCards.creating": "Creating...",
+  "admin.giftCards.created": "Gift card created!",
+  "admin.giftCards.copyCode": "Copy Code",
+  "admin.giftCards.copied": "Copied!",
+  "admin.giftCards.deactivate": "Deactivate",
+  "admin.giftCards.deactivated": "Gift card deactivated",
   "admin.giftCards.table.code": "Code",
-  "admin.giftCards.table.theme": "Theme",
   "admin.giftCards.table.amount": "Amount",
   "admin.giftCards.table.balance": "Balance",
   "admin.giftCards.table.status": "Status",
-  "admin.giftCards.table.buyer": "Buyer",
+  "admin.giftCards.table.note": "Note",
   "admin.giftCards.table.recipient": "Recipient",
   "admin.giftCards.table.date": "Date",
-  "admin.giftCards.confirm": "Confirm Payment",
-  "admin.giftCards.confirming": "Confirming...",
+  "admin.giftCards.expiration": "Expiration",
+  "admin.giftCards.expiration.30": "30 days",
+  "admin.giftCards.expiration.90": "90 days",
+  "admin.giftCards.expiration.180": "180 days",
+  "admin.giftCards.expiration.365": "1 year",
+  "admin.giftCards.expiration.never": "No expiration",
+  "admin.giftCards.maxRedemptions": "Usage Limit",
+  "admin.giftCards.maxRedemptionsPlaceholder": "Unlimited",
+  "admin.giftCards.table.expires": "Expires",
+  "admin.giftCards.table.limit": "Limit",
+  "admin.giftCards.unlimited": "Unlimited",
   "admin.giftCards.empty": "No gift cards found",
 
   // Admin - Digital Orders
@@ -806,19 +791,16 @@ const en = {
   "admin.digitalOrders.empty": "No digital orders found",
 
   // Admin - Dashboard extras
-  "admin.dashboard.giftCardsSold": "Gift Cards Sold",
+  "admin.dashboard.giftCardsCreated": "Gift Cards Created",
   "admin.dashboard.digitalRevenue": "Digital Revenue",
 
   // Validators - Gift Card & Digital
-  "validator.giftCard.themeInvalid": "Invalid gift card theme",
-  "validator.giftCard.amountInvalid": "Invalid gift card amount",
   "validator.giftCard.codeRequired": "Gift card code is required",
   "validator.digital.sourceOrderRequired": "Source order is required",
 
   // API - Gift Card & Digital
   "api.giftCard.notFound": "Gift card not found",
   "api.giftCard.createFailed": "Gift card creation failed",
-  "api.giftCard.confirmFailed": "Gift card confirmation failed",
   "api.digital.createFailed": "Digital order creation failed",
   "api.digital.confirmFailed": "Digital order confirmation failed",
   "api.digital.notFound": "Digital order not found",

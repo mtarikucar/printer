@@ -695,37 +695,6 @@ const tr: Dictionary = {
   "editor.cut.cancel": "İptal",
   "editor.cut.tooFewPoints": "Daha büyük bir alan çizin",
 
-  // Nav - Gift Cards
-  "nav.giftCards": "Hediye Kartları",
-
-  // Gift Card - Themes
-  "giftCard.theme.ramazan": "Ramazan",
-  "giftCard.theme.dogum_gunu": "Doğum Günü",
-  "giftCard.theme.yeni_yil": "Yeni Yıl",
-  "giftCard.theme.sevgililer_gunu": "Sevgililer Günü",
-  "giftCard.theme.genel": "Genel",
-
-  // Gift Card - Purchase
-  "giftCard.title": "Hediye Kartları",
-  "giftCard.subtitle": "Yaratıcılığı hediye edin. Figurine Studio hediye kartı gönderin.",
-  "giftCard.selectTheme": "Tema Seçin",
-  "giftCard.selectAmount": "Tutar Seçin",
-  "giftCard.recipientToggle.self": "Kendim için",
-  "giftCard.recipientToggle.other": "Birine gönder",
-  "giftCard.recipientEmail": "Alıcı E-postası",
-  "giftCard.recipientName": "Alıcı Adı",
-  "giftCard.recipientMessage": "Kişisel Mesaj",
-  "giftCard.recipientMessage.placeholder": "Alıcıya bir mesaj yazın (isteğe bağlı)",
-  "giftCard.summary": "Özet",
-  "giftCard.submitButton": "WhatsApp ile Satın Al",
-  "giftCard.submitting": "İşleniyor...",
-  "giftCard.success.title": "Hediye Kartı Sipariş Edildi!",
-  "giftCard.success.message": "WhatsApp açıldı. Mesajı göndererek satın almayı tamamlayın.",
-  "giftCard.success.code": "Hediye Kartı Kodu",
-  "giftCard.success.copied": "Kopyalandı!",
-  "giftCard.success.copy": "Kodu Kopyala",
-  "giftCard.success.resend": "WhatsApp'ı Tekrar Aç",
-
   // Gift Card - Validation
   "giftCard.apply": "Uygula",
   "giftCard.applying": "Uygulanıyor...",
@@ -742,6 +711,7 @@ const tr: Dictionary = {
   "giftCard.error.fully_used": "Hediye kartı tamamen kullanılmış",
   "giftCard.error.expired": "Hediye kartının süresi dolmuş",
   "giftCard.error.insufficient": "Yetersiz hediye kartı bakiyesi",
+  "giftCard.error.limit_reached": "Bu kodun kullanım limiti dolmuş",
 
   // Gift Card - Status
   "giftCard.status.pending_payment": "Ödeme Bekleniyor",
@@ -771,28 +741,43 @@ const tr: Dictionary = {
   "digital.status.paid": "Ödendi",
   "digital.status.ready": "İndirmeye Hazır",
 
-  // Account - Digital & Gift Cards
+  // Account - Digital Orders
   "account.digitalOrders.title": "Dijital Satın Alımlarım",
   "account.digitalOrders.empty": "Henüz dijital satın alımınız yok.",
-  "account.giftCards.title": "Hediye Kartlarım",
-  "account.giftCards.empty": "Henüz hediye kartınız yok.",
-  "account.giftCards.purchased": "Satın Alınan",
-  "account.giftCards.received": "Alınan",
 
   // Admin - Gift Cards
   "admin.nav.giftCards": "Hediye Kartları",
   "admin.giftCards.title": "Hediye Kartları",
-  "admin.giftCards.subtitle": "Hediye kartı siparişlerini yönetin",
+  "admin.giftCards.subtitle": "Hediye kartları oluşturun ve yönetin",
+  "admin.giftCards.createTitle": "Hediye Kartı Oluştur",
+  "admin.giftCards.amountTL": "Tutar (TL)",
+  "admin.giftCards.note": "Not",
+  "admin.giftCards.notePlaceholder": "Dahili not (isteğe bağlı)",
+  "admin.giftCards.create": "Oluştur",
+  "admin.giftCards.creating": "Oluşturuluyor...",
+  "admin.giftCards.created": "Hediye kartı oluşturuldu!",
+  "admin.giftCards.copyCode": "Kodu Kopyala",
+  "admin.giftCards.copied": "Kopyalandı!",
+  "admin.giftCards.deactivate": "Devre Dışı Bırak",
+  "admin.giftCards.deactivated": "Hediye kartı devre dışı bırakıldı",
   "admin.giftCards.table.code": "Kod",
-  "admin.giftCards.table.theme": "Tema",
   "admin.giftCards.table.amount": "Tutar",
   "admin.giftCards.table.balance": "Bakiye",
   "admin.giftCards.table.status": "Durum",
-  "admin.giftCards.table.buyer": "Satın Alan",
+  "admin.giftCards.table.note": "Not",
   "admin.giftCards.table.recipient": "Alıcı",
   "admin.giftCards.table.date": "Tarih",
-  "admin.giftCards.confirm": "Ödemeyi Onayla",
-  "admin.giftCards.confirming": "Onaylanıyor...",
+  "admin.giftCards.expiration": "Son Tarih",
+  "admin.giftCards.expiration.30": "30 gün",
+  "admin.giftCards.expiration.90": "90 gün",
+  "admin.giftCards.expiration.180": "180 gün",
+  "admin.giftCards.expiration.365": "1 yıl",
+  "admin.giftCards.expiration.never": "Süresiz",
+  "admin.giftCards.maxRedemptions": "Kullanım Limiti",
+  "admin.giftCards.maxRedemptionsPlaceholder": "Sınırsız",
+  "admin.giftCards.table.expires": "Son Tarih",
+  "admin.giftCards.table.limit": "Limit",
+  "admin.giftCards.unlimited": "Sınırsız",
   "admin.giftCards.empty": "Hediye kartı bulunamadı",
 
   // Admin - Digital Orders
@@ -811,19 +796,16 @@ const tr: Dictionary = {
   "admin.digitalOrders.empty": "Dijital sipariş bulunamadı",
 
   // Admin - Dashboard extras
-  "admin.dashboard.giftCardsSold": "Satılan Hediye Kartı",
+  "admin.dashboard.giftCardsCreated": "Oluşturulan Hediye Kartları",
   "admin.dashboard.digitalRevenue": "Dijital Gelir",
 
   // Validators - Gift Card & Digital
-  "validator.giftCard.themeInvalid": "Geçersiz hediye kartı teması",
-  "validator.giftCard.amountInvalid": "Geçersiz hediye kartı tutarı",
   "validator.giftCard.codeRequired": "Hediye kartı kodu zorunludur",
   "validator.digital.sourceOrderRequired": "Kaynak sipariş zorunludur",
 
   // API - Gift Card & Digital
   "api.giftCard.notFound": "Hediye kartı bulunamadı",
   "api.giftCard.createFailed": "Hediye kartı oluşturma başarısız",
-  "api.giftCard.confirmFailed": "Hediye kartı onaylama başarısız",
   "api.digital.createFailed": "Dijital sipariş oluşturma başarısız",
   "api.digital.confirmFailed": "Dijital sipariş onaylama başarısız",
   "api.digital.notFound": "Dijital sipariş bulunamadı",

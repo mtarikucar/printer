@@ -44,7 +44,7 @@ async function getMetrics() {
     .from(orders)
     .where(sql`${orders.paidAt} IS NOT NULL`);
 
-  const [giftCardsSold] = await db
+  const [giftCardsCreated] = await db
     .select({ count: count() })
     .from(giftCards)
     .where(sql`${giftCards.status} != 'pending_payment'`);
@@ -62,7 +62,7 @@ async function getMetrics() {
     shipped: shipped.count,
     failed: failed.count,
     revenueKurus: revenue.total || 0,
-    giftCardsSold: giftCardsSold.count,
+    giftCardsCreated: giftCardsCreated.count,
     digitalRevenueKurus: digitalRevenue.total || 0,
   };
 }
@@ -79,7 +79,7 @@ export default async function AdminDashboardPage() {
     { label: d["admin.dashboard.printing"], value: metrics.printing, color: "bg-purple-500" },
     { label: d["admin.dashboard.shipped"], value: metrics.shipped, color: "bg-emerald-500" },
     { label: d["admin.dashboard.failedRejected"], value: metrics.failed, color: "bg-red-500" },
-    { label: d["admin.dashboard.giftCardsSold"], value: metrics.giftCardsSold, color: "bg-pink-500" },
+    { label: d["admin.dashboard.giftCardsCreated"], value: metrics.giftCardsCreated, color: "bg-pink-500" },
   ];
 
   return (

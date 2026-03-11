@@ -271,15 +271,15 @@ export const adminActionsRelations = relations(adminActions, ({ one }) => ({
 export const giftCards = pgTable("gift_cards", {
   id: uuid("id").primaryKey().defaultRandom(),
   code: text("code").notNull().unique(),
-  theme: giftCardThemeEnum("theme").notNull(),
+  theme: giftCardThemeEnum("theme"),
   amountKurus: integer("amount_kurus").notNull(),
   balanceKurus: integer("balance_kurus").notNull(),
-  status: giftCardStatusEnum("status").notNull().default("pending_payment"),
-  buyerUserId: uuid("buyer_user_id")
-    .notNull()
-    .references(() => users.id),
-  buyerEmail: text("buyer_email").notNull(),
-  buyerName: text("buyer_name").notNull(),
+  status: giftCardStatusEnum("status").notNull().default("active"),
+  buyerUserId: uuid("buyer_user_id").references(() => users.id),
+  buyerEmail: text("buyer_email"),
+  buyerName: text("buyer_name"),
+  note: text("note"),
+  maxRedemptions: integer("max_redemptions"), // null = unlimited
   recipientEmail: text("recipient_email"),
   recipientName: text("recipient_name"),
   recipientMessage: text("recipient_message"),

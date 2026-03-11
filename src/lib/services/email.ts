@@ -151,7 +151,7 @@ function getTemplates(locale: Locale) {
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
             <h1 style="color: #1a1a1a;">${d["email.giftCard.heading"].replace("{customerName}", p.customerName)}</h1>
-            <p>${d["email.giftCard.body"].replace("{senderName}", p.senderName || "")}</p>
+            <p>${d["email.giftCard.body"].replace("{senderName}", p.senderName || "Figurine Studio")}</p>
             ${p.giftCardMessage ? `<div style="margin: 16px 0; padding: 16px; background: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e;"><p style="margin: 0; font-style: italic;">"${p.giftCardMessage}"</p></div>` : ""}
             <div style="margin: 24px 0; padding: 24px; background: #f9fafb; border-radius: 12px; text-align: center;">
               <p style="margin: 0; font-size: 14px; color: #6b7280;">${d["email.giftCard.codeLabel"]}</p>

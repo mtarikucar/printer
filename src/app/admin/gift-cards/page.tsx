@@ -1,11 +1,12 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
-import { giftCards } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { giftCards, giftCardRedemptions } from "@/lib/db/schema";
+import { desc, eq, count } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
+import { CreateGiftCardForm } from "./create-form";
 import { AdminGiftCardActions } from "./actions";
 
 export default async function AdminGiftCardsPage() {
@@ -13,8 +14,24 @@ export default async function AdminGiftCardsPage() {
   const d = getDictionary(locale);
 
   const cards = await db
-    .select()
+    .select({
+      id: giftCards.id,
+      code: giftCards.code,
+      theme: giftCards.theme,
+      amountKurus: giftCards.amountKurus,
+      balanceKurus: giftCards.balanceKurus,
+      status: giftCards.status,
+      note: giftCards.note,
+      maxRedemptions: giftCards.maxRedemptions,
+      recipientName: giftCards.recipientName,
+      recipientEmail: giftCards.recipientEmail,
+      expiresAt: giftCards.expiresAt,
+      createdAt: giftCards.createdAt,
+      redemptionCount: count(giftCardRedemptions.id),
+    })
     .from(giftCards)
+    .leftJoin(giftCardRedemptions, eq(giftCards.id, giftCardRedemptions.giftCardId))
+    .groupBy(giftCards.id)
     .orderBy(desc(giftCards.createdAt));
 
   return (
@@ -22,16 +39,21 @@ export default async function AdminGiftCardsPage() {
       <h1 className="text-2xl font-bold text-gray-900">{d["admin.giftCards.title"]}</h1>
       <p className="text-gray-500 mt-1">{d["admin.giftCards.subtitle"]}</p>
 
+      <div className="mt-6">
+        <CreateGiftCardForm d={d} />
+      </div>
+
       <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.code"]}</th>
-              <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.theme"]}</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.amount"]}</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.balance"]}</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.status"]}</th>
-              <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.buyer"]}</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.expires"]}</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.limit"]}</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.note"]}</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.recipient"]}</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.date"]}</th>
               <th className="px-4 py-3" />
@@ -40,7 +62,7 @@ export default async function AdminGiftCardsPage() {
           <tbody>
             {cards.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                   {d["admin.giftCards.empty"]}
                 </td>
               </tr>
@@ -48,9 +70,6 @@ export default async function AdminGiftCardsPage() {
               cards.map((card) => (
                 <tr key={card.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs">{card.code}</td>
-                  <td className="px-4 py-3">
-                    {d[`giftCard.theme.${card.theme}` as keyof typeof d] || card.theme}
-                  </td>
                   <td className="px-4 py-3 font-mono">{formatCurrency(card.amountKurus, locale)}</td>
                   <td className="px-4 py-3 font-mono">{formatCurrency(card.balanceKurus, locale)}</td>
                   <td className="px-4 py-3">
@@ -58,18 +77,23 @@ export default async function AdminGiftCardsPage() {
                       card.status === "active" ? "bg-green-100 text-green-700" :
                       card.status === "pending_payment" ? "bg-yellow-100 text-yellow-700" :
                       card.status === "fully_used" ? "bg-gray-100 text-gray-600" :
+                      card.status === "expired" ? "bg-red-100 text-red-700" :
                       "bg-blue-100 text-blue-700"
                     }`}>
                       {d[`giftCard.status.${card.status}` as keyof typeof d] || card.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs">{card.buyerName}<br /><span className="text-gray-400">{card.buyerEmail}</span></td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{formatDate(card.expiresAt, locale)}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {card.maxRedemptions !== null
+                      ? `${card.redemptionCount}/${card.maxRedemptions}`
+                      : d["admin.giftCards.unlimited"]}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{card.note || "—"}</td>
                   <td className="px-4 py-3 text-xs">{card.recipientName || "—"}<br /><span className="text-gray-400">{card.recipientEmail || ""}</span></td>
                   <td className="px-4 py-3 text-xs text-gray-500">{formatDate(card.createdAt, locale)}</td>
                   <td className="px-4 py-3">
-                    {card.status === "pending_payment" && (
-                      <AdminGiftCardActions cardId={card.id} />
-                    )}
+                    <AdminGiftCardActions cardId={card.id} code={card.code} status={card.status} d={d} />
                   </td>
                 </tr>
               ))

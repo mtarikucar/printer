@@ -98,7 +98,7 @@ const tr: Dictionary = {
   "landing.stats.figurines": "Figürin Oluşturuldu",
   "landing.stats.reviews": "5 Yıldızlı Yorum",
   "landing.stats.processing": "İşleme Süresi",
-  "landing.stats.processingValue": "48s",
+  "landing.stats.processingValue": "48h",
   "landing.stats.shipping": "Ücretsiz Kargo",
 
   // Landing - Testimonials
@@ -415,6 +415,7 @@ const tr: Dictionary = {
   "admin.dashboard.failedRejected": "Başarısız/Reddedilen",
   "admin.dashboard.revenue": "Gelir",
   "admin.dashboard.revenueSubtitle": "Ödenen siparişlerden toplam",
+  "admin.dashboard.digitalRevenueSubtitle": "Dijital STL siparişlerinden toplam",
 
   // Admin - Orders
   "admin.orders.title": "Siparişler",
@@ -640,17 +641,17 @@ const tr: Dictionary = {
   "gallery.modal.yourFigurine": "Figürininiz",
 
   // Account Gallery
-  "account.gallery.generating": "Olusturuluyor...",
-  "account.gallery.processing": "Isleniyor...",
-  "account.gallery.awaitingPayment": "Odeme Bekleniyor",
-  "account.gallery.createAnother": "Bir Tane Daha Olustur",
-  "account.gallery.trackOrder": "Siparisi Takip Et",
-  "account.gallery.orderThis": "Bu Figurini Siparis Ver",
-  "account.gallery.failed": "Basarisiz",
-  "account.gallery.readyToOrder": "Siparis Verilebilir",
-  "account.gallery.loadMore": "Daha Fazla Yukle",
-  "account.gallery.loading": "Yukleniyor...",
-  "account.creations.title": "Olusturmalarim",
+  "account.gallery.generating": "Oluşturuluyor...",
+  "account.gallery.processing": "İşleniyor...",
+  "account.gallery.awaitingPayment": "Ödeme Bekleniyor",
+  "account.gallery.createAnother": "Bir Tane Daha Oluştur",
+  "account.gallery.trackOrder": "Siparişi Takip Et",
+  "account.gallery.orderThis": "Bu Figürini Sipariş Ver",
+  "account.gallery.failed": "Başarısız",
+  "account.gallery.readyToOrder": "Sipariş Verilebilir",
+  "account.gallery.loadMore": "Daha Fazla Yükle",
+  "account.gallery.loading": "Yükleniyor...",
+  "account.creations.title": "Oluşturmalarım",
 
   // Photo Editor
   "editor.title": "Fotoğrafı Düzenle",
@@ -693,6 +694,158 @@ const tr: Dictionary = {
   "editor.cut.apply": "Kesimi Uygula",
   "editor.cut.cancel": "İptal",
   "editor.cut.tooFewPoints": "Daha büyük bir alan çizin",
+
+  // Nav - Gift Cards
+  "nav.giftCards": "Hediye Kartları",
+
+  // Gift Card - Themes
+  "giftCard.theme.ramazan": "Ramazan",
+  "giftCard.theme.dogum_gunu": "Doğum Günü",
+  "giftCard.theme.yeni_yil": "Yeni Yıl",
+  "giftCard.theme.sevgililer_gunu": "Sevgililer Günü",
+  "giftCard.theme.genel": "Genel",
+
+  // Gift Card - Purchase
+  "giftCard.title": "Hediye Kartları",
+  "giftCard.subtitle": "Yaratıcılığı hediye edin. Figurine Studio hediye kartı gönderin.",
+  "giftCard.selectTheme": "Tema Seçin",
+  "giftCard.selectAmount": "Tutar Seçin",
+  "giftCard.recipientToggle.self": "Kendim için",
+  "giftCard.recipientToggle.other": "Birine gönder",
+  "giftCard.recipientEmail": "Alıcı E-postası",
+  "giftCard.recipientName": "Alıcı Adı",
+  "giftCard.recipientMessage": "Kişisel Mesaj",
+  "giftCard.recipientMessage.placeholder": "Alıcıya bir mesaj yazın (isteğe bağlı)",
+  "giftCard.summary": "Özet",
+  "giftCard.submitButton": "WhatsApp ile Satın Al",
+  "giftCard.submitting": "İşleniyor...",
+  "giftCard.success.title": "Hediye Kartı Sipariş Edildi!",
+  "giftCard.success.message": "WhatsApp açıldı. Mesajı göndererek satın almayı tamamlayın.",
+  "giftCard.success.code": "Hediye Kartı Kodu",
+  "giftCard.success.copied": "Kopyalandı!",
+  "giftCard.success.copy": "Kodu Kopyala",
+  "giftCard.success.resend": "WhatsApp'ı Tekrar Aç",
+
+  // Gift Card - Validation
+  "giftCard.apply": "Uygula",
+  "giftCard.applying": "Uygulanıyor...",
+  "giftCard.applied": "Hediye kartı uygulandı",
+  "giftCard.remove": "Kaldır",
+  "giftCard.hasCard": "Hediye kartınız var mı?",
+  "giftCard.enterCode": "Hediye kartı kodunu girin",
+  "giftCard.balance": "Hediye Kartı Bakiyesi",
+  "giftCard.discount": "Hediye Kartı İndirimi",
+  "giftCard.remaining": "Kalan Tutar",
+  "giftCard.fullyCovered": "Hediye kartı ile tamamen karşılandı",
+  "giftCard.error.not_found": "Hediye kartı bulunamadı",
+  "giftCard.error.not_active": "Hediye kartı aktif değil",
+  "giftCard.error.fully_used": "Hediye kartı tamamen kullanılmış",
+  "giftCard.error.expired": "Hediye kartının süresi dolmuş",
+  "giftCard.error.insufficient": "Yetersiz hediye kartı bakiyesi",
+
+  // Gift Card - Status
+  "giftCard.status.pending_payment": "Ödeme Bekleniyor",
+  "giftCard.status.active": "Aktif",
+  "giftCard.status.partially_used": "Kısmen Kullanıldı",
+  "giftCard.status.fully_used": "Tamamen Kullanıldı",
+  "giftCard.status.expired": "Süresi Dolmuş",
+
+  // Digital Order
+  "digital.title": "STL Dosyası Satın Al",
+  "digital.subtitle": "Bu figürinin 3D model dosyasını indirin.",
+  "digital.price": "Fiyat",
+  "digital.buyButton": "WhatsApp ile STL Satın Al",
+  "digital.buyButtonDirect": "STL Satın Al",
+  "digital.submitting": "İşleniyor...",
+  "digital.success.title": "Sipariş Verildi!",
+  "digital.success.message": "STL dosyanız ödeme onayından sonra indirilmeye hazır olacak.",
+  "digital.success.openWhatsapp": "WhatsApp'ı Tekrar Aç",
+  "digital.download": "STL İndir",
+  "digital.downloading": "İndiriliyor...",
+  "digital.downloadCount": "İndirme Sayısı",
+  "digital.notReady": "Siparişiniz işleniyor. Hazır olduğunda e-posta alacaksınız.",
+  "digital.galleryButton": "STL Satın Al",
+
+  // Digital Order - Status
+  "digital.status.pending_payment": "Ödeme Bekleniyor",
+  "digital.status.paid": "Ödendi",
+  "digital.status.ready": "İndirmeye Hazır",
+
+  // Account - Digital & Gift Cards
+  "account.digitalOrders.title": "Dijital Satın Alımlarım",
+  "account.digitalOrders.empty": "Henüz dijital satın alımınız yok.",
+  "account.giftCards.title": "Hediye Kartlarım",
+  "account.giftCards.empty": "Henüz hediye kartınız yok.",
+  "account.giftCards.purchased": "Satın Alınan",
+  "account.giftCards.received": "Alınan",
+
+  // Admin - Gift Cards
+  "admin.nav.giftCards": "Hediye Kartları",
+  "admin.giftCards.title": "Hediye Kartları",
+  "admin.giftCards.subtitle": "Hediye kartı siparişlerini yönetin",
+  "admin.giftCards.table.code": "Kod",
+  "admin.giftCards.table.theme": "Tema",
+  "admin.giftCards.table.amount": "Tutar",
+  "admin.giftCards.table.balance": "Bakiye",
+  "admin.giftCards.table.status": "Durum",
+  "admin.giftCards.table.buyer": "Satın Alan",
+  "admin.giftCards.table.recipient": "Alıcı",
+  "admin.giftCards.table.date": "Tarih",
+  "admin.giftCards.confirm": "Ödemeyi Onayla",
+  "admin.giftCards.confirming": "Onaylanıyor...",
+  "admin.giftCards.empty": "Hediye kartı bulunamadı",
+
+  // Admin - Digital Orders
+  "admin.nav.digitalOrders": "Dijital Siparişler",
+  "admin.digitalOrders.title": "Dijital Siparişler",
+  "admin.digitalOrders.subtitle": "Dijital STL siparişlerini yönetin",
+  "admin.digitalOrders.table.order": "Sipariş",
+  "admin.digitalOrders.table.customer": "Müşteri",
+  "admin.digitalOrders.table.sourceOrder": "Kaynak Sipariş",
+  "admin.digitalOrders.table.amount": "Tutar",
+  "admin.digitalOrders.table.status": "Durum",
+  "admin.digitalOrders.table.downloads": "İndirme",
+  "admin.digitalOrders.table.date": "Tarih",
+  "admin.digitalOrders.confirm": "Ödemeyi Onayla",
+  "admin.digitalOrders.confirming": "Onaylanıyor...",
+  "admin.digitalOrders.empty": "Dijital sipariş bulunamadı",
+
+  // Admin - Dashboard extras
+  "admin.dashboard.giftCardsSold": "Satılan Hediye Kartı",
+  "admin.dashboard.digitalRevenue": "Dijital Gelir",
+
+  // Validators - Gift Card & Digital
+  "validator.giftCard.themeInvalid": "Geçersiz hediye kartı teması",
+  "validator.giftCard.amountInvalid": "Geçersiz hediye kartı tutarı",
+  "validator.giftCard.codeRequired": "Hediye kartı kodu zorunludur",
+  "validator.digital.sourceOrderRequired": "Kaynak sipariş zorunludur",
+
+  // API - Gift Card & Digital
+  "api.giftCard.notFound": "Hediye kartı bulunamadı",
+  "api.giftCard.createFailed": "Hediye kartı oluşturma başarısız",
+  "api.giftCard.confirmFailed": "Hediye kartı onaylama başarısız",
+  "api.digital.createFailed": "Dijital sipariş oluşturma başarısız",
+  "api.digital.confirmFailed": "Dijital sipariş onaylama başarısız",
+  "api.digital.notFound": "Dijital sipariş bulunamadı",
+  "api.digital.notReady": "Dijital sipariş henüz indirmeye hazır değil",
+  "api.digital.alreadyPurchased": "Bu siparişin STL dosyasını zaten satın aldınız",
+  "api.digital.noStl": "Bu sipariş için STL dosyası mevcut değil",
+
+  // Email - Gift Card
+  "email.giftCard.subject": "Size {amount} Figurine Studio Hediye Kartı gönderildi!",
+  "email.giftCard.heading": "Merhaba {customerName}!",
+  "email.giftCard.body": "{senderName} size bir Figurine Studio hediye kartı gönderdi!",
+  "email.giftCard.codeLabel": "Hediye Kartı Kodunuz",
+  "email.giftCard.howToUse": "Siparişinizi verirken bu kodu kullanarak hediye kartı bakiyenizi uygulayın.",
+  "email.giftCard.startButton": "Oluşturmaya Başla",
+
+  // Email - Digital Ready
+  "email.digitalReady.subject": "STL dosyanız hazır! #{orderNumber}",
+  "email.digitalReady.heading": "Harika haber, {customerName}!",
+  "email.digitalReady.body": "Dijital STL dosyanız indirilmeye hazır.",
+  "email.digitalReady.orderNumber": "Sipariş Numarası:",
+  "email.digitalReady.downloadButton": "STL İndir",
+  "email.digitalReady.note": "Dosyanızı istediğiniz zaman hesap sayfanızdan indirebilirsiniz.",
 };
 
 export default tr;

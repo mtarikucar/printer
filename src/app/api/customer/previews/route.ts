@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
     previewIds.length > 0
       ? await db.query.orders.findMany({
           columns: {
+            id: true,
             previewId: true,
             orderNumber: true,
             status: true,
@@ -79,6 +80,7 @@ export async function GET(request: NextRequest) {
       createdAt: p.createdAt,
       order: order
         ? {
+            id: order.id,
             orderNumber: order.orderNumber,
             status: order.status,
             amountKurus: order.amountKurus,

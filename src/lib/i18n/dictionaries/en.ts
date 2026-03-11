@@ -413,6 +413,7 @@ const en = {
   "admin.dashboard.failedRejected": "Failed/Rejected",
   "admin.dashboard.revenue": "Revenue",
   "admin.dashboard.revenueSubtitle": "Total from paid orders",
+  "admin.dashboard.digitalRevenueSubtitle": "Total from digital STL orders",
 
   // Admin - Orders
   "admin.orders.title": "Orders",
@@ -688,6 +689,158 @@ const en = {
   "editor.cut.apply": "Apply Cut",
   "editor.cut.cancel": "Cancel",
   "editor.cut.tooFewPoints": "Draw a larger outline",
+
+  // Nav - Gift Cards
+  "nav.giftCards": "Gift Cards",
+
+  // Gift Card - Themes
+  "giftCard.theme.ramazan": "Ramadan",
+  "giftCard.theme.dogum_gunu": "Birthday",
+  "giftCard.theme.yeni_yil": "New Year",
+  "giftCard.theme.sevgililer_gunu": "Valentine's Day",
+  "giftCard.theme.genel": "General",
+
+  // Gift Card - Purchase
+  "giftCard.title": "Gift Cards",
+  "giftCard.subtitle": "Give the gift of creativity. Send a Figurine Studio gift card.",
+  "giftCard.selectTheme": "Select Theme",
+  "giftCard.selectAmount": "Select Amount",
+  "giftCard.recipientToggle.self": "For myself",
+  "giftCard.recipientToggle.other": "Send to someone",
+  "giftCard.recipientEmail": "Recipient Email",
+  "giftCard.recipientName": "Recipient Name",
+  "giftCard.recipientMessage": "Personal Message",
+  "giftCard.recipientMessage.placeholder": "Write a message for the recipient (optional)",
+  "giftCard.summary": "Summary",
+  "giftCard.submitButton": "Purchase via WhatsApp",
+  "giftCard.submitting": "Processing...",
+  "giftCard.success.title": "Gift Card Ordered!",
+  "giftCard.success.message": "WhatsApp has been opened. Send the message to complete your purchase.",
+  "giftCard.success.code": "Gift Card Code",
+  "giftCard.success.copied": "Copied!",
+  "giftCard.success.copy": "Copy Code",
+  "giftCard.success.resend": "Open WhatsApp Again",
+
+  // Gift Card - Validation
+  "giftCard.apply": "Apply",
+  "giftCard.applying": "Applying...",
+  "giftCard.applied": "Gift card applied",
+  "giftCard.remove": "Remove",
+  "giftCard.hasCard": "Have a gift card?",
+  "giftCard.enterCode": "Enter gift card code",
+  "giftCard.balance": "Gift Card Balance",
+  "giftCard.discount": "Gift Card Discount",
+  "giftCard.remaining": "Remaining to Pay",
+  "giftCard.fullyCovered": "Fully covered by gift card",
+  "giftCard.error.not_found": "Gift card not found",
+  "giftCard.error.not_active": "Gift card is not active",
+  "giftCard.error.fully_used": "Gift card has been fully used",
+  "giftCard.error.expired": "Gift card has expired",
+  "giftCard.error.insufficient": "Insufficient gift card balance",
+
+  // Gift Card - Status
+  "giftCard.status.pending_payment": "Pending Payment",
+  "giftCard.status.active": "Active",
+  "giftCard.status.partially_used": "Partially Used",
+  "giftCard.status.fully_used": "Fully Used",
+  "giftCard.status.expired": "Expired",
+
+  // Digital Order
+  "digital.title": "Buy STL File",
+  "digital.subtitle": "Download the 3D model file for this figurine.",
+  "digital.price": "Price",
+  "digital.buyButton": "Buy STL via WhatsApp",
+  "digital.buyButtonDirect": "Buy STL",
+  "digital.submitting": "Processing...",
+  "digital.success.title": "Order Placed!",
+  "digital.success.message": "Your STL file will be ready for download after payment confirmation.",
+  "digital.success.openWhatsapp": "Open WhatsApp Again",
+  "digital.download": "Download STL",
+  "digital.downloading": "Downloading...",
+  "digital.downloadCount": "Downloads",
+  "digital.notReady": "Your order is being processed. You'll receive an email when it's ready.",
+  "digital.galleryButton": "Buy STL",
+
+  // Digital Order - Status
+  "digital.status.pending_payment": "Pending Payment",
+  "digital.status.paid": "Paid",
+  "digital.status.ready": "Ready to Download",
+
+  // Account - Digital & Gift Cards
+  "account.digitalOrders.title": "My Digital Purchases",
+  "account.digitalOrders.empty": "No digital purchases yet.",
+  "account.giftCards.title": "My Gift Cards",
+  "account.giftCards.empty": "No gift cards yet.",
+  "account.giftCards.purchased": "Purchased",
+  "account.giftCards.received": "Received",
+
+  // Admin - Gift Cards
+  "admin.nav.giftCards": "Gift Cards",
+  "admin.giftCards.title": "Gift Cards",
+  "admin.giftCards.subtitle": "Manage gift card orders",
+  "admin.giftCards.table.code": "Code",
+  "admin.giftCards.table.theme": "Theme",
+  "admin.giftCards.table.amount": "Amount",
+  "admin.giftCards.table.balance": "Balance",
+  "admin.giftCards.table.status": "Status",
+  "admin.giftCards.table.buyer": "Buyer",
+  "admin.giftCards.table.recipient": "Recipient",
+  "admin.giftCards.table.date": "Date",
+  "admin.giftCards.confirm": "Confirm Payment",
+  "admin.giftCards.confirming": "Confirming...",
+  "admin.giftCards.empty": "No gift cards found",
+
+  // Admin - Digital Orders
+  "admin.nav.digitalOrders": "Digital Orders",
+  "admin.digitalOrders.title": "Digital Orders",
+  "admin.digitalOrders.subtitle": "Manage digital STL orders",
+  "admin.digitalOrders.table.order": "Order",
+  "admin.digitalOrders.table.customer": "Customer",
+  "admin.digitalOrders.table.sourceOrder": "Source Order",
+  "admin.digitalOrders.table.amount": "Amount",
+  "admin.digitalOrders.table.status": "Status",
+  "admin.digitalOrders.table.downloads": "Downloads",
+  "admin.digitalOrders.table.date": "Date",
+  "admin.digitalOrders.confirm": "Confirm Payment",
+  "admin.digitalOrders.confirming": "Confirming...",
+  "admin.digitalOrders.empty": "No digital orders found",
+
+  // Admin - Dashboard extras
+  "admin.dashboard.giftCardsSold": "Gift Cards Sold",
+  "admin.dashboard.digitalRevenue": "Digital Revenue",
+
+  // Validators - Gift Card & Digital
+  "validator.giftCard.themeInvalid": "Invalid gift card theme",
+  "validator.giftCard.amountInvalid": "Invalid gift card amount",
+  "validator.giftCard.codeRequired": "Gift card code is required",
+  "validator.digital.sourceOrderRequired": "Source order is required",
+
+  // API - Gift Card & Digital
+  "api.giftCard.notFound": "Gift card not found",
+  "api.giftCard.createFailed": "Gift card creation failed",
+  "api.giftCard.confirmFailed": "Gift card confirmation failed",
+  "api.digital.createFailed": "Digital order creation failed",
+  "api.digital.confirmFailed": "Digital order confirmation failed",
+  "api.digital.notFound": "Digital order not found",
+  "api.digital.notReady": "Digital order is not ready for download",
+  "api.digital.alreadyPurchased": "You have already purchased the STL for this order",
+  "api.digital.noStl": "No STL available for this order",
+
+  // Email - Gift Card
+  "email.giftCard.subject": "You received a {amount} Figurine Studio Gift Card!",
+  "email.giftCard.heading": "Hello {customerName}!",
+  "email.giftCard.body": "{senderName} sent you a Figurine Studio gift card!",
+  "email.giftCard.codeLabel": "Your Gift Card Code",
+  "email.giftCard.howToUse": "Use this code when placing your order to apply the gift card balance.",
+  "email.giftCard.startButton": "Start Creating",
+
+  // Email - Digital Ready
+  "email.digitalReady.subject": "Your STL file is ready! #{orderNumber}",
+  "email.digitalReady.heading": "Great news, {customerName}!",
+  "email.digitalReady.body": "Your digital STL file is ready for download.",
+  "email.digitalReady.orderNumber": "Order Number:",
+  "email.digitalReady.downloadButton": "Download STL",
+  "email.digitalReady.note": "You can download your file anytime from your account page.",
 } as const;
 
 export type DictionaryKey = keyof typeof en;

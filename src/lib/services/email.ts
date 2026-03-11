@@ -21,7 +21,9 @@ interface SendEmailParams {
     | "generation_failed"
     | "order_shipped"
     | "order_refunded"
-    | "revision_request";
+    | "revision_request"
+    | "gift_card_received"
+    | "digital_order_ready";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -30,6 +32,11 @@ interface SendEmailParams {
   photoUrl?: string;
   glbUrl?: string;
   revisionNote?: string;
+  giftCardCode?: string;
+  giftCardAmount?: number;
+  giftCardMessage?: string;
+  senderName?: string;
+  downloadUrl?: string;
   locale?: Locale;
 }
 
@@ -131,6 +138,48 @@ function getTemplates(locale: Locale) {
             <p style="margin: 8px 0 0;">${p.revisionNote || ""}</p>
           </div>
           <p>${d["email.revision.action"]}</p>
+        </div>
+      `,
+    }),
+
+    gift_card_received: (p) => {
+      const amountFormatted = p.giftCardAmount
+        ? `₺${(p.giftCardAmount / 100).toLocaleString("tr-TR")}`
+        : "";
+      return {
+        subject: d["email.giftCard.subject"].replace("{amount}", amountFormatted),
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #1a1a1a;">${d["email.giftCard.heading"].replace("{customerName}", p.customerName)}</h1>
+            <p>${d["email.giftCard.body"].replace("{senderName}", p.senderName || "")}</p>
+            ${p.giftCardMessage ? `<div style="margin: 16px 0; padding: 16px; background: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e;"><p style="margin: 0; font-style: italic;">"${p.giftCardMessage}"</p></div>` : ""}
+            <div style="margin: 24px 0; padding: 24px; background: #f9fafb; border-radius: 12px; text-align: center;">
+              <p style="margin: 0; font-size: 14px; color: #6b7280;">${d["email.giftCard.codeLabel"]}</p>
+              <p style="margin: 8px 0; font-size: 28px; font-weight: bold; font-family: monospace; color: #1a1a1a; letter-spacing: 2px;">${p.giftCardCode}</p>
+              <p style="margin: 8px 0 0; font-size: 24px; font-weight: bold; color: #22c55e;">${amountFormatted}</p>
+            </div>
+            <p>${d["email.giftCard.howToUse"]}</p>
+            <a href="${process.env.NEXT_PUBLIC_APP_URL}/create"
+               style="display: inline-block; background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+              ${d["email.giftCard.startButton"]}
+            </a>
+          </div>
+        `,
+      };
+    },
+
+    digital_order_ready: (p) => ({
+      subject: d["email.digitalReady.subject"].replace("{orderNumber}", p.orderNumber),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.digitalReady.heading"].replace("{customerName}", p.customerName)}</h1>
+          <p>${d["email.digitalReady.body"]}</p>
+          <p><strong>${d["email.digitalReady.orderNumber"]}</strong> ${p.orderNumber}</p>
+          ${p.downloadUrl ? `<a href="${p.downloadUrl}"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["email.digitalReady.downloadButton"]}
+          </a>` : ""}
+          <p style="margin-top: 24px; color: #666;">${d["email.digitalReady.note"]}</p>
         </div>
       `,
     }),

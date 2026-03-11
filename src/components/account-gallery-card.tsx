@@ -10,6 +10,7 @@ export interface AccountPreview {
   figurineSize: string;
   createdAt: string;
   order: {
+    id: string;
     orderNumber: string;
     status: string;
     amountKurus: number;

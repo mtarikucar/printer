@@ -10,6 +10,28 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+export const giftCardThemeEnum = pgEnum("gift_card_theme", [
+  "ramazan",
+  "dogum_gunu",
+  "yeni_yil",
+  "sevgililer_gunu",
+  "genel",
+]);
+
+export const giftCardStatusEnum = pgEnum("gift_card_status", [
+  "pending_payment",
+  "active",
+  "partially_used",
+  "fully_used",
+  "expired",
+]);
+
+export const digitalOrderStatusEnum = pgEnum("digital_order_status", [
+  "pending_payment",
+  "paid",
+  "ready",
+]);
+
 export interface TurkishAddress {
   adres: string;
   mahalle?: string;
@@ -119,6 +141,7 @@ export const orders = pgTable("orders", {
   trackingNumber: text("tracking_number"),
   adminNotes: text("admin_notes"),
   failureReason: text("failure_reason"),
+  giftCardAmountKurus: integer("gift_card_amount_kurus").notNull().default(0),
   retryCount: integer("retry_count").notNull().default(0),
   isPublic: boolean("is_public").notNull().default(false),
   publicDisplayName: text("public_display_name"),
@@ -190,6 +213,8 @@ export const adminActions = pgTable("admin_actions", {
 export const usersRelations = relations(users, ({ many }) => ({
   orders: many(orders),
   previews: many(previews),
+  giftCards: many(giftCards),
+  digitalOrders: many(digitalOrders),
 }));
 
 export const previewsRelations = relations(previews, ({ one }) => ({
@@ -241,3 +266,114 @@ export const adminActionsRelations = relations(adminActions, ({ one }) => ({
     references: [orders.id],
   }),
 }));
+
+// Gift Cards
+export const giftCards = pgTable("gift_cards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: text("code").notNull().unique(),
+  theme: giftCardThemeEnum("theme").notNull(),
+  amountKurus: integer("amount_kurus").notNull(),
+  balanceKurus: integer("balance_kurus").notNull(),
+  status: giftCardStatusEnum("status").notNull().default("pending_payment"),
+  buyerUserId: uuid("buyer_user_id")
+    .notNull()
+    .references(() => users.id),
+  buyerEmail: text("buyer_email").notNull(),
+  buyerName: text("buyer_name").notNull(),
+  recipientEmail: text("recipient_email"),
+  recipientName: text("recipient_name"),
+  recipientMessage: text("recipient_message"),
+  emailSent: boolean("email_sent").notNull().default(false),
+  expiresAt: timestamp("expires_at").notNull(),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const giftCardRedemptions = pgTable("gift_card_redemptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  giftCardId: uuid("gift_card_id")
+    .notNull()
+    .references(() => giftCards.id),
+  orderId: uuid("order_id").references(() => orders.id),
+  digitalOrderId: uuid("digital_order_id").references(() => digitalOrders.id),
+  amountKurus: integer("amount_kurus").notNull(),
+  redeemedByUserId: uuid("redeemed_by_user_id")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const digitalOrders = pgTable("digital_orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderNumber: text("order_number").notNull().unique(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  email: text("email").notNull(),
+  customerName: text("customer_name").notNull(),
+  sourceOrderId: uuid("source_order_id")
+    .notNull()
+    .references(() => orders.id),
+  generationAttemptId: uuid("generation_attempt_id")
+    .notNull()
+    .references(() => generationAttempts.id),
+  amountKurus: integer("amount_kurus").notNull(),
+  giftCardAmountKurus: integer("gift_card_amount_kurus").notNull().default(0),
+  status: digitalOrderStatusEnum("status").notNull().default("pending_payment"),
+  stlFileKey: text("stl_file_key"),
+  downloadCount: integer("download_count").notNull().default(0),
+  lastDownloadAt: timestamp("last_download_at"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Gift Card Relations
+export const giftCardsRelations = relations(giftCards, ({ one, many }) => ({
+  buyer: one(users, {
+    fields: [giftCards.buyerUserId],
+    references: [users.id],
+  }),
+  redemptions: many(giftCardRedemptions),
+}));
+
+export const giftCardRedemptionsRelations = relations(
+  giftCardRedemptions,
+  ({ one }) => ({
+    giftCard: one(giftCards, {
+      fields: [giftCardRedemptions.giftCardId],
+      references: [giftCards.id],
+    }),
+    order: one(orders, {
+      fields: [giftCardRedemptions.orderId],
+      references: [orders.id],
+    }),
+    digitalOrder: one(digitalOrders, {
+      fields: [giftCardRedemptions.digitalOrderId],
+      references: [digitalOrders.id],
+    }),
+    redeemedBy: one(users, {
+      fields: [giftCardRedemptions.redeemedByUserId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const digitalOrdersRelations = relations(
+  digitalOrders,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [digitalOrders.userId],
+      references: [users.id],
+    }),
+    sourceOrder: one(orders, {
+      fields: [digitalOrders.sourceOrderId],
+      references: [orders.id],
+    }),
+    generationAttempt: one(generationAttempts, {
+      fields: [digitalOrders.generationAttemptId],
+      references: [generationAttempts.id],
+    }),
+  })
+);

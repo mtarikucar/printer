@@ -8,6 +8,8 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { AccountGalleryCard } from "@/components/account-gallery-card";
 import { AccountGalleryModal } from "@/components/account-gallery-modal";
 import type { AccountPreview } from "@/components/account-gallery-card";
+import { formatCurrency, formatDate } from "@/lib/i18n/format";
+import { useLocale } from "@/lib/i18n/locale-context";
 
 interface User {
   id: string;
@@ -16,15 +18,27 @@ interface User {
   phone: string;
 }
 
+interface DigitalOrder {
+  id: string;
+  orderNumber: string;
+  status: string;
+  amountKurus: number;
+  downloadCount: number;
+  createdAt: string;
+}
+
 export default function AccountPage() {
   const router = useRouter();
   const d = useDictionary();
+  const locale = useLocale();
   const [user, setUser] = useState<User | null>(null);
   const [previews, setPreviews] = useState<AccountPreview[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountPreview | null>(null);
+  const [digitalOrders, setDigitalOrders] = useState<DigitalOrder[]>([]);
+
 
   useEffect(() => {
     async function load() {
@@ -37,11 +51,20 @@ export default function AccountPage() {
         const meData = await meRes.json();
         setUser(meData.user);
 
-        const res = await fetch("/api/customer/previews");
-        if (res.ok) {
-          const data = await res.json();
+        const [previewsRes, digitalRes] = await Promise.all([
+          fetch("/api/customer/previews"),
+          fetch("/api/customer/digital-orders"),
+        ]);
+
+        if (previewsRes.ok) {
+          const data = await previewsRes.json();
           setPreviews(data.previews);
           setCursor(data.nextCursor);
+        }
+
+        if (digitalRes.ok) {
+          const data = await digitalRes.json();
+          setDigitalOrders(data.digitalOrders || []);
         }
       } catch {
         router.push("/login");
@@ -172,6 +195,39 @@ export default function AccountPage() {
             </>
           )}
         </div>
+
+        {/* Digital Purchases */}
+        {digitalOrders.length > 0 && (
+          <div className="mt-8 animate-fade-in-up delay-200">
+            <h2 className="text-xl font-serif text-text-primary mb-4">{d["account.digitalOrders.title"]}</h2>
+            <div className="card overflow-hidden">
+              <div className="divide-y divide-bg-subtle">
+                {digitalOrders.map((order) => (
+                  <div key={order.id} className="p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-mono font-medium text-text-primary">{order.orderNumber}</p>
+                      <p className="text-xs text-text-muted">{formatDate(order.createdAt, locale)}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        order.status === "ready"
+                          ? "bg-green-100 text-green-700"
+                          : "bg-yellow-100 text-yellow-700"
+                      }`}>
+                        {d[`digital.status.${order.status}` as keyof typeof d] || order.status}
+                      </span>
+                      {order.status === "ready" && (
+                        <Link href={`/digital/${order.id}`} className="btn-primary text-xs !py-1.5 !px-3">
+                          {d["digital.download"]}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {selected && (

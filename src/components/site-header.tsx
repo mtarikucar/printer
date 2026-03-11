@@ -48,6 +48,7 @@ export function SiteHeader() {
 
   const navLinks = [
     { href: "/gallery", label: d["nav.gallery"] },
+    { href: "/gift-cards", label: d["nav.giftCards"] },
     { href: "/create", label: d["nav.create"] },
     ...(user ? [{ href: "/account", label: d["nav.myOrders"] }] : []),
   ];

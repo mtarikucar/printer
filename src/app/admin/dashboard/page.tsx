@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
-import { orders } from "@/lib/db/schema";
+import { orders, giftCards, digitalOrders } from "@/lib/db/schema";
 import { count, sql } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -44,6 +44,16 @@ async function getMetrics() {
     .from(orders)
     .where(sql`${orders.paidAt} IS NOT NULL`);
 
+  const [giftCardsSold] = await db
+    .select({ count: count() })
+    .from(giftCards)
+    .where(sql`${giftCards.status} != 'pending_payment'`);
+
+  const [digitalRevenue] = await db
+    .select({ total: sql<number>`COALESCE(SUM(${digitalOrders.amountKurus}), 0)` })
+    .from(digitalOrders)
+    .where(sql`${digitalOrders.paidAt} IS NOT NULL`);
+
   return {
     total: totalOrders.count,
     pendingReview: pendingReview.count,
@@ -52,6 +62,8 @@ async function getMetrics() {
     shipped: shipped.count,
     failed: failed.count,
     revenueKurus: revenue.total || 0,
+    giftCardsSold: giftCardsSold.count,
+    digitalRevenueKurus: digitalRevenue.total || 0,
   };
 }
 
@@ -67,6 +79,7 @@ export default async function AdminDashboardPage() {
     { label: d["admin.dashboard.printing"], value: metrics.printing, color: "bg-purple-500" },
     { label: d["admin.dashboard.shipped"], value: metrics.shipped, color: "bg-emerald-500" },
     { label: d["admin.dashboard.failedRejected"], value: metrics.failed, color: "bg-red-500" },
+    { label: d["admin.dashboard.giftCardsSold"], value: metrics.giftCardsSold, color: "bg-pink-500" },
   ];
 
   return (
@@ -74,7 +87,7 @@ export default async function AdminDashboardPage() {
       <h1 className="text-2xl font-bold text-gray-900">{d["admin.dashboard.title"]}</h1>
       <p className="text-gray-500 mt-1">{d["admin.dashboard.subtitle"]}</p>
 
-      <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {cards.map((card) => (
           <div key={card.label} className="bg-white rounded-xl border border-gray-200 p-4">
             <div className={`w-3 h-3 rounded-full ${card.color} mb-3`} />
@@ -84,12 +97,21 @@ export default async function AdminDashboardPage() {
         ))}
       </div>
 
-      <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900">{d["admin.dashboard.revenue"]}</h2>
-        <p className="text-3xl font-bold text-gray-900 mt-2">
-          {formatCurrency(metrics.revenueKurus, locale)}
-        </p>
-        <p className="text-sm text-gray-500 mt-1">{d["admin.dashboard.revenueSubtitle"]}</p>
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900">{d["admin.dashboard.revenue"]}</h2>
+          <p className="text-3xl font-bold text-gray-900 mt-2">
+            {formatCurrency(metrics.revenueKurus, locale)}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">{d["admin.dashboard.revenueSubtitle"]}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900">{d["admin.dashboard.digitalRevenue"]}</h2>
+          <p className="text-3xl font-bold text-gray-900 mt-2">
+            {formatCurrency(metrics.digitalRevenueKurus, locale)}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">{d["admin.dashboard.digitalRevenueSubtitle"]}</p>
+        </div>
       </div>
     </div>
   );

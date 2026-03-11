@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
+import { DIGITAL_PRICE_KURUS } from "@/lib/config/prices";
 import type { AccountPreview } from "@/components/account-gallery-card";
 
 export function AccountGalleryModal({
@@ -170,8 +171,14 @@ export function AccountGalleryModal({
                   {d["account.gallery.trackOrder"]}
                 </Link>
                 <Link
-                  href="/create"
+                  href={`/digital/${preview.order!.id}`}
                   className="btn-primary flex-1 !block text-center text-sm"
+                >
+                  {d["digital.galleryButton"]} {formatCurrency(DIGITAL_PRICE_KURUS, locale)}
+                </Link>
+                <Link
+                  href="/create"
+                  className="btn-secondary flex-1 !block text-center text-sm"
                 >
                   {d["account.gallery.createAnother"]}
                 </Link>

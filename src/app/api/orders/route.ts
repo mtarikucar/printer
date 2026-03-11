@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, previews } from "@/lib/db/schema";
+import { orders, orderPhotos, previews, giftCards, giftCardRedemptions } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
 import { PRICES_KURUS } from "@/lib/config/prices";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { validateGiftCard } from "@/lib/services/gift-card";
+import { confirmOrder } from "@/lib/services/order-confirm";
 import { users } from "@/lib/db/schema";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
@@ -62,42 +64,110 @@ export async function POST(request: NextRequest) {
     const photoUrl = getPublicUrl(validated.photoKey);
     const amountKurus = PRICES_KURUS[validated.figurineSize];
 
-    const [order] = await db
-      .insert(orders)
-      .values({
-        orderNumber,
-        userId: user.id,
-        previewId: previewId || null,
-        email: user.email,
-        customerName: user.fullName,
-        phone: validated.shippingAddress.telefon,
-        figurineSize: validated.figurineSize,
-        shippingAddress: validated.shippingAddress,
-        amountKurus,
-        status: "pending_payment",
-      })
-      .returning();
+    // Validate gift card if provided (quick check before transaction)
+    let giftCardId: string | undefined;
+    let giftCardAmountKurus = 0;
+    let fullyCovered = false;
 
-    await db.insert(orderPhotos).values({
-      orderId: order.id,
-      originalUrl: photoUrl,
+    if (validated.giftCardCode) {
+      const gcResult = await validateGiftCard(validated.giftCardCode);
+      if (!gcResult.valid) {
+        const errorKey = `giftCard.error.${gcResult.error}` as keyof typeof d;
+        return NextResponse.json({ error: d[errorKey] || d["common.error"] }, { status: 400 });
+      }
+      giftCardId = gcResult.card!.id;
+      giftCardAmountKurus = Math.min(gcResult.card!.balanceKurus, amountKurus);
+      fullyCovered = giftCardAmountKurus >= amountKurus;
+    }
+
+    // Create order + apply gift card atomically
+    const order = await db.transaction(async (tx) => {
+      const [newOrder] = await tx
+        .insert(orders)
+        .values({
+          orderNumber,
+          userId: user.id,
+          previewId: previewId || null,
+          email: user.email,
+          customerName: user.fullName,
+          phone: validated.shippingAddress.telefon,
+          figurineSize: validated.figurineSize,
+          shippingAddress: validated.shippingAddress,
+          amountKurus,
+          giftCardAmountKurus: 0,
+          status: "pending_payment",
+        })
+        .returning();
+
+      await tx.insert(orderPhotos).values({
+        orderId: newOrder.id,
+        originalUrl: photoUrl,
+      });
+
+      // Apply gift card inside same transaction (prevents race condition)
+      if (giftCardId && giftCardAmountKurus > 0) {
+        const card = await tx.query.giftCards.findFirst({
+          where: eq(giftCards.id, giftCardId),
+        });
+        if (!card || card.balanceKurus < giftCardAmountKurus) {
+          throw new Error("INSUFFICIENT_BALANCE");
+        }
+
+        const newBalance = card.balanceKurus - giftCardAmountKurus;
+        const newStatus = newBalance === 0 ? "fully_used" : "partially_used";
+
+        await tx.update(giftCards).set({
+          balanceKurus: newBalance,
+          status: newStatus as "fully_used" | "partially_used",
+          updatedAt: new Date(),
+        }).where(eq(giftCards.id, giftCardId));
+
+        await tx.insert(giftCardRedemptions).values({
+          giftCardId,
+          orderId: newOrder.id,
+          amountKurus: giftCardAmountKurus,
+          redeemedByUserId: user.id,
+        });
+
+        await tx.update(orders).set({
+          giftCardAmountKurus: giftCardAmountKurus,
+          updatedAt: new Date(),
+        }).where(eq(orders.id, newOrder.id));
+      }
+
+      return newOrder;
     });
 
-    // Build WhatsApp message
+    // If fully covered by gift card, auto-confirm
+    if (fullyCovered) {
+      await confirmOrder(order.id, locale);
+      return NextResponse.json({
+        orderNumber,
+        autoConfirmed: true,
+      });
+    }
+
+    // Build WhatsApp message with remaining amount
     const sizeLabel = d[`sizes.${validated.figurineSize}` as keyof typeof d] || validated.figurineSize;
-    const priceFormatted = `₺${(amountKurus / 100).toLocaleString("tr-TR")}`;
+    const remainingKurus = amountKurus - giftCardAmountKurus;
+    const priceFormatted = `₺${(remainingKurus / 100).toLocaleString("tr-TR")}`;
     const addr = validated.shippingAddress;
-    const message = [
-      `Siparis No: ${orderNumber}`,
+    const messageParts = [
+      `Sipariş No: ${orderNumber}`,
       `Boyut: ${sizeLabel}`,
       `Fiyat: ${priceFormatted}`,
+    ];
+    if (giftCardAmountKurus > 0) {
+      messageParts.push(`Hediye Kartı: -₺${(giftCardAmountKurus / 100).toLocaleString("tr-TR")}`);
+    }
+    messageParts.push(
       `Isim: ${user.fullName}`,
       `Telefon: ${addr.telefon}`,
-      `Adres: ${addr.mahalle ? addr.mahalle + ", " : ""}${addr.adres}, ${addr.ilce}/${addr.il} ${addr.postaKodu}`,
-    ].join("\n");
+      `Adres: ${addr.mahalle ? addr.mahalle + ", " : ""}${addr.adres}, ${addr.ilce}/${addr.il} ${addr.postaKodu}`
+    );
 
     const phone = process.env.WHATSAPP_PHONE;
-    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(messageParts.join("\n"))}`;
 
     return NextResponse.json({
       orderNumber,
@@ -106,6 +176,12 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     if (error.name === "ZodError") {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+    if (error.message === "INSUFFICIENT_BALANCE") {
+      return NextResponse.json(
+        { error: d["giftCard.error.insufficient"] },
+        { status: 400 }
+      );
     }
     console.error("Order creation failed:", error);
     return NextResponse.json(

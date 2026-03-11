@@ -28,6 +28,7 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
       error: d["validator.size.invalid"],
     }),
     shippingAddress: createTurkishAddressSchema(locale),
+    giftCardCode: z.string().optional(),
   });
 }
 

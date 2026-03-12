@@ -674,6 +674,7 @@ const tr: Dictionary = {
   "editor.tool.detectPerson.loading": "Kişi algılanıyor...",
   "editor.tool.detectPerson.found": "Kişi algılandı!",
   "editor.tool.detectPerson.notFound": "Kişi algılanamadı",
+  "editor.tool.detectPerson.failed": "Algılama başarısız oldu",
   "editor.aspect.free": "Serbest",
   "editor.aspect.portrait": "3:4",
   "editor.aspect.square": "1:1",

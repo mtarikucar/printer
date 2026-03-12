@@ -669,6 +669,7 @@ const en = {
   "editor.tool.detectPerson.loading": "Detecting person...",
   "editor.tool.detectPerson.found": "Person detected!",
   "editor.tool.detectPerson.notFound": "No person detected",
+  "editor.tool.detectPerson.failed": "Detection failed",
   "editor.aspect.free": "Free",
   "editor.aspect.portrait": "3:4",
   "editor.aspect.square": "1:1",

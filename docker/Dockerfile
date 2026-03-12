@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -40,6 +41,15 @@ RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Fix: onnxruntime-node .so shared libraries missing from standalone trace
+COPY --from=builder --chown=nextjs:nodejs \
+  /app/node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/ \
+  ./node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/
+
+# HuggingFace model cache directory
+RUN mkdir -p /app/.cache/huggingface && chown nextjs:nodejs /app/.cache/huggingface
+ENV HF_HOME=/app/.cache/huggingface
 
 USER nextjs
 

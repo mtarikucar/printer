@@ -130,7 +130,7 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
       setTimeout(() => setDetectStatus(null), 3000);
     } catch (error) {
       console.error("Person detection failed:", error);
-      setDetectStatus(d["editor.tool.detectPerson.notFound"]);
+      setDetectStatus(d["editor.tool.detectPerson.failed"]);
       setTimeout(() => setDetectStatus(null), 3000);
     } finally {
       setDetectLoading(false);

@@ -1,4 +1,10 @@
-import { pipeline, type ObjectDetectionPipeline } from "@huggingface/transformers";
+import { pipeline, env, type ObjectDetectionPipeline } from "@huggingface/transformers";
+
+// Run single-threaded to avoid SharedArrayBuffer requirement
+// (SharedArrayBuffer needs COOP/COEP headers which we don't set)
+if (env.backends.onnx.wasm) {
+  env.backends.onnx.wasm.numThreads = 1;
+}
 
 const MODEL_ID = "Xenova/detr-resnet-50";
 const DEVICE = "wasm";

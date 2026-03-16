@@ -75,7 +75,9 @@ export async function removeBackground(buffer: Buffer): Promise<Buffer> {
   const result = await sharp(rgb, {
     raw: { width: image.width, height: image.height, channels: 3 },
   })
-    .joinChannel(maskBuffer)
+    .joinChannel(maskBuffer, {
+      raw: { width: image.width, height: image.height, channels: 1 },
+    })
     .png()
     .toBuffer();
 

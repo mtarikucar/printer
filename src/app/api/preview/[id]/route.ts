@@ -27,5 +27,6 @@ export async function GET(
     glbUrl: preview.glbUrl,
     errorMessage: preview.errorMessage,
     createdAt: preview.createdAt,
+    photoKey: preview.photoKey,
   });
 }

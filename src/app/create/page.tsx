@@ -128,6 +128,7 @@ export default function CreatePage() {
       .then((data) => {
         if (!data) return;
         setPreviewId(qPreviewId);
+        if (data.photoKey) setPhotoKey(data.photoKey);
         if (data.status === "ready" || data.status === "approved") {
           setPreviewGlbUrl(data.glbUrl);
           setStep(2);
@@ -208,6 +209,7 @@ export default function CreatePage() {
       try {
         const blob = await editorExportRef.current?.();
         if (!blob) {
+          setError(d["create.photoRequired"]);
           setSubmitting(false);
           return;
         }
@@ -228,6 +230,7 @@ export default function CreatePage() {
         const { key } = await res.json();
         setPhotoKey(key);
         setIsEditing(false);
+        setSelectedFile(null);
         currentPhotoKey = key;
       } catch (err: any) {
         setError(err.message || d["upload.failed"]);
@@ -291,6 +294,8 @@ export default function CreatePage() {
     setPreviewGlbUrl(null);
     setPreviewError(null);
     setPhotoKey(null);
+    setSelectedFile(null);
+    setIsEditing(false);
   };
 
   const handleApprove = () => {

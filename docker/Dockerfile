@@ -27,6 +27,16 @@ RUN npm ci
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Pre-download RMBG-1.4 model during build so it's cached in the image
+ENV HF_HOME=/app/.cache/huggingface
+RUN node --input-type=module -e " \
+  import { AutoModel, AutoProcessor } from '@huggingface/transformers'; \
+  await AutoModel.from_pretrained('briaai/RMBG-1.4', { device: 'cpu' }); \
+  await AutoProcessor.from_pretrained('briaai/RMBG-1.4'); \
+  console.log('RMBG-1.4 model pre-downloaded'); \
+"
+
 RUN npm run build
 
 # ── App target: Next.js standalone server ────────────────────────────
@@ -47,8 +57,8 @@ COPY --from=builder --chown=nextjs:nodejs \
   /app/node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/ \
   ./node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/
 
-# HuggingFace model cache directory
-RUN mkdir -p /app/.cache/huggingface && chown nextjs:nodejs /app/.cache/huggingface
+# HuggingFace model cache (pre-downloaded in builder stage)
+COPY --from=builder --chown=nextjs:nodejs /app/.cache/huggingface ./.cache/huggingface
 ENV HF_HOME=/app/.cache/huggingface
 
 USER nextjs
@@ -67,9 +77,11 @@ FROM base AS worker
 ENV NODE_ENV=production
 
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+    adduser --system --uid 1001 --home /home/nextjs nextjs
 
 RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
+
+ENV HOME=/home/nextjs
 
 # Full node_modules (tsx is in devDeps, needed to run workers/start.ts)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules

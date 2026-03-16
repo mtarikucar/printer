@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { removeBackground } from "@/lib/services/background-removal";
 
+// Allow up to 5 minutes for model loading + inference on CPU
+export const maxDuration = 300;
+
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_SIZE = 15 * 1024 * 1024; // 15MB
 

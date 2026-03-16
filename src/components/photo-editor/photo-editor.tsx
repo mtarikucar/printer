@@ -77,10 +77,15 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
 
       setRemoveBgStatus(d["editor.tool.removeBg.loading"]);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
+
       const response = await fetch("/api/remove-background", {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const err = await response.json().catch(() => null);

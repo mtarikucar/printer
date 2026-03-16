@@ -7,7 +7,7 @@ let model: any = null;
 let processor: any = null;
 let loadingPromise: Promise<void> | null = null;
 
-async function ensureModel(): Promise<void> {
+export async function ensureModel(): Promise<void> {
   if (model && processor) return;
 
   if (loadingPromise) {
@@ -57,12 +57,27 @@ function extractAlphaMask(output: Tensor, width: number, height: number): Uint8C
 export async function removeBackground(buffer: Buffer): Promise<Buffer> {
   await ensureModel();
 
-  const image = await RawImage.fromBlob(new Blob([new Uint8Array(buffer)]));
+  // Get original dimensions
+  const metadata = await sharp(buffer).metadata();
+  const origWidth = metadata.width!;
+  const origHeight = metadata.height!;
+
+  // Resize to max 1024px for faster inference (preserve aspect ratio)
+  const MAX_DIM = 1024;
+  let inferenceBuffer = buffer;
+  if (origWidth > MAX_DIM || origHeight > MAX_DIM) {
+    inferenceBuffer = await sharp(buffer)
+      .resize(MAX_DIM, MAX_DIM, { fit: "inside", withoutEnlargement: true })
+      .toBuffer();
+  }
+
+  const image = await RawImage.fromBlob(new Blob([new Uint8Array(inferenceBuffer)]));
 
   const { pixel_values } = await processor(image);
   const { output } = await model({ input: pixel_values });
 
-  const mask = extractAlphaMask(output, image.width, image.height);
+  // Extract mask scaled to original resolution (extractAlphaMask handles scaling)
+  const mask = extractAlphaMask(output, origWidth, origHeight);
 
   // Compose: take RGB from original, use mask as alpha channel
   const maskBuffer = Buffer.from(mask.buffer, mask.byteOffset, mask.byteLength);
@@ -73,7 +88,7 @@ export async function removeBackground(buffer: Buffer): Promise<Buffer> {
     .toBuffer();
 
   const result = await sharp(rgb, {
-    raw: { width: image.width, height: image.height, channels: 3 },
+    raw: { width: origWidth, height: origHeight, channels: 3 },
   })
     .joinChannel(maskBuffer, {
       raw: { width: image.width, height: image.height, channels: 1 },

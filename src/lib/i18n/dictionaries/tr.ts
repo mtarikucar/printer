@@ -47,7 +47,6 @@ const tr: Dictionary = {
     "Bir fotoğraf yükle. Biz onu 3D baskılı figürine dönüştürelim ve boyama kiti ile birlikte kapına gönderelim.",
   "landing.hero.tagline":
     "Figürin + boyama kiti + ücretsiz kargo. Abonelik yok.",
-  "landing.hero.trustBadge": "500+ yaratıcı tarafından seviliyor",
 
   // Landing - How It Works
   "landing.howItWorks.title": "Nasıl Çalışır?",
@@ -72,53 +71,6 @@ const tr: Dictionary = {
   "landing.pricing.feature5": "Boyama rehberi",
   "landing.pricing.feature6": "Ücretsiz kargo (Yurtiçi)",
 
-  // Landing - FAQ
-  "landing.faq.title": "Sık Sorulan Sorular",
-  "landing.faq.q1": "Hangi tür fotoğraflar en iyi sonucu verir?",
-  "landing.faq.a1":
-    "Net, iyi aydınlatılmış ve yüzün kameraya dönük olduğu fotoğraflar en iyi sonucu verir. Tam boy çekimler en detaylı figürinleri üretir. Bulanık veya aşırı filtreli görüntülerden kaçının.",
-  "landing.faq.q2": "Figürin ne kadar büyük?",
-  "landing.faq.a2":
-    "Küçük boy ~60mm, Orta boy ~80mm, Büyük boy ~120mm yüksekliğindedir. Hepsi sağlam bir taban üzerine monte edilir — masa veya raf için ideal.",
-  "landing.faq.q3": "Boyama kitinde ne var?",
-  "landing.faq.a3":
-    "6 adet akrilik boya (tasarımınıza uygun renklerde), 2 fırça (orta yuvarlak + ince detay), karıştırma paleti ve adım adım boyama rehberi (video eğitimi QR kodu dahil).",
-  "landing.faq.q4": "Teslimat ne kadar sürer?",
-  "landing.faq.a4":
-    "Siparişlerin çoğu 5-7 iş günü içinde kargoya verilir. Kitiniz kargoya verildiğinde size takip bilgisi göndeririz.",
-  "landing.faq.q5": "Sonuçtan memnun kalmazsam?",
-  "landing.faq.a5":
-    "Her modeli baskıdan önce inceliyoruz. Fotoğrafınızdan kaliteli bir figürin oluşturamıyorsak sizi bilgilendirir, tam iade veya farklı fotoğraf gönderme seçeneği sunarız.",
-  "landing.faq.q6": "Figürin kırılgan mı?",
-  "landing.faq.a6":
-    "Figürinlerimiz yüksek kaliteli reçine ile basılır ve UV ile sertleştirilir. Sergileme için yeterince sağlamdır, ancak diğer koleksiyon parçaları gibi dikkatli tutulmalıdır.",
-
-  // Landing - Stats
-  "landing.stats.title": "Yaratıcılar Tarafından Güveniliyor",
-  "landing.stats.figurines": "Figürin Oluşturuldu",
-  "landing.stats.reviews": "5 Yıldızlı Yorum",
-  "landing.stats.processing": "İşleme Süresi",
-  "landing.stats.processingValue": "48h",
-  "landing.stats.shipping": "Ücretsiz Kargo",
-
-  // Landing - Testimonials
-  "landing.testimonials.title": "Müşterilerimiz Ne Diyor?",
-  "landing.testimonials.subtitle": "Fotoğraflarını figürine dönüştüren yüzlerce mutlu yaratıcıya katılın.",
-  "landing.testimonials.quote1": "Detaylara bayıldım. Figürin tıpkı bana benziyor!",
-  "landing.testimonials.name1": "Ayşe M.",
-  "landing.testimonials.location1": "İstanbul",
-  "landing.testimonials.quote2": "Doğum günü hediyesi olarak verdim — tepkisi paha biçilemezdi. Bir tane daha sipariş ediyorum!",
-  "landing.testimonials.name2": "Ali K.",
-  "landing.testimonials.location2": "Ankara",
-  "landing.testimonials.quote3": "Boyama kiti çok eğlenceli. Çocuklarım figürinlerini birlikte boyamayı çok sevdi.",
-  "landing.testimonials.name3": "Elif R.",
-  "landing.testimonials.location3": "İzmir",
-
-  // Landing - CTA Banner
-  "landing.cta.title": "Figürünüzü Oluşturmaya Hazır Mısınız?",
-  "landing.cta.subtitle": "Bir fotoğraf yükleyin ve boyama kiti ile birlikte özel 3D baskılı figürününüzü alın.",
-  "landing.cta.button": "Oluşturmaya Başla",
-
   // Landing - Footer
   "landing.footer.rights": "Tüm hakları saklıdır.",
   "landing.footer.description": "Fotoğraflarınızı boyama kiti ile birlikte özel 3D baskılı figürinlere dönüştürün.",
@@ -128,7 +80,6 @@ const tr: Dictionary = {
   "landing.footer.privacy": "Gizlilik Politikası",
   "landing.footer.terms": "Kullanım Koşulları",
   "landing.footer.contact": "İletişim",
-  "landing.footer.faq": "SSS",
   "landing.footer.trackOrder": "Sipariş Takibi",
 
   // Nav
@@ -156,8 +107,6 @@ const tr: Dictionary = {
   "gallery.viewModel": "Modeli Gör",
 
   // Landing - Gallery Section
-  "landing.gallery.title": "Başkalarının Neler Yarattığını Görün",
-  "landing.gallery.subtitle": "Figürin yaratıcıları topluluğumuza katılın.",
   "landing.gallery.viewAll": "Galeriyi Görüntüle",
 
   // Publish
@@ -217,6 +166,10 @@ const tr: Dictionary = {
   "account.orders.table.amount": "Tutar",
   "account.orders.table.date": "Tarih",
   "account.orders.track": "Takip Et",
+  "account.tab.creations": "Oluşturmalarım",
+  "account.tab.orders": "Siparişlerim",
+  "account.tab.profile": "Profil",
+  "account.profile.phone": "Telefon",
 
   // Create
   "create.title": "Figürün Oluştur",
@@ -415,8 +368,6 @@ const tr: Dictionary = {
   "admin.dashboard.failedRejected": "Başarısız/Reddedilen",
   "admin.dashboard.revenue": "Gelir",
   "admin.dashboard.revenueSubtitle": "Ödenen siparişlerden toplam",
-  "admin.dashboard.digitalRevenueSubtitle": "Dijital STL siparişlerinden toplam",
-
   // Admin - Orders
   "admin.orders.title": "Siparişler",
   "admin.orders.all": "Tümü",
@@ -471,7 +422,6 @@ const tr: Dictionary = {
   "admin.orderDetail.generationFailed": "Başarısız",
   "admin.orderDetail.noAttempts": "Henüz oluşturma denemesi yok",
   "admin.orderDetail.adminActions": "Yönetici İşlemleri",
-  "admin.orderDetail.downloadStl": "STL İndir",
   "admin.orderDetail.adminNote": "Yönetici Notu (isteğe bağlı)",
   "admin.orderDetail.addNote": "Not ekle...",
   "admin.orderDetail.approve": "Onayla",
@@ -493,19 +443,19 @@ const tr: Dictionary = {
   "admin.orderDetail.kargoFailed": "Yurtici Kargo gönderisi oluşturulamadı",
   "admin.orderDetail.orManual": "veya manuel girin",
   "admin.orderDetail.actionFailed": "işlemi başarısız",
+  "admin.orderDetail.startPrint": "Baskıyı Başlat",
+  "admin.orderDetail.startingPrint": "Baskı başlatılıyor...",
+  "admin.orderDetail.deliver": "Teslim Edildi",
+  "admin.orderDetail.delivering": "Teslim ediliyor...",
 
   // Admin - Print Queue
   "admin.printQueue.title": "Baskı Kuyruğu",
   "admin.printQueue.subtitle": "Onaylanan ve baskıya hazır siparişler",
-  "admin.printQueue.downloadStl": "STL İndir",
   "admin.printQueue.readyToPrint": "Baskıya Hazır",
   "admin.printQueue.currentlyPrinting": "Baskıda",
   "admin.printQueue.table.order": "Sipariş",
   "admin.printQueue.table.customer": "Müşteri",
   "admin.printQueue.table.approvalDate": "Onay Tarihi",
-  "admin.printQueue.table.stl": "STL",
-  "admin.printQueue.download": "İndir",
-  "admin.printQueue.notAvailable": "Yok",
   "admin.printQueue.view": "Görüntüle",
   "admin.printQueue.empty": "Baskı kuyruğunda sipariş yok",
   "admin.printQueue.emptySubtitle": "Onaylanan siparişler burada görünecek",
@@ -556,15 +506,17 @@ const tr: Dictionary = {
   "api.kargo.shipFailed": "Gönderim başarısız",
   "api.order.notInPrinting": "Sipariş baskıda durumunda değil",
   "api.order.notInReview": "Sipariş inceleme durumunda değil",
+  "api.order.notApproved": "Sipariş onaylanmış durumunda değil",
+  "api.order.notShipped": "Sipariş kargoya verilmiş durumunda değil",
+  "api.order.invalidStatusForReject": "Sipariş mevcut durumunda reddedilemez",
+  "api.order.invalidStatusForRegenerate": "Sipariş mevcut durumunda yeniden oluşturulamaz",
   "api.order.noPhoto": "Fotoğraf bulunamadı",
+  "api.order.noProcessableContent": "İşlenecek fotoğraf veya önizleme bulunamadı",
   "api.auth.unauthorized": "Yetkisiz erişim",
 
   // Section Badges
   "section.howItWorks": "NASIL ÇALIŞIR",
-  "section.gallery": "GALERİ",
   "section.pricing": "FİYATLANDIRMA",
-  "section.faq": "SSS",
-  "section.testimonials": "YORUMLAR",
 
   // Email templates
   "email.confirmation.subject": "Siparişiniz onaylandı! #{orderNumber}",
@@ -621,6 +573,27 @@ const tr: Dictionary = {
   "email.revision.noteLabel": "Revizyon Notu:",
   "email.revision.action": "Lütfen revizyonu görüşmek için müşteri ile iletişime geçin.",
 
+  // Email - Approved
+  "email.approved.subject": "Figürününüz onaylandı! #{orderNumber}",
+  "email.approved.heading": "Harika haber, {customerName}!",
+  "email.approved.body": "Figürününüz onaylandı, yakında baskıya başlıyoruz.",
+  "email.approved.orderNumber": "Sipariş Numarası:",
+  "email.approved.trackButton": "Siparişi Takip Et",
+
+  // Email - Printing
+  "email.printing.subject": "Figürününüz basılıyor! #{orderNumber}",
+  "email.printing.heading": "Heyecanlı haber, {customerName}!",
+  "email.printing.body": "Figürününüz şu an 3D yazıcıda basılıyor. Bu işlem genellikle 1-2 gün sürer.",
+  "email.printing.orderNumber": "Sipariş Numarası:",
+  "email.printing.trackButton": "Siparişi Takip Et",
+
+  // Email - Delivered
+  "email.delivered.subject": "Figürününüz teslim edildi! #{orderNumber}",
+  "email.delivered.heading": "Merhaba {customerName}!",
+  "email.delivered.body": "Figürününüz teslim edildi! Boyamayı keyifle yapmanızı umuyoruz. İyi boyamalar!",
+  "email.delivered.orderNumber": "Sipariş Numarası:",
+  "email.delivered.trackButton": "Siparişi Takip Et",
+
   "email.refunded.subject": "İade işlemi tamamlandı #{orderNumber}",
   "email.refunded.heading": "Merhaba {customerName},",
   "email.refunded.body":
@@ -632,9 +605,6 @@ const tr: Dictionary = {
   // Hero Showcase
   "landing.hero.showcase.photo": "Fotoğrafın",
   "landing.hero.showcase.figurine": "Figürinin",
-
-  // Gallery - 3D view
-  "landing.gallery.viewModel3D": "3D Olarak Gör",
 
   // Gallery Modal - Before/After
   "gallery.modal.originalPhoto": "Orijinal Fotoğraf",
@@ -721,31 +691,6 @@ const tr: Dictionary = {
   "giftCard.status.fully_used": "Tamamen Kullanıldı",
   "giftCard.status.expired": "Süresi Dolmuş",
 
-  // Digital Order
-  "digital.title": "STL Dosyası Satın Al",
-  "digital.subtitle": "Bu figürinin 3D model dosyasını indirin.",
-  "digital.price": "Fiyat",
-  "digital.buyButton": "WhatsApp ile STL Satın Al",
-  "digital.buyButtonDirect": "STL Satın Al",
-  "digital.submitting": "İşleniyor...",
-  "digital.success.title": "Sipariş Verildi!",
-  "digital.success.message": "STL dosyanız ödeme onayından sonra indirilmeye hazır olacak.",
-  "digital.success.openWhatsapp": "WhatsApp'ı Tekrar Aç",
-  "digital.download": "STL İndir",
-  "digital.downloading": "İndiriliyor...",
-  "digital.downloadCount": "İndirme Sayısı",
-  "digital.notReady": "Siparişiniz işleniyor. Hazır olduğunda e-posta alacaksınız.",
-  "digital.galleryButton": "STL Satın Al",
-
-  // Digital Order - Status
-  "digital.status.pending_payment": "Ödeme Bekleniyor",
-  "digital.status.paid": "Ödendi",
-  "digital.status.ready": "İndirmeye Hazır",
-
-  // Account - Digital Orders
-  "account.digitalOrders.title": "Dijital Satın Alımlarım",
-  "account.digitalOrders.empty": "Henüz dijital satın alımınız yok.",
-
   // Admin - Gift Cards
   "admin.nav.giftCards": "Hediye Kartları",
   "admin.giftCards.title": "Hediye Kartları",
@@ -781,38 +726,14 @@ const tr: Dictionary = {
   "admin.giftCards.unlimited": "Sınırsız",
   "admin.giftCards.empty": "Hediye kartı bulunamadı",
 
-  // Admin - Digital Orders
-  "admin.nav.digitalOrders": "Dijital Siparişler",
-  "admin.digitalOrders.title": "Dijital Siparişler",
-  "admin.digitalOrders.subtitle": "Dijital STL siparişlerini yönetin",
-  "admin.digitalOrders.table.order": "Sipariş",
-  "admin.digitalOrders.table.customer": "Müşteri",
-  "admin.digitalOrders.table.sourceOrder": "Kaynak Sipariş",
-  "admin.digitalOrders.table.amount": "Tutar",
-  "admin.digitalOrders.table.status": "Durum",
-  "admin.digitalOrders.table.downloads": "İndirme",
-  "admin.digitalOrders.table.date": "Tarih",
-  "admin.digitalOrders.confirm": "Ödemeyi Onayla",
-  "admin.digitalOrders.confirming": "Onaylanıyor...",
-  "admin.digitalOrders.empty": "Dijital sipariş bulunamadı",
-
   // Admin - Dashboard extras
   "admin.dashboard.giftCardsCreated": "Oluşturulan Hediye Kartları",
-  "admin.dashboard.digitalRevenue": "Dijital Gelir",
-
-  // Validators - Gift Card & Digital
+  // Validators - Gift Card
   "validator.giftCard.codeRequired": "Hediye kartı kodu zorunludur",
-  "validator.digital.sourceOrderRequired": "Kaynak sipariş zorunludur",
 
-  // API - Gift Card & Digital
+  // API - Gift Card
   "api.giftCard.notFound": "Hediye kartı bulunamadı",
   "api.giftCard.createFailed": "Hediye kartı oluşturma başarısız",
-  "api.digital.createFailed": "Dijital sipariş oluşturma başarısız",
-  "api.digital.confirmFailed": "Dijital sipariş onaylama başarısız",
-  "api.digital.notFound": "Dijital sipariş bulunamadı",
-  "api.digital.notReady": "Dijital sipariş henüz indirmeye hazır değil",
-  "api.digital.alreadyPurchased": "Bu siparişin STL dosyasını zaten satın aldınız",
-  "api.digital.noStl": "Bu sipariş için STL dosyası mevcut değil",
 
   // Email - Gift Card
   "email.giftCard.subject": "Size {amount} Figurine Studio Hediye Kartı gönderildi!",
@@ -822,13 +743,6 @@ const tr: Dictionary = {
   "email.giftCard.howToUse": "Siparişinizi verirken bu kodu kullanarak hediye kartı bakiyenizi uygulayın.",
   "email.giftCard.startButton": "Oluşturmaya Başla",
 
-  // Email - Digital Ready
-  "email.digitalReady.subject": "STL dosyanız hazır! #{orderNumber}",
-  "email.digitalReady.heading": "Harika haber, {customerName}!",
-  "email.digitalReady.body": "Dijital STL dosyanız indirilmeye hazır.",
-  "email.digitalReady.orderNumber": "Sipariş Numarası:",
-  "email.digitalReady.downloadButton": "STL İndir",
-  "email.digitalReady.note": "Dosyanızı istediğiniz zaman hesap sayfanızdan indirebilirsiniz.",
 };
 
 export default tr;

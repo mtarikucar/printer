@@ -45,7 +45,6 @@ const en = {
     "Upload a photo. We'll turn it into a 3D printed figurine and deliver it to your door with a paint kit.",
   "landing.hero.tagline":
     "Figurine + paint kit + free shipping. No subscription.",
-  "landing.hero.trustBadge": "Loved by 500+ creators",
 
   // Landing - How It Works
   "landing.howItWorks.title": "How It Works",
@@ -70,53 +69,6 @@ const en = {
   "landing.pricing.feature5": "Painting guide",
   "landing.pricing.feature6": "Free shipping (Domestic)",
 
-  // Landing - FAQ
-  "landing.faq.title": "Frequently Asked Questions",
-  "landing.faq.q1": "What kind of photos give the best results?",
-  "landing.faq.a1":
-    "Clear, well-lit photos where the face is facing the camera give the best results. Full body shots produce the most detailed figurines. Avoid blurry or heavily filtered images.",
-  "landing.faq.q2": "How big is the figurine?",
-  "landing.faq.a2":
-    "Small is ~60mm, Medium is ~80mm, Large is ~120mm tall. All are mounted on a sturdy base — perfect for a desk or shelf.",
-  "landing.faq.q3": "What's in the paint kit?",
-  "landing.faq.a3":
-    "6 acrylic paints (colors matched to your design), 2 brushes (medium round + fine detail), mixing palette, and a step-by-step painting guide (video tutorial QR code included).",
-  "landing.faq.q4": "How long does delivery take?",
-  "landing.faq.a4":
-    "Most orders ship within 5-7 business days. We'll send you tracking info when your kit ships.",
-  "landing.faq.q5": "What if I'm not happy with the result?",
-  "landing.faq.a5":
-    "We review every model before printing. If we can't create a quality figurine from your photo, we'll let you know and offer a full refund or the option to send a different photo.",
-  "landing.faq.q6": "Is the figurine fragile?",
-  "landing.faq.a6":
-    "Our figurines are printed with high-quality resin and UV-cured. They're sturdy enough for display, but should be handled with care like other collectible pieces.",
-
-  // Landing - Stats
-  "landing.stats.title": "Trusted by Creators",
-  "landing.stats.figurines": "Figurines Created",
-  "landing.stats.reviews": "5-Star Reviews",
-  "landing.stats.processing": "Processing Time",
-  "landing.stats.processingValue": "48h",
-  "landing.stats.shipping": "Free Shipping",
-
-  // Landing - Testimonials
-  "landing.testimonials.title": "What Our Customers Say",
-  "landing.testimonials.subtitle": "Join hundreds of happy creators who turned their photos into figurines.",
-  "landing.testimonials.quote1": "I was blown away by the detail. The figurine looks exactly like me!",
-  "landing.testimonials.name1": "Sarah M.",
-  "landing.testimonials.location1": "Istanbul",
-  "landing.testimonials.quote2": "Gave this as a birthday gift — the reaction was priceless. Ordering another one!",
-  "landing.testimonials.name2": "Alex K.",
-  "landing.testimonials.location2": "Ankara",
-  "landing.testimonials.quote3": "The paint kit is so much fun. My kids loved painting their figurines together.",
-  "landing.testimonials.name3": "Emily R.",
-  "landing.testimonials.location3": "Izmir",
-
-  // Landing - CTA Banner
-  "landing.cta.title": "Ready to Create Your Figurine?",
-  "landing.cta.subtitle": "Upload a photo and get your custom 3D printed figurine with a paint kit.",
-  "landing.cta.button": "Start Creating",
-
   // Landing - Footer
   "landing.footer.rights": "All rights reserved.",
   "landing.footer.description": "Turn your photos into custom 3D printed figurines with a paint kit.",
@@ -126,7 +78,6 @@ const en = {
   "landing.footer.privacy": "Privacy Policy",
   "landing.footer.terms": "Terms of Service",
   "landing.footer.contact": "Contact",
-  "landing.footer.faq": "FAQ",
   "landing.footer.trackOrder": "Track Order",
 
   // Nav
@@ -154,8 +105,6 @@ const en = {
   "gallery.viewModel": "View Model",
 
   // Landing - Gallery Section
-  "landing.gallery.title": "See What Others Have Created",
-  "landing.gallery.subtitle": "Join our community of figurine creators.",
   "landing.gallery.viewAll": "View Gallery",
 
   // Publish
@@ -215,6 +164,10 @@ const en = {
   "account.orders.table.amount": "Amount",
   "account.orders.table.date": "Date",
   "account.orders.track": "Track",
+  "account.tab.creations": "My Creations",
+  "account.tab.orders": "My Orders",
+  "account.tab.profile": "Profile",
+  "account.profile.phone": "Phone",
 
   // Create
   "create.title": "Create Your Figurine",
@@ -413,8 +366,6 @@ const en = {
   "admin.dashboard.failedRejected": "Failed/Rejected",
   "admin.dashboard.revenue": "Revenue",
   "admin.dashboard.revenueSubtitle": "Total from paid orders",
-  "admin.dashboard.digitalRevenueSubtitle": "Total from digital STL orders",
-
   // Admin - Orders
   "admin.orders.title": "Orders",
   "admin.orders.all": "All",
@@ -469,7 +420,6 @@ const en = {
   "admin.orderDetail.generationFailed": "Failed",
   "admin.orderDetail.noAttempts": "No generation attempts yet",
   "admin.orderDetail.adminActions": "Admin Actions",
-  "admin.orderDetail.downloadStl": "Download STL",
   "admin.orderDetail.adminNote": "Admin Note (optional)",
   "admin.orderDetail.addNote": "Add note...",
   "admin.orderDetail.approve": "Approve",
@@ -491,19 +441,19 @@ const en = {
   "admin.orderDetail.kargoFailed": "Yurtici Kargo shipment failed",
   "admin.orderDetail.orManual": "or enter manually",
   "admin.orderDetail.actionFailed": "action failed",
+  "admin.orderDetail.startPrint": "Start Printing",
+  "admin.orderDetail.startingPrint": "Starting print...",
+  "admin.orderDetail.deliver": "Mark Delivered",
+  "admin.orderDetail.delivering": "Marking delivered...",
 
   // Admin - Print Queue
   "admin.printQueue.title": "Print Queue",
   "admin.printQueue.subtitle": "Approved orders ready for printing",
-  "admin.printQueue.downloadStl": "Download STL",
   "admin.printQueue.readyToPrint": "Ready to Print",
   "admin.printQueue.currentlyPrinting": "Currently Printing",
   "admin.printQueue.table.order": "Order",
   "admin.printQueue.table.customer": "Customer",
   "admin.printQueue.table.approvalDate": "Approval Date",
-  "admin.printQueue.table.stl": "STL",
-  "admin.printQueue.download": "Download",
-  "admin.printQueue.notAvailable": "N/A",
   "admin.printQueue.view": "View",
   "admin.printQueue.empty": "No orders in the print queue",
   "admin.printQueue.emptySubtitle": "Approved orders will appear here",
@@ -554,15 +504,17 @@ const en = {
   "api.kargo.shipFailed": "Shipping failed",
   "api.order.notInPrinting": "Order is not in printing status",
   "api.order.notInReview": "Order is not in review status",
+  "api.order.notApproved": "Order is not in approved status",
+  "api.order.notShipped": "Order is not in shipped status",
+  "api.order.invalidStatusForReject": "Order cannot be rejected in its current status",
+  "api.order.invalidStatusForRegenerate": "Order cannot be regenerated in its current status",
   "api.order.noPhoto": "No photo found",
+  "api.order.noProcessableContent": "No photo or preview available for processing",
   "api.auth.unauthorized": "Unauthorized",
 
   // Section Badges
   "section.howItWorks": "HOW IT WORKS",
-  "section.gallery": "GALLERY",
   "section.pricing": "PRICING",
-  "section.faq": "FAQ",
-  "section.testimonials": "TESTIMONIALS",
 
   // Email templates
   "email.confirmation.subject": "Your order is confirmed! #{orderNumber}",
@@ -616,6 +568,27 @@ const en = {
   "email.revision.noteLabel": "Revision Note:",
   "email.revision.action": "Please contact the customer to discuss the revision.",
 
+  // Email - Approved
+  "email.approved.subject": "Your figurine is approved! #{orderNumber}",
+  "email.approved.heading": "Great news, {customerName}!",
+  "email.approved.body": "Your figurine has been approved and will start printing soon.",
+  "email.approved.orderNumber": "Order Number:",
+  "email.approved.trackButton": "Track Order",
+
+  // Email - Printing
+  "email.printing.subject": "Your figurine is being printed! #{orderNumber}",
+  "email.printing.heading": "Exciting news, {customerName}!",
+  "email.printing.body": "Your figurine is now being 3D printed. This usually takes 1-2 days.",
+  "email.printing.orderNumber": "Order Number:",
+  "email.printing.trackButton": "Track Order",
+
+  // Email - Delivered
+  "email.delivered.subject": "Your figurine has been delivered! #{orderNumber}",
+  "email.delivered.heading": "Hello {customerName}!",
+  "email.delivered.body": "Your figurine has been delivered! We hope you enjoy painting it. Happy painting!",
+  "email.delivered.orderNumber": "Order Number:",
+  "email.delivered.trackButton": "Track Order",
+
   "email.refunded.subject": "Refund completed #{orderNumber}",
   "email.refunded.heading": "Hello {customerName},",
   "email.refunded.body":
@@ -627,9 +600,6 @@ const en = {
   // Hero Showcase
   "landing.hero.showcase.photo": "Your Photo",
   "landing.hero.showcase.figurine": "Your Figurine",
-
-  // Gallery - 3D view
-  "landing.gallery.viewModel3D": "View in 3D",
 
   // Gallery Modal - Before/After
   "gallery.modal.originalPhoto": "Original Photo",
@@ -716,31 +686,6 @@ const en = {
   "giftCard.status.fully_used": "Fully Used",
   "giftCard.status.expired": "Expired",
 
-  // Digital Order
-  "digital.title": "Buy STL File",
-  "digital.subtitle": "Download the 3D model file for this figurine.",
-  "digital.price": "Price",
-  "digital.buyButton": "Buy STL via WhatsApp",
-  "digital.buyButtonDirect": "Buy STL",
-  "digital.submitting": "Processing...",
-  "digital.success.title": "Order Placed!",
-  "digital.success.message": "Your STL file will be ready for download after payment confirmation.",
-  "digital.success.openWhatsapp": "Open WhatsApp Again",
-  "digital.download": "Download STL",
-  "digital.downloading": "Downloading...",
-  "digital.downloadCount": "Downloads",
-  "digital.notReady": "Your order is being processed. You'll receive an email when it's ready.",
-  "digital.galleryButton": "Buy STL",
-
-  // Digital Order - Status
-  "digital.status.pending_payment": "Pending Payment",
-  "digital.status.paid": "Paid",
-  "digital.status.ready": "Ready to Download",
-
-  // Account - Digital Orders
-  "account.digitalOrders.title": "My Digital Purchases",
-  "account.digitalOrders.empty": "No digital purchases yet.",
-
   // Admin - Gift Cards
   "admin.nav.giftCards": "Gift Cards",
   "admin.giftCards.title": "Gift Cards",
@@ -776,38 +721,14 @@ const en = {
   "admin.giftCards.unlimited": "Unlimited",
   "admin.giftCards.empty": "No gift cards found",
 
-  // Admin - Digital Orders
-  "admin.nav.digitalOrders": "Digital Orders",
-  "admin.digitalOrders.title": "Digital Orders",
-  "admin.digitalOrders.subtitle": "Manage digital STL orders",
-  "admin.digitalOrders.table.order": "Order",
-  "admin.digitalOrders.table.customer": "Customer",
-  "admin.digitalOrders.table.sourceOrder": "Source Order",
-  "admin.digitalOrders.table.amount": "Amount",
-  "admin.digitalOrders.table.status": "Status",
-  "admin.digitalOrders.table.downloads": "Downloads",
-  "admin.digitalOrders.table.date": "Date",
-  "admin.digitalOrders.confirm": "Confirm Payment",
-  "admin.digitalOrders.confirming": "Confirming...",
-  "admin.digitalOrders.empty": "No digital orders found",
-
   // Admin - Dashboard extras
   "admin.dashboard.giftCardsCreated": "Gift Cards Created",
-  "admin.dashboard.digitalRevenue": "Digital Revenue",
-
-  // Validators - Gift Card & Digital
+  // Validators - Gift Card
   "validator.giftCard.codeRequired": "Gift card code is required",
-  "validator.digital.sourceOrderRequired": "Source order is required",
 
-  // API - Gift Card & Digital
+  // API - Gift Card
   "api.giftCard.notFound": "Gift card not found",
   "api.giftCard.createFailed": "Gift card creation failed",
-  "api.digital.createFailed": "Digital order creation failed",
-  "api.digital.confirmFailed": "Digital order confirmation failed",
-  "api.digital.notFound": "Digital order not found",
-  "api.digital.notReady": "Digital order is not ready for download",
-  "api.digital.alreadyPurchased": "You have already purchased the STL for this order",
-  "api.digital.noStl": "No STL available for this order",
 
   // Email - Gift Card
   "email.giftCard.subject": "You received a {amount} Figurine Studio Gift Card!",
@@ -817,13 +738,6 @@ const en = {
   "email.giftCard.howToUse": "Use this code when placing your order to apply the gift card balance.",
   "email.giftCard.startButton": "Start Creating",
 
-  // Email - Digital Ready
-  "email.digitalReady.subject": "Your STL file is ready! #{orderNumber}",
-  "email.digitalReady.heading": "Great news, {customerName}!",
-  "email.digitalReady.body": "Your digital STL file is ready for download.",
-  "email.digitalReady.orderNumber": "Order Number:",
-  "email.digitalReady.downloadButton": "Download STL",
-  "email.digitalReady.note": "You can download your file anytime from your account page.",
 } as const;
 
 export type DictionaryKey = keyof typeof en;

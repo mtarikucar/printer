@@ -23,7 +23,9 @@ interface SendEmailParams {
     | "order_refunded"
     | "revision_request"
     | "gift_card_received"
-    | "digital_order_ready";
+    | "order_approved"
+    | "order_printing"
+    | "order_delivered";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -36,7 +38,6 @@ interface SendEmailParams {
   giftCardAmount?: number;
   giftCardMessage?: string;
   senderName?: string;
-  downloadUrl?: string;
   locale?: Locale;
 }
 
@@ -168,18 +169,47 @@ function getTemplates(locale: Locale) {
       };
     },
 
-    digital_order_ready: (p) => ({
-      subject: d["email.digitalReady.subject"].replace("{orderNumber}", p.orderNumber),
+    order_approved: (p) => ({
+      subject: d["email.approved.subject"].replace("{orderNumber}", p.orderNumber),
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #1a1a1a;">${d["email.digitalReady.heading"].replace("{customerName}", p.customerName)}</h1>
-          <p>${d["email.digitalReady.body"]}</p>
-          <p><strong>${d["email.digitalReady.orderNumber"]}</strong> ${p.orderNumber}</p>
-          ${p.downloadUrl ? `<a href="${p.downloadUrl}"
+          <h1 style="color: #1a1a1a;">${d["email.approved.heading"].replace("{customerName}", p.customerName)}</h1>
+          <p>${d["email.approved.body"]}</p>
+          <p><strong>${d["email.approved.orderNumber"]}</strong> ${p.orderNumber}</p>
+          <a href="${trackUrl(p.orderNumber)}"
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
-            ${d["email.digitalReady.downloadButton"]}
-          </a>` : ""}
-          <p style="margin-top: 24px; color: #666;">${d["email.digitalReady.note"]}</p>
+            ${d["email.approved.trackButton"]}
+          </a>
+        </div>
+      `,
+    }),
+
+    order_printing: (p) => ({
+      subject: d["email.printing.subject"].replace("{orderNumber}", p.orderNumber),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.printing.heading"].replace("{customerName}", p.customerName)}</h1>
+          <p>${d["email.printing.body"]}</p>
+          <p><strong>${d["email.printing.orderNumber"]}</strong> ${p.orderNumber}</p>
+          <a href="${trackUrl(p.orderNumber)}"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["email.printing.trackButton"]}
+          </a>
+        </div>
+      `,
+    }),
+
+    order_delivered: (p) => ({
+      subject: d["email.delivered.subject"].replace("{orderNumber}", p.orderNumber),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.delivered.heading"].replace("{customerName}", p.customerName)}</h1>
+          <p>${d["email.delivered.body"]}</p>
+          <p><strong>${d["email.delivered.orderNumber"]}</strong> ${p.orderNumber}</p>
+          <a href="${trackUrl(p.orderNumber)}"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["email.delivered.trackButton"]}
+          </a>
         </div>
       `,
     }),

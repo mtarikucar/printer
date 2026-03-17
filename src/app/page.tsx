@@ -5,7 +5,6 @@ import { orders, orderPhotos, generationAttempts } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
-import { GalleryPreview } from "./gallery-preview";
 import { LandingClient } from "./landing-client";
 
 const GALLERY_STATUSES = [
@@ -19,7 +18,7 @@ export default async function HomePage() {
   const locale = await getLocale();
   const d = getDictionary(locale);
 
-  // Fetch up to 8 featured gallery items
+  // Fetch up to 8 featured gallery items to find one with both photo + GLB
   const featuredOrders = await db.query.orders.findMany({
     where: and(
       eq(orders.isPublic, true),
@@ -57,7 +56,10 @@ export default async function HomePage() {
   }));
 
   // Find first gallery item that has both photo + GLB for hero showcase
-  const heroItem = galleryItems.find((item) => item.thumbnailUrl && item.glbUrl) ?? null;
+  const found = galleryItems.find((item) => item.thumbnailUrl && item.glbUrl);
+  const heroItem = found && found.glbUrl && found.thumbnailUrl
+    ? { id: found.id, publicDisplayName: found.publicDisplayName, figurineSize: found.figurineSize, publishedAt: found.publishedAt, glbUrl: found.glbUrl, thumbnailUrl: found.thumbnailUrl }
+    : null;
 
   const steps = [
     {
@@ -108,48 +110,6 @@ export default async function HomePage() {
     d["landing.pricing.feature6"],
   ];
 
-  const faqs = [
-    { q: d["landing.faq.q1"], a: d["landing.faq.a1"] },
-    { q: d["landing.faq.q2"], a: d["landing.faq.a2"] },
-    { q: d["landing.faq.q3"], a: d["landing.faq.a3"] },
-    { q: d["landing.faq.q4"], a: d["landing.faq.a4"] },
-    { q: d["landing.faq.q5"], a: d["landing.faq.a5"] },
-    { q: d["landing.faq.q6"], a: d["landing.faq.a6"] },
-  ];
-
-  const marqueeItems = galleryItems
-    .filter((item) => item.thumbnailUrl)
-    .map((item) => ({
-      src: item.thumbnailUrl!,
-      alt: item.publicDisplayName || "Figurine",
-      hasModel: !!item.glbUrl,
-    }));
-
-  const testimonials = [
-    {
-      quote: d["landing.testimonials.quote1"],
-      name: d["landing.testimonials.name1"],
-      location: d["landing.testimonials.location1"],
-    },
-    {
-      quote: d["landing.testimonials.quote2"],
-      name: d["landing.testimonials.name2"],
-      location: d["landing.testimonials.location2"],
-    },
-    {
-      quote: d["landing.testimonials.quote3"],
-      name: d["landing.testimonials.name3"],
-      location: d["landing.testimonials.location3"],
-    },
-  ];
-
-  const communityStats = [
-    { value: 500, suffix: "+", label: d["landing.stats.figurines"], display: null },
-    { value: 4.9, suffix: "/5", label: d["landing.stats.reviews"], display: null },
-    { value: 48, suffix: d["landing.stats.processingValue"] === "48h" ? "h" : "s", label: d["landing.stats.processing"], display: null },
-    { value: 0, suffix: "", label: d["landing.stats.shipping"], display: d["landing.stats.processingValue"] === "48h" ? "Free" : d["landing.stats.shipping"] },
-  ];
-
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
@@ -161,21 +121,14 @@ export default async function HomePage() {
           getStarted: d["landing.nav.getStarted"],
           viewGallery: d["landing.gallery.viewAll"],
           heroTagline: d["landing.hero.tagline"],
-          sectionGallery: d["section.gallery"],
-          galleryTitle: d["landing.gallery.title"],
-          gallerySubtitle: d["landing.gallery.subtitle"],
+          howItWorksTitle: d["landing.howItWorks.title"],
           pricingTitle: d["landing.pricing.title"],
           pricingSubtitle: d["landing.pricing.subtitle"],
           pricingSelect: d["landing.pricing.select"],
-          faqTitle: d["landing.faq.title"],
-          ctaTitle: d["landing.cta.title"],
-          ctaSubtitle: d["landing.cta.subtitle"],
-          ctaButton: d["landing.cta.button"],
           footerDescription: d["landing.footer.description"],
           footerProduct: d["landing.footer.product"],
           footerSupport: d["landing.footer.support"],
           footerLegal: d["landing.footer.legal"],
-          footerFaq: d["landing.footer.faq"],
           footerContact: d["landing.footer.contact"],
           footerTrackOrder: d["landing.footer.trackOrder"],
           footerPrivacy: d["landing.footer.privacy"],
@@ -186,18 +139,11 @@ export default async function HomePage() {
           pricingTitle2: d["landing.pricing.title"],
           heroShowcasePhoto: d["landing.hero.showcase.photo"],
           heroShowcaseFigurine: d["landing.hero.showcase.figurine"],
-          testimonialsTitle: d["landing.testimonials.title"],
-          testimonialsSubtitle: d["landing.testimonials.subtitle"],
         }}
         steps={steps}
         sizes={sizes}
         features={features}
-        faqs={faqs}
-        marqueeItems={marqueeItems}
-        galleryItems={galleryItems}
         heroItem={heroItem}
-        testimonials={testimonials}
-        communityStats={communityStats}
       />
     </main>
   );

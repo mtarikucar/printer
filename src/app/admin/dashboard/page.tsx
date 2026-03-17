@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
-import { orders, giftCards, digitalOrders } from "@/lib/db/schema";
+import { orders, giftCards } from "@/lib/db/schema";
 import { count, sql } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -49,11 +49,6 @@ async function getMetrics() {
     .from(giftCards)
     .where(sql`${giftCards.status} != 'pending_payment'`);
 
-  const [digitalRevenue] = await db
-    .select({ total: sql<number>`COALESCE(SUM(${digitalOrders.amountKurus}), 0)` })
-    .from(digitalOrders)
-    .where(sql`${digitalOrders.paidAt} IS NOT NULL`);
-
   return {
     total: totalOrders.count,
     pendingReview: pendingReview.count,
@@ -63,7 +58,6 @@ async function getMetrics() {
     failed: failed.count,
     revenueKurus: revenue.total || 0,
     giftCardsCreated: giftCardsCreated.count,
-    digitalRevenueKurus: digitalRevenue.total || 0,
   };
 }
 
@@ -97,20 +91,13 @@ export default async function AdminDashboardPage() {
         ))}
       </div>
 
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="mt-8">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900">{d["admin.dashboard.revenue"]}</h2>
           <p className="text-3xl font-bold text-gray-900 mt-2">
             {formatCurrency(metrics.revenueKurus, locale)}
           </p>
           <p className="text-sm text-gray-500 mt-1">{d["admin.dashboard.revenueSubtitle"]}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900">{d["admin.dashboard.digitalRevenue"]}</h2>
-          <p className="text-3xl font-bold text-gray-900 mt-2">
-            {formatCurrency(metrics.digitalRevenueKurus, locale)}
-          </p>
-          <p className="text-sm text-gray-500 mt-1">{d["admin.dashboard.digitalRevenueSubtitle"]}</p>
         </div>
       </div>
     </div>

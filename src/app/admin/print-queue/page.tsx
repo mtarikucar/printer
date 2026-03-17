@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
-import { orders, generationAttempts } from "@/lib/db/schema";
+import { orders } from "@/lib/db/schema";
 import { desc, inArray } from "drizzle-orm";
 import { PrintQueueClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
@@ -14,26 +14,15 @@ export default async function PrintQueuePage() {
   const approvedOrders = await db.query.orders.findMany({
     where: inArray(orders.status, ["approved", "printing"]),
     orderBy: [desc(orders.updatedAt)],
-    with: {
-      generationAttempts: {
-        orderBy: [desc(generationAttempts.createdAt)],
-      },
-    },
   });
 
-  const queueItems = approvedOrders.map((order) => {
-    const successfulGen = order.generationAttempts.find(
-      (g) => g.status === "succeeded"
-    );
-    return {
-      id: order.id,
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
-      status: order.status,
-      stlUrl: successfulGen?.outputStlUrl || null,
-      updatedAt: order.updatedAt.toISOString(),
-    };
-  });
+  const queueItems = approvedOrders.map((order) => ({
+    id: order.id,
+    orderNumber: order.orderNumber,
+    customerName: order.customerName,
+    status: order.status,
+    updatedAt: order.updatedAt.toISOString(),
+  }));
 
   return (
     <div className="p-8">

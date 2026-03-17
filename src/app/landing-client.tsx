@@ -1,25 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { TextReveal } from "@/components/text-reveal";
 import { MagneticButton } from "@/components/magnetic-button";
-import { ProcessScrollytelling } from "@/components/process-scrollytelling";
-import { Marquee } from "@/components/marquee";
-import type { MarqueeItem } from "@/components/marquee";
-import { SectionDivider } from "@/components/section-divider";
-import { GalleryPreview } from "./gallery-preview";
-import { SocialProofSection } from "@/components/social-proof";
-import { CommunityCounter } from "@/components/community-counter";
-import { GoldParticles } from "@/components/gold-particles";
-import type { GalleryItem } from "@/components/gallery-card";
-
-const HeroModel = dynamic(
-  () => import("@/components/hero-model").then((m) => m.HeroModel),
-  { ssr: false }
-);
 
 const HeroShowcase = dynamic(
   () => import("@/components/hero-showcase").then((m) => m.HeroShowcase),
@@ -47,21 +32,14 @@ interface LandingTexts {
   getStarted: string;
   viewGallery: string;
   heroTagline: string;
-  sectionGallery: string;
-  galleryTitle: string;
-  gallerySubtitle: string;
+  howItWorksTitle: string;
   pricingTitle: string;
   pricingSubtitle: string;
   pricingSelect: string;
-  faqTitle: string;
-  ctaTitle: string;
-  ctaSubtitle: string;
-  ctaButton: string;
   footerDescription: string;
   footerProduct: string;
   footerSupport: string;
   footerLegal: string;
-  footerFaq: string;
   footerContact: string;
   footerTrackOrder: string;
   footerPrivacy: string;
@@ -72,20 +50,6 @@ interface LandingTexts {
   pricingTitle2: string;
   heroShowcasePhoto: string;
   heroShowcaseFigurine: string;
-  testimonialsTitle: string;
-  testimonialsSubtitle: string;
-}
-
-interface Testimonial {
-  quote: string;
-  name: string;
-  location: string;
-}
-
-interface CommunityStat {
-  value: number;
-  suffix: string;
-  label: string;
 }
 
 export function LandingClient({
@@ -93,26 +57,14 @@ export function LandingClient({
   steps,
   sizes,
   features,
-  faqs,
-  marqueeItems,
-  galleryItems,
   heroItem,
-  testimonials,
-  communityStats,
 }: {
   d: LandingTexts;
   steps: Step[];
   sizes: Size[];
   features: string[];
-  faqs: { q: string; a: string }[];
-  marqueeItems: MarqueeItem[];
-  galleryItems: GalleryItem[];
-  heroItem: GalleryItem | null;
-  testimonials: Testimonial[];
-  communityStats: CommunityStat[];
+  heroItem: { id: string; publicDisplayName: string | null; figurineSize: string; publishedAt: string | null; glbUrl: string; thumbnailUrl: string; } | null;
 }) {
-  const [ctaHover, setCtaHover] = useState(false);
-
   return (
     <>
       {/* Hero (100vh) */}
@@ -149,7 +101,7 @@ export function LandingClient({
                 </p>
               </ScrollReveal>
             </div>
-            {/* Hero right: showcase or fallback sphere */}
+            {/* Hero right: showcase or fallback placeholder */}
             <div className="hidden md:block">
               {heroItem ? (
                 <HeroShowcase
@@ -158,63 +110,41 @@ export function LandingClient({
                   figurineLabel={d.heroShowcaseFigurine}
                 />
               ) : (
-                <HeroModel className="w-full h-[500px]" />
+                <div className="w-full h-[500px] flex items-center justify-center">
+                  <div className="w-40 h-40 rounded-full bg-bg-muted/50" />
+                </div>
               )}
             </div>
           </div>
         </div>
       </section>
 
-      {/* Marquee */}
-      {marqueeItems.length > 0 && (
-        <section className="border-y border-bg-subtle/50">
-          <Marquee items={marqueeItems} />
-        </section>
-      )}
-
-      {/* Process Scrollytelling */}
-      <ProcessScrollytelling steps={steps} />
-
-      {/* Community Counter Stats */}
-      <CommunityCounter stats={communityStats} />
-
-      {/* Gallery Masonry */}
-      {galleryItems.length > 0 && (
-        <section className="section-spacing">
-          <div className="max-w-6xl mx-auto px-4">
-            <ScrollReveal>
-              <TextReveal
-                text={d.galleryTitle}
-                as="h2"
-                className="text-3xl md:text-5xl font-serif text-text-primary text-center"
-              />
-            </ScrollReveal>
-            <ScrollReveal delay={0.1}>
-              <p className="mt-4 text-text-secondary text-center max-w-xl mx-auto">
-                {d.gallerySubtitle}
-              </p>
-            </ScrollReveal>
-            <div className="mt-12">
-              <GalleryPreview items={galleryItems} />
-            </div>
-            <div className="mt-8 text-center">
-              <Link href="/gallery" className="btn-secondary">
-                {d.viewGallery}
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                </svg>
-              </Link>
-            </div>
+      {/* How It Works */}
+      <section className="section-spacing">
+        <div className="max-w-6xl mx-auto px-4">
+          <ScrollReveal>
+            <h2 className="text-3xl md:text-5xl font-serif text-text-primary text-center">
+              {d.howItWorksTitle}
+            </h2>
+          </ScrollReveal>
+          <div className="mt-12 grid md:grid-cols-3 gap-8">
+            {steps.map((step, i) => (
+              <ScrollReveal key={step.number} delay={i * 0.1}>
+                <div className="card p-6 text-center">
+                  <div className="w-14 h-14 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mx-auto">
+                    {step.icon}
+                  </div>
+                  <span className="mt-4 inline-block text-xs font-mono font-bold text-green-500 bg-green-500/10 rounded-full px-3 py-1">
+                    {step.number}
+                  </span>
+                  <h3 className="mt-3 text-lg font-semibold text-text-primary">{step.title}</h3>
+                  <p className="mt-2 text-sm text-text-secondary leading-relaxed">{step.description}</p>
+                </div>
+              </ScrollReveal>
+            ))}
           </div>
-        </section>
-      )}
-
-      {/* Social Proof: 3 Testimonials */}
-      <SocialProofSection
-        title={d.testimonialsTitle}
-        subtitle={d.testimonialsSubtitle}
-        testimonials={testimonials}
-      />
+        </div>
+      </section>
 
       {/* Pricing (horizontal bars) */}
       <section className="section-spacing" id="pricing">
@@ -278,76 +208,6 @@ export function LandingClient({
         </div>
       </section>
 
-      {/* FAQ */}
-      <section className="section-spacing" id="faq">
-        <div className="max-w-3xl mx-auto px-4">
-          <ScrollReveal>
-            <TextReveal
-              text={d.faqTitle}
-              as="h2"
-              className="text-3xl md:text-5xl font-serif text-text-primary text-center"
-            />
-          </ScrollReveal>
-          <div className="mt-10 space-y-3">
-            {faqs.map((faq, i) => (
-              <ScrollReveal key={faq.q} delay={i * 0.05}>
-                <details className="group card overflow-hidden">
-                  <summary className="flex items-center justify-between cursor-pointer p-5 font-semibold text-text-primary select-none hover:bg-bg-elevated transition-colors">
-                    {faq.q}
-                    <svg
-                      className="w-5 h-5 text-text-muted shrink-0 transition-transform duration-300 group-open:rotate-180"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </summary>
-                  <div className="accordion-content">
-                    <div>
-                      <p className="px-5 pb-5 text-text-secondary leading-relaxed">
-                        {faq.a}
-                      </p>
-                    </div>
-                  </div>
-                </details>
-              </ScrollReveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA with confetti on hover */}
-      <section className="py-20 relative">
-        {ctaHover && <GoldParticles />}
-        <div className="max-w-4xl mx-auto px-4 text-center">
-          <ScrollReveal>
-            <h2 className="text-3xl md:text-5xl font-serif text-text-primary">
-              {d.ctaTitle}
-            </h2>
-          </ScrollReveal>
-          <ScrollReveal delay={0.1}>
-            <p className="mt-4 text-lg text-text-secondary max-w-2xl mx-auto">
-              {d.ctaSubtitle}
-            </p>
-          </ScrollReveal>
-          <ScrollReveal delay={0.2}>
-            <div
-              className="mt-8"
-              onMouseEnter={() => setCtaHover(true)}
-              onMouseLeave={() => setCtaHover(false)}
-            >
-              <MagneticButton href="/create" className="btn-primary text-lg !px-8 !py-3.5">
-                {d.ctaButton}
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                </svg>
-              </MagneticButton>
-            </div>
-          </ScrollReveal>
-        </div>
-      </section>
-
       {/* Footer */}
       <footer className="border-t border-bg-subtle bg-bg-base">
         <div className="max-w-6xl mx-auto px-4 py-16">
@@ -380,7 +240,6 @@ export function LandingClient({
                 {d.footerSupport}
               </h4>
               <ul className="mt-4 space-y-2 text-sm">
-                <li><a href="#faq" className="text-text-muted hover:text-green-400 transition-colors">{d.footerFaq}</a></li>
                 <li><Link href="/login" className="text-text-muted hover:text-green-400 transition-colors">{d.footerContact}</Link></li>
                 <li><Link href="/login" className="text-text-muted hover:text-green-400 transition-colors">{d.footerTrackOrder}</Link></li>
               </ul>

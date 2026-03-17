@@ -25,7 +25,11 @@ export interface EmailJobData {
     | "generation_failed"
     | "order_shipped"
     | "order_refunded"
-    | "revision_request";
+    | "revision_request"
+    | "order_approved"
+    | "order_printing"
+    | "order_delivered"
+    | "gift_card_received";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -34,6 +38,10 @@ export interface EmailJobData {
   photoUrl?: string;
   glbUrl?: string;
   revisionNote?: string;
+  giftCardCode?: string;
+  giftCardAmount?: number;
+  giftCardMessage?: string;
+  senderName?: string;
   locale?: "en" | "tr";
 }
 

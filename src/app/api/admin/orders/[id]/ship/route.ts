@@ -34,6 +34,13 @@ export async function POST(
       return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
     }
 
+    if (order.status !== "printing") {
+      return NextResponse.json(
+        { error: d["api.order.notInPrinting"] },
+        { status: 400 }
+      );
+    }
+
     await db
       .update(orders)
       .set({

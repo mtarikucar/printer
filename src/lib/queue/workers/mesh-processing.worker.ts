@@ -7,7 +7,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { getRedisConnection } from "../connection";
 import type { MeshProcessingJobData } from "../queues";
-import { getFileBuffer, saveFile, getPublicUrl } from "../../services/storage";
+import { getFileBuffer } from "../../services/storage";
 import { db } from "../../db";
 import { orders, generationAttempts, meshReports } from "../../db/schema";
 
@@ -54,18 +54,6 @@ async function processJob(job: Job<MeshProcessingJobData>) {
 
     // Read report
     const report = JSON.parse(await readFile(reportPath, "utf-8"));
-
-    // Upload processed STL to local storage
-    job.log("Saving processed STL to storage...");
-    const stlBuffer = await readFile(outputStlPath);
-    const stlKey = await saveFile(Buffer.from(stlBuffer), `models/${orderId}`, "processed.stl");
-    const stlUrl = getPublicUrl(stlKey);
-
-    // Update generation attempt with STL URL
-    await db
-      .update(generationAttempts)
-      .set({ outputStlUrl: stlUrl, updatedAt: new Date() })
-      .where(eq(generationAttempts.id, generationId));
 
     // Create mesh report
     await db.insert(meshReports).values({

@@ -23,6 +23,8 @@ export async function confirmOrder(orderId: string, locale: Locale) {
     })
     .where(eq(orders.id, orderId));
 
+  let processingStarted = false;
+
   // Check if order has a preview (skip AI generation)
   if (order.previewId) {
     const preview = await db.query.previews.findFirst({
@@ -45,6 +47,12 @@ export async function confirmOrder(orderId: string, locale: Locale) {
         })
         .returning();
 
+      // Update status before enqueueing to avoid race condition
+      await db
+        .update(orders)
+        .set({ status: "processing_mesh", updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+
       // Skip AI generation, go directly to mesh processing
       await getMeshProcessingQueue().add("process-mesh", {
         orderId: order.id,
@@ -52,18 +60,39 @@ export async function confirmOrder(orderId: string, locale: Locale) {
         glbUrl: preview.glbUrl,
         glbKey: preview.glbKey,
       });
+
+      processingStarted = true;
     }
-  } else {
-    // No preview — use standard AI generation flow
+    // Preview exists but glbUrl/glbKey missing — fall through to photo path
+  }
+
+  if (!processingStarted) {
+    // No usable preview — use standard AI generation flow
     const photo = await db.query.orderPhotos.findFirst({
       where: eq(orderPhotos.orderId, order.id),
     });
 
     if (photo) {
+      // Update status before enqueueing to avoid race condition
+      await db
+        .update(orders)
+        .set({ status: "generating", updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+
       await getAiGenerationQueue().add("generate", {
         orderId: order.id,
         imageUrl: photo.originalUrl,
       });
+    } else {
+      // No photo and no usable preview — mark as failed
+      await db
+        .update(orders)
+        .set({
+          status: "failed_generation",
+          failureReason: "No photo or preview available for processing",
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, orderId));
     }
   }
 

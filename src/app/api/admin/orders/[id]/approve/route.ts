@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
+import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -46,6 +47,14 @@ export async function POST(
     action: "approve",
     adminEmail: session.user.email,
     notes: body.notes,
+  });
+
+  await getEmailQueue().add("approved", {
+    type: "order_approved",
+    to: order.email,
+    orderNumber: order.orderNumber,
+    customerName: order.customerName,
+    locale,
   });
 
   return NextResponse.json({ success: true });

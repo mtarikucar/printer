@@ -30,6 +30,13 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
+  if (!["review", "failed_generation", "failed_mesh", "paid"].includes(order.status)) {
+    return NextResponse.json(
+      { error: d["api.order.invalidStatusForRegenerate"] },
+      { status: 400 }
+    );
+  }
+
   const photo = await db.query.orderPhotos.findFirst({
     where: eq(orderPhotos.orderId, id),
   });
@@ -42,7 +49,7 @@ export async function POST(
   await db
     .update(orders)
     .set({
-      status: "paid",
+      status: "generating",
       failureReason: null,
       retryCount: order.retryCount + 1,
       adminNotes: body.notes,

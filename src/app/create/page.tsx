@@ -423,7 +423,6 @@ export default function CreatePage() {
         <SiteHeader />
         <div className="max-w-lg mx-auto px-4 py-20">
           <div className="card shadow-elevated overflow-hidden">
-            <div className="h-1 bg-gradient-to-r from-success to-green-500" />
             <div className="p-8 text-center">
               <div className="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce-in">
                 <svg className="w-10 h-10 text-green-500" viewBox="0 0 24 24" fill="currentColor">
@@ -476,7 +475,6 @@ export default function CreatePage() {
         <SiteHeader />
         <div className="max-w-lg mx-auto px-4 py-20">
           <div className="card shadow-elevated overflow-hidden">
-            <div className="h-1 bg-gradient-to-r from-success to-green-500" />
             <div className="p-8 text-center">
               <div className="w-20 h-20 bg-success-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce-in">
                 <svg className="w-10 h-10 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -505,40 +503,21 @@ export default function CreatePage() {
 
       <div className="max-w-3xl mx-auto px-4 py-12">
         {/* Step Indicator */}
-        <div className="flex items-center justify-center gap-0 mb-10 animate-fade-in">
-          {stepLabels.map((label, i) => (
-            <div key={label} className="flex items-center">
-              <div className="flex flex-col items-center w-14 sm:w-20">
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold font-mono transition-all ${
-                    i === step
-                      ? "bg-green-500 text-white shadow-sm ring-4 ring-green-500/20"
-                      : i < step
-                        ? "bg-green-600 text-white shadow-sm"
-                        : "bg-bg-muted text-text-muted"
-                  }`}
-                >
-                  {i < step ? (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    i + 1
-                  )}
-                </div>
-                <span className={`mt-2 text-xs font-medium truncate w-full text-center ${i <= step ? "text-green-500" : "text-text-muted"}`}>
-                  {label}
-                </span>
-              </div>
-              {i < stepLabels.length - 1 && (
-                <div className={`w-6 sm:w-12 lg:w-16 h-0.5 mx-1 mb-5 step-connector ${
-                  i < step
-                    ? "bg-gradient-to-r from-green-500 to-beige-400"
-                    : "bg-bg-muted"
-                }`} />
-              )}
-            </div>
-          ))}
+        <div className="mb-10 animate-fade-in">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-text-muted">
+              {d[`create.step${step}.eyebrow` as keyof typeof d]}
+            </span>
+            <span className="text-xs text-text-muted">
+              {stepLabels[step]}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-bg-muted">
+            <div
+              className="h-full rounded-full bg-green-500 transition-all duration-500"
+              style={{ width: `${((step + 1) / 4) * 100}%` }}
+            />
+          </div>
         </div>
 
         {/* Step 0: Size + Photo */}
@@ -550,36 +529,25 @@ export default function CreatePage() {
             </div>
 
             <div className="space-y-8">
-              {/* Size Selection Card */}
-              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-200">
-                <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
-                <div className="p-6">
-                  <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.sizeSelection"]}</h2>
-                  <div className="grid sm:grid-cols-3 gap-4">
-                    {SIZES.map((size) => (
-                      <button
-                        key={size.key}
-                        type="button"
-                        onClick={() => setSelectedSize(size.key)}
-                        className={`relative card p-5 text-left transition-all ${
-                          selectedSize === size.key
-                            ? "border-2 border-green-500 bg-green-500/5"
-                            : "border-2 border-transparent hover:border-bg-subtle"
-                        }`}
-                      >
-                        {selectedSize === size.key && (
-                          <div className="absolute top-3 right-3 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </div>
-                        )}
-                        <p className="text-lg font-bold text-text-primary">{size.label}</p>
-                        <p className="text-sm text-text-muted">{size.height}</p>
-                        <p className="mt-2 text-xl font-mono font-bold text-green-500">₺{size.price}</p>
-                      </button>
-                    ))}
-                  </div>
+              {/* Size Selection */}
+              <div className="animate-fade-in-up delay-200">
+                <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.sizeSelection"]}</h2>
+                <div className="flex gap-2">
+                  {SIZES.map((size) => (
+                    <button
+                      key={size.key}
+                      type="button"
+                      onClick={() => setSelectedSize(size.key)}
+                      className={`flex-1 py-3 px-4 text-center rounded-xl transition-all ${
+                        selectedSize === size.key
+                          ? "bg-green-500 text-white"
+                          : "bg-bg-surface border border-bg-subtle hover:border-green-500/30"
+                      }`}
+                    >
+                      <p className={`text-sm font-semibold ${selectedSize === size.key ? "text-white" : "text-text-primary"}`}>{size.label} {size.height}</p>
+                      <p className={`text-base font-mono font-bold mt-0.5 ${selectedSize === size.key ? "text-white" : "text-green-500"}`}>₺{size.price}</p>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -597,7 +565,6 @@ export default function CreatePage() {
                 </div>
               ) : photoKey && !selectedFile ? (
                 <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
-                  <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
                   <div className="p-6">
                     <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
                     <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
@@ -620,7 +587,6 @@ export default function CreatePage() {
                 </div>
               ) : (
                 <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
-                  <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
                   <div className="p-6">
                     <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
                     <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
@@ -845,7 +811,6 @@ export default function CreatePage() {
             <form onSubmit={handleSubmit} className="space-y-8">
               {/* Form Card */}
               <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-200">
-                <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
                 <div className="p-6">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>

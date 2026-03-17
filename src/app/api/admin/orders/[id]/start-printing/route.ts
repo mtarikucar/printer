@@ -30,33 +30,27 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  if (!["review", "approved", "failed_generation", "failed_mesh"].includes(order.status)) {
+  if (order.status !== "approved") {
     return NextResponse.json(
-      { error: d["api.order.invalidStatusForReject"] },
+      { error: d["api.order.notApproved"] },
       { status: 400 }
     );
   }
 
   await db
     .update(orders)
-    .set({
-      status: "rejected",
-      failureReason: body.reason || d["api.order.rejectedDefault"],
-      adminNotes: body.notes,
-      updatedAt: new Date(),
-    })
+    .set({ status: "printing", adminNotes: body.notes, updatedAt: new Date() })
     .where(eq(orders.id, id));
 
   await db.insert(adminActions).values({
     orderId: id,
-    action: "reject",
+    action: "print",
     adminEmail: session.user.email,
     notes: body.notes,
   });
 
-  // Email customer about refund
-  await getEmailQueue().add("refund", {
-    type: "order_refunded",
+  await getEmailQueue().add("printing", {
+    type: "order_printing",
     to: order.email,
     orderNumber: order.orderNumber,
     customerName: order.customerName,

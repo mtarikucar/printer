@@ -7,12 +7,10 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 
 export function OrderDetailClient({
   glbUrl,
-  stlUrl,
   orderId,
   orderStatus,
 }: {
   glbUrl?: string | null;
-  stlUrl?: string | null;
   orderId: string;
   orderStatus: string;
 }) {
@@ -47,8 +45,10 @@ export function OrderDetailClient({
   const canConfirm = orderStatus === "pending_payment";
   const canApprove = orderStatus === "review";
   const canReject = ["review", "approved", "failed_generation", "failed_mesh"].includes(orderStatus);
-  const canRegenerate = ["review", "failed_generation", "failed_mesh"].includes(orderStatus);
+  const canRegenerate = ["review", "failed_generation", "failed_mesh", "paid"].includes(orderStatus);
+  const canStartPrinting = orderStatus === "approved";
   const canShip = orderStatus === "printing";
+  const canDeliver = orderStatus === "shipped";
 
   return (
     <div>
@@ -56,18 +56,8 @@ export function OrderDetailClient({
         <ModelViewer url={glbUrl} className="w-full h-80 bg-gray-900 rounded-lg" />
       )}
 
-      {stlUrl && (
-        <a
-          href={stlUrl}
-          download
-          className="mt-3 inline-block text-sm text-blue-600 hover:text-blue-800 font-medium"
-        >
-          {d["admin.orderDetail.downloadStl"]}
-        </a>
-      )}
-
       {/* Admin Actions */}
-      {(canConfirm || canApprove || canReject || canRegenerate || canShip) && (
+      {(canConfirm || canApprove || canReject || canRegenerate || canStartPrinting || canShip || canDeliver) && (
         <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -99,6 +89,24 @@ export function OrderDetailClient({
                 className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400"
               >
                 {loading === "approve" ? d["admin.orderDetail.approving"] : d["admin.orderDetail.approve"]}
+              </button>
+            )}
+            {canStartPrinting && (
+              <button
+                onClick={() => performAction("start-printing")}
+                disabled={!!loading}
+                className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:bg-gray-400"
+              >
+                {loading === "start-printing" ? d["admin.orderDetail.startingPrint"] : d["admin.orderDetail.startPrint"]}
+              </button>
+            )}
+            {canDeliver && (
+              <button
+                onClick={() => performAction("deliver")}
+                disabled={!!loading}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+              >
+                {loading === "deliver" ? d["admin.orderDetail.delivering"] : d["admin.orderDetail.deliver"]}
               </button>
             )}
             {canRegenerate && (

@@ -96,7 +96,6 @@ export default async function AdminOrderDetailPage({
               )}
               <OrderDetailClient
                 glbUrl={latestGeneration?.outputGlbUrl}
-                stlUrl={latestGeneration?.outputStlUrl}
                 orderId={order.id}
                 orderStatus={order.status}
               />

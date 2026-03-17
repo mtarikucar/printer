@@ -97,7 +97,7 @@ export function UploadDropzone({
             <div className="text-center">
               <div className="w-48 h-2.5 bg-bg-muted rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-green-500 to-beige-400 transition-all duration-300"
+                  className="h-full rounded-full bg-gradient-to-r from-green-500 to-green-800 transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -129,7 +129,7 @@ export function UploadDropzone({
       }`}
     >
       {/* Accent bar */}
-      <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400 rounded-t-2xl opacity-60" />
+      <div className="h-1 bg-gradient-to-r from-green-500 to-green-800 rounded-t-2xl opacity-60" />
 
       <input {...getInputProps()} />
       <div className="p-8 space-y-5">

@@ -96,9 +96,9 @@ export default function LoginPage() {
               <GoogleSignInButton label={d["login.google"]} redirect={redirect || undefined} />
             </div>
             <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 h-px bg-border-default" />
+              <div className="flex-1 h-px bg-bg-subtle" />
               <span className="text-xs text-text-muted uppercase">{d["login.orEmail"]}</span>
-              <div className="flex-1 h-px bg-border-default" />
+              <div className="flex-1 h-px bg-bg-subtle" />
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>

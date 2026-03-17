@@ -92,6 +92,8 @@ export async function POST(request: NextRequest) {
           customerName: user.fullName,
           phone: validated.shippingAddress.telefon,
           figurineSize: validated.figurineSize,
+          style: validated.style,
+          modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
           shippingAddress: validated.shippingAddress,
           amountKurus,
           giftCardAmountKurus: 0,

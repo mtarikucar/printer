@@ -4,6 +4,8 @@ import { getRedisConnection } from "./connection";
 export interface AiGenerationJobData {
   orderId: string;
   imageUrl: string;
+  style: string;
+  modifiers?: string[];
 }
 
 export interface MeshProcessingJobData {
@@ -17,6 +19,8 @@ export interface PreviewGenerationJobData {
   previewId: string;
   imageUrl: string;
   photoKey: string;
+  style: string;
+  modifiers?: string[];
 }
 
 export interface EmailJobData {

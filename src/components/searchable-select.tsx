@@ -157,7 +157,7 @@ export function SearchableSelect({
       {open && (
         <ul
           ref={listRef}
-          className="absolute z-50 mt-1 w-full max-h-48 overflow-auto rounded-lg border border-border bg-bg-elevated shadow-elevated"
+          className="absolute z-50 mt-1 w-full max-h-48 overflow-auto rounded-lg border border-bg-subtle bg-bg-muted shadow-elevated"
         >
           {filtered.length === 0 ? (
             <li className="px-3 py-2 text-sm text-text-muted">—</li>
@@ -167,7 +167,7 @@ export function SearchableSelect({
                 key={option}
                 className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
                   i === highlightIndex
-                    ? "bg-green-500/10 text-green-700"
+                    ? "bg-green-500/10 text-green-400"
                     : "hover:bg-bg-subtle text-text-primary"
                 }`}
                 onMouseEnter={() => setHighlightIndex(i)}

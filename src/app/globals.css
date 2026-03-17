@@ -3,57 +3,60 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-dm-sans);
-  --font-serif: var(--font-dm-serif);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains);
 
-  /* Background scale (beige) */
-  --color-bg-base: #F5F0E6;
-  --color-bg-surface: #FFFFFF;
-  --color-bg-elevated: #FFFFFF;
-  --color-bg-muted: #EBE6DB;
-  --color-bg-subtle: #D6CFC2;
+  /* Background scale (dark) */
+  --color-bg-base: #0A0A0B;
+  --color-bg-surface: rgba(255,255,255,0.03);
+  --color-bg-elevated: rgba(255,255,255,0.06);
+  --color-bg-muted: #1A1A1F;
+  --color-bg-subtle: rgba(255,255,255,0.08);
 
-  /* Green accent */
-  --color-green-300: #8BC4A0;
-  --color-green-400: #6AB382;
-  --color-green-500: #4A9E68;
-  --color-green-600: #3A8A56;
-  --color-green-700: #2C7544;
-  --color-green-800: #1E6033;
-  --color-green-900: #104B22;
+  /* Green accent (emerald) */
+  --color-green-300: #6EE7B7;
+  --color-green-400: #34D399;
+  --color-green-500: #10B981;
+  --color-green-600: #059669;
+  --color-green-700: #047857;
+  --color-green-800: #065F46;
+  --color-green-900: #064E3B;
 
-  /* Beige accent */
-  --color-beige-300: #DDD4C0;
-  --color-beige-400: #CCC2A8;
-  --color-beige-500: #B5AA90;
-  --color-beige-600: #9E9478;
+  /* Beige accent → neutral glass */
+  --color-beige-300: rgba(255,255,255,0.08);
+  --color-beige-400: rgba(255,255,255,0.10);
+  --color-beige-500: rgba(255,255,255,0.14);
+  --color-beige-600: rgba(255,255,255,0.20);
 
   /* Text */
-  --color-text-primary: #1C2420;
-  --color-text-secondary: #4A5550;
-  --color-text-muted: #7E8A82;
+  --color-text-primary: #F5F5F5;
+  --color-text-secondary: #9CA3AF;
+  --color-text-muted: #6B7280;
 
   /* Semantic */
-  --color-success: #4A9E68;
-  --color-success-50: #F0FDF4;
-  --color-success-500: #4A9E68;
-  --color-error: #C85A5A;
-  --color-error-50: #FEF2F2;
-  --color-error-500: #C85A5A;
-  --color-error-700: #A04242;
-  --color-warning-50: #FFFBEB;
-  --color-warning-500: #D4A03A;
+  --color-success: #34D399;
+  --color-success-50: rgba(52,211,153,0.1);
+  --color-success-500: #34D399;
+  --color-error: #F87171;
+  --color-error-50: rgba(248,113,113,0.1);
+  --color-error-500: #F87171;
+  --color-error-700: #DC2626;
+  --color-warning-50: rgba(251,191,36,0.1);
+  --color-warning-500: #FBBF24;
+
+  /* Border */
+  --color-border-default: rgba(255,255,255,0.08);
 
   /* Shadows */
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
-  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
-  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 0 0 1px rgba(255,255,255,0.03), 0 4px 12px rgba(0,0,0,0.2);
+  --shadow-card-hover: 0 0 0 1px rgba(255,255,255,0.06), 0 8px 32px rgba(0,0,0,0.3);
+  --shadow-elevated: 0 0 0 1px rgba(255,255,255,0.06), 0 16px 48px rgba(0,0,0,0.3);
 }
 
 :root {
-  --background: #F5F0E6;
-  --foreground: #1C2420;
+  --background: #0A0A0B;
+  --foreground: #F5F5F5;
 }
 
 body {
@@ -128,19 +131,28 @@ body {
 .delay-500 { animation-delay: 500ms; }
 
 /* ============================================
-   Card
+   Card — Glassmorphism
    ============================================ */
 
 .card {
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-bg-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 1rem;
-  box-shadow: var(--shadow-card);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.03);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+/* Fallback for browsers without backdrop-filter */
+@supports not (backdrop-filter: blur(12px)) {
+  .card {
+    background: #141419;
+  }
 }
 
 .card:hover {
-  box-shadow: var(--shadow-card-hover);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 /* ============================================
@@ -150,9 +162,9 @@ body {
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--color-bg-muted) 25%,
-    var(--color-bg-subtle) 50%,
-    var(--color-bg-muted) 75%
+    #1A1A1F 25%,
+    rgba(255,255,255,0.06) 50%,
+    #1A1A1F 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
@@ -166,8 +178,8 @@ body {
 .input-base {
   width: 100%;
   padding: 0.625rem 0.875rem;
-  background: var(--color-bg-surface);
-  border: 1.5px solid var(--color-bg-subtle);
+  background: rgba(255,255,255,0.03);
+  border: 1.5px solid rgba(255,255,255,0.1);
   border-radius: 0.75rem;
   font-size: 0.875rem;
   color: var(--color-text-primary);
@@ -181,11 +193,11 @@ body {
 
 .input-base:focus {
   border-color: var(--color-green-500);
-  box-shadow: 0 0 0 3px rgba(74, 158, 104, 0.12);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
 
 select.input-base {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%237E8A82' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236B7280' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   appearance: none;
@@ -193,12 +205,12 @@ select.input-base {
 }
 
 select.input-base option {
-  background: var(--color-bg-surface);
+  background: #1A1A1F;
   color: var(--color-text-primary);
 }
 
 /* ============================================
-   Buttons (Green)
+   Buttons (Green) — Glow
    ============================================ */
 
 .btn-primary {
@@ -211,7 +223,7 @@ select.input-base option {
   color: white;
   font-weight: 600;
   border-radius: 0.75rem;
-  box-shadow: 0 4px 14px rgba(74, 158, 104, 0.2);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   cursor: pointer;
   border: none;
@@ -220,7 +232,7 @@ select.input-base option {
 .btn-primary:hover {
   background: var(--color-green-400);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(74, 158, 104, 0.3);
+  box-shadow: 0 0 30px rgba(52, 211, 153, 0.4);
 }
 
 .btn-primary:active { transform: translateY(0); }
@@ -232,19 +244,19 @@ select.input-base option {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.75rem 1.75rem;
-  background: var(--color-bg-surface);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--color-text-primary);
   font-weight: 600;
   border-radius: 0.75rem;
-  border: 1.5px solid var(--color-bg-subtle);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   cursor: pointer;
 }
 
 .btn-secondary:hover {
-  border-color: var(--color-green-500);
+  border-color: var(--color-green-400);
   box-shadow: var(--shadow-card);
-  background: var(--color-bg-muted);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -255,18 +267,18 @@ select.input-base option {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.75rem 1.75rem;
-  background: var(--color-bg-surface);
-  color: var(--color-beige-600);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-warning-500);
   font-weight: 600;
   border-radius: 0.75rem;
-  border: 1.5px solid var(--color-beige-400);
+  border: 1px solid rgba(251, 191, 36, 0.25);
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
   cursor: pointer;
 }
 
 .btn-amber:hover {
-  background: rgba(204, 194, 168, 0.1);
-  border-color: var(--color-beige-500);
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.4);
   box-shadow: var(--shadow-card);
 }
 
@@ -280,9 +292,9 @@ select.input-base option {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: var(--color-bg-muted);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--color-text-secondary);
-  border: 1px solid var(--color-bg-subtle);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 9999px;
   padding: 0.5rem 1rem;
   font-size: 0.8125rem;

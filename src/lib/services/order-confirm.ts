@@ -82,6 +82,8 @@ export async function confirmOrder(orderId: string, locale: Locale) {
       await getAiGenerationQueue().add("generate", {
         orderId: order.id,
         imageUrl: photo.originalUrl,
+        style: order.style,
+        modifiers: order.modifiers ?? [],
       });
     } else {
       // No photo and no usable preview — mark as failed

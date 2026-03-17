@@ -100,7 +100,7 @@ export function EditorCutTool({ imageSrc, onApply, onCancel }: EditorCutToolProp
     const size = 8;
     for (let row = 0; row < Math.ceil(h / size); row++) {
       for (let col = 0; col < Math.ceil(w / size); col++) {
-        ctx.fillStyle = (row + col) % 2 === 0 ? "#e5e5e5" : "#ffffff";
+        ctx.fillStyle = (row + col) % 2 === 0 ? "#1A1A1F" : "#2A2A2F";
         ctx.fillRect(x + col * size, y + row * size, size, size);
       }
     }
@@ -172,7 +172,7 @@ export function EditorCutTool({ imageSrc, onApply, onCancel }: EditorCutToolProp
 
         // Draw lasso stroke line
         buildSmoothPath(ctx, currentPoints, closed);
-        ctx.strokeStyle = "#22c55e";
+        ctx.strokeStyle = "#10B981";
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 3]);
         ctx.stroke();
@@ -425,7 +425,7 @@ export function EditorCutTool({ imageSrc, onApply, onCancel }: EditorCutToolProp
 
   return (
     <div className="card shadow-elevated overflow-hidden animate-fade-in-up">
-      <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
+      <div className="h-1 bg-gradient-to-r from-green-500 to-green-800" />
 
       {/* Mode selector + instruction */}
       <div className="px-6 py-4 border-b border-bg-subtle">

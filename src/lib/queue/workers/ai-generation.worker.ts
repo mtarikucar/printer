@@ -4,6 +4,7 @@ import { getRedisConnection } from "../connection";
 import { getMeshProcessingQueue, type AiGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
 import { saveFile, getPublicUrl } from "../../services/storage";
+import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../../services/style-transfer";
 import { db } from "../../db";
 import { orders, generationAttempts, orderPhotos } from "../../db/schema";
 import { getEmailQueue } from "../queues";
@@ -17,6 +18,8 @@ async function downloadFile(url: string): Promise<Buffer> {
 
 async function processJob(job: Job<AiGenerationJobData>) {
   const { orderId, imageUrl } = job.data;
+  const style = (job.data.style || "realistic") as FigurineStyle;
+  const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
 
   // Update order status to generating
   await db
@@ -36,8 +39,12 @@ async function processJob(job: Job<AiGenerationJobData>) {
     .returning();
 
   try {
-    job.log("Starting Meshy generation...");
-    const result = await generateWithMeshy(imageUrl);
+    job.log(`Starting Meshy generation (style: ${style}, modifiers: ${modifiers.join(",") || "none"})...`);
+    // Apply style transfer before sending to Meshy
+    const imageBuffer = await downloadFile(imageUrl);
+    const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
+    const styledBase64 = `data:image/png;base64,${styledBuffer.toString("base64")}`;
+    const result = await generateWithMeshy(styledBase64);
 
     await db
       .update(generationAttempts)

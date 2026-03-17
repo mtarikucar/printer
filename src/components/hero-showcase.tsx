@@ -31,10 +31,10 @@ function AutoRotateModel({ url }: { url: string }) {
 function ModelCanvas({ url }: { url: string }) {
   return (
     <Canvas camera={{ position: [0, 2, 5], fov: 45 }}>
-      <color attach="background" args={["#F0EDE8"]} />
+      <color attach="background" args={["#0A0A0B"]} />
       <ambientLight intensity={0.3} />
-      <directionalLight position={[5, 5, 5]} intensity={1} color="#4A9E68" />
-      <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#CCC2A8" />
+      <directionalLight position={[5, 5, 5]} intensity={1} color="#10B981" />
+      <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#1E293B" />
       <Suspense fallback={null}>
         <Stage environment="city" intensity={0.5}>
           <AutoRotateModel url={url} />

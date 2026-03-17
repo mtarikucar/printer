@@ -95,9 +95,9 @@ export default function RegisterPage() {
               <GoogleSignInButton label={d["register.google"]} redirect={redirect || undefined} />
             </div>
             <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 h-px bg-border-default" />
+              <div className="flex-1 h-px bg-bg-subtle" />
               <span className="text-xs text-text-muted uppercase">{d["register.orEmail"]}</span>
-              <div className="flex-1 h-px bg-border-default" />
+              <div className="flex-1 h-px bg-bg-subtle" />
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>

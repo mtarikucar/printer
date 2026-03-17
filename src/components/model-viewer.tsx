@@ -38,7 +38,7 @@ function LoadingSpinner() {
   return (
     <mesh ref={ref}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="#4A9E68" wireframe />
+      <meshStandardMaterial color="#10B981" wireframe />
     </mesh>
   );
 }
@@ -72,19 +72,19 @@ export function ModelViewer({
   return (
     <div className="relative">
       {previewMode && (
-        <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400 rounded-t-2xl" />
+        <div className="h-1 bg-gradient-to-r from-green-500 to-green-800 rounded-t-2xl" />
       )}
       <div className={className || defaultClass}>
         <Canvas camera={{ position: [0, 2, 5], fov: 45 }}>
           {/* Warm dark background */}
-          <color attach="background" args={["#F0EDE8"]} />
+          <color attach="background" args={["#0A0A0B"]} />
           <ambientLight intensity={previewMode ? 0.4 : 0.3} />
-          {/* Green key light */}
-          <directionalLight position={[5, 5, 5]} intensity={1} color="#4A9E68" />
-          {/* Beige fill light */}
-          <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#CCC2A8" />
+          {/* Emerald key light */}
+          <directionalLight position={[5, 5, 5]} intensity={1} color="#10B981" />
+          {/* Cool fill light */}
+          <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#1E293B" />
           {previewMode && (
-            <directionalLight position={[0, -3, 5]} intensity={0.3} color="#F0EDE8" />
+            <directionalLight position={[0, -3, 5]} intensity={0.3} color="#0A0A0B" />
           )}
           <Suspense fallback={<LoadingSpinner />}>
             <Stage environment="city" intensity={0.5}>
@@ -104,7 +104,7 @@ export function ModelViewer({
       {previewMode && (
         <>
           {/* Hint overlay */}
-          <div className="absolute bottom-4 left-4 bg-white/70 backdrop-blur-sm text-text-muted rounded-full px-3 py-1 text-xs">
+          <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-sm text-white rounded-full px-3 py-1 text-xs">
             {d["create.preview.dragToRotate"]}
           </div>
           {/* Reset button */}
@@ -112,7 +112,7 @@ export function ModelViewer({
             <button
               type="button"
               onClick={resetView}
-              className="bg-white/70 backdrop-blur-sm text-text-secondary rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-white/90 transition-colors"
+              className="bg-black/50 backdrop-blur-sm text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-black/70 transition-colors"
             >
               {d["model.viewer.resetView"]}
             </button>

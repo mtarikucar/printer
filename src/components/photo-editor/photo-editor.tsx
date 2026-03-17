@@ -207,7 +207,7 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
 
   return (
     <div className="card shadow-elevated overflow-hidden animate-fade-in-up">
-      <div className="h-1 bg-gradient-to-r from-green-500 to-beige-400" />
+      <div className="h-1 bg-gradient-to-r from-green-500 to-green-800" />
 
       {/* Header */}
       <div className="px-6 py-4 flex items-center justify-between border-b border-bg-subtle">

@@ -167,9 +167,28 @@ const tr: Dictionary = {
   "account.orders.table.date": "Tarih",
   "account.orders.track": "Takip Et",
   "account.tab.creations": "Oluşturmalarım",
+  "account.tab.creations.desc": "3D model galerisi",
   "account.tab.orders": "Siparişlerim",
+  "account.tab.orders.desc": "Sipariş durumları",
   "account.tab.profile": "Profil",
+  "account.tab.profile.desc": "Hesap bilgileri",
   "account.profile.phone": "Telefon",
+
+  // Create — Style
+  "create.styleSelection": "Stil Seçimi",
+  "create.style.realistic": "Gerçekçi",
+  "create.style.disney": "Disney / Pixar",
+  "create.style.anime": "Anime",
+  "create.style.chibi": "Chibi",
+  "create.style.realistic.desc": "Fotoğrafa sadık kalır",
+  "create.style.disney.desc": "Disney animasyon stili",
+  "create.style.anime.desc": "Japon anime stili",
+  "create.style.chibi.desc": "Sevimli, büyük başlı stil",
+
+  // Create — Modifiers
+  "create.modifiers": "Stil Efektleri",
+  "create.modifier.pixel_art": "Piksel Art",
+  "create.modifier.pixel_art.desc": "Retro 16-bit oyun görünümü",
 
   // Create
   "create.title": "Figürün Oluştur",
@@ -232,6 +251,7 @@ const tr: Dictionary = {
   "create.revision.backHome": "Ana Sayfaya Dön",
 
   // Preview errors
+  "create.preview.timedOut": "İşlem çok uzun sürdü. Lütfen tekrar deneyin.",
   "create.preview.failed": "Önizleme oluşturulamadı",
   "create.preview.retry": "Tekrar Dene",
   "create.preview.failedMessage": "Bir sorun oluştu. Lütfen farklı bir fotoğraf yüklemeyi deneyin.",
@@ -513,6 +533,8 @@ const tr: Dictionary = {
   "api.order.noPhoto": "Fotoğraf bulunamadı",
   "api.order.noProcessableContent": "İşlenecek fotoğraf veya önizleme bulunamadı",
   "api.auth.unauthorized": "Yetkisiz erişim",
+  "api.turnstile.failed": "Doğrulama başarısız. Lütfen tekrar deneyin.",
+  "api.preview.limitReached": "Ücretsiz önizleme limitine ulaştınız (3). Sınırsız önizleme için sipariş verin.",
 
   // Section Badges
   "section.howItWorks": "NASIL ÇALIŞIR",

@@ -27,6 +27,8 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     figurineSize: z.enum(["kucuk", "orta", "buyuk"], {
       error: d["validator.size.invalid"],
     }),
+    style: z.enum(["realistic", "disney", "anime", "chibi"]).default("realistic"),
+    modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
     shippingAddress: createTurkishAddressSchema(locale),
     giftCardCode: z.string().optional(),
   });

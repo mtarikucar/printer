@@ -46,7 +46,7 @@ export function UserDropdown({ user, onLogout }: UserDropdownProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-64 bg-bg-surface border border-bg-subtle rounded-xl shadow-elevated overflow-hidden animate-scale-in origin-top-right z-50">
+        <div className="absolute right-0 mt-2 w-64 bg-bg-muted border border-bg-subtle rounded-xl shadow-elevated overflow-hidden animate-scale-in origin-top-right z-50">
           {/* Header */}
           <div className="px-4 py-3 border-b border-bg-subtle">
             <p className="text-sm font-semibold text-text-primary truncate">

@@ -165,9 +165,28 @@ const en = {
   "account.orders.table.date": "Date",
   "account.orders.track": "Track",
   "account.tab.creations": "My Creations",
+  "account.tab.creations.desc": "3D model gallery",
   "account.tab.orders": "My Orders",
+  "account.tab.orders.desc": "Order statuses",
   "account.tab.profile": "Profile",
+  "account.tab.profile.desc": "Account details",
   "account.profile.phone": "Phone",
+
+  // Create — Style
+  "create.styleSelection": "Style Selection",
+  "create.style.realistic": "Realistic",
+  "create.style.disney": "Disney / Pixar",
+  "create.style.anime": "Anime",
+  "create.style.chibi": "Chibi",
+  "create.style.realistic.desc": "True to the photo",
+  "create.style.disney.desc": "Disney animation style",
+  "create.style.anime.desc": "Japanese anime style",
+  "create.style.chibi.desc": "Cute, big-headed style",
+
+  // Create — Modifiers
+  "create.modifiers": "Style Effects",
+  "create.modifier.pixel_art": "Pixel Art",
+  "create.modifier.pixel_art.desc": "Retro 16-bit game look",
 
   // Create
   "create.title": "Create Your Figurine",
@@ -230,6 +249,7 @@ const en = {
   "create.revision.backHome": "Back to Home",
 
   // Preview errors
+  "create.preview.timedOut": "Generation took too long. Please try again.",
   "create.preview.failed": "Preview generation failed",
   "create.preview.retry": "Try Again",
   "create.preview.failedMessage": "Something went wrong. Please try uploading a different photo.",
@@ -511,6 +531,8 @@ const en = {
   "api.order.noPhoto": "No photo found",
   "api.order.noProcessableContent": "No photo or preview available for processing",
   "api.auth.unauthorized": "Unauthorized",
+  "api.turnstile.failed": "Verification failed. Please try again.",
+  "api.preview.limitReached": "You've reached the free preview limit (3). Place an order to unlock unlimited previews.",
 
   // Section Badges
   "section.howItWorks": "HOW IT WORKS",

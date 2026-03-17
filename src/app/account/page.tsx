@@ -125,9 +125,36 @@ export default function AccountPage() {
   };
 
   const tabs = [
-    { key: "creations", label: d["account.tab.creations"] },
-    { key: "orders", label: d["account.tab.orders"] },
-    { key: "profile", label: d["account.tab.profile"] },
+    {
+      key: "creations",
+      label: d["account.tab.creations"],
+      desc: d["account.tab.creations.desc"],
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+        </svg>
+      ),
+    },
+    {
+      key: "orders",
+      label: d["account.tab.orders"],
+      desc: d["account.tab.orders.desc"],
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+      ),
+    },
+    {
+      key: "profile",
+      label: d["account.tab.profile"],
+      desc: d["account.tab.profile.desc"],
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+      ),
+    },
   ];
 
   return (
@@ -145,18 +172,28 @@ export default function AccountPage() {
         </nav>
 
         {/* Tab Bar */}
-        <div className="flex border-b border-bg-subtle mb-8">
+        <div className="grid grid-cols-3 gap-3 mb-8">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => switchTab(t.key)}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+              className={`flex items-start gap-3 rounded-xl px-4 py-3 border transition-all cursor-pointer text-left ${
                 tab === t.key
-                  ? "border-green-500 text-green-500"
-                  : "border-transparent text-text-muted hover:text-text-secondary"
+                  ? "bg-green-500/10 border-green-500/30 border-l-2 border-l-green-500"
+                  : "bg-bg-surface border-bg-subtle hover:bg-bg-elevated hover:border-bg-subtle"
               }`}
             >
-              {t.label}
+              <span className={`mt-0.5 shrink-0 ${tab === t.key ? "text-green-400" : "text-text-muted"}`}>
+                {t.icon}
+              </span>
+              <span className="min-w-0">
+                <span className={`block text-sm leading-tight ${
+                  tab === t.key ? "text-text-primary font-semibold" : "text-text-muted"
+                }`}>
+                  {t.label}
+                </span>
+                <span className="block text-xs text-text-muted mt-0.5 leading-tight">{t.desc}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -248,11 +285,11 @@ export default function AccountPage() {
                             <td className="py-3 px-4 text-text-muted">{d[sizeKey] || order.figurineSize}</td>
                             <td className="py-3 px-4">
                               <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                order.status === "delivered" ? "bg-green-100 text-green-700" :
-                                order.status === "shipped" ? "bg-blue-100 text-blue-700" :
-                                order.status === "printing" ? "bg-purple-100 text-purple-700" :
-                                order.status === "rejected" ? "bg-red-100 text-red-700" :
-                                "bg-yellow-100 text-yellow-700"
+                                order.status === "delivered" ? "bg-green-500/15 text-green-400" :
+                                order.status === "shipped" ? "bg-blue-500/15 text-blue-400" :
+                                order.status === "printing" ? "bg-purple-500/15 text-purple-400" :
+                                order.status === "rejected" ? "bg-red-500/15 text-red-400" :
+                                "bg-yellow-500/15 text-yellow-400"
                               }`}>
                                 {d[statusKey] || order.status}
                               </span>
@@ -284,11 +321,11 @@ export default function AccountPage() {
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-mono font-medium text-text-primary text-sm">{order.orderNumber}</span>
                           <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            order.status === "delivered" ? "bg-green-100 text-green-700" :
-                            order.status === "shipped" ? "bg-blue-100 text-blue-700" :
-                            order.status === "printing" ? "bg-purple-100 text-purple-700" :
-                            order.status === "rejected" ? "bg-red-100 text-red-700" :
-                            "bg-yellow-100 text-yellow-700"
+                            order.status === "delivered" ? "bg-green-500/15 text-green-400" :
+                            order.status === "shipped" ? "bg-blue-500/15 text-blue-400" :
+                            order.status === "printing" ? "bg-purple-500/15 text-purple-400" :
+                            order.status === "rejected" ? "bg-red-500/15 text-red-400" :
+                            "bg-yellow-500/15 text-yellow-400"
                           }`}>
                             {d[statusKey] || order.status}
                           </span>

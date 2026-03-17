@@ -37,6 +37,7 @@
     "react-advanced-cropper": "^0.20.1",
     "react-dom": "19.2.3",
     "react-dropzone": "^15.0.0",
+    "replicate": "^1.4.0",
     "sharp": "^0.34.5",
     "soap": "^1.7.1",
     "three": "^0.183.2",

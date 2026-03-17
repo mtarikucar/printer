@@ -5,6 +5,7 @@ import { getRedisConnection } from "../connection";
 import type { PreviewGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
 import { saveFile, getPublicUrl, getFileBuffer } from "../../services/storage";
+import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../../services/style-transfer";
 import { db } from "../../db";
 import { previews } from "../../db/schema";
 import { nanoid } from "nanoid";
@@ -26,16 +27,29 @@ async function downloadFile(url: string): Promise<Buffer> {
 
 async function processJob(job: Job<PreviewGenerationJobData>) {
   const { previewId, photoKey } = job.data;
+  const style = (job.data.style || "realistic") as FigurineStyle;
+  const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
 
   try {
-    job.log("Starting Meshy preview generation...");
+    console.log(`[preview ${previewId}] Style: ${style}, modifiers: ${JSON.stringify(modifiers)}, job data:`, JSON.stringify(job.data));
+    job.log(`Starting Meshy preview generation (style: ${style}, modifiers: ${modifiers.join(",") || "none"})...`);
 
-    // Read image from disk and convert to base64 data URI
+    // Read image from disk and apply style transfer
     const imageBuffer = await getFileBuffer(photoKey);
-    const mimeType = getMimeType(photoKey);
-    const imageBase64 = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+    const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
 
-    const result = await generateWithMeshy(imageBase64);
+    // Save styled image to disk so it's accessible via URL (and viewable)
+    const styledFilename = `styled-${nanoid()}.png`;
+    const styledKey = await saveFile(styledBuffer, `previews/${previewId}`, styledFilename);
+    const styledUrl = getPublicUrl(styledKey);
+    job.log(`Styled image saved: ${styledUrl}`);
+
+    // In production, send public URL to Meshy; locally use base64 (Meshy can't reach localhost)
+    const isLocal = styledUrl.includes("localhost") || styledUrl.includes("127.0.0.1");
+    const meshyInput = isLocal
+      ? `data:image/png;base64,${styledBuffer.toString("base64")}`
+      : styledUrl;
+    const result = await generateWithMeshy(meshyInput);
 
     // Download GLB and save to local storage
     const glbBuffer = await downloadFile(result.glbUrl);

@@ -24,7 +24,7 @@ function HeroSphere() {
     );
   });
 
-  const sphereColor = useMemo(() => new THREE.Color("#4A9E68"), []);
+  const sphereColor = useMemo(() => new THREE.Color("#10B981"), []);
 
   return (
     <mesh ref={meshRef} scale={2.2}>
@@ -44,25 +44,25 @@ export function HeroModel({ className }: { className?: string }) {
   return (
     <div className={className}>
       <Canvas camera={{ position: [0, 0, 5], fov: 45 }}>
-        <color attach="background" args={["#FAF7F2"]} />
+        <color attach="background" args={["#0A0A0B"]} />
         <ambientLight intensity={0.2} />
-        {/* Green key light */}
+        {/* Emerald key light */}
         <directionalLight
           position={[5, 5, 5]}
           intensity={1.2}
-          color="#4A9E68"
+          color="#10B981"
         />
-        {/* Warm beige fill light */}
+        {/* Cool fill light */}
         <directionalLight
           position={[-5, 3, -5]}
           intensity={0.6}
-          color="#CCC2A8"
+          color="#1E293B"
         />
-        {/* Cool rim light */}
+        {/* Rim light */}
         <directionalLight
           position={[0, -3, 5]}
           intensity={0.3}
-          color="#F0EDE8"
+          color="#0A0A0B"
         />
         <HeroSphere />
       </Canvas>

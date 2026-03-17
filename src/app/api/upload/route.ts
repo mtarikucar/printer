@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { saveFile } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { verifyTurnstileToken } from "@/lib/services/turnstile";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -10,6 +11,21 @@ export async function POST(request: NextRequest) {
 
   try {
     const formData = await request.formData();
+
+    // Turnstile verification
+    const turnstileToken = formData.get("turnstileToken") as string | null;
+    const ip =
+      request.headers.get("cf-connecting-ip") ??
+      request.headers.get("x-forwarded-for") ??
+      "unknown";
+
+    if (!(await verifyTurnstileToken(turnstileToken ?? "", ip))) {
+      return NextResponse.json(
+        { error: d["api.turnstile.failed"] },
+        { status: 403 }
+      );
+    }
+
     const file = formData.get("file") as File | null;
 
     if (!file) {

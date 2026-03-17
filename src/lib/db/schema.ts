@@ -78,6 +78,13 @@ export const figurineSizeEnum = pgEnum("figurine_size", [
   "buyuk",
 ]);
 
+export const figurineStyleEnum = pgEnum("figurine_style", [
+  "realistic",
+  "disney",
+  "anime",
+  "chibi",
+]);
+
 export const previewStatusEnum = pgEnum("preview_status", [
   "generating",
   "ready",
@@ -105,6 +112,8 @@ export const previews = pgTable("previews", {
   photoKey: text("photo_key").notNull(),
   photoUrl: text("photo_url").notNull(),
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
+  style: figurineStyleEnum("style").notNull().default("realistic"),
+  modifiers: jsonb("modifiers").$type<string[]>(),
   status: previewStatusEnum("status").notNull().default("generating"),
   glbUrl: text("glb_url"),
   glbKey: text("glb_key"),
@@ -127,6 +136,8 @@ export const orders = pgTable("orders", {
   customerName: text("customer_name").notNull(),
   phone: text("phone"),
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
+  style: figurineStyleEnum("style").notNull().default("realistic"),
+  modifiers: jsonb("modifiers").$type<string[]>(),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   status: orderStatusEnum("status").notNull().default("pending_payment"),
   paytrMerchantOid: text("paytr_merchant_oid"),

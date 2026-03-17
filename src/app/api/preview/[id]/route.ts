@@ -22,6 +22,30 @@ export async function GET(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
+  // Stale "generating" detection — if older than 5 minutes, mark as failed
+  if (preview.status === "generating") {
+    const ageMs = Date.now() - new Date(preview.createdAt).getTime();
+    if (ageMs > 5 * 60 * 1000) {
+      const timedOutMessage = d["create.preview.timedOut"];
+      await db
+        .update(previews)
+        .set({
+          status: "failed",
+          errorMessage: timedOutMessage,
+          updatedAt: new Date(),
+        })
+        .where(eq(previews.id, id));
+
+      return NextResponse.json({
+        status: "failed",
+        glbUrl: preview.glbUrl,
+        errorMessage: timedOutMessage,
+        createdAt: preview.createdAt,
+        photoKey: preview.photoKey,
+      });
+    }
+  }
+
   return NextResponse.json({
     status: preview.status,
     glbUrl: preview.glbUrl,

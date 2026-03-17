@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
+import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatDateLong } from "@/lib/i18n/format";
 import type { GalleryItem } from "@/components/gallery-card";
@@ -41,7 +42,7 @@ export function GalleryModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={`relative card shadow-elevated w-full mx-4 overflow-hidden max-h-[90vh] flex flex-col animate-scale-in ${hasBoth ? "max-w-4xl" : "max-w-2xl"}`}>
+      <div className={`relative card shadow-elevated w-full mx-4 overflow-hidden h-[90vh] flex flex-col animate-scale-in ${hasBoth ? "max-w-4xl" : "max-w-2xl"}`}>
         {/* Close button */}
         <button
           onClick={onClose}
@@ -53,59 +54,34 @@ export function GalleryModal({
         </button>
 
         {hasBoth ? (
-          /* Before/After side-by-side (desktop) / stacked (mobile) */
-          <div className="flex flex-col md:flex-row">
-            {/* Original Photo */}
-            <div className="flex-1 flex flex-col">
-              <div className="px-4 pt-4 pb-2">
-                <span className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                  {d["gallery.modal.originalPhoto"]}
-                </span>
-              </div>
-              <div className="relative h-64 sm:h-80 md:h-96 bg-bg-elevated">
-                <img
-                  src={item.thumbnailUrl!}
-                  alt=""
-                  className="w-full h-full object-contain"
-                />
-              </div>
-            </div>
-
-            {/* Arrow divider */}
-            <div className="flex items-center justify-center py-2 md:py-0 md:px-2">
-              <svg
-                className="w-6 h-6 text-green-500 rotate-90 md:rotate-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-              </svg>
-            </div>
-
-            {/* 3D Figurine */}
-            <div className="flex-1 flex flex-col">
-              <div className="px-4 pt-4 pb-2 md:pt-4">
-                <span className="text-xs font-medium text-green-500 uppercase tracking-wider">
-                  {d["gallery.modal.yourFigurine"]}
-                </span>
-              </div>
-              <ModelViewer
-                url={item.glbUrl!}
-                className="w-full h-64 sm:h-80 md:h-96"
-              />
-            </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <BeforeAfterSlider
+              before={
+                <div className="w-full h-full bg-bg-elevated">
+                  <img
+                    src={item.thumbnailUrl!}
+                    alt=""
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              }
+              after={
+                <ModelViewer url={item.glbUrl!} className="w-full h-full" />
+              }
+              beforeLabel={d["gallery.modal.originalPhoto"]}
+              afterLabel={d["gallery.modal.yourFigurine"]}
+            />
           </div>
         ) : (
           /* Single view: 3D or photo fallback */
-          <>
+          <div className="flex-1 min-h-0 overflow-hidden">
             {item.glbUrl ? (
               <ModelViewer
                 url={item.glbUrl}
-                className="w-full h-80 sm:h-96 rounded-t-2xl"
+                className="w-full h-full rounded-t-2xl"
               />
             ) : item.thumbnailUrl ? (
-              <div className="w-full h-80 sm:h-96 bg-bg-elevated relative">
+              <div className="w-full h-full bg-bg-elevated relative">
                 <img
                   src={item.thumbnailUrl}
                   alt=""
@@ -113,11 +89,11 @@ export function GalleryModal({
                 />
               </div>
             ) : null}
-          </>
+          </div>
         )}
 
         {/* Info */}
-        <div className="p-6">
+        <div className="p-6 shrink-0">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold text-text-primary">

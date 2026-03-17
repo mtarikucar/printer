@@ -70,7 +70,7 @@ export function ModelViewer({
     : "w-full h-96 rounded-lg";
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       {previewMode && (
         <div className="h-1 bg-gradient-to-r from-green-500 to-green-800 rounded-t-2xl" />
       )}

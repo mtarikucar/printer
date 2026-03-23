@@ -70,6 +70,9 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "ship",
   "confirm",
   "deliver",
+  "message_whatsapp",
+  "message_email",
+  "edit",
 ]);
 
 export const figurineSizeEnum = pgEnum("figurine_size", [
@@ -214,6 +217,20 @@ export const adminActions = pgTable("admin_actions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Admin Messages (admin→customer communication log)
+export const adminMessages = pgTable("admin_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id),
+  channel: text("channel").notNull(), // "email" | "whatsapp"
+  subject: text("subject"),
+  body: text("body").notNull(),
+  templateKey: text("template_key"),
+  adminEmail: text("admin_email").notNull(),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   orders: many(orders),
@@ -237,6 +254,7 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   photos: many(orderPhotos),
   generationAttempts: many(generationAttempts),
   adminActions: many(adminActions),
+  messages: many(adminMessages),
 }));
 
 export const orderPhotosRelations = relations(orderPhotos, ({ one }) => ({
@@ -267,6 +285,13 @@ export const meshReportsRelations = relations(meshReports, ({ one }) => ({
 export const adminActionsRelations = relations(adminActions, ({ one }) => ({
   order: one(orders, {
     fields: [adminActions.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const adminMessagesRelations = relations(adminMessages, ({ one }) => ({
+  order: one(orders, {
+    fields: [adminMessages.orderId],
     references: [orders.id],
   }),
 }));

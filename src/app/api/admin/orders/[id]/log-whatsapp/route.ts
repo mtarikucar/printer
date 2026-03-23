@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { orders, adminActions } from "@/lib/db/schema";
-import { getEmailQueue } from "@/lib/queue/queues";
+import { orders, adminActions, adminMessages } from "@/lib/db/schema";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -20,7 +19,10 @@ export async function POST(
   }
 
   const { id } = await params;
-  const body = await request.json().catch(() => ({}));
+  const body = await request.json().catch(() => ({})) as {
+    body: string;
+    templateKey?: string;
+  };
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, id),
@@ -30,37 +32,18 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  if (!["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status)) {
-    return NextResponse.json(
-      { error: d["api.order.invalidStatusForReject"] },
-      { status: 400 }
-    );
-  }
-
-  await db
-    .update(orders)
-    .set({
-      status: "rejected",
-      failureReason: body.reason || d["api.order.rejectedDefault"],
-      adminNotes: body.notes,
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, id));
+  await db.insert(adminMessages).values({
+    orderId: id,
+    channel: "whatsapp",
+    body: body.body,
+    templateKey: body.templateKey,
+    adminEmail: session.user.email,
+  });
 
   await db.insert(adminActions).values({
     orderId: id,
-    action: "reject",
+    action: "message_whatsapp",
     adminEmail: session.user.email,
-    notes: body.notes,
-  });
-
-  // Email customer about refund
-  await getEmailQueue().add("refund", {
-    type: "order_refunded",
-    to: order.email,
-    orderNumber: order.orderNumber,
-    customerName: order.customerName,
-    locale,
   });
 
   return NextResponse.json({ success: true });

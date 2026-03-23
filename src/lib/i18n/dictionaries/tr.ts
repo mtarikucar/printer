@@ -467,6 +467,8 @@ const tr: Dictionary = {
   "admin.orderDetail.startingPrint": "Baskı başlatılıyor...",
   "admin.orderDetail.deliver": "Teslim Edildi",
   "admin.orderDetail.delivering": "Teslim ediliyor...",
+  "admin.orderDetail.forceReview": "İncelemeye Gönder",
+  "admin.orderDetail.forcingReview": "Gönderiliyor...",
 
   // Admin - Print Queue
   "admin.printQueue.title": "Baskı Kuyruğu",
@@ -750,6 +752,123 @@ const tr: Dictionary = {
 
   // Admin - Dashboard extras
   "admin.dashboard.giftCardsCreated": "Oluşturulan Hediye Kartları",
+  "admin.dashboard.todayOrders": "Bugünkü Siparişler",
+  "admin.dashboard.todayRevenue": "Bugünkü Gelir",
+  "admin.dashboard.delivered": "Teslim Edildi",
+  "admin.dashboard.needsAttention": "Dikkat Gerektiren",
+  "admin.dashboard.revenueTrend": "Gelir Trendi (30 Gün)",
+  "admin.dashboard.recentOrders": "Son Siparişler",
+  "admin.dashboard.viewAll": "Tümünü Gör",
+  "admin.dashboard.attentionAlerts": "Dikkat Gerektiren Siparişler",
+  "admin.dashboard.noAlerts": "Her şey yolunda! Dikkat gerektiren sipariş yok.",
+  "admin.dashboard.reviewOverdue": "24 saatten fazla incelemede",
+  "admin.dashboard.paymentOverdue": "48 saatten fazla ödeme bekliyor",
+  "admin.dashboard.failedOrder": "Oluşturma veya mesh başarısız",
+
+  // Admin - Siparişler (arama/pagination/toplu işlem)
+  "admin.orders.search": "Ara",
+  "admin.orders.searchPlaceholder": "Sipariş no, isim veya email...",
+  "admin.orders.dateFrom": "Başlangıç",
+  "admin.orders.dateTo": "Bitiş",
+  "admin.orders.prev": "Önceki",
+  "admin.orders.next": "Sonraki",
+  "admin.orders.showingRange": "{from}-{to} / {total} gösteriliyor",
+  "admin.orders.bulkApprove": "Seçilenleri Onayla",
+  "admin.orders.bulkStartPrint": "Seçilenleri Yazdır",
+  "admin.orders.selected": "{count} seçili",
+  "admin.orders.bulkSuccess": "{count} sipariş işlendi",
+  "admin.orders.table.style": "Stil",
+
+  // Admin - Sipariş Detay (gelişmiş)
+  "admin.orderDetail.timeline": "Sipariş Zaman Çizelgesi",
+  "admin.orderDetail.customerInfo": "Müşteri Bilgisi",
+  "admin.orderDetail.callCustomer": "Ara",
+  "admin.orderDetail.emailCustomer": "E-posta",
+  "admin.orderDetail.whatsappCustomer": "WhatsApp",
+  "admin.orderDetail.editOrder": "Siparişi Düzenle",
+  "admin.orderDetail.saveChanges": "Değişiklikleri Kaydet",
+  "admin.orderDetail.saving": "Kaydediliyor...",
+  "admin.orderDetail.saved": "Değişiklikler kaydedildi",
+  "admin.orderDetail.cancel": "İptal",
+  "admin.orderDetail.downloadGlb": "3D Modeli İndir",
+  "admin.orderDetail.style": "Stil",
+  "admin.orderDetail.createdAt": "Oluşturulma",
+  "admin.orderDetail.paidAt": "Ödeme",
+  "admin.orderDetail.shippedAt": "Kargolama",
+  "admin.orderDetail.giftCardAmount": "Hediye Kartı",
+  "admin.orderDetail.remaining": "Kalan",
+
+  // Admin - Mesajlaşma
+  "admin.messaging.title": "Mesaj Gönder",
+  "admin.messaging.selectTemplate": "Şablon Seç",
+  "admin.messaging.customMessage": "Özel Mesaj",
+  "admin.messaging.subject": "Konu",
+  "admin.messaging.body": "Mesaj",
+  "admin.messaging.send": "E-posta Gönder",
+  "admin.messaging.sending": "Gönderiliyor...",
+  "admin.messaging.sent": "Mesaj gönderildi!",
+  "admin.messaging.openWhatsapp": "WhatsApp Aç",
+  "admin.messaging.history": "Mesaj Geçmişi",
+  "admin.messaging.noMessages": "Henüz mesaj gönderilmedi",
+  "admin.messaging.via.email": "E-posta",
+  "admin.messaging.via.whatsapp": "WhatsApp",
+  "admin.messaging.tpl.orderUpdate": "Sipariş Güncellemesi",
+  "admin.messaging.tpl.orderUpdate.subject": "Siparişiniz hakkında güncelleme #{orderNumber}",
+  "admin.messaging.tpl.orderUpdate.body": "Merhaba {customerName},\n\n#{orderNumber} numaralı siparişiniz hakkında bir güncelleme var.\n\n",
+  "admin.messaging.tpl.paymentReminder": "Ödeme Hatırlatma",
+  "admin.messaging.tpl.paymentReminder.subject": "Ödeme hatırlatması #{orderNumber}",
+  "admin.messaging.tpl.paymentReminder.body": "Merhaba {customerName},\n\n#{orderNumber} numaralı siparişiniz ödeme onayı bekliyor. Lütfen ödemenizi tamamlayın.\n\n",
+  "admin.messaging.tpl.shippingUpdate": "Kargo Güncellemesi",
+  "admin.messaging.tpl.shippingUpdate.subject": "Kargo güncellemesi #{orderNumber}",
+  "admin.messaging.tpl.shippingUpdate.body": "Merhaba {customerName},\n\n#{orderNumber} numaralı siparişiniz kargoya verildi! Takip numarası: {trackingNumber}\n\n",
+  "admin.messaging.tpl.custom": "Özel Mesaj",
+  "admin.messaging.bodyPlaceholder": "Mesajınızı yazın...",
+  "admin.messaging.subjectPlaceholder": "E-posta konusu (isteğe bağlı)",
+
+  // Admin - Zaman çizelgesi
+  "admin.timeline.created": "Sipariş oluşturuldu",
+  "admin.timeline.paid": "Ödeme alındı",
+  "admin.timeline.generating": "AI oluşturma başladı",
+  "admin.timeline.generationDone": "AI oluşturma tamamlandı",
+  "admin.timeline.meshProcessing": "Mesh işleme başladı",
+  "admin.timeline.meshDone": "Mesh işleme tamamlandı",
+  "admin.timeline.review": "İncelemeye gönderildi",
+  "admin.timeline.approved": "Onaylandı",
+  "admin.timeline.rejected": "Reddedildi",
+  "admin.timeline.printing": "Baskı başladı",
+  "admin.timeline.shipped": "Kargoya verildi",
+  "admin.timeline.delivered": "Teslim edildi",
+  "admin.timeline.regenerated": "Yeniden oluşturuldu",
+  "admin.timeline.confirmed": "Sipariş onaylandı",
+  "admin.timeline.edited": "Sipariş düzenlendi",
+  "admin.timeline.emailSent": "E-posta gönderildi",
+  "admin.timeline.whatsappSent": "WhatsApp gönderildi",
+
+  // Admin - Layout
+  "admin.nav.reviewBadge": "{count}",
+
+  // Tekrar Sipariş
+  "account.orders.reorder": "Tekrar Sipariş",
+  "account.orders.reordering": "Sipariş oluşturuluyor...",
+  "account.orders.reorderSuccess": "Yeni sipariş oluşturuldu!",
+  "track.reorder": "Tekrar Sipariş Ver",
+  "track.reorderDesc": "Aynı ayarlarla bu figürini tekrar sipariş edin.",
+  "track.reordering": "Oluşturuluyor...",
+
+  // API - Tekrar Sipariş
+  "api.order.notReorderable": "Bu sipariş tekrar sipariş edilemez",
+  "api.order.notYourOrder": "Sipariş bulunamadı",
+
+  // API - Admin mesajlaşma
+  "api.messaging.bodyRequired": "Mesaj içeriği zorunludur",
+  "api.messaging.sendFailed": "Mesaj gönderilemedi",
+
+  // Email - Admin Özel
+  "email.adminCustom.subject": "Siparişiniz hakkında güncelleme #{orderNumber}",
+  "email.adminCustom.heading": "Merhaba {customerName},",
+  "email.adminCustom.orderNumber": "Sipariş Numarası:",
+  "email.adminCustom.trackButton": "Siparişi Takip Et",
+
   // Validators - Gift Card
   "validator.giftCard.codeRequired": "Hediye kartı kodu zorunludur",
 

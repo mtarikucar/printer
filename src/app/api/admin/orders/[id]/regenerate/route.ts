@@ -30,7 +30,7 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  if (!["review", "failed_generation", "failed_mesh", "paid"].includes(order.status)) {
+  if (!["review", "failed_generation", "failed_mesh", "paid", "generating", "processing_mesh"].includes(order.status)) {
     return NextResponse.json(
       { error: d["api.order.invalidStatusForRegenerate"] },
       { status: 400 }

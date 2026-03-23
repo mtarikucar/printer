@@ -465,6 +465,8 @@ const en = {
   "admin.orderDetail.startingPrint": "Starting print...",
   "admin.orderDetail.deliver": "Mark Delivered",
   "admin.orderDetail.delivering": "Marking delivered...",
+  "admin.orderDetail.forceReview": "Send to Review",
+  "admin.orderDetail.forcingReview": "Sending...",
 
   // Admin - Print Queue
   "admin.printQueue.title": "Print Queue",
@@ -745,6 +747,123 @@ const en = {
 
   // Admin - Dashboard extras
   "admin.dashboard.giftCardsCreated": "Gift Cards Created",
+  "admin.dashboard.todayOrders": "Today's Orders",
+  "admin.dashboard.todayRevenue": "Today's Revenue",
+  "admin.dashboard.delivered": "Delivered",
+  "admin.dashboard.needsAttention": "Needs Attention",
+  "admin.dashboard.revenueTrend": "Revenue Trend (30 Days)",
+  "admin.dashboard.recentOrders": "Recent Orders",
+  "admin.dashboard.viewAll": "View All",
+  "admin.dashboard.attentionAlerts": "Orders Needing Attention",
+  "admin.dashboard.noAlerts": "All good! No orders need attention.",
+  "admin.dashboard.reviewOverdue": "In review for over 24 hours",
+  "admin.dashboard.paymentOverdue": "Awaiting payment for over 48 hours",
+  "admin.dashboard.failedOrder": "Generation or mesh failed",
+
+  // Admin - Orders (search/pagination/bulk)
+  "admin.orders.search": "Search",
+  "admin.orders.searchPlaceholder": "Order no, name, or email...",
+  "admin.orders.dateFrom": "From",
+  "admin.orders.dateTo": "To",
+  "admin.orders.prev": "Previous",
+  "admin.orders.next": "Next",
+  "admin.orders.showingRange": "Showing {from}-{to} of {total}",
+  "admin.orders.bulkApprove": "Approve Selected",
+  "admin.orders.bulkStartPrint": "Start Printing Selected",
+  "admin.orders.selected": "{count} selected",
+  "admin.orders.bulkSuccess": "{count} orders processed",
+  "admin.orders.table.style": "Style",
+
+  // Admin - Order Detail (enhanced)
+  "admin.orderDetail.timeline": "Order Timeline",
+  "admin.orderDetail.customerInfo": "Customer Info",
+  "admin.orderDetail.callCustomer": "Call",
+  "admin.orderDetail.emailCustomer": "Email",
+  "admin.orderDetail.whatsappCustomer": "WhatsApp",
+  "admin.orderDetail.editOrder": "Edit Order",
+  "admin.orderDetail.saveChanges": "Save Changes",
+  "admin.orderDetail.saving": "Saving...",
+  "admin.orderDetail.saved": "Changes saved",
+  "admin.orderDetail.cancel": "Cancel",
+  "admin.orderDetail.downloadGlb": "Download 3D Model",
+  "admin.orderDetail.style": "Style",
+  "admin.orderDetail.createdAt": "Created",
+  "admin.orderDetail.paidAt": "Paid",
+  "admin.orderDetail.shippedAt": "Shipped",
+  "admin.orderDetail.giftCardAmount": "Gift Card",
+  "admin.orderDetail.remaining": "Remaining",
+
+  // Admin - Messaging
+  "admin.messaging.title": "Send Message",
+  "admin.messaging.selectTemplate": "Select Template",
+  "admin.messaging.customMessage": "Custom Message",
+  "admin.messaging.subject": "Subject",
+  "admin.messaging.body": "Message",
+  "admin.messaging.send": "Send Email",
+  "admin.messaging.sending": "Sending...",
+  "admin.messaging.sent": "Message sent!",
+  "admin.messaging.openWhatsapp": "Open WhatsApp",
+  "admin.messaging.history": "Message History",
+  "admin.messaging.noMessages": "No messages sent yet",
+  "admin.messaging.via.email": "Email",
+  "admin.messaging.via.whatsapp": "WhatsApp",
+  "admin.messaging.tpl.orderUpdate": "Order Update",
+  "admin.messaging.tpl.orderUpdate.subject": "Update on your order #{orderNumber}",
+  "admin.messaging.tpl.orderUpdate.body": "Hello {customerName},\n\nWe have an update regarding your order #{orderNumber}.\n\n",
+  "admin.messaging.tpl.paymentReminder": "Payment Reminder",
+  "admin.messaging.tpl.paymentReminder.subject": "Payment reminder for order #{orderNumber}",
+  "admin.messaging.tpl.paymentReminder.body": "Hello {customerName},\n\nYour order #{orderNumber} is awaiting payment confirmation. Please complete your payment to proceed.\n\n",
+  "admin.messaging.tpl.shippingUpdate": "Shipping Update",
+  "admin.messaging.tpl.shippingUpdate.subject": "Shipping update for order #{orderNumber}",
+  "admin.messaging.tpl.shippingUpdate.body": "Hello {customerName},\n\nYour order #{orderNumber} has been shipped! Tracking: {trackingNumber}\n\n",
+  "admin.messaging.tpl.custom": "Custom Message",
+  "admin.messaging.bodyPlaceholder": "Type your message...",
+  "admin.messaging.subjectPlaceholder": "Email subject (optional)",
+
+  // Admin - Timeline events
+  "admin.timeline.created": "Order created",
+  "admin.timeline.paid": "Payment received",
+  "admin.timeline.generating": "AI generation started",
+  "admin.timeline.generationDone": "AI generation completed",
+  "admin.timeline.meshProcessing": "Mesh processing started",
+  "admin.timeline.meshDone": "Mesh processing completed",
+  "admin.timeline.review": "Sent for review",
+  "admin.timeline.approved": "Approved",
+  "admin.timeline.rejected": "Rejected",
+  "admin.timeline.printing": "Printing started",
+  "admin.timeline.shipped": "Shipped",
+  "admin.timeline.delivered": "Delivered",
+  "admin.timeline.regenerated": "Regenerated",
+  "admin.timeline.confirmed": "Order confirmed",
+  "admin.timeline.edited": "Order edited",
+  "admin.timeline.emailSent": "Email sent",
+  "admin.timeline.whatsappSent": "WhatsApp sent",
+
+  // Admin - Layout
+  "admin.nav.reviewBadge": "{count}",
+
+  // Reorder
+  "account.orders.reorder": "Reorder",
+  "account.orders.reordering": "Creating order...",
+  "account.orders.reorderSuccess": "New order created!",
+  "track.reorder": "Order Again",
+  "track.reorderDesc": "Reorder this figurine with the same settings.",
+  "track.reordering": "Creating...",
+
+  // API - Reorder
+  "api.order.notReorderable": "This order cannot be reordered",
+  "api.order.notYourOrder": "Order not found",
+
+  // API - Admin messaging
+  "api.messaging.bodyRequired": "Message body is required",
+  "api.messaging.sendFailed": "Failed to send message",
+
+  // Email - Admin Custom
+  "email.adminCustom.subject": "Update on your order #{orderNumber}",
+  "email.adminCustom.heading": "Hello {customerName},",
+  "email.adminCustom.orderNumber": "Order Number:",
+  "email.adminCustom.trackButton": "Track Order",
+
   // Validators - Gift Card
   "validator.giftCard.codeRequired": "Gift card code is required",
 

@@ -296,13 +296,16 @@ export default function AccountPage() {
                             </td>
                             <td className="py-3 px-4 text-right font-mono text-text-muted">{formatCurrency(order.amountKurus, locale)}</td>
                             <td className="py-3 px-4 text-right text-text-muted">{formatDate(order.createdAt, locale)}</td>
-                            <td className="py-3 px-4 text-right">
+                            <td className="py-3 px-4 text-right space-x-2">
                               <Link
                                 href={`/track/${order.orderNumber}`}
                                 className="text-green-500 hover:text-green-600 text-xs font-medium transition-colors"
                               >
                                 {d["account.orders.track"]}
                               </Link>
+                              {(!["pending_payment", "rejected"].includes(order.status)) && (
+                                <ReorderButton orderNumber={order.orderNumber} />
+                              )}
                             </td>
                           </tr>
                         );
@@ -334,12 +337,17 @@ export default function AccountPage() {
                           <span>{d[sizeKey] || order.figurineSize} &middot; {formatCurrency(order.amountKurus, locale)}</span>
                           <span>{formatDate(order.createdAt, locale)}</span>
                         </div>
-                        <Link
-                          href={`/track/${order.orderNumber}`}
-                          className="mt-2 inline-block text-green-500 hover:text-green-600 text-xs font-medium transition-colors"
-                        >
-                          {d["account.orders.track"]} &rarr;
-                        </Link>
+                        <div className="flex items-center gap-3 mt-2">
+                          <Link
+                            href={`/track/${order.orderNumber}`}
+                            className="text-green-500 hover:text-green-600 text-xs font-medium transition-colors"
+                          >
+                            {d["account.orders.track"]} &rarr;
+                          </Link>
+                          {(!["pending_payment", "rejected"].includes(order.status)) && (
+                            <ReorderButton orderNumber={order.orderNumber} />
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -388,5 +396,41 @@ export default function AccountPage() {
         />
       )}
     </main>
+  );
+}
+
+function ReorderButton({ orderNumber }: { orderNumber: string }) {
+  const d = useDictionary();
+  const [loading, setLoading] = useState(false);
+
+  const handleReorder = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/customer/orders/${orderNumber}/reorder`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || d["common.error"]);
+        return;
+      }
+      const data = await res.json();
+      if (data.whatsappUrl) {
+        window.open(data.whatsappUrl, "_blank");
+      }
+      alert(`${d["account.orders.reorderSuccess"]} ${data.orderNumber}`);
+    } catch {
+      alert(d["common.error"]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleReorder}
+      disabled={loading}
+      className="text-blue-500 hover:text-blue-600 text-xs font-medium transition-colors disabled:text-gray-400"
+    >
+      {loading ? d["account.orders.reordering"] : d["account.orders.reorder"]}
+    </button>
   );
 }

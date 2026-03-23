@@ -33,7 +33,8 @@ export interface EmailJobData {
     | "order_approved"
     | "order_printing"
     | "order_delivered"
-    | "gift_card_received";
+    | "gift_card_received"
+    | "admin_custom";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -46,6 +47,8 @@ export interface EmailJobData {
   giftCardAmount?: number;
   giftCardMessage?: string;
   senderName?: string;
+  customSubject?: string;
+  customBody?: string;
   locale?: "en" | "tr";
 }
 

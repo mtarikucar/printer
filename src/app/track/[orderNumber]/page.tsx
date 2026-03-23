@@ -8,6 +8,42 @@ import { SiteHeader } from "@/components/site-header";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatDateLong } from "@/lib/i18n/format";
 
+function ReorderButton({ orderNumber: on }: { orderNumber: string }) {
+  const d = useDictionary();
+  const [loading, setLoading] = useState(false);
+
+  const handleReorder = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/customer/orders/${on}/reorder`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || d["common.error"]);
+        return;
+      }
+      const data = await res.json();
+      if (data.whatsappUrl) {
+        window.open(data.whatsappUrl, "_blank");
+      }
+      alert(`${d["account.orders.reorderSuccess"]} ${data.orderNumber}`);
+    } catch {
+      alert(d["common.error"]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleReorder}
+      disabled={loading}
+      className="btn-primary text-sm !py-2 !px-6"
+    >
+      {loading ? d["track.reordering"] : d["track.reorder"]}
+    </button>
+  );
+}
+
 const PUBLISH_ELIGIBLE_STATUSES = [
   "approved",
   "printing",
@@ -121,6 +157,15 @@ export default function TrackPage({
                   url={order.glbUrl}
                   className="w-full h-72 sm:h-96"
                 />
+              </div>
+            )}
+
+            {/* Reorder button */}
+            {order.status !== "pending_payment" && order.status !== "rejected" && (
+              <div className="card p-6">
+                <h2 className="text-lg font-serif text-text-primary mb-2">{d["track.reorder"]}</h2>
+                <p className="text-sm text-text-secondary mb-4">{d["track.reorderDesc"]}</p>
+                <ReorderButton orderNumber={order.orderNumber} />
               </div>
             )}
 

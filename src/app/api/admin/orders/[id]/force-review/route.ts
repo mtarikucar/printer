@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
-import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -30,37 +29,23 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  if (!["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status)) {
+  if (!["paid", "generating", "processing_mesh"].includes(order.status)) {
     return NextResponse.json(
-      { error: d["api.order.invalidStatusForReject"] },
+      { error: d["api.order.invalidStatusForRegenerate"] },
       { status: 400 }
     );
   }
 
   await db
     .update(orders)
-    .set({
-      status: "rejected",
-      failureReason: body.reason || d["api.order.rejectedDefault"],
-      adminNotes: body.notes,
-      updatedAt: new Date(),
-    })
+    .set({ status: "review", updatedAt: new Date() })
     .where(eq(orders.id, id));
 
   await db.insert(adminActions).values({
     orderId: id,
-    action: "reject",
+    action: "edit",
     adminEmail: session.user.email,
-    notes: body.notes,
-  });
-
-  // Email customer about refund
-  await getEmailQueue().add("refund", {
-    type: "order_refunded",
-    to: order.email,
-    orderNumber: order.orderNumber,
-    customerName: order.customerName,
-    locale,
+    notes: body.notes || "Manually moved to review",
   });
 
   return NextResponse.json({ success: true });

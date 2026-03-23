@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { orders, adminActions } from "@/lib/db/schema";
+import { orders, adminActions, adminMessages } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -20,7 +20,15 @@ export async function POST(
   }
 
   const { id } = await params;
-  const body = await request.json().catch(() => ({}));
+  const body = await request.json().catch(() => ({})) as {
+    subject?: string;
+    body: string;
+    templateKey?: string;
+  };
+
+  if (!body.body || body.body.trim().length === 0) {
+    return NextResponse.json({ error: "Body is required" }, { status: 400 });
+  }
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, id),
@@ -30,37 +38,30 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  if (!["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status)) {
-    return NextResponse.json(
-      { error: d["api.order.invalidStatusForReject"] },
-      { status: 400 }
-    );
-  }
-
-  await db
-    .update(orders)
-    .set({
-      status: "rejected",
-      failureReason: body.reason || d["api.order.rejectedDefault"],
-      adminNotes: body.notes,
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, id));
-
-  await db.insert(adminActions).values({
-    orderId: id,
-    action: "reject",
-    adminEmail: session.user.email,
-    notes: body.notes,
-  });
-
-  // Email customer about refund
-  await getEmailQueue().add("refund", {
-    type: "order_refunded",
+  await getEmailQueue().add("admin-custom", {
+    type: "admin_custom",
     to: order.email,
     orderNumber: order.orderNumber,
     customerName: order.customerName,
+    customSubject: body.subject,
+    customBody: body.body,
     locale,
+  });
+
+  await db.insert(adminMessages).values({
+    orderId: id,
+    channel: "email",
+    subject: body.subject,
+    body: body.body,
+    templateKey: body.templateKey,
+    adminEmail: session.user.email,
+  });
+
+  await db.insert(adminActions).values({
+    orderId: id,
+    action: "message_email",
+    adminEmail: session.user.email,
+    notes: body.subject ? `Subject: ${body.subject}` : undefined,
   });
 
   return NextResponse.json({ success: true });

@@ -25,7 +25,8 @@ interface SendEmailParams {
     | "gift_card_received"
     | "order_approved"
     | "order_printing"
-    | "order_delivered";
+    | "order_delivered"
+    | "admin_custom";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -38,6 +39,8 @@ interface SendEmailParams {
   giftCardAmount?: number;
   giftCardMessage?: string;
   senderName?: string;
+  customSubject?: string;
+  customBody?: string;
   locale?: Locale;
 }
 
@@ -210,6 +213,23 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.delivered.trackButton"]}
           </a>
+        </div>
+      `,
+    }),
+
+    admin_custom: (p) => ({
+      subject: p.customSubject || d["email.adminCustom.subject"].replace("{orderNumber}", p.orderNumber),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.adminCustom.heading"].replace("{customerName}", p.customerName)}</h1>
+          <div style="white-space: pre-wrap;">${p.customBody || ""}</div>
+          <hr style="margin: 24px 0; border: none; border-top: 1px solid #e5e7eb;" />
+          <p><strong>${d["email.adminCustom.orderNumber"]}</strong> ${p.orderNumber}</p>
+          <a href="${trackUrl(p.orderNumber)}"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 16px;">
+            ${d["email.adminCustom.trackButton"]}
+          </a>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
         </div>
       `,
     }),

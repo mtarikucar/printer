@@ -4,102 +4,210 @@ import { db } from "@/lib/db";
 import { orders, giftCards } from "@/lib/db/schema";
 import { count, sql } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
-import { getDictionary } from "@/lib/i18n/dictionaries";
-import { formatCurrency } from "@/lib/i18n/format";
+import { DashboardClient } from "./dashboard-client";
 
 async function getMetrics() {
-  const [totalOrders] = await db
-    .select({ count: count() })
-    .from(orders);
+  const [
+    [totalOrders],
+    [todayOrders],
+    [pendingReview],
+    [approved],
+    [printing],
+    [shipped],
+    [delivered],
+    [failed],
+    [revenue],
+    [todayRevenue],
+    [needsAttention],
+    [giftCardsCreated],
+  ] = await Promise.all([
+    db.select({ count: count() }).from(orders),
 
-  const [pendingReview] = await db
-    .select({ count: count() })
-    .from(orders)
-    .where(sql`${orders.status} = 'review'`);
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(sql`${orders.createdAt} >= CURRENT_DATE`),
 
-  const [approved] = await db
-    .select({ count: count() })
-    .from(orders)
-    .where(sql`${orders.status} = 'approved'`);
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(sql`${orders.status} = 'review'`),
 
-  const [printing] = await db
-    .select({ count: count() })
-    .from(orders)
-    .where(sql`${orders.status} = 'printing'`);
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(sql`${orders.status} = 'approved'`),
 
-  const [shipped] = await db
-    .select({ count: count() })
-    .from(orders)
-    .where(sql`${orders.status} = 'shipped'`);
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(sql`${orders.status} = 'printing'`),
 
-  const [failed] = await db
-    .select({ count: count() })
-    .from(orders)
-    .where(
-      sql`${orders.status} IN ('failed_generation', 'failed_mesh', 'rejected')`
-    );
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(sql`${orders.status} = 'shipped'`),
 
-  const [revenue] = await db
-    .select({ total: sql<number>`COALESCE(SUM(${orders.amountKurus}), 0)` })
-    .from(orders)
-    .where(sql`${orders.paidAt} IS NOT NULL`);
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(sql`${orders.status} = 'delivered'`),
 
-  const [giftCardsCreated] = await db
-    .select({ count: count() })
-    .from(giftCards)
-    .where(sql`${giftCards.status} != 'pending_payment'`);
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(
+        sql`${orders.status} IN ('failed_generation', 'failed_mesh', 'rejected')`
+      ),
+
+    db
+      .select({
+        total: sql<number>`COALESCE(SUM(${orders.amountKurus}), 0)`,
+      })
+      .from(orders)
+      .where(sql`${orders.paidAt} IS NOT NULL`),
+
+    db
+      .select({
+        total: sql<number>`COALESCE(SUM(${orders.amountKurus}), 0)`,
+      })
+      .from(orders)
+      .where(
+        sql`${orders.paidAt} IS NOT NULL AND ${orders.paidAt} >= CURRENT_DATE`
+      ),
+
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(
+        sql`(${orders.status} = 'review' AND ${orders.updatedAt} < NOW() - INTERVAL '24 hours')
+        OR (${orders.status} = 'pending_payment' AND ${orders.createdAt} < NOW() - INTERVAL '48 hours')
+        OR (${orders.status} IN ('failed_generation', 'failed_mesh'))`
+      ),
+
+    db
+      .select({ count: count() })
+      .from(giftCards)
+      .where(sql`${giftCards.status} != 'pending_payment'`),
+  ]);
 
   return {
     total: totalOrders.count,
+    todayOrders: todayOrders.count,
     pendingReview: pendingReview.count,
     approved: approved.count,
     printing: printing.count,
     shipped: shipped.count,
+    delivered: delivered.count,
     failed: failed.count,
+    needsAttention: needsAttention.count,
     revenueKurus: revenue.total || 0,
+    todayRevenueKurus: todayRevenue.total || 0,
     giftCardsCreated: giftCardsCreated.count,
   };
 }
 
+async function getRevenueTrend(): Promise<{ date: string; amount: number }[]> {
+  const rows = await db.execute(
+    sql`SELECT date_trunc('day', ${orders.paidAt}) as day, SUM(${orders.amountKurus}) as total
+        FROM ${orders}
+        WHERE ${orders.paidAt} >= NOW() - INTERVAL '30 days'
+        GROUP BY day
+        ORDER BY day`
+  );
+
+  return (rows.rows as { day: string; total: string }[]).map((r) => ({
+    date: new Date(r.day).toISOString(),
+    amount: Number(r.total),
+  }));
+}
+
+async function getRecentOrders() {
+  const rows = await db.query.orders.findMany({
+    orderBy: (o, { desc }) => [desc(o.createdAt)],
+    limit: 5,
+    columns: {
+      id: true,
+      orderNumber: true,
+      customerName: true,
+      status: true,
+      createdAt: true,
+      amountKurus: true,
+    },
+  });
+
+  return rows.map((r) => ({
+    id: r.id,
+    orderNumber: r.orderNumber,
+    customerName: r.customerName,
+    status: r.status,
+    createdAt: r.createdAt.toISOString(),
+    amountKurus: r.amountKurus,
+  }));
+}
+
+async function getAttentionOrders() {
+  const rows = await db.query.orders.findMany({
+    where: (o, { or, and, lt, inArray }) =>
+      or(
+        and(
+          sql`${o.status} = 'review'`,
+          lt(o.updatedAt, sql`NOW() - INTERVAL '24 hours'`)
+        ),
+        and(
+          sql`${o.status} = 'pending_payment'`,
+          lt(o.createdAt, sql`NOW() - INTERVAL '48 hours'`)
+        ),
+        inArray(o.status, ["failed_generation", "failed_mesh"])
+      ),
+    orderBy: (o, { desc }) => [desc(o.updatedAt)],
+    columns: {
+      id: true,
+      orderNumber: true,
+      customerName: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return rows.map((r) => {
+    let reason: string;
+    if (r.status === "review") {
+      reason = "reviewOverdue";
+    } else if (r.status === "pending_payment") {
+      reason = "paymentOverdue";
+    } else {
+      reason = "failedOrder";
+    }
+    return {
+      id: r.id,
+      orderNumber: r.orderNumber,
+      customerName: r.customerName,
+      status: r.status,
+      reason,
+    };
+  });
+}
+
 export default async function AdminDashboardPage() {
   const locale = await getLocale();
-  const d = getDictionary(locale);
-  const metrics = await getMetrics();
 
-  const cards = [
-    { label: d["admin.dashboard.totalOrders"], value: metrics.total, color: "bg-blue-500" },
-    { label: d["admin.dashboard.pendingReview"], value: metrics.pendingReview, color: "bg-yellow-500" },
-    { label: d["admin.dashboard.approved"], value: metrics.approved, color: "bg-green-500" },
-    { label: d["admin.dashboard.printing"], value: metrics.printing, color: "bg-purple-500" },
-    { label: d["admin.dashboard.shipped"], value: metrics.shipped, color: "bg-emerald-500" },
-    { label: d["admin.dashboard.failedRejected"], value: metrics.failed, color: "bg-red-500" },
-    { label: d["admin.dashboard.giftCardsCreated"], value: metrics.giftCardsCreated, color: "bg-pink-500" },
-  ];
+  const [metrics, revenueTrend, recentOrders, attentionOrders] =
+    await Promise.all([
+      getMetrics(),
+      getRevenueTrend(),
+      getRecentOrders(),
+      getAttentionOrders(),
+    ]);
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold text-gray-900">{d["admin.dashboard.title"]}</h1>
-      <p className="text-gray-500 mt-1">{d["admin.dashboard.subtitle"]}</p>
-
-      <div className="mt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {cards.map((card) => (
-          <div key={card.label} className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className={`w-3 h-3 rounded-full ${card.color} mb-3`} />
-            <p className="text-2xl font-bold text-gray-900">{card.value}</p>
-            <p className="text-sm text-gray-500">{card.label}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-8">
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900">{d["admin.dashboard.revenue"]}</h2>
-          <p className="text-3xl font-bold text-gray-900 mt-2">
-            {formatCurrency(metrics.revenueKurus, locale)}
-          </p>
-          <p className="text-sm text-gray-500 mt-1">{d["admin.dashboard.revenueSubtitle"]}</p>
-        </div>
-      </div>
-    </div>
+    <DashboardClient
+      metrics={metrics}
+      revenueTrend={revenueTrend}
+      recentOrders={recentOrders}
+      attentionOrders={attentionOrders}
+      locale={locale}
+    />
   );
 }

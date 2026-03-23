@@ -141,6 +141,14 @@ export function AccountGalleryModal({
                 >
                   {d["account.gallery.trackOrder"]}
                 </Link>
+                {preview.glbUrl && (
+                  <Link
+                    href={`/create?previewId=${preview.id}`}
+                    className="btn-primary flex-1 !block text-center text-sm"
+                  >
+                    {d["account.orders.reorder"]}
+                  </Link>
+                )}
                 <Link
                   href="/create"
                   className="btn-secondary flex-1 !block text-center text-sm"

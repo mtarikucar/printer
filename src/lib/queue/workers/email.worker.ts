@@ -4,9 +4,19 @@ import type { EmailJobData } from "../queues";
 import { sendEmail } from "../../services/email";
 
 async function processJob(job: Job<EmailJobData>) {
-  const { type, to, orderNumber, customerName, trackingNumber, locale } = job.data;
+  const {
+    type, to, orderNumber, customerName, trackingNumber, locale,
+    adminEmail, photoUrl, glbUrl, revisionNote,
+    giftCardCode, giftCardAmount, giftCardMessage, senderName,
+    customSubject, customBody,
+  } = job.data;
 
-  await sendEmail({ type, to, orderNumber, customerName, trackingNumber, locale });
+  await sendEmail({
+    type, to, orderNumber, customerName, trackingNumber, locale,
+    adminEmail, photoUrl, glbUrl, revisionNote,
+    giftCardCode, giftCardAmount, giftCardMessage, senderName,
+    customSubject, customBody,
+  });
 
   job.log(`Sent ${type} email to ${to} for order ${orderNumber}`);
 }

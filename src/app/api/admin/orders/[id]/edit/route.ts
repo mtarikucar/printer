@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { orders, adminActions } from "@/lib/db/schema";
-import { getEmailQueue } from "@/lib/queue/queues";
+import { orders, adminActions, TurkishAddress } from "@/lib/db/schema";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -20,7 +19,10 @@ export async function POST(
   }
 
   const { id } = await params;
-  const body = await request.json().catch(() => ({}));
+  const body = await request.json().catch(() => ({})) as {
+    adminNotes?: string;
+    shippingAddress?: TurkishAddress;
+  };
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, id),
@@ -30,37 +32,31 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  if (!["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status)) {
-    return NextResponse.json(
-      { error: d["api.order.invalidStatusForReject"] },
-      { status: 400 }
-    );
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  const changedFields: string[] = [];
+
+  if (body.adminNotes !== undefined) {
+    updates.adminNotes = body.adminNotes;
+    changedFields.push("adminNotes");
   }
 
-  await db
-    .update(orders)
-    .set({
-      status: "rejected",
-      failureReason: body.reason || d["api.order.rejectedDefault"],
-      adminNotes: body.notes,
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, id));
+  if (body.shippingAddress !== undefined) {
+    updates.shippingAddress = body.shippingAddress;
+    changedFields.push("shippingAddress");
+  }
+
+  if (changedFields.length > 0) {
+    await db
+      .update(orders)
+      .set(updates)
+      .where(eq(orders.id, id));
+  }
 
   await db.insert(adminActions).values({
     orderId: id,
-    action: "reject",
+    action: "edit",
     adminEmail: session.user.email,
-    notes: body.notes,
-  });
-
-  // Email customer about refund
-  await getEmailQueue().add("refund", {
-    type: "order_refunded",
-    to: order.email,
-    orderNumber: order.orderNumber,
-    customerName: order.customerName,
-    locale,
+    notes: `Edited fields: ${changedFields.join(", ") || "none"}`,
   });
 
   return NextResponse.json({ success: true });

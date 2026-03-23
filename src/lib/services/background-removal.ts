@@ -1,7 +1,12 @@
-import { AutoModel, AutoProcessor, RawImage, type Tensor } from "@huggingface/transformers";
+import { env, AutoModel, AutoProcessor, RawImage, type Tensor } from "@huggingface/transformers";
 import sharp from "sharp";
 
 const MODEL_ID = "briaai/RMBG-1.4";
+
+// Use pre-downloaded model cache in Docker (set via TRANSFORMERS_CACHE env)
+if (process.env.TRANSFORMERS_CACHE) {
+  env.cacheDir = process.env.TRANSFORMERS_CACHE;
+}
 
 let model: any = null;
 let processor: any = null;

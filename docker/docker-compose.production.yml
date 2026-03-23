@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: printer_postgres
+    environment:
+      POSTGRES_USER: printer
+      POSTGRES_PASSWORD: printer
+      POSTGRES_DB: printer
+    volumes:
+      - printer_pgdata:/var/lib/postgresql/data
+    networks:
+      - printer_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printer"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: printer_redis
+    networks:
+      - printer_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker
+    container_name: printer_migrate
+    command: ["npx", "drizzle-kit", "push"]
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://printer:printer@postgres:5432/printer
+    networks:
+      - printer_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: app
+    container_name: printer_app
+    ports:
+      - "3005:3000"
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://printer:printer@postgres:5432/printer
+      REDIS_URL: redis://redis:6379
+      ORT_NUM_THREADS: "4"
+    volumes:
+      - printer_uploads:/app/uploads
+    networks:
+      - printer_network
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker
+    container_name: printer_worker
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://printer:printer@postgres:5432/printer
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - printer_uploads:/app/uploads
+    networks:
+      - printer_network
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  printer_pgdata:
+  printer_uploads:
+
+networks:
+  printer_network:
+    driver: bridge

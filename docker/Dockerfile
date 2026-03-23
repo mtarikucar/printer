@@ -29,12 +29,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Pre-download RMBG-1.4 model during build so it's cached in the image
-ENV HF_HOME=/app/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 RUN node --input-type=module -e " \
-  import { AutoModel, AutoProcessor } from '@huggingface/transformers'; \
+  import { env, AutoModel, AutoProcessor } from '@huggingface/transformers'; \
+  env.cacheDir = '/app/.cache/huggingface'; \
   await AutoModel.from_pretrained('briaai/RMBG-1.4', { device: 'cpu' }); \
   await AutoProcessor.from_pretrained('briaai/RMBG-1.4'); \
-  console.log('RMBG-1.4 model pre-downloaded'); \
+  console.log('RMBG-1.4 model pre-downloaded to', env.cacheDir); \
 "
 
 RUN npm run build
@@ -59,7 +60,7 @@ COPY --from=builder --chown=nextjs:nodejs \
 
 # HuggingFace model cache (pre-downloaded in builder stage)
 COPY --from=builder --chown=nextjs:nodejs /app/.cache/huggingface ./.cache/huggingface
-ENV HF_HOME=/app/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 
 USER nextjs
 

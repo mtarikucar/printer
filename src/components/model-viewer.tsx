@@ -66,7 +66,7 @@ export function ModelViewer({
   };
 
   const defaultClass = previewMode
-    ? "w-full h-[500px] rounded-2xl overflow-hidden"
+    ? "w-full h-[300px] sm:h-[400px] md:h-[500px] rounded-2xl overflow-hidden"
     : "w-full h-96 rounded-lg";
 
   return (

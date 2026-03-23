@@ -809,14 +809,14 @@ export default function CreatePage() {
 
         {/* Step 2: 3D Preview */}
         {step === 2 && previewGlbUrl && (
-          <div className="animate-fade-in">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-serif text-text-primary animate-fade-in-up">{d["create.preview.wow"]}</h2>
-              <p className="text-text-secondary mt-1 animate-fade-in-up delay-100">{d["create.preview.wow.sub"]}</p>
+          <div className="animate-fade-in pb-6">
+            <div className="text-center mb-4 sm:mb-6">
+              <h2 className="text-xl sm:text-2xl font-serif text-text-primary animate-fade-in-up">{d["create.preview.wow"]}</h2>
+              <p className="text-text-secondary mt-1 text-sm sm:text-base animate-fade-in-up delay-100">{d["create.preview.wow.sub"]}</p>
             </div>
 
             {/* Context pills */}
-            <div className="flex flex-wrap justify-center gap-3 mb-6 animate-fade-in-up delay-200">
+            <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-4 sm:mb-6 animate-fade-in-up delay-200">
               <span className="trust-pill">
                 {d["create.preview.sizeLabel"]}: {selectedSizeObj?.label} ({selectedSizeObj?.height})
               </span>
@@ -829,7 +829,7 @@ export default function CreatePage() {
               <ModelViewer url={previewGlbUrl} previewMode />
             </div>
 
-            <div className="mt-8 flex flex-col sm:flex-row gap-4 animate-fade-in-up delay-300">
+            <div className="mt-4 sm:mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4 animate-fade-in-up delay-300">
               <button
                 onClick={handleApprove}
                 className="btn-primary flex-1 text-lg !py-3.5"

@@ -30,13 +30,17 @@ COPY . .
 
 # Pre-download RMBG-1.4 model during build so it's cached in the image
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
-RUN node --input-type=module -e " \
-  import { env, AutoModel, AutoProcessor } from '@huggingface/transformers'; \
-  env.cacheDir = '/app/.cache/huggingface'; \
-  await AutoModel.from_pretrained('briaai/RMBG-1.4', { device: 'cpu' }); \
-  await AutoProcessor.from_pretrained('briaai/RMBG-1.4'); \
-  console.log('RMBG-1.4 model pre-downloaded to', env.cacheDir); \
-"
+RUN mkdir -p /app/.cache/huggingface && \
+    for i in 1 2 3; do \
+      node --input-type=module -e " \
+        import { env, AutoModel, AutoProcessor } from '@huggingface/transformers'; \
+        env.cacheDir = '/app/.cache/huggingface'; \
+        await AutoModel.from_pretrained('briaai/RMBG-1.4', { device: 'cpu' }); \
+        await AutoProcessor.from_pretrained('briaai/RMBG-1.4'); \
+        console.log('RMBG-1.4 model pre-downloaded to', env.cacheDir); \
+      " && break || echo "Attempt $i failed, retrying..." && sleep 5; \
+    done; \
+    echo "Model cache dir contents:" && ls -la /app/.cache/huggingface/ || true
 
 RUN npm run build
 

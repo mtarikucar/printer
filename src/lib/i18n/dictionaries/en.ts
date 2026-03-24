@@ -715,6 +715,8 @@ const en = {
   "admin.giftCards.title": "Gift Cards",
   "admin.giftCards.subtitle": "Create and manage gift cards",
   "admin.giftCards.createTitle": "Create Gift Card",
+  "admin.giftCards.code": "Code",
+  "admin.giftCards.codePlaceholder": "e.g. RAMAZAN100",
   "admin.giftCards.amountTL": "Amount (TL)",
   "admin.giftCards.note": "Note",
   "admin.giftCards.notePlaceholder": "Internal note (optional)",

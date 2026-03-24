@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     const amountKurus = Math.round(validated.amountTL * 100);
 
     const { card } = await createGiftCard({
+      code: validated.code || undefined,
       amountKurus,
       note: validated.note || undefined,
       recipientName: validated.recipientName || undefined,
@@ -46,6 +47,9 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     if (error.name === "ZodError") {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+    if (error?.code === "23505" && error?.constraint_name?.includes("code")) {
+      return NextResponse.json({ error: "Bu kod zaten kullanılıyor" }, { status: 409 });
     }
     console.error("Gift card creation failed:", error);
     return NextResponse.json(

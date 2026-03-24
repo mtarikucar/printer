@@ -10,6 +10,7 @@ export function generateGiftCardCode(): string {
 }
 
 interface CreateGiftCardParams {
+  code?: string;
   amountKurus: number;
   note?: string;
   recipientName?: string;
@@ -19,7 +20,7 @@ interface CreateGiftCardParams {
 }
 
 export async function createGiftCard(params: CreateGiftCardParams) {
-  const code = generateGiftCardCode();
+  const code = params.code ? params.code.toUpperCase() : generateGiftCardCode();
   const expiresAt = new Date();
   if (params.expirationDays === 0) {
     // No expiration — set far future

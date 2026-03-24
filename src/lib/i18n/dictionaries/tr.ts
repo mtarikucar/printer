@@ -437,6 +437,7 @@ const tr: Dictionary = {
   "admin.orderDetail.baseAdded": "Taban Eklendi",
   "admin.orderDetail.dimensions": "Boyut (mm)",
   "admin.orderDetail.repairsApplied": "Uygulanan Onarımlar",
+
   "admin.orderDetail.generationHistory": "Oluşturma Geçmişi",
   "admin.orderDetail.succeeded": "Başarılı",
   "admin.orderDetail.generationFailed": "Başarısız",
@@ -720,6 +721,8 @@ const tr: Dictionary = {
   "admin.giftCards.title": "Hediye Kartları",
   "admin.giftCards.subtitle": "Hediye kartları oluşturun ve yönetin",
   "admin.giftCards.createTitle": "Hediye Kartı Oluştur",
+  "admin.giftCards.code": "Kod",
+  "admin.giftCards.codePlaceholder": "ör. RAMAZAN100",
   "admin.giftCards.amountTL": "Tutar (TL)",
   "admin.giftCards.note": "Not",
   "admin.giftCards.notePlaceholder": "Dahili not (isteğe bağlı)",

@@ -5,6 +5,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 
 export function createAdminGiftCardSchema() {
   return z.object({
+    code: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_-]+$/).optional().or(z.literal("")),
     amountTL: z.number().min(1).max(100000),
     recipientName: z.string().max(100).optional().or(z.literal("")),
     recipientEmail: z.string().email().optional().or(z.literal("")),

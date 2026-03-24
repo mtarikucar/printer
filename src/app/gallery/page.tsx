@@ -38,7 +38,11 @@ export default async function GalleryPage() {
       id: true,
       publicDisplayName: true,
       figurineSize: true,
+      style: true,
+      galleryCategory: true,
+      galleryTags: true,
       publishedAt: true,
+      createdAt: true,
     },
     with: {
       photos: {
@@ -59,13 +63,17 @@ export default async function GalleryPage() {
     id: order.id,
     publicDisplayName: order.publicDisplayName,
     figurineSize: order.figurineSize,
+    style: order.style,
+    category: order.galleryCategory,
+    tags: order.galleryTags ?? [],
     publishedAt: order.publishedAt?.toISOString() ?? null,
     glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
     thumbnailUrl: order.photos[0]?.originalUrl ?? null,
   }));
 
-  const nextCursor = hasMore
-    ? items[items.length - 1]?.publishedAt ?? null
+  const lastOrder = publicOrders[11]; // 12th item (0-indexed)
+  const nextCursor = hasMore && lastOrder
+    ? (lastOrder.publishedAt?.toISOString() ?? lastOrder.createdAt.toISOString())
     : null;
 
   return (

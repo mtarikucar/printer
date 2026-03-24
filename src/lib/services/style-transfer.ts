@@ -6,11 +6,11 @@ export type StyleModifier = "pixel_art";
 
 const STYLE_PROMPTS: Record<Exclude<FigurineStyle, "realistic">, string> = {
   disney:
-    "Transform this person into a Disney Pixar 3D animated character. Keep the person's face, features, and pose exactly the same but render them in the signature Pixar animation style with smooth colorful skin, big expressive eyes, stylized proportions, and soft studio lighting. Remove the background completely and replace it with a plain white background. Only include the person, no other objects.",
+    "Reimagine this person as an adorable Disney Pixar 3D animated collectible figurine character. Use their general appearance as loose inspiration but fully transform them into a charming Pixar-style character with cute stylized proportions, big warm expressive eyes, a sweet friendly smile, smooth colorful skin, and soft studio lighting. Show the full body in a cute standing pose facing forward, like a collectible toy figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects.",
   anime:
-    "Transform this person into a Japanese anime character. Keep the person's face, features, and pose exactly the same but render them in anime cel-shading style with clean bold lines, vibrant colors, detailed anime eyes, and manga-inspired shading. Remove the background completely and replace it with a plain white background. Only include the person, no other objects.",
+    "Reimagine this person as a beautiful Japanese anime character figurine. Use their general appearance as loose inspiration but fully transform them into an authentic anime character with large detailed anime eyes, stylized colorful anime hair, clean bold cel-shading lines, vibrant colors, and manga-inspired proportions. Show the full body in a confident standing pose facing forward, like an anime figure collectible. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects.",
   chibi:
-    "Transform this person into a chibi character. Keep the person's recognizable facial features but render them in cute chibi style with an oversized head, tiny body, big round kawaii eyes, and adorable proportions. Remove the background completely and replace it with a plain white background. Only include the character, no other objects.",
+    "Reimagine this person as an extremely cute chibi figurine character. Use their general appearance as loose inspiration but prioritize maximum cuteness — an oversized round head taking up nearly half the body, a tiny adorable body, big sparkling kawaii eyes, a sweet little smile, and irresistibly charming proportions. Show the full body in an adorable standing pose facing forward, like a chibi collectible figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects.",
 };
 
 const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
@@ -28,7 +28,7 @@ function buildPrompt(style: FigurineStyle, modifiers: StyleModifier[]): string |
   if (style === "realistic" && hasModifiers) {
     // Only modifier prompt, applied to the realistic photo
     const modifierSuffix = modifiers.map((m) => MODIFIER_PROMPTS[m]).join(" ");
-    return `Transform this photo: ${modifierSuffix} Keep the person's face, features, and pose exactly the same. Remove the background completely and replace it with a plain white background. Only include the person, no other objects.`;
+    return `Transform this photo: ${modifierSuffix} Show the full body in a standing pose facing forward. Remove the background completely and replace it with a plain white background. Only include the person, no other objects.`;
   }
 
   const basePrompt = STYLE_PROMPTS[style as Exclude<FigurineStyle, "realistic">];

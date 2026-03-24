@@ -1,16 +1,32 @@
 "use client";
 
-import Image from "next/image";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export interface GalleryItem {
   id: string;
   publicDisplayName: string | null;
   figurineSize: string;
+  style: string;
+  category: string | null;
+  tags: string[];
   publishedAt: string | null;
   glbUrl: string | null;
   thumbnailUrl: string | null;
 }
+
+const STYLE_BADGE_COLORS: Record<string, string> = {
+  disney: "bg-purple-100 text-purple-700 border-purple-200",
+  anime: "bg-pink-100 text-pink-700 border-pink-200",
+  chibi: "bg-orange-100 text-orange-700 border-orange-200",
+  realistic: "bg-gray-100 text-gray-600 border-gray-200",
+};
+
+const STYLE_LABELS: Record<string, string> = {
+  disney: "Disney",
+  anime: "Anime",
+  chibi: "Chibi",
+  realistic: "Realistic",
+};
 
 export function GalleryCard({
   item,
@@ -31,12 +47,11 @@ export function GalleryCard({
     >
       <div className="aspect-square bg-bg-elevated relative overflow-hidden">
         {item.thumbnailUrl ? (
-          <Image
+          <img
             src={item.thumbnailUrl}
             alt={item.publicDisplayName || d["gallery.anonymous"]}
-            fill
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
-            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-text-muted">
@@ -55,15 +70,29 @@ export function GalleryCard({
             {d["gallery.viewModel"]}
           </span>
         </div>
-        {/* Size badge */}
-        <span className="absolute top-3 right-3 bg-bg-elevated/90 text-green-500 text-xs font-medium px-2.5 py-1 rounded-full border border-bg-subtle">
-          {sizeLabel}
-        </span>
+        {/* Badges */}
+        <div className="absolute top-3 right-3 flex gap-1.5">
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${STYLE_BADGE_COLORS[item.style] || "bg-gray-100 text-gray-600 border-gray-200"}`}>
+            {STYLE_LABELS[item.style] || item.style}
+          </span>
+          <span className="bg-bg-elevated/90 text-green-500 text-xs font-medium px-2 py-0.5 rounded-full border border-bg-subtle">
+            {sizeLabel}
+          </span>
+        </div>
       </div>
-      <div className="p-4">
+      <div className="p-3">
         <p className="text-sm font-medium text-text-primary truncate">
           {item.publicDisplayName || d["gallery.anonymous"]}
         </p>
+        {item.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {item.tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="text-[10px] text-text-muted bg-bg-elevated px-1.5 py-0.5 rounded">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );

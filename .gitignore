@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# python venv
+.venv/
+
 # backups
 backup_*.sql
 

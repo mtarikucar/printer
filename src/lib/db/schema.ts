@@ -155,6 +155,8 @@ export const orders = pgTable("orders", {
   isPublic: boolean("is_public").notNull().default(false),
   publicDisplayName: text("public_display_name"),
   publishedAt: timestamp("published_at"),
+  galleryCategory: text("gallery_category"),
+  galleryTags: jsonb("gallery_tags").$type<string[]>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

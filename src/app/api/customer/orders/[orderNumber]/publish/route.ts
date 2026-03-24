@@ -49,18 +49,39 @@ export async function POST(
     );
   }
 
-  const body = await request.json();
-  const { isPublic, displayName } = body as {
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body.isPublic !== "boolean") {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+  const { isPublic, displayName, category, tags } = body as {
     isPublic: boolean;
     displayName?: string;
+    category?: string;
+    tags?: string[];
   };
+
+  // Validate category
+  const VALID_CATEGORIES = ["character", "couple", "family", "pet", "fantasy", "funny", "custom"];
+  const validCategory = category && VALID_CATEGORIES.includes(category) ? category : null;
+
+  // Validate tags (max 5, each max 20 chars, lowercase trimmed)
+  const validTags = Array.isArray(tags)
+    ? tags
+        .filter((t): t is string => typeof t === "string")
+        .map((t) => t.trim().toLowerCase().slice(0, 20))
+        .filter((t) => t.length > 0)
+        .slice(0, 5)
+    : null;
 
   await db
     .update(orders)
     .set({
       isPublic,
       publicDisplayName: isPublic ? (displayName || null) : order.publicDisplayName,
-      publishedAt: isPublic && !order.publishedAt ? new Date() : order.publishedAt,
+      // Always set publishedAt when publishing (prevents null cursor breaking pagination)
+      publishedAt: isPublic ? new Date() : order.publishedAt,
+      galleryCategory: isPublic ? (validCategory || null) : order.galleryCategory,
+      galleryTags: isPublic ? (validTags && validTags.length > 0 ? validTags : null) : order.galleryTags,
       updatedAt: new Date(),
     })
     .where(eq(orders.id, order.id));

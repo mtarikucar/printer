@@ -6,6 +6,7 @@ import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 
 export function CreateGiftCardForm({ d }: { d: Dictionary }) {
   const router = useRouter();
+  const [code, setCode] = useState("");
   const [amountTL, setAmountTL] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [recipientEmail, setRecipientEmail] = useState("");
@@ -27,6 +28,7 @@ export function CreateGiftCardForm({ d }: { d: Dictionary }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          code: code || undefined,
           amountTL: Number(amountTL),
           recipientName: recipientName || undefined,
           recipientEmail: recipientEmail || undefined,
@@ -45,6 +47,7 @@ export function CreateGiftCardForm({ d }: { d: Dictionary }) {
 
       const data = await res.json();
       setCreatedCode(data.card.code);
+      setCode("");
       setAmountTL("");
       setRecipientName("");
       setRecipientEmail("");
@@ -86,7 +89,18 @@ export function CreateGiftCardForm({ d }: { d: Dictionary }) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{d["admin.giftCards.code"]}</label>
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
+            placeholder={d["admin.giftCards.codePlaceholder"]}
+            maxLength={30}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
+          />
+        </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">{d["admin.giftCards.amountTL"]}</label>
           <input
@@ -154,7 +168,7 @@ export function CreateGiftCardForm({ d }: { d: Dictionary }) {
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
           />
         </div>
-        <div className="sm:col-span-2 lg:col-span-6 flex items-center gap-4">
+        <div className="sm:col-span-2 lg:col-span-7 flex items-center gap-4">
           <button
             type="submit"
             disabled={submitting}

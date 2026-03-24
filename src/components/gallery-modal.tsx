@@ -113,6 +113,16 @@ export function GalleryModal({
             </div>
           </div>
 
+          {item.tags && item.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {item.tags.map((tag: string) => (
+                <span key={tag} className="text-xs text-text-muted bg-bg-elevated px-2 py-0.5 rounded-full border border-bg-subtle">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+
           <Link
             href="/create"
             className="btn-primary w-full mt-5 !block text-center"

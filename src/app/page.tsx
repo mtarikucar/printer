@@ -30,6 +30,9 @@ export default async function HomePage() {
       id: true,
       publicDisplayName: true,
       figurineSize: true,
+      style: true,
+      galleryCategory: true,
+      galleryTags: true,
       publishedAt: true,
     },
     with: {
@@ -50,6 +53,9 @@ export default async function HomePage() {
     id: order.id,
     publicDisplayName: order.publicDisplayName,
     figurineSize: order.figurineSize,
+    style: order.style,
+    category: order.galleryCategory,
+    tags: order.galleryTags ?? [],
     publishedAt: order.publishedAt?.toISOString() ?? null,
     glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
     thumbnailUrl: order.photos[0]?.originalUrl ?? null,
@@ -58,7 +64,7 @@ export default async function HomePage() {
   // Find first gallery item that has both photo + GLB for hero showcase
   const found = galleryItems.find((item) => item.thumbnailUrl && item.glbUrl);
   const heroItem = found && found.glbUrl && found.thumbnailUrl
-    ? { id: found.id, publicDisplayName: found.publicDisplayName, figurineSize: found.figurineSize, publishedAt: found.publishedAt, glbUrl: found.glbUrl, thumbnailUrl: found.thumbnailUrl }
+    ? { id: found.id, publicDisplayName: found.publicDisplayName, figurineSize: found.figurineSize, style: found.style, category: found.category, tags: found.tags, publishedAt: found.publishedAt, glbUrl: found.glbUrl, thumbnailUrl: found.thumbnailUrl }
     : null;
 
   const steps = [

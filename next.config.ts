@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  images: {
+    remotePatterns: [
+      { hostname: "localhost" },
+      { hostname: "127.0.0.1" },
+    ],
+  },
   serverExternalPackages: ["bullmq", "ioredis", "onnxruntime-node", "sharp"],
   // Turbopack handles node module resolution automatically — empty config silences the warning
   turbopack: {},

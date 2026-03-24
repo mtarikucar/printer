@@ -41,6 +41,7 @@
     "sharp": "^0.34.5",
     "soap": "^1.7.1",
     "three": "^0.183.2",
+    "three-mesh-bvh": "^0.9.9",
     "zod": "^4.3.6"
   },
   "devDependencies": {

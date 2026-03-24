@@ -27,6 +27,8 @@ interface CustomerOrder {
   createdAt: string;
   trackingNumber: string | null;
   thumbnailUrl: string | null;
+  isPublic: boolean;
+  glbUrl: string | null;
 }
 
 export default function AccountPage() {
@@ -393,6 +395,15 @@ export default function AccountPage() {
         <AccountGalleryModal
           preview={selected}
           onClose={() => setSelected(null)}
+          onPublishChanged={(previewId, newIsPublic) => {
+            setPreviews((prev) =>
+              prev.map((p) =>
+                p.id === previewId && p.order
+                  ? { ...p, order: { ...p.order, isPublic: newIsPublic } }
+                  : p
+              )
+            );
+          }}
         />
       )}
     </main>

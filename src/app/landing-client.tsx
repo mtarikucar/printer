@@ -63,7 +63,7 @@ export function LandingClient({
   steps: Step[];
   sizes: Size[];
   features: string[];
-  heroItem: { id: string; publicDisplayName: string | null; figurineSize: string; publishedAt: string | null; glbUrl: string; thumbnailUrl: string; } | null;
+  heroItem: { id: string; publicDisplayName: string | null; figurineSize: string; style: string; category: string | null; tags: string[]; publishedAt: string | null; glbUrl: string; thumbnailUrl: string; } | null;
 }) {
   return (
     <>

@@ -35,7 +35,7 @@ export default function CreatePage() {
   const d = useDictionary();
   const [photoKey, setPhotoKey] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
-  const [selectedStyle, setSelectedStyle] = useState<string>("realistic");
+  const [selectedStyle, setSelectedStyle] = useState<string>("disney");
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -90,7 +90,7 @@ export default function CreatePage() {
   ] as const;
 
   const STYLES = [
-    { key: "realistic", label: d["create.style.realistic"], desc: d["create.style.realistic.desc"], img: "/examples/realistic.png" },
+    // "realistic" temporarily removed — outputs are not print-ready
     { key: "disney",    label: d["create.style.disney"],    desc: d["create.style.disney.desc"],    img: "/examples/disney.png" },
     { key: "anime",     label: d["create.style.anime"],     desc: d["create.style.anime.desc"],     img: "/examples/anime.png" },
     { key: "chibi",     label: d["create.style.chibi"],     desc: d["create.style.chibi.desc"],     img: "/examples/chibi.png" },
@@ -287,6 +287,7 @@ export default function CreatePage() {
     }
 
     if (loggedIn === false) {
+      setSubmitting(false);
       sessionStorage.setItem(
         "createFlowState",
         JSON.stringify({ photoKey: currentPhotoKey, selectedSize, selectedStyle, selectedModifiers, step: 0 })
@@ -342,10 +343,13 @@ export default function CreatePage() {
     setPhotoKey(null);
     setSelectedFile(null);
     setIsEditing(false);
+    // Clear previewId from URL to prevent useEffect from restoring stale preview
+    router.replace("/create");
   };
 
   const handleApprove = () => {
-    if (!loggedIn) {
+    if (loggedIn === null) return; // Auth check still loading
+    if (loggedIn === false) {
       // Save state before redirecting to login
       sessionStorage.setItem(
         "createFlowState",

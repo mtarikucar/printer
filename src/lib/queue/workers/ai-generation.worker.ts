@@ -1,5 +1,5 @@
 import { Worker, Job } from "bullmq";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
 import { getMeshProcessingQueue, type AiGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
@@ -90,14 +90,13 @@ async function processJob(job: Job<AiGenerationJobData>) {
       })
       .where(eq(generationAttempts.id, attempt[0].id));
 
-    // Update order as failed
-    const currentOrder = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
+    // Update order as failed with atomic retryCount increment
     await db
       .update(orders)
       .set({
         status: "failed_generation",
         failureReason: `Meshy: ${error.message}`,
-        retryCount: (currentOrder?.retryCount ?? 0) + 1,
+        retryCount: sql`${orders.retryCount} + 1`,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));

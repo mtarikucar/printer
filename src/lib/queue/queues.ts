@@ -34,12 +34,16 @@ export interface EmailJobData {
     | "order_printing"
     | "order_delivered"
     | "gift_card_received"
-    | "admin_custom";
+    | "admin_custom"
+    | "order_assigned"
+    | "manufacturer_shipped";
   to: string;
   orderNumber: string;
   customerName: string;
   trackingNumber?: string;
   adminEmail?: string;
+  manufacturerEmail?: string;
+  companyName?: string;
   photoUrl?: string;
   glbUrl?: string;
   revisionNote?: string;

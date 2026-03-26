@@ -12,7 +12,11 @@ function signState(data: string): string {
 }
 
 export async function GET(request: NextRequest) {
-  const redirect = request.nextUrl.searchParams.get("redirect") || "/account";
+  let redirect = request.nextUrl.searchParams.get("redirect") || "/account";
+  // Prevent open redirect: only allow relative paths
+  if (!redirect.startsWith("/") || redirect.startsWith("//")) {
+    redirect = "/account";
+  }
 
   const stateData = JSON.stringify({ redirect, ts: Date.now() });
   const stateB64 = Buffer.from(stateData).toString("base64url");

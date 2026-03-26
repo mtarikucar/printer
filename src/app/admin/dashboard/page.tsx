@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
-import { orders, giftCards } from "@/lib/db/schema";
+import { orders, giftCards, manufacturers } from "@/lib/db/schema";
 import { count, sql } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { DashboardClient } from "./dashboard-client";
@@ -20,6 +20,10 @@ async function getMetrics() {
     [todayRevenue],
     [needsAttention],
     [giftCardsCreated],
+    [activeMfg],
+    [unassigned],
+    [inProduction],
+    [pendingMfg],
   ] = await Promise.all([
     db.select({ count: count() }).from(orders),
 
@@ -62,14 +66,14 @@ async function getMetrics() {
 
     db
       .select({
-        total: sql<number>`COALESCE(SUM(${orders.amountKurus}), 0)`,
+        total: sql<number>`COALESCE(SUM(${orders.amountKurus} - ${orders.giftCardAmountKurus}), 0)`,
       })
       .from(orders)
       .where(sql`${orders.paidAt} IS NOT NULL`),
 
     db
       .select({
-        total: sql<number>`COALESCE(SUM(${orders.amountKurus}), 0)`,
+        total: sql<number>`COALESCE(SUM(${orders.amountKurus} - ${orders.giftCardAmountKurus}), 0)`,
       })
       .from(orders)
       .where(
@@ -89,6 +93,34 @@ async function getMetrics() {
       .select({ count: count() })
       .from(giftCards)
       .where(sql`${giftCards.status} != 'pending_payment'`),
+
+    // Active manufacturers
+    db
+      .select({ count: count() })
+      .from(manufacturers)
+      .where(sql`${manufacturers.status} = 'active'`),
+
+    // Unassigned orders (approved but no manufacturer)
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(
+        sql`${orders.status} = 'approved' AND (${orders.manufacturerStatus} IS NULL OR ${orders.manufacturerStatus} = 'unassigned')`
+      ),
+
+    // Orders in production (manufacturer is printing)
+    db
+      .select({ count: count() })
+      .from(orders)
+      .where(
+        sql`${orders.manufacturerStatus} IN ('accepted', 'printing')`
+      ),
+
+    // Pending manufacturer approvals
+    db
+      .select({ count: count() })
+      .from(manufacturers)
+      .where(sql`${manufacturers.status} = 'pending_approval'`),
   ]);
 
   return {
@@ -104,12 +136,16 @@ async function getMetrics() {
     revenueKurus: revenue.total || 0,
     todayRevenueKurus: todayRevenue.total || 0,
     giftCardsCreated: giftCardsCreated.count,
+    activeManufacturers: activeMfg.count,
+    unassignedOrders: unassigned.count,
+    inProduction: inProduction.count,
+    pendingManufacturerApproval: pendingMfg.count,
   };
 }
 
 async function getRevenueTrend(): Promise<{ date: string; amount: number }[]> {
   const rows = await db.execute(
-    sql`SELECT date_trunc('day', ${orders.paidAt}) as day, SUM(${orders.amountKurus}) as total
+    sql`SELECT date_trunc('day', ${orders.paidAt}) as day, SUM(${orders.amountKurus} - ${orders.giftCardAmountKurus}) as total
         FROM ${orders}
         WHERE ${orders.paidAt} >= NOW() - INTERVAL '30 days'
         GROUP BY day

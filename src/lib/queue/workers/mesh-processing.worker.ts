@@ -2,7 +2,7 @@ import { Worker, Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { writeFile, readFile, unlink, mkdtemp } from "fs/promises";
+import { writeFile, readFile, rm, mkdtemp } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { getRedisConnection } from "../connection";
@@ -89,10 +89,8 @@ async function processJob(job: Job<MeshProcessingJobData>) {
 
     throw error;
   } finally {
-    // Cleanup temp files
-    await unlink(inputPath).catch(() => {});
-    await unlink(outputStlPath).catch(() => {});
-    await unlink(reportPath).catch(() => {});
+    // Cleanup entire temp directory
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 

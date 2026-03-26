@@ -39,16 +39,16 @@ export function SculptStatusBar({
   faceCount,
 }: SculptStatusBarProps) {
   return (
-    <div className="flex items-center justify-between px-3 py-1 bg-[#12121f] border-t border-white/10 text-[11px] text-white/40 shrink-0">
+    <div className="flex items-center justify-between px-3 py-1 bg-white border-t border-gray-200 text-[11px] text-gray-400 shrink-0">
       <div className="flex items-center gap-4">
         <span>
-          Brush: <span className="text-white/70">{BRUSH_LABELS[activeBrush]}</span>
+          Brush: <span className="text-gray-600">{BRUSH_LABELS[activeBrush]}</span>
         </span>
         <span>
-          Vertices: <span className="text-white/70">{formatNumber(vertexCount)}</span>
+          Vertices: <span className="text-gray-600">{formatNumber(vertexCount)}</span>
         </span>
         <span>
-          Faces: <span className="text-white/70">{formatNumber(faceCount)}</span>
+          Faces: <span className="text-gray-600">{formatNumber(faceCount)}</span>
         </span>
       </div>
       <div className="flex items-center gap-3">

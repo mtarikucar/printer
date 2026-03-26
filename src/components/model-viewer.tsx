@@ -77,7 +77,7 @@ export function ModelViewer({
       <div className={className || defaultClass}>
         <Canvas camera={{ position: [0, 2, 5], fov: 45 }}>
           {/* Warm dark background */}
-          <color attach="background" args={["#0A0A0B"]} />
+          <color attach="background" args={["#F3F4F6"]} />
           <ambientLight intensity={previewMode ? 0.4 : 0.3} />
           {/* Emerald key light */}
           <directionalLight position={[5, 5, 5]} intensity={1} color="#10B981" />

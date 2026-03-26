@@ -15,21 +15,22 @@ export async function saveFile(
   return `${subdir}/${filename}`;
 }
 
-export async function getFileBuffer(relativePath: string): Promise<Buffer> {
-  const fullPath = resolve(UPLOAD_DIR, relativePath);
-  // Prevent path traversal
-  if (!fullPath.startsWith(UPLOAD_DIR)) {
+function assertSafePath(fullPath: string): void {
+  // Ensure path is strictly within UPLOAD_DIR (prevent prefix ambiguity like /uploads-evil)
+  if (!fullPath.startsWith(UPLOAD_DIR + "/") && fullPath !== UPLOAD_DIR) {
     throw new Error("Invalid file path");
   }
+}
+
+export async function getFileBuffer(relativePath: string): Promise<Buffer> {
+  const fullPath = resolve(UPLOAD_DIR, relativePath);
+  assertSafePath(fullPath);
   return readFile(fullPath);
 }
 
 export async function deleteFile(relativePath: string): Promise<void> {
   const fullPath = resolve(UPLOAD_DIR, relativePath);
-  // Prevent path traversal
-  if (!fullPath.startsWith(UPLOAD_DIR)) {
-    throw new Error("Invalid file path");
-  }
+  assertSafePath(fullPath);
   await rm(fullPath, { force: true });
 }
 

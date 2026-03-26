@@ -73,6 +73,14 @@ export async function POST(
 
   // Save the sculpted GLB file
   const buffer = Buffer.from(await glbFile.arrayBuffer());
+
+  // Validate GLB magic bytes (glTF = 0x67 0x6C 0x54 0x46)
+  if (buffer.length < 4 || buffer[0] !== 0x67 || buffer[1] !== 0x6c || buffer[2] !== 0x54 || buffer[3] !== 0x46) {
+    return NextResponse.json(
+      { error: "Invalid GLB file" },
+      { status: 400 }
+    );
+  }
   const filename = `sculpted-${nanoid()}.glb`;
   const fileKey = await saveFile(buffer, `models/${orderId}`, filename);
   const publicUrl = getPublicUrl(fileKey);

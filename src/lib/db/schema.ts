@@ -73,6 +73,7 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "message_whatsapp",
   "message_email",
   "edit",
+  "assign_manufacturer",
 ]);
 
 export const figurineSizeEnum = pgEnum("figurine_size", [
@@ -95,6 +96,21 @@ export const previewStatusEnum = pgEnum("preview_status", [
   "approved",
   "revision_requested",
   "expired",
+]);
+
+export const manufacturerStatusEnum = pgEnum("manufacturer_status", [
+  "pending_approval",
+  "active",
+  "suspended",
+]);
+
+export const manufacturerOrderStatusEnum = pgEnum("manufacturer_order_status", [
+  "unassigned",
+  "assigned",
+  "accepted",
+  "printing",
+  "printed",
+  "shipped",
 ]);
 
 export const users = pgTable("users", {
@@ -157,6 +173,11 @@ export const orders = pgTable("orders", {
   publishedAt: timestamp("published_at"),
   galleryCategory: text("gallery_category"),
   galleryTags: jsonb("gallery_tags").$type<string[]>(),
+  manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id),
+  manufacturerStatus: manufacturerOrderStatusEnum("manufacturer_status"),
+  assignedToManufacturerAt: timestamp("assigned_to_manufacturer_at"),
+  manufacturerAcceptedAt: timestamp("manufacturer_accepted_at"),
+  manufacturerPrintedAt: timestamp("manufacturer_printed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -233,6 +254,31 @@ export const adminMessages = pgTable("admin_messages", {
   sentAt: timestamp("sent_at").notNull().defaultNow(),
 });
 
+// Manufacturers
+export const manufacturers = pgTable("manufacturers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  companyName: text("company_name").notNull(),
+  contactPerson: text("contact_person").notNull(),
+  phone: text("phone").notNull(),
+  address: jsonb("address").$type<TurkishAddress>(),
+  capabilities: jsonb("capabilities").$type<string[]>(),
+  status: manufacturerStatusEnum("status").notNull().default("pending_approval"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const manufacturerActions = pgTable("manufacturer_actions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  manufacturerId: uuid("manufacturer_id").notNull().references(() => manufacturers.id),
+  action: text("action").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   orders: many(orders),
@@ -257,6 +303,11 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   generationAttempts: many(generationAttempts),
   adminActions: many(adminActions),
   messages: many(adminMessages),
+  manufacturer: one(manufacturers, {
+    fields: [orders.manufacturerId],
+    references: [manufacturers.id],
+  }),
+  manufacturerActions: many(manufacturerActions),
 }));
 
 export const orderPhotosRelations = relations(orderPhotos, ({ one }) => ({
@@ -295,6 +346,22 @@ export const adminMessagesRelations = relations(adminMessages, ({ one }) => ({
   order: one(orders, {
     fields: [adminMessages.orderId],
     references: [orders.id],
+  }),
+}));
+
+export const manufacturersRelations = relations(manufacturers, ({ many }) => ({
+  orders: many(orders),
+  actions: many(manufacturerActions),
+}));
+
+export const manufacturerActionsRelations = relations(manufacturerActions, ({ one }) => ({
+  order: one(orders, {
+    fields: [manufacturerActions.orderId],
+    references: [orders.id],
+  }),
+  manufacturer: one(manufacturers, {
+    fields: [manufacturerActions.manufacturerId],
+    references: [manufacturers.id],
   }),
 }));
 

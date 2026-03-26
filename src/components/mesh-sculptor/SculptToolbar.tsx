@@ -68,11 +68,11 @@ export function SculptToolbar({
   onClose,
 }: SculptToolbarProps) {
   return (
-    <div className="flex items-center gap-1 px-3 py-1.5 bg-[#12121f] border-b border-white/10 overflow-x-auto shrink-0">
+    <div className="flex items-center gap-1 px-3 py-1.5 bg-white border-b border-gray-200 overflow-x-auto shrink-0">
       {/* Brush groups */}
       {BRUSH_GROUPS.map((group) => (
         <div key={group.label} className="flex items-center gap-0.5">
-          <span className="text-[10px] text-white/30 px-1 select-none">{group.label}</span>
+          <span className="text-[10px] text-gray-400 px-1 select-none">{group.label}</span>
           {group.brushes.map((b) => (
             <button
               key={b.type}
@@ -81,13 +81,13 @@ export function SculptToolbar({
               className={`px-2 py-1 text-xs rounded transition-colors ${
                 activeBrush === b.type
                   ? "bg-emerald-600 text-white"
-                  : "text-white/60 hover:bg-white/10 hover:text-white"
+                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
               }`}
             >
               {b.name}
             </button>
           ))}
-          <div className="w-px h-5 bg-white/10 mx-1" />
+          <div className="w-px h-5 bg-gray-200 mx-1" />
         </div>
       ))}
 
@@ -96,7 +96,7 @@ export function SculptToolbar({
 
       {/* Symmetry */}
       <div className="flex items-center gap-0.5">
-        <span className="text-[10px] text-white/30 px-1 select-none">Symmetry</span>
+        <span className="text-[10px] text-gray-400 px-1 select-none">Symmetry</span>
         {(["x", "y", "z"] as const).map((axis) => (
           <button
             key={axis}
@@ -105,7 +105,7 @@ export function SculptToolbar({
             className={`w-6 h-6 text-xs font-bold rounded transition-colors ${
               symmetry[axis]
                 ? "bg-blue-600 text-white"
-                : "text-white/40 hover:bg-white/10 hover:text-white"
+                : "text-gray-400 hover:bg-gray-100 hover:text-gray-900"
             }`}
           >
             {axis.toUpperCase()}
@@ -113,7 +113,7 @@ export function SculptToolbar({
         ))}
       </div>
 
-      <div className="w-px h-5 bg-white/10 mx-1" />
+      <div className="w-px h-5 bg-gray-200 mx-1" />
 
       {/* Wireframe */}
       <button
@@ -122,7 +122,7 @@ export function SculptToolbar({
         className={`px-2 py-1 text-xs rounded transition-colors ${
           wireframe
             ? "bg-purple-600 text-white"
-            : "text-white/60 hover:bg-white/10 hover:text-white"
+            : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
         }`}
       >
         Wire
@@ -132,12 +132,12 @@ export function SculptToolbar({
       <button
         onClick={onFrame}
         title="Frame model (F)"
-        className="px-2 py-1 text-xs rounded text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+        className="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors"
       >
         Frame
       </button>
 
-      <div className="w-px h-5 bg-white/10 mx-1" />
+      <div className="w-px h-5 bg-gray-200 mx-1" />
 
       {/* Close */}
       <button

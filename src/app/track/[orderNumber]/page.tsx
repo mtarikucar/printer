@@ -23,9 +23,9 @@ function ReorderButton({ orderNumber: on }: { orderNumber: string }) {
       }
       const data = await res.json();
       if (data.whatsappUrl) {
-        window.open(data.whatsappUrl, "_blank");
+        // Use location.href instead of window.open to avoid popup blockers on mobile
+        window.location.href = data.whatsappUrl;
       }
-      alert(`${d["account.orders.reorderSuccess"]} ${data.orderNumber}`);
     } catch {
       alert(d["common.error"]);
     } finally {
@@ -77,6 +77,8 @@ export default function TrackPage({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let isInitialLoad = true;
+
     async function fetchOrder() {
       try {
         const res = await fetch(`/api/track/${orderNumber}`);
@@ -85,10 +87,17 @@ export default function TrackPage({
           throw new Error(d["track.orderLoadFailed"]);
         }
         setOrder(await res.json());
+        setError(null);
       } catch (err: any) {
-        setError(err.message);
+        // Only show error on initial load; silently ignore transient polling failures
+        if (isInitialLoad) {
+          setError(err.message);
+        }
       } finally {
-        setLoading(false);
+        if (isInitialLoad) {
+          setLoading(false);
+          isInitialLoad = false;
+        }
       }
     }
     fetchOrder();

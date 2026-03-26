@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, desc, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, desc, lt, sql, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, generationAttempts } from "@/lib/db/schema";
 
@@ -24,7 +24,24 @@ export async function GET(request: NextRequest) {
   ];
 
   if (cursor) {
-    conditions.push(lt(orders.publishedAt, new Date(cursor)));
+    // Compound cursor: "timestamp|id" for deterministic pagination
+    const [cursorTs, cursorId] = cursor.split("|");
+    if (cursorTs && cursorId) {
+      const cursorDate = new Date(cursorTs);
+      if (isNaN(cursorDate.getTime())) {
+        return NextResponse.json({ items: [], nextCursor: null });
+      }
+      conditions.push(
+        sql`(${orders.publishedAt}, ${orders.id}) < (${cursorDate}, ${cursorId})`
+      );
+    } else {
+      // Fallback for legacy single-value cursors
+      const cursorDate = new Date(cursor);
+      if (isNaN(cursorDate.getTime())) {
+        return NextResponse.json({ items: [], nextCursor: null });
+      }
+      conditions.push(lt(orders.publishedAt, cursorDate));
+    }
   }
 
   if (styleFilter && ["realistic", "disney", "anime", "chibi"].includes(styleFilter)) {
@@ -82,7 +99,7 @@ export async function GET(request: NextRequest) {
 
   const lastOrder = publicOrders[PAGE_SIZE - 1];
   const nextCursor = hasMore && lastOrder
-    ? (lastOrder.publishedAt?.toISOString() ?? lastOrder.createdAt.toISOString())
+    ? `${(lastOrder.publishedAt ?? lastOrder.createdAt).toISOString()}|${lastOrder.id}`
     : null;
 
   return NextResponse.json({ items, nextCursor });

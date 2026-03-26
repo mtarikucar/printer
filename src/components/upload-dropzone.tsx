@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
@@ -19,6 +19,13 @@ export function UploadDropzone({
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+
+  // Revoke blob URL on cleanup to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {

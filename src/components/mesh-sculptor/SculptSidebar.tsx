@@ -26,14 +26,14 @@ export function SculptSidebar({
   onSave,
 }: SculptSidebarProps) {
   return (
-    <div className="w-56 bg-[#12121f] border-l border-white/10 flex flex-col shrink-0 overflow-y-auto">
+    <div className="w-56 bg-white border-l border-gray-200 flex flex-col shrink-0 overflow-y-auto">
       {/* Brush Settings */}
-      <div className="p-3 border-b border-white/10">
-        <h3 className="text-[10px] uppercase tracking-wider text-white/40 mb-3">Brush Settings</h3>
+      <div className="p-3 border-b border-gray-200">
+        <h3 className="text-[10px] uppercase tracking-wider text-gray-400 mb-3">Brush Settings</h3>
 
         {/* Size */}
         <div className="mb-3">
-          <div className="flex justify-between text-xs text-white/60 mb-1">
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
             <span>Size</span>
             <span>{brushSize.toFixed(2)}</span>
           </div>
@@ -44,18 +44,18 @@ export function SculptSidebar({
             step="0.01"
             value={brushSize}
             onChange={(e) => onSizeChange(parseFloat(e.target.value))}
-            className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer
+            className="w-full h-1 bg-gray-200 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
               [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
           />
-          <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
+          <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
             <span>[ / ]</span>
           </div>
         </div>
 
         {/* Strength */}
         <div>
-          <div className="flex justify-between text-xs text-white/60 mb-1">
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
             <span>Strength</span>
             <span>{(brushStrength * 100).toFixed(0)}%</span>
           </div>
@@ -66,7 +66,7 @@ export function SculptSidebar({
             step="0.01"
             value={brushStrength}
             onChange={(e) => onStrengthChange(parseFloat(e.target.value))}
-            className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer
+            className="w-full h-1 bg-gray-200 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
               [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
           />
@@ -74,28 +74,28 @@ export function SculptSidebar({
       </div>
 
       {/* Modifiers hint */}
-      <div className="p-3 border-b border-white/10">
-        <h3 className="text-[10px] uppercase tracking-wider text-white/40 mb-2">Modifiers</h3>
-        <div className="space-y-1 text-[11px] text-white/50">
+      <div className="p-3 border-b border-gray-200">
+        <h3 className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Modifiers</h3>
+        <div className="space-y-1 text-[11px] text-gray-500">
           <div className="flex justify-between">
             <span>Smooth</span>
-            <kbd className="px-1 rounded bg-white/10 text-white/70 text-[10px]">Shift</kbd>
+            <kbd className="px-1 rounded bg-gray-100 text-gray-600 text-[10px]">Shift</kbd>
           </div>
           <div className="flex justify-between">
             <span>Invert</span>
-            <kbd className="px-1 rounded bg-white/10 text-white/70 text-[10px]">Ctrl</kbd>
+            <kbd className="px-1 rounded bg-gray-100 text-gray-600 text-[10px]">Ctrl</kbd>
           </div>
         </div>
       </div>
 
       {/* Undo / Redo */}
-      <div className="p-3 border-b border-white/10">
-        <h3 className="text-[10px] uppercase tracking-wider text-white/40 mb-2">History</h3>
+      <div className="p-3 border-b border-gray-200">
+        <h3 className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">History</h3>
         <div className="flex gap-2">
           <button
             onClick={onUndo}
             disabled={undoCount === 0}
-            className="flex-1 px-2 py-1.5 text-xs rounded bg-white/5 text-white/60 hover:bg-white/10
+            className="flex-1 px-2 py-1.5 text-xs rounded bg-gray-50 text-gray-500 hover:bg-gray-100
               disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             Undo ({undoCount})
@@ -103,13 +103,13 @@ export function SculptSidebar({
           <button
             onClick={onRedo}
             disabled={redoCount === 0}
-            className="flex-1 px-2 py-1.5 text-xs rounded bg-white/5 text-white/60 hover:bg-white/10
+            className="flex-1 px-2 py-1.5 text-xs rounded bg-gray-50 text-gray-500 hover:bg-gray-100
               disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             Redo ({redoCount})
           </button>
         </div>
-        <div className="text-[10px] text-white/30 mt-1 text-center">
+        <div className="text-[10px] text-gray-400 mt-1 text-center">
           Ctrl+Z / Ctrl+Shift+Z
         </div>
       </div>

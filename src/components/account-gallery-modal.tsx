@@ -20,8 +20,6 @@ export function AccountGalleryModal({
   const d = useDictionary();
   const locale = useLocale();
   const [isPublic, setIsPublic] = useState(preview.order?.isPublic ?? false);
-  const [publishSaving, setPublishSaving] = useState(false);
-  const [displayName, setDisplayName] = useState("");
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -137,12 +135,13 @@ export function AccountGalleryModal({
             </div>
           </div>
 
-          {/* Publish to gallery */}
+          {/* Publish to gallery — button opens separate modal */}
           {hasOrder && preview.glbUrl && ["approved", "printing", "shipped", "delivered"].includes(preview.order!.status) && (
-            <PublishSection
+            <PublishButton
+              isPublic={isPublic}
               orderNumber={preview.order!.orderNumber}
               previewId={preview.id}
-              initialIsPublic={isPublic}
+              initialDisplayName={preview.order!.publicDisplayName}
               onToggled={(newVal) => {
                 setIsPublic(newVal);
                 onPublishChanged?.(preview.id, newVal);
@@ -205,7 +204,7 @@ export function AccountGalleryModal({
   );
 }
 
-// ─── Publish Section ─────────────────────────────────────────
+// ─── Publish Button + Modal ──────────────────────────────────
 
 const CATEGORIES = [
   { key: "character", label: "publish.category.character" },
@@ -222,22 +221,103 @@ const SUGGESTED_TAGS = [
   "graduation", "baby", "cosplay", "gaming", "sport", "music",
 ];
 
-function PublishSection({
+function PublishButton({
+  isPublic,
   orderNumber,
   previewId,
-  initialIsPublic,
+  initialDisplayName,
   onToggled,
   d,
 }: {
+  isPublic: boolean;
   orderNumber: string;
   previewId: string;
-  initialIsPublic: boolean;
+  initialDisplayName?: string | null;
   onToggled: (isPublic: boolean) => void;
   d: Record<string, string>;
 }) {
-  const [isPublic, setIsPublic] = useState(initialIsPublic);
+  const [showModal, setShowModal] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
+
+  const handleUnpublish = async () => {
+    setUnpublishing(true);
+    try {
+      const res = await fetch(`/api/customer/orders/${orderNumber}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isPublic: false }),
+      });
+      if (res.ok) {
+        onToggled(false);
+      }
+    } finally {
+      setUnpublishing(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="mt-4 flex gap-2">
+        {isPublic ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-500/10 text-green-600 rounded-full border border-green-500/20">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              {d["publish.published"] ?? "Published"}
+            </span>
+            <button
+              disabled={unpublishing}
+              onClick={handleUnpublish}
+              className="text-xs text-orange-500 hover:text-orange-600 transition-colors disabled:opacity-50"
+            >
+              {unpublishing ? (d["common.loading"] ?? "...") : (d["publish.makePrivate"] ?? "Remove from Gallery")}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setShowModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {d["publish.makePublic"] ?? "Publish to Gallery"}
+          </button>
+        )}
+      </div>
+
+      {showModal && (
+        <PublishModal
+          orderNumber={orderNumber}
+          initialDisplayName={initialDisplayName}
+          onClose={() => setShowModal(false)}
+          onPublished={() => {
+            setShowModal(false);
+            onToggled(true);
+          }}
+          d={d}
+        />
+      )}
+    </>
+  );
+}
+
+function PublishModal({
+  orderNumber,
+  initialDisplayName,
+  onClose,
+  onPublished,
+  d,
+}: {
+  orderNumber: string;
+  initialDisplayName?: string | null;
+  onClose: () => void;
+  onPublished: () => void;
+  d: Record<string, string>;
+}) {
   const [saving, setSaving] = useState(false);
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(initialDisplayName || "");
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
@@ -261,16 +341,16 @@ function PublishSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          isPublic: !isPublic,
-          displayName: !isPublic ? displayName || undefined : undefined,
-          category: !isPublic ? category || undefined : undefined,
-          tags: !isPublic && tags.length > 0 ? tags : undefined,
+          isPublic: true,
+          displayName: displayName || undefined,
+          category: category || undefined,
+          tags: tags.length > 0 ? tags : undefined,
         }),
       });
       if (res.ok) {
-        const newVal = !isPublic;
-        setIsPublic(newVal);
-        onToggled(newVal);
+        onPublished();
+      } else {
+        alert("Failed to publish. Please try again.");
       }
     } finally {
       setSaving(false);
@@ -278,26 +358,47 @@ function PublishSection({
   };
 
   return (
-    <div className="mt-4 p-4 bg-bg-elevated rounded-xl border border-bg-subtle">
-      <div className="flex items-center gap-2 mb-3">
-        <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span className="text-sm font-medium text-text-primary">
-          {d["publish.title"] ?? "Share to Gallery"}
-        </span>
-      </div>
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="relative card shadow-elevated w-full max-w-md mx-4 p-6 animate-scale-in">
+        {/* Close */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 p-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
 
-      {!isPublic && (
-        <div className="space-y-3">
+        {/* Title */}
+        <div className="flex items-center gap-2 mb-5">
+          <svg className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h3 className="text-lg font-semibold text-text-primary">
+            {d["publish.title"] ?? "Share to Gallery"}
+          </h3>
+        </div>
+
+        <div className="space-y-4">
           {/* Display name */}
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder={d["publish.displayNamePlaceholder"] ?? "Display name (optional)"}
-            className="input-base text-sm"
-          />
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1.5">
+              {d["publish.displayNameLabel"] ?? "Display Name"}
+            </label>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={d["publish.displayNamePlaceholder"] ?? "Display name (optional)"}
+              className="input-base text-sm"
+            />
+          </div>
 
           {/* Category */}
           <div>
@@ -327,7 +428,6 @@ function PublishSection({
             <label className="block text-xs font-medium text-text-muted mb-1.5">
               {d["publish.tagsLabel"] ?? "Tags"} ({tags.length}/5)
             </label>
-            {/* Selected tags */}
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {tags.map((tag) => (
@@ -343,7 +443,6 @@ function PublishSection({
                 ))}
               </div>
             )}
-            {/* Tag input */}
             {tags.length < 5 && (
               <input
                 type="text"
@@ -359,7 +458,6 @@ function PublishSection({
                 className="input-base text-sm mb-2"
               />
             )}
-            {/* Suggested tags */}
             <div className="flex flex-wrap gap-1">
               {SUGGESTED_TAGS.filter((t) => !tags.includes(t)).slice(0, 8).map((tag) => (
                 <button
@@ -374,23 +472,24 @@ function PublishSection({
             </div>
           </div>
         </div>
-      )}
 
-      <button
-        disabled={saving}
-        onClick={handlePublish}
-        className={`w-full text-sm font-medium py-2 rounded-lg transition-colors mt-3 ${
-          isPublic
-            ? "bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20"
-            : "bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border border-blue-500/20"
-        } disabled:opacity-50`}
-      >
-        {saving
-          ? (d["common.loading"] ?? "...")
-          : isPublic
-            ? (d["publish.makePrivate"] ?? "Remove from Gallery")
-            : (d["publish.makePublic"] ?? "Publish to Gallery")}
-      </button>
+        {/* Actions */}
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="btn-secondary flex-1 text-sm"
+          >
+            {d["common.cancel"] ?? "Cancel"}
+          </button>
+          <button
+            disabled={saving}
+            onClick={handlePublish}
+            className="btn-primary flex-1 text-sm !bg-blue-500 hover:!bg-blue-600 disabled:opacity-50"
+          >
+            {saving ? (d["common.loading"] ?? "...") : (d["publish.makePublic"] ?? "Publish to Gallery")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

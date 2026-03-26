@@ -38,7 +38,7 @@ export default async function RootLayout({
   const locale = await getLocale();
 
   return (
-    <html lang={locale}>
+    <html lang={locale} style={{ colorScheme: "light" }}>
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased bg-bg-base text-text-primary`}
       >

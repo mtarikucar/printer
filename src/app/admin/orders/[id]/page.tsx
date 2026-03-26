@@ -3,8 +3,9 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, generationAttempts, meshReports, adminActions, adminMessages } from "@/lib/db/schema";
+import { orders, orderPhotos, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
+import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
 
@@ -32,10 +33,20 @@ export default async function AdminOrderDetailPage({
       messages: {
         orderBy: [desc(adminMessages.sentAt)],
       },
+      manufacturer: true,
+      manufacturerActions: {
+        orderBy: [desc(manufacturerActions.createdAt)],
+      },
     },
   });
 
   if (!order) notFound();
+
+  // Query active manufacturers for the assignment dropdown
+  const activeManufacturers = await db.query.manufacturers.findMany({
+    where: sql`${manufacturers.status} = 'active'`,
+    columns: { id: true, companyName: true },
+  });
 
   const latestGeneration = order.generationAttempts.find(
     (g) => g.status === "succeeded"
@@ -114,6 +125,24 @@ export default async function AdminOrderDetailPage({
       templateKey: m.templateKey,
       adminEmail: m.adminEmail,
       sentAt: m.sentAt.toISOString(),
+    })),
+    manufacturer: order.manufacturer ? {
+      id: order.manufacturer.id,
+      companyName: order.manufacturer.companyName,
+      contactPerson: order.manufacturer.contactPerson,
+      status: order.manufacturer.status,
+    } : null,
+    manufacturerActions: order.manufacturerActions.map(a => ({
+      id: a.id,
+      action: a.action,
+      notes: a.notes,
+      createdAt: a.createdAt.toISOString(),
+    })),
+    manufacturerStatus: order.manufacturerStatus,
+    assignedToManufacturerAt: order.assignedToManufacturerAt?.toISOString() ?? null,
+    activeManufacturers: activeManufacturers.map(m => ({
+      id: m.id,
+      companyName: m.companyName,
     })),
   };
 

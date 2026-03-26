@@ -34,6 +34,28 @@ export function OrderStatusTracker({
   const isFailed = (FAILED_STATUSES as readonly string[]).includes(status);
   const currentIndex = STEPS.findIndex((s) => s.key === status);
 
+  if (status === "pending_payment") {
+    return (
+      <div className="card bg-bg-elevated border-l-4 border-yellow-500 p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 bg-yellow-500/20 rounded-full flex items-center justify-center shrink-0">
+            <svg className="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-yellow-400">
+              {d["tracker.pendingPayment.title"]}
+            </h3>
+            <p className="text-text-secondary mt-1">
+              {d["tracker.pendingPayment.message"]}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isFailed) {
     return (
       <div className="card bg-bg-elevated border-l-4 border-amber-500 p-6">
@@ -112,7 +134,7 @@ export function OrderStatusTracker({
                 {step.label}
               </p>
               <p className="text-sm text-text-muted">{step.description}</p>
-              {step.key === "shipped" && isCurrent && trackingNumber && (
+              {step.key === "shipped" && (isCurrent || isCompleted) && trackingNumber && (
                 <div className="mt-1.5 space-y-1.5">
                   <p className="inline-flex items-center gap-1.5">
                     <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

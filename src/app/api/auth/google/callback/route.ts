@@ -14,6 +14,8 @@ const GOOGLE_CLIENT_SECRET = () => process.env.GOOGLE_CLIENT_SECRET!;
 const AUTH_SECRET = () => process.env.AUTH_SECRET!;
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL!;
 
+const STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
+
 function verifyState(state: string): { redirect: string } | null {
   const [stateB64, sig] = state.split(".");
   if (!stateB64 || !sig) return null;
@@ -23,11 +25,29 @@ function verifyState(state: string): { redirect: string } | null {
     .update(stateB64)
     .digest("hex");
 
-  if (sig !== expected) return null;
+  // Constant-time comparison
+  if (
+    sig.length !== expected.length ||
+    !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+  ) {
+    return null;
+  }
 
   try {
     const data = JSON.parse(Buffer.from(stateB64, "base64url").toString());
-    return { redirect: data.redirect || "/account" };
+
+    // Validate timestamp to prevent state replay
+    if (!data.ts || Date.now() - data.ts > STATE_MAX_AGE_MS) {
+      return null;
+    }
+
+    // Validate redirect is a safe relative path
+    const redirect = data.redirect || "/account";
+    if (!redirect.startsWith("/") || redirect.startsWith("//")) {
+      return { redirect: "/account" };
+    }
+
+    return { redirect };
   } catch {
     return null;
   }

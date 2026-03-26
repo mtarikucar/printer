@@ -15,6 +15,7 @@ export interface AccountPreview {
     status: string;
     amountKurus: number;
     isPublic: boolean;
+    publicDisplayName: string | null;
   } | null;
 }
 

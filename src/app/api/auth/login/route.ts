@@ -7,12 +7,22 @@ import {
   createSessionToken,
   setSessionCookie,
 } from "@/lib/services/customer-auth";
+import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
+
+  const ip = extractClientIp(request);
+  const rl = rateLimit(`login:${ip}`, 10, 15 * 60 * 1000); // 10 attempts per 15 min
+  if (!rl.success) {
+    return NextResponse.json(
+      { error: "Too many login attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
 
   try {
     const body = await request.json();

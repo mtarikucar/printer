@@ -1,5 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
@@ -12,12 +14,28 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
       async authorize(credentials) {
         const adminEmail = process.env.ADMIN_EMAIL;
-        const adminPassword = process.env.ADMIN_PASSWORD;
+        const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
 
-        if (
-          credentials?.email === adminEmail &&
-          credentials?.password === adminPassword
-        ) {
+        if (!adminEmail || !adminPasswordHash || !credentials?.email || !credentials?.password) {
+          return null;
+        }
+
+        const emailStr = String(credentials.email);
+        const emailMatch =
+          emailStr.length === adminEmail.length &&
+          crypto.timingSafeEqual(
+            Buffer.from(emailStr),
+            Buffer.from(adminEmail)
+          );
+
+        if (!emailMatch) return null;
+
+        const passwordMatch = await bcrypt.compare(
+          String(credentials.password),
+          adminPasswordHash
+        );
+
+        if (passwordMatch) {
           return { id: "admin", email: adminEmail, name: "Admin" };
         }
         return null;

@@ -32,6 +32,10 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
+  if (!body.body || !body.body.trim()) {
+    return NextResponse.json({ error: "Message body is required" }, { status: 400 });
+  }
+
   await db.insert(adminMessages).values({
     orderId: id,
     channel: "whatsapp",

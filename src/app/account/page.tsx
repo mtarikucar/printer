@@ -425,9 +425,9 @@ function ReorderButton({ orderNumber }: { orderNumber: string }) {
       }
       const data = await res.json();
       if (data.whatsappUrl) {
-        window.open(data.whatsappUrl, "_blank");
+        window.location.href = data.whatsappUrl;
+        return;
       }
-      alert(`${d["account.orders.reorderSuccess"]} ${data.orderNumber}`);
     } catch {
       alert(d["common.error"]);
     } finally {

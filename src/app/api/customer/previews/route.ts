@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
             status: true,
             amountKurus: true,
             isPublic: true,
+            publicDisplayName: true,
           },
           where: (o, { inArray }) =>
             inArray(o.previewId, previewIds),
@@ -86,6 +87,7 @@ export async function GET(request: NextRequest) {
             status: order.status,
             amountKurus: order.amountKurus,
             isPublic: order.isPublic,
+            publicDisplayName: order.publicDisplayName,
           }
         : null,
     };

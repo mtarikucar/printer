@@ -36,38 +36,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: d["api.auth.userNotFound"] }, { status: 401 });
     }
 
-    // Validate previewId if provided
-    if (previewId) {
-      const preview = await db.query.previews.findFirst({
-        where: and(
-          eq(previews.id, previewId),
-          or(
-            eq(previews.userId, session.userId),
-            isNull(previews.userId)
-          )
-        ),
-      });
-      if (!preview || (preview.status !== "ready" && preview.status !== "approved")) {
-        return NextResponse.json(
-          { error: d["api.order.createFailed"] },
-          { status: 400 }
-        );
-      }
-      // Assign anonymous preview to the current user and mark as approved
-      await db
-        .update(previews)
-        .set({ userId: session.userId, status: "approved", updatedAt: new Date() })
-        .where(eq(previews.id, previewId));
+    // Validate previewId format if provided (actual ownership check is inside the transaction)
+    if (previewId && typeof previewId !== "string") {
+      return NextResponse.json({ error: d["api.order.createFailed"] }, { status: 400 });
     }
 
     const orderNumber = `FIG-${nanoid(8).toUpperCase()}`;
+
+    // Validate photoKey is under the photos/ directory (not arbitrary paths)
+    if (!validated.photoKey.startsWith("photos/") || validated.photoKey.includes("..")) {
+      return NextResponse.json({ error: d["api.order.createFailed"] }, { status: 400 });
+    }
     const photoUrl = getPublicUrl(validated.photoKey);
     const amountKurus = PRICES_KURUS[validated.figurineSize];
 
     // Validate gift card if provided (quick check before transaction)
     let giftCardId: string | undefined;
-    let giftCardAmountKurus = 0;
-    let fullyCovered = false;
 
     if (validated.giftCardCode) {
       const gcResult = await validateGiftCard(validated.giftCardCode);
@@ -76,12 +60,35 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: d[errorKey] || d["common.error"] }, { status: 400 });
       }
       giftCardId = gcResult.card!.id;
-      giftCardAmountKurus = Math.min(gcResult.card!.balanceKurus, amountKurus);
-      fullyCovered = giftCardAmountKurus >= amountKurus;
     }
 
     // Create order + apply gift card atomically
-    const order = await db.transaction(async (tx) => {
+    const { order, fullyCovered, giftCardAmountKurus } = await db.transaction(async (tx) => {
+      // Validate and claim preview inside transaction to prevent race conditions
+      if (previewId) {
+        const [preview] = await tx
+          .select()
+          .from(previews)
+          .where(and(
+            eq(previews.id, previewId),
+            or(
+              eq(previews.userId, session.userId),
+              isNull(previews.userId)
+            )
+          ))
+          .for('update');
+
+        if (!preview || (preview.status !== "ready" && preview.status !== "approved")) {
+          throw new Error("INVALID_PREVIEW");
+        }
+
+        // Atomically assign preview to user
+        await tx
+          .update(previews)
+          .set({ userId: session.userId, status: "approved", updatedAt: new Date() })
+          .where(eq(previews.id, previewId));
+      }
+
       const [newOrder] = await tx
         .insert(orders)
         .values({
@@ -106,14 +113,26 @@ export async function POST(request: NextRequest) {
         originalUrl: photoUrl,
       });
 
+      let giftCardAmountKurus = 0;
+      let isCovered = false;
+
       // Apply gift card inside same transaction (row lock prevents race condition)
-      if (giftCardId && giftCardAmountKurus > 0) {
+      if (giftCardId) {
         const [card] = await tx
           .select()
           .from(giftCards)
           .where(eq(giftCards.id, giftCardId))
           .for('update');
-        if (!card || card.balanceKurus < giftCardAmountKurus) {
+
+        if (!card || card.balanceKurus <= 0) {
+          throw new Error("INSUFFICIENT_BALANCE");
+        }
+
+        // Re-validate card status under lock (may have changed since pre-check)
+        if (card.status === "expired" || card.status === "fully_used" || card.status === "pending_payment") {
+          throw new Error("INSUFFICIENT_BALANCE");
+        }
+        if (card.expiresAt < new Date()) {
           throw new Error("INSUFFICIENT_BALANCE");
         }
 
@@ -127,6 +146,10 @@ export async function POST(request: NextRequest) {
             throw new Error("LIMIT_REACHED");
           }
         }
+
+        // Compute amount from the locked row's actual balance
+        giftCardAmountKurus = Math.min(card.balanceKurus, amountKurus);
+        isCovered = giftCardAmountKurus >= amountKurus;
 
         const newBalance = card.balanceKurus - giftCardAmountKurus;
         const newStatus = newBalance === 0 ? "fully_used" : "partially_used";
@@ -145,22 +168,24 @@ export async function POST(request: NextRequest) {
         });
 
         await tx.update(orders).set({
-          giftCardAmountKurus: giftCardAmountKurus,
+          giftCardAmountKurus,
           updatedAt: new Date(),
         }).where(eq(orders.id, newOrder.id));
       }
 
-      return newOrder;
+      return { order: newOrder, fullyCovered: isCovered, giftCardAmountKurus };
     });
 
     // If fully covered by gift card, auto-confirm
     if (fullyCovered) {
       try {
         await confirmOrder(order.id, locale);
+        return NextResponse.json({ orderNumber, autoConfirmed: true });
       } catch (err) {
         console.error("Auto-confirm failed for order", orderNumber, err);
+        // Return success with autoConfirmed: false so frontend can show WhatsApp fallback
+        return NextResponse.json({ orderNumber, autoConfirmed: false, error: "Auto-confirm failed, please contact support" });
       }
-      return NextResponse.json({ orderNumber, autoConfirmed: true });
     }
 
     // Build WhatsApp message with remaining amount
@@ -192,6 +217,12 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     if (error.name === "ZodError") {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+    if (error.message === "INVALID_PREVIEW") {
+      return NextResponse.json(
+        { error: d["api.order.createFailed"] },
+        { status: 400 }
+      );
     }
     if (error.message === "INSUFFICIENT_BALANCE") {
       return NextResponse.json(

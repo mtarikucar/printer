@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
@@ -22,25 +22,19 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
 
-  const order = await db.query.orders.findFirst({
-    where: eq(orders.id, id),
-  });
+  // Atomic status transition
+  const [order] = await db
+    .update(orders)
+    .set({ status: "delivered", adminNotes: body.notes, updatedAt: new Date() })
+    .where(and(eq(orders.id, id), eq(orders.status, "shipped")))
+    .returning();
 
   if (!order) {
-    return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
-  }
-
-  if (order.status !== "shipped") {
     return NextResponse.json(
       { error: d["api.order.notShipped"] },
       { status: 400 }
     );
   }
-
-  await db
-    .update(orders)
-    .set({ status: "delivered", adminNotes: body.notes, updatedAt: new Date() })
-    .where(eq(orders.id, id));
 
   await db.insert(adminActions).values({
     orderId: id,

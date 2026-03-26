@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
@@ -22,22 +22,10 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
 
-  const order = await db.query.orders.findFirst({
-    where: eq(orders.id, id),
-  });
+  const rejectableStatuses = ["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"] as const;
 
-  if (!order) {
-    return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
-  }
-
-  if (!["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status)) {
-    return NextResponse.json(
-      { error: d["api.order.invalidStatusForReject"] },
-      { status: 400 }
-    );
-  }
-
-  await db
+  // Atomic status transition
+  const [order] = await db
     .update(orders)
     .set({
       status: "rejected",
@@ -45,7 +33,15 @@ export async function POST(
       adminNotes: body.notes,
       updatedAt: new Date(),
     })
-    .where(eq(orders.id, id));
+    .where(and(eq(orders.id, id), inArray(orders.status, [...rejectableStatuses])))
+    .returning();
+
+  if (!order) {
+    return NextResponse.json(
+      { error: d["api.order.invalidStatusForReject"] },
+      { status: 400 }
+    );
+  }
 
   await db.insert(adminActions).values({
     orderId: id,

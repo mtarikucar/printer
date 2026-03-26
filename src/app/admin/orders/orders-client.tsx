@@ -72,6 +72,11 @@ export function OrdersClient({
   const [bulkLoading, setBulkLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Clear selection when orders change (filter/page navigation)
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [page, filters.status, filters.q, filters.dateFrom, filters.dateTo]);
+
   const totalPages = Math.ceil(total / pageSize);
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);

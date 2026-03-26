@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
@@ -26,22 +26,8 @@ export async function POST(
     const body = await request.json();
     const validated = createShipOrderSchema(locale).parse(body);
 
-    const order = await db.query.orders.findFirst({
-      where: eq(orders.id, id),
-    });
-
-    if (!order) {
-      return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
-    }
-
-    if (order.status !== "printing") {
-      return NextResponse.json(
-        { error: d["api.order.notInPrinting"] },
-        { status: 400 }
-      );
-    }
-
-    await db
+    // Atomic status transition
+    const [order] = await db
       .update(orders)
       .set({
         status: "shipped",
@@ -49,7 +35,15 @@ export async function POST(
         shippedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(orders.id, id));
+      .where(and(eq(orders.id, id), eq(orders.status, "printing"), isNull(orders.manufacturerId)))
+      .returning();
+
+    if (!order) {
+      return NextResponse.json(
+        { error: "Order is not in printing status or is managed by a manufacturer" },
+        { status: 400 }
+      );
+    }
 
     await db.insert(adminActions).values({
       orderId: id,

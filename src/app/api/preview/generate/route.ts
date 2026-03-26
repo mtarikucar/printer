@@ -5,6 +5,7 @@ import { previews } from "@/lib/db/schema";
 import { getPreviewGenerationQueue } from "@/lib/queue/queues";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
@@ -41,9 +42,18 @@ export async function POST(request: NextRequest) {
     }
 
     const validated = generateSchema.parse(rest);
+
+    // Validate photoKey is under the photos/ directory
+    if (!validated.photoKey.startsWith("photos/") || validated.photoKey.includes("..")) {
+      return NextResponse.json(
+        { error: d["api.order.createFailed"] },
+        { status: 400 }
+      );
+    }
+
     const photoUrl = getPublicUrl(validated.photoKey);
 
-    // Preview limit: 3 for users who haven't paid
+    // Preview limit: 3 for users who haven't paid, also limit anonymous users
     if (session) {
       const hasPaidOrder = await db.query.orders.findFirst({
         where: (o, { and, eq: eq2, ne: ne2 }) =>
@@ -66,6 +76,16 @@ export async function POST(request: NextRequest) {
             { status: 429 }
           );
         }
+      }
+    } else {
+      // Anonymous users: rate limit by IP to prevent abuse
+      const anonIp = extractClientIp(request);
+      const rl = rateLimit(`preview:${anonIp}`, 3, 60 * 60 * 1000); // 3 previews per hour
+      if (!rl.success) {
+        return NextResponse.json(
+          { error: d["api.preview.limitReached"] },
+          { status: 429 }
+        );
       }
     }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
@@ -21,25 +21,21 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
 
-  const order = await db.query.orders.findFirst({
-    where: eq(orders.id, id),
-  });
+  const reviewableStatuses = ["paid", "generating", "processing_mesh"] as const;
+
+  // Atomic status transition
+  const [order] = await db
+    .update(orders)
+    .set({ status: "review", updatedAt: new Date() })
+    .where(and(eq(orders.id, id), inArray(orders.status, [...reviewableStatuses])))
+    .returning();
 
   if (!order) {
-    return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
-  }
-
-  if (!["paid", "generating", "processing_mesh"].includes(order.status)) {
     return NextResponse.json(
       { error: d["api.order.invalidStatusForRegenerate"] },
       { status: 400 }
     );
   }
-
-  await db
-    .update(orders)
-    .set({ status: "review", updatedAt: new Date() })
-    .where(eq(orders.id, id));
 
   await db.insert(adminActions).values({
     orderId: id,

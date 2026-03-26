@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { orders, adminActions } from "@/lib/db/schema";
+import { adminActions } from "@/lib/db/schema";
 import { confirmOrder } from "@/lib/services/order-confirm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -22,22 +21,17 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
 
-  const order = await db.query.orders.findFirst({
-    where: eq(orders.id, id),
-  });
-
-  if (!order) {
-    return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
+  try {
+    await confirmOrder(id, locale);
+  } catch (err: any) {
+    if (err.message?.includes("not in pending_payment")) {
+      return NextResponse.json(
+        { error: "Order is not in pending_payment status" },
+        { status: 400 }
+      );
+    }
+    throw err;
   }
-
-  if (order.status !== "pending_payment") {
-    return NextResponse.json(
-      { error: "Order is not in pending_payment status" },
-      { status: 400 }
-    );
-  }
-
-  await confirmOrder(id, locale);
 
   await db.insert(adminActions).values({
     orderId: id,

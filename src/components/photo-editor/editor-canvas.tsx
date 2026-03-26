@@ -16,7 +16,7 @@ export const EditorCanvas = forwardRef<CropperRef, EditorCanvasProps>(
     const filterStyle = useMemo(() => getFilterStyle(adjustments), [adjustments]);
 
     return (
-      <div className="relative w-full bg-black/90 rounded-lg overflow-hidden" style={{ minHeight: 300 }}>
+      <div className="relative w-full bg-gray-100 rounded-lg overflow-hidden" style={{ minHeight: 300 }}>
         {/* Apply CSS filter to cropper images for live preview */}
         <style>{`.editor-cropper img { filter: ${filterStyle}; }`}</style>
         <Cropper

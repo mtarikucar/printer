@@ -18,7 +18,7 @@ export async function verifyPassword(
 }
 
 export function createSessionToken(userId: string, email: string): string {
-  return jwt.sign({ userId, email }, JWT_SECRET(), { expiresIn: "30d" });
+  return jwt.sign({ userId, email }, JWT_SECRET(), { expiresIn: "7d" });
 }
 
 export function verifySessionToken(
@@ -41,7 +41,7 @@ export async function setSessionCookie(token: string) {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 7 * 24 * 60 * 60, // 7 days
     path: "/",
   });
 }

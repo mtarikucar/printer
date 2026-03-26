@@ -44,7 +44,7 @@ export function HeroModel({ className }: { className?: string }) {
   return (
     <div className={className}>
       <Canvas camera={{ position: [0, 0, 5], fov: 45 }}>
-        <color attach="background" args={["#0A0A0B"]} />
+        <color attach="background" args={["#F3F4F6"]} />
         <ambientLight intensity={0.2} />
         {/* Emerald key light */}
         <directionalLight

@@ -20,6 +20,10 @@ interface DashboardClientProps {
     revenueKurus: number;
     todayRevenueKurus: number;
     giftCardsCreated: number;
+    activeManufacturers: number;
+    unassignedOrders: number;
+    inProduction: number;
+    pendingManufacturerApproval: number;
   };
   revenueTrend: { date: string; amount: number }[];
   recentOrders: {
@@ -145,6 +149,44 @@ export function DashboardClient({
             <p className="text-sm text-gray-500">{card.label}</p>
           </div>
         ))}
+      </div>
+
+      {/* Manufacturing metrics */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Manufacturing</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            {
+              label: d["admin.dashboard.activeManufacturers"],
+              value: metrics.activeManufacturers,
+              color: "bg-blue-500",
+            },
+            {
+              label: d["admin.dashboard.unassignedOrders"],
+              value: metrics.unassignedOrders,
+              color: "bg-amber-500",
+            },
+            {
+              label: d["admin.dashboard.inProduction"],
+              value: metrics.inProduction,
+              color: "bg-purple-500",
+            },
+            {
+              label: d["admin.dashboard.pendingManufacturerApproval"],
+              value: metrics.pendingManufacturerApproval,
+              color: "bg-yellow-500",
+            },
+          ].map((card) => (
+            <div
+              key={card.label}
+              className="bg-white rounded-xl border border-gray-200 p-4"
+            >
+              <div className={`w-3 h-3 rounded-full ${card.color} mb-3`} />
+              <p className="text-2xl font-bold text-gray-900">{card.value}</p>
+              <p className="text-sm text-gray-500">{card.label}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Revenue summary */}

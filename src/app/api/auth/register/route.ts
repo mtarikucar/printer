@@ -8,12 +8,22 @@ import {
   createSessionToken,
   setSessionCookie,
 } from "@/lib/services/customer-auth";
+import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
+
+  const ip = extractClientIp(request);
+  const rl = rateLimit(`register:${ip}`, 5, 60 * 60 * 1000); // 5 registrations per hour
+  if (!rl.success) {
+    return NextResponse.json(
+      { error: "Too many registration attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
 
   const registerSchema = z.object({
     email: z.string().email(d["api.auth.emailInvalid"]),
@@ -32,32 +42,8 @@ export async function POST(request: NextRequest) {
     });
 
     if (existing) {
-      // Google-only user wants to add a password
-      if (existing.googleId && !existing.passwordHash) {
-        const passwordHash = await hashPassword(validated.password);
-        await db
-          .update(users)
-          .set({
-            passwordHash,
-            fullName: validated.fullName,
-            phone: validated.phone,
-            updatedAt: new Date(),
-          })
-          .where(eq(users.id, existing.id));
-
-        const token = createSessionToken(existing.id, existing.email);
-        await setSessionCookie(token);
-
-        return NextResponse.json({
-          user: {
-            id: existing.id,
-            email: existing.email,
-            fullName: validated.fullName,
-            phone: validated.phone,
-          },
-        });
-      }
-
+      // Do not allow setting password on a Google-only account via registration.
+      // The user must be logged in via Google first, then set a password from account settings.
       return NextResponse.json(
         { error: d["api.auth.emailExists"] },
         { status: 409 }

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+
+const MAX_BULK_SIZE = 50;
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -25,6 +27,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "orderIds and action are required" }, { status: 400 });
   }
 
+  if (body.orderIds.length > MAX_BULK_SIZE) {
+    return NextResponse.json(
+      { error: `Maximum ${MAX_BULK_SIZE} orders per bulk action` },
+      { status: 400 }
+    );
+  }
+
   const allOrders = await db.query.orders.findMany({
     where: inArray(orders.id, body.orderIds),
   });
@@ -32,60 +41,67 @@ export async function POST(request: NextRequest) {
   let processed = 0;
   let skipped = 0;
 
-  if (body.action === "approve") {
-    const eligible = allOrders.filter((o) => o.status === "review");
-    skipped = allOrders.length - eligible.length;
+  const requiredStatus = body.action === "approve" ? "review" : "approved";
+  const newStatus = body.action === "approve" ? "approved" : "printing";
+  const actionType = body.action === "approve" ? "approve" : "print";
+  const emailType = body.action === "approve" ? "order_approved" : "order_printing";
+  const emailJobName = body.action === "approve" ? "approved" : "printing";
 
+  const eligible = allOrders.filter((o) => o.status === requiredStatus);
+  skipped = allOrders.length - eligible.length;
+
+  // Process all updates in a single transaction
+  const emailJobs: Array<{
+    email: string;
+    orderNumber: string;
+    customerName: string;
+  }> = [];
+
+  await db.transaction(async (tx) => {
     for (const order of eligible) {
-      await db
+      // Atomic status transition within transaction
+      // For start-printing, exclude manufacturer-assigned orders
+      const conditions = [eq(orders.id, order.id), eq(orders.status, requiredStatus as any)];
+      if (body.action === "start-printing") {
+        conditions.push(isNull(orders.manufacturerId));
+      }
+      const [updated] = await tx
         .update(orders)
-        .set({ status: "approved", updatedAt: new Date() })
-        .where(eq(orders.id, order.id));
+        .set({ status: newStatus as any, updatedAt: new Date() })
+        .where(and(...conditions))
+        .returning();
 
-      await db.insert(adminActions).values({
+      if (!updated) {
+        skipped++;
+        continue;
+      }
+
+      await tx.insert(adminActions).values({
         orderId: order.id,
-        action: "approve",
-        adminEmail: session.user.email,
+        action: actionType,
+        adminEmail: session.user!.email!,
         notes: "Bulk action",
       });
 
-      await getEmailQueue().add("approved", {
-        type: "order_approved",
-        to: order.email,
+      emailJobs.push({
+        email: order.email,
         orderNumber: order.orderNumber,
         customerName: order.customerName,
-        locale,
       });
 
       processed++;
     }
-  } else if (body.action === "start-printing") {
-    const eligible = allOrders.filter((o) => o.status === "approved");
-    skipped = allOrders.length - eligible.length;
+  });
 
-    for (const order of eligible) {
-      await db
-        .update(orders)
-        .set({ status: "printing", updatedAt: new Date() })
-        .where(eq(orders.id, order.id));
-
-      await db.insert(adminActions).values({
-        orderId: order.id,
-        action: "print",
-        adminEmail: session.user.email,
-        notes: "Bulk action",
-      });
-
-      await getEmailQueue().add("printing", {
-        type: "order_printing",
-        to: order.email,
-        orderNumber: order.orderNumber,
-        customerName: order.customerName,
-        locale,
-      });
-
-      processed++;
-    }
+  // Enqueue emails after transaction commits
+  for (const job of emailJobs) {
+    await getEmailQueue().add(emailJobName, {
+      type: emailType,
+      to: job.email,
+      orderNumber: job.orderNumber,
+      customerName: job.customerName,
+      locale,
+    });
   }
 
   return NextResponse.json({ success: true, processed, skipped });

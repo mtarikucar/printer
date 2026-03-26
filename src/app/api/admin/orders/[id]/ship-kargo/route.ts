@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
@@ -27,20 +27,20 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const order = await db.query.orders.findFirst({
-      where: eq(orders.id, id),
-    });
+    // Atomically claim the order BEFORE calling the external API to prevent double-shipment
+    const [order] = await db
+      .update(orders)
+      .set({
+        status: "shipped",
+        shippedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(orders.id, id), eq(orders.status, "printing"), isNull(orders.manufacturerId)))
+      .returning();
 
     if (!order) {
       return NextResponse.json(
-        { error: d["api.order.notFound"] },
-        { status: 404 }
-      );
-    }
-
-    if (order.status !== "printing") {
-      return NextResponse.json(
-        { error: d["api.order.notInPrinting"] },
+        { error: "Order is not in printing status or is managed by a manufacturer" },
         { status: 400 }
       );
     }
@@ -58,20 +58,22 @@ export async function POST(
     });
 
     if (!result.success) {
+      // Revert status since shipment creation failed
+      await db
+        .update(orders)
+        .set({ status: "printing", shippedAt: null, updatedAt: new Date() })
+        .where(eq(orders.id, id));
+
       return NextResponse.json(
         { error: d["api.kargo.createFailed"], detail: result.errorMessage },
         { status: 502 }
       );
     }
 
+    // Set tracking number after successful shipment creation
     await db
       .update(orders)
-      .set({
-        status: "shipped",
-        trackingNumber: order.orderNumber,
-        shippedAt: new Date(),
-        updatedAt: new Date(),
-      })
+      .set({ trackingNumber: order.orderNumber, updatedAt: new Date() })
       .where(eq(orders.id, id));
 
     await db.insert(adminActions).values({

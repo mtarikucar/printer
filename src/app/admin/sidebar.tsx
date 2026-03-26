@@ -6,7 +6,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { signOutAction } from "./actions";
 
-export function AdminSidebar({ reviewCount }: { reviewCount: number }) {
+export function AdminSidebar({ reviewCount, pendingManufacturerCount }: { reviewCount: number; pendingManufacturerCount: number }) {
   const pathname = usePathname();
   const d = useDictionary();
 
@@ -24,8 +24,14 @@ export function AdminSidebar({ reviewCount }: { reviewCount: number }) {
       badge: reviewCount,
     },
     {
+      href: "/admin/manufacturers",
+      label: d["admin.nav.manufacturers"],
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />,
+      badge: pendingManufacturerCount,
+    },
+    {
       href: "/admin/print-queue",
-      label: d["admin.nav.printQueue"],
+      label: d["admin.manufacturingQueue.title"],
       icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z" />,
       badge: 0,
     },
@@ -38,10 +44,10 @@ export function AdminSidebar({ reviewCount }: { reviewCount: number }) {
   ];
 
   return (
-    <aside className="w-64 bg-gray-900 text-white flex flex-col">
-      <div className="p-6 border-b border-gray-800">
-        <h1 className="text-lg font-bold">Figurine Studio</h1>
-        <p className="text-xs text-gray-400 mt-1">Admin Panel</p>
+    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
+      <div className="p-6 border-b border-gray-200">
+        <h1 className="text-lg font-bold text-gray-900">Figurine Studio</h1>
+        <p className="text-xs text-gray-500 mt-1">Admin Panel</p>
       </div>
       <nav className="flex-1 p-4 space-y-1">
         {links.map((link) => {
@@ -51,7 +57,7 @@ export function AdminSidebar({ reviewCount }: { reviewCount: number }) {
               key={link.href}
               href={link.href}
               className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                isActive ? "bg-gray-800 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                isActive ? "bg-green-50 text-green-700 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
               }`}
             >
               <span className="flex items-center gap-3">
@@ -59,7 +65,7 @@ export function AdminSidebar({ reviewCount }: { reviewCount: number }) {
                 {link.label}
               </span>
               {link.badge > 0 && (
-                <span className="bg-yellow-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
                   {link.badge}
                 </span>
               )}
@@ -67,14 +73,14 @@ export function AdminSidebar({ reviewCount }: { reviewCount: number }) {
           );
         })}
       </nav>
-      <div className="p-4 border-t border-gray-800 space-y-2">
+      <div className="p-4 border-t border-gray-200 space-y-2">
         <div className="px-3">
           <LanguageSwitcher />
         </div>
         <form action={signOutAction}>
           <button
             type="submit"
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

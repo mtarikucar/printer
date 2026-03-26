@@ -96,7 +96,7 @@ export async function removeBackground(buffer: Buffer): Promise<Buffer> {
     raw: { width: origWidth, height: origHeight, channels: 3 },
   })
     .joinChannel(maskBuffer, {
-      raw: { width: image.width, height: image.height, channels: 1 },
+      raw: { width: origWidth, height: origHeight, channels: 1 },
     })
     .png()
     .toBuffer();

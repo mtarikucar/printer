@@ -1,9 +1,8 @@
 "use client";
 
-import { Suspense } from "react";
-import Image from "next/image";
+import { Suspense, useMemo } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useGLTF, Center, Stage } from "@react-three/drei";
+import { useGLTF, Environment } from "@react-three/drei";
 import { motion } from "motion/react";
 import * as THREE from "three";
 import { useRef } from "react";
@@ -13,6 +12,21 @@ function AutoRotateModel({ url }: { url: string }) {
   const { scene } = useGLTF(url);
   const ref = useRef<THREE.Group>(null);
 
+  // Clone scene and normalize scale/position once
+  const cloned = useMemo(() => {
+    const clone = scene.clone(true);
+    const box = new THREE.Box3().setFromObject(clone);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0) {
+      const s = 2 / maxDim;
+      clone.scale.setScalar(s);
+      clone.position.set(-center.x * s, -center.y * s, -center.z * s);
+    }
+    return clone;
+  }, [scene]);
+
   useFrame((_, delta) => {
     if (ref.current) {
       ref.current.rotation.y += delta * 0.4;
@@ -20,27 +34,26 @@ function AutoRotateModel({ url }: { url: string }) {
   });
 
   return (
-    <Center>
-      <group ref={ref}>
-        <primitive object={scene} />
-      </group>
-    </Center>
+    <group ref={ref}>
+      <primitive object={cloned} />
+    </group>
   );
 }
 
 function ModelCanvas({ url }: { url: string }) {
   return (
-    <Canvas camera={{ position: [0, 2, 5], fov: 45 }}>
-      <color attach="background" args={["#0A0A0B"]} />
-      <ambientLight intensity={0.3} />
-      <directionalLight position={[5, 5, 5]} intensity={1} color="#10B981" />
-      <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#1E293B" />
-      <Suspense fallback={null}>
-        <Stage environment="city" intensity={0.5}>
+    <div style={{ position: "absolute", inset: 0 }}>
+      <Canvas camera={{ position: [0, 0, 4.5], fov: 45 }}>
+        <color attach="background" args={["#F3F4F6"]} />
+        <ambientLight intensity={0.5} />
+        <directionalLight position={[5, 5, 5]} intensity={1.2} color="#10B981" />
+        <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#1E293B" />
+        <Suspense fallback={null}>
           <AutoRotateModel url={url} />
-        </Stage>
-      </Suspense>
-    </Canvas>
+          <Environment preset="city" />
+        </Suspense>
+      </Canvas>
+    </div>
   );
 }
 
@@ -66,12 +79,10 @@ export function HeroShowcase({
         >
           <div className="relative aspect-[3/4] rounded-2xl overflow-hidden border-2 border-bg-subtle shadow-lg rotate-[-2deg]">
             {item.thumbnailUrl && (
-              <Image
+              <img
                 src={item.thumbnailUrl}
                 alt={item.publicDisplayName || "Photo"}
-                fill
-                className="object-cover"
-                sizes="(max-width: 768px) 100vw, 40vw"
+                className="absolute inset-0 w-full h-full object-cover"
               />
             )}
           </div>
@@ -109,19 +120,15 @@ export function HeroShowcase({
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.7, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
         >
-          <div className="aspect-[3/4] rounded-2xl overflow-hidden border-2 border-green-500/30 shadow-lg rotate-[2deg]">
+          <div className="relative aspect-[3/4] rounded-2xl overflow-hidden border-2 border-green-500/30 shadow-lg rotate-[2deg]">
             {item.glbUrl ? (
               <ModelCanvas url={item.glbUrl} />
             ) : item.thumbnailUrl ? (
-              <div className="w-full h-full bg-bg-elevated flex items-center justify-center">
-                <Image
-                  src={item.thumbnailUrl}
-                  alt={item.publicDisplayName || "Figurine"}
-                  fill
-                  className="object-cover"
-                  sizes="(max-width: 768px) 100vw, 40vw"
-                />
-              </div>
+              <img
+                src={item.thumbnailUrl}
+                alt={item.publicDisplayName || "Figurine"}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
             ) : null}
           </div>
           <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-green-500 text-white text-xs font-medium px-3 py-1 rounded-full shadow-sm">
@@ -140,12 +147,10 @@ export function HeroShowcase({
         >
           <div className="relative h-[250px] rounded-2xl overflow-hidden border-2 border-bg-subtle shadow-lg">
             {item.thumbnailUrl && (
-              <Image
+              <img
                 src={item.thumbnailUrl}
                 alt={item.publicDisplayName || "Photo"}
-                fill
-                className="object-cover"
-                sizes="100vw"
+                className="absolute inset-0 w-full h-full object-cover"
               />
             )}
           </div>
@@ -180,19 +185,15 @@ export function HeroShowcase({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.2 }}
         >
-          <div className="h-[250px] rounded-2xl overflow-hidden border-2 border-green-500/30 shadow-lg">
+          <div className="relative h-[250px] rounded-2xl overflow-hidden border-2 border-green-500/30 shadow-lg">
             {item.glbUrl ? (
               <ModelCanvas url={item.glbUrl} />
             ) : item.thumbnailUrl ? (
-              <div className="relative w-full h-full bg-bg-elevated">
-                <Image
-                  src={item.thumbnailUrl}
-                  alt={item.publicDisplayName || "Figurine"}
-                  fill
-                  className="object-cover"
-                  sizes="100vw"
-                />
-              </div>
+              <img
+                src={item.thumbnailUrl}
+                alt={item.publicDisplayName || "Figurine"}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
             ) : null}
           </div>
           <span className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 bg-green-500 text-white text-xs font-medium px-3 py-1 rounded-full shadow-sm">

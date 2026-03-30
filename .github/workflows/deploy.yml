@@ -1,0 +1,106 @@
+name: Deploy Printer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  COMPOSE_FILE: docker/docker-compose.production.yml
+  APP_PORT: 3005
+  HEALTH_RETRIES: 15
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT }}
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            PROJECT_DIR="/root/projects/printer"
+            COMPOSE_FILE="$PROJECT_DIR/docker/docker-compose.production.yml"
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            BACKUP_FILE="$PROJECT_DIR/backup_predeploy_${TIMESTAMP}.sql"
+
+            RED='\033[0;31m'
+            GREEN='\033[0;32m'
+            YELLOW='\033[1;33m'
+            NC='\033[0m'
+
+            log()  { echo -e "${GREEN}[DEPLOY]${NC} $1"; }
+            warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+            err()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+            cd "$PROJECT_DIR"
+
+            # ─── 0. Git Pull ─────────────────────────────────────────
+            log "Son degisiklikler cekiliyor..."
+            git fetch origin main
+            git reset --hard origin/main
+            log "Git pull tamamlandi. Commit: $(git rev-parse --short HEAD)"
+
+            # ─── 1. Pre-deploy DB Backup ─────────────────────────────
+            log "Veritabani yedegi aliniyor..."
+            if docker ps --format '{{.Names}}' | grep -q printer_postgres; then
+                docker exec printer_postgres pg_dump -U printer -d printer > "$BACKUP_FILE" 2>/dev/null && \
+                    log "Yedek alindi: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))" || \
+                    warn "Yedek alinamadi, devam ediliyor..."
+            else
+                warn "Postgres container calismiyomaintainr, yedek atlaniyor."
+            fi
+
+            # ─── 2. Build with Docker cache ──────────────────────────
+            log "Docker image'lar build ediliyor (cache aktif)..."
+            DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 \
+                docker-compose -f "$COMPOSE_FILE" build \
+                --build-arg BUILDKIT_INLINE_CACHE=1 \
+                --parallel
+            log "Build tamamlandi."
+
+            # ─── 3. Keep DB & Redis running ──────────────────────────
+            log "App ve worker yeniden baslatiliyor..."
+            docker-compose -f "$COMPOSE_FILE" up -d postgres redis
+            docker-compose -f "$COMPOSE_FILE" up -d --wait postgres redis 2>/dev/null || true
+
+            # ─── 4. Run migration ────────────────────────────────────
+            log "Veritabani migration calistiriliyor..."
+            docker-compose -f "$COMPOSE_FILE" run --rm migrate
+
+            # ─── 5. Rolling restart: app & worker ────────────────────
+            log "Servisler guncelleniyor..."
+            docker-compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate app worker
+
+            # ─── 6. Health check ─────────────────────────────────────
+            log "Saglik kontrolu yapiliyor..."
+            RETRIES=15
+            for i in $(seq 1 $RETRIES); do
+                if curl -sf -o /dev/null http://localhost:3005; then
+                    log "Uygulama calisiyor! http://localhost:3005"
+                    break
+                fi
+                if [ "$i" -eq "$RETRIES" ]; then
+                    err "Uygulama $RETRIES deneme sonrasi yanit vermedi!"
+                fi
+                sleep 2
+            done
+
+            # ─── 7. Cleanup old images ───────────────────────────────
+            log "Eski image'lar temizleniyor..."
+            docker image prune -f --filter "until=24h" > /dev/null 2>&1 || true
+
+            # ─── Done ────────────────────────────────────────────────
+            echo ""
+            log "Deploy tamamlandi!"
+            log "  App:    http://localhost:3005"
+            log "  Commit: $(git rev-parse --short HEAD 2>/dev/null || echo 'N/A')"
+            log "  Zaman:  $(date '+%Y-%m-%d %H:%M:%S')"

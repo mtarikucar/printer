@@ -23,12 +23,10 @@ FROM base AS deps
 COPY package.json package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 
-# ── Builder: build Next.js standalone output ─────────────────────────
-FROM base AS builder
+# ── Model: pre-download RMBG-1.4 (rarely changes, cached separately) ─
+FROM base AS model
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-# Pre-download RMBG-1.4 model during build so it's cached in the image
+COPY package.json ./
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 RUN --mount=type=cache,target=/tmp/hf-cache \
     mkdir -p /app/.cache/huggingface && \
@@ -39,12 +37,15 @@ RUN --mount=type=cache,target=/tmp/hf-cache \
         env.cacheDir = '/app/.cache/huggingface'; \
         await AutoModel.from_pretrained('briaai/RMBG-1.4', { device: 'cpu' }); \
         await AutoProcessor.from_pretrained('briaai/RMBG-1.4'); \
-        console.log('RMBG-1.4 model pre-downloaded to', env.cacheDir); \
+        console.log('RMBG-1.4 cached'); \
       " && break || echo "Attempt $i failed, retrying..." && sleep 5; \
     done; \
-    cp -a /app/.cache/huggingface/. /tmp/hf-cache/ && \
-    echo "Model cache dir contents:" && ls -la /app/.cache/huggingface/ || true
+    cp -a /app/.cache/huggingface/. /tmp/hf-cache/ || true
 
+# ── Builder: build Next.js standalone output ─────────────────────────
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # ── App target: Next.js standalone server ────────────────────────────
@@ -65,8 +66,8 @@ COPY --from=builder --chown=nextjs:nodejs \
   /app/node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/ \
   ./node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/
 
-# HuggingFace model cache (pre-downloaded in builder stage)
-COPY --from=builder --chown=nextjs:nodejs /app/.cache/huggingface ./.cache/huggingface
+# HuggingFace model cache (from separate model stage)
+COPY --from=model --chown=nextjs:nodejs /app/.cache/huggingface ./.cache/huggingface
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 
 USER nextjs

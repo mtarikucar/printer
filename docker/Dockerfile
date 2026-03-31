@@ -21,7 +21,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # ── Deps: install all node dependencies (including devDeps for tsx) ──
 FROM base AS deps
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 # ── Builder: build Next.js standalone output ─────────────────────────
 FROM base AS builder
@@ -30,7 +30,9 @@ COPY . .
 
 # Pre-download RMBG-1.4 model during build so it's cached in the image
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
-RUN mkdir -p /app/.cache/huggingface && \
+RUN --mount=type=cache,target=/tmp/hf-cache \
+    mkdir -p /app/.cache/huggingface && \
+    cp -a /tmp/hf-cache/. /app/.cache/huggingface/ 2>/dev/null || true && \
     for i in 1 2 3; do \
       node --input-type=module -e " \
         import { env, AutoModel, AutoProcessor } from '@huggingface/transformers'; \
@@ -40,9 +42,10 @@ RUN mkdir -p /app/.cache/huggingface && \
         console.log('RMBG-1.4 model pre-downloaded to', env.cacheDir); \
       " && break || echo "Attempt $i failed, retrying..." && sleep 5; \
     done; \
+    cp -a /app/.cache/huggingface/. /tmp/hf-cache/ && \
     echo "Model cache dir contents:" && ls -la /app/.cache/huggingface/ || true
 
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # ── App target: Next.js standalone server ────────────────────────────
 FROM base AS app

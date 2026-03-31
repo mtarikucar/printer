@@ -32,10 +32,9 @@ fi
 # ─── 2. Build with Docker cache ──────────────────────────────────────
 log "Docker image'lar build ediliyor (cache aktif)..."
 
-# BuildKit cache mount ile node_modules ve .next cache'i korunur
+# BuildKit cache mounts in Dockerfile handle node_modules, .next, and model caching
 DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 \
     docker-compose -f "$COMPOSE_FILE" build \
-    --build-arg BUILDKIT_INLINE_CACHE=1 \
     --parallel
 
 log "Build tamamlandı."
@@ -69,9 +68,10 @@ for i in $(seq 1 $RETRIES); do
     sleep 2
 done
 
-# ─── 7. Cleanup old images ───────────────────────────────────────────
-log "Eski image'lar temizleniyor..."
+# ─── 7. Cleanup old images and build cache ───────────────────────────
+log "Eski image'lar ve build cache temizleniyor..."
 docker image prune -f --filter "until=24h" > /dev/null 2>&1 || true
+docker builder prune -f --keep-storage=2GB > /dev/null 2>&1 || true
 
 # ─── Done ─────────────────────────────────────────────────────────────
 echo ""

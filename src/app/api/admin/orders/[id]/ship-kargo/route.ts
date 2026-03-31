@@ -94,6 +94,13 @@ export async function POST(
 
     return NextResponse.json({ success: true, cargoKey: order.orderNumber });
   } catch (error) {
+    // Revert status if we claimed the order but the SOAP call threw
+    await db
+      .update(orders)
+      .set({ status: "printing", shippedAt: null, updatedAt: new Date() })
+      .where(and(eq(orders.id, id), eq(orders.status, "shipped")))
+      .catch(() => {}); // Best-effort revert
+
     console.error("Yurtici Kargo ship failed:", error);
     return NextResponse.json(
       { error: d["api.kargo.shipFailed"] },

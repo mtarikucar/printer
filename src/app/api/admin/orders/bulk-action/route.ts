@@ -65,9 +65,13 @@ export async function POST(request: NextRequest) {
       if (body.action === "start-printing") {
         conditions.push(isNull(orders.manufacturerId));
       }
+      const setData: Record<string, any> = { status: newStatus, updatedAt: new Date() };
+      if (body.action === "approve") {
+        setData.manufacturerStatus = "unassigned";
+      }
       const [updated] = await tx
         .update(orders)
-        .set({ status: newStatus as any, updatedAt: new Date() })
+        .set(setData)
         .where(and(...conditions))
         .returning();
 

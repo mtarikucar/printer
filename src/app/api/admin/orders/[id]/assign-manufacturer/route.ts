@@ -108,10 +108,11 @@ export async function POST(
       // Notify manufacturer
       await getEmailQueue().add("order-assigned", {
         type: "order_assigned",
-        to: orderRetry.customerName,
+        to: orderRetry.email,
         manufacturerEmail: manufacturer.email,
         orderNumber: orderRetry.orderNumber,
         customerName: orderRetry.customerName,
+        locale,
       });
 
       return NextResponse.json({ success: true });
@@ -127,10 +128,11 @@ export async function POST(
     // Notify manufacturer
     await getEmailQueue().add("order-assigned", {
       type: "order_assigned",
-      to: order.customerName,
+      to: order.email,
       manufacturerEmail: manufacturer.email,
       orderNumber: order.orderNumber,
       customerName: order.customerName,
+      locale,
     });
 
     return NextResponse.json({ success: true });

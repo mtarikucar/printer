@@ -1,5 +1,5 @@
 import { Worker, Job } from "bullmq";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
 import { getMeshProcessingQueue, type AiGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
@@ -21,11 +21,18 @@ async function processJob(job: Job<AiGenerationJobData>) {
   const style = (job.data.style || "realistic") as FigurineStyle;
   const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
 
-  // Update order status to generating
-  await db
+  // Update order status to generating — only if still in an expected state
+  // This prevents BullMQ retries from overwriting admin-initiated status changes (reject, force-review)
+  const [updated] = await db
     .update(orders)
     .set({ status: "generating", updatedAt: new Date() })
-    .where(eq(orders.id, orderId));
+    .where(and(eq(orders.id, orderId), inArray(orders.status, ["paid", "generating", "failed_generation"])))
+    .returning();
+
+  if (!updated) {
+    job.log(`Order ${orderId} is no longer in a generatable state, skipping`);
+    return;
+  }
 
   // Create generation attempt record
   const attempt = await db

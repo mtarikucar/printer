@@ -28,7 +28,11 @@ export async function GET(request: NextRequest) {
   ];
 
   if (cursor) {
-    conditions.push(lt(previews.createdAt, new Date(cursor)));
+    const cursorDate = new Date(cursor);
+    if (isNaN(cursorDate.getTime())) {
+      return NextResponse.json({ previews: [], nextCursor: null });
+    }
+    conditions.push(lt(previews.createdAt, cursorDate));
   }
 
   const userPreviews = await db.query.previews.findMany({

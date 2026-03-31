@@ -23,7 +23,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Manufacturer routes: check session cookie exists
+  // Manufacturer routes: check session cookie exists and JWT is not expired
   if (
     pathname.startsWith("/manufacturer") &&
     pathname !== "/manufacturer/login" &&
@@ -34,6 +34,24 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(
         new URL("/manufacturer/login", request.url)
       );
+    }
+
+    // Quick JWT expiry check (Edge-compatible, no crypto library needed)
+    try {
+      const parts = session.value.split(".");
+      if (parts.length !== 3) throw new Error("bad jwt");
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        // Token expired — clear cookie and redirect
+        const res = NextResponse.redirect(new URL("/manufacturer/login", request.url));
+        res.cookies.delete("manufacturer_session");
+        return res;
+      }
+    } catch {
+      // Malformed token — redirect to login
+      const res = NextResponse.redirect(new URL("/manufacturer/login", request.url));
+      res.cookies.delete("manufacturer_session");
+      return res;
     }
   }
 

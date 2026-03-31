@@ -132,6 +132,11 @@ export default function LoginPage() {
               {d["login.register"]}
             </Link>
           </p>
+          <p className="mt-4 text-xs text-center text-text-muted">
+            <Link href="/privacy" className="hover:text-green-500 transition-colors">{d["landing.footer.privacy"]}</Link>
+            {" · "}
+            <Link href="/terms" className="hover:text-green-500 transition-colors">{d["landing.footer.terms"]}</Link>
+          </p>
         </div>
       </div>
     </main>

@@ -6,13 +6,55 @@ on:
   workflow_dispatch:
 
 env:
-  COMPOSE_FILE: docker/docker-compose.production.yml
-  APP_PORT: 3005
-  HEALTH_RETRIES: 15
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
 
 jobs:
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: app
+          push: true
+          tags: ${{ env.IMAGE_BASE }}/app:latest,${{ env.IMAGE_BASE }}/app:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: worker
+          push: true
+          tags: ${{ env.IMAGE_BASE }}/worker:latest,${{ env.IMAGE_BASE }}/worker:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
-    name: Deploy to Production
+    name: Deploy to VPS
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
@@ -22,7 +64,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
-          command_timeout: 15m
+          command_timeout: 10m
           script: |
             set -euo pipefail
 
@@ -30,19 +72,16 @@ jobs:
             COMPOSE_FILE="$PROJECT_DIR/docker/docker-compose.production.yml"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
             BACKUP_FILE="$PROJECT_DIR/backup_predeploy_${TIMESTAMP}.sql"
+            IMAGE_BASE="ghcr.io/${{ github.repository }}"
+            IMAGE_TAG="${{ github.sha }}"
 
-            RED='\033[0;31m'
-            GREEN='\033[0;32m'
-            YELLOW='\033[1;33m'
-            NC='\033[0m'
-
-            log()  { echo -e "${GREEN}[DEPLOY]${NC} $1"; }
-            warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-            err()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+            log()  { echo "[DEPLOY] $1"; }
+            warn() { echo "[WARN] $1"; }
+            err()  { echo "[ERROR] $1"; exit 1; }
 
             cd "$PROJECT_DIR"
 
-            # ─── 0. Git Pull ─────────────────────────────────────────
+            # ─── 0. Git Pull (for compose file & env updates) ────────
             log "Son degisiklikler cekiliyor..."
             git fetch origin main
             git reset --hard origin/main
@@ -55,18 +94,20 @@ jobs:
                     log "Yedek alindi: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))" || \
                     warn "Yedek alinamadi, devam ediliyor..."
             else
-                warn "Postgres container calismiyomaintainr, yedek atlaniyor."
+                warn "Postgres container calismiyor, yedek atlaniyor."
             fi
 
-            # ─── 2. Build with Docker cache ──────────────────────────
-            log "Docker image'lar build ediliyor (cache aktif)..."
-            DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 \
-                docker-compose -f "$COMPOSE_FILE" build \
-                --parallel
-            log "Build tamamlandi."
+            # ─── 2. Login to GHCR & Pull images ─────────────────────
+            log "Image'lar cekiliyor..."
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+            docker pull "${IMAGE_BASE}/app:${IMAGE_TAG}"
+            docker pull "${IMAGE_BASE}/worker:${IMAGE_TAG}"
+            docker tag "${IMAGE_BASE}/app:${IMAGE_TAG}" "${IMAGE_BASE}/app:latest"
+            docker tag "${IMAGE_BASE}/worker:${IMAGE_TAG}" "${IMAGE_BASE}/worker:latest"
+            log "Image'lar cekildi."
 
             # ─── 3. Keep DB & Redis running ──────────────────────────
-            log "App ve worker yeniden baslatiliyor..."
+            log "Postgres ve Redis kontrol ediliyor..."
             docker-compose -f "$COMPOSE_FILE" up -d postgres redis
             docker-compose -f "$COMPOSE_FILE" up -d --wait postgres redis 2>/dev/null || true
 
@@ -74,28 +115,24 @@ jobs:
             log "Veritabani migration calistiriliyor..."
             docker-compose -f "$COMPOSE_FILE" run --rm migrate
 
-            # ─── 5. Rolling restart: app & worker ────────────────────
+            # ─── 5. Restart app & worker with new images ─────────────
             log "Servisler guncelleniyor..."
             docker-compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate app worker
 
             # ─── 6. Health check ─────────────────────────────────────
             log "Saglik kontrolu yapiliyor..."
-            RETRIES=15
-            for i in $(seq 1 $RETRIES); do
+            for i in $(seq 1 15); do
                 if curl -sf -o /dev/null http://localhost:3005; then
                     log "Uygulama calisiyor! http://localhost:3005"
                     break
                 fi
-                if [ "$i" -eq "$RETRIES" ]; then
-                    err "Uygulama $RETRIES deneme sonrasi yanit vermedi!"
-                fi
+                [ "$i" -eq 15 ] && err "Uygulama 15 deneme sonrasi yanit vermedi!"
                 sleep 2
             done
 
-            # ─── 7. Cleanup old images and build cache ────────────────
-            log "Eski image'lar ve build cache temizleniyor..."
+            # ─── 7. Cleanup ──────────────────────────────────────────
+            log "Eski image'lar temizleniyor..."
             docker image prune -f --filter "until=24h" > /dev/null 2>&1 || true
-            docker builder prune -f --keep-storage=2GB > /dev/null 2>&1 || true
 
             # ─── Done ────────────────────────────────────────────────
             echo ""

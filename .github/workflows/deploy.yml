@@ -22,8 +22,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
-          script_stop: true
-          command_timeout: 10m
+          command_timeout: 15m
           script: |
             set -euo pipefail
 

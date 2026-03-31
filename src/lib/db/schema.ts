@@ -87,6 +87,7 @@ export const figurineStyleEnum = pgEnum("figurine_style", [
   "disney",
   "anime",
   "chibi",
+  "object",
 ]);
 
 export const previewStatusEnum = pgEnum("preview_status", [

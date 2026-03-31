@@ -8,6 +8,7 @@
   --font-sans: var(--font-inter);
   --font-serif: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains);
+  --font-display: var(--font-display);
 
   /* Background scale (light) */
   --color-bg-base: #FFFFFF;
@@ -345,6 +346,186 @@ select.input-base option {
 
 /* Modal backdrop */
 .modal-backdrop { animation: fade-in 0.2s ease; }
+
+/* ============================================
+   Landing Page — Light Atelier Theme
+   ============================================ */
+
+.font-display { font-family: var(--font-display), Georgia, serif; }
+
+/* Hero section — light with subtle depth */
+.landing-hero {
+  background: linear-gradient(180deg, #F8FAF9 0%, #FFFFFF 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.landing-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(16,185,129,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(16,185,129,0.04) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* Subtle dot grid on hero */
+.landing-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+
+/* Horizontal scroll for mobile style cards */
+.style-scroll {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 0.5rem;
+}
+.style-scroll::-webkit-scrollbar { display: none; }
+.style-scroll > * { scroll-snap-align: start; flex-shrink: 0; }
+
+/* Style card */
+.style-card {
+  position: relative;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: white;
+  transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.style-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: rgba(16,185,129,0.3);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 0 20px rgba(16,185,129,0.06);
+}
+
+/* Section heading with decorative line */
+.section-heading-line {
+  position: relative;
+  display: inline-block;
+}
+
+.section-heading-line::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 3px;
+  background: linear-gradient(90deg, #10B981, #34D399);
+  border-radius: 2px;
+}
+
+/* FAQ card */
+.faq-card-warm {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 1rem;
+  transition: box-shadow 0.2s ease;
+}
+
+.faq-card-warm:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+}
+
+/* Box item card */
+.box-card {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  text-align: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.box-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+}
+
+/* How it works step card */
+.step-card {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 1.25rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.step-card:hover {
+  border-color: rgba(16,185,129,0.2);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
+}
+
+/* Use case card */
+.usecase-card {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  text-align: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.usecase-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.08);
+}
+
+/* CTA section */
+.cta-section {
+  background: linear-gradient(180deg, #F0FDF4 0%, #ECFDF5 50%, #F0FDF4 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.cta-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(16,185,129,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* Pricing card */
+.price-row {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 1rem;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.price-row:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  transform: translateY(-1px);
+}
+
+.price-row-popular {
+  border: 2px solid #10B981;
+  box-shadow: 0 0 0 3px rgba(16,185,129,0.08);
+}
+
+/* Alt bg section */
+.section-alt {
+  background: #F8FAF9;
+}
 
 /* ============================================
    Accessibility

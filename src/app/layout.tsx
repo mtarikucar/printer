@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Inter, Space_Grotesk, JetBrains_Mono, DM_Serif_Display } from "next/font/google";
 import "./globals.css";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -21,6 +21,12 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
+const dmSerifDisplay = DM_Serif_Display({
+  variable: "--font-display",
+  subsets: ["latin", "latin-ext"],
+  weight: "400",
+});
+
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
   const d = getDictionary(locale);
@@ -40,7 +46,7 @@ export default async function RootLayout({
   return (
     <html lang={locale} style={{ colorScheme: "light" }}>
       <body
-        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased bg-bg-base text-text-primary`}
+        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${dmSerifDisplay.variable} font-sans antialiased bg-bg-base text-text-primary`}
       >
         <LocaleProvider locale={locale}>
           {children}

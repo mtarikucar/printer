@@ -116,6 +116,92 @@ export default async function HomePage() {
     d["landing.pricing.feature6"],
   ];
 
+  const styles = [
+    { key: "object", name: d["landing.styles.object"], description: d["landing.styles.object.desc"], image: "/examples/object.png" },
+    { key: "anime", name: d["landing.styles.anime"], description: d["landing.styles.anime.desc"], image: "/examples/anime.png" },
+    { key: "disney", name: d["landing.styles.disney"], description: d["landing.styles.disney.desc"], image: "/examples/disney.png" },
+    { key: "chibi", name: d["landing.styles.chibi"], description: d["landing.styles.chibi.desc"], image: "/examples/chibi.png" },
+  ];
+
+  const boxItems = [
+    {
+      title: d["landing.box.figurine"],
+      description: d["landing.box.figurine.desc"],
+      highlighted: true,
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+    {
+      title: d["landing.box.paints"],
+      description: d["landing.box.paints.desc"],
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+        </svg>
+      ),
+    },
+    {
+      title: d["landing.box.brushes"],
+      description: d["landing.box.brushes.desc"],
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+        </svg>
+      ),
+    },
+    {
+      title: d["landing.box.guide"],
+      description: d["landing.box.guide.desc"],
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      ),
+    },
+    {
+      title: d["landing.box.packaging"],
+      description: d["landing.box.packaging.desc"],
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+        </svg>
+      ),
+    },
+    {
+      title: d["landing.box.shipping"],
+      description: d["landing.box.shipping.desc"],
+      icon: (
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+        </svg>
+      ),
+    },
+  ];
+
+  const useCasesList = [
+    { icon: "\u{1F382}", title: d["landing.useCases.birthday"], description: d["landing.useCases.birthday.desc"] },
+    { icon: "\u{1F48D}", title: d["landing.useCases.love"], description: d["landing.useCases.love.desc"] },
+    { icon: "\u{1F43E}", title: d["landing.useCases.pet"], description: d["landing.useCases.pet.desc"] },
+    { icon: "\u{1F3AE}", title: d["landing.useCases.gaming"], description: d["landing.useCases.gaming.desc"] },
+    { icon: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", title: d["landing.useCases.family"], description: d["landing.useCases.family.desc"] },
+    { icon: "\u{1F393}", title: d["landing.useCases.graduation"], description: d["landing.useCases.graduation.desc"] },
+  ];
+
+  const faqItems = [
+    { question: d["landing.faq.q1"], answer: d["landing.faq.a1"] },
+    { question: d["landing.faq.q2"], answer: d["landing.faq.a2"] },
+    { question: d["landing.faq.q3"], answer: d["landing.faq.a3"] },
+    { question: d["landing.faq.q4"], answer: d["landing.faq.a4"] },
+    { question: d["landing.faq.q5"], answer: d["landing.faq.a5"] },
+    { question: d["landing.faq.q6"], answer: d["landing.faq.a6"] },
+    { question: d["landing.faq.q7"], answer: d["landing.faq.a7"] },
+    { question: d["landing.faq.q8"], answer: d["landing.faq.a8"] },
+  ];
+
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
@@ -145,10 +231,28 @@ export default async function HomePage() {
           pricingTitle2: d["landing.pricing.title"],
           heroShowcasePhoto: d["landing.hero.showcase.photo"],
           heroShowcaseFigurine: d["landing.hero.showcase.figurine"],
+          heroTrust1: d["landing.hero.trust1"],
+          heroTrust2: d["landing.hero.trust2"],
+          heroTrust3: d["landing.hero.trust3"],
+          heroTrust4: d["landing.hero.trust4"],
+          stylesTitle: d["landing.styles.title"],
+          stylesSubtitle: d["landing.styles.subtitle"],
+          boxTitle: d["landing.box.title"],
+          boxSubtitle: d["landing.box.subtitle"],
+          useCasesTitle: d["landing.useCases.title"],
+          useCasesSubtitle: d["landing.useCases.subtitle"],
+          faqTitle: d["landing.faq.title"],
+          ctaTitle: d["landing.cta.title"],
+          ctaSubtitle: d["landing.cta.subtitle"],
+          ctaButton: d["landing.cta.button"],
         }}
         steps={steps}
         sizes={sizes}
         features={features}
+        styles={styles}
+        boxItems={boxItems}
+        useCases={useCasesList}
+        faqItems={faqItems}
         heroItem={heroItem}
       />
     </main>

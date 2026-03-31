@@ -90,7 +90,7 @@ export default function CreatePage() {
   ] as const;
 
   const STYLES = [
-    // "realistic" temporarily removed — outputs are not print-ready
+    { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
     { key: "disney",    label: d["create.style.disney"],    desc: d["create.style.disney.desc"],    img: "/examples/disney.png" },
     { key: "anime",     label: d["create.style.anime"],     desc: d["create.style.anime.desc"],     img: "/examples/anime.png" },
     { key: "chibi",     label: d["create.style.chibi"],     desc: d["create.style.chibi.desc"],     img: "/examples/chibi.png" },

@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (styleFilter && ["realistic", "disney", "anime", "chibi"].includes(styleFilter)) {
+  if (styleFilter && ["realistic", "disney", "anime", "chibi", "object"].includes(styleFilter)) {
     conditions.push(eq(orders.style, styleFilter as any));
   }
 

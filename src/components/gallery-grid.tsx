@@ -8,7 +8,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 
 const STYLE_FILTERS = [
   { key: "all", labelKey: "gallery.filter.all" },
-  { key: "realistic", labelKey: "gallery.filter.realistic" },
+  { key: "object", labelKey: "gallery.filter.object" },
   { key: "disney", labelKey: "gallery.filter.disney" },
   { key: "anime", labelKey: "gallery.filter.anime" },
   { key: "chibi", labelKey: "gallery.filter.chibi" },

@@ -1,10 +1,10 @@
 import Replicate from "replicate";
 import { removeBackground } from "./background-removal";
 
-export type FigurineStyle = "realistic" | "disney" | "anime" | "chibi";
+export type FigurineStyle = "realistic" | "disney" | "anime" | "chibi" | "object";
 export type StyleModifier = "pixel_art";
 
-const STYLE_PROMPTS: Record<Exclude<FigurineStyle, "realistic">, string> = {
+const STYLE_PROMPTS: Record<Exclude<FigurineStyle, "realistic" | "object">, string> = {
   disney:
     "Reimagine this person as an adorable Disney Pixar 3D animated collectible figurine character. Use their general appearance as loose inspiration but fully transform them into a charming Pixar-style character with cute stylized proportions, big warm expressive eyes, a sweet friendly smile, smooth colorful skin, and soft studio lighting. Show the full body in a cute standing pose facing forward, like a collectible toy figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects.",
   anime:
@@ -21,17 +21,18 @@ const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
 function buildPrompt(style: FigurineStyle, modifiers: StyleModifier[]): string | null {
   const hasModifiers = modifiers.length > 0;
 
-  if (style === "realistic" && !hasModifiers) {
-    return null; // Skip Replicate entirely
+  if ((style === "realistic" || style === "object") && !hasModifiers) {
+    return null; // Skip Replicate entirely — send directly to Meshy
   }
 
-  if (style === "realistic" && hasModifiers) {
-    // Only modifier prompt, applied to the realistic photo
+  if ((style === "realistic" || style === "object") && hasModifiers) {
+    // Only modifier prompt, applied to the photo
     const modifierSuffix = modifiers.map((m) => MODIFIER_PROMPTS[m]).join(" ");
-    return `Transform this photo: ${modifierSuffix} Show the full body in a standing pose facing forward. Remove the background completely and replace it with a plain white background. Only include the person, no other objects.`;
+    const subject = style === "object" ? "the object" : "the person";
+    return `Transform this photo: ${modifierSuffix} Remove the background completely and replace it with a plain white background. Only include ${subject}, no other elements.`;
   }
 
-  const basePrompt = STYLE_PROMPTS[style as Exclude<FigurineStyle, "realistic">];
+  const basePrompt = STYLE_PROMPTS[style as Exclude<FigurineStyle, "realistic" | "object">];
 
   if (!hasModifiers) {
     return basePrompt;

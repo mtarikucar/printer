@@ -5,6 +5,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
 import { GrainOverlay } from "@/components/grain-overlay";
+import { DebugConsole } from "@/components/debug-console";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -51,6 +52,7 @@ export default async function RootLayout({
         <LocaleProvider locale={locale}>
           {children}
           <GrainOverlay />
+          <DebugConsole />
         </LocaleProvider>
       </body>
     </html>

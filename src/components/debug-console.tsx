@@ -23,19 +23,19 @@ export function DebugConsole() {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-      fractionalSecondDigits: 3,
     });
     setLogs((prev) => [...prev.slice(-200), { id: nextId++, time, type, message }]);
   }, []);
 
-  // Check admin status
+  // Check admin — no cookie gate, just try the API
   useEffect(() => {
-    if (!document.cookie.includes("session")) return;
     fetch("/api/auth/me")
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();
-          if (data.user?.isAdmin) {
+          const email = data.user?.email?.toLowerCase();
+          // Server-side isAdmin OR hardcoded fallback
+          if (data.user?.isAdmin || email === "muhammedtarikucar@gmail.com") {
             setIsAdmin(true);
           }
         }
@@ -92,7 +92,7 @@ export function DebugConsole() {
     window.addEventListener("error", handleError);
     window.addEventListener("unhandledrejection", handleRejection);
 
-    addLog("info", "Console active");
+    addLog("info", "Debug console active");
 
     return () => {
       console.log = origLog;

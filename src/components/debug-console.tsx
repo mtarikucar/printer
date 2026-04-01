@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-const ADMIN_EMAIL = "muhammedtarikucar@gmail.com";
-
 interface LogEntry {
   time: string;
   type: "error" | "warn" | "log";
@@ -22,11 +20,13 @@ export function DebugConsole() {
   }, []);
 
   useEffect(() => {
+    // Only check if a session cookie exists (avoids API call for anonymous visitors)
+    if (!document.cookie.includes("session")) return;
     fetch("/api/auth/me")
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();
-          if (data.user?.email === ADMIN_EMAIL) {
+          if (data.user?.isAdmin) {
             setIsAdmin(true);
             setVisible(true);
           }

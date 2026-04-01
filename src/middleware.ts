@@ -40,7 +40,9 @@ export async function middleware(request: NextRequest) {
     try {
       const parts = session.value.split(".");
       if (parts.length !== 3) throw new Error("bad jwt");
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      b64 += "=".repeat((4 - b64.length % 4) % 4);
+      const payload = JSON.parse(atob(b64));
       if (payload.exp && payload.exp * 1000 < Date.now()) {
         // Token expired — clear cookie and redirect
         const res = NextResponse.redirect(new URL("/manufacturer/login", request.url));

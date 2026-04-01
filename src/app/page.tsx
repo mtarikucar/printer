@@ -1,3 +1,5 @@
+export const revalidate = 60;
+
 import Link from "next/link";
 import { eq, and, inArray, desc } from "drizzle-orm";
 import { db } from "@/lib/db";

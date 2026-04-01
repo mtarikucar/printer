@@ -23,6 +23,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: d["api.auth.userNotFound"] }, { status: 401 });
   }
 
+  const adminEmails = process.env.ADMIN_EMAILS?.split(",").map((e) => e.trim().toLowerCase()) ?? [];
+
   return NextResponse.json({
     user: {
       id: user.id,
@@ -30,6 +32,7 @@ export async function GET(request: NextRequest) {
       fullName: user.fullName,
       phone: user.phone,
       defaultAddress: user.defaultAddress,
+      isAdmin: adminEmails.includes(user.email.toLowerCase()),
     },
   });
 }

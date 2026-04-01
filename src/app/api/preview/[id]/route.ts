@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { previews } from "@/lib/db/schema";
+import { normalizeFileUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -38,7 +39,7 @@ export async function GET(
 
       return NextResponse.json({
         status: "failed",
-        glbUrl: preview.glbUrl,
+        glbUrl: normalizeFileUrl(preview.glbUrl),
         errorMessage: timedOutMessage,
         createdAt: preview.createdAt,
         photoKey: preview.photoKey,
@@ -48,7 +49,7 @@ export async function GET(
 
   return NextResponse.json({
     status: preview.status,
-    glbUrl: preview.glbUrl,
+    glbUrl: normalizeFileUrl(preview.glbUrl),
     errorMessage: preview.errorMessage,
     createdAt: preview.createdAt,
     photoKey: preview.photoKey,

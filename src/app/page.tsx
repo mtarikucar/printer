@@ -8,6 +8,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { LandingClient } from "./landing-client";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 const GALLERY_STATUSES = [
   "approved",
@@ -59,8 +60,8 @@ export default async function HomePage() {
     category: order.galleryCategory,
     tags: order.galleryTags ?? [],
     publishedAt: order.publishedAt?.toISOString() ?? null,
-    glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
-    thumbnailUrl: order.photos[0]?.originalUrl ?? null,
+    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+    thumbnailUrl: normalizeFileUrl(order.photos[0]?.originalUrl ?? null),
   }));
 
   // Find first gallery item that has both photo + GLB for hero showcase

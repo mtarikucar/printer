@@ -38,3 +38,18 @@ export function getPublicUrl(relativePath: string): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   return `${appUrl}/api/files/${relativePath}`;
 }
+
+/**
+ * Rewrite any file URL to use the current app origin.
+ * Handles old URLs pointing to previous domains (e.g. printer.muhammedtarikucar.com)
+ * by extracting the /api/files/... path and prepending the current NEXT_PUBLIC_APP_URL.
+ */
+export function normalizeFileUrl(url: string | null): string | null {
+  if (!url) return null;
+  const match = url.match(/\/api\/files\/.+$/);
+  if (match) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    return `${appUrl}${match[0]}`;
+  }
+  return url;
+}

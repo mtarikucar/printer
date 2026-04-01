@@ -5,6 +5,7 @@ import { previews, orders } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 const PAGE_SIZE = 12;
 
@@ -80,8 +81,8 @@ export async function GET(request: NextRequest) {
     return {
       id: p.id,
       status: p.status,
-      photoUrl: p.photoUrl,
-      glbUrl: p.glbUrl,
+      photoUrl: normalizeFileUrl(p.photoUrl),
+      glbUrl: normalizeFileUrl(p.glbUrl),
       figurineSize: p.figurineSize,
       createdAt: p.createdAt,
       order: order

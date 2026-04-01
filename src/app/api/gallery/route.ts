@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, inArray, desc, lt, sql, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, generationAttempts } from "@/lib/db/schema";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 const GALLERY_STATUSES = [
   "approved",
@@ -93,8 +94,8 @@ export async function GET(request: NextRequest) {
     category: order.galleryCategory,
     tags: order.galleryTags ?? [],
     publishedAt: order.publishedAt,
-    glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
-    thumbnailUrl: order.photos[0]?.originalUrl ?? null,
+    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+    thumbnailUrl: normalizeFileUrl(order.photos[0]?.originalUrl ?? null),
   }));
 
   const lastOrder = publicOrders[PAGE_SIZE - 1];

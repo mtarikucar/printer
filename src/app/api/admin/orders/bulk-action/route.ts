@@ -65,13 +65,13 @@ export async function POST(request: NextRequest) {
       if (body.action === "start-printing") {
         conditions.push(isNull(orders.manufacturerId));
       }
-      const setData: Record<string, any> = { status: newStatus, updatedAt: new Date() };
-      if (body.action === "approve") {
-        setData.manufacturerStatus = "unassigned";
-      }
       const [updated] = await tx
         .update(orders)
-        .set(setData)
+        .set({
+          status: newStatus as typeof orders.$inferInsert.status,
+          updatedAt: new Date(),
+          ...(body.action === "approve" ? { manufacturerStatus: "unassigned" } : {}),
+        })
         .where(and(...conditions))
         .returning();
 

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { orders, generationAttempts, manufacturers } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getFileBuffer } from "@/lib/services/storage";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 export async function GET(
   request: NextRequest,
@@ -45,7 +46,7 @@ export async function GET(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const glbUrl = order.generationAttempts[0]?.outputGlbUrl;
+  const glbUrl = normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null);
   if (!glbUrl) {
     return NextResponse.json({ error: "No GLB file available" }, { status: 404 });
   }

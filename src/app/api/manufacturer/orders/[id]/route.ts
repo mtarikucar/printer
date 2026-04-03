@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import type { TurkishAddress } from "@/lib/db/schema";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 export async function GET(
   request: NextRequest,
@@ -92,8 +93,8 @@ export async function GET(
       trackingNumber: order.trackingNumber,
       shippedAt: order.shippedAt,
       createdAt: order.createdAt,
-      photoUrls: order.photos.map((p) => p.originalUrl),
-      glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
+      photoUrls: order.photos.map((p) => normalizeFileUrl(p.originalUrl) ?? p.originalUrl),
+      glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
       actions: order.manufacturerActions.map((a) => ({
         id: a.id,
         action: a.action,

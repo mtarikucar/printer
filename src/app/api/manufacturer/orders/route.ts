@@ -8,6 +8,7 @@ import {
   manufacturers,
 } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 const PAGE_SIZE = 20;
 
@@ -103,8 +104,8 @@ export async function GET(request: NextRequest) {
     manufacturerStatus: o.manufacturerStatus,
     assignedToManufacturerAt: o.assignedToManufacturerAt,
     customerName: o.customerName,
-    photoUrl: o.photos[0]?.originalUrl ?? null,
-    glbUrl: o.generationAttempts[0]?.outputGlbUrl ?? null,
+    photoUrl: normalizeFileUrl(o.photos[0]?.originalUrl ?? null),
+    glbUrl: normalizeFileUrl(o.generationAttempts[0]?.outputGlbUrl ?? null),
   }));
 
   return NextResponse.json({

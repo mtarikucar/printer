@@ -5,6 +5,7 @@ import { orders, generationAttempts } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 export async function GET(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -51,8 +52,8 @@ export async function GET(request: NextRequest) {
     createdAt: order.createdAt,
     trackingNumber: order.trackingNumber,
     isPublic: order.isPublic,
-    glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
-    thumbnailUrl: order.photos[0]?.originalUrl ?? null,
+    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+    thumbnailUrl: normalizeFileUrl(order.photos[0]?.originalUrl ?? null),
   }));
 
   return NextResponse.json({ orders: result });

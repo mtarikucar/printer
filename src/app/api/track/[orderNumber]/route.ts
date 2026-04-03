@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, generationAttempts } from "@/lib/db/schema";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 export async function GET(
   request: NextRequest,
@@ -35,6 +36,6 @@ export async function GET(
     createdAt: order.createdAt,
     isPublic: order.isPublic,
     publicDisplayName: order.publicDisplayName,
-    glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
+    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
   });
 }

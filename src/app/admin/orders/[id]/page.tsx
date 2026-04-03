@@ -79,7 +79,7 @@ export default async function AdminOrderDetailPage({
     },
     photos: order.photos.map(p => ({
       id: p.id,
-      originalUrl: normalizeFileUrl(p.originalUrl),
+      originalUrl: normalizeFileUrl(p.originalUrl) ?? p.originalUrl,
       thumbnailUrl: normalizeFileUrl(p.thumbnailUrl),
     })),
     latestGeneration: latestGeneration ? {

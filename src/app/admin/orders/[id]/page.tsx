@@ -8,6 +8,7 @@ import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 export default async function AdminOrderDetailPage({
   params,
@@ -78,14 +79,14 @@ export default async function AdminOrderDetailPage({
     },
     photos: order.photos.map(p => ({
       id: p.id,
-      originalUrl: p.originalUrl,
-      thumbnailUrl: p.thumbnailUrl,
+      originalUrl: normalizeFileUrl(p.originalUrl),
+      thumbnailUrl: normalizeFileUrl(p.thumbnailUrl),
     })),
     latestGeneration: latestGeneration ? {
       id: latestGeneration.id,
       provider: latestGeneration.provider,
       status: latestGeneration.status,
-      outputGlbUrl: latestGeneration.outputGlbUrl,
+      outputGlbUrl: normalizeFileUrl(latestGeneration.outputGlbUrl),
       costCents: latestGeneration.costCents,
       durationMs: latestGeneration.durationMs,
       createdAt: latestGeneration.createdAt.toISOString(),
@@ -104,7 +105,7 @@ export default async function AdminOrderDetailPage({
       id: a.id,
       provider: a.provider,
       status: a.status,
-      outputGlbUrl: a.outputGlbUrl,
+      outputGlbUrl: normalizeFileUrl(a.outputGlbUrl),
       errorMessage: a.errorMessage,
       costCents: a.costCents,
       durationMs: a.durationMs,

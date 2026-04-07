@@ -203,6 +203,7 @@ export const generationAttempts = pgTable("generation_attempts", {
   status: generationStatusEnum("status").notNull().default("pending"),
   inputImageUrl: text("input_image_url").notNull(),
   outputGlbUrl: text("output_glb_url"),
+  outputStlUrl: text("output_stl_url"),
   errorMessage: text("error_message"),
   costCents: integer("cost_cents"),
   durationMs: integer("duration_ms"),

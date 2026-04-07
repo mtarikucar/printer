@@ -42,9 +42,9 @@ interface Props {
   data: {
     order: OrderData;
     photos: { id: string; originalUrl: string; thumbnailUrl: string | null }[];
-    latestGeneration: { id: string; provider: string; status: string; outputGlbUrl: string | null; costCents: number | null; durationMs: number | null; createdAt: string } | null;
+    latestGeneration: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; costCents: number | null; durationMs: number | null; createdAt: string } | null;
     latestReport: { isWatertight: boolean; isVolume: boolean; vertexCount: number; faceCount: number; componentCount: number; boundingBox: any; baseAdded: boolean; repairsApplied: string[] | null } | null;
-    generationAttempts: { id: string; provider: string; status: string; outputGlbUrl: string | null; errorMessage: string | null; costCents: number | null; durationMs: number | null; createdAt: string }[];
+    generationAttempts: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; errorMessage: string | null; costCents: number | null; durationMs: number | null; createdAt: string }[];
     adminActions: { id: string; action: string; adminEmail: string; notes: string | null; createdAt: string }[];
     adminMessages: { id: string; channel: string; subject: string | null; body: string; templateKey: string | null; adminEmail: string; sentAt: string }[];
     manufacturer?: { id: string; companyName: string; contactPerson: string; status: string } | null;
@@ -310,12 +310,20 @@ export function OrderDetailClient({ data, locale }: Props) {
             <p className="text-sm text-gray-500 mt-0.5">{order.customerName} &middot; {order.email}</p>
           </div>
         </div>
-        {latestGeneration?.outputGlbUrl && (
-          <a href={latestGeneration.outputGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-            {d["admin.orderDetail.downloadGlb"]}
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          {latestGeneration?.outputGlbUrl && (
+            <a href={latestGeneration.outputGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              {d["admin.orderDetail.downloadGlb"]}
+            </a>
+          )}
+          {latestGeneration?.outputStlUrl && (
+            <a href={latestGeneration.outputStlUrl} download className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              {d["admin.orderDetail.downloadStl"]}
+            </a>
+          )}
+        </div>
       </div>
 
       {/* ─── Horizontal Stepper Timeline ────────────────── */}

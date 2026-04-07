@@ -7,9 +7,10 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { getRedisConnection } from "../connection";
 import type { MeshProcessingJobData } from "../queues";
-import { getFileBuffer } from "../../services/storage";
+import { getFileBuffer, saveFile, getPublicUrl } from "../../services/storage";
 import { db } from "../../db";
 import { orders, generationAttempts, meshReports } from "../../db/schema";
+import { nanoid } from "nanoid";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +56,12 @@ async function processJob(job: Job<MeshProcessingJobData>) {
     // Read report
     const report = JSON.parse(await readFile(reportPath, "utf-8"));
 
+    // Persist STL to storage before temp dir cleanup
+    const stlBuffer = await readFile(outputStlPath);
+    const stlFilename = `processed-${nanoid()}.stl`;
+    const stlKey = await saveFile(stlBuffer, `models/${orderId}`, stlFilename);
+    const stlUrl = getPublicUrl(stlKey);
+
     // Create mesh report
     await db.insert(meshReports).values({
       generationId,
@@ -67,6 +74,12 @@ async function processJob(job: Job<MeshProcessingJobData>) {
       baseAdded: report.base_added,
       repairsApplied: report.repairs_applied,
     });
+
+    // Store STL URL on generation attempt
+    await db
+      .update(generationAttempts)
+      .set({ outputStlUrl: stlUrl, updatedAt: new Date() })
+      .where(eq(generationAttempts.id, generationId));
 
     // Update order status to review
     await db

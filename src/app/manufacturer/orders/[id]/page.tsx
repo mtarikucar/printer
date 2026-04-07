@@ -13,6 +13,7 @@ import {
 import type { TurkishAddress } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
+import { normalizeFileUrl } from "@/lib/services/storage";
 import { ManufacturerOrderDetailClient } from "./client";
 
 export default async function ManufacturerOrderDetailPage({
@@ -48,7 +49,7 @@ export default async function ManufacturerOrderDetailPage({
       },
       generationAttempts: {
         where: eq(generationAttempts.status, "succeeded"),
-        columns: { id: true, outputGlbUrl: true },
+        columns: { id: true, outputGlbUrl: true, outputStlUrl: true },
         orderBy: [desc(generationAttempts.createdAt)],
         limit: 1,
       },
@@ -88,7 +89,8 @@ export default async function ManufacturerOrderDetailPage({
       id: p.id,
       originalUrl: p.originalUrl,
     })),
-    glbUrl: latestGeneration?.outputGlbUrl ?? null,
+    glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
+    stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
     actions: order.manufacturerActions.map((a) => ({
       id: a.id,
       action: a.action,

@@ -25,6 +25,7 @@ export async function POST(
   // Parse multipart form data
   const formData = await request.formData();
   const glbFile = formData.get("glb") as File | null;
+  const stlFile = formData.get("stl") as File | null;
   const generationId = formData.get("generationId") as string | null;
 
   if (!glbFile || !generationId) {
@@ -85,11 +86,21 @@ export async function POST(
   const fileKey = await saveFile(buffer, `models/${orderId}`, filename);
   const publicUrl = getPublicUrl(fileKey);
 
-  // Update generation attempt with new GLB URL
+  // Save STL if provided
+  let stlUrl: string | null = null;
+  if (stlFile) {
+    const stlBuffer = Buffer.from(await stlFile.arrayBuffer());
+    const stlFilename = `sculpted-${nanoid()}.stl`;
+    const stlKey = await saveFile(stlBuffer, `models/${orderId}`, stlFilename);
+    stlUrl = getPublicUrl(stlKey);
+  }
+
+  // Update generation attempt with new GLB + STL URLs
   await db
     .update(generationAttempts)
     .set({
       outputGlbUrl: publicUrl,
+      ...(stlUrl && { outputStlUrl: stlUrl }),
       updatedAt: new Date(),
     })
     .where(eq(generationAttempts.id, generationId));

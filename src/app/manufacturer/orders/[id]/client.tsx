@@ -41,6 +41,7 @@ interface Props {
     order: OrderData;
     photos: { id: string; originalUrl: string }[];
     glbUrl: string | null;
+    stlUrl: string | null;
     actions: {
       id: string;
       action: string;
@@ -96,7 +97,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, glbUrl, actions } = data;
+  const { order, photos, glbUrl, stlUrl, actions } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -218,28 +219,52 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </span>
           </div>
         </div>
-        {glbUrl && (
-          <a
-            href={`/api/manufacturer/orders/${order.id}/download-glb`}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-indigo-200 transition-all hover:shadow-md hover:shadow-indigo-200"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+        <div className="flex items-center gap-2">
+          {glbUrl && (
+            <a
+              href={`/api/manufacturer/orders/${order.id}/download-glb`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-indigo-200 transition-all hover:shadow-md hover:shadow-indigo-200"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            {(d["manufacturer.orderDetail.downloadGlb" as keyof typeof d] as string) ||
-              "Download GLB"}
-          </a>
-        )}
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              {(d["manufacturer.orderDetail.downloadGlb" as keyof typeof d] as string) ||
+                "Download GLB"}
+            </a>
+          )}
+          {stlUrl && (
+            <a
+              href={`/api/manufacturer/orders/${order.id}/download-stl`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-emerald-200 transition-all hover:shadow-md hover:shadow-emerald-200"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              {(d["manufacturer.orderDetail.downloadStl" as keyof typeof d] as string) ||
+                "Download STL"}
+            </a>
+          )}
+        </div>
       </div>
 
       {/* ─── Horizontal Timeline Stepper ──────────────────── */}

@@ -231,12 +231,14 @@ export function MeshSculptor({
     setSaving(true);
     try {
       // Use the dedicated exporter which handles material swap, color attr cleanup, and matrix baking
-      const { exportGLB } = await import("@/lib/sculpting/engine/MeshExporter");
+      const { exportGLB, exportSTL } = await import("@/lib/sculpting/engine/MeshExporter");
       const glb = await exportGLB(mesh);
+      const stl = exportSTL(mesh);
 
       // Upload to server
       const formData = new FormData();
       formData.append("glb", new Blob([glb], { type: "model/gltf-binary" }), "sculpted.glb");
+      formData.append("stl", new Blob([stl], { type: "application/octet-stream" }), "sculpted.stl");
       formData.append("generationId", generationId);
 
       const res = await fetch(`/api/admin/orders/${orderId}/save-sculpted-mesh`, {

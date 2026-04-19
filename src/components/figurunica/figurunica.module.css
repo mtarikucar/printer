@@ -19,8 +19,6 @@
   font-family: var(--font-inter-tight), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
-  overflow-x: hidden;
-  position: relative;
 }
 .root *, .root *::before, .root *::after { box-sizing: border-box; }
 

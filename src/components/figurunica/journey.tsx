@@ -100,8 +100,18 @@ export function ScrollJourney({ d }: { d: FigurunicaDict }) {
   const [scene, setScene] = useState(0);
   const [sceneProg, setSceneProg] = useState(0);
   const [tx, setTx] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
+    const mql = window.matchMedia("(max-width: 960px)");
+    const apply = () => setIsMobile(mql.matches);
+    apply();
+    mql.addEventListener("change", apply);
+    return () => mql.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (isMobile) return;
     const onScroll = () => {
       const el = wrapRef.current;
       if (!el) return;
@@ -122,7 +132,7 @@ export function ScrollJourney({ d }: { d: FigurunicaDict }) {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };
-  }, []);
+  }, [isMobile]);
 
   const stations: StationComp[] = [
     StationUpload,
@@ -142,14 +152,18 @@ export function ScrollJourney({ d }: { d: FigurunicaDict }) {
         <div className={s("stage-grid")} />
         <div
           className={s("stations-track")}
-          style={{
-            width: `${STATION_COUNT * 100}vw`,
-            transform: `translateX(${tx}px)`,
-          }}
+          style={
+            isMobile
+              ? undefined
+              : {
+                  width: `${STATION_COUNT * 100}vw`,
+                  transform: `translateX(${tx}px)`,
+                }
+          }
         >
           {stations.map((Comp, i) => {
             const active = i === scene;
-            const prog = active ? sceneProg : i < scene ? 1 : 0;
+            const prog = isMobile ? 1 : active ? sceneProg : i < scene ? 1 : 0;
             const c = copy[i];
             return (
               <div className={s("station")} key={i}>

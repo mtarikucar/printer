@@ -1402,13 +1402,100 @@
 /* ---------- RESPONSIVE — keep desktop elegance, simplify mobile ---------- */
 @media (max-width: 960px) {
   .hero-intro { padding-top: 140px; }
+
+  /* --- HERO: compact mobile layout --- */
+  .hero {
+    height: auto;
+    min-height: 100vh;
+    padding-bottom: 12px;
+  }
+  .hero-printer {
+    width: 75vw; height: 75vw;
+    opacity: 0.22;
+    top: 56%;
+  }
+  .hud-chip { display: none; }
+  .hero-content {
+    padding: 28px 20px 0;
+    max-width: 100%;
+  }
+  .hero-content::before {
+    top: 50%; width: 120%; height: 80%;
+    background: radial-gradient(ellipse, rgba(250,250,247,0.75) 0%, rgba(250,250,247,0.3) 50%, transparent 80%);
+  }
+  .hero .hero-title {
+    font-size: clamp(32px, 9vw, 46px);
+    line-height: 1.02;
+    margin-top: 20px;
+  }
+  .hero .hero-sub {
+    font-size: 14px;
+    margin-top: 12px;
+    max-width: 360px;
+    line-height: 1.5;
+  }
+  .hero-ctas {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+    margin-top: 20px;
+    padding: 0 4px;
+  }
+  .hero-ctas > * { justify-content: center; }
+  .hero-stats {
+    width: calc(100% - 32px);
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 0;
+    gap: 0;
+    margin-top: 20px;
+  }
+  .stat { padding: 6px 10px; border-right: 1px solid var(--rule); }
+  .stat-v { font-size: 24px; }
+  .stat-k { font-size: 9px; margin-top: 4px; }
+  .stat:nth-child(2n) { border-right: none; }
+  .stat:nth-child(1), .stat:nth-child(2) { border-bottom: 1px solid var(--rule); }
+  .hero-ticker { margin-top: 14px; }
+  .ticker-track { font-size: 10px; }
+
+  /* --- JOURNEY: abandon horizontal pan, use vertical full-height sections --- */
+  .journey { height: auto; }
+  .journey-stage {
+    position: static;
+    height: auto;
+    width: 100%;
+    overflow: visible;
+  }
+  .stage-bg, .stage-grid { display: none; }
+  .stations-track {
+    position: static;
+    width: 100% !important;
+    height: auto;
+    transform: none !important;
+    flex-direction: column;
+    display: flex;
+  }
   .station {
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    flex-shrink: 1;
     grid-template-columns: 1fr;
-    padding: 48px 20px;
-    gap: 20px;
-    text-align: center;
     grid-template-rows: auto auto;
+    padding: 48px 20px;
+    gap: 22px;
+    text-align: center;
     align-content: center;
+    justify-items: center;
+    position: relative;
+    isolation: isolate;
+  }
+  .station::before {
+    content: "";
+    position: absolute; inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(ellipse at 50% 100%, rgba(0,212,255,0.05), transparent 60%),
+      linear-gradient(180deg, #FDFDFA 0%, #F3F2EC 100%);
   }
   .station-visual {
     height: auto;
@@ -1425,6 +1512,7 @@
   .station-desc { font-size: 15px; margin-top: 14px; }
   .station-caption { margin-top: 18px; }
   .station-index { margin-bottom: 12px; justify-content: center; }
+  .scene-counter, .scene-label { display: none; }
 
   /* Stage visuals — fluid widths and proportional heights */
   .upload-frame,
@@ -1467,11 +1555,6 @@
   .reveal-arrow { width: 32px; }
   .reveal-card .label { font-size: 9px; letter-spacing: 0.16em; padding: 4px 8px; }
 
-  .scene-counter, .scene-label { bottom: 16px; }
-  .scene-counter { left: 16px; }
-  .scene-label { right: 16px; font-size: 10px; }
-  .scene-counter .tick { width: 20px; }
-
   /* Everything else */
   .styles-grid { grid-template-columns: repeat(2, 1fr); }
   .steps { grid-template-columns: 1fr 1fr; }
@@ -1484,7 +1567,14 @@
 }
 
 @media (max-width: 560px) {
-  .station { padding: 36px 16px; gap: 16px; }
+  .hero .hero-title { font-size: clamp(30px, 11vw, 40px); }
+  .hero-printer { width: 95vw; height: 95vw; opacity: 0.16; top: 60%; }
+  .ticker-chunk { font-size: 10px; padding: 0 14px; }
+  .hero .hero-sub { font-size: 13.5px; max-width: 320px; }
+  .stat-v { font-size: 22px; }
+  .eyebrow { font-size: 10px; padding: 5px 12px; }
+
+  .station { padding: 40px 16px 56px; gap: 18px; min-height: 92vh; }
   .station-title { font-size: clamp(28px, 9vw, 36px); }
   .station-desc { font-size: 14px; }
 
@@ -1513,9 +1603,4 @@
   .cta-band { margin: 40px 16px 24px; padding: 44px 22px; border-radius: 20px; }
   .faq-section { padding: 72px 18px; }
   .footer { flex-direction: column; gap: 8px; text-align: center; padding: 40px 20px 32px; }
-}
-
-/* Prevent mobile viewport jumps from wrecking sticky calculations */
-@media (max-width: 960px) {
-  html { scroll-padding-top: 0; }
 }

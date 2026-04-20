@@ -1406,13 +1406,13 @@
   /* --- HERO: compact mobile layout --- */
   .hero {
     height: auto;
-    min-height: 100vh;
-    padding-bottom: 12px;
+    min-height: 0;
+    padding: 24px 0 28px;
   }
   .hero-printer {
-    width: 75vw; height: 75vw;
-    opacity: 0.22;
-    top: 56%;
+    width: 70vw; height: 70vw;
+    opacity: 0.2;
+    top: 58%;
   }
   .hud-chip { display: none; }
   .hero-content {
@@ -1477,17 +1477,25 @@
   .station {
     width: 100%;
     height: auto;
-    min-height: 100vh;
+    min-height: 0;
     flex-shrink: 1;
     grid-template-columns: 1fr;
     grid-template-rows: auto auto;
-    padding: 48px 20px;
-    gap: 22px;
+    padding: 72px 20px 88px;
+    gap: 28px;
     text-align: center;
     align-content: center;
     justify-items: center;
     position: relative;
     isolation: isolate;
+  }
+  .station + .station::before {
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(0,212,255,0.04), transparent 55%),
+      linear-gradient(180deg, #F3F2EC 0%, #FDFDFA 12%, #F3F2EC 100%);
+  }
+  .station:last-child {
+    padding-bottom: 96px;
   }
   .station::before {
     content: "";
@@ -1567,16 +1575,23 @@
 }
 
 @media (max-width: 560px) {
-  .hero .hero-title { font-size: clamp(30px, 11vw, 40px); }
-  .hero-printer { width: 95vw; height: 95vw; opacity: 0.16; top: 60%; }
+  .hero { padding: 16px 0 20px; }
+  .hero .hero-title { font-size: clamp(30px, 11vw, 40px); margin-top: 14px; }
+  .hero-printer { width: 86vw; height: 86vw; opacity: 0.16; top: 62%; }
   .ticker-chunk { font-size: 10px; padding: 0 14px; }
-  .hero .hero-sub { font-size: 13.5px; max-width: 320px; }
+  .hero .hero-sub { font-size: 13.5px; max-width: 320px; margin-top: 10px; }
+  .hero-ctas { margin-top: 16px; gap: 8px; }
+  .hero-stats { margin-top: 16px; padding: 10px 0; }
+  .stat { padding: 5px 8px; }
   .stat-v { font-size: 22px; }
+  .stat-k { font-size: 8.5px; }
   .eyebrow { font-size: 10px; padding: 5px 12px; }
+  .hero-ticker { margin-top: 10px; padding: 8px 0; }
 
-  .station { padding: 40px 16px 56px; gap: 18px; min-height: 92vh; }
+  .station { padding: 56px 16px 72px; gap: 22px; min-height: 0; }
   .station-title { font-size: clamp(28px, 9vw, 36px); }
-  .station-desc { font-size: 14px; }
+  .station-desc { font-size: 14px; margin-top: 12px; }
+  .station-caption { margin-top: 14px; }
 
   .upload-frame,
   .scan-stage,

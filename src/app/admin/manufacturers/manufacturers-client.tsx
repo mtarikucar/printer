@@ -12,6 +12,9 @@ interface Manufacturer {
   contactPerson: string;
   email: string;
   phone: string;
+  taxId: string | null;
+  taxIdType: "vkn" | "tckn" | null;
+  requiresManualTaxReview: boolean;
   status: string;
   activeOrders: number;
   createdAt: string;
@@ -29,7 +32,20 @@ const STATUS_LABEL_KEY: Record<string, string> = {
   suspended: "admin.manufacturers.statusSuspended",
 };
 
-type FilterTab = "all" | "pending_approval" | "active" | "suspended";
+type FilterTab =
+  | "all"
+  | "pending_approval"
+  | "manual_review"
+  | "active"
+  | "suspended";
+
+function matchesFilter(m: Manufacturer, filter: FilterTab): boolean {
+  if (filter === "all") return true;
+  if (filter === "manual_review") {
+    return m.requiresManualTaxReview && m.status !== "suspended";
+  }
+  return m.status === filter;
+}
 
 export function ManufacturersClient({
   manufacturers,
@@ -44,10 +60,7 @@ export function ManufacturersClient({
   const [filter, setFilter] = useState<FilterTab>("all");
   const [loading, setLoading] = useState<string | null>(null);
 
-  const filtered =
-    filter === "all"
-      ? manufacturers
-      : manufacturers.filter((m) => m.status === filter);
+  const filtered = manufacturers.filter((m) => matchesFilter(m, filter));
 
   const performAction = async (
     id: string,
@@ -72,6 +85,10 @@ export function ManufacturersClient({
   const tabs: { key: FilterTab; label: string }[] = [
     { key: "all", label: d["admin.manufacturers.filterAll"] },
     { key: "pending_approval", label: d["admin.manufacturers.filterPending"] },
+    {
+      key: "manual_review",
+      label: d["admin.manufacturers.filterManualReview"],
+    },
     { key: "active", label: d["admin.manufacturers.filterActive"] },
     { key: "suspended", label: d["admin.manufacturers.filterSuspended"] },
   ];
@@ -88,10 +105,9 @@ export function ManufacturersClient({
       {/* Filter tabs */}
       <div className="mt-6 flex gap-2">
         {tabs.map((tab) => {
-          const count =
-            tab.key === "all"
-              ? manufacturers.length
-              : manufacturers.filter((m) => m.status === tab.key).length;
+          const count = manufacturers.filter((m) =>
+            matchesFilter(m, tab.key)
+          ).length;
           return (
             <button
               key={tab.key}
@@ -131,6 +147,9 @@ export function ManufacturersClient({
                   {d["admin.manufacturers.status"]}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                  {d["admin.manufacturers.colTaxId"]}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
                   {d["admin.manufacturers.activeOrders"]}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
@@ -157,6 +176,17 @@ export function ManufacturersClient({
                     >
                       {d[STATUS_LABEL_KEY[m.status] as keyof typeof d] || m.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    {m.taxId && m.taxIdType ? (
+                      <span className="font-mono text-gray-700">
+                        {m.taxIdType.toUpperCase()}: {m.taxId}
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                        {d["admin.manufacturers.badgeManualReview"]}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700 text-center">
                     {m.activeOrders}

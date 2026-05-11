@@ -26,7 +26,7 @@ export default async function TermsPage() {
             <>
               <p>
                 Bu Kullanim Kosullari (&quot;Kosullar&quot;), Figurine Studio (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafindan
-                figurinestudio.com web sitesi ve iliskili hizmetler uzerinden sunulan hizmetlerin kullanimina
+                figurunica.com web sitesi ve iliskili hizmetler uzerinden sunulan hizmetlerin kullanimina
                 iliskin sartlari duzenlemektedir. Hizmetlerimizi kullanarak bu Kosullar&apos;i kabul etmis sayilirsiniz.
               </p>
 
@@ -104,7 +104,7 @@ export default async function TermsPage() {
                 <li>Her figurin ozel uretim oldugu icin standart iade kabul edilmemektedir.</li>
                 <li>Urun hasar gormus veya hatali olarak teslim edilmisse, teslim tarihinden itibaren 14 gun icinde bizimle iletisime geciniz.</li>
                 <li>Kalite sorunu tespit edilmesi halinde ucretsiz yeniden uretim veya iade yapilir.</li>
-                <li>Urunun fotografi ve sorunun aciklamasi ile birlikte info@figurinestudio.com adresine basvuru yapilmalidir.</li>
+                <li>Urunun fotografi ve sorunun aciklamasi ile birlikte info@figurunica.com adresine basvuru yapilmalidir.</li>
               </ul>
 
               <h3>4.3 Mesafeli Satis Sozlesmesi</h3>
@@ -185,14 +185,14 @@ export default async function TermsPage() {
               <h2>11. Iletisim</h2>
               <p>Bu Kullanim Kosullari hakkinda sorulariniz icin:</p>
               <ul>
-                <li>E-posta: info@figurinestudio.com</li>
+                <li>E-posta: info@figurunica.com</li>
               </ul>
             </>
           ) : (
             <>
               <p>
                 These Terms of Service (&quot;Terms&quot;) govern the use of services provided by Figurine Studio (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;)
-                through the figurinestudio.com website and related services. By using our services, you agree to these Terms.
+                through the figurunica.com website and related services. By using our services, you agree to these Terms.
               </p>
 
               <h2>1. Service Description</h2>
@@ -269,7 +269,7 @@ export default async function TermsPage() {
                 <li>Standard returns are not accepted as each figurine is custom-made.</li>
                 <li>If the product is delivered damaged or defective, contact us within 14 days of delivery.</li>
                 <li>If a quality issue is confirmed, free reproduction or refund will be provided.</li>
-                <li>Applications should be made to info@figurinestudio.com with a photo of the product and description of the issue.</li>
+                <li>Applications should be made to info@figurunica.com with a photo of the product and description of the issue.</li>
               </ul>
 
               <h3>4.3 Distance Sales Contract</h3>
@@ -349,7 +349,7 @@ export default async function TermsPage() {
               <h2>11. Contact</h2>
               <p>For questions about these Terms of Service:</p>
               <ul>
-                <li>Email: info@figurinestudio.com</li>
+                <li>Email: info@figurunica.com</li>
               </ul>
             </>
           )}

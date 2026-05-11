@@ -35,8 +35,8 @@ export default async function PrivacyPage() {
                 Kisisel verileriniz bakimindan veri sorumlusu Figurine Studio&apos;dur. Bize asagidaki kanallardan ulasabilirsiniz:
               </p>
               <ul>
-                <li>E-posta: info@figurinestudio.com</li>
-                <li>Web sitesi: figurinestudio.com</li>
+                <li>E-posta: info@figurunica.com</li>
+                <li>Web sitesi: figurunica.com</li>
               </ul>
 
               <h2>2. Toplanan Kisisel Veriler</h2>
@@ -157,7 +157,7 @@ export default async function PrivacyPage() {
                 <li>Kisisel verilerin kanuna aykiri olarak islenmesi sebebiyle zarara ugramaniz halinde zararin giderilmesini talep etme</li>
               </ul>
               <p>
-                Bu haklarinizi kullanmak icin info@figurinestudio.com adresine basvurabilirsiniz.
+                Bu haklarinizi kullanmak icin info@figurunica.com adresine basvurabilirsiniz.
                 Basvurular en gec 30 gun icinde ucretsiz olarak sonuclandirilir.
               </p>
 
@@ -179,7 +179,7 @@ export default async function PrivacyPage() {
                 Gizlilik politikamiz hakkinda sorulariniz veya talepleriniz icin bizimle iletisime gecebilirsiniz:
               </p>
               <ul>
-                <li>E-posta: info@figurinestudio.com</li>
+                <li>E-posta: info@figurunica.com</li>
               </ul>
             </>
           ) : (
@@ -193,8 +193,8 @@ export default async function PrivacyPage() {
               <h2>1. Data Controller</h2>
               <p>Figurine Studio is the data controller for your personal data. You can reach us through:</p>
               <ul>
-                <li>Email: info@figurinestudio.com</li>
-                <li>Website: figurinestudio.com</li>
+                <li>Email: info@figurunica.com</li>
+                <li>Website: figurunica.com</li>
               </ul>
 
               <h2>2. Personal Data We Collect</h2>
@@ -315,7 +315,7 @@ export default async function PrivacyPage() {
                 <li>Claim compensation for damages arising from unlawful processing of personal data</li>
               </ul>
               <p>
-                To exercise these rights, contact us at info@figurinestudio.com.
+                To exercise these rights, contact us at info@figurunica.com.
                 Requests are processed free of charge within 30 days at the latest.
               </p>
 
@@ -335,7 +335,7 @@ export default async function PrivacyPage() {
               <h2>12. Contact</h2>
               <p>For questions or requests about our privacy policy, you can contact us:</p>
               <ul>
-                <li>Email: info@figurinestudio.com</li>
+                <li>Email: info@figurunica.com</li>
               </ul>
             </>
           )}

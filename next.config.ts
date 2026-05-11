@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { hostname: "localhost" },
       { hostname: "127.0.0.1" },
+      { hostname: "figurunica.com" },
+      { hostname: "www.figurunica.com" },
     ],
   },
   serverExternalPackages: ["bullmq", "ioredis", "onnxruntime-node", "sharp"],

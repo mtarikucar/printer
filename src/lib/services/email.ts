@@ -13,7 +13,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const FROM_EMAIL = process.env.SMTP_FROM || "Figurine Studio <siparis@figurinestudio.com>";
+const FROM_EMAIL = process.env.SMTP_FROM || "Figurine Studio <siparis@figurunica.com>";
 
 function escHtml(str: string): string {
   return str

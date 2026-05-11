@@ -7,7 +7,7 @@ import { orders, giftCards, giftCardRedemptions, adminActions } from "../../db/s
 import { getBankDetails } from "../../config/payment";
 import type { Locale } from "../../i18n/types";
 
-const SYSTEM_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "system@figurinestudio.com";
+const SYSTEM_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "system@figurunica.com";
 
 function localeOf(value: string | null | undefined): Locale {
   return value === "en" ? "en" : "tr";

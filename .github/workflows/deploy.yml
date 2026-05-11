@@ -64,6 +64,10 @@ jobs:
           GHCR_USER: ${{ github.repository_owner }}
           IMAGE_BASE: ghcr.io/${{ github.repository }}
           IMAGE_TAG: ${{ github.sha }}
+          # Public-facing config (managed in GitHub → upserted into server .env)
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
           # Payment + bank secrets (managed in GitHub → upserted into server .env)
           PAYTR_MERCHANT_ID: ${{ secrets.PAYTR_MERCHANT_ID }}
           PAYTR_MERCHANT_KEY: ${{ secrets.PAYTR_MERCHANT_KEY }}
@@ -80,7 +84,7 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
           command_timeout: 10m
-          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH
+          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH
           script: |
             set -euo pipefail
 
@@ -123,6 +127,9 @@ jobs:
             }
 
             log "GitHub Secrets'tan .env senkronize ediliyor..."
+            upsert_env NEXT_PUBLIC_APP_URL   "$NEXT_PUBLIC_APP_URL"
+            upsert_env SMTP_FROM             "$SMTP_FROM"
+            upsert_env ADMIN_EMAIL           "$ADMIN_EMAIL"
             upsert_env PAYTR_MERCHANT_ID     "$PAYTR_MERCHANT_ID"
             upsert_env PAYTR_MERCHANT_KEY    "$PAYTR_MERCHANT_KEY"
             upsert_env PAYTR_MERCHANT_SALT   "$PAYTR_MERCHANT_SALT"

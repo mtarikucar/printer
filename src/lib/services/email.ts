@@ -36,7 +36,11 @@ interface SendEmailParams {
     | "order_delivered"
     | "admin_custom"
     | "order_assigned"
-    | "manufacturer_shipped";
+    | "manufacturer_shipped"
+    | "bank_transfer_instructions"
+    | "bank_transfer_reminder"
+    | "bank_transfer_receipt_received"
+    | "payment_expired";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -54,6 +58,29 @@ interface SendEmailParams {
   customSubject?: string;
   customBody?: string;
   locale?: Locale;
+  bankName?: string;
+  bankAccountHolder?: string;
+  bankIban?: string;
+  bankBranch?: string;
+  paymentAmountKurus?: number;
+  paymentDeadline?: string;
+}
+
+function formatKurus(kurus?: number): string {
+  if (kurus === undefined || kurus === null) return "";
+  return `₺${(kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatDeadline(iso?: string, locale: Locale = "tr"): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString(locale === "tr" ? "tr-TR" : "en-US", {
+      dateStyle: "long",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function getTemplates(locale: Locale) {
@@ -278,9 +305,98 @@ function getTemplates(locale: Locale) {
         </div>
       `,
     }),
+
+    bank_transfer_instructions: (p) => ({
+      subject: d["email.bankTransfer.subject"].replace("{orderNumber}", escHtml(p.orderNumber)),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.bankTransfer.heading"].replace("{customerName}", escHtml(p.customerName))}</h1>
+          <p>${d["email.bankTransfer.body"]}</p>
+          <div style="margin: 24px 0; padding: 20px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+            <p style="margin: 0 0 12px;"><strong>${d["email.bankTransfer.amount"]}</strong> <span style="font-size: 22px; font-weight: 700; color: #10b981;">${formatKurus(p.paymentAmountKurus)}</span></p>
+            <p style="margin: 4px 0;"><strong>${d["email.bankTransfer.bankName"]}</strong> ${escHtml(p.bankName || "")}</p>
+            <p style="margin: 4px 0;"><strong>${d["email.bankTransfer.accountHolder"]}</strong> ${escHtml(p.bankAccountHolder || "")}</p>
+            <p style="margin: 4px 0;"><strong>${d["email.bankTransfer.iban"]}</strong> <span style="font-family: monospace;">${escHtml(p.bankIban || "")}</span></p>
+            <p style="margin: 12px 0 4px;"><strong>${d["email.bankTransfer.reference"]}</strong> <span style="font-family: monospace; background: #fef3c7; padding: 2px 8px; border-radius: 4px;">${escHtml(p.orderNumber)}</span></p>
+            <p style="margin: 12px 0 0;"><strong>${d["email.bankTransfer.deadline"]}</strong> ${escHtml(formatDeadline(p.paymentDeadline, locale))}</p>
+          </div>
+          <a href="${trackUrl(p.orderNumber)}"
+             style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["email.bankTransfer.trackButton"]}
+          </a>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
+
+    bank_transfer_reminder: (p) => ({
+      subject: d["email.bankTransfer.reminderSubject"].replace("{orderNumber}", escHtml(p.orderNumber)),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.bankTransfer.heading"].replace("{customerName}", escHtml(p.customerName))}</h1>
+          <p>${d["email.bankTransfer.reminderBody"]}</p>
+          <div style="margin: 24px 0; padding: 20px; background: #fef3c7; border-radius: 12px;">
+            <p style="margin: 0 0 12px;"><strong>${d["email.bankTransfer.amount"]}</strong> <span style="font-size: 20px; font-weight: 700;">${formatKurus(p.paymentAmountKurus)}</span></p>
+            <p style="margin: 4px 0;"><strong>${d["email.bankTransfer.bankName"]}</strong> ${escHtml(p.bankName || "")}</p>
+            <p style="margin: 4px 0;"><strong>${d["email.bankTransfer.iban"]}</strong> <span style="font-family: monospace;">${escHtml(p.bankIban || "")}</span></p>
+            <p style="margin: 12px 0 4px;"><strong>${d["email.bankTransfer.reference"]}</strong> <span style="font-family: monospace;">${escHtml(p.orderNumber)}</span></p>
+          </div>
+          <a href="${trackUrl(p.orderNumber)}"
+             style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["email.bankTransfer.trackButton"]}
+          </a>
+        </div>
+      `,
+    }),
+
+    bank_transfer_receipt_received: (p) => ({
+      subject: d["email.bankTransfer.receiptSubject"].replace(
+        "{orderNumber}",
+        escHtml(p.orderNumber)
+      ),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.bankTransfer.receiptHeading"]}</h1>
+          <p>${d["email.bankTransfer.receiptBody"]
+            .replace("{customerName}", escHtml(p.customerName))
+            .replace("{orderNumber}", escHtml(p.orderNumber))}</p>
+          ${p.photoUrl ? `<p><a href="${p.photoUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">${d["email.bankTransfer.receiptView"]}</a></p>` : ""}
+        </div>
+      `,
+    }),
+
+    payment_expired: (p) => ({
+      subject: d["email.paymentExpired.subject"].replace("{orderNumber}", escHtml(p.orderNumber)),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.paymentExpired.heading"].replace("{customerName}", escHtml(p.customerName))}</h1>
+          <p>${d["email.paymentExpired.body"]}</p>
+          <p>${d["email.paymentExpired.tryAgain"]}</p>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/create"
+             style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 12px;">
+            ${d["nav.createNew"]}
+          </a>
+        </div>
+      `,
+    }),
   };
 
   return templates;
+}
+
+// Map email type → recipient resolver. Centralised so adding a new type
+// only requires updating one spot instead of growing a chained ternary.
+const RECIPIENT_OVERRIDES: Partial<
+  Record<SendEmailParams["type"], (p: SendEmailParams) => string | undefined>
+> = {
+  order_assigned: (p) => p.manufacturerEmail,
+  manufacturer_shipped: (p) => p.adminEmail,
+  revision_request: (p) => p.adminEmail,
+};
+
+function resolveRecipient(params: SendEmailParams): string {
+  const override = RECIPIENT_OVERRIDES[params.type]?.(params);
+  return override ?? params.to;
 }
 
 export async function sendEmail(params: SendEmailParams): Promise<void> {
@@ -288,18 +404,9 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   const templates = getTemplates(locale);
   const template = templates[params.type](params);
 
-  const recipient =
-    params.type === "order_assigned" && params.manufacturerEmail
-      ? params.manufacturerEmail
-      : params.type === "manufacturer_shipped" && params.adminEmail
-        ? params.adminEmail
-        : params.type === "revision_request" && params.adminEmail
-          ? params.adminEmail
-          : params.to;
-
   await transporter.sendMail({
     from: FROM_EMAIL,
-    to: recipient,
+    to: resolveRecipient(params),
     subject: template.subject,
     html: template.html,
   });

@@ -1027,6 +1027,22 @@ const en = {
     "Your order has been automatically cancelled because the bank transfer was not received within 72 hours. Any gift card balance has been refunded.",
   "email.paymentExpired.tryAgain": "If you'd like to retry, you can place a new order anytime.",
   "email.bankTransfer.trackButton": "View order",
+  "email.bankTransfer.receiptSubject":
+    "[ADMIN] New bank transfer receipt for #{orderNumber}",
+
+  // Track page extras
+  "track.paymentSuccess": "Payment successful — we're starting your figurine!",
+  "track.paymentSuccessPending":
+    "Confirmation may take a moment. We'll update this page automatically.",
+  "track.paymentFailed": "Payment was not completed",
+  "track.paymentFailedDesc": "You can retry below — no charge has been made.",
+  "track.retryPayment.title": "Retry payment",
+  "track.retryPayment.desc":
+    "Your previous attempt didn't go through. Tap retry to be sent back to secure checkout.",
+  "track.retryPayment.button": "Retry payment",
+  "track.cancelled.title": "Order cancelled",
+  "track.bankTransferPaid.title": "Bank transfer received",
+  "track.bankTransferPaid.viewReceipt": "View receipt",
 
   // Payment method selector
   "payment.method.title": "Payment Method",

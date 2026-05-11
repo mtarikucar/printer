@@ -36,7 +36,11 @@ export interface EmailJobData {
     | "gift_card_received"
     | "admin_custom"
     | "order_assigned"
-    | "manufacturer_shipped";
+    | "manufacturer_shipped"
+    | "bank_transfer_instructions"
+    | "bank_transfer_reminder"
+    | "bank_transfer_receipt_received"
+    | "payment_expired";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -54,6 +58,18 @@ export interface EmailJobData {
   customSubject?: string;
   customBody?: string;
   locale?: "en" | "tr";
+  bankName?: string;
+  bankAccountHolder?: string;
+  bankIban?: string;
+  bankBranch?: string;
+  paymentAmountKurus?: number;
+  paymentDeadline?: string;
+}
+
+export interface PaymentDeadlineJobData {
+  orderId: string;
+  orderNumber: string;
+  type: "havale_reminder" | "havale_expire";
 }
 
 let aiGenerationQueue: Queue | null = null;
@@ -61,6 +77,7 @@ let meshProcessingQueue: Queue | null = null;
 let emailQueue: Queue | null = null;
 let previewGenerationQueue: Queue | null = null;
 let previewCleanupQueue: Queue | null = null;
+let paymentDeadlineQueue: Queue | null = null;
 
 export function getAiGenerationQueue(): Queue {
   if (!aiGenerationQueue) {
@@ -133,4 +150,27 @@ export function getEmailQueue(): Queue {
     });
   }
   return emailQueue;
+}
+
+export function getPaymentDeadlineQueue(): Queue {
+  if (!paymentDeadlineQueue) {
+    paymentDeadlineQueue = new Queue("payment-deadline", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 60000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return paymentDeadlineQueue;
+}
+
+export function havaleReminderJobId(orderId: string): string {
+  return `havale-reminder-${orderId}`;
+}
+
+export function havaleExpireJobId(orderId: string): string {
+  return `havale-expire-${orderId}`;
 }

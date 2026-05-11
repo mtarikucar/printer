@@ -176,6 +176,7 @@ export const orders = pgTable("orders", {
   modifiers: jsonb("modifiers").$type<string[]>(),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   status: orderStatusEnum("status").notNull().default("pending_payment"),
+  locale: text("locale").notNull().default("tr"),
   paymentMethod: paymentMethodEnum("payment_method"),
   paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
   paytrMerchantOid: text("paytr_merchant_oid"),

@@ -76,6 +76,19 @@ export default async function AdminOrderDetailPage({
       failureReason: order.failureReason,
       retryCount: order.retryCount,
       createdAt: order.createdAt.toISOString(),
+      paymentMethod: order.paymentMethod,
+      paymentStatus: order.paymentStatus,
+      havaleDiscountKurus: order.havaleDiscountKurus,
+      bankTransferDeadline: order.bankTransferDeadline?.toISOString() ?? null,
+      bankTransferReceiptUrl: order.bankTransferReceiptKey
+        ? `/api/admin/orders/${order.id}/receipt`
+        : null,
+      bankTransferReceiptUploadedAt:
+        order.bankTransferReceiptUploadedAt?.toISOString() ?? null,
+      paytrMerchantOid: order.paytrMerchantOid,
+      paytrPaymentType: order.paytrPaymentType,
+      paytrTestMode: order.paytrTestMode,
+      paytrFailureReason: order.paytrFailureReason,
     },
     photos: order.photos.map(p => ({
       id: p.id,

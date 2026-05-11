@@ -36,6 +36,16 @@ interface OrderData {
   failureReason: string | null;
   retryCount: number;
   createdAt: string;
+  paymentMethod: "card" | "bank_transfer" | "gift_card_full" | null;
+  paymentStatus: "pending" | "awaiting_transfer" | "succeeded" | "failed" | "expired";
+  havaleDiscountKurus: number;
+  bankTransferDeadline: string | null;
+  bankTransferReceiptUrl: string | null;
+  bankTransferReceiptUploadedAt: string | null;
+  paytrMerchantOid: string | null;
+  paytrPaymentType: string | null;
+  paytrTestMode: boolean | null;
+  paytrFailureReason: string | null;
 }
 
 interface Props {
@@ -418,7 +428,52 @@ export function OrderDetailClient({ data, locale }: Props) {
           {hasAnyAction && (
             <div className="space-y-3">
               {/* Primary action card */}
-              {primaryAction === "confirm" && (
+              {primaryAction === "confirm" && order.paymentMethod === "bank_transfer" && (
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-amber-200 p-5">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center flex-shrink-0">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-base font-semibold text-amber-900">{d["admin.payment.markHavalePaid"]}</h3>
+                      {order.bankTransferReceiptUrl ? (
+                        <a
+                          href={order.bankTransferReceiptUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 mt-2 text-sm text-amber-700 hover:text-amber-900 underline"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                          {d["admin.payment.receiptUploaded"]}
+                        </a>
+                      ) : (
+                        <p className="text-sm text-amber-700 mt-1">{d["admin.payment.receiptMissing"]}</p>
+                      )}
+                      {order.bankTransferDeadline && (
+                        <p className="text-xs text-amber-600 mt-2">
+                          {d["admin.payment.deadline"]}: {formatDateTime(order.bankTransferDeadline, loc)}
+                        </p>
+                      )}
+                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-amber-200 rounded-xl text-sm placeholder:text-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
+                      <button
+                        onClick={() => {
+                          if (confirm(d["admin.payment.markHavalePaid.confirm"])) {
+                            performAction("mark-havale-paid", { notes });
+                          }
+                        }}
+                        disabled={!!loading}
+                        className="mt-3 px-6 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-xl hover:bg-amber-700 disabled:bg-gray-400 transition-colors shadow-sm"
+                      >
+                        {loading === "mark-havale-paid"
+                          ? d["admin.orderDetail.confirming"]
+                          : d["admin.payment.markHavalePaid"]}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {primaryAction === "confirm" && order.paymentMethod !== "bank_transfer" && (
                 <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
                   <div className="flex items-start gap-4">
                     <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0">
@@ -866,6 +921,70 @@ export function OrderDetailClient({ data, locale }: Props) {
                     <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus - order.giftCardAmountKurus, loc)}</dd>
                   </div>
                 </>
+              )}
+              {order.havaleDiscountKurus > 0 && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.payment.havaleDiscount"]}</dt>
+                  <dd className="font-medium">
+                    <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-amber-200">
+                      -{formatCurrency(order.havaleDiscountKurus, loc)}
+                    </span>
+                  </dd>
+                </div>
+              )}
+              {order.paymentMethod && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.payment.method"]}</dt>
+                  <dd className="text-gray-700">
+                    {order.paymentMethod === "card" && d["admin.payment.method.card"]}
+                    {order.paymentMethod === "bank_transfer" && d["admin.payment.method.bankTransfer"]}
+                    {order.paymentMethod === "gift_card_full" && d["admin.payment.method.giftCardFull"]}
+                    {order.paymentMethod === "card" && order.paytrTestMode && (
+                      <span className="ml-2 inline-flex items-center text-[10px] font-semibold text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full">
+                        {d["admin.payment.paytrTestMode"]}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <dt className="text-gray-400">{d["admin.payment.status"]}</dt>
+                <dd className="text-gray-700 text-xs">
+                  {d[`admin.payment.status.${order.paymentStatus}` as keyof typeof d] || order.paymentStatus}
+                </dd>
+              </div>
+              {order.paymentMethod === "bank_transfer" && order.bankTransferReceiptUrl && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.payment.receiptUploaded"]}</dt>
+                  <dd>
+                    <a
+                      href={order.bankTransferReceiptUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:text-blue-800 underline"
+                    >
+                      Görüntüle
+                    </a>
+                  </dd>
+                </div>
+              )}
+              {order.paymentMethod === "bank_transfer" && order.bankTransferDeadline && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.payment.deadline"]}</dt>
+                  <dd className="text-gray-700 text-xs">{formatDateTime(order.bankTransferDeadline, loc)}</dd>
+                </div>
+              )}
+              {order.paymentMethod === "card" && order.paytrPaymentType && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.payment.paytrType"]}</dt>
+                  <dd className="text-gray-700 text-xs uppercase">{order.paytrPaymentType}</dd>
+                </div>
+              )}
+              {order.paytrFailureReason && (
+                <div className="flex justify-between items-start gap-2">
+                  <dt className="text-gray-400">{d["admin.payment.paytrFailureReason"]}</dt>
+                  <dd className="text-red-700 text-xs text-right">{order.paytrFailureReason}</dd>
+                </div>
               )}
               <div className="flex justify-between items-center">
                 <dt className="text-gray-400">{d["admin.orderDetail.payment"]}</dt>

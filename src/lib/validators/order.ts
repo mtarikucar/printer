@@ -31,6 +31,7 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
     shippingAddress: createTurkishAddressSchema(locale),
     giftCardCode: z.string().optional(),
+    paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
   });
 }
 

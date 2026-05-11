@@ -64,18 +64,29 @@ jobs:
           GHCR_USER: ${{ github.repository_owner }}
           IMAGE_BASE: ghcr.io/${{ github.repository }}
           IMAGE_TAG: ${{ github.sha }}
+          # Payment + bank secrets (managed in GitHub → upserted into server .env)
+          PAYTR_MERCHANT_ID: ${{ secrets.PAYTR_MERCHANT_ID }}
+          PAYTR_MERCHANT_KEY: ${{ secrets.PAYTR_MERCHANT_KEY }}
+          PAYTR_MERCHANT_SALT: ${{ secrets.PAYTR_MERCHANT_SALT }}
+          PAYTR_TEST_MODE: ${{ secrets.PAYTR_TEST_MODE }}
+          PAYTR_TIMEOUT_MINUTES: ${{ secrets.PAYTR_TIMEOUT_MINUTES }}
+          BANK_NAME: ${{ secrets.BANK_NAME }}
+          BANK_ACCOUNT_HOLDER: ${{ secrets.BANK_ACCOUNT_HOLDER }}
+          BANK_IBAN: ${{ secrets.BANK_IBAN }}
+          BANK_BRANCH: ${{ secrets.BANK_BRANCH }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
           command_timeout: 10m
-          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG
+          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH
           script: |
             set -euo pipefail
 
             PROJECT_DIR="/root/projects/printer"
             COMPOSE_FILE="$PROJECT_DIR/docker/docker-compose.production.yml"
+            ENV_FILE="$PROJECT_DIR/.env"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
             BACKUP_FILE="$PROJECT_DIR/backup_predeploy_${TIMESTAMP}.sql"
 
@@ -90,6 +101,39 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             log "Git pull tamamlandi. Commit: $(git rev-parse --short HEAD)"
+
+            # ─── 0b. Sync managed env vars from GitHub Secrets ───────
+            # Server's .env holds static infra config (DB_URL, REDIS_URL, ...);
+            # this step upserts the GitHub-managed secrets so they stay in sync.
+            # An empty secret is skipped (existing value preserved as safety net).
+            if [ ! -f "$ENV_FILE" ]; then
+                err ".env not found at $ENV_FILE — create it once manually with static infra settings before first deploy"
+            fi
+
+            upsert_env() {
+                local key="$1"
+                local value="$2"
+                if [ -z "$value" ]; then
+                    return 0
+                fi
+                # Drop any existing assignment (active or commented) then append fresh value.
+                sed -i "/^${key}=/d" "$ENV_FILE"
+                sed -i "/^#${key}=/d" "$ENV_FILE"
+                printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+            }
+
+            log "GitHub Secrets'tan .env senkronize ediliyor..."
+            upsert_env PAYTR_MERCHANT_ID     "$PAYTR_MERCHANT_ID"
+            upsert_env PAYTR_MERCHANT_KEY    "$PAYTR_MERCHANT_KEY"
+            upsert_env PAYTR_MERCHANT_SALT   "$PAYTR_MERCHANT_SALT"
+            upsert_env PAYTR_TEST_MODE       "$PAYTR_TEST_MODE"
+            upsert_env PAYTR_TIMEOUT_MINUTES "$PAYTR_TIMEOUT_MINUTES"
+            upsert_env BANK_NAME             "$BANK_NAME"
+            upsert_env BANK_ACCOUNT_HOLDER   "$BANK_ACCOUNT_HOLDER"
+            upsert_env BANK_IBAN             "$BANK_IBAN"
+            upsert_env BANK_BRANCH           "$BANK_BRANCH"
+            chmod 600 "$ENV_FILE"
+            log ".env senkronize edildi (600 izinleri)."
 
             # ─── 1. Pre-deploy DB Backup ─────────────────────────────
             log "Veritabani yedegi aliniyor..."

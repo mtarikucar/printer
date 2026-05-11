@@ -1033,6 +1033,22 @@ const tr: Dictionary = {
     "Havale ödemesi 72 saat içinde alınamadığı için siparişiniz otomatik olarak iptal edildi. Kullanıldıysa hediye kartı bakiyeniz iade edildi.",
   "email.paymentExpired.tryAgain": "Tekrar denemek isterseniz dilediğiniz zaman yeni sipariş verebilirsiniz.",
   "email.bankTransfer.trackButton": "Siparişi Görüntüle",
+  "email.bankTransfer.receiptSubject":
+    "[ADMIN] #{orderNumber} için yeni havale dekontu",
+
+  // Track sayfası ek
+  "track.paymentSuccess": "Ödemeniz alındı — figürünüzü hazırlamaya başlıyoruz!",
+  "track.paymentSuccessPending":
+    "Onay birkaç saniye sürebilir. Sayfayı otomatik güncelliyoruz.",
+  "track.paymentFailed": "Ödeme tamamlanamadı",
+  "track.paymentFailedDesc": "Aşağıdan tekrar deneyebilirsiniz — herhangi bir ücret çekilmedi.",
+  "track.retryPayment.title": "Ödemeyi tekrar dene",
+  "track.retryPayment.desc":
+    "Önceki deneme tamamlanmadı. Tekrar dene'ye dokunarak güvenli ödemeye yönlendirilirsiniz.",
+  "track.retryPayment.button": "Ödemeyi tekrar dene",
+  "track.cancelled.title": "Sipariş iptal edildi",
+  "track.bankTransferPaid.title": "Havale alındı",
+  "track.bankTransferPaid.viewReceipt": "Dekontu görüntüle",
 
   // Ödeme yöntemi seçimi
   "payment.method.title": "Ödeme Yöntemi",

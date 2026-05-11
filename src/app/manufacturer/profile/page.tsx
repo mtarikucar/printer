@@ -9,8 +9,17 @@ interface ManufacturerProfile {
   companyName: string;
   contactPerson: string;
   phone: string;
+  taxId: string | null;
+  taxIdType: "vkn" | "tckn" | null;
+  requiresManualTaxReview: boolean;
   status: string;
   createdAt: string;
+}
+
+function formatTaxId(taxId: string, taxIdType: "vkn" | "tckn"): string {
+  if (taxIdType === "vkn") return `VKN: ${taxId}`;
+  // TCKN: keep first 5 and last 2 visible, mask middle 4
+  return `TCKN: ${taxId.slice(0, 5)}****${taxId.slice(-2)}`;
 }
 
 export default function ManufacturerProfilePage() {
@@ -144,6 +153,33 @@ export default function ManufacturerProfilePage() {
             {(d["common.phone" as keyof typeof d] as string) || "Phone"}
           </label>
           <p className="text-gray-900">{profile.phone}</p>
+        </div>
+
+        {/* Tax ID */}
+        <div>
+          <label className="block text-sm font-medium text-gray-500 mb-1">
+            {(d["manufacturer.profile.taxId" as keyof typeof d] as string) ||
+              "Tax ID"}
+          </label>
+          {profile.taxId && profile.taxIdType ? (
+            <p className="text-gray-900 font-mono">
+              {formatTaxId(profile.taxId, profile.taxIdType)}
+            </p>
+          ) : (
+            <div>
+              <p className="text-gray-400">—</p>
+              <p className="mt-1 text-xs text-amber-700">
+                {(d["manufacturer.profile.taxId.missing" as keyof typeof d] as string) ||
+                  "Missing. To complete:"}{" "}
+                <a
+                  href="mailto:admin@figurunica.com"
+                  className="font-semibold underline hover:text-amber-900"
+                >
+                  admin@figurunica.com
+                </a>
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Member Since */}

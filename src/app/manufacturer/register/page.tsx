@@ -12,6 +12,8 @@ export default function ManufacturerRegisterPage() {
   const [contactPerson, setContactPerson] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [taxId, setTaxId] = useState("");
+  const [taxIdError, setTaxIdError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -34,11 +36,21 @@ export default function ManufacturerRegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setTaxIdError(null);
 
     if (password !== passwordConfirm) {
       setError(
         (d["manufacturer.register.passwordMismatch" as keyof typeof d] as string) ||
           "Passwords do not match"
+      );
+      return;
+    }
+
+    const taxIdTrimmed = taxId.replace(/\D+/g, "");
+    if (taxIdTrimmed.length > 0 && taxIdTrimmed.length !== 10 && taxIdTrimmed.length !== 11) {
+      setTaxIdError(
+        (d["manufacturer.register.taxId.invalid" as keyof typeof d] as string) ||
+          "Invalid tax ID"
       );
       return;
     }
@@ -54,6 +66,7 @@ export default function ManufacturerRegisterPage() {
           contactPerson,
           email,
           phone,
+          taxId: taxIdTrimmed || null,
           password,
         }),
       });
@@ -172,6 +185,43 @@ export default function ManufacturerRegisterPage() {
                     "05XX XXX XXXX"
                   }
                 />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-medium text-gray-700">
+                    {(d["manufacturer.register.taxId" as keyof typeof d] as string) ||
+                      "Tax ID / National ID"}
+                  </label>
+                  <span className="text-xs text-gray-400">
+                    {(d["manufacturer.register.taxId.optional" as keyof typeof d] as string) ||
+                      "Optional"}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={11}
+                  value={taxId}
+                  onChange={(e) => setTaxId(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder={
+                    (d["manufacturer.register.taxId.placeholder" as keyof typeof d] as string) ||
+                    "10 or 11 digits"
+                  }
+                />
+                {taxIdError && (
+                  <p className="mt-1.5 text-xs text-red-600">{taxIdError}</p>
+                )}
+                <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 leading-relaxed">
+                  {(d["manufacturer.register.taxId.help" as keyof typeof d] as string) ||
+                    "If you don't have a tax certificate you can leave this blank. Your account will be flagged for manual review. Contact:"}{" "}
+                  <a
+                    href="mailto:admin@figurunica.com"
+                    className="font-semibold underline hover:text-amber-900"
+                  >
+                    admin@figurunica.com
+                  </a>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">

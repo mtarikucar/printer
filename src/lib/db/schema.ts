@@ -50,6 +50,20 @@ export const orderStatusEnum = pgEnum("order_status", [
   "rejected",
 ]);
 
+export const paymentMethodEnum = pgEnum("payment_method", [
+  "card",
+  "bank_transfer",
+  "gift_card_full",
+]);
+
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pending",
+  "awaiting_transfer",
+  "succeeded",
+  "failed",
+  "expired",
+]);
+
 export const generationProviderEnum = pgEnum("generation_provider", [
   "tripo3d",
   "meshy",
@@ -74,6 +88,8 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "message_email",
   "edit",
   "assign_manufacturer",
+  "mark_havale_paid",
+  "mark_payment_expired",
 ]);
 
 export const figurineSizeEnum = pgEnum("figurine_size", [
@@ -160,7 +176,17 @@ export const orders = pgTable("orders", {
   modifiers: jsonb("modifiers").$type<string[]>(),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   status: orderStatusEnum("status").notNull().default("pending_payment"),
+  paymentMethod: paymentMethodEnum("payment_method"),
+  paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
   paytrMerchantOid: text("paytr_merchant_oid"),
+  paytrPaymentType: text("paytr_payment_type"),
+  paytrTestMode: boolean("paytr_test_mode"),
+  paytrFailureReason: text("paytr_failure_reason"),
+  havaleDiscountKurus: integer("havale_discount_kurus").notNull().default(0),
+  bankTransferDeadline: timestamp("bank_transfer_deadline"),
+  bankTransferReceiptKey: text("bank_transfer_receipt_key"),
+  bankTransferReceiptUploadedAt: timestamp("bank_transfer_receipt_uploaded_at"),
+  bankTransferReminderSentAt: timestamp("bank_transfer_reminder_sent_at"),
   amountKurus: integer("amount_kurus").notNull(),
   paidAt: timestamp("paid_at"),
   shippedAt: timestamp("shipped_at"),
@@ -266,6 +292,9 @@ export const manufacturers = pgTable("manufacturers", {
   phone: text("phone").notNull(),
   address: jsonb("address").$type<TurkishAddress>(),
   capabilities: jsonb("capabilities").$type<string[]>(),
+  taxId: text("tax_id"),
+  taxIdType: text("tax_id_type"),
+  requiresManualTaxReview: boolean("requires_manual_tax_review").notNull().default(false),
   status: manufacturerStatusEnum("status").notNull().default("pending_approval"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

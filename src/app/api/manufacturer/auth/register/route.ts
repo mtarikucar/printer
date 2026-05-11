@@ -9,6 +9,7 @@ import {
   setManufacturerSessionCookie,
 } from "@/lib/services/manufacturer-auth";
 import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
+import { parseTaxId } from "@/lib/services/tax-id";
 
 export async function POST(request: NextRequest) {
   const ip = extractClientIp(request);
@@ -26,11 +27,29 @@ export async function POST(request: NextRequest) {
     companyName: z.string().min(1, "Company name is required").max(100),
     contactPerson: z.string().min(1, "Contact person is required").max(100),
     phone: z.string().min(10, "Phone number must be at least 10 characters"),
+    taxId: z.string().optional().nullable(),
   });
 
   try {
     const body = await request.json();
     const validated = registerSchema.parse(body);
+
+    let taxId: string | null = null;
+    let taxIdType: "vkn" | "tckn" | null = null;
+    let requiresManualTaxReview = true;
+
+    if (validated.taxId && validated.taxId.trim() !== "") {
+      const parsed = parseTaxId(validated.taxId);
+      if (!parsed.ok) {
+        return NextResponse.json(
+          { error: "Invalid tax ID" },
+          { status: 400 }
+        );
+      }
+      taxId = parsed.normalized;
+      taxIdType = parsed.type;
+      requiresManualTaxReview = false;
+    }
 
     // Check if email already exists
     const existing = await db.query.manufacturers.findFirst({
@@ -54,6 +73,9 @@ export async function POST(request: NextRequest) {
         companyName: validated.companyName,
         contactPerson: validated.contactPerson,
         phone: validated.phone,
+        taxId,
+        taxIdType,
+        requiresManualTaxReview,
         status: "pending_approval",
       })
       .returning();

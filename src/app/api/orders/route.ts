@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, previews, giftCards, giftCardRedemptions } from "@/lib/db/schema";
+import {
+  orderDrafts,
+  previews,
+  giftCards,
+  giftCardRedemptions,
+  users,
+} from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
 import { PRICES_KURUS } from "@/lib/config/prices";
-import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
-import { confirmOrder } from "@/lib/services/order-confirm";
-import { createPaytrToken } from "@/lib/services/paytr";
+import {
+  buildDraftReference,
+  promoteDraftToOrder,
+} from "@/lib/services/order-draft";
+import { createPaytrToken, buildMerchantOid } from "@/lib/services/paytr";
 import {
   calculateHavaleDiscount,
   HAVALE_DEADLINE_HOURS,
@@ -22,7 +29,6 @@ import {
   havaleReminderJobId,
 } from "@/lib/queue/queues";
 import { getClientIp } from "@/lib/utils/request";
-import { users } from "@/lib/db/schema";
 import { eq, and, or, isNull, count } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -52,12 +58,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: d["api.order.createFailed"] }, { status: 400 });
     }
 
-    const orderNumber = `FIG-${nanoid(8).toUpperCase()}`;
-
     if (!validated.photoKey.startsWith("photos/") || validated.photoKey.includes("..")) {
       return NextResponse.json({ error: d["api.order.createFailed"] }, { status: 400 });
     }
-    const photoUrl = getPublicUrl(validated.photoKey);
+
+    const reference = buildDraftReference();
     const amountKurus = PRICES_KURUS[validated.figurineSize];
 
     let giftCardId: string | undefined;
@@ -70,13 +75,12 @@ export async function POST(request: NextRequest) {
       giftCardId = gcResult.card!.id;
     }
 
-    // Compute everything that depends on gift-card outcome inside a single transaction.
-    // Final paymentMethod / paymentStatus / bank deadline is decided here so the order
-    // never sits in an inconsistent state between the transaction commit and follow-up updates.
+    // Reserve gift-card balance and create the draft atomically. The order row only
+    // appears after payment is verified (PayTR webhook / OCR auto-confirm / admin).
     const deadlineCandidate = new Date(Date.now() + HAVALE_DEADLINE_HOURS * 3600 * 1000);
 
     const {
-      order,
+      draft,
       fullyCovered,
       giftCardAmountKurus,
       havaleDiscountKurus,
@@ -86,10 +90,12 @@ export async function POST(request: NextRequest) {
         const [preview] = await tx
           .select()
           .from(previews)
-          .where(and(
-            eq(previews.id, previewId),
-            or(eq(previews.userId, session.userId), isNull(previews.userId))
-          ))
+          .where(
+            and(
+              eq(previews.id, previewId),
+              or(eq(previews.userId, session.userId), isNull(previews.userId))
+            )
+          )
           .for("update");
 
         if (!preview || (preview.status !== "ready" && preview.status !== "approved")) {
@@ -101,33 +107,6 @@ export async function POST(request: NextRequest) {
           .set({ userId: session.userId, status: "approved", updatedAt: new Date() })
           .where(eq(previews.id, previewId));
       }
-
-      const [newOrder] = await tx
-        .insert(orders)
-        .values({
-          orderNumber,
-          userId: user.id,
-          previewId: previewId || null,
-          email: user.email,
-          customerName: user.fullName,
-          phone: validated.shippingAddress.telefon,
-          figurineSize: validated.figurineSize,
-          style: validated.style,
-          modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
-          shippingAddress: validated.shippingAddress,
-          amountKurus,
-          giftCardAmountKurus: 0,
-          status: "pending_payment",
-          locale,
-          paymentMethod: null,
-          paymentStatus: "pending",
-        })
-        .returning();
-
-      await tx.insert(orderPhotos).values({
-        orderId: newOrder.id,
-        originalUrl: photoUrl,
-      });
 
       let giftCardAmountKurus = 0;
       let isCovered = false;
@@ -176,57 +155,63 @@ export async function POST(request: NextRequest) {
             updatedAt: new Date(),
           })
           .where(eq(giftCards.id, giftCardId));
+      }
 
+      const finalPaymentMethod: "card" | "bank_transfer" | "gift_card_full" = isCovered
+        ? "gift_card_full"
+        : validated.paymentMethod === "bank_transfer"
+        ? "bank_transfer"
+        : "card";
+
+      let havaleDiscountKurus = 0;
+      let bankTransferDeadline: Date | null = null;
+      let paytrMerchantOid: string | null = null;
+
+      if (!isCovered && finalPaymentMethod === "bank_transfer") {
+        havaleDiscountKurus = calculateHavaleDiscount(amountKurus - giftCardAmountKurus);
+        bankTransferDeadline = deadlineCandidate;
+      }
+      if (!isCovered && finalPaymentMethod === "card") {
+        paytrMerchantOid = buildMerchantOid(reference);
+      }
+
+      const [newDraft] = await tx
+        .insert(orderDrafts)
+        .values({
+          reference,
+          userId: user.id,
+          previewId: previewId || null,
+          email: user.email,
+          customerName: user.fullName,
+          phone: validated.shippingAddress.telefon,
+          figurineSize: validated.figurineSize,
+          style: validated.style,
+          modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
+          shippingAddress: validated.shippingAddress,
+          photoKey: validated.photoKey,
+          locale,
+          amountKurus,
+          giftCardId: giftCardId || null,
+          giftCardAmountKurus,
+          havaleDiscountKurus,
+          paymentMethod: finalPaymentMethod,
+          status: "pending",
+          paytrMerchantOid,
+          bankTransferDeadline,
+        })
+        .returning();
+
+      if (giftCardId && giftCardAmountKurus > 0) {
         await tx.insert(giftCardRedemptions).values({
           giftCardId,
-          orderId: newOrder.id,
+          draftId: newDraft.id,
           amountKurus: giftCardAmountKurus,
           redeemedByUserId: user.id,
         });
       }
 
-      // Final paymentMethod + paymentStatus + havale fields, all in this transaction.
-      let havaleDiscountKurus = 0;
-      let bankTransferDeadline: Date | null = null;
-
-      if (isCovered) {
-        await tx
-          .update(orders)
-          .set({
-            giftCardAmountKurus,
-            paymentMethod: "gift_card_full",
-            paymentStatus: "succeeded",
-            updatedAt: new Date(),
-          })
-          .where(eq(orders.id, newOrder.id));
-      } else if (validated.paymentMethod === "bank_transfer") {
-        havaleDiscountKurus = calculateHavaleDiscount(amountKurus - giftCardAmountKurus);
-        bankTransferDeadline = deadlineCandidate;
-        await tx
-          .update(orders)
-          .set({
-            giftCardAmountKurus,
-            havaleDiscountKurus,
-            paymentMethod: "bank_transfer",
-            paymentStatus: "awaiting_transfer",
-            bankTransferDeadline,
-            updatedAt: new Date(),
-          })
-          .where(eq(orders.id, newOrder.id));
-      } else {
-        await tx
-          .update(orders)
-          .set({
-            giftCardAmountKurus,
-            paymentMethod: "card",
-            paymentStatus: "pending",
-            updatedAt: new Date(),
-          })
-          .where(eq(orders.id, newOrder.id));
-      }
-
       return {
-        order: newOrder,
+        draft: newDraft,
         fullyCovered: isCovered,
         giftCardAmountKurus,
         havaleDiscountKurus,
@@ -234,19 +219,20 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    // ─── Fully covered by gift card → auto-confirm ───────────────
+    // ─── Fully covered by gift card → promote immediately ────────
     if (fullyCovered) {
       try {
-        await confirmOrder(order.id, locale);
+        const promoted = await promoteDraftToOrder(draft.id);
         return NextResponse.json({
-          orderNumber,
+          reference: draft.reference,
+          orderNumber: promoted.orderNumber,
           paymentMethod: "gift_card_full",
           autoConfirmed: true,
         });
       } catch (err) {
-        console.error("Auto-confirm failed for order", orderNumber, err);
+        console.error("Auto-promote failed for draft", draft.reference, err);
         return NextResponse.json({
-          orderNumber,
+          reference: draft.reference,
           autoConfirmed: false,
           error: "Auto-confirm failed, please contact support",
         });
@@ -254,24 +240,24 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── Bank transfer (havale/EFT) ──────────────────────────────
-    if (validated.paymentMethod === "bank_transfer") {
+    if (draft.paymentMethod === "bank_transfer") {
       const finalAmountKurus = amountKurus - giftCardAmountKurus - havaleDiscountKurus;
       const bank = getBankDetails();
 
       const paymentQueue = getPaymentDeadlineQueue();
       await paymentQueue.add(
         "havale-reminder",
-        { orderId: order.id, orderNumber, type: "havale_reminder" },
+        { draftId: draft.id, reference: draft.reference, type: "havale_reminder" },
         {
-          jobId: havaleReminderJobId(order.id),
+          jobId: havaleReminderJobId(draft.id),
           delay: HAVALE_REMINDER_HOURS * 3600 * 1000,
         }
       );
       await paymentQueue.add(
         "havale-expire",
-        { orderId: order.id, orderNumber, type: "havale_expire" },
+        { draftId: draft.id, reference: draft.reference, type: "havale_expire" },
         {
-          jobId: havaleExpireJobId(order.id),
+          jobId: havaleExpireJobId(draft.id),
           delay: HAVALE_DEADLINE_HOURS * 3600 * 1000,
         }
       );
@@ -279,7 +265,7 @@ export async function POST(request: NextRequest) {
       await getEmailQueue().add("send-email", {
         type: "bank_transfer_instructions",
         to: user.email,
-        orderNumber,
+        orderNumber: draft.reference,
         customerName: user.fullName,
         bankName: bank.bankName,
         bankAccountHolder: bank.accountHolder,
@@ -291,13 +277,14 @@ export async function POST(request: NextRequest) {
       });
 
       return NextResponse.json({
-        orderNumber,
+        reference: draft.reference,
         paymentMethod: "bank_transfer",
         bankDetails: bank,
         finalAmountKurus,
         havaleDiscountKurus,
         giftCardAmountKurus,
         deadline: bankTransferDeadline?.toISOString(),
+        redirectUrl: `/havale/${draft.reference}`,
       });
     }
 
@@ -310,7 +297,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const paytrResult = await createPaytrToken({
-        orderNumber,
+        orderNumber: draft.reference,
         email: user.email,
         amountKurus: paymentAmountKurus,
         userName: user.fullName,
@@ -328,37 +315,33 @@ export async function POST(request: NextRequest) {
       });
 
       await db
-        .update(orders)
+        .update(orderDrafts)
         .set({
           paytrMerchantOid: paytrResult.merchantOid,
           paytrTestMode: paytrResult.testMode,
           updatedAt: new Date(),
         })
-        .where(eq(orders.id, order.id));
+        .where(eq(orderDrafts.id, draft.id));
 
       return NextResponse.json({
-        orderNumber,
+        reference: draft.reference,
         paymentMethod: "card",
         iframeUrl: paytrResult.iframeUrl,
         paytrToken: paytrResult.token,
         finalAmountKurus: paymentAmountKurus,
       });
     } catch (err) {
-      console.error("PayTR token creation failed for", orderNumber, err);
+      console.error("PayTR token creation failed for", draft.reference, err);
       const failureMessage = err instanceof Error ? err.message : "unknown";
 
-      // Orphan order would block any retry; mark it rejected so the
-      // customer can start a fresh checkout. Gift card stays consumed —
-      // admin can refund manually if needed (separate flow).
       await db
-        .update(orders)
+        .update(orderDrafts)
         .set({
-          status: "rejected",
-          paymentStatus: "failed",
-          failureReason: `PayTR token error: ${failureMessage}`,
+          status: "failed",
+          paytrFailureReason: `PayTR token error: ${failureMessage}`,
           updatedAt: new Date(),
         })
-        .where(eq(orders.id, order.id));
+        .where(eq(orderDrafts.id, draft.id));
 
       return NextResponse.json(
         {
@@ -371,7 +354,6 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      // ZodError is an Error; `errors` is on the actual instance.
       const errors = (error as Error & { errors?: unknown }).errors;
       return NextResponse.json({ error: errors ?? error.message }, { status: 400 });
     }

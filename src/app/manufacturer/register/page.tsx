@@ -1,31 +1,86 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
+
+const ONBOARDING_TEXT = `# Üretici Ortaklığı Bilgilendirmesi
+
+Figurine Studio üretici ağına başvuruyorsunuz.
+
+**Çalışma Düzeni**
+- Müşterilerimiz figürin siparişlerini portalımızdan oluşturur ve ödemeyi tamamlar.
+- Admin ekibimiz mevcut iş yükü, lokasyon ve performansa göre size sipariş atar. Atamayı 24 saat içinde kabul/reddetmeniz beklenir.
+- Ortalama üretim süresi: 5 iş günü. Kargolama Yurtiçi Kargo üzerinden tarafımızca açılır.
+
+**Kalite Beklentileri**
+- Reçine baskı katman yüksekliği 50 mikron veya altı.
+- Renklendirme ve son rötuş kontrol edilmeli; çatlak / destek izi reddedilme sebebidir.
+- Pakete standart fırça setimiz ve QR kart eklenir.
+
+**Ödeme**
+- Net üretici payı haftalık olarak (Cuma) IBAN'ınıza ödenir.
+- VKN/TCKN ve IBAN zorunludur.
+
+**Hesap Durumu**
+- Hesabınız ilk başta "Beklemede" olur; admin onayından sonra sipariş alırsınız.
+- "Sipariş Almıyorum" düğmesi ile dilediğiniz zaman atamaları durdurabilirsiniz.
+
+Sorularınız için admin@figurunica.com
+`;
+
+type Step = "onboarding" | "form";
 
 export default function ManufacturerRegisterPage() {
   const router = useRouter();
   const d = useDictionary();
+  const [step, setStep] = useState<Step>("onboarding");
+  const [accepted, setAccepted] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Account
   const [companyName, setCompanyName] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [taxId, setTaxId] = useState("");
-  const [taxIdError, setTaxIdError] = useState<string | null>(null);
+  const [whatsappPhone, setWhatsappPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+
+  // Tax
+  const [taxId, setTaxId] = useState("");
+  const [taxIdError, setTaxIdError] = useState<string | null>(null);
+
+  // Address
+  const [il, setIl] = useState("");
+  const [ilce, setIlce] = useState("");
+  const [mahalle, setMahalle] = useState("");
+  const [adres, setAdres] = useState("");
+  const [postaKodu, setPostaKodu] = useState("");
+
+  // Bank
+  const [iban, setIban] = useState("");
+  const [bankAccountHolder, setBankAccountHolder] = useState("");
+  const [bankName, setBankName] = useState("");
+
+  // Capacity
+  const [maxConcurrentOrders, setMaxConcurrentOrders] = useState(5);
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // Redirect if already logged in
+  const districtOptions = useMemo(
+    () => (il ? DISTRICTS[il] ?? [] : []),
+    [il]
+  );
+
   useEffect(() => {
     fetch("/api/manufacturer/auth/me")
       .then((res) => {
         if (res.ok) {
-          router.replace("/manufacturer/dashboard");
+          router.replace("/manufacturer/orders");
         } else {
           setCheckingAuth(false);
         }
@@ -41,22 +96,23 @@ export default function ManufacturerRegisterPage() {
     if (password !== passwordConfirm) {
       setError(
         (d["manufacturer.register.passwordMismatch" as keyof typeof d] as string) ||
-          "Passwords do not match"
+          "Şifreler eşleşmiyor"
       );
       return;
     }
-
     const taxIdTrimmed = taxId.replace(/\D+/g, "");
     if (taxIdTrimmed.length > 0 && taxIdTrimmed.length !== 10 && taxIdTrimmed.length !== 11) {
-      setTaxIdError(
-        (d["manufacturer.register.taxId.invalid" as keyof typeof d] as string) ||
-          "Invalid tax ID"
-      );
+      setTaxIdError("VKN 10, TCKN 11 hane olmalı");
+      return;
+    }
+
+    const ibanClean = iban.replace(/\s+/g, "").toUpperCase();
+    if (!/^TR\d{24}$/.test(ibanClean)) {
+      setError("Geçersiz IBAN (TR ile başlayan 26 karakter olmalı)");
       return;
     }
 
     setLoading(true);
-
     try {
       const res = await fetch("/api/manufacturer/auth/register", {
         method: "POST",
@@ -66,28 +122,33 @@ export default function ManufacturerRegisterPage() {
           contactPerson,
           email,
           phone,
+          whatsappPhone: whatsappPhone || null,
           taxId: taxIdTrimmed || null,
           password,
+          address: {
+            adres,
+            mahalle: mahalle || undefined,
+            ilce,
+            il,
+            postaKodu,
+            telefon: phone,
+          },
+          iban: ibanClean,
+          bankAccountHolder,
+          bankName,
+          maxConcurrentOrders: Number(maxConcurrentOrders),
+          onboardingAccepted: true,
         }),
       });
 
       const data = await res.json();
-
       if (!res.ok) {
-        setError(
-          data.error ||
-            (d["manufacturer.register.failed" as keyof typeof d] as string) ||
-            "Registration failed"
-        );
+        setError(data.error || "Kayıt başarısız");
         return;
       }
-
-      router.push("/manufacturer/dashboard");
+      router.push("/manufacturer/orders");
     } catch {
-      setError(
-        (d["common.error" as keyof typeof d] as string) ||
-          "An error occurred"
-      );
+      setError("Bir hata oluştu");
     } finally {
       setLoading(false);
     }
@@ -101,202 +162,205 @@ export default function ManufacturerRegisterPage() {
     );
   }
 
-  return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="flex items-center justify-center min-h-screen py-12">
-        <div className="w-full max-w-sm px-4">
+  if (step === "onboarding") {
+    return (
+      <main className="min-h-screen bg-gray-50">
+        <div className="max-w-2xl mx-auto px-4 py-12">
           <div className="text-center mb-6">
-            <span className="text-xl font-serif text-gray-900">
-              Figurine Studio
-            </span>
-            <p className="text-sm text-indigo-600 mt-1">
-              {(d["manufacturer.nav.panel" as keyof typeof d] as string) ||
-                "Manufacturer Panel"}
-            </p>
+            <span className="text-xl font-serif text-gray-900">Figurine Studio</span>
+            <p className="text-sm text-indigo-600 mt-1">Üretici Paneli</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-8">
-            <h1 className="text-2xl font-serif text-gray-900 text-center">
-              {(d["manufacturer.register.title" as keyof typeof d] as string) ||
-                "Manufacturer Registration"}
+            <h1 className="text-2xl font-serif text-gray-900 mb-4">
+              Başvurudan önce lütfen okuyun
             </h1>
-            <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  {(d["manufacturer.register.companyName" as keyof typeof d] as string) ||
-                    "Company Name"}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={
-                    (d["manufacturer.register.placeholder.companyName" as keyof typeof d] as string) ||
-                    "Acme Manufacturing Ltd."
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  {(d["manufacturer.register.contactPerson" as keyof typeof d] as string) ||
-                    "Contact Person"}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={contactPerson}
-                  onChange={(e) => setContactPerson(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={
-                    (d["manufacturer.register.placeholder.contactPerson" as keyof typeof d] as string) ||
-                    "Full Name"
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  {(d["common.email" as keyof typeof d] as string) || "Email"}
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={
-                    (d["manufacturer.register.placeholder.email" as keyof typeof d] as string) ||
-                    "manufacturer@example.com"
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  {(d["common.phone" as keyof typeof d] as string) || "Phone"}
-                </label>
-                <input
-                  type="tel"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={
-                    (d["manufacturer.register.placeholder.phone" as keyof typeof d] as string) ||
-                    "05XX XXX XXXX"
-                  }
-                />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm font-medium text-gray-700">
-                    {(d["manufacturer.register.taxId" as keyof typeof d] as string) ||
-                      "Tax ID / National ID"}
-                  </label>
-                  <span className="text-xs text-gray-400">
-                    {(d["manufacturer.register.taxId.optional" as keyof typeof d] as string) ||
-                      "Optional"}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={11}
-                  value={taxId}
-                  onChange={(e) => setTaxId(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={
-                    (d["manufacturer.register.taxId.placeholder" as keyof typeof d] as string) ||
-                    "10 or 11 digits"
-                  }
-                />
-                {taxIdError && (
-                  <p className="mt-1.5 text-xs text-red-600">{taxIdError}</p>
-                )}
-                <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 leading-relaxed">
-                  {(d["manufacturer.register.taxId.help" as keyof typeof d] as string) ||
-                    "If you don't have a tax certificate you can leave this blank. Your account will be flagged for manual review. Contact:"}{" "}
-                  <a
-                    href="mailto:admin@figurunica.com"
-                    className="font-semibold underline hover:text-amber-900"
-                  >
-                    admin@figurunica.com
-                  </a>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  {(d["common.password" as keyof typeof d] as string) ||
-                    "Password"}
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder={
-                    (d["manufacturer.register.placeholder.password" as keyof typeof d] as string) ||
-                    "Min 6 characters"
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  {(d["manufacturer.register.passwordConfirm" as keyof typeof d] as string) ||
-                    "Confirm Password"}
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={passwordConfirm}
-                  onChange={(e) => setPasswordConfirm(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-              </div>
-              {error && (
-                <div className="bg-red-50 text-red-700 rounded-xl p-3 text-sm text-center flex items-center justify-center gap-2">
-                  <svg
-                    className="w-4 h-4 shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  {error}
-                </div>
-              )}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors text-sm"
+            <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap leading-relaxed">
+              {ONBOARDING_TEXT}
+            </div>
+            <label className="mt-6 flex items-start gap-3 text-sm text-gray-800 select-none">
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300"
+              />
+              <span>
+                Yukarıdaki şartları okudum ve üretici ortaklığını bu şartlar
+                altında kabul ediyorum.
+              </span>
+            </label>
+            <div className="mt-6 flex items-center justify-between">
+              <Link
+                href="/manufacturer/login"
+                className="text-sm text-indigo-600 hover:text-indigo-500"
               >
-                {loading
-                  ? (d["manufacturer.register.submitting" as keyof typeof d] as string) ||
-                    "Registering..."
-                  : (d["manufacturer.register.submit" as keyof typeof d] as string) ||
-                    "Register"}
+                Hesabım var, giriş yap
+              </Link>
+              <button
+                type="button"
+                disabled={!accepted}
+                onClick={() => setStep("form")}
+                className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-medium text-sm disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                Devam et
               </button>
-            </form>
+            </div>
           </div>
-          <p className="mt-6 text-sm text-center text-gray-500">
-            {(d["manufacturer.register.hasAccount" as keyof typeof d] as string) ||
-              "Already have an account?"}{" "}
-            <Link
-              href="/manufacturer/login"
-              className="text-indigo-600 hover:text-indigo-500 font-semibold"
+        </div>
+      </main>
+    );
+  }
+
+  const inputCls =
+    "w-full px-3 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent";
+
+  return (
+    <main className="min-h-screen bg-gray-50">
+      <div className="max-w-2xl mx-auto px-4 py-12">
+        <div className="text-center mb-6">
+          <span className="text-xl font-serif text-gray-900">Figurine Studio</span>
+          <p className="text-sm text-indigo-600 mt-1">Üretici Paneli</p>
+        </div>
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-8 space-y-6">
+          <h1 className="text-2xl font-serif text-gray-900">Üretici Kaydı</h1>
+
+          {/* Hesap */}
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-gray-700">Hesap</legend>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Firma Adı *</label>
+                <input className={inputCls} required value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Yetkili Kişi *</label>
+                <input className={inputCls} required value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">E-posta *</label>
+                <input type="email" className={inputCls} required value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Telefon *</label>
+                <input type="tel" className={inputCls} required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="05XX XXX XXXX" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">WhatsApp (opsiyonel, admin iletişimi için)</label>
+                <input type="tel" className={inputCls} value={whatsappPhone} onChange={(e) => setWhatsappPhone(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Şifre *</label>
+                <input type="password" className={inputCls} required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Şifre Tekrar *</label>
+                <input type="password" className={inputCls} required value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} />
+              </div>
+            </div>
+          </fieldset>
+
+          {/* VKN/TCKN */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-700">Vergi Numarası</legend>
+            <p className="text-xs text-gray-500 mt-1 mb-2">VKN (10 hane) veya TCKN (11 hane). Boş bırakılırsa admin manuel inceleme yapar.</p>
+            <input className={inputCls} inputMode="numeric" maxLength={11} value={taxId} onChange={(e) => setTaxId(e.target.value)} />
+            {taxIdError && <p className="mt-1 text-xs text-red-600">{taxIdError}</p>}
+          </fieldset>
+
+          {/* Adres */}
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-gray-700">Üretim / İş Adresi</legend>
+            <p className="text-xs text-gray-500">Lokasyona göre sipariş atamasında kullanılır.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">İl *</label>
+                <select className={inputCls} required value={il} onChange={(e) => { setIl(e.target.value); setIlce(""); }}>
+                  <option value="">Seçiniz</option>
+                  {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">İlçe *</label>
+                <select className={inputCls} required disabled={!il} value={ilce} onChange={(e) => setIlce(e.target.value)}>
+                  <option value="">Seçiniz</option>
+                  {districtOptions.map((dist) => <option key={dist} value={dist}>{dist}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Mahalle</label>
+                <input className={inputCls} value={mahalle} onChange={(e) => setMahalle(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Posta Kodu *</label>
+                <input className={inputCls} required value={postaKodu} onChange={(e) => setPostaKodu(e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Açık Adres *</label>
+                <textarea className={inputCls} required rows={2} value={adres} onChange={(e) => setAdres(e.target.value)} />
+              </div>
+            </div>
+          </fieldset>
+
+          {/* Banka */}
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-gray-700">Banka Bilgileri</legend>
+            <p className="text-xs text-gray-500">Üretici ödemeleri bu IBAN&apos;a yapılır.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">IBAN *</label>
+                <input className={`${inputCls} font-mono uppercase`} required value={iban} onChange={(e) => setIban(e.target.value.toUpperCase())} placeholder="TR12 3456 7890 1234 5678 9012 34" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Hesap Sahibi *</label>
+                <input className={inputCls} required value={bankAccountHolder} onChange={(e) => setBankAccountHolder(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Banka *</label>
+                <input className={inputCls} required value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ör. Garanti BBVA" />
+              </div>
+            </div>
+          </fieldset>
+
+          {/* Kapasite */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-700">Kapasite</legend>
+            <p className="text-xs text-gray-500 mt-1 mb-2">Aynı anda elinizde tutabileceğiniz maksimum sipariş sayısı.</p>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              className={`${inputCls} max-w-[140px]`}
+              value={maxConcurrentOrders}
+              onChange={(e) => setMaxConcurrentOrders(Number(e.target.value) || 1)}
+            />
+          </fieldset>
+
+          {error && (
+            <div className="bg-red-50 text-red-700 rounded-xl p-3 text-sm text-center">
+              {error}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2">
+            <button type="button" onClick={() => setStep("onboarding")} className="text-sm text-gray-500 hover:text-gray-700">
+              ← Geri
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-2.5 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors text-sm"
             >
-              {(d["manufacturer.register.login" as keyof typeof d] as string) ||
-                "Sign In"}
+              {loading ? "Kayıt yapılıyor..." : "Kaydı Tamamla"}
+            </button>
+          </div>
+
+          <p className="text-sm text-center text-gray-500">
+            Hesabınız var mı?{" "}
+            <Link href="/manufacturer/login" className="text-indigo-600 hover:text-indigo-500 font-semibold">
+              Giriş Yap
             </Link>
           </p>
-        </div>
+        </form>
       </div>
     </main>
   );

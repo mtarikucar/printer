@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders } from "@/lib/db/schema";
+import { orderDrafts } from "@/lib/db/schema";
 import { saveFile } from "@/lib/services/storage";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
 import { getSessionUser } from "@/lib/services/customer-auth";
-import { getEmailQueue } from "@/lib/queue/queues";
+import { getDekontOcrQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { RECEIPT_MAX_SIZE_BYTES } from "@/lib/config/payment";
@@ -40,6 +40,10 @@ function extForType(mime: string): string {
   }
 }
 
+/**
+ * `orderNumber` here is actually the draft reference (same string format pre- and post-promotion).
+ * Receipts can only be uploaded against pending bank_transfer drafts.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
@@ -56,22 +60,22 @@ export async function POST(
     );
   }
 
-  const order = await db.query.orders.findFirst({
+  const draft = await db.query.orderDrafts.findFirst({
     where: and(
-      eq(orders.orderNumber, orderNumber),
-      eq(orders.userId, session.userId)
+      eq(orderDrafts.reference, orderNumber),
+      eq(orderDrafts.userId, session.userId)
     ),
   });
-  if (!order) {
+  if (!draft) {
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
-  if (order.paymentMethod !== "bank_transfer") {
+  if (draft.paymentMethod !== "bank_transfer") {
     return NextResponse.json(
       { error: "Bu sipariş havale ile ödenmiyor" },
       { status: 400 }
     );
   }
-  if (order.paymentStatus !== "awaiting_transfer") {
+  if (draft.status !== "pending" && draft.status !== "awaiting_review") {
     return NextResponse.json(
       { error: "Bu sipariş için dekont yüklenemez" },
       { status: 400 }
@@ -103,35 +107,31 @@ export async function POST(
   }
 
   const filename = `${nanoid()}.${extForType(detected)}`;
-  const key = await saveFile(buffer, `receipts/${order.id}`, filename);
+  const key = await saveFile(buffer, `receipts/${draft.id}`, filename);
 
   await db
-    .update(orders)
+    .update(orderDrafts)
     .set({
       bankTransferReceiptKey: key,
       bankTransferReceiptUploadedAt: new Date(),
+      receiptOcrText: null,
+      receiptOcrParsed: null,
+      receiptOcrConfidence: null,
+      receiptOcrFailureReason: null,
       updatedAt: new Date(),
     })
-    .where(eq(orders.id, order.id));
+    .where(eq(orderDrafts.id, draft.id));
 
-  // Notify admin — link points to authenticated admin receipt endpoint
-  const adminEmail = process.env.ADMIN_EMAIL;
-  if (adminEmail) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const adminReceiptUrl = `${appUrl}/api/admin/orders/${order.id}/receipt`;
-    await getEmailQueue().add("send-email", {
-      type: "bank_transfer_receipt_received",
-      to: adminEmail,
-      adminEmail,
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
-      photoUrl: adminReceiptUrl,
-      locale: "tr",
-    });
-  }
+  // Hand off to the OCR worker — keeps the customer's response fast (Tesseract is CPU-bound).
+  await getDekontOcrQueue().add(
+    "ocr-receipt",
+    { draftId: draft.id, receiptKey: key },
+    { jobId: `ocr-${draft.id}-${Date.now()}` }
+  );
 
   return NextResponse.json({
     success: true,
-    receiptUrl: `/api/customer/orders/${order.orderNumber}/receipt/view`,
+    receiptUrl: `/api/customer/orders/${draft.reference}/receipt/view`,
+    status: "scanning",
   });
 }

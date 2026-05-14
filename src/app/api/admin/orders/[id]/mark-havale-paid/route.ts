@@ -2,16 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { orders, adminActions } from "@/lib/db/schema";
-import { confirmOrder } from "@/lib/services/order-confirm";
-import {
-  getPaymentDeadlineQueue,
-  havaleExpireJobId,
-  havaleReminderJobId,
-} from "@/lib/queue/queues";
+import { orderDrafts, adminActions } from "@/lib/db/schema";
+import { promoteDraftToOrder } from "@/lib/services/order-draft";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
+/**
+ * `id` is the draft id. Admin manually promotes a havale draft when OCR confidence was
+ * medium/low or admin reviewed the receipt out-of-band.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -27,58 +26,47 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
 
-  const order = await db.query.orders.findFirst({ where: eq(orders.id, id) });
-  if (!order) {
-    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  const draft = await db.query.orderDrafts.findFirst({
+    where: eq(orderDrafts.id, id),
+  });
+  if (!draft) {
+    return NextResponse.json({ error: "Draft not found" }, { status: 404 });
   }
 
-  if (order.paymentMethod !== "bank_transfer") {
+  if (draft.paymentMethod !== "bank_transfer") {
     return NextResponse.json(
-      { error: "Order is not a bank transfer order" },
+      { error: "Draft is not a bank transfer" },
       { status: 400 }
     );
   }
 
-  if (order.paymentStatus === "succeeded") {
-    return NextResponse.json({ success: true, alreadyPaid: true });
+  if (draft.status === "confirmed" && draft.promotedOrderId) {
+    return NextResponse.json({
+      success: true,
+      alreadyPaid: true,
+      orderId: draft.promotedOrderId,
+    });
   }
 
-  if (order.status !== "pending_payment") {
+  if (draft.status !== "pending" && draft.status !== "awaiting_review") {
     return NextResponse.json(
-      { error: "Order is no longer in pending_payment status" },
+      { error: `Draft is in '${draft.status}' state and cannot be marked paid` },
       { status: 400 }
     );
   }
 
-  try {
-    await confirmOrder(id, locale);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "";
-    if (msg.includes("not in pending_payment")) {
-      return NextResponse.json(
-        { error: "Order is not in pending_payment status" },
-        { status: 400 }
-      );
-    }
-    throw err;
-  }
-
-  await db
-    .update(orders)
-    .set({ paymentStatus: "succeeded", updatedAt: new Date() })
-    .where(eq(orders.id, id));
+  const promoted = await promoteDraftToOrder(draft.id);
 
   await db.insert(adminActions).values({
-    orderId: id,
+    orderId: promoted.orderId,
     action: "mark_havale_paid",
     adminEmail: session.user.email,
     notes: body.notes,
   });
 
-  // Cancel scheduled deadline jobs.
-  const q = getPaymentDeadlineQueue();
-  await q.remove(havaleReminderJobId(id)).catch(() => {});
-  await q.remove(havaleExpireJobId(id)).catch(() => {});
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json({
+    success: true,
+    orderId: promoted.orderId,
+    orderNumber: promoted.orderNumber,
+  });
 }

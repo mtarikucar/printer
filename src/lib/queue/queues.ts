@@ -40,7 +40,10 @@ export interface EmailJobData {
     | "bank_transfer_instructions"
     | "bank_transfer_reminder"
     | "bank_transfer_receipt_received"
-    | "payment_expired";
+    | "bank_transfer_auto_confirmed"
+    | "bank_transfer_needs_review"
+    | "payment_expired"
+    | "manufacturer_notification";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -64,12 +67,25 @@ export interface EmailJobData {
   bankBranch?: string;
   paymentAmountKurus?: number;
   paymentDeadline?: string;
+  // OCR auto-confirm / review notification
+  ocrConfidence?: "high" | "medium" | "low";
+  ocrSummary?: string;
+  // Manufacturer notification
+  manufacturerNotificationId?: string;
+  notificationSubject?: string;
+  notificationBody?: string;
+  notificationType?: string;
 }
 
 export interface PaymentDeadlineJobData {
-  orderId: string;
-  orderNumber: string;
+  draftId: string;
+  reference: string;
   type: "havale_reminder" | "havale_expire";
+}
+
+export interface DekontOcrJobData {
+  draftId: string;
+  receiptKey: string;
 }
 
 let aiGenerationQueue: Queue | null = null;
@@ -78,6 +94,7 @@ let emailQueue: Queue | null = null;
 let previewGenerationQueue: Queue | null = null;
 let previewCleanupQueue: Queue | null = null;
 let paymentDeadlineQueue: Queue | null = null;
+let dekontOcrQueue: Queue | null = null;
 
 export function getAiGenerationQueue(): Queue {
   if (!aiGenerationQueue) {
@@ -167,10 +184,26 @@ export function getPaymentDeadlineQueue(): Queue {
   return paymentDeadlineQueue;
 }
 
-export function havaleReminderJobId(orderId: string): string {
-  return `havale-reminder-${orderId}`;
+export function getDekontOcrQueue(): Queue {
+  if (!dekontOcrQueue) {
+    dekontOcrQueue = new Queue("dekont-ocr", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 30000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return dekontOcrQueue;
 }
 
-export function havaleExpireJobId(orderId: string): string {
-  return `havale-expire-${orderId}`;
+// Job IDs are keyed by draft id (matches the new draft-based payment lifecycle).
+export function havaleReminderJobId(draftId: string): string {
+  return `havale-reminder-${draftId}`;
+}
+
+export function havaleExpireJobId(draftId: string): string {
+  return `havale-expire-${draftId}`;
 }

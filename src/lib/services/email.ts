@@ -40,7 +40,10 @@ interface SendEmailParams {
     | "bank_transfer_instructions"
     | "bank_transfer_reminder"
     | "bank_transfer_receipt_received"
-    | "payment_expired";
+    | "bank_transfer_auto_confirmed"
+    | "bank_transfer_needs_review"
+    | "payment_expired"
+    | "manufacturer_notification";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -64,6 +67,13 @@ interface SendEmailParams {
   bankBranch?: string;
   paymentAmountKurus?: number;
   paymentDeadline?: string;
+  // OCR-related fields (high/medium/low + free-form summary)
+  ocrConfidence?: "high" | "medium" | "low";
+  ocrSummary?: string;
+  // Manufacturer notification — body is plain text; templated wrapper in the email body.
+  notificationSubject?: string;
+  notificationBody?: string;
+  notificationType?: string;
 }
 
 function formatKurus(kurus?: number): string {
@@ -376,6 +386,41 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 12px;">
             ${d["nav.createNew"]}
           </a>
+        </div>
+      `,
+    }),
+
+    bank_transfer_auto_confirmed: (p) => ({
+      subject: `[OTO ONAY] Havale onaylandı — ${escHtml(p.orderNumber)}`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #059669;">Havale otomatik onaylandı</h1>
+          <p>Sipariş <strong>${escHtml(p.orderNumber)}</strong> (${escHtml(p.customerName)}) için yüklenen dekont OCR taramasıyla yüksek güvenle eşleşti ve sipariş otomatik olarak üretime alındı.</p>
+          <pre style="background:#f3f4f6; padding:12px; border-radius:6px; font-size:13px; white-space:pre-wrap;">${escHtml(p.ocrSummary ?? "")}</pre>
+          <p style="color:#6b7280;font-size:13px;">Aksaklık fark ederseniz admin panelinden incelemeye alabilirsiniz.</p>
+        </div>
+      `,
+    }),
+
+    bank_transfer_needs_review: (p) => ({
+      subject: `[İNCELEME] Dekont kontrol gerekli — ${escHtml(p.orderNumber)}`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #b45309;">Dekont OCR güveni düşük</h1>
+          <p>Sipariş <strong>${escHtml(p.orderNumber)}</strong> (${escHtml(p.customerName)}) için yüklenen dekont otomatik onaylanamadı. Güven: <strong>${escHtml(p.ocrConfidence ?? "low")}</strong>.</p>
+          <pre style="background:#f3f4f6; padding:12px; border-radius:6px; font-size:13px; white-space:pre-wrap;">${escHtml(p.ocrSummary ?? "")}</pre>
+          <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/admin/drafts" style="display:inline-block;background:#2563eb;color:white;padding:10px 18px;border-radius:6px;text-decoration:none;">Admin panelinde incele</a></p>
+        </div>
+      `,
+    }),
+
+    manufacturer_notification: (p) => ({
+      subject: p.notificationSubject || `Figurine Studio — ${escHtml(p.orderNumber || "")}`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${escHtml(p.notificationSubject || "")}</h1>
+          <div style="white-space: pre-wrap; color: #1f2937;">${escHtml(p.notificationBody || "")}</div>
+          <p style="margin-top:24px;"><a href="${process.env.NEXT_PUBLIC_APP_URL}/manufacturer/orders" style="display:inline-block;background:#4f46e5;color:white;padding:10px 18px;border-radius:6px;text-decoration:none;">Üretici paneli</a></p>
         </div>
       `,
     }),

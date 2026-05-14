@@ -1,21 +1,11 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders } from "@/lib/db/schema";
+import { orderDrafts } from "@/lib/db/schema";
 import { verifyPaytrCallback } from "@/lib/services/paytr";
-import { confirmOrder } from "@/lib/services/order-confirm";
-import {
-  getPaymentDeadlineQueue,
-  havaleExpireJobId,
-  havaleReminderJobId,
-} from "@/lib/queue/queues";
-import type { Locale } from "@/lib/i18n/types";
+import { findDraftByPaytrMerchantOid, promoteDraftToOrder } from "@/lib/services/order-draft";
 
 export const runtime = "nodejs";
-
-function localeOf(value: string | null | undefined): Locale {
-  return value === "en" ? "en" : "tr";
-}
 
 function okResponse() {
   return new Response("OK", {
@@ -59,65 +49,50 @@ export async function POST(request: NextRequest) {
     return new Response("PAYTR bad hash", { status: 400 });
   }
 
-  const order = await db.query.orders.findFirst({
-    where: eq(orders.paytrMerchantOid, merchantOid),
-  });
-
-  if (!order) {
-    // No matching order — acknowledge so PayTR stops retrying.
-    console.warn(`PayTR webhook: no order matching merchant_oid=${merchantOid}`);
+  const draft = await findDraftByPaytrMerchantOid(merchantOid);
+  if (!draft) {
+    // No matching draft — ack so PayTR stops retrying.
+    console.warn(`PayTR webhook: no draft matching merchant_oid=${merchantOid}`);
     return okResponse();
   }
 
-  // Idempotent: already processed → just acknowledge.
-  if (order.paymentStatus === "succeeded") {
-    return okResponse();
-  }
-
-  const locale = localeOf(order.locale);
+  // Always persist the payment-type metadata so we have an audit trail even if the
+  // draft is already in a terminal state.
+  await db
+    .update(orderDrafts)
+    .set({
+      paytrPaymentType: paymentType,
+      paytrTestMode: testMode,
+      paytrFailureReason:
+        status === "failed"
+          ? [failedReasonCode, failedReasonMsg].filter(Boolean).join(" — ") || "PayTR failed"
+          : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(orderDrafts.id, draft.id));
 
   if (status === "success") {
     try {
-      await confirmOrder(order.id, locale);
+      // promoteDraftToOrder is idempotent — returns the existing order if the draft was
+      // already promoted by another caller (OCR worker / admin / earlier webhook retry).
+      await promoteDraftToOrder(draft.id);
     } catch (err) {
-      // If order isn't in pending_payment we still record payment metadata but skip confirm.
       const msg = err instanceof Error ? err.message : "";
-      if (!msg.includes("not in pending_payment")) {
-        console.error("PayTR webhook: confirmOrder failed", err);
-        return new Response("PAYTR internal", { status: 500 });
+      if (msg.startsWith("DRAFT_NOT_PROMOTABLE")) {
+        // Draft is in a terminal non-confirmed state (expired/failed/cancelled). PayTR
+        // shouldn't be calling success on it, but we ack to stop retries and log.
+        console.warn(
+          `PayTR webhook: draft ${draft.reference} succeeded but not promotable (${msg})`
+        );
+        return okResponse();
       }
+      console.error("PayTR webhook: promoteDraftToOrder failed", err);
+      return new Response("PAYTR internal", { status: 500 });
     }
-
-    await db
-      .update(orders)
-      .set({
-        paymentStatus: "succeeded",
-        paytrPaymentType: paymentType,
-        paytrTestMode: testMode,
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, order.id));
-
-    // Remove any lingering deadline jobs (defensive — card flow doesn't schedule them,
-    // but if a customer switched method this would clean up).
-    const q = getPaymentDeadlineQueue();
-    await q.remove(havaleReminderJobId(order.id)).catch(() => {});
-    await q.remove(havaleExpireJobId(order.id)).catch(() => {});
-
     return okResponse();
   }
 
-  // status === "failed"
-  await db
-    .update(orders)
-    .set({
-      paymentStatus: "failed",
-      paytrPaymentType: paymentType,
-      paytrTestMode: testMode,
-      paytrFailureReason: [failedReasonCode, failedReasonMsg].filter(Boolean).join(" — "),
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, order.id));
-
+  // status === "failed" — leave draft in pending so the customer can retry from the
+  // track page. Expiry worker / admin cleans up if abandoned.
   return okResponse();
 }

@@ -424,8 +424,12 @@ function ReorderButton({ orderNumber }: { orderNumber: string }) {
         return;
       }
       const data = await res.json();
-      if (data.whatsappUrl) {
-        window.location.href = data.whatsappUrl;
+      if (data.iframeUrl) {
+        window.location.href = data.iframeUrl;
+        return;
+      }
+      if (data.paymentMethod === "bank_transfer") {
+        window.location.href = data.redirectUrl ?? `/havale/${data.reference ?? data.orderNumber}`;
         return;
       }
     } catch {

@@ -50,7 +50,6 @@ export async function POST(
 
   await db.insert(adminMessages).values({
     orderId: id,
-    channel: "email",
     subject: body.subject,
     body: body.body,
     templateKey: body.templateKey,

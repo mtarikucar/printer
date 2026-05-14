@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { orders } from "@/lib/db/schema";
+import { orderDrafts } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { createPaytrToken } from "@/lib/services/paytr";
 import { getClientIp } from "@/lib/utils/request";
@@ -10,11 +10,13 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
 const retrySchema = z.object({
-  // Only card retry is supported here; bank_transfer state is handled in /api/orders
-  // (a new order, since the customer chose a different payment path).
   paymentMethod: z.literal("card").default("card"),
 });
 
+/**
+ * Retry a failed card payment on an existing draft (the customer pressed "try again"
+ * on the track page). Only operates on drafts in `pending` status with paymentMethod=card.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
@@ -31,49 +33,44 @@ export async function POST(
     );
   }
 
-  // Parse but ignore for now — keeps the schema explicit if we expand later.
   await request.json().catch(() => ({}));
   retrySchema.parse({ paymentMethod: "card" });
 
-  const order = await db.query.orders.findFirst({
+  const draft = await db.query.orderDrafts.findFirst({
     where: and(
-      eq(orders.orderNumber, orderNumber),
-      eq(orders.userId, session.userId)
+      eq(orderDrafts.reference, orderNumber),
+      eq(orderDrafts.userId, session.userId)
     ),
   });
 
-  if (!order) {
+  if (!draft) {
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  // Only retry orders that are still awaiting payment and haven't succeeded.
-  if (order.status !== "pending_payment") {
+  if (draft.status !== "pending") {
     return NextResponse.json(
       { error: "Order is not in a retryable state" },
       { status: 400 }
     );
   }
-  if (order.paymentMethod !== "card") {
+  if (draft.paymentMethod !== "card") {
     return NextResponse.json(
       { error: "Only card payments can be retried" },
       { status: 400 }
     );
   }
-  if (order.paymentStatus === "succeeded") {
-    return NextResponse.json({ error: "Order already paid" }, { status: 400 });
-  }
 
-  const addr = order.shippingAddress;
+  const addr = draft.shippingAddress;
   const userIp = await getClientIp();
-  const paymentAmountKurus = order.amountKurus - order.giftCardAmountKurus;
-  const sizeLabel = d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize;
+  const paymentAmountKurus = draft.amountKurus - draft.giftCardAmountKurus;
+  const sizeLabel = d[`sizes.${draft.figurineSize}` as keyof typeof d] || draft.figurineSize;
 
   try {
     const paytrResult = await createPaytrToken({
-      orderNumber: order.orderNumber,
-      email: order.email,
+      orderNumber: draft.reference,
+      email: draft.email,
       amountKurus: paymentAmountKurus,
-      userName: order.customerName,
+      userName: draft.customerName,
       userAddress: `${addr.mahalle ? addr.mahalle + ", " : ""}${addr.adres}, ${addr.ilce}/${addr.il}`,
       userPhone: addr.telefon,
       userIp,
@@ -84,27 +81,26 @@ export async function POST(
           quantity: 1,
         },
       ],
-      locale: order.locale,
+      locale: draft.locale,
     });
 
     await db
-      .update(orders)
+      .update(orderDrafts)
       .set({
         paytrMerchantOid: paytrResult.merchantOid,
         paytrTestMode: paytrResult.testMode,
-        paymentStatus: "pending",
         paytrFailureReason: null,
         updatedAt: new Date(),
       })
-      .where(eq(orders.id, order.id));
+      .where(eq(orderDrafts.id, draft.id));
 
     return NextResponse.json({
-      orderNumber: order.orderNumber,
+      reference: draft.reference,
       iframeUrl: paytrResult.iframeUrl,
       finalAmountKurus: paymentAmountKurus,
     });
   } catch (err) {
-    console.error("Retry PayTR token failed for", order.orderNumber, err);
+    console.error("Retry PayTR token failed for", draft.reference, err);
     return NextResponse.json(
       {
         error:

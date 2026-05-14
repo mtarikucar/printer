@@ -85,7 +85,6 @@ async function getMetrics() {
       .from(orders)
       .where(
         sql`(${orders.status} = 'review' AND ${orders.updatedAt} < NOW() - INTERVAL '24 hours')
-        OR (${orders.status} = 'pending_payment' AND ${orders.createdAt} < NOW() - INTERVAL '48 hours')
         OR (${orders.status} IN ('failed_generation', 'failed_mesh'))`
       ),
 
@@ -190,10 +189,6 @@ async function getAttentionOrders() {
           sql`${o.status} = 'review'`,
           lt(o.updatedAt, sql`NOW() - INTERVAL '24 hours'`)
         ),
-        and(
-          sql`${o.status} = 'pending_payment'`,
-          lt(o.createdAt, sql`NOW() - INTERVAL '48 hours'`)
-        ),
         inArray(o.status, ["failed_generation", "failed_mesh"])
       ),
     orderBy: (o, { desc }) => [desc(o.updatedAt)],
@@ -211,8 +206,6 @@ async function getAttentionOrders() {
     let reason: string;
     if (r.status === "review") {
       reason = "reviewOverdue";
-    } else if (r.status === "pending_payment") {
-      reason = "paymentOverdue";
     } else {
       reason = "failedOrder";
     }

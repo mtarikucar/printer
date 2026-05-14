@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { orders, orderPhotos } from "@/lib/db/schema";
+import { orders, orderDrafts } from "@/lib/db/schema";
 import { PRICES_KURUS } from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
-import { createPaytrToken } from "@/lib/services/paytr";
+import { buildDraftReference } from "@/lib/services/order-draft";
+import { createPaytrToken, buildMerchantOid } from "@/lib/services/paytr";
 import {
   calculateHavaleDiscount,
   HAVALE_DEADLINE_HOURS,
@@ -27,6 +27,18 @@ const reorderSchema = z.object({
   paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
 });
 
+const PHOTO_KEY_REGEX = /\/(photos\/[^?#]+)$/;
+
+/**
+ * Reorder = create a new draft using a confirmed order's snapshot data, then route the
+ * customer through the same payment flow as a fresh checkout.
+ *
+ * Note: gift cards are NOT carried over from the original order. If the customer wants to
+ * redeem a gift code they must use the regular `/api/orders` flow (which validates and
+ * locks the code). Reordering deliberately stays a simple "buy again at full price"
+ * action — otherwise we'd need to re-validate the code, handle expired/used cards, and
+ * leak gift-card balance from a paid order's snapshot.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
@@ -58,7 +70,7 @@ export async function POST(
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
 
-  const NON_REORDERABLE = ["pending_payment", "rejected"];
+  const NON_REORDERABLE = ["rejected"];
   if (NON_REORDERABLE.includes(order.status)) {
     return NextResponse.json(
       { error: d["api.order.notReorderable"] },
@@ -66,7 +78,7 @@ export async function POST(
     );
   }
 
-  const newOrderNumber = `FIG-${nanoid(8).toUpperCase()}`;
+  const reference = buildDraftReference();
   const amountKurus = PRICES_KURUS[order.figurineSize];
 
   const havaleDiscountKurus =
@@ -76,11 +88,28 @@ export async function POST(
       ? new Date(Date.now() + HAVALE_DEADLINE_HOURS * 3600 * 1000)
       : null;
 
-  const newOrder = await db.transaction(async (tx) => {
+  // We need a photoKey to seed the draft. originalUrl is `/api/files/photos/...`;
+  // extract the storage key from it. If the regex doesn't match we cannot reorder
+  // safely — the alternative (passing the full URL through getPublicUrl) would
+  // double-prefix and produce a broken image.
+  const firstPhoto = order.photos[0];
+  const photoMatch = firstPhoto?.originalUrl?.match(PHOTO_KEY_REGEX);
+  if (!photoMatch) {
+    return NextResponse.json(
+      { error: d["api.order.notReorderable"] },
+      { status: 400 }
+    );
+  }
+  const photoKey = photoMatch[1];
+
+  const paytrMerchantOid =
+    paymentMethod === "card" ? buildMerchantOid(reference) : null;
+
+  const draft = await db.transaction(async (tx) => {
     const [created] = await tx
-      .insert(orders)
+      .insert(orderDrafts)
       .values({
-        orderNumber: newOrderNumber,
+        reference,
         userId: session.userId,
         email: order.email,
         customerName: order.customerName,
@@ -89,27 +118,21 @@ export async function POST(
         style: order.style,
         modifiers: order.modifiers,
         shippingAddress: order.shippingAddress,
-        amountKurus,
-        status: "pending_payment",
+        photoKey,
         locale,
-        paymentMethod,
-        paymentStatus: paymentMethod === "bank_transfer" ? "awaiting_transfer" : "pending",
+        amountKurus,
         havaleDiscountKurus,
+        paymentMethod,
+        status: "pending",
+        paytrMerchantOid,
         bankTransferDeadline,
       })
       .returning();
-
-    if (order.photos.length > 0) {
-      await tx.insert(orderPhotos).values({
-        orderId: created.id,
-        originalUrl: order.photos[0].originalUrl,
-      });
-    }
-
     return created;
   });
 
-  // ─── Bank transfer ───────────────────────────────────────────
+  // orderPhotos rows are inserted when the draft is promoted (order-draft.ts).
+
   if (paymentMethod === "bank_transfer") {
     const finalAmountKurus = amountKurus - havaleDiscountKurus;
     const bank = getBankDetails();
@@ -117,17 +140,17 @@ export async function POST(
     const queue = getPaymentDeadlineQueue();
     await queue.add(
       "havale-reminder",
-      { orderId: newOrder.id, orderNumber: newOrderNumber, type: "havale_reminder" },
+      { draftId: draft.id, reference, type: "havale_reminder" },
       {
-        jobId: havaleReminderJobId(newOrder.id),
+        jobId: havaleReminderJobId(draft.id),
         delay: HAVALE_REMINDER_HOURS * 3600 * 1000,
       }
     );
     await queue.add(
       "havale-expire",
-      { orderId: newOrder.id, orderNumber: newOrderNumber, type: "havale_expire" },
+      { draftId: draft.id, reference, type: "havale_expire" },
       {
-        jobId: havaleExpireJobId(newOrder.id),
+        jobId: havaleExpireJobId(draft.id),
         delay: HAVALE_DEADLINE_HOURS * 3600 * 1000,
       }
     );
@@ -135,7 +158,7 @@ export async function POST(
     await getEmailQueue().add("send-email", {
       type: "bank_transfer_instructions",
       to: order.email,
-      orderNumber: newOrderNumber,
+      orderNumber: reference,
       customerName: order.customerName,
       bankName: bank.bankName,
       bankAccountHolder: bank.accountHolder,
@@ -147,23 +170,25 @@ export async function POST(
     });
 
     return NextResponse.json({
-      orderNumber: newOrderNumber,
+      reference,
+      orderNumber: reference,
       paymentMethod: "bank_transfer",
       bankDetails: bank,
       finalAmountKurus,
       havaleDiscountKurus,
       deadline: bankTransferDeadline?.toISOString(),
+      redirectUrl: `/havale/${reference}`,
     });
   }
 
-  // ─── Card via PayTR ──────────────────────────────────────────
+  // Card flow
   const addr = order.shippingAddress;
   const userIp = await getClientIp();
   const sizeLabel = d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize;
 
   try {
     const paytrResult = await createPaytrToken({
-      orderNumber: newOrderNumber,
+      orderNumber: reference,
       email: order.email,
       amountKurus,
       userName: order.customerName,
@@ -181,32 +206,31 @@ export async function POST(
     });
 
     await db
-      .update(orders)
+      .update(orderDrafts)
       .set({
         paytrMerchantOid: paytrResult.merchantOid,
         paytrTestMode: paytrResult.testMode,
         updatedAt: new Date(),
       })
-      .where(eq(orders.id, newOrder.id));
+      .where(eq(orderDrafts.id, draft.id));
 
     return NextResponse.json({
-      orderNumber: newOrderNumber,
+      reference,
+      orderNumber: reference,
       paymentMethod: "card",
       iframeUrl: paytrResult.iframeUrl,
     });
   } catch (err) {
-    console.error("Reorder PayTR token failed for", newOrderNumber, err);
+    console.error("Reorder PayTR token failed for", reference, err);
     const failureMessage = err instanceof Error ? err.message : "unknown";
-    // Mark the just-created order as rejected so the customer can retry cleanly.
     await db
-      .update(orders)
+      .update(orderDrafts)
       .set({
-        status: "rejected",
-        paymentStatus: "failed",
-        failureReason: `PayTR token error: ${failureMessage}`,
+        status: "failed",
+        paytrFailureReason: `PayTR token error: ${failureMessage}`,
         updatedAt: new Date(),
       })
-      .where(eq(orders.id, newOrder.id));
+      .where(eq(orderDrafts.id, draft.id));
 
     return NextResponse.json(
       {

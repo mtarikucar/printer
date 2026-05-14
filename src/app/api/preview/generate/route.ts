@@ -56,11 +56,7 @@ export async function POST(request: NextRequest) {
     // Preview limit: 3 for users who haven't paid, also limit anonymous users
     if (session) {
       const hasPaidOrder = await db.query.orders.findFirst({
-        where: (o, { and, eq: eq2, ne: ne2 }) =>
-          and(
-            eq2(o.userId, session.userId),
-            ne2(o.status, "pending_payment")
-          ),
+        where: (o, { eq: eq2 }) => eq2(o.userId, session.userId),
         columns: { id: true },
       });
 

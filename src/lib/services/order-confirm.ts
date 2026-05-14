@@ -1,38 +1,43 @@
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, previews, generationAttempts } from "@/lib/db/schema";
 import { getAiGenerationQueue, getMeshProcessingQueue, getEmailQueue } from "@/lib/queue/queues";
 import type { Locale } from "@/lib/i18n/types";
 
-export async function confirmOrder(orderId: string, locale: Locale) {
+/**
+ * Kick off post-payment processing for an order that is already in `status='paid'`.
+ *
+ * Decides between three paths:
+ *  - reuse approved preview → enqueue mesh processing
+ *  - no preview → enqueue AI generation
+ *  - no usable input → mark failed_generation
+ *
+ * Idempotent: only the first caller transitioning from `paid` succeeds; the rest are no-ops.
+ */
+export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
   const result = await db.transaction(async (tx) => {
-    // Atomically claim the order: only one caller can transition from pending_payment
-    const [updated] = await tx
-      .update(orders)
-      .set({
-        status: "paid",
-        paidAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(orders.id, orderId), eq(orders.status, "pending_payment")))
-      .returning();
-
-    if (!updated) {
-      throw new Error("Order not found or not in pending_payment status");
+    const order = await tx.query.orders.findFirst({
+      where: eq(orders.id, orderId),
+    });
+    if (!order) {
+      throw new Error("Order not found");
     }
 
-    // Check if order has a preview (skip AI generation)
-    if (updated.previewId) {
+    // Idempotency: only kick off from the freshly-paid state.
+    if (order.status !== "paid") {
+      return { order, action: "noop" as const };
+    }
+
+    if (order.previewId) {
       const preview = await tx.query.previews.findFirst({
-        where: eq(previews.id, updated.previewId),
+        where: eq(previews.id, order.previewId),
       });
 
       if (preview?.glbUrl && preview.glbKey) {
-        // Create generation attempt record from preview data
         const [attempt] = await tx
           .insert(generationAttempts)
           .values({
-            orderId: updated.id,
+            orderId: order.id,
             provider: "meshy",
             providerTaskId: preview.meshyTaskId,
             status: "succeeded",
@@ -49,7 +54,7 @@ export async function confirmOrder(orderId: string, locale: Locale) {
           .where(eq(orders.id, orderId));
 
         return {
-          order: updated,
+          order,
           action: "mesh" as const,
           meshData: {
             generationId: attempt.id,
@@ -60,9 +65,8 @@ export async function confirmOrder(orderId: string, locale: Locale) {
       }
     }
 
-    // No usable preview — use standard AI generation flow
     const photo = await tx.query.orderPhotos.findFirst({
-      where: eq(orderPhotos.orderId, updated.id),
+      where: eq(orderPhotos.orderId, order.id),
     });
 
     if (photo) {
@@ -72,15 +76,12 @@ export async function confirmOrder(orderId: string, locale: Locale) {
         .where(eq(orders.id, orderId));
 
       return {
-        order: updated,
+        order,
         action: "generate" as const,
-        generateData: {
-          imageUrl: photo.originalUrl,
-        },
+        generateData: { imageUrl: photo.originalUrl },
       };
     }
 
-    // No photo and no usable preview
     await tx
       .update(orders)
       .set({
@@ -90,10 +91,11 @@ export async function confirmOrder(orderId: string, locale: Locale) {
       })
       .where(eq(orders.id, orderId));
 
-    return { order: updated, action: "failed" as const };
+    return { order, action: "failed" as const };
   });
 
-  // Enqueue jobs outside the transaction (after commit)
+  if (result.action === "noop") return;
+
   if (result.action === "mesh") {
     await getMeshProcessingQueue().add("process-mesh", {
       orderId: result.order.id,
@@ -110,7 +112,6 @@ export async function confirmOrder(orderId: string, locale: Locale) {
     });
   }
 
-  // Send confirmation email (only if order is actually being processed)
   if (result.action !== "failed") {
     await getEmailQueue().add("confirmation", {
       type: "order_confirmation",
@@ -121,3 +122,4 @@ export async function confirmOrder(orderId: string, locale: Locale) {
     });
   }
 }
+

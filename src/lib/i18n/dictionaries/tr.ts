@@ -239,9 +239,9 @@ const tr: Dictionary = {
   "create.photoRequired": "Lütfen bir fotoğraf yükleyin",
   "create.orderFailed": "Sipariş oluşturulamadı",
   "create.submitting": "Sipariş oluşturuluyor...",
-  "create.submitButton": "WhatsApp ile Sipariş Ver",
+  "create.submitButton": "Ödemeye Geç",
   "create.shippingNote":
-    "Ücretsiz kargo (Yurtiçi). Siparişinizi WhatsApp üzerinden tamamlayın.",
+    "Ücretsiz kargo (Yurtiçi). Ödeme adımına geçtiğinizde kart veya havale ile tamamlayabilirsiniz.",
   "create.payment": "Ödeme",
   "create.paymentTitle": "Ödeme",
   "create.step1": "Boyut & Fotoğraf",
@@ -323,8 +323,8 @@ const tr: Dictionary = {
 
   // Create — Order submitted
   "create.orderSubmitted.title": "Sipariş Oluşturuldu!",
-  "create.orderSubmitted.message": "WhatsApp açıldı, mesajı göndererek siparişi tamamlayın.",
-  "create.orderSubmitted.resend": "WhatsApp'ı Tekrar Aç",
+  "create.orderSubmitted.message": "Siparişiniz başarıyla oluşturuldu, kısa süre içinde üretim sürecine alınacak.",
+  "create.orderSubmitted.resend": "",
   "create.orderSubmitted.track": "Siparişi Takip Et",
 
   // Create — Payment
@@ -890,7 +890,6 @@ const tr: Dictionary = {
   "admin.orderDetail.customerInfo": "Müşteri Bilgisi",
   "admin.orderDetail.callCustomer": "Ara",
   "admin.orderDetail.emailCustomer": "E-posta",
-  "admin.orderDetail.whatsappCustomer": "WhatsApp",
   "admin.orderDetail.editOrder": "Siparişi Düzenle",
   "admin.orderDetail.saveChanges": "Değişiklikleri Kaydet",
   "admin.orderDetail.saving": "Kaydediliyor...",
@@ -915,11 +914,9 @@ const tr: Dictionary = {
   "admin.messaging.send": "E-posta Gönder",
   "admin.messaging.sending": "Gönderiliyor...",
   "admin.messaging.sent": "Mesaj gönderildi!",
-  "admin.messaging.openWhatsapp": "WhatsApp Aç",
   "admin.messaging.history": "Mesaj Geçmişi",
   "admin.messaging.noMessages": "Henüz mesaj gönderilmedi",
   "admin.messaging.via.email": "E-posta",
-  "admin.messaging.via.whatsapp": "WhatsApp",
   "admin.messaging.tpl.orderUpdate": "Sipariş Güncellemesi",
   "admin.messaging.tpl.orderUpdate.subject": "Siparişiniz hakkında güncelleme #{orderNumber}",
   "admin.messaging.tpl.orderUpdate.body": "Merhaba {customerName},\n\n#{orderNumber} numaralı siparişiniz hakkında bir güncelleme var.\n\n",
@@ -950,7 +947,6 @@ const tr: Dictionary = {
   "admin.timeline.confirmed": "Sipariş onaylandı",
   "admin.timeline.edited": "Sipariş düzenlendi",
   "admin.timeline.emailSent": "E-posta gönderildi",
-  "admin.timeline.whatsappSent": "WhatsApp gönderildi",
 
   // Admin - Layout
   "admin.nav.reviewBadge": "{count}",

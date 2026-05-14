@@ -5,6 +5,7 @@ import { startEmailWorker } from "../src/lib/queue/workers/email.worker";
 import { startPreviewGenerationWorker } from "../src/lib/queue/workers/preview-generation.worker";
 import { startPreviewCleanupWorker } from "../src/lib/queue/workers/preview-cleanup.worker";
 import { startPaymentDeadlineWorker } from "../src/lib/queue/workers/payment-deadline.worker";
+import { startDekontOcrWorker } from "../src/lib/queue/workers/dekont-ocr.worker";
 import { getPreviewCleanupQueue } from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
@@ -15,6 +16,7 @@ const emailWorker = startEmailWorker();
 const previewWorker = startPreviewGenerationWorker();
 const cleanupWorker = startPreviewCleanupWorker();
 const paymentDeadlineWorker = startPaymentDeadlineWorker();
+const dekontOcrWorker = startDekontOcrWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -30,6 +32,7 @@ console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
 console.log("  - preview-cleanup (repeatable: every 1h)");
 console.log("  - payment-deadline (concurrency: 2)");
+console.log("  - dekont-ocr (concurrency: 2)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -40,6 +43,7 @@ async function shutdown() {
     previewWorker.close(),
     cleanupWorker.close(),
     paymentDeadlineWorker.close(),
+    dekontOcrWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

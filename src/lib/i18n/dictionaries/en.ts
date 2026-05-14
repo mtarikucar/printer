@@ -237,9 +237,9 @@ const en = {
   "create.photoRequired": "Please upload a photo",
   "create.orderFailed": "Order creation failed",
   "create.submitting": "Creating order...",
-  "create.submitButton": "Order via WhatsApp",
+  "create.submitButton": "Proceed to Payment",
   "create.shippingNote":
-    "Free shipping (Domestic). Complete your order via WhatsApp.",
+    "Free shipping (Domestic). Pay by card or bank transfer at checkout.",
   "create.payment": "Payment",
   "create.paymentTitle": "Payment",
   "create.step1": "Size & Photo",
@@ -321,8 +321,8 @@ const en = {
 
   // Create — Order submitted
   "create.orderSubmitted.title": "Order Submitted!",
-  "create.orderSubmitted.message": "WhatsApp has been opened. Send the message to complete your order.",
-  "create.orderSubmitted.resend": "Open WhatsApp Again",
+  "create.orderSubmitted.message": "Your order has been received and will enter production shortly.",
+  "create.orderSubmitted.resend": "",
   "create.orderSubmitted.track": "Track Your Order",
 
   // Create — Payment
@@ -884,7 +884,6 @@ const en = {
   "admin.orderDetail.customerInfo": "Customer Info",
   "admin.orderDetail.callCustomer": "Call",
   "admin.orderDetail.emailCustomer": "Email",
-  "admin.orderDetail.whatsappCustomer": "WhatsApp",
   "admin.orderDetail.editOrder": "Edit Order",
   "admin.orderDetail.saveChanges": "Save Changes",
   "admin.orderDetail.saving": "Saving...",
@@ -909,11 +908,9 @@ const en = {
   "admin.messaging.send": "Send Email",
   "admin.messaging.sending": "Sending...",
   "admin.messaging.sent": "Message sent!",
-  "admin.messaging.openWhatsapp": "Open WhatsApp",
   "admin.messaging.history": "Message History",
   "admin.messaging.noMessages": "No messages sent yet",
   "admin.messaging.via.email": "Email",
-  "admin.messaging.via.whatsapp": "WhatsApp",
   "admin.messaging.tpl.orderUpdate": "Order Update",
   "admin.messaging.tpl.orderUpdate.subject": "Update on your order #{orderNumber}",
   "admin.messaging.tpl.orderUpdate.body": "Hello {customerName},\n\nWe have an update regarding your order #{orderNumber}.\n\n",
@@ -944,7 +941,6 @@ const en = {
   "admin.timeline.confirmed": "Order confirmed",
   "admin.timeline.edited": "Order edited",
   "admin.timeline.emailSent": "Email sent",
-  "admin.timeline.whatsappSent": "WhatsApp sent",
 
   // Admin - Layout
   "admin.nav.reviewBadge": "{count}",

@@ -37,15 +37,9 @@ interface OrderData {
   retryCount: number;
   createdAt: string;
   paymentMethod: "card" | "bank_transfer" | "gift_card_full" | null;
-  paymentStatus: "pending" | "awaiting_transfer" | "succeeded" | "failed" | "expired";
+  paymentStatus: "succeeded" | "refunded";
   havaleDiscountKurus: number;
-  bankTransferDeadline: string | null;
   bankTransferReceiptUrl: string | null;
-  bankTransferReceiptUploadedAt: string | null;
-  paytrMerchantOid: string | null;
-  paytrPaymentType: string | null;
-  paytrTestMode: boolean | null;
-  paytrFailureReason: string | null;
 }
 
 interface Props {
@@ -56,18 +50,34 @@ interface Props {
     latestReport: { isWatertight: boolean; isVolume: boolean; vertexCount: number; faceCount: number; componentCount: number; boundingBox: any; baseAdded: boolean; repairsApplied: string[] | null } | null;
     generationAttempts: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; errorMessage: string | null; costCents: number | null; durationMs: number | null; createdAt: string }[];
     adminActions: { id: string; action: string; adminEmail: string; notes: string | null; createdAt: string }[];
-    adminMessages: { id: string; channel: string; subject: string | null; body: string; templateKey: string | null; adminEmail: string; sentAt: string }[];
+    adminMessages: { id: string; subject: string | null; body: string; templateKey: string | null; adminEmail: string; sentAt: string }[];
     manufacturer?: { id: string; companyName: string; contactPerson: string; status: string } | null;
     manufacturerActions?: { id: string; action: string; notes: string | null; createdAt: string }[];
     manufacturerStatus?: string | null;
     assignedToManufacturerAt?: string | null;
     activeManufacturers?: { id: string; companyName: string }[];
+    candidates?: {
+      manufacturerId: string;
+      companyName: string;
+      city: string | null;
+      district: string | null;
+      phone: string | null;
+      email: string;
+      iban: string | null;
+      currentLoad: number;
+      maxConcurrentOrders: number;
+      acceptingOrders: boolean;
+      scores: { distance: number; load: number; reliability: number; compliance: number };
+      totalScore: number;
+      reasons: string[];
+      eligible: boolean;
+      ineligibleReason?: string;
+    }[];
   };
   locale: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending_payment: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
   paid: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
   generating: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   processing_mesh: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
@@ -82,14 +92,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const TIMELINE_STEPS = [
-  "pending_payment", "paid", "generating", "processing_mesh", "review", "approved", "printing", "shipped", "delivered",
+  "paid", "generating", "processing_mesh", "review", "approved", "printing", "shipped", "delivered",
 ];
 
 // ─── Step Icons ──────────────────────────────────────────────
 function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: string }) {
   switch (step) {
-    case "pending_payment":
-      return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>;
     case "paid":
       return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>;
     case "generating":
@@ -113,7 +121,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, assignedToManufacturerAt, activeManufacturers } = data;
+  const { order, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, assignedToManufacturerAt, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -129,8 +137,7 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [editNotes, setEditNotes] = useState(order.adminNotes || "");
   const [editAddress, setEditAddress] = useState(order.shippingAddress);
 
-  // Messaging state
-  const [msgTab, setMsgTab] = useState<"email" | "whatsapp">("whatsapp");
+  // Messaging state (email-only after WhatsApp removal)
   const [selectedTemplate, setSelectedTemplate] = useState("custom");
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
@@ -225,27 +232,7 @@ export function OrderDetailClient({ data, locale }: Props) {
     }
   };
 
-  const openWhatsapp = async () => {
-    if (!msgBody.trim() || msgSending) return;
-    setMsgSending(true);
-    try {
-      const phone = order.phone || order.shippingAddress?.telefon || "";
-      const cleanPhone = phone.replace(/\D/g, "").replace(/^0/, "90");
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgBody)}`, "_blank");
-      // Log it
-      await fetch(`/api/admin/orders/${order.id}/log-whatsapp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: msgBody, templateKey: selectedTemplate }),
-      });
-      router.refresh();
-    } finally {
-      setMsgSending(false);
-    }
-  };
-
   const hasManufacturer = !!manufacturer;
-  const canConfirm = order.status === "pending_payment";
   const canApprove = order.status === "review";
   const canReject = ["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status);
   const canRegenerate = ["review", "failed_generation", "failed_mesh", "paid", "generating", "processing_mesh"].includes(order.status);
@@ -288,14 +275,13 @@ export function OrderDetailClient({ data, locale }: Props) {
   const currentStepIndex = TIMELINE_STEPS.indexOf(effectiveStatus);
 
   // Determine primary action
-  const primaryAction = canConfirm ? "confirm"
-    : canApprove ? "approve"
+  const primaryAction = canApprove ? "approve"
     : canStartPrinting ? "start-printing"
     : canShip ? "ship-section"
     : canDeliver ? "deliver"
     : null;
 
-  const hasAnyAction = canConfirm || canApprove || canReject || canRegenerate || canForceReview || canStartPrinting || canShip || canDeliver;
+  const hasAnyAction = canApprove || canReject || canRegenerate || canForceReview || canStartPrinting || canShip || canDeliver;
 
   // Customer initials
   const initials = order.customerName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
@@ -427,70 +413,6 @@ export function OrderDetailClient({ data, locale }: Props) {
           {/* ─── Primary Action Panel ─────────────────── */}
           {hasAnyAction && (
             <div className="space-y-3">
-              {/* Primary action card */}
-              {primaryAction === "confirm" && order.paymentMethod === "bank_transfer" && (
-                <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-amber-200 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-semibold text-amber-900">{d["admin.payment.markHavalePaid"]}</h3>
-                      {order.bankTransferReceiptUrl ? (
-                        <a
-                          href={order.bankTransferReceiptUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 mt-2 text-sm text-amber-700 hover:text-amber-900 underline"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                          {d["admin.payment.receiptUploaded"]}
-                        </a>
-                      ) : (
-                        <p className="text-sm text-amber-700 mt-1">{d["admin.payment.receiptMissing"]}</p>
-                      )}
-                      {order.bankTransferDeadline && (
-                        <p className="text-xs text-amber-600 mt-2">
-                          {d["admin.payment.deadline"]}: {formatDateTime(order.bankTransferDeadline, loc)}
-                        </p>
-                      )}
-                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-amber-200 rounded-xl text-sm placeholder:text-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                      <button
-                        onClick={() => {
-                          if (confirm(d["admin.payment.markHavalePaid.confirm"])) {
-                            performAction("mark-havale-paid", { notes });
-                          }
-                        }}
-                        disabled={!!loading}
-                        className="mt-3 px-6 py-2.5 bg-amber-600 text-white text-sm font-semibold rounded-xl hover:bg-amber-700 disabled:bg-gray-400 transition-colors shadow-sm"
-                      >
-                        {loading === "mark-havale-paid"
-                          ? d["admin.orderDetail.confirming"]
-                          : d["admin.payment.markHavalePaid"]}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {primaryAction === "confirm" && order.paymentMethod !== "bank_transfer" && (
-                <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-semibold text-green-900">{d["admin.orderDetail.confirm"]}</h3>
-                      <p className="text-sm text-green-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
-                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-green-200 rounded-xl text-sm placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                      <button onClick={() => performAction("confirm")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm">
-                        {loading === "confirm" ? d["admin.orderDetail.confirming"] : d["admin.orderDetail.confirm"]}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {primaryAction === "approve" && (
                 <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
                   <div className="flex items-start gap-4">
@@ -651,8 +573,108 @@ export function OrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
-          {/* Manufacturer Assignment */}
-          {canAssignManufacturer && activeManufacturers && activeManufacturers.length > 0 && (
+          {/* Manufacturer Assignment — ranked recommendations */}
+          {canAssignManufacturer && candidates && candidates.length > 0 && (
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5 space-y-3">
+              <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider">{d["admin.orderDetail.assignManufacturer"]}</h3>
+              <p className="text-xs text-blue-700/80">
+                Mesafe · Yük · Güvenilirlik · Uygunluk skorlarına göre sıralandı. En iyi adaylar üstte.
+              </p>
+              <div className="space-y-2">
+                {candidates
+                  .filter((c) => c.eligible)
+                  .slice(0, 5)
+                  .map((c, idx) => (
+                    <div
+                      key={c.manufacturerId}
+                      className={`bg-white rounded-xl border p-4 ${
+                        idx === 0 && c.totalScore >= 60 ? "border-emerald-300 ring-1 ring-emerald-100" : "border-gray-200"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-gray-900 truncate">{c.companyName}</h4>
+                            {idx === 0 && c.totalScore >= 60 && (
+                              <span className="text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">
+                                En uygun
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {c.city || "Şehir yok"}{c.district ? ` / ${c.district}` : ""} ·
+                            {" "}Yük {c.currentLoad}/{c.maxConcurrentOrders}
+                            {c.phone ? (
+                              <>
+                                {" "}· <a href={`tel:${c.phone}`} className="text-blue-600 hover:underline">{c.phone}</a>
+                              </>
+                            ) : null}
+                          </p>
+                          {c.reasons.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {c.reasons.map((r) => (
+                                <span key={r} className="text-[10px] bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">
+                                  {r}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-4 gap-2 mt-3">
+                            {(["distance", "load", "reliability", "compliance"] as const).map((k) => (
+                              <div key={k} className="space-y-1">
+                                <div className="flex justify-between text-[10px] text-gray-500">
+                                  <span>{k === "distance" ? "Mesafe" : k === "load" ? "Yük" : k === "reliability" ? "Güven" : "Uygun"}</span>
+                                  <span>{c.scores[k]}</span>
+                                </div>
+                                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-blue-500" style={{ width: `${c.scores[k]}%` }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="text-2xl font-bold text-blue-700">{c.totalScore}</div>
+                          <button
+                            onClick={() => {
+                              setSelectedManufacturerId(c.manufacturerId);
+                              assignManufacturer();
+                            }}
+                            disabled={!!loading}
+                            className="px-4 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+                          >
+                            {loading === "assign-manufacturer" && selectedManufacturerId === c.manufacturerId
+                              ? "Atanıyor..."
+                              : "Bu üreticiye ata"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              {candidates.some((c) => !c.eligible) && (
+                <details className="text-xs text-blue-700/80">
+                  <summary className="cursor-pointer hover:text-blue-900">
+                    Uygun olmayan üreticiler ({candidates.filter((c) => !c.eligible).length})
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {candidates
+                      .filter((c) => !c.eligible)
+                      .map((c) => (
+                        <li key={c.manufacturerId} className="bg-white/50 rounded-lg px-3 py-1.5 flex justify-between">
+                          <span className="text-gray-700">{c.companyName}</span>
+                          <span className="text-gray-500">{c.ineligibleReason}</span>
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+
+          {/* Fallback: classic dropdown if no candidates ranked (no active manufacturers yet) */}
+          {canAssignManufacturer && (!candidates || candidates.length === 0) && activeManufacturers && activeManufacturers.length > 0 && (
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5">
               <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-3">{d["admin.orderDetail.assignManufacturer"]}</h3>
               <div className="flex gap-2">
@@ -693,45 +715,18 @@ export function OrderDetailClient({ data, locale }: Props) {
             </button>
             <div className={`transition-all duration-300 ease-in-out ${messagingOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
               <div className="px-5 pb-5 space-y-4 border-t border-gray-100 pt-4">
-                {/* Tab pills */}
-                <div className="flex gap-2">
-                  <button onClick={() => setMsgTab("whatsapp")} className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${msgTab === "whatsapp" ? "bg-green-100 text-green-700 ring-1 ring-green-200" : "bg-gray-50 text-gray-500 hover:bg-gray-100"}`}>
-                    <span className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18c-1.66 0-3.203-.51-4.484-1.375l-.3-.188-3.216.844.844-3.216-.188-.3A7.963 7.963 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>
-                      WhatsApp
-                    </span>
-                  </button>
-                  <button onClick={() => setMsgTab("email")} className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${msgTab === "email" ? "bg-blue-100 text-blue-700 ring-1 ring-blue-200" : "bg-gray-50 text-gray-500 hover:bg-gray-100"}`}>
-                    <span className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                      E-posta
-                    </span>
-                  </button>
-                </div>
                 {/* Template selector */}
                 <select value={selectedTemplate} onChange={(e) => applyTemplate(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow">
                   {MESSAGE_TEMPLATES.map(tpl => (
                     <option key={tpl.key} value={tpl.key}>{d[tpl.labelKey as keyof typeof d] || tpl.key}</option>
                   ))}
                 </select>
-                {/* Subject (email only) */}
-                {msgTab === "email" && (
-                  <input type="text" value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder={d["admin.messaging.subjectPlaceholder"]} />
-                )}
-                {/* Message body */}
+                <input type="text" value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder={d["admin.messaging.subjectPlaceholder"]} />
                 <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} rows={4} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder={d["admin.messaging.bodyPlaceholder"]} />
-                {/* Send button */}
-                {msgTab === "whatsapp" ? (
-                  <button onClick={openWhatsapp} disabled={!msgBody.trim()} className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors shadow-sm">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
-                    {d["admin.messaging.openWhatsapp"]}
-                  </button>
-                ) : (
-                  <button onClick={sendEmail} disabled={!msgBody.trim() || msgSending} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors shadow-sm">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                    {msgSending ? d["admin.messaging.sending"] : msgSent ? d["admin.messaging.sent"] : d["admin.messaging.send"]}
-                  </button>
-                )}
+                <button onClick={sendEmail} disabled={!msgBody.trim() || msgSending} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors shadow-sm">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                  {msgSending ? d["admin.messaging.sending"] : msgSent ? d["admin.messaging.sent"] : d["admin.messaging.send"]}
+                </button>
               </div>
             </div>
           </div>
@@ -746,14 +741,14 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {adminMessages.map((msg, i) => (
                   <div key={msg.id} className="flex gap-3">
                     <div className="flex flex-col items-center">
-                      <div className={`w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0 ${msg.channel === "whatsapp" ? "bg-green-400" : "bg-blue-400"}`} />
+                      <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0 bg-blue-400" />
                       {i < adminMessages.length - 1 && <div className="w-px flex-1 bg-gray-200 my-0.5" />}
                     </div>
                     <div className="pb-4 min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${msg.channel === "whatsapp" ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}>
-                            {msg.channel === "whatsapp" ? d["admin.messaging.via.whatsapp"] : d["admin.messaging.via.email"]}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700">
+                            {d["admin.messaging.via.email"]}
                           </span>
                           {msg.subject && <span className="text-sm font-medium text-gray-700 truncate">{msg.subject}</span>}
                         </div>
@@ -815,7 +810,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                     <div className="pb-3 flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-gray-700 capitalize">{d[`admin.timeline.${action.action === "print" ? "printing" : action.action === "message_email" ? "emailSent" : action.action === "message_whatsapp" ? "whatsappSent" : action.action}` as keyof typeof d] || action.action}</span>
+                        <span className="text-sm font-medium text-gray-700 capitalize">{d[`admin.timeline.${action.action === "print" ? "printing" : action.action === "message_email" ? "emailSent" : action.action}` as keyof typeof d] || action.action}</span>
                         <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDateTime(action.createdAt, loc)}</span>
                       </div>
                       <p className="text-[10px] text-gray-400">{action.adminEmail}</p>
@@ -879,11 +874,6 @@ export function OrderDetailClient({ data, locale }: Props) {
               <a href={`mailto:${order.email}`} title={d["admin.orderDetail.emailCustomer"]} className="w-9 h-9 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600 transition-colors">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
               </a>
-              {(order.phone || addr?.telefon) && (
-                <a href={`https://wa.me/${(order.phone || addr?.telefon || "").replace(/\D/g, "").replace(/^0/, "90")}`} target="_blank" rel="noopener noreferrer" title={d["admin.orderDetail.whatsappCustomer"]} className="w-9 h-9 flex items-center justify-center bg-green-50 hover:bg-green-100 rounded-full text-green-600 transition-colors">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
-                </a>
-              )}
             </div>
           </div>
 
@@ -939,11 +929,6 @@ export function OrderDetailClient({ data, locale }: Props) {
                     {order.paymentMethod === "card" && d["admin.payment.method.card"]}
                     {order.paymentMethod === "bank_transfer" && d["admin.payment.method.bankTransfer"]}
                     {order.paymentMethod === "gift_card_full" && d["admin.payment.method.giftCardFull"]}
-                    {order.paymentMethod === "card" && order.paytrTestMode && (
-                      <span className="ml-2 inline-flex items-center text-[10px] font-semibold text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full">
-                        {d["admin.payment.paytrTestMode"]}
-                      </span>
-                    )}
                   </dd>
                 </div>
               )}
@@ -966,24 +951,6 @@ export function OrderDetailClient({ data, locale }: Props) {
                       Görüntüle
                     </a>
                   </dd>
-                </div>
-              )}
-              {order.paymentMethod === "bank_transfer" && order.bankTransferDeadline && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.payment.deadline"]}</dt>
-                  <dd className="text-gray-700 text-xs">{formatDateTime(order.bankTransferDeadline, loc)}</dd>
-                </div>
-              )}
-              {order.paymentMethod === "card" && order.paytrPaymentType && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.payment.paytrType"]}</dt>
-                  <dd className="text-gray-700 text-xs uppercase">{order.paytrPaymentType}</dd>
-                </div>
-              )}
-              {order.paytrFailureReason && (
-                <div className="flex justify-between items-start gap-2">
-                  <dt className="text-gray-400">{d["admin.payment.paytrFailureReason"]}</dt>
-                  <dd className="text-red-700 text-xs text-right">{order.paytrFailureReason}</dd>
                 </div>
               )}
               <div className="flex justify-between items-center">

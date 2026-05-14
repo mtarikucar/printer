@@ -3,7 +3,7 @@ import { extname } from "path";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { orders } from "@/lib/db/schema";
+import { orderDrafts, orders } from "@/lib/db/schema";
 import { getFileBuffer } from "@/lib/services/storage";
 
 const MIME_TYPES: Record<string, string> = {
@@ -14,6 +14,10 @@ const MIME_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
 };
 
+/**
+ * `id` here is either an order id (post-payment) or a draft id (pre-payment review).
+ * Admin can view either.
+ */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -25,18 +29,37 @@ export async function GET(
 
   const { id } = await params;
 
-  const order = await db.query.orders.findFirst({
-    where: eq(orders.id, id),
+  // Try draft first (admins review unpaid dekonts there).
+  let receiptKey: string | null = null;
+  const draft = await db.query.orderDrafts.findFirst({
+    where: eq(orderDrafts.id, id),
     columns: { bankTransferReceiptKey: true },
   });
+  if (draft?.bankTransferReceiptKey) {
+    receiptKey = draft.bankTransferReceiptKey;
+  } else {
+    const order = await db.query.orders.findFirst({
+      where: eq(orders.id, id),
+      columns: { draftId: true },
+    });
+    if (order?.draftId) {
+      const linked = await db.query.orderDrafts.findFirst({
+        where: eq(orderDrafts.id, order.draftId),
+        columns: { bankTransferReceiptKey: true },
+      });
+      if (linked?.bankTransferReceiptKey) {
+        receiptKey = linked.bankTransferReceiptKey;
+      }
+    }
+  }
 
-  if (!order?.bankTransferReceiptKey) {
+  if (!receiptKey) {
     return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
   }
 
   try {
-    const buffer = await getFileBuffer(order.bankTransferReceiptKey);
-    const ext = extname(order.bankTransferReceiptKey).toLowerCase();
+    const buffer = await getFileBuffer(receiptKey);
+    const ext = extname(receiptKey).toLowerCase();
     const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
     return new NextResponse(new Uint8Array(buffer), {

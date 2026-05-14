@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, generationAttempts } from "@/lib/db/schema";
+import { orders, orderDrafts, generationAttempts } from "@/lib/db/schema";
 import { normalizeFileUrl } from "@/lib/services/storage";
 import { getBankDetails } from "@/lib/config/payment";
 
+/**
+ * Track endpoint resolves either a confirmed order or a pending draft (same reference string).
+ * Pre-payment drafts return synthetic status `pending_payment` so the UI can render the
+ * payment-pending experience without leaking that drafts/orders are different tables.
+ */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
@@ -23,62 +28,119 @@ export async function GET(
     },
   });
 
-  if (!order) {
+  if (order) {
+    // Look up the (now historical) draft to surface dekont receipt and havale total.
+    const draft = order.draftId
+      ? await db.query.orderDrafts.findFirst({
+          where: eq(orderDrafts.id, order.draftId),
+          columns: {
+            bankTransferReceiptKey: true,
+            havaleDiscountKurus: true,
+            paymentMethod: true,
+          },
+        })
+      : null;
+
+    const finalAmountKurus =
+      order.amountKurus - order.giftCardAmountKurus - order.havaleDiscountKurus;
+    const receiptUrl = draft?.bankTransferReceiptKey
+      ? `/api/customer/orders/${order.orderNumber}/receipt/view`
+      : null;
+
+    return NextResponse.json({
+      orderNumber: order.orderNumber,
+      status: order.status,
+      customerName: order.customerName,
+      trackingNumber: order.trackingNumber,
+      paidAt: order.paidAt,
+      shippedAt: order.shippedAt,
+      createdAt: order.createdAt,
+      isPublic: order.isPublic,
+      publicDisplayName: order.publicDisplayName,
+      glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+      paymentMethod: order.paymentMethod,
+      paymentStatus: order.paymentStatus,
+      amountKurus: order.amountKurus,
+      giftCardAmountKurus: order.giftCardAmountKurus,
+      havaleDiscountKurus: order.havaleDiscountKurus,
+      failureReason: order.failureReason,
+      bankTransfer: null,
+      bankTransferHistory:
+        order.paymentMethod === "bank_transfer"
+          ? {
+              finalAmountKurus,
+              paidAt: order.paidAt?.toISOString() ?? null,
+              receiptUrl,
+            }
+          : null,
+    });
+  }
+
+  // Pre-payment: try the draft.
+  const draft = await db.query.orderDrafts.findFirst({
+    where: eq(orderDrafts.reference, orderNumber),
+  });
+  if (!draft) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
   const isAwaitingTransfer =
-    order.paymentMethod === "bank_transfer" &&
-    order.paymentStatus === "awaiting_transfer";
-
-  // Once paid we keep a stripped-down history block so the customer can still
-  // see what they paid and how — but without bank details, deadline or upload.
-  const isBankTransferHistory =
-    order.paymentMethod === "bank_transfer" &&
-    !isAwaitingTransfer &&
-    order.paymentStatus === "succeeded";
-
+    draft.paymentMethod === "bank_transfer" &&
+    (draft.status === "pending" || draft.status === "awaiting_review");
   const finalAmountKurus =
-    order.amountKurus - order.giftCardAmountKurus - order.havaleDiscountKurus;
-
-  // Auth'd customer-only path — only the owner's session will succeed.
-  const receiptUrl = order.bankTransferReceiptKey
-    ? `/api/customer/orders/${order.orderNumber}/receipt/view`
+    draft.amountKurus - draft.giftCardAmountKurus - draft.havaleDiscountKurus;
+  const receiptUrl = draft.bankTransferReceiptKey
+    ? `/api/customer/orders/${draft.reference}/receipt/view`
     : null;
 
+  // Map draft status to a synthetic order status the client already understands.
+  let syntheticStatus: string;
+  if (draft.status === "expired") syntheticStatus = "rejected";
+  else if (draft.status === "failed") syntheticStatus = "rejected";
+  else if (draft.status === "cancelled") syntheticStatus = "rejected";
+  else syntheticStatus = "pending_payment";
+
   return NextResponse.json({
-    orderNumber: order.orderNumber,
-    status: order.status,
-    customerName: order.customerName,
-    trackingNumber: order.trackingNumber,
-    paidAt: order.paidAt,
-    shippedAt: order.shippedAt,
-    createdAt: order.createdAt,
-    isPublic: order.isPublic,
-    publicDisplayName: order.publicDisplayName,
-    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
-    paymentMethod: order.paymentMethod,
-    paymentStatus: order.paymentStatus,
-    amountKurus: order.amountKurus,
-    giftCardAmountKurus: order.giftCardAmountKurus,
-    havaleDiscountKurus: order.havaleDiscountKurus,
-    failureReason: order.failureReason,
+    orderNumber: draft.reference,
+    status: syntheticStatus,
+    customerName: draft.customerName,
+    trackingNumber: null,
+    paidAt: null,
+    shippedAt: null,
+    createdAt: draft.createdAt,
+    isPublic: false,
+    publicDisplayName: null,
+    glbUrl: null,
+    paymentMethod: draft.paymentMethod,
+    // Map draft status → legacy paymentStatus values the UI uses to switch banners.
+    paymentStatus:
+      draft.status === "pending" && draft.paymentMethod === "bank_transfer"
+        ? "awaiting_transfer"
+        : draft.status === "expired"
+        ? "expired"
+        : draft.paytrFailureReason
+        ? "failed"
+        : "pending",
+    amountKurus: draft.amountKurus,
+    giftCardAmountKurus: draft.giftCardAmountKurus,
+    havaleDiscountKurus: draft.havaleDiscountKurus,
+    failureReason: draft.paytrFailureReason,
     bankTransfer: isAwaitingTransfer
       ? {
           bank: getBankDetails(),
           finalAmountKurus,
-          deadline: order.bankTransferDeadline?.toISOString() ?? null,
+          deadline: draft.bankTransferDeadline?.toISOString() ?? null,
           receiptUploadedAt:
-            order.bankTransferReceiptUploadedAt?.toISOString() ?? null,
+            draft.bankTransferReceiptUploadedAt?.toISOString() ?? null,
           receiptUrl,
+          ocrConfidence: draft.receiptOcrConfidence ?? null,
+          ocrStatus: draft.bankTransferReceiptKey
+            ? draft.receiptOcrConfidence
+              ? "scanned"
+              : "scanning"
+            : null,
         }
       : null,
-    bankTransferHistory: isBankTransferHistory
-      ? {
-          finalAmountKurus,
-          paidAt: order.paidAt?.toISOString() ?? null,
-          receiptUrl,
-        }
-      : null,
+    bankTransferHistory: null,
   });
 }

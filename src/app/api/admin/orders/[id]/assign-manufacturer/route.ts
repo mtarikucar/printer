@@ -3,7 +3,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { orders, adminActions, manufacturers } from "@/lib/db/schema";
-import { getEmailQueue } from "@/lib/queue/queues";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -105,14 +105,13 @@ export async function POST(
         notes: `Assigned to ${manufacturer.companyName}`,
       });
 
-      // Notify manufacturer
-      await getEmailQueue().add("order-assigned", {
+      // Notify manufacturer (persistent inbox + email)
+      await notifyManufacturer({
+        manufacturerId,
         type: "order_assigned",
-        to: orderRetry.email,
-        manufacturerEmail: manufacturer.email,
-        orderNumber: orderRetry.orderNumber,
-        customerName: orderRetry.customerName,
-        locale,
+        subject: `Yeni sipariş atandı: ${orderRetry.orderNumber}`,
+        body: `Sayın ${manufacturer.companyName},\n\n${orderRetry.orderNumber} numaralı sipariş size atandı. Lütfen üretici panelinizden 24 saat içinde kabul veya reddedin.\n\nMüşteri: ${orderRetry.customerName}`,
+        orderId: orderRetry.id,
       });
 
       return NextResponse.json({ success: true });
@@ -125,14 +124,13 @@ export async function POST(
       notes: `Assigned to ${manufacturer.companyName}`,
     });
 
-    // Notify manufacturer
-    await getEmailQueue().add("order-assigned", {
+    // Notify manufacturer (persistent inbox + email)
+    await notifyManufacturer({
+      manufacturerId,
       type: "order_assigned",
-      to: order.email,
-      manufacturerEmail: manufacturer.email,
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
-      locale,
+      subject: `Yeni sipariş atandı: ${order.orderNumber}`,
+      body: `Sayın ${manufacturer.companyName},\n\n${order.orderNumber} numaralı sipariş size atandı. Lütfen üretici panelinizden 24 saat içinde kabul veya reddedin.\n\nMüşteri: ${order.customerName}`,
+      orderId: order.id,
     });
 
     return NextResponse.json({ success: true });

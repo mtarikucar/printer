@@ -9,6 +9,7 @@ import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl } from "@/lib/services/storage";
+import { rankManufacturersForOrder } from "@/lib/services/manufacturer-assignment";
 
 export default async function AdminOrderDetailPage({
   params,
@@ -49,6 +50,9 @@ export default async function AdminOrderDetailPage({
     columns: { id: true, companyName: true },
   });
 
+  // Rank candidates for the assignment recommendation UI.
+  const candidates = await rankManufacturersForOrder(id);
+
   const latestGeneration = order.generationAttempts.find(
     (g) => g.status === "succeeded"
   );
@@ -79,16 +83,9 @@ export default async function AdminOrderDetailPage({
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
       havaleDiscountKurus: order.havaleDiscountKurus,
-      bankTransferDeadline: order.bankTransferDeadline?.toISOString() ?? null,
-      bankTransferReceiptUrl: order.bankTransferReceiptKey
+      bankTransferReceiptUrl: order.draftId
         ? `/api/admin/orders/${order.id}/receipt`
         : null,
-      bankTransferReceiptUploadedAt:
-        order.bankTransferReceiptUploadedAt?.toISOString() ?? null,
-      paytrMerchantOid: order.paytrMerchantOid,
-      paytrPaymentType: order.paytrPaymentType,
-      paytrTestMode: order.paytrTestMode,
-      paytrFailureReason: order.paytrFailureReason,
     },
     photos: order.photos.map(p => ({
       id: p.id,
@@ -135,7 +132,6 @@ export default async function AdminOrderDetailPage({
     })),
     adminMessages: order.messages.map(m => ({
       id: m.id,
-      channel: m.channel,
       subject: m.subject,
       body: m.body,
       templateKey: m.templateKey,
@@ -160,6 +156,7 @@ export default async function AdminOrderDetailPage({
       id: m.id,
       companyName: m.companyName,
     })),
+    candidates,
   };
 
   return (

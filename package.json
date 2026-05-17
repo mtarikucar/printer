@@ -11,7 +11,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "workers": "npx tsx workers/start.ts"
+    "workers": "npx tsx workers/start.ts",
+    "test:e2e": "playwright test",
+    "test:tax-id": "tsx scripts/test-tax-id.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
@@ -46,6 +48,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",

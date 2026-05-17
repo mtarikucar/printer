@@ -43,6 +43,12 @@ backup_*.sql
 # uploads
 /uploads
 
+# playwright
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
+
 # drizzle: SQL migrations MUST be committed so deploys are reproducible and
 # code review can see schema changes. We ignore only the local cache.
 /drizzle/meta/_journal.json

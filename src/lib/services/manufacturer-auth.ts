@@ -1,8 +1,8 @@
 import jwt from "jsonwebtoken";
 import { cookies } from "next/headers";
 import { hashPassword, verifyPassword } from "./customer-auth";
+import { env, JWT_CLAIMS } from "@/lib/env";
 
-const JWT_SECRET = () => process.env.AUTH_SECRET!;
 const COOKIE_NAME = "manufacturer_session";
 
 export { hashPassword, verifyPassword };
@@ -11,17 +11,21 @@ export function createManufacturerSessionToken(
   manufacturerId: string,
   email: string
 ): string {
-  return jwt.sign({ manufacturerId, email }, JWT_SECRET(), { expiresIn: "7d" });
+  return jwt.sign({ manufacturerId, email }, env.MANUFACTURER_JWT_SECRET, {
+    expiresIn: "7d",
+    issuer: JWT_CLAIMS.manufacturer.iss,
+    audience: JWT_CLAIMS.manufacturer.aud,
+  });
 }
 
 export function verifyManufacturerSessionToken(
   token: string
 ): { manufacturerId: string; email: string } | null {
   try {
-    const payload = jwt.verify(token, JWT_SECRET()) as {
-      manufacturerId: string;
-      email: string;
-    };
+    const payload = jwt.verify(token, env.MANUFACTURER_JWT_SECRET, {
+      issuer: JWT_CLAIMS.manufacturer.iss,
+      audience: JWT_CLAIMS.manufacturer.aud,
+    }) as { manufacturerId: string; email: string };
     return payload;
   } catch {
     return null;

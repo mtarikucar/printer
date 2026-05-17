@@ -116,6 +116,11 @@ export default function TrackPage({
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const paymentParam = searchParams.get("payment");
+  // After returning from PayTR with ?payment=success we synchronously verify the
+  // transaction with PayTR (in case the webhook hasn't landed yet — common in dev
+  // where PayTR can't reach localhost). While the verify is in flight we suppress
+  // the "retry payment" UI so the customer doesn't see contradictory CTAs.
+  const [verifying, setVerifying] = useState(paymentParam === "success");
 
   const handleRetryPayment = async () => {
     setRetrying(true);
@@ -145,6 +150,7 @@ export default function TrackPage({
 
   useEffect(() => {
     let isInitialLoad = true;
+    let cancelled = false;
 
     async function fetchOrder() {
       try {
@@ -153,12 +159,13 @@ export default function TrackPage({
           if (res.status === 404) throw new Error(d["track.orderNotFound"]);
           throw new Error(d["track.orderLoadFailed"]);
         }
+        if (cancelled) return;
         setOrder(await res.json());
         setError(null);
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Only show error on initial load; silently ignore transient polling failures
-        if (isInitialLoad) {
-          setError(err.message);
+        if (isInitialLoad && !cancelled) {
+          setError((err instanceof Error ? err.message : "unknown"));
         }
       } finally {
         if (isInitialLoad) {
@@ -168,9 +175,58 @@ export default function TrackPage({
       }
     }
     fetchOrder();
-    const interval = setInterval(fetchOrder, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      // Pause polling while the tab is hidden — saves bandwidth and server
+      // load. We refetch immediately when the tab becomes visible again.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      fetchOrder();
+    }, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchOrder();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [orderNumber, d]);
+
+  // PayTR redirected the customer back with ?payment=success. Verify the
+  // transaction out-of-band so the order is promoted even if the webhook is
+  // delayed or unreachable (localhost dev).
+  useEffect(() => {
+    if (paymentParam !== "success") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetch(`/api/customer/orders/${orderNumber}/verify-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (cancelled) return;
+        // Whatever verify returned (confirmed / failed / waiting), the draft state
+        // may have shifted. Refetch /api/track so the UI mirrors current state.
+        try {
+          const trackRes = await fetch(`/api/track/${orderNumber}`);
+          if (trackRes.ok && !cancelled) {
+            setOrder(await trackRes.json());
+          }
+        } catch {
+          // Background polling will catch up on the next tick.
+        }
+      } catch {
+        // Verification is best-effort; polling will recover.
+      } finally {
+        if (!cancelled) setVerifying(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentParam, orderNumber]);
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -268,8 +324,11 @@ export default function TrackPage({
               )}
             </div>
 
-            {/* Retry payment for failed card orders */}
-            {order.status === "pending_payment" &&
+            {/* Retry payment for failed card orders. Hidden while a returning
+                PayTR verification is in flight so we don't show the user a "retry"
+                button at the same time as a "we're confirming your payment" toast. */}
+            {!verifying &&
+              order.status === "pending_payment" &&
               order.paymentMethod === "card" &&
               (order.paymentStatus === "failed" || order.paymentStatus === "pending") && (
                 <div className="card p-6 border-l-4 border-amber-500">

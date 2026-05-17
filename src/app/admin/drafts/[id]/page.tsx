@@ -44,6 +44,9 @@ export default async function AdminDraftDetailPage({
           receiptOcrText: draft.receiptOcrText,
           receiptOcrFailureReason: draft.receiptOcrFailureReason,
           paytrFailureReason: draft.paytrFailureReason,
+          paytrMerchantOid: draft.paytrMerchantOid,
+          paytrTestMode: draft.paytrTestMode,
+          paytrPaymentType: draft.paytrPaymentType,
           promotedOrderId: draft.promotedOrderId,
           createdAt: draft.createdAt.toISOString(),
         }}

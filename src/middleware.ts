@@ -1,24 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
+// Side-effect import: triggers env.ts module-load validation at process start
+// so the server fails to boot on missing critical env in production.
+import "@/lib/env";
+
+const AUTH_SECRET = process.env.AUTH_SECRET;
+
+/**
+ * Edge-safe NextAuth JWT verification. Returns the decoded token if valid AND
+ * the role is "admin"; null otherwise. Unlike a cookie-presence check this
+ * actually verifies the JWT signature against AUTH_SECRET — without it any
+ * forged cookie value passed the previous check.
+ */
+async function getAdminToken(request: NextRequest) {
+  if (!AUTH_SECRET) return null;
+  const token = await getToken({
+    req: request,
+    secret: AUTH_SECRET,
+    // Auth.js v5 cookie name varies by environment. Pass both so secure prod
+    // cookies and unsecured dev cookies both work.
+    cookieName: process.env.NODE_ENV === "production"
+      ? "__Secure-authjs.session-token"
+      : "authjs.session-token",
+    salt: process.env.NODE_ENV === "production"
+      ? "__Secure-authjs.session-token"
+      : "authjs.session-token",
+  });
+  if (!token || (token as { role?: string }).role !== "admin") return null;
+  return token;
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Admin routes: check for NextAuth session cookie
+  // Admin routes: properly verify the NextAuth JWT (signature + role claim).
   if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
-    const sessionToken =
-      request.cookies.get("authjs.session-token") ??
-      request.cookies.get("__Secure-authjs.session-token");
-    if (!sessionToken?.value) {
+    const token = await getAdminToken(request);
+    if (!token) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }
   }
 
-  // Admin login: redirect to dashboard if already logged in
+  // Admin login: redirect to dashboard if already a valid admin session.
   if (pathname === "/admin/login") {
-    const sessionToken =
-      request.cookies.get("authjs.session-token") ??
-      request.cookies.get("__Secure-authjs.session-token");
-    if (sessionToken?.value) {
+    const token = await getAdminToken(request);
+    if (token) {
       return NextResponse.redirect(new URL("/admin/dashboard", request.url));
     }
   }

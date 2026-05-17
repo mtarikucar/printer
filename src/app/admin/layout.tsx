@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -6,12 +7,24 @@ import { db } from "@/lib/db";
 import { orders, manufacturers, orderDrafts } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { AdminSidebar } from "./sidebar";
+import { auth } from "@/lib/auth/config";
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Defense-in-depth: middleware already gates /admin/*, but if it's ever
+  // mis-configured the layout would otherwise run DB queries and leak counts
+  // in HTML. Verify the role claim here too.
+  // (We use `auth()` directly here rather than `requireAdmin()` because this
+  // is an RSC layout, not an API route — `requireAdmin` returns a
+  // NextResponse-or-session union shaped for API handlers.)
+  const session = await auth();
+  if ((session?.user as { role?: string } | undefined)?.role !== "admin") {
+    redirect("/admin/login");
+  }
+
   const locale = await getLocale();
   const d = getDictionary(locale);
 

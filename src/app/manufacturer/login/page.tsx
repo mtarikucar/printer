@@ -1,18 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export default function ManufacturerLoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const d = useDictionary();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  // Set by /manufacturer/register after a successful registration that's
+  // pending admin approval. The user just submitted the form but cannot log
+  // in until activation, so we show a friendly banner instead of silently
+  // letting them try (and fail) to log in.
+  const justRegisteredPending = searchParams.get("pending") === "1";
 
   // Redirect if already logged in
   useEffect(() => {
@@ -82,6 +88,18 @@ export default function ManufacturerLoginPage() {
                 "Manufacturer Panel"}
             </p>
           </div>
+          {justRegisteredPending && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-semibold">
+                {(d["manufacturer.login.pending.title" as keyof typeof d] as string) ||
+                  "Kaydınız alındı 🎉"}
+              </p>
+              <p className="mt-1">
+                {(d["manufacturer.login.pending.body" as keyof typeof d] as string) ||
+                  "Hesabınız admin onayı bekliyor."}
+              </p>
+            </div>
+          )}
           <div className="bg-white rounded-xl border border-gray-200 p-8">
             <h1 className="text-2xl font-serif text-gray-900 text-center">
               {(d["manufacturer.login.title" as keyof typeof d] as string) ||

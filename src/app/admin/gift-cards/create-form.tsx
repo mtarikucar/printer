@@ -55,8 +55,8 @@ export function CreateGiftCardForm({ d }: { d: Dictionary }) {
       setExpirationDays("365");
       setMaxRedemptions("");
       router.refresh();
-    } catch (err: any) {
-      setError(err.message || "Failed");
+    } catch (err: unknown) {
+      setError((err instanceof Error ? err.message : "unknown") || "Failed");
     } finally {
       setSubmitting(false);
     }

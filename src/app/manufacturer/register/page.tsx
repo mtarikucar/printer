@@ -146,7 +146,14 @@ export default function ManufacturerRegisterPage() {
         setError(data.error || "Kayıt başarısız");
         return;
       }
-      router.push("/manufacturer/orders");
+      // No auto-login; account is created with status=pending_approval and the
+      // user must wait for admin activation before logging in.
+      if (data.pendingApproval) {
+        router.push("/manufacturer/login?pending=1");
+        return;
+      }
+      // Backward-compat: in case the server ever short-circuits to active.
+      router.push("/manufacturer/login");
     } catch {
       setError("Bir hata oluştu");
     } finally {

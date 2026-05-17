@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { giftCards } from "@/lib/db/schema";
 import { desc, eq, and, inArray } from "drizzle-orm";
@@ -8,10 +8,9 @@ import { createAdminGiftCardSchema } from "@/lib/validators/gift-card";
 import { createGiftCard } from "@/lib/services/gift-card";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const a = await requireAdmin();
+
+  if ("response" in a) return a.response;
 
   const cards = await db
     .select()
@@ -22,10 +21,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const a = await requireAdmin();
+  if ("response" in a) return a.response;
 
   try {
     const body = await request.json();
@@ -44,11 +41,13 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ card });
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return NextResponse.json({ error: error.errors }, { status: 400 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ZodError") {
+      const errors = (error as Error & { errors?: unknown }).errors;
+      return NextResponse.json({ error: errors }, { status: 400 });
     }
-    if (error?.code === "23505" && error?.constraint_name?.includes("code")) {
+    const pgErr = error as { code?: string; constraint_name?: string };
+    if (pgErr?.code === "23505" && pgErr.constraint_name?.includes("code")) {
       return NextResponse.json({ error: "Bu kod zaten kullanılıyor" }, { status: 409 });
     }
     console.error("Gift card creation failed:", error);
@@ -60,10 +59,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const a = await requireAdmin();
+  if ("response" in a) return a.response;
 
   try {
     const patchSchema = z.object({ id: z.string().uuid(), action: z.enum(["deactivate"]) });

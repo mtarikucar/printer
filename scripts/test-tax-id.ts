@@ -68,11 +68,13 @@ test("valid synthetic TCKN 12345678950", () => {
   assert.deepEqual(r, { ok: true, type: "tckn", normalized: "12345678950" });
 });
 
-test("TCKN starting with 0 → invalid_checksum", () => {
-  // Even if checksums matched, leading zero is disallowed.
+test("TCKN starting with 0 → invalid_format", () => {
+  // Structural rule (first digit non-zero) is reported as invalid_format,
+  // distinct from invalid_checksum where the math fails. This lets the UI
+  // surface a clearer error message to the user.
   const r = parseTaxId("01234567890");
   assert.equal(r.ok, false);
-  if (!r.ok) assert.equal(r.reason, "invalid_checksum");
+  if (!r.ok) assert.equal(r.reason, "invalid_format");
 });
 
 test("TCKN with wrong final digit → invalid_checksum", () => {

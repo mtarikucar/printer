@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, generationAttempts, adminActions } from "@/lib/db/schema";
 import { saveFile, getPublicUrl } from "@/lib/services/storage";
@@ -15,10 +15,13 @@ export async function POST(
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: d["api.auth.unauthorized"] }, { status: 401 });
-  }
+  const a = await requireAdmin();
+
+
+  if ("response" in a) return a.response;
+
+
+  const session = { user: { email: a.session.user.email } };
 
   const { id: orderId } = await params;
 

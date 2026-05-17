@@ -70,12 +70,17 @@ export function UploadDropzone({
           throw new Error(data.error || d["upload.failed"]);
         }
 
-        const { key } = await res.json();
+        const { key, previewUrl: signedPreviewUrl } = await res.json();
         setProgress(100);
 
-        onUploadComplete(key, previewUrl);
-      } catch (error: any) {
-        onError?.(error.message || d["upload.failed"]);
+        // Pass the SERVER-SIGNED URL to the caller (not the local blob URL).
+        // The blob URL is fine for the immediate in-card preview below, but
+        // the caller may persist this through a login-redirect roundtrip via
+        // sessionStorage where the blob URL would die. The server-signed URL
+        // has a 24h expiry, well within roundtrip time.
+        onUploadComplete(key, signedPreviewUrl ?? previewUrl);
+      } catch (error: unknown) {
+        onError?.((error instanceof Error ? error.message : "unknown") || d["upload.failed"]);
         setPreview(null);
       } finally {
         setUploading(false);

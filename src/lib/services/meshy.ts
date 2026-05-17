@@ -7,7 +7,9 @@ interface MeshyResult {
 export async function generateWithMeshy(imageBase64: string): Promise<MeshyResult> {
   const startTime = Date.now();
 
-  // Create task — Meshy v1 API with Meshy-6 model (base64 image)
+  // Create task — Meshy v1 API with Meshy-6 model (base64 image).
+  // The per-request timeout caps any hung-connection scenario; the outer
+  // 180s loop budget is enforced by the iteration counter below.
   const createRes = await fetch("https://api.meshy.ai/openapi/v1/image-to-3d", {
     method: "POST",
     headers: {
@@ -23,6 +25,7 @@ export async function generateWithMeshy(imageBase64: string): Promise<MeshyResul
       target_polycount: 50000,
       should_texture: false,
     }),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!createRes.ok) {
@@ -32,16 +35,27 @@ export async function generateWithMeshy(imageBase64: string): Promise<MeshyResul
 
   const { result: taskId } = await createRes.json();
 
-  // Poll for completion (max ~180s)
+  // Poll for completion with a hard wall-clock budget. The previous loop ran
+  // 90 iterations × (2s sleep + up to 10s fetch timeout) which could exceed
+  // 18 minutes — well past anyone's expected budget. Enforce 180s real time.
+  const WALL_BUDGET_MS = 180_000;
   for (let i = 0; i < 90; i++) {
+    if (Date.now() - startTime > WALL_BUDGET_MS) break;
     await new Promise((r) => setTimeout(r, 2000));
 
-    const statusRes = await fetch(
-      `https://api.meshy.ai/openapi/v1/image-to-3d/${taskId}`,
-      {
-        headers: { Authorization: `Bearer ${process.env.MESHY_API_KEY}` },
-      }
-    );
+    let statusRes: Response;
+    try {
+      statusRes = await fetch(
+        `https://api.meshy.ai/openapi/v1/image-to-3d/${taskId}`,
+        {
+          headers: { Authorization: `Bearer ${process.env.MESHY_API_KEY}` },
+          signal: AbortSignal.timeout(10_000),
+        }
+      );
+    } catch {
+      // Transient network error / per-request timeout — retry on next iteration.
+      continue;
+    }
 
     if (!statusRes.ok) continue;
 

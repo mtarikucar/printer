@@ -7,8 +7,9 @@ import {
   boolean,
   uuid,
   pgEnum,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const giftCardThemeEnum = pgEnum("gift_card_theme", [
   "ramazan",
@@ -101,6 +102,7 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "deliver",
   "message_email",
   "edit",
+  "force_review",
   "assign_manufacturer",
   "mark_havale_paid",
   "mark_payment_expired",
@@ -194,7 +196,13 @@ export const orderDrafts = pgTable("order_drafts", {
   photoKey: text("photo_key").notNull(),
   locale: text("locale").notNull().default("tr"),
   amountKurus: integer("amount_kurus").notNull(),
-  giftCardId: uuid("gift_card_id"), // FK declared in relations to avoid forward-ref cycle
+  // The forward ref is safe — drizzle resolves the arrow lazily, and at runtime
+  // the giftCards table object already exists by the time DDL is emitted.
+  // `: any` on the arrow's return is necessary because TypeScript evaluates
+  // the type eagerly and giftCards isn't typed yet at this point in the file;
+  // drizzle's runtime resolution is unaffected.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  giftCardId: uuid("gift_card_id").references((): any => giftCards.id),
   giftCardAmountKurus: integer("gift_card_amount_kurus").notNull().default(0),
   havaleDiscountKurus: integer("havale_discount_kurus").notNull().default(0),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
@@ -538,20 +546,38 @@ export const giftCards = pgTable("gift_cards", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const giftCardRedemptions = pgTable("gift_card_redemptions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  giftCardId: uuid("gift_card_id")
-    .notNull()
-    .references(() => giftCards.id),
-  orderId: uuid("order_id").references(() => orders.id),
-  draftId: uuid("draft_id").references(() => orderDrafts.id),
-  amountKurus: integer("amount_kurus").notNull(),
-  redeemedByUserId: uuid("redeemed_by_user_id")
-    .notNull()
-    .references(() => users.id),
-  refundedAt: timestamp("refunded_at"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const giftCardRedemptions = pgTable(
+  "gift_card_redemptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    giftCardId: uuid("gift_card_id")
+      .notNull()
+      .references(() => giftCards.id),
+    orderId: uuid("order_id").references(() => orders.id),
+    draftId: uuid("draft_id").references(() => orderDrafts.id),
+    amountKurus: integer("amount_kurus").notNull(),
+    redeemedByUserId: uuid("redeemed_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    refundedAt: timestamp("refunded_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    // Partial unique index — guarantees a single draft can have at most one
+    // ACTIVE (non-refunded) redemption row. Prevents accidental double-insert
+    // that could double-refund a gift card.
+    //
+    // The `refunded_at IS NULL` predicate is critical: without it, any
+    // historical pair (active + refunded) on the same draft would block
+    // index creation on existing prod data. With it, refunded rows fall
+    // out of the unique scope and only the live ones are constrained.
+    uniqueIndex("gift_card_redemptions_draft_id_unique")
+      .on(table.draftId)
+      .where(
+        sql`${table.draftId} IS NOT NULL AND ${table.refundedAt} IS NULL`
+      ),
+  ]
+);
 
 // Gift Card Relations
 export const giftCardsRelations = relations(giftCards, ({ one, many }) => ({

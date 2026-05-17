@@ -334,10 +334,12 @@ export async function POST(request: NextRequest) {
       console.error("PayTR token creation failed for", draft.reference, err);
       const failureMessage = err instanceof Error ? err.message : "unknown";
 
+      // Keep the draft in `pending` (not `failed`) so the customer can retry
+      // via /api/customer/orders/[orderNumber]/retry-payment. The failure
+      // reason is recorded for diagnostics.
       await db
         .update(orderDrafts)
         .set({
-          status: "failed",
           paytrFailureReason: `PayTR token error: ${failureMessage}`,
           updatedAt: new Date(),
         })
@@ -348,6 +350,8 @@ export async function POST(request: NextRequest) {
           error:
             d["payment.paytr.tokenFailed"] ||
             "Ödeme başlatılamadı, lütfen tekrar deneyin.",
+          reference: draft.reference,
+          retryable: true,
         },
         { status: 502 }
       );
@@ -355,7 +359,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
       const errors = (error as Error & { errors?: unknown }).errors;
-      return NextResponse.json({ error: errors ?? error.message }, { status: 400 });
+      // Return the structured Zod issues array; never fall back to
+      // `error.message`, which can leak internal validation details.
+      return NextResponse.json(
+        { error: errors ?? d["api.order.createFailed"] },
+        { status: 400 }
+      );
     }
     const msg = error instanceof Error ? error.message : "";
     if (msg === "INVALID_PREVIEW") {

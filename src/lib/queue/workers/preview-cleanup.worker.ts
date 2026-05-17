@@ -63,7 +63,7 @@ export function startPreviewCleanupWorker() {
   });
 
   worker.on("completed", (job) => {
-    console.log(`Preview cleanup completed: ${job.id}`);
+    console.info(`Preview cleanup completed: ${job.id}`);
   });
 
   worker.on("failed", (job, error) => {

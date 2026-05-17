@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { createShipOrderSchema } from "@/lib/validators/order";
@@ -15,10 +15,13 @@ export async function POST(
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: d["api.auth.unauthorized"] }, { status: 401 });
-  }
+  const a = await requireAdmin();
+
+
+  if ("response" in a) return a.response;
+
+
+  const session = { user: { email: a.session.user.email } };
 
   const { id } = await params;
 
@@ -63,9 +66,9 @@ export async function POST(
     });
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return NextResponse.json({ error: error.errors }, { status: 400 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ZodError") {
+      return NextResponse.json({ error: (error as Error & { errors?: unknown }).errors }, { status: 400 });
     }
     console.error("Ship order failed:", error);
     return NextResponse.json(

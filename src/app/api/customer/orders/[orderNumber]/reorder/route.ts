@@ -101,6 +101,14 @@ export async function POST(
     );
   }
   const photoKey = photoMatch[1];
+  // Defense-in-depth: mirror the guard in /api/orders so an unexpected URL
+  // shape (future schema migration) can't slip a traversal through.
+  if (!photoKey.startsWith("photos/") || photoKey.includes("..")) {
+    return NextResponse.json(
+      { error: d["api.order.notReorderable"] },
+      { status: 400 }
+    );
+  }
 
   const paytrMerchantOid =
     paymentMethod === "card" ? buildMerchantOid(reference) : null;

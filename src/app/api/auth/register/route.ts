@@ -8,7 +8,7 @@ import {
   createSessionToken,
   setSessionCookie,
 } from "@/lib/services/customer-auth";
-import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
+import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   const d = getDictionary(locale);
 
   const ip = extractClientIp(request);
-  const rl = rateLimit(`register:${ip}`, 5, 60 * 60 * 1000); // 5 registrations per hour
+  const rl = await rateLimitAsync(`register:${ip}`, 5, 60 * 60 * 1000); // 5 registrations per hour
   if (!rl.success) {
     return NextResponse.json(
       { error: "Too many registration attempts. Please try again later." },
@@ -73,9 +73,14 @@ export async function POST(request: NextRequest) {
         phone: user.phone,
       },
     });
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return NextResponse.json({ error: error.errors[0]?.message }, { status: 400 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ZodError") {
+      const issues = (error as Error & { errors?: { message?: string }[] })
+        .errors;
+      return NextResponse.json(
+        { error: issues?.[0]?.message ?? d["api.auth.registerFailed"] },
+        { status: 400 }
+      );
     }
     console.error("Registration failed:", error);
     return NextResponse.json(

@@ -243,14 +243,18 @@ export function OrderDetailClient({ data, locale }: Props) {
   const canAssignManufacturer = order.status === "approved" && (!manufacturerStatus || manufacturerStatus === "unassigned");
   const addr = order.shippingAddress;
 
-  const assignManufacturer = async () => {
-    if (!selectedManufacturerId) return;
+  const assignManufacturer = async (manufacturerId?: string) => {
+    // Accept the id as an argument so call sites that just did a
+    // `setSelectedManufacturerId(...)` then call us can pass it directly —
+    // otherwise we'd read the stale closure value (`""` on first click).
+    const id = manufacturerId ?? selectedManufacturerId;
+    if (!id) return;
     setLoading("assign-manufacturer");
     try {
       const res = await fetch(`/api/admin/orders/${order.id}/assign-manufacturer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ manufacturerId: selectedManufacturerId }),
+        body: JSON.stringify({ manufacturerId: id }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -638,7 +642,10 @@ export function OrderDetailClient({ data, locale }: Props) {
                           <button
                             onClick={() => {
                               setSelectedManufacturerId(c.manufacturerId);
-                              assignManufacturer();
+                              // Pass the id directly to avoid the stale-closure
+                              // race where `selectedManufacturerId` is still ""
+                              // on this click (React state hasn't flushed yet).
+                              assignManufacturer(c.manufacturerId);
                             }}
                             disabled={!!loading}
                             className="px-4 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
@@ -689,7 +696,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                   ))}
                 </select>
                 <button
-                  onClick={assignManufacturer}
+                  onClick={() => assignManufacturer()}
                   disabled={!selectedManufacturerId || !!loading}
                   className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors shadow-sm"
                 >

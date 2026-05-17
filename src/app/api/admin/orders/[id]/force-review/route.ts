@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, inArray, and } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
@@ -13,10 +13,13 @@ export async function POST(
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: d["api.auth.unauthorized"] }, { status: 401 });
-  }
+  const a = await requireAdmin();
+
+
+  if ("response" in a) return a.response;
+
+
+  const session = { user: { email: a.session.user.email } };
 
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
@@ -32,17 +35,18 @@ export async function POST(
 
   if (!order) {
     return NextResponse.json(
-      { error: d["api.order.invalidStatusForRegenerate"] },
+      { error: "Order is not in a status that can be force-reviewed" },
       { status: 400 }
     );
   }
 
   await db.insert(adminActions).values({
     orderId: id,
-    action: "edit",
+    action: "force_review",
     adminEmail: session.user.email,
     notes: body.notes || "Manually moved to review",
   });
+  void d;
 
   return NextResponse.json({ success: true });
 }

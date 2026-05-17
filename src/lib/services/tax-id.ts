@@ -2,7 +2,14 @@ export type TaxIdType = "vkn" | "tckn";
 
 export type ParseResult =
   | { ok: true; type: TaxIdType; normalized: string }
-  | { ok: false; reason: "empty" | "invalid_length" | "invalid_checksum" };
+  | {
+      ok: false;
+      // "invalid_format" covers structural violations like a leading-zero TCKN
+      // where the digit count is right but a hard rule disqualifies it. This
+      // is distinct from "invalid_checksum" (right shape, math fails) so
+      // callers can surface a clearer error.
+      reason: "empty" | "invalid_length" | "invalid_format" | "invalid_checksum";
+    };
 
 function normalize(input: string): string {
   return input.replace(/\D+/g, "");
@@ -34,15 +41,14 @@ function validateVkn(digits: string): boolean {
 
 // Turkish TCKN (TC Kimlik Numarasi) — 11 digits
 // Rules:
-//   1) First digit non-zero.
+//   1) First digit non-zero. (Structural — reported as invalid_format.)
 //   2) digit_10 = ((sum_odd * 7) - sum_even) mod 10
 //      where sum_odd  = d0 + d2 + d4 + d6 + d8
 //            sum_even = d1 + d3 + d5 + d7
 //   3) digit_11 = (sum of d0..d9) mod 10
-function validateTckn(digits: string): boolean {
+function validateTcknChecksum(digits: string): boolean {
   if (digits.length !== 11) return false;
   const d = digits.split("").map((c) => Number(c));
-  if (d[0] === 0) return false;
   const sumOdd = d[0] + d[2] + d[4] + d[6] + d[8];
   const sumEven = d[1] + d[3] + d[5] + d[7];
   const check10 = ((sumOdd * 7 - sumEven) % 10 + 10) % 10;
@@ -60,7 +66,15 @@ export function parseTaxId(raw: string | null | undefined): ParseResult {
     return { ok: false, reason: "invalid_length" };
   }
   const isVkn = normalized.length === 10;
-  const valid = isVkn ? validateVkn(normalized) : validateTckn(normalized);
+  if (!isVkn && normalized[0] === "0") {
+    // TCKN leading-zero is a structural rule, not a checksum failure. Reporting
+    // it as "invalid_checksum" was misleading users into thinking they had a
+    // typo when the rule itself is "first digit can't be zero".
+    return { ok: false, reason: "invalid_format" };
+  }
+  const valid = isVkn
+    ? validateVkn(normalized)
+    : validateTcknChecksum(normalized);
   if (!valid) return { ok: false, reason: "invalid_checksum" };
   return { ok: true, type: isVkn ? "vkn" : "tckn", normalized };
 }

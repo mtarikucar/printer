@@ -19,7 +19,13 @@ interface NotifyArgs {
 
 /**
  * Persist a manufacturer-targeted notification and enqueue the email delivery.
- * The email worker stamps `emailSentAt` (or `emailFailedReason`) on the row after dispatch.
+ *
+ * Robustness:
+ *   - The DB insert is the source of truth (inbox row). If email enqueue fails
+ *     we still return the row id — caller's main operation (e.g. order
+ *     assignment) shouldn't roll back because of a queue blip.
+ *   - The email worker stamps `emailSentAt` / `emailFailedReason` after
+ *     dispatch.
  */
 export async function notifyManufacturer({
   manufacturerId,
@@ -45,17 +51,33 @@ export async function notifyManufacturer({
     })
     .returning({ id: manufacturerNotifications.id });
 
-  await getEmailQueue().add("manufacturer-notification", {
-    type: "manufacturer_notification",
-    to: manufacturer.email,
-    orderNumber: orderId ?? "",
-    customerName: manufacturer.companyName,
-    manufacturerNotificationId: row.id,
-    notificationSubject: subject,
-    notificationBody: body,
-    notificationType: type,
-    locale: "tr",
-  });
+  try {
+    await getEmailQueue().add("manufacturer-notification", {
+      type: "manufacturer_notification",
+      to: manufacturer.email,
+      orderNumber: orderId ?? "",
+      customerName: manufacturer.companyName,
+      manufacturerNotificationId: row.id,
+      notificationSubject: subject,
+      notificationBody: body,
+      notificationType: type,
+      locale: "tr",
+    });
+  } catch (err) {
+    // Inbox row is already persisted; mark the failure so admin/worker can
+    // retry or alert.
+    console.error(
+      `notifyManufacturer: email enqueue failed for notification ${row.id}`,
+      err
+    );
+    await db
+      .update(manufacturerNotifications)
+      .set({
+        emailFailedReason: err instanceof Error ? err.message : "enqueue failed",
+      })
+      .where(eq(manufacturerNotifications.id, row.id))
+      .catch(() => {});
+  }
 
   return row.id;
 }

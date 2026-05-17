@@ -2,8 +2,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
+import { env, JWT_CLAIMS } from "@/lib/env";
 
-const JWT_SECRET = () => process.env.AUTH_SECRET!;
 const COOKIE_NAME = "customer_session";
 
 export async function hashPassword(password: string): Promise<string> {
@@ -18,17 +18,21 @@ export async function verifyPassword(
 }
 
 export function createSessionToken(userId: string, email: string): string {
-  return jwt.sign({ userId, email }, JWT_SECRET(), { expiresIn: "7d" });
+  return jwt.sign({ userId, email }, env.CUSTOMER_JWT_SECRET, {
+    expiresIn: "7d",
+    issuer: JWT_CLAIMS.customer.iss,
+    audience: JWT_CLAIMS.customer.aud,
+  });
 }
 
 export function verifySessionToken(
   token: string
 ): { userId: string; email: string } | null {
   try {
-    const payload = jwt.verify(token, JWT_SECRET()) as {
-      userId: string;
-      email: string;
-    };
+    const payload = jwt.verify(token, env.CUSTOMER_JWT_SECRET, {
+      issuer: JWT_CLAIMS.customer.iss,
+      audience: JWT_CLAIMS.customer.aud,
+    }) as { userId: string; email: string };
     return payload;
   } catch {
     return null;

@@ -39,12 +39,16 @@ async function processJob(job: Job<MeshProcessingJobData>) {
     job.log("Running mesh processing pipeline...");
     const scriptPath = join(process.cwd(), "scripts", "process_mesh.py");
 
+    // maxBuffer prevents a chatty script with >1MB stdout/stderr (e.g. a
+    // verbose error stack) from throwing ENOBUFS and being reported back as
+    // a misleading "mesh processing failed" with a buffer-overflow message
+    // instead of the real error.
     const { stdout, stderr } = await execFileAsync("python3", [
       scriptPath,
       inputPath,
       outputStlPath,
       reportPath,
-    ], { timeout: 120000 });
+    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
 
     if (stderr) {
       job.log(`Python stderr: ${stderr}`);
@@ -88,14 +92,15 @@ async function processJob(job: Job<MeshProcessingJobData>) {
       .where(eq(orders.id, orderId));
 
     job.log("Mesh processing complete, order ready for review");
-  } catch (error: any) {
-    job.log(`Mesh processing failed: ${error.message}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "unknown";
+    job.log(`Mesh processing failed: ${msg}`);
 
     await db
       .update(orders)
       .set({
         status: "failed_mesh",
-        failureReason: error.message,
+        failureReason: msg,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
@@ -118,7 +123,7 @@ export function startMeshProcessingWorker() {
   );
 
   worker.on("completed", (job) => {
-    console.log(`Mesh processing completed for order ${job.data.orderId}`);
+    console.info(`Mesh processing completed for order ${job.data.orderId}`);
   });
 
   worker.on("failed", (job, error) => {

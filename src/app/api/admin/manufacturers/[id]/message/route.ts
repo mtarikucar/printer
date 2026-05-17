@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 const messageSchema = z.object({
@@ -13,10 +13,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const a = await requireAdmin();
+  if ("response" in a) return a.response;
 
   const { id } = await params;
   let body: unknown;

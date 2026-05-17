@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { z } from "zod";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
@@ -9,13 +8,11 @@ import { getClientIp } from "@/lib/utils/request";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
-const retrySchema = z.object({
-  paymentMethod: z.literal("card").default("card"),
-});
-
 /**
  * Retry a failed card payment on an existing draft (the customer pressed "try again"
  * on the track page). Only operates on drafts in `pending` status with paymentMethod=card.
+ * The request body is currently ignored — card is the only supported retry path; if we
+ * ever allow switching methods on retry, parse + validate the body here.
  */
 export async function POST(
   request: NextRequest,
@@ -32,9 +29,6 @@ export async function POST(
       { status: 401 }
     );
   }
-
-  await request.json().catch(() => ({}));
-  retrySchema.parse({ paymentMethod: "card" });
 
   const draft = await db.query.orderDrafts.findFirst({
     where: and(
@@ -65,6 +59,11 @@ export async function POST(
   const paymentAmountKurus = draft.amountKurus - draft.giftCardAmountKurus;
   const sizeLabel = d[`sizes.${draft.figurineSize}` as keyof typeof d] || draft.figurineSize;
 
+  // PayTR rejects duplicate merchant_oids — once they've issued any token (even
+  // for a transaction that didn't complete) the same oid can't be re-used.
+  // Append a millisecond-precision suffix so each retry uses a fresh value.
+  const retrySuffix = `R${Date.now().toString(36)}`;
+
   try {
     const paytrResult = await createPaytrToken({
       orderNumber: draft.reference,
@@ -82,6 +81,7 @@ export async function POST(
         },
       ],
       locale: draft.locale,
+      merchantOidSuffix: retrySuffix,
     });
 
     await db
@@ -89,7 +89,8 @@ export async function POST(
       .set({
         paytrMerchantOid: paytrResult.merchantOid,
         paytrTestMode: paytrResult.testMode,
-        paytrFailureReason: null,
+        // Don't blank the prior failure reason — admin recon and the webhook
+        // audit trail both rely on seeing failure history across retries.
         updatedAt: new Date(),
       })
       .where(eq(orderDrafts.id, draft.id));

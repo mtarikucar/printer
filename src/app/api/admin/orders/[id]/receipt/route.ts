@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extname } from "path";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orderDrafts, orders } from "@/lib/db/schema";
 import { getFileBuffer } from "@/lib/services/storage";
@@ -22,10 +22,8 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const a = await requireAdmin();
+  if ("response" in a) return a.response;
 
   const { id } = await params;
 

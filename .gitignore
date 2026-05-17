@@ -43,8 +43,9 @@ backup_*.sql
 # uploads
 /uploads
 
-# drizzle
-/drizzle
+# drizzle: SQL migrations MUST be committed so deploys are reproducible and
+# code review can see schema changes. We ignore only the local cache.
+/drizzle/meta/_journal.json
 
 # vercel
 .vercel

@@ -2,9 +2,17 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
+import { env } from "@/lib/env";
+
+// The admin realm uses NextAuth with a single-credentials provider. Only users
+// authenticated via this provider get `role: "admin"` stamped on their JWT.
+// Every admin-side check must verify `role === "admin"` — not just session
+// presence — so that if more providers are added later, customer logins can't
+// accidentally inherit admin powers.
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
+  secret: env.AUTH_SECRET,
   providers: [
     Credentials({
       name: "Admin Login",
@@ -36,7 +44,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         );
 
         if (passwordMatch) {
-          return { id: "admin", email: adminEmail, name: "Admin" };
+          // The role is set here in `authorize`; the JWT callback below copies
+          // it onto the token. Future providers (e.g. customer Google login) MUST
+          // NOT return `role: "admin"`.
+          return { id: "admin", email: adminEmail, name: "Admin", role: "admin" };
         }
         return null;
       },
@@ -49,16 +60,31 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     strategy: "jwt",
   },
   callbacks: {
+    async jwt({ token, user }) {
+      // `user` is populated only on first sign-in. Copy role onto the token so
+      // it survives subsequent requests.
+      if (user && (user as { role?: string }).role === "admin") {
+        token.role = "admin";
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token.role === "admin") {
+        (session.user as { role?: string }).role = "admin";
+      }
+      return session;
+    },
     authorized({ auth, request: { nextUrl } }) {
-      const isLoggedIn = !!auth?.user;
+      const role = (auth?.user as { role?: string } | undefined)?.role;
+      const isAdmin = role === "admin";
       const isAdminRoute = nextUrl.pathname.startsWith("/admin");
       const isLoginPage = nextUrl.pathname === "/admin/login";
 
-      if (isAdminRoute && !isLoginPage && !isLoggedIn) {
+      if (isAdminRoute && !isLoginPage && !isAdmin) {
         return Response.redirect(new URL("/admin/login", nextUrl));
       }
 
-      if (isLoginPage && isLoggedIn) {
+      if (isLoginPage && isAdmin) {
         return Response.redirect(new URL("/admin/dashboard", nextUrl));
       }
 

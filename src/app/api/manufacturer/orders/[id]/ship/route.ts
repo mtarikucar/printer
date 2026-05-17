@@ -90,9 +90,9 @@ export async function POST(
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    if (error.name === "ZodError") {
-      return NextResponse.json({ error: error.errors }, { status: 400 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ZodError") {
+      return NextResponse.json({ error: (error as Error & { errors?: unknown }).errors }, { status: 400 });
     }
     console.error("Manufacturer ship order failed:", error);
     return NextResponse.json(

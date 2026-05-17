@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { removeBackground } from "@/lib/services/background-removal";
-import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
+import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
 
@@ -11,9 +11,10 @@ const MAX_SIZE = 15 * 1024 * 1024; // 15MB
 
 export async function POST(request: NextRequest) {
   try {
-    // Rate limit by IP to prevent DoS
+    // Rate limit by IP to prevent DoS — Redis-backed so multi-instance
+    // deploys share the bucket.
     const ip = extractClientIp(request);
-    const rl = rateLimit(`rmbg:${ip}`, 5, 10 * 60 * 1000); // 5 per 10 min
+    const rl = await rateLimitAsync(`rmbg:${ip}`, 5, 10 * 60 * 1000); // 5 per 10 min
     if (!rl.success) {
       return NextResponse.json(
         { error: "Too many requests. Please try again later." },

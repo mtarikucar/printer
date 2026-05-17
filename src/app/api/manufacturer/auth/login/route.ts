@@ -7,11 +7,11 @@ import {
   createManufacturerSessionToken,
   setManufacturerSessionCookie,
 } from "@/lib/services/manufacturer-auth";
-import { rateLimit, extractClientIp } from "@/lib/services/rate-limit";
+import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 
 export async function POST(request: NextRequest) {
   const ip = extractClientIp(request);
-  const rl = rateLimit(`mfr-login:${ip}`, 10, 15 * 60 * 1000); // 10 per 15 min
+  const rl = await rateLimitAsync(`mfr-login:${ip}`, 10, 15 * 60 * 1000); // 10 per 15 min
   if (!rl.success) {
     return NextResponse.json(
       { error: "Too many login attempts. Please try again later." },
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
         status: manufacturer.status,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Manufacturer login failed:", error);
     return NextResponse.json({ error: "Login failed" }, { status: 500 });
   }

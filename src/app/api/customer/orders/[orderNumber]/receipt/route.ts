@@ -3,7 +3,7 @@ import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
-import { saveFile } from "@/lib/services/storage";
+import { saveFile, deleteFile } from "@/lib/services/storage";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getDekontOcrQueue } from "@/lib/queue/queues";
@@ -52,6 +52,38 @@ export async function POST(
   const d = getDictionary(locale);
   const { orderNumber } = await params;
 
+  // Multipart/form-data is a "simple" content type, so sameSite=lax cookies
+  // can be sent on cross-site form submissions — an attacker site could host
+  // a hidden <form action="…/receipt"> and trick the customer into uploading
+  // attacker-chosen content as their dekont. Enforce same-origin via Origin
+  // (preferred) or Referer header.
+  const origin = request.headers.get("origin");
+  const referer = request.headers.get("referer");
+  const expectedHost = request.headers.get("host");
+  const isSameOrigin = (() => {
+    if (origin) {
+      try {
+        return new URL(origin).host === expectedHost;
+      } catch {
+        return false;
+      }
+    }
+    if (referer) {
+      try {
+        return new URL(referer).host === expectedHost;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  })();
+  if (!isSameOrigin) {
+    return NextResponse.json(
+      { error: d["api.receipt.crossOrigin"] },
+      { status: 403 }
+    );
+  }
+
   const session = await getSessionUser();
   if (!session) {
     return NextResponse.json(
@@ -71,13 +103,13 @@ export async function POST(
   }
   if (draft.paymentMethod !== "bank_transfer") {
     return NextResponse.json(
-      { error: "Bu sipariş havale ile ödenmiyor" },
+      { error: d["api.receipt.notBankTransfer"] },
       { status: 400 }
     );
   }
   if (draft.status !== "pending" && draft.status !== "awaiting_review") {
     return NextResponse.json(
-      { error: "Bu sipariş için dekont yüklenemez" },
+      { error: d["api.receipt.notUploadable"] },
       { status: 400 }
     );
   }
@@ -108,6 +140,19 @@ export async function POST(
 
   const filename = `${nanoid()}.${extForType(detected)}`;
   const key = await saveFile(buffer, `receipts/${draft.id}`, filename);
+
+  // If the customer is replacing an earlier receipt, delete the stale file
+  // from disk so we don't accumulate orphans. Best-effort — a failure here
+  // doesn't block the upload.
+  const previousKey = draft.bankTransferReceiptKey;
+  if (previousKey && previousKey !== key) {
+    deleteFile(previousKey).catch((err) => {
+      console.warn(
+        `receipt: failed to delete previous file ${previousKey} for draft ${draft.id}`,
+        err
+      );
+    });
+  }
 
   await db
     .update(orderDrafts)

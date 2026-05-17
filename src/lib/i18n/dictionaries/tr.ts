@@ -551,6 +551,12 @@ const tr: Dictionary = {
   "api.upload.tooLarge": "Dosya boyutu en fazla 10MB olmalıdır",
   "api.upload.failed": "Dosya yükleme başarısız",
   "api.order.notFound": "Sipariş bulunamadı",
+  "api.receipt.crossOrigin": "Çapraz kaynak yüklemesine izin verilmiyor",
+  "api.receipt.notBankTransfer": "Bu sipariş havale ile ödenmiyor",
+  "api.receipt.notUploadable": "Bu sipariş için dekont yüklenemez",
+  "api.verifyPayment.notCard": "Yalnızca kart siparişleri için PayTR doğrulaması yapılabilir",
+  "api.verifyPayment.noMerchantOid": "Bu siparişte PayTR ödemesi başlatılmamış",
+  "api.verifyPayment.failed": "PayTR durum sorgulaması başarısız",
   "api.order.rejectedDefault": "Yönetici tarafından reddedildi",
   "api.order.shipFailed": "Sipariş kargolanamadı",
   "api.kargo.createFailed": "Gönderi oluşturulamadı",
@@ -1104,6 +1110,9 @@ const tr: Dictionary = {
 
   // Üretici - Giriş
   "manufacturer.login.title": "Üretici Girişi",
+  "manufacturer.login.pending.title": "Kaydınız alındı 🎉",
+  "manufacturer.login.pending.body":
+    "Hesabınız admin onayı bekliyor. Onaylandığında size e-posta göndereceğiz; ardından bu sayfadan giriş yapabilirsiniz.",
   "manufacturer.login.subtitle": "Üretici panelinize giriş yapın",
   "manufacturer.login.email": "E-posta",
   "manufacturer.login.password": "Şifre",

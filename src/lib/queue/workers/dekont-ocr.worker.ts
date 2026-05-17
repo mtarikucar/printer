@@ -1,5 +1,5 @@
 import { Worker, Job } from "bullmq";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
 import { getEmailQueue, type DekontOcrJobData } from "../queues";
 import { db } from "../../db";
@@ -39,17 +39,13 @@ async function processJob(job: Job<DekontOcrJobData>) {
   try {
     buffer = await getFileBuffer(receiptKey);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "load failed";
-    await db
-      .update(orderDrafts)
-      .set({
-        receiptOcrConfidence: "low",
-        receiptOcrFailureReason: `Receipt load failed: ${msg}`,
-        status: "awaiting_review",
-        updatedAt: new Date(),
-      })
-      .where(eq(orderDrafts.id, draftId));
-    return;
+    // Throw so BullMQ retries the job — most file-read failures (storage
+    // hiccups, transient FS errors) are recoverable. The `failed` handler
+    // below parks the draft for manual review only after attempts are
+    // exhausted, so we don't permanently strand a draft on a single blip.
+    throw new Error(
+      `Receipt load failed (will retry): ${err instanceof Error ? err.message : "unknown"}`
+    );
   }
 
   const expectedAmountKurus =
@@ -58,6 +54,9 @@ async function processJob(job: Job<DekontOcrJobData>) {
   const result = await ocrDekont(buffer, receiptKey, draft.reference);
   const confidence = scoreOcr(result, expectedAmountKurus);
 
+  // Re-assert staleness in the WHERE clause: if the customer uploaded a new
+  // receipt after we started, or the draft already moved on (admin marked
+  // paid, etc.), don't clobber that newer state.
   await db
     .update(orderDrafts)
     .set({
@@ -75,7 +74,13 @@ async function processJob(job: Job<DekontOcrJobData>) {
       status: confidence === "high" ? "pending" : "awaiting_review",
       updatedAt: new Date(),
     })
-    .where(eq(orderDrafts.id, draftId));
+    .where(
+      and(
+        eq(orderDrafts.id, draftId),
+        eq(orderDrafts.bankTransferReceiptKey, receiptKey),
+        inArray(orderDrafts.status, ["pending", "awaiting_review"])
+      )
+    );
 
   const locale = localeOf(draft.locale);
   const summary = [
@@ -140,11 +145,36 @@ export function startDekontOcrWorker() {
     console.log(`Dekont OCR done for draft ${job.data.draftId}`);
   });
 
-  worker.on("failed", (job, error) => {
+  worker.on("failed", async (job, error) => {
     console.error(
       `Dekont OCR failed for draft ${job?.data.draftId}:`,
       error.message
     );
+    // When attempts are exhausted (BullMQ stops retrying), park the draft so
+    // admin sees it in the review queue. Best-effort — failure here just logs.
+    const draftId = job?.data.draftId;
+    const attemptsMade = job?.attemptsMade ?? 0;
+    const attemptsAllowed = job?.opts?.attempts ?? 1;
+    if (draftId && attemptsMade >= attemptsAllowed) {
+      try {
+        await db
+          .update(orderDrafts)
+          .set({
+            receiptOcrConfidence: "low",
+            receiptOcrFailureReason: `OCR exhausted: ${error.message}`,
+            status: "awaiting_review",
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(orderDrafts.id, draftId),
+              inArray(orderDrafts.status, ["pending", "awaiting_review"])
+            )
+          );
+      } catch (e) {
+        console.error("Dekont OCR final-park write failed:", e);
+      }
+    }
   });
 
   return worker;

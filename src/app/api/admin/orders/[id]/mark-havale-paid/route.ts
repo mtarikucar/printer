@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orderDrafts, adminActions } from "@/lib/db/schema";
 import { promoteDraftToOrder } from "@/lib/services/order-draft";
-import { getRequestLocale } from "@/lib/i18n/get-request-locale";
-import { getDictionary } from "@/lib/i18n/dictionaries";
 
 /**
  * `id` is the draft id. Admin manually promotes a havale draft when OCR confidence was
@@ -15,13 +13,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const locale = getRequestLocale(request);
-  const d = getDictionary(locale);
-
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: d["api.auth.unauthorized"] }, { status: 401 });
-  }
+  const a = await requireAdmin();
+  if ("response" in a) return a.response;
+  const session = { user: { email: a.session.user.email } };
 
   const { id } = await params;
   const body = await request.json().catch(() => ({}));

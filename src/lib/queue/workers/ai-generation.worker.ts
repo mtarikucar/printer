@@ -1,12 +1,12 @@
 import { Worker, Job } from "bullmq";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { desc, eq, and, inArray, sql } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
 import { getMeshProcessingQueue, type AiGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
-import { saveFile, getPublicUrl } from "../../services/storage";
+import { saveFile, getPublicUrl, fileExists } from "../../services/storage";
 import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../../services/style-transfer";
 import { db } from "../../db";
-import { orders, generationAttempts, orderPhotos } from "../../db/schema";
+import { orders, generationAttempts } from "../../db/schema";
 import { getEmailQueue } from "../queues";
 import { nanoid } from "nanoid";
 
@@ -20,6 +20,58 @@ async function processJob(job: Job<AiGenerationJobData>) {
   const { orderId, imageUrl } = job.data;
   const style = (job.data.style || "realistic") as FigurineStyle;
   const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
+
+  // ─── Idempotency check ───────────────────────────────────────
+  // BullMQ retries call this function with the same job.id on transient
+  // failures (network blips, DB hiccups). Without this guard each retry
+  // would re-bill Meshy ($0.40/call) and produce duplicate GLBs. If a
+  // previous attempt already succeeded for this order, just re-enqueue
+  // the downstream mesh-processing job and return.
+  const existingSucceeded = await db
+    .select()
+    .from(generationAttempts)
+    .where(
+      and(
+        eq(generationAttempts.orderId, orderId),
+        eq(generationAttempts.status, "succeeded")
+      )
+    )
+    .orderBy(desc(generationAttempts.createdAt))
+    .limit(1);
+
+  if (existingSucceeded.length > 0 && existingSucceeded[0].outputGlbUrl) {
+    // Extract glbKey from the stored URL.
+    const match = existingSucceeded[0].outputGlbUrl.match(
+      /\/api\/files\/([^?]+)/
+    );
+    const glbKey = match?.[1];
+    // Defense-in-depth: the URL is sourced from the DB but if a future
+    // migration ever lets external input flow in, traversal would slip
+    // through. Require the storage prefix and reject `..`.
+    if (
+      glbKey &&
+      glbKey.startsWith("models/") &&
+      !glbKey.includes("..") &&
+      // Confirm the file is still on disk — admin may have pruned it.
+      // Use `fileExists` (fs.access) instead of reading the file — GLBs can
+      // be 10-50 MB and we'd OOM under heavy retry load.
+      (await fileExists(glbKey))
+    ) {
+      job.log(
+        `Order ${orderId} already has a succeeded generation; re-enqueueing mesh-processing without re-billing Meshy.`
+      );
+      await getMeshProcessingQueue().add("process-mesh", {
+        orderId,
+        generationId: existingSucceeded[0].id,
+        glbUrl: existingSucceeded[0].outputGlbUrl,
+        glbKey,
+      });
+      return;
+    }
+    job.log(
+      `Order ${orderId} had a prior succeeded attempt but the GLB is unreadable (deleted/moved). Falling through to fresh generation.`
+    );
+  }
 
   // Update order status to generating — only if still in an expected state
   // This prevents BullMQ retries from overwriting admin-initiated status changes (reject, force-review)
@@ -85,14 +137,15 @@ async function processJob(job: Job<AiGenerationJobData>) {
     });
 
     job.log("Successfully generated with Meshy, enqueued mesh processing");
-  } catch (error: any) {
-    job.log(`Meshy generation failed: ${error.message}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "unknown";
+    job.log(`Meshy generation failed: ${msg}`);
 
     await db
       .update(generationAttempts)
       .set({
         status: "failed",
-        errorMessage: error.message,
+        errorMessage: msg,
         updatedAt: new Date(),
       })
       .where(eq(generationAttempts.id, attempt[0].id));
@@ -102,7 +155,7 @@ async function processJob(job: Job<AiGenerationJobData>) {
       .update(orders)
       .set({
         status: "failed_generation",
-        failureReason: `Meshy: ${error.message}`,
+        failureReason: `Meshy: ${msg}`,
         retryCount: sql`${orders.retryCount} + 1`,
         updatedAt: new Date(),
       })
@@ -119,7 +172,7 @@ async function processJob(job: Job<AiGenerationJobData>) {
       });
     }
 
-    throw new Error(`Meshy generation failed: ${error.message}`);
+    throw new Error(`Meshy generation failed: ${msg}`);
   }
 }
 
@@ -135,7 +188,7 @@ export function startAiGenerationWorker() {
   );
 
   worker.on("completed", (job) => {
-    console.log(`AI generation completed for order ${job.data.orderId}`);
+    console.info(`AI generation completed for order ${job.data.orderId}`);
   });
 
   worker.on("failed", (job, error) => {

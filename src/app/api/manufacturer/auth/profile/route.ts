@@ -5,8 +5,12 @@ import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
+import { rateLimitAsync } from "@/lib/services/rate-limit";
+import { isValidTrIban, normalizeIban } from "@/lib/services/iban";
 
-const ibanRegex = /^TR\d{24}$/;
+// Turkish mobile / landline shape: optional +90 prefix, then 5XXXXXXXXX (10 digits)
+// or full 11-digit form. Reject all-alpha and obvious garbage.
+const trPhoneRegex = /^(?:\+?90)?[2-5]\d{9}$/;
 
 const addressSchema = z.object({
   adres: z.string().min(5),
@@ -14,18 +18,22 @@ const addressSchema = z.object({
   ilce: z.string().min(1),
   il: z.string().min(1),
   postaKodu: z.string().min(4),
-  telefon: z.string().min(10),
+  telefon: z.string().regex(trPhoneRegex, "Invalid phone number"),
 });
 
 const profileSchema = z.object({
   contactPerson: z.string().min(1).max(100).optional(),
-  phone: z.string().min(10).optional(),
-  whatsappPhone: z.string().min(10).nullable().optional(),
+  phone: z.string().regex(trPhoneRegex, "Invalid phone number").optional(),
+  whatsappPhone: z
+    .string()
+    .regex(trPhoneRegex, "Invalid WhatsApp phone")
+    .nullable()
+    .optional(),
   address: addressSchema.optional(),
   iban: z
     .string()
-    .transform((v) => v.replace(/\s+/g, "").toUpperCase())
-    .refine((v) => ibanRegex.test(v), "Invalid IBAN")
+    .transform(normalizeIban)
+    .refine(isValidTrIban, "Invalid IBAN (failed mod-97 checksum)")
     .optional(),
   bankAccountHolder: z.string().min(2).max(120).optional(),
   bankName: z.string().min(2).max(80).optional(),
@@ -33,10 +41,32 @@ const profileSchema = z.object({
   acceptingOrders: z.boolean().optional(),
 });
 
+// Fields that materially affect payouts / order routing — restricted to active
+// manufacturers and re-flag for admin tax review when changed.
+const SENSITIVE_FIELDS = [
+  "iban",
+  "bankAccountHolder",
+  "bankName",
+  "maxConcurrentOrders",
+  "acceptingOrders",
+] as const;
+
 export async function PATCH(request: NextRequest) {
   const session = await getManufacturerSession();
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const rl = await rateLimitAsync(
+    `mfr-profile:${session.manufacturerId}`,
+    30,
+    60 * 60 * 1000
+  );
+  if (!rl.success) {
+    return NextResponse.json(
+      { error: "Too many profile updates. Please wait." },
+      { status: 429 }
+    );
   }
 
   let body: unknown;
@@ -59,6 +89,27 @@ export async function PATCH(request: NextRequest) {
     throw err;
   }
 
+  // Load current row so we can check status and detect IBAN changes.
+  const current = await db.query.manufacturers.findFirst({
+    where: eq(manufacturers.id, session.manufacturerId),
+  });
+  if (!current) {
+    return NextResponse.json({ error: "Manufacturer not found" }, { status: 404 });
+  }
+
+  const wantsSensitiveChange = SENSITIVE_FIELDS.some(
+    (k) => (validated as Record<string, unknown>)[k] !== undefined
+  );
+  if (wantsSensitiveChange && current.status !== "active") {
+    return NextResponse.json(
+      {
+        error:
+          "Hesabınız henüz aktif değil. Banka bilgileri ve sipariş ayarları yalnızca onaylı hesaplarda değiştirilebilir.",
+      },
+      { status: 403 }
+    );
+  }
+
   const update: Partial<typeof manufacturers.$inferInsert> = {};
   if (validated.contactPerson !== undefined) update.contactPerson = validated.contactPerson;
   if (validated.phone !== undefined) update.phone = validated.phone;
@@ -74,7 +125,12 @@ export async function PATCH(request: NextRequest) {
       telefon: a.telefon,
     } satisfies TurkishAddress;
   }
-  if (validated.iban !== undefined) update.iban = validated.iban;
+  if (validated.iban !== undefined && validated.iban !== current.iban) {
+    update.iban = validated.iban;
+    // Bank-detail change re-flags for manual tax review so admin re-verifies
+    // before any further payouts.
+    update.requiresManualTaxReview = true;
+  }
   if (validated.bankAccountHolder !== undefined) update.bankAccountHolder = validated.bankAccountHolder;
   if (validated.bankName !== undefined) update.bankName = validated.bankName;
   if (validated.maxConcurrentOrders !== undefined) update.maxConcurrentOrders = validated.maxConcurrentOrders;

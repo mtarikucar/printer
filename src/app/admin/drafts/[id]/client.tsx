@@ -30,6 +30,9 @@ interface DraftView {
   receiptOcrText: string | null;
   receiptOcrFailureReason: string | null;
   paytrFailureReason: string | null;
+  paytrMerchantOid: string | null;
+  paytrTestMode: boolean | null;
+  paytrPaymentType: string | null;
   promotedOrderId: string | null;
   createdAt: string;
 }
@@ -48,9 +51,51 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
   const [notes, setNotes] = useState("");
 
   const isHavale = draft.paymentMethod === "bank_transfer";
+  const isCard = draft.paymentMethod === "card";
   const canMarkPaid =
     isHavale && (draft.status === "pending" || draft.status === "awaiting_review");
   const canExpire = draft.status === "pending" || draft.status === "awaiting_review";
+  const canVerifyPaytr =
+    isCard &&
+    !!draft.paytrMerchantOid &&
+    draft.status !== "confirmed" &&
+    draft.status !== "expired" &&
+    draft.status !== "cancelled";
+  const [verifyResult, setVerifyResult] = useState<string | null>(null);
+
+  const verifyPaytr = async () => {
+    setError(null);
+    setVerifyResult(null);
+    setLoading("verify-paytr");
+    try {
+      const res = await fetch(`/api/admin/drafts/${draft.id}/verify-paytr`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "PayTR sorgulama başarısız");
+        return;
+      }
+      if (data.state === "confirmed" && data.orderId) {
+        router.push(`/admin/orders/${data.orderId}`);
+        return;
+      }
+      if (data.state === "failed") {
+        setVerifyResult(`PayTR ödemeyi reddetti: ${data.reason ?? "—"}`);
+        router.refresh();
+        return;
+      }
+      if (data.state === "waiting") {
+        setVerifyResult("PayTR henüz beklemede — ödeme tamamlanmamış görünüyor.");
+        return;
+      }
+      setVerifyResult(`Sorgulama hata: ${data.error ?? "bilinmiyor"}`);
+    } catch {
+      setError("Bir hata oluştu");
+    } finally {
+      setLoading(null);
+    }
+  };
 
   const markPaid = async () => {
     if (!confirm("Bu havale ödemesini onaylıyor musunuz? Sipariş hemen üretime alınacak.")) return;
@@ -243,6 +288,56 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
                 {draft.receiptOcrText}
               </pre>
             </details>
+          )}
+        </section>
+      )}
+
+      {isCard && (
+        <section className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              PayTR
+            </h2>
+            {draft.paytrTestMode && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
+                TEST modu
+              </span>
+            )}
+          </div>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-gray-500">merchant_oid</dt>
+              <dd className="text-gray-900 font-mono text-xs">
+                {draft.paytrMerchantOid ?? "—"}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-gray-500">Ödeme tipi</dt>
+              <dd className="text-gray-900">{draft.paytrPaymentType ?? "—"}</dd>
+            </div>
+          </dl>
+          {canVerifyPaytr && (
+            <div className="mt-4">
+              <button
+                onClick={verifyPaytr}
+                disabled={loading !== null}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:bg-gray-300"
+              >
+                {loading === "verify-paytr"
+                  ? "PayTR sorgulanıyor..."
+                  : "PayTR durumunu sorgula"}
+              </button>
+              <p className="text-xs text-gray-500 mt-2">
+                PayTR&apos;ye merchant_oid ile durum sorgusu gönderir; ödeme tamamsa
+                sipariş hemen üretime alınır. Webhook ulaşmadığında stuck draft&apos;ı
+                kurtarmak için kullanılır.
+              </p>
+              {verifyResult && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900">
+                  {verifyResult}
+                </div>
+              )}
+            </div>
           )}
         </section>
       )}

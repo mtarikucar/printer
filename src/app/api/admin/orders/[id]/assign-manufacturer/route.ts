@@ -1,26 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
+import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions, manufacturers } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
-import { getRequestLocale } from "@/lib/i18n/get-request-locale";
-import { getDictionary } from "@/lib/i18n/dictionaries";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const locale = getRequestLocale(request);
-  const d = getDictionary(locale);
-
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json(
-      { error: d["api.auth.unauthorized"] },
-      { status: 401 }
-    );
-  }
+  const a = await requireAdmin();
+  if ("response" in a) return a.response;
+  const session = { user: { email: a.session.user.email } };
 
   const { id } = await params;
 
@@ -134,7 +125,7 @@ export async function POST(
     });
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Assign manufacturer failed:", error);
     return NextResponse.json(
       { error: "Failed to assign manufacturer" },

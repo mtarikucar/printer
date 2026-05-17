@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { saveFile } from "@/lib/services/storage";
+import { saveFile, getPublicUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
@@ -55,8 +55,13 @@ export async function POST(request: NextRequest) {
     const filename = `${nanoid()}.${ext}`;
     const key = await saveFile(buffer, "photos", filename);
 
-    return NextResponse.json({ key });
-  } catch (error: any) {
+    // Return a server-signed URL alongside the storage key. The client uses
+    // this for the post-upload preview AND persists it through any
+    // login-redirect roundtrip via sessionStorage. Without this, the page
+    // would fall back to an unsigned `/api/files/...` path that 401s under
+    // FILES_REQUIRE_SIGNATURE=1.
+    return NextResponse.json({ key, previewUrl: getPublicUrl(key) });
+  } catch (error: unknown) {
     console.error("Upload failed:", error);
     return NextResponse.json(
       { error: d["api.upload.failed"] },

@@ -1,6 +1,5 @@
 import { Worker, Job } from "bullmq";
-import { eq } from "drizzle-orm";
-import { extname } from "path";
+import { and, eq } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
 import type { PreviewGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
@@ -9,15 +8,6 @@ import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../.
 import { db } from "../../db";
 import { previews } from "../../db/schema";
 import { nanoid } from "nanoid";
-
-function getMimeType(filePath: string): string {
-  const ext = extname(filePath).toLowerCase();
-  const types: Record<string, string> = {
-    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-    ".png": "image/png", ".webp": "image/webp",
-  };
-  return types[ext] || "image/jpeg";
-}
 
 async function downloadFile(url: string): Promise<Buffer> {
   const res = await fetch(url);
@@ -57,8 +47,11 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
     const glbKey = await saveFile(glbBuffer, `previews/${previewId}`, glbFilename);
     const localGlbUrl = getPublicUrl(glbKey);
 
-    // Update preview record
-    await db
+    // Guarded transition: only flip to "ready" when we still own the record
+    // (status === "generating") AND we actually have a glbUrl. Without this
+    // guard a worker crash mid-update could leave status="ready" but
+    // glbUrl=null, which the 3D viewer can't handle.
+    const [flipped] = await db
       .update(previews)
       .set({
         status: "ready",
@@ -68,22 +61,33 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
         durationMs: result.durationMs,
         updatedAt: new Date(),
       })
-      .where(eq(previews.id, previewId));
+      .where(
+        and(eq(previews.id, previewId), eq(previews.status, "generating"))
+      )
+      .returning({ id: previews.id });
+
+    if (!flipped) {
+      job.log(
+        "Preview status was already terminal (canceled/failed/ready) — skipping update"
+      );
+      return;
+    }
 
     job.log("Preview generation completed successfully");
-  } catch (error: any) {
-    job.log(`Preview generation failed: ${error.message}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "unknown";
+    job.log(`Preview generation failed: ${msg}`);
 
     await db
       .update(previews)
       .set({
         status: "failed",
-        errorMessage: error.message,
+        errorMessage: msg,
         updatedAt: new Date(),
       })
       .where(eq(previews.id, previewId));
 
-    throw new Error(`Preview generation failed: ${error.message}`);
+    throw new Error(`Preview generation failed: ${msg}`);
   }
 }
 
@@ -99,7 +103,7 @@ export function startPreviewGenerationWorker() {
   );
 
   worker.on("completed", (job) => {
-    console.log(`Preview generation completed for preview ${job.data.previewId}`);
+    console.info(`Preview generation completed for preview ${job.data.previewId}`);
   });
 
   worker.on("failed", (job, error) => {

@@ -548,6 +548,12 @@ const en = {
   "api.upload.tooLarge": "File size must be 10MB or less",
   "api.upload.failed": "File upload failed",
   "api.order.notFound": "Order not found",
+  "api.receipt.crossOrigin": "Cross-origin upload not allowed",
+  "api.receipt.notBankTransfer": "This order is not paid via bank transfer",
+  "api.receipt.notUploadable": "Cannot upload a receipt for this order",
+  "api.verifyPayment.notCard": "Only card drafts support PayTR verification",
+  "api.verifyPayment.noMerchantOid": "Payment was never started for this order",
+  "api.verifyPayment.failed": "PayTR status query failed",
   "api.order.rejectedDefault": "Rejected by admin",
   "api.order.shipFailed": "Failed to ship order",
   "api.kargo.createFailed": "Failed to create shipment",
@@ -1098,6 +1104,9 @@ const en = {
 
   // Manufacturer - Auth
   "manufacturer.login.title": "Manufacturer Login",
+  "manufacturer.login.pending.title": "Registration received 🎉",
+  "manufacturer.login.pending.body":
+    "Your account is waiting for admin approval. We'll email you once it's activated; you can sign in here after that.",
   "manufacturer.login.subtitle": "Sign in to your manufacturer dashboard",
   "manufacturer.login.email": "Email",
   "manufacturer.login.password": "Password",

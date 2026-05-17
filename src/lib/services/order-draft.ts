@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -17,6 +17,12 @@ import {
   getEmailQueue,
 } from "@/lib/queue/queues";
 import type { Locale } from "@/lib/i18n/types";
+
+async function cancelHavaleJobs(draftId: string): Promise<void> {
+  const q = getPaymentDeadlineQueue();
+  await q.remove(havaleReminderJobId(draftId)).catch(() => {});
+  await q.remove(havaleExpireJobId(draftId)).catch(() => {});
+}
 
 /**
  * Build a customer-facing reference string. Used as the order number when promoted
@@ -126,9 +132,7 @@ export async function promoteDraftToOrder(
   });
 
   // Outside the transaction: cancel scheduled deadline jobs and kick generation.
-  const q = getPaymentDeadlineQueue();
-  await q.remove(havaleReminderJobId(draftId)).catch(() => {});
-  await q.remove(havaleExpireJobId(draftId)).catch(() => {});
+  await cancelHavaleJobs(draftId);
 
   await kickOffOrderProcessing(result.orderId, result.locale);
 
@@ -154,44 +158,10 @@ export async function expireDraft(draftId: string): Promise<void> {
       return null;
     }
 
-    const redemption = await tx.query.giftCardRedemptions.findFirst({
-      where: eq(giftCardRedemptions.draftId, draftId),
-    });
-
-    if (redemption && !redemption.refundedAt) {
-      const [card] = await tx
-        .select()
-        .from(giftCards)
-        .where(eq(giftCards.id, redemption.giftCardId))
-        .for("update");
-
-      if (card) {
-        const newBalance = card.balanceKurus + redemption.amountKurus;
-        let newStatus: typeof card.status;
-        if (card.status === "expired") {
-          newStatus = "expired";
-        } else if (newBalance === 0) {
-          newStatus = "fully_used";
-        } else if (newBalance >= card.amountKurus) {
-          newStatus = "active";
-        } else {
-          newStatus = "partially_used";
-        }
-        await tx
-          .update(giftCards)
-          .set({
-            balanceKurus: newBalance,
-            status: newStatus,
-            updatedAt: new Date(),
-          })
-          .where(eq(giftCards.id, card.id));
-
-        await tx
-          .update(giftCardRedemptions)
-          .set({ refundedAt: new Date() })
-          .where(eq(giftCardRedemptions.id, redemption.id));
-      }
-    }
+    // Atomic claim: refund only redemptions that haven't been refunded yet.
+    // The `refundedAt IS NULL` guard makes this idempotent — a retried job
+    // that finds rows already refunded just gets zero claimed rows back.
+    await refundGiftCardForDraft(tx, draftId);
 
     await tx
       .update(orderDrafts)
@@ -208,6 +178,11 @@ export async function expireDraft(draftId: string): Promise<void> {
 
   if (!result) return;
   void SYSTEM_ADMIN_EMAIL;
+
+  // Cancel the sibling reminder job. When `expireDraft` runs from its own
+  // bullmq job that's redundant, but it's also called from admin force-expire
+  // and the reminder would otherwise still fire 24h later.
+  await cancelHavaleJobs(draftId);
 
   const locale: Locale = result.locale === "en" ? "en" : "tr";
   await getEmailQueue().add("send-email", {
@@ -237,44 +212,7 @@ export async function failDraft(
     if (!draft) return;
     if (draft.status !== "pending" && draft.status !== "awaiting_review") return;
 
-    const redemption = await tx.query.giftCardRedemptions.findFirst({
-      where: eq(giftCardRedemptions.draftId, draftId),
-    });
-
-    if (redemption && !redemption.refundedAt) {
-      const [card] = await tx
-        .select()
-        .from(giftCards)
-        .where(eq(giftCards.id, redemption.giftCardId))
-        .for("update");
-
-      if (card) {
-        const newBalance = card.balanceKurus + redemption.amountKurus;
-        let newStatus: typeof card.status;
-        if (card.status === "expired") {
-          newStatus = "expired";
-        } else if (newBalance === 0) {
-          newStatus = "fully_used";
-        } else if (newBalance >= card.amountKurus) {
-          newStatus = "active";
-        } else {
-          newStatus = "partially_used";
-        }
-        await tx
-          .update(giftCards)
-          .set({
-            balanceKurus: newBalance,
-            status: newStatus,
-            updatedAt: new Date(),
-          })
-          .where(eq(giftCards.id, card.id));
-
-        await tx
-          .update(giftCardRedemptions)
-          .set({ refundedAt: new Date() })
-          .where(eq(giftCardRedemptions.id, redemption.id));
-      }
-    }
+    await refundGiftCardForDraft(tx, draftId);
 
     await tx
       .update(orderDrafts)
@@ -285,6 +223,69 @@ export async function failDraft(
       })
       .where(eq(orderDrafts.id, draftId));
   });
+
+  // Cancel any scheduled bullmq jobs so they don't fire after the draft is
+  // already in a terminal state. Best-effort; if Redis is down the worker's
+  // own status guard catches the case.
+  await cancelHavaleJobs(draftId);
+}
+
+/**
+ * Refund any active (refundedAt IS NULL) gift-card redemption rows tied to
+ * `draftId`. Implementation note: we do the credit-restore in a single UPDATE
+ * against `giftCardRedemptions` keyed on `refundedAt IS NULL`. Any concurrent
+ * worker retry that re-enters this code path finds zero rows in that state
+ * and is a no-op — so even without the partial unique index (defense in
+ * depth) we cannot double-refund.
+ */
+async function refundGiftCardForDraft(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  draftId: string
+): Promise<void> {
+  const claimed = await tx
+    .update(giftCardRedemptions)
+    .set({ refundedAt: new Date() })
+    .where(
+      and(
+        eq(giftCardRedemptions.draftId, draftId),
+        isNull(giftCardRedemptions.refundedAt)
+      )
+    )
+    .returning({
+      giftCardId: giftCardRedemptions.giftCardId,
+      amountKurus: giftCardRedemptions.amountKurus,
+    });
+
+  // Restore the credit on each gift card we just claimed. Lock per row to
+  // prevent a concurrent redemption attempt from stomping the balance.
+  for (const r of claimed) {
+    const [card] = await tx
+      .select()
+      .from(giftCards)
+      .where(eq(giftCards.id, r.giftCardId))
+      .for("update");
+    if (!card) continue;
+
+    const newBalance = card.balanceKurus + r.amountKurus;
+    let newStatus: typeof card.status;
+    if (card.status === "expired") {
+      newStatus = "expired";
+    } else if (newBalance === 0) {
+      newStatus = "fully_used";
+    } else if (newBalance >= card.amountKurus) {
+      newStatus = "active";
+    } else {
+      newStatus = "partially_used";
+    }
+    await tx
+      .update(giftCards)
+      .set({
+        balanceKurus: newBalance,
+        status: newStatus,
+        updatedAt: new Date(),
+      })
+      .where(eq(giftCards.id, card.id));
+  }
 }
 
 export async function findDraftByReference(reference: string) {

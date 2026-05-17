@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { manufacturerNotifications } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
@@ -46,7 +47,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
   const body = await request.json().catch(() => ({}));
-  if (body.action === "mark_all_read") {
+  const actionSchema = z.discriminatedUnion("action", [
+    z.object({ action: z.literal("mark_all_read") }),
+    z.object({ action: z.literal("mark_read"), id: z.string().uuid() }),
+  ]);
+  const parsed = actionSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid action or notification id" },
+      { status: 400 }
+    );
+  }
+  if (parsed.data.action === "mark_all_read") {
     await db
       .update(manufacturerNotifications)
       .set({ readAt: new Date() })
@@ -56,13 +68,13 @@ export async function POST(request: NextRequest) {
           sql`${manufacturerNotifications.readAt} IS NULL`
         )
       );
-  } else if (body.action === "mark_read" && typeof body.id === "string") {
+  } else {
     await db
       .update(manufacturerNotifications)
       .set({ readAt: new Date() })
       .where(
         and(
-          eq(manufacturerNotifications.id, body.id),
+          eq(manufacturerNotifications.id, parsed.data.id),
           eq(manufacturerNotifications.manufacturerId, session.manufacturerId)
         )
       );

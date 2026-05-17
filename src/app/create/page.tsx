@@ -35,6 +35,11 @@ export default function CreatePage() {
   const searchParams = useSearchParams();
   const d = useDictionary();
   const [photoKey, setPhotoKey] = useState<string | null>(null);
+  // Signed URL companion to photoKey. Uploaded path returns one ready-signed;
+  // restored sessionStorage paths fetch one lazily. Keeping the signed URL in
+  // state (instead of building it inline as `/api/files/${photoKey}`) means
+  // the preview image survives a future flip of FILES_REQUIRE_SIGNATURE=1.
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
   const [selectedStyle, setSelectedStyle] = useState<string>("disney");
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
@@ -125,21 +130,47 @@ export default function CreatePage() {
     d["create.loading.stage4"],
   ];
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
   useEffect(() => {
     fetch("/api/auth/me")
-      .then((res) => {
-        setLoggedIn(res.ok);
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          setLoggedIn(true);
+          if (data?.user?.id) setCurrentUserId(data.user.id);
+        } else {
+          setLoggedIn(false);
+        }
       })
       .catch(() => setLoggedIn(false));
   }, []);
 
-  // Restore state from sessionStorage after login redirect
+  // Restore state from sessionStorage AFTER the auth check resolves. Gate on
+  // `loggedIn` (tri-state: null while loading, then true/false). We must not
+  // gate on `currentUserId` because anonymous flows never set it — that would
+  // permanently skip restore for logged-out users, breaking the legitimate
+  // "anonymous save → reload page" path.
+  //
+  // Cross-user safety: a saved state tagged with userId X is only accepted by
+  // the same userId X. Anonymous saves (userId: null) are accepted by any
+  // anonymous viewer.
   useEffect(() => {
+    if (loggedIn === null) return; // Wait for auth check to complete.
     try {
       const saved = sessionStorage.getItem("createFlowState");
       if (!saved) return;
       const state = JSON.parse(saved);
+      const savedFor = state.userId ?? null;
+      const currentFor = currentUserId ?? null;
+      // Reject if the save was for a different logged-in user, OR if the save
+      // was for some user but the current viewer is anonymous.
+      if (savedFor !== null && savedFor !== currentFor) {
+        sessionStorage.removeItem("createFlowState");
+        return;
+      }
       if (state.photoKey) setPhotoKey(state.photoKey);
+      if (state.photoPreviewUrl) setPhotoPreviewUrl(state.photoPreviewUrl);
       if (state.selectedSize) setSelectedSize(state.selectedSize);
       if (state.selectedStyle) setSelectedStyle(state.selectedStyle);
       if (state.selectedModifiers) setSelectedModifiers(state.selectedModifiers);
@@ -150,7 +181,7 @@ export default function CreatePage() {
     } catch {
       // Ignore parse errors
     }
-  }, []);
+  }, [loggedIn, currentUserId]);
 
   // Restore from ?previewId= query param (e.g. from account page)
   useEffect(() => {
@@ -272,13 +303,14 @@ export default function CreatePage() {
           throw new Error(data.error || d["upload.failed"]);
         }
 
-        const { key } = await res.json();
+        const { key, previewUrl: signedPreviewUrl } = await res.json();
         setPhotoKey(key);
+        if (signedPreviewUrl) setPhotoPreviewUrl(signedPreviewUrl);
         setIsEditing(false);
         setSelectedFile(null);
         currentPhotoKey = key;
-      } catch (err: any) {
-        setError(err.message || d["upload.failed"]);
+      } catch (err: unknown) {
+        setError((err instanceof Error ? err.message : "unknown") || d["upload.failed"]);
         setSubmitting(false);
         return;
       }
@@ -291,9 +323,20 @@ export default function CreatePage() {
 
     if (loggedIn === false) {
       setSubmitting(false);
+      // Tag with userId=null because the user isn't logged in yet — the
+      // restore effect requires userId match, so we use null sentinel and
+      // accept either null or matched-id during restore.
       sessionStorage.setItem(
         "createFlowState",
-        JSON.stringify({ photoKey: currentPhotoKey, selectedSize, selectedStyle, selectedModifiers, step: 0 })
+        JSON.stringify({
+          photoKey: currentPhotoKey,
+          photoPreviewUrl,
+          selectedSize,
+          selectedStyle,
+          selectedModifiers,
+          step: 0,
+          userId: null,
+        })
       );
       router.push("/login?redirect=/create");
       return;
@@ -330,8 +373,8 @@ export default function CreatePage() {
       setPreviewStatus("generating");
       setStep(1);
       startPolling(data.previewId);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError((err instanceof Error ? err.message : "unknown"));
     } finally {
       setSubmitting(false);
     }
@@ -353,17 +396,21 @@ export default function CreatePage() {
   const handleApprove = () => {
     if (loggedIn === null) return; // Auth check still loading
     if (loggedIn === false) {
-      // Save state before redirecting to login
+      // Save state before redirecting to login; tag userId=null so the restore
+      // effect only adopts this state for newly-logged-in users (any user can
+      // pick up an anonymous state, but a different logged-in user can't).
       sessionStorage.setItem(
         "createFlowState",
         JSON.stringify({
           photoKey,
+          photoPreviewUrl,
           selectedSize,
           selectedStyle,
           selectedModifiers,
           previewId,
           previewGlbUrl,
           step: 2,
+          userId: null,
         })
       );
       router.push("/login?redirect=/create");
@@ -476,8 +523,8 @@ export default function CreatePage() {
       }
 
       setOrderSubmitted(true);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError((err instanceof Error ? err.message : "unknown"));
     } finally {
       setSubmitting(false);
     }
@@ -687,7 +734,7 @@ export default function CreatePage() {
                     <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
                     <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
                       <img
-                        src={`/api/files/${photoKey}`}
+                        src={photoPreviewUrl ?? `/api/files/${photoKey}`}
                         alt="Uploaded photo"
                         className="w-full h-full object-contain"
                       />
@@ -709,8 +756,13 @@ export default function CreatePage() {
                     <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
                     <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
                     <UploadDropzone
-                      onUploadComplete={(key, _previewUrl) => {
+                      onUploadComplete={(key, previewUrl) => {
                         setPhotoKey(key);
+                        // `previewUrl` is the server-signed URL from /api/upload
+                        // (not a blob:). Persisting it lets the photo card
+                        // survive a login-redirect roundtrip AND a future
+                        // FILES_REQUIRE_SIGNATURE=1 flip in prod.
+                        setPhotoPreviewUrl(previewUrl ?? null);
                         setError(null);
                       }}
                       onError={setError}

@@ -32,7 +32,10 @@ export default defineConfig({
         command: "npm run dev",
         url: "http://localhost:3005",
         reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
+        // First Turbopack compile + huggingface model warm-up easily runs
+        // 60-90s on a cold cache. Bump well past that to avoid flaky
+        // "Timed out waiting for webServer" failures.
+        timeout: 240_000,
         stdout: "pipe",
         stderr: "pipe",
       },

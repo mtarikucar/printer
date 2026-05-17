@@ -1042,6 +1042,14 @@ const en = {
   "track.retryPayment.desc":
     "Your previous attempt didn't go through. Tap retry to be sent back to secure checkout.",
   "track.retryPayment.button": "Retry payment",
+  "track.verifyStillWaiting":
+    "Payment is still being verified. Tap 'Check PayTR status' if it doesn't update in a few minutes.",
+  "track.verifyAuthLost":
+    "Your session expired. Refresh the page and sign in again.",
+  "track.verifyFailed":
+    "Verification could not complete. Refresh the page or contact support.",
+  "track.checkPaytrStatus": "Check PayTR status",
+  "track.checkingPaytr": "Checking...",
   "track.cancelled.title": "Order cancelled",
   "track.bankTransferPaid.title": "Bank transfer received",
   "track.bankTransferPaid.viewReceipt": "View receipt",

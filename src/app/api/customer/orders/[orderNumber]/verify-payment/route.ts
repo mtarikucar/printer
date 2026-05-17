@@ -27,7 +27,11 @@ export async function POST(
   const { orderNumber } = await params;
 
   const session = await getSessionUser();
+  console.log(
+    `[verify-payment] enter orderNumber=${orderNumber} userId=${session?.userId ?? "unauth"}`
+  );
   if (!session) {
+    console.log(`[verify-payment] outcome orderNumber=${orderNumber} action=unauth`);
     return NextResponse.json(
       { error: d["api.auth.notLoggedIn"] },
       { status: 401 }
@@ -92,10 +96,17 @@ export async function POST(
   }
 
   const result = await queryPaytrTransactionStatus(draft.paytrMerchantOid);
+  console.log(
+    `[verify-payment] paytr orderNumber=${orderNumber} merchantOid=${draft.paytrMerchantOid} ` +
+      `paytrStatus=${result.status} failedReasonCode=${result.failedReasonCode ?? "-"}`
+  );
 
   if (result.status === "success") {
     try {
       const promoted = await promoteDraftToOrder(draft.id);
+      console.log(
+        `[verify-payment] outcome orderNumber=${orderNumber} action=promoted orderId=${promoted.orderId}`
+      );
       return NextResponse.json({
         state: "confirmed",
         orderNumber: promoted.orderNumber,
@@ -103,7 +114,7 @@ export async function POST(
     } catch (err) {
       const msg = err instanceof Error ? err.message : "promotion_failed";
       console.error(
-        `verify-payment: promotion failed for ${draft.reference}`,
+        `[verify-payment] outcome orderNumber=${orderNumber} action=promotion_error reason=${msg}`,
         err
       );
       return NextResponse.json(
@@ -119,15 +130,24 @@ export async function POST(
         .filter(Boolean)
         .join(" — ") || "PayTR rejected the payment";
     await failDraft(draft.id, reason);
+    console.log(
+      `[verify-payment] outcome orderNumber=${orderNumber} action=failed reason=${reason}`
+    );
     return NextResponse.json({ state: "failed", reason });
   }
 
   if (result.status === "waiting") {
+    console.log(
+      `[verify-payment] outcome orderNumber=${orderNumber} action=waiting`
+    );
     return NextResponse.json({ state: "waiting" });
   }
 
   // status === "error" — transport / config issue. Don't mutate state; let the
   // caller retry. Surface a generic verify error.
+  console.log(
+    `[verify-payment] outcome orderNumber=${orderNumber} action=verify_error reason=${result.failedReasonMsg ?? "unknown"}`
+  );
   return NextResponse.json(
     {
       state: "verify_error",

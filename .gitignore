@@ -49,6 +49,9 @@ backup_*.sql
 /blob-report
 /playwright/.cache
 
+# Claude Code local settings
+/.claude/settings.local.json
+
 # drizzle: SQL migrations MUST be committed so deploys are reproducible and
 # code review can see schema changes. We ignore only the local cache.
 /drizzle/meta/_journal.json

@@ -118,9 +118,15 @@ export default function TrackPage({
   const paymentParam = searchParams.get("payment");
   // After returning from PayTR with ?payment=success we synchronously verify the
   // transaction with PayTR (in case the webhook hasn't landed yet — common in dev
-  // where PayTR can't reach localhost). While the verify is in flight we suppress
-  // the "retry payment" UI so the customer doesn't see contradictory CTAs.
+  // where PayTR can't reach localhost). The retry loop tolerates PayTR's
+  // `waiting` state (test mode commonly settles 5-30s after redirect) and
+  // surfaces non-recoverable failures (auth lost, network, exhausted waits) as
+  // a user-visible banner instead of silently disappearing. While verify is in
+  // flight `verifying` suppresses the "retry payment" CTA to avoid showing
+  // contradictory actions.
   const [verifying, setVerifying] = useState(paymentParam === "success");
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [manualVerifying, setManualVerifying] = useState(false);
 
   const handleRetryPayment = async () => {
     setRetrying(true);
@@ -196,37 +202,173 @@ export default function TrackPage({
 
   // PayTR redirected the customer back with ?payment=success. Verify the
   // transaction out-of-band so the order is promoted even if the webhook is
-  // delayed or unreachable (localhost dev).
+  // delayed or unreachable.
+  //
+  // PayTR's status-query may return `waiting` if their backend hasn't settled
+  // the test/live transaction yet — we retry on a short backoff (3/6/10/15s,
+  // ~34s total) before giving up. Auth loss and exhausted waits surface as
+  // `verifyError` so the user sees a banner with a manual recovery button
+  // instead of silently appearing stuck (Wave 8's silent-failure bug).
   useEffect(() => {
     if (paymentParam !== "success") return;
     let cancelled = false;
+    const WAITING_RETRY_DELAYS_MS = [3000, 6000, 10000, 15000];
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
     (async () => {
-      try {
-        await fetch(`/api/customer/orders/${orderNumber}/verify-payment`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-        if (cancelled) return;
-        // Whatever verify returned (confirmed / failed / waiting), the draft state
-        // may have shifted. Refetch /api/track so the UI mirrors current state.
+      let retriesLeft = WAITING_RETRY_DELAYS_MS.length;
+      let nextDelayIdx = 0;
+      while (!cancelled) {
+        let res: Response;
         try {
-          const trackRes = await fetch(`/api/track/${orderNumber}`);
-          if (trackRes.ok && !cancelled) {
-            setOrder(await trackRes.json());
-          }
+          res = await fetch(
+            `/api/customer/orders/${orderNumber}/verify-payment`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         } catch {
-          // Background polling will catch up on the next tick.
+          // Network error — treat as verify_error path: retry if attempts left.
+          if (cancelled) return;
+          if (retriesLeft > 0) {
+            await sleep(WAITING_RETRY_DELAYS_MS[nextDelayIdx]);
+            nextDelayIdx = Math.min(nextDelayIdx + 1, WAITING_RETRY_DELAYS_MS.length - 1);
+            retriesLeft -= 1;
+            continue;
+          }
+          if (!cancelled) {
+            setVerifyError(d["track.verifyFailed"]);
+            setVerifying(false);
+          }
+          return;
         }
-      } catch {
-        // Verification is best-effort; polling will recover.
-      } finally {
-        if (!cancelled) setVerifying(false);
+        if (cancelled) return;
+
+        if (res.status === 401) {
+          setVerifyError(d["track.verifyAuthLost"]);
+          setVerifying(false);
+          return;
+        }
+        if (res.status === 429) {
+          // Rate limited — bail to the background poller. No banner: the
+          // poller will pick up the eventual success.
+          setVerifying(false);
+          return;
+        }
+
+        const data = (await res.json().catch(() => null)) as
+          | { state?: string; orderNumber?: string; reason?: string; error?: string }
+          | null;
+        const state = data?.state;
+
+        if (state === "confirmed") {
+          // Refetch /api/track so the UI flips to "paid".
+          try {
+            const trackRes = await fetch(`/api/track/${orderNumber}`);
+            if (trackRes.ok && !cancelled) setOrder(await trackRes.json());
+          } catch {
+            // Background poll will catch up on the next tick.
+          }
+          if (!cancelled) {
+            setVerifyError(null);
+            setVerifying(false);
+          }
+          return;
+        }
+        if (state === "failed" || state === "expired" || state === "cancelled") {
+          try {
+            const trackRes = await fetch(`/api/track/${orderNumber}`);
+            if (trackRes.ok && !cancelled) setOrder(await trackRes.json());
+          } catch {
+            // ignore
+          }
+          if (!cancelled) {
+            setVerifyError(null);
+            setVerifying(false);
+          }
+          return;
+        }
+        if (state === "waiting") {
+          if (retriesLeft > 0) {
+            await sleep(WAITING_RETRY_DELAYS_MS[nextDelayIdx]);
+            nextDelayIdx = Math.min(nextDelayIdx + 1, WAITING_RETRY_DELAYS_MS.length - 1);
+            retriesLeft -= 1;
+            continue;
+          }
+          if (!cancelled) {
+            setVerifyError(d["track.verifyStillWaiting"]);
+            setVerifying(false);
+          }
+          return;
+        }
+        // state === "verify_error" (HTTP 502) or unknown shape.
+        if (retriesLeft > 0) {
+          await sleep(WAITING_RETRY_DELAYS_MS[nextDelayIdx]);
+          nextDelayIdx = Math.min(nextDelayIdx + 1, WAITING_RETRY_DELAYS_MS.length - 1);
+          retriesLeft -= 1;
+          continue;
+        }
+        if (!cancelled) {
+          setVerifyError(d["track.verifyFailed"]);
+          setVerifying(false);
+        }
+        return;
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [paymentParam, orderNumber]);
+  }, [paymentParam, orderNumber, d]);
+
+  // Manual single-shot verify, called from the verifyError banner. Same
+  // endpoint, no retry loop — gives the customer a self-service recovery
+  // path without spamming PayTR (the endpoint is already rate-limited
+  // 12/min/user server-side).
+  const handleManualVerify = async () => {
+    setManualVerifying(true);
+    try {
+      const res = await fetch(
+        `/api/customer/orders/${orderNumber}/verify-payment`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+      if (res.status === 401) {
+        setVerifyError(d["track.verifyAuthLost"]);
+        return;
+      }
+      if (res.status === 429) {
+        // Mirror the loop: bail silently — poller will recover.
+        return;
+      }
+      const data = (await res.json().catch(() => null)) as
+        | { state?: string }
+        | null;
+      if (data?.state === "confirmed" || data?.state === "failed" || data?.state === "expired" || data?.state === "cancelled") {
+        try {
+          const trackRes = await fetch(`/api/track/${orderNumber}`);
+          if (trackRes.ok) setOrder(await trackRes.json());
+        } catch {
+          // ignore
+        }
+        setVerifyError(null);
+        return;
+      }
+      // Still waiting / verify_error.
+      setVerifyError(
+        data?.state === "waiting"
+          ? d["track.verifyStillWaiting"]
+          : d["track.verifyFailed"]
+      );
+    } catch {
+      setVerifyError(d["track.verifyFailed"]);
+    } finally {
+      setManualVerifying(false);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -299,6 +441,41 @@ export default function TrackPage({
                 <div className="text-sm flex-1">
                   <p className="font-semibold text-red-900">{d["track.paymentFailed"]}</p>
                   <p className="text-red-700">{d["track.paymentFailedDesc"]}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Verify-loop ran but didn't resolve to success/failure (waiting timeout,
+                auth lost, or transport error). Surface the cause + a manual
+                recovery button instead of leaving the user staring at a stale
+                "Ödeme Bekleniyor". */}
+            {verifyError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+                <svg
+                  className="w-5 h-5 text-red-600 mt-0.5 shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div className="text-sm flex-1">
+                  <p className="text-red-900">{verifyError}</p>
+                  <button
+                    type="button"
+                    onClick={handleManualVerify}
+                    disabled={manualVerifying}
+                    className="mt-3 inline-flex items-center px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:bg-gray-300"
+                  >
+                    {manualVerifying
+                      ? d["track.checkingPaytr"]
+                      : d["track.checkPaytrStatus"]}
+                  </button>
                 </div>
               </div>
             )}

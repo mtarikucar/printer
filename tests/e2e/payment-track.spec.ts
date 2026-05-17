@@ -168,4 +168,142 @@ test.describe("Track page — PayTR card payment recovery", () => {
       page.getByRole("button", { name: /Ödemeyi tekrar dene|Retry payment/i })
     ).toBeVisible({ timeout: 15_000 });
   });
+
+  test("retries verify when PayTR reports waiting, then settles to confirmed", async ({
+    page,
+  }) => {
+    // Verify mock: first 2 hits return waiting (PayTR backend hasn't settled),
+    // 3rd hit returns confirmed (Wave 11 retry loop should keep trying).
+    let verifyHits = 0;
+    await page.route(
+      `**/api/customer/orders/${REF}/verify-payment`,
+      async (route) => {
+        verifyHits += 1;
+        const body =
+          verifyHits >= 3
+            ? { state: "confirmed", orderNumber: REF }
+            : { state: "waiting" };
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(body),
+        });
+      }
+    );
+
+    // Track mock: pending until the 3rd verify hit promotes the draft, then
+    // succeeded on the post-verify refetch.
+    let trackHits = 0;
+    await page.route(`**/api/track/${REF}`, async (route) => {
+      trackHits += 1;
+      const succeeded = verifyHits >= 3;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          orderNumber: REF,
+          status: succeeded ? "paid" : "pending_payment",
+          customerName: "Test User",
+          trackingNumber: null,
+          paidAt: succeeded ? new Date().toISOString() : null,
+          shippedAt: null,
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          isPublic: false,
+          publicDisplayName: null,
+          glbUrl: null,
+          paymentMethod: "card",
+          paymentStatus: succeeded ? "succeeded" : "pending",
+          amountKurus: 139900,
+          giftCardAmountKurus: 0,
+          havaleDiscountKurus: 0,
+          failureReason: null,
+          bankTransfer: null,
+          bankTransferHistory: null,
+        }),
+      });
+    });
+
+    await page.goto(`/track/${REF}?payment=success`);
+
+    // Generous timeout: the retry backoff is 3s + 6s = 9s wait between the 3
+    // verify attempts. Plus initial fetch + render.
+    await expect(
+      page.getByText(/Ödemeniz alındı|Payment successful/i)
+    ).toBeVisible({ timeout: 25_000 });
+
+    // CRITICAL: the retry CTA must NEVER appear, because `verifying` stays true
+    // throughout the retry loop (the Wave 11 fix that preserves Wave 7's
+    // suppression while waiting).
+    await expect(
+      page.getByRole("button", { name: /Ödemeyi tekrar dene|Retry payment/i })
+    ).toHaveCount(0);
+
+    // Verify the retry loop actually ran — exactly 3 verify hits.
+    expect(verifyHits).toBe(3);
+    expect(trackHits).toBeGreaterThanOrEqual(2);
+  });
+
+  test("shows manual recovery banner when verify exhausts on waiting", async ({
+    page,
+  }) => {
+    // Verify ALWAYS returns waiting → loop exhausts (~34s) → banner appears.
+    let verifyHits = 0;
+    await page.route(
+      `**/api/customer/orders/${REF}/verify-payment`,
+      async (route) => {
+        verifyHits += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ state: "waiting" }),
+        });
+      }
+    );
+
+    // Track stays pending throughout.
+    await page.route(`**/api/track/${REF}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          orderNumber: REF,
+          status: "pending_payment",
+          customerName: "Test User",
+          trackingNumber: null,
+          paidAt: null,
+          shippedAt: null,
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          isPublic: false,
+          publicDisplayName: null,
+          glbUrl: null,
+          paymentMethod: "card",
+          paymentStatus: "pending",
+          amountKurus: 139900,
+          giftCardAmountKurus: 0,
+          havaleDiscountKurus: 0,
+          failureReason: null,
+          bankTransfer: null,
+          bankTransferHistory: null,
+        }),
+      });
+    });
+
+    await page.goto(`/track/${REF}?payment=success`);
+
+    // The banner appears after the retry loop exhausts (1 initial + 4 retries
+    // with 3+6+10+15s waits = ~34s wall time before banner). Allow margin.
+    await expect(
+      page.getByText(
+        /Ödemeniz hâlâ doğrulanıyor|Payment is still being verified/i
+      )
+    ).toBeVisible({ timeout: 45_000 });
+
+    // Manual recovery button must be present.
+    await expect(
+      page.getByRole("button", { name: /PayTR durumunu sorgula|Check PayTR status/i })
+    ).toBeVisible();
+
+    // Loop made 5 attempts total (1 + 4 retries).
+    expect(verifyHits).toBe(5);
+  });
 });

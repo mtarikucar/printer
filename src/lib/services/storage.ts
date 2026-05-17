@@ -78,11 +78,17 @@ const SIGNED_URL_DEFAULT_TTL_SECONDS = 60 * 60 * 24; // 24h
 function getSignSecret(): string {
   const secret = process.env.FILES_SIGNING_SECRET || process.env.AUTH_SECRET;
   if (!secret) {
-    // Fail loudly in production so we don't silently mint HMACs with an empty
-    // key (producer side would happily sign, but every verify would 401 and
-    // the customer wouldn't know why). In dev, return "" so unsigned URLs
-    // still serve under FILES_REQUIRE_SIGNATURE=unset.
-    if (process.env.NODE_ENV === "production") {
+    // Fail loudly in PROD RUNTIME so we don't silently mint HMACs with an
+    // empty key (producer side would happily sign, but every verify would 401
+    // and the customer wouldn't know why).
+    //
+    // Skip the throw during `next build` (NODE_ENV=production but secrets are
+    // not injected at build time) and during dev. The runtime check still
+    // fires when the production server starts and a file URL is signed.
+    const isBuild =
+      process.env.NEXT_PHASE === "phase-production-build" ||
+      process.env.NEXT_PHASE === "phase-export";
+    if (process.env.NODE_ENV === "production" && !isBuild) {
       throw new Error(
         "FILES_SIGNING_SECRET (or AUTH_SECRET fallback) is required for URL signing"
       );

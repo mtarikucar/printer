@@ -6,21 +6,38 @@
  * Imported at the top of `src/middleware.ts` so server boot fails on missing
  * critical env in production. In dev (NODE_ENV !== "production") we log a
  * warning instead of throwing so local setups can run without every var set.
+ *
+ * IMPORTANT: `next build` runs with NODE_ENV="production" but does not have
+ * runtime secrets (AUTH_SECRET etc.) injected. We detect the build phase via
+ * NEXT_PHASE and suppress throws then — the same check still fires at boot
+ * (phase-production-server) and at runtime.
  */
+
+function isProductionRuntime(): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  // Skip during build / static export — secrets aren't supposed to be present.
+  const phase = process.env.NEXT_PHASE;
+  if (phase === "phase-production-build" || phase === "phase-export") return false;
+  return true;
+}
 
 function required(name: string, opts?: { minLength?: number }): string {
   const v = process.env[name];
   if (!v || v.trim() === "") {
     const msg = `Missing required env var: ${name}`;
-    if (process.env.NODE_ENV === "production") {
+    if (isProductionRuntime()) {
       throw new Error(msg);
     }
-    console.warn(`[env] ${msg} — set in .env before going to production`);
+    // During build (or dev) we degrade gracefully so the bundler can still
+    // resolve this module.
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`[env] ${msg} — set in .env before going to production`);
+    }
     return "";
   }
   if (opts?.minLength && v.length < opts.minLength) {
     const msg = `Env ${name} is too short (need ≥${opts.minLength} chars)`;
-    if (process.env.NODE_ENV === "production") {
+    if (isProductionRuntime()) {
       throw new Error(msg);
     }
     console.warn(`[env] ${msg}`);
@@ -46,8 +63,8 @@ const MANUFACTURER_JWT_SECRET = optional("MANUFACTURER_JWT_SECRET", AUTH_SECRET)
 // Warn whenever any pair of secrets is identical — not only the fall-back case.
 // An operator who set CUSTOMER_JWT_SECRET to the same value as AUTH_SECRET
 // (or as MANUFACTURER_JWT_SECRET) gets the same cross-realm exposure as if
-// they left it unset.
-if (process.env.NODE_ENV === "production") {
+// they left it unset. Skipped during build (no secrets available).
+if (isProductionRuntime()) {
   const pairs: Array<[string, string, string, string]> = [
     ["AUTH_SECRET", AUTH_SECRET, "CUSTOMER_JWT_SECRET", CUSTOMER_JWT_SECRET],
     ["AUTH_SECRET", AUTH_SECRET, "MANUFACTURER_JWT_SECRET", MANUFACTURER_JWT_SECRET],

@@ -39,28 +39,27 @@ This branch ships ~70 fixes covering admin auth, payment defense-in-depth, gift-
    ```
    Must report 4/4 passed. Covers the card-payment recovery flow + waiting-retry loop.
 
-## ⚠️ PayTR merchant panel — webhook URL (CRITICAL, one-time setup)
+## PayTR merchant panel — webhook URL (one-time setup, NOT via env)
 
-**The webhook URL is configured ONCE in the PayTR merchant panel, NOT via env vars.**
-
-Login to <https://paytr.com/magaza/ayarlar> and set the **Bildirim URL** field to:
+The webhook URL is configured ONCE in the PayTR merchant panel — there's no
+env var for it. Login to <https://paytr.com/magaza/ayarlar> and set the
+**Bildirim URL** field to:
 
 ```
 https://figurunica.com/api/webhooks/paytr
 ```
 
-If this is misconfigured (404 path, wrong domain, or empty), PayTR will silently
-fire webhooks to a dead URL and **every card payment will get stuck** in the
-`pending_payment` state forever. The verify-payment endpoint heals fresh
-transactions but only when the customer returns to the track page within their
-session — async webhook recovery is the primary path.
+If it ever becomes empty, points at the wrong domain, or 404s for any reason,
+new card payments will hang in `pending_payment` until the customer returns to
+the track page and the verify-payment endpoint heals them (now with a retry
+loop + manual recovery banner — see `src/app/track/[orderNumber]/page.tsx`).
 
-**Backward-compat:** The codebase also serves `/api/payment/paytr/callback` as
-an alias for the canonical `/api/webhooks/paytr` endpoint. This catches the
-case where the panel was previously set to that (incorrect) path. New
-deployments should always use the canonical path.
+**Defensive alias:** The codebase ALSO serves `/api/payment/paytr/callback`
+as an identical alias for the canonical `/api/webhooks/paytr`. This is
+defense-in-depth — it does not imply misconfiguration. Both paths route to
+the same handler; either is acceptable in the panel.
 
-**Smoke test:**
+**Smoke test (canonical path):**
 ```bash
 curl -sv -X POST https://figurunica.com/api/webhooks/paytr \
   -d "merchant_oid=TEST&status=success&total_amount=100&hash=invalid"

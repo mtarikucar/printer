@@ -2,14 +2,14 @@ import type { MetadataRoute } from "next";
 import { desc, eq, and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
+import { STYLE_SLUGS } from "@/lib/styles/landing-content";
 
 /**
  * Sitemap surfacing the public, indexable routes plus every published
  * gallery item. Refreshed by Next.js on revalidate (default behaviour for
  * `MetadataRoute` exports).
  *
- * Per-style landing pages (Q2 in the roadmap) will be added here once they
- * ship — until then, gallery filtering does the SEO work.
+ * Per-style landing pages (Q2 in the roadmap) are listed below for SEO.
  */
 
 const STATIC_ROUTES: Array<{
@@ -34,6 +34,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     lastModified: now,
     changeFrequency: r.changeFrequency,
     priority: r.priority,
+  }));
+
+  // Per-style landing pages (Q2). Each carries paid-ad + SEO weight and is
+  // pre-rendered, so we surface them at a high priority.
+  const styleEntries: MetadataRoute.Sitemap = STYLE_SLUGS.map((slug) => ({
+    url: `${baseUrl}/styles/${slug}`,
+    lastModified: now,
+    changeFrequency: "monthly" as const,
+    priority: 0.85,
   }));
 
   // Public gallery items — published orders that have reached a renderable
@@ -70,5 +79,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.error("[sitemap] gallery query failed", err);
   }
 
-  return [...staticEntries, ...galleryEntries];
+  return [...staticEntries, ...styleEntries, ...galleryEntries];
 }

@@ -197,6 +197,21 @@ export default function CreatePage() {
       .catch(() => setLoggedIn(false));
   }, []);
 
+  // Q2: `/styles/[slug]` landing pages link here with `?style=<slug>`.
+  // Prefill the style selector when the slug is one we support. We only
+  // apply the prefill on initial mount so a customer who lands here and
+  // then changes the style isn't fighting the URL param.
+  const styleQueryAppliedRef = useRef(false);
+  useEffect(() => {
+    if (styleQueryAppliedRef.current) return;
+    const styleParam = searchParams.get("style");
+    if (!styleParam) return;
+    if (["realistic", "disney", "anime", "chibi", "object"].includes(styleParam)) {
+      setSelectedStyle(styleParam);
+      styleQueryAppliedRef.current = true;
+    }
+  }, [searchParams]);
+
   // Restore state from sessionStorage AFTER the auth check resolves. Gate on
   // `loggedIn` (tri-state: null while loading, then true/false). We must not
   // gate on `currentUserId` because anonymous flows never set it — that would

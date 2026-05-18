@@ -82,6 +82,40 @@ Açıklama     FIG-IJK456`,
     },
   },
   {
+    name: "Yapı Kredi — mixed layout",
+    text: `Yapı Kredi Bankası A.Ş.
+Para Transferi Dekontu
+İşlem Tarihi: 14.05.2026
+Gönderen: ZEYNEP DEMİREL
+Alıcı IBAN: TR33 0006 7000 0000 1234 5678 90
+Tutar: 999,00 TL
+Açıklama: FIG-YKB777`,
+    expectedBank: "yapi_kredi",
+    expected: {
+      amountKurus: 99900,
+      iban: "TR330006700000001234567890",
+      sender: "ZEYNEP DEMİREL",
+      date: "2026-05-14",
+    },
+  },
+  {
+    name: "Akbank — standard layout",
+    text: `AKBANK T.A.Ş.
+EFT/Havale Dekontu
+İşlem Tarihi 14/05/2026
+Gönderen FATMA ÖZKAN
+Alıcı IBAN TR47 0004 6000 0000 0000 0099 88
+İşlem Tutarı 1.999,99 TL
+Açıklama FIG-AKB123`,
+    expectedBank: "akbank",
+    expected: {
+      amountKurus: 199999,
+      iban: "TR470004600000000000009988",
+      sender: "FATMA ÖZKAN",
+      date: "2026-05-14",
+    },
+  },
+  {
     name: "Unknown bank — detection falls back to generic",
     text: `RANDOM HOLDING BANK
 A Receipt

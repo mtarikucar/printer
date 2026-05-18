@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturerActions } from "@/lib/db/schema";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
@@ -136,11 +136,13 @@ export async function declineOrder(args: {
 
   // Step 3: cap check.
   if (result.declinedCount >= MAX_DECLINES_BEFORE_ADMIN) {
+    // Review I4: append (don't overwrite) so a concurrent admin note
+    // edit isn't clobbered. The newline keeps the audit trail readable.
+    const note = `[N12] ${result.declinedCount} manufacturer(s) declined — needs manual assignment.`;
     await db
       .update(orders)
       .set({
-        adminNotes:
-          `[N12] ${result.declinedCount} manufacturer(s) declined — needs manual assignment.`,
+        adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
@@ -171,11 +173,11 @@ export async function declineOrder(args: {
   );
 
   if (!next) {
+    const note = `[N12] No eligible manufacturer left after ${result.declinedCount} decline(s).`;
     await db
       .update(orders)
       .set({
-        adminNotes:
-          `[N12] No eligible manufacturer left after ${result.declinedCount} decline(s).`,
+        adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));

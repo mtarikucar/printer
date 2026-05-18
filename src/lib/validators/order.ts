@@ -36,6 +36,10 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
       .array(z.enum(["extra_paint", "gift_wrap", "rush_shipping"]))
       .optional()
       .default([]),
+    // Guest-checkout fields (Q6). Server reads these only when there is no
+    // session cookie; logged-in customers get their identity from the JWT.
+    guestEmail: z.string().email("Invalid email").optional(),
+    guestName: z.string().min(2).max(120).optional(),
   });
 }
 

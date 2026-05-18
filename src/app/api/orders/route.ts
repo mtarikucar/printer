@@ -43,19 +43,49 @@ export async function POST(request: NextRequest) {
 
   try {
     const session = await getSessionUser();
-    if (!session) {
-      return NextResponse.json({ error: d["api.auth.required"] }, { status: 401 });
-    }
 
     const body = await request.json();
     const validated = createOrderSchema(locale).parse(body);
     const previewId: string | undefined = body.previewId;
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, session.userId),
-    });
-    if (!user) {
-      return NextResponse.json({ error: d["api.auth.userNotFound"] }, { status: 401 });
+    // Guest checkout (Q6): if no session, we expect guestEmail + guestName
+    // in the body. We attach the order to an existing user with that email
+    // OR create a guest user row (isGuest=true, no password). The customer
+    // claims the row post-checkout via the email link.
+    let user: typeof users.$inferSelect | undefined;
+    if (session) {
+      user = await db.query.users.findFirst({
+        where: eq(users.id, session.userId),
+      });
+      if (!user) {
+        return NextResponse.json({ error: d["api.auth.userNotFound"] }, { status: 401 });
+      }
+    } else {
+      if (!validated.guestEmail || !validated.guestName) {
+        return NextResponse.json(
+          { error: d["api.auth.required"] },
+          { status: 401 }
+        );
+      }
+      const email = validated.guestEmail.trim().toLowerCase();
+      const existing = await db.query.users.findFirst({
+        where: eq(users.email, email),
+      });
+      if (existing) {
+        user = existing;
+      } else {
+        const [created] = await db
+          .insert(users)
+          .values({
+            email,
+            fullName: validated.guestName,
+            phone: validated.shippingAddress.telefon,
+            passwordHash: null,
+            isGuest: true,
+          })
+          .returning();
+        user = created;
+      }
     }
 
     if (previewId && typeof previewId !== "string") {
@@ -101,7 +131,7 @@ export async function POST(request: NextRequest) {
           .where(
             and(
               eq(previews.id, previewId),
-              or(eq(previews.userId, session.userId), isNull(previews.userId))
+              or(eq(previews.userId, user!.id), isNull(previews.userId))
             )
           )
           .for("update");
@@ -112,7 +142,7 @@ export async function POST(request: NextRequest) {
 
         await tx
           .update(previews)
-          .set({ userId: session.userId, status: "approved", updatedAt: new Date() })
+          .set({ userId: user!.id, status: "approved", updatedAt: new Date() })
           .where(eq(previews.id, previewId));
       }
 

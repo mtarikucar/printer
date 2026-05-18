@@ -265,6 +265,11 @@ const tr: Dictionary = {
   "upsell.rush_shipping.label": "Hızlı kargo",
   "upsell.rush_shipping.description": "Üretim sonrası kargo süresi 1-2 iş günü.",
   "gallery.search.placeholder": "İsim veya etikete göre ara…",
+  "create.guest.title": "İletişim bilgileri",
+  "create.guest.subtitle": "Üyelik gerekmez. Sipariş sonrası e-postanıza hesap aktivasyon bağlantısı göndereceğiz.",
+  "create.guest.fullName": "Ad Soyad",
+  "create.guest.email": "E-posta",
+  "create.guest.alreadyHaveAccount": "Hesabınız var mı? Giriş yapın",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

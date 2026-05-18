@@ -43,7 +43,8 @@ interface SendEmailParams {
     | "bank_transfer_auto_confirmed"
     | "bank_transfer_needs_review"
     | "payment_expired"
-    | "manufacturer_notification";
+    | "manufacturer_notification"
+    | "guest_account_claim";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -74,6 +75,8 @@ interface SendEmailParams {
   notificationSubject?: string;
   notificationBody?: string;
   notificationType?: string;
+  // Q6: deep link to /reset-password/{token}?claim=1 for guest checkout.
+  claimUrl?: string;
 }
 
 function formatKurus(kurus?: number): string {
@@ -421,6 +424,38 @@ function getTemplates(locale: Locale) {
           <h1 style="color: #1a1a1a;">${escHtml(p.notificationSubject || "")}</h1>
           <div style="white-space: pre-wrap; color: #1f2937;">${escHtml(p.notificationBody || "")}</div>
           <p style="margin-top:24px;"><a href="${process.env.NEXT_PUBLIC_APP_URL}/manufacturer/orders" style="display:inline-block;background:#4f46e5;color:white;padding:10px 18px;border-radius:6px;text-decoration:none;">Üretici paneli</a></p>
+        </div>
+      `,
+    }),
+
+    guest_account_claim: (p) => ({
+      subject: locale === "tr"
+        ? "Figurine Studio — Hesabınızı koruyun"
+        : "Figurine Studio — Claim your account",
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #1f2937;">
+          <h1 style="color: #1a1a1a;">${
+            locale === "tr"
+              ? `Merhaba ${escHtml(p.customerName)},`
+              : `Hi ${escHtml(p.customerName)},`
+          }</h1>
+          <p>${
+            locale === "tr"
+              ? `<strong>${escHtml(p.orderNumber)}</strong> numaralı siparişiniz için teşekkürler. Sipariş geçmişinize ulaşmak, takip etmek ve gelecekteki siparişlerinizi hızlandırmak için aşağıdaki butona basarak şifre belirleyebilir ve hesabınızı koruyabilirsiniz.`
+              : `Thanks for your order <strong>${escHtml(p.orderNumber)}</strong>. To access your order history, track shipments, and speed up future purchases, set a password and claim your account below.`
+          }</p>
+          <p style="margin: 24px 0;">
+            <a href="${p.claimUrl}" style="display:inline-block;background:#10b981;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">
+              ${locale === "tr" ? "Hesabımı oluştur" : "Set up my account"}
+            </a>
+          </p>
+          <p style="font-size:13px;color:#6b7280">
+            ${locale === "tr"
+              ? "Bu bağlantı 30 gün geçerlidir. Buton çalışmazsa, bu adresi tarayıcınıza yapıştırın:"
+              : "This link is valid for 30 days. If the button doesn't work, paste this link into your browser:"
+            }
+            <br><span style="font-family:monospace;word-break:break-all;">${p.claimUrl}</span>
+          </p>
         </div>
       `,
     }),

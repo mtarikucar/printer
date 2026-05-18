@@ -177,6 +177,11 @@ export const users = pgTable("users", {
   // the DB so a leak of this table doesn't grant account access.
   passwordResetTokenHash: text("password_reset_token_hash"),
   passwordResetExpiresAt: timestamp("password_reset_expires_at"),
+  // Guest-checkout flag (Q6). True while the customer placed an order
+  // without explicitly registering — they have a row in `users` but never
+  // set a password. Flipped false once they claim the account via the
+  // post-purchase email (which reuses the password-reset token flow).
+  isGuest: boolean("is_guest").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

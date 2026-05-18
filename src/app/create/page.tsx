@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { ModelViewer } from "@/components/model-viewer";
 import { SiteHeader } from "@/components/site-header";
@@ -123,6 +124,12 @@ export default function CreatePage() {
     (acc, key) => acc + (UPSELLS.find((u) => u.key === key)?.priceKurus ?? 0),
     0
   );
+
+  // Q6: guest checkout fields. Only shown + sent when the visitor is NOT
+  // logged in. Logged-in customers continue to derive email + name from
+  // their JWT/session.
+  const [guestEmail, setGuestEmail] = useState("");
+  const [guestName, setGuestName] = useState("");
 
   // Loading stage rotation
   const [loadingStage, setLoadingStage] = useState(0);
@@ -447,26 +454,8 @@ export default function CreatePage() {
       return;
     }
 
-    if (loggedIn === false) {
-      setSubmitting(false);
-      // Tag with userId=null because the user isn't logged in yet — the
-      // restore effect requires userId match, so we use null sentinel and
-      // accept either null or matched-id during restore.
-      sessionStorage.setItem(
-        "createFlowState",
-        JSON.stringify({
-          photoKey: currentPhotoKey,
-          photoPreviewUrl,
-          selectedSize,
-          selectedStyle,
-          selectedModifiers,
-          step: 0,
-          userId: null,
-        })
-      );
-      router.push("/login?redirect=/create");
-      return;
-    }
+    // Q6: anonymous (guest) flow is allowed all the way through preview
+    // generation and checkout. No /login redirect here.
 
     setSubmitting(true);
     setError(null);
@@ -521,27 +510,8 @@ export default function CreatePage() {
 
   const handleApprove = () => {
     if (loggedIn === null) return; // Auth check still loading
-    if (loggedIn === false) {
-      // Save state before redirecting to login; tag userId=null so the restore
-      // effect only adopts this state for newly-logged-in users (any user can
-      // pick up an anonymous state, but a different logged-in user can't).
-      sessionStorage.setItem(
-        "createFlowState",
-        JSON.stringify({
-          photoKey,
-          photoPreviewUrl,
-          selectedSize,
-          selectedStyle,
-          selectedModifiers,
-          previewId,
-          previewGlbUrl,
-          step: 2,
-          userId: null,
-        })
-      );
-      router.push("/login?redirect=/create");
-      return;
-    }
+    // Q6: guest checkout — allow logged-out customers to proceed to step 3
+    // where they enter email + name alongside the shipping form.
     setStep(3);
   };
 
@@ -614,6 +584,8 @@ export default function CreatePage() {
           giftCardCode: gcApplied?.code || undefined,
           paymentMethod,
           upsells: selectedUpsells,
+          guestEmail: !loggedIn ? guestEmail.trim() : undefined,
+          guestName: !loggedIn ? guestName.trim() : undefined,
         }),
       });
 
@@ -1124,6 +1096,58 @@ export default function CreatePage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-8">
+              {/* Guest checkout (Q6) — captures the buyer's email + name
+                  without forcing a login. Post-purchase email lets them
+                  claim the account via a 30-day token. Logged-in customers
+                  don't see this card. */}
+              {!loggedIn && (
+                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-100">
+                  <div className="p-6">
+                    <h3 className="text-sm font-medium text-text-secondary mb-1">
+                      {d["create.guest.title"]}
+                    </h3>
+                    <p className="text-xs text-text-muted mb-4">
+                      {d["create.guest.subtitle"]}
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-text-secondary mb-1.5">
+                          {d["create.guest.fullName"]}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={guestName}
+                          onChange={(e) => setGuestName(e.target.value)}
+                          className="input-base"
+                          autoComplete="name"
+                          minLength={2}
+                          maxLength={120}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-text-secondary mb-1.5">
+                          {d["create.guest.email"]}
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          value={guestEmail}
+                          onChange={(e) => setGuestEmail(e.target.value)}
+                          className="input-base"
+                          autoComplete="email"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-text-muted mt-3">
+                      <Link href="/login?redirect=/create" className="underline">
+                        {d["create.guest.alreadyHaveAccount"]}
+                      </Link>
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Saved address dropdown (Q5) — only shown when the logged-in
                   customer already has saved addresses; new customers see the
                   empty form unchanged. */}

@@ -154,9 +154,44 @@ export async function consumePasswordResetToken(
       passwordHash,
       passwordResetTokenHash: null,
       passwordResetExpiresAt: null,
+      // Guests claim their account by setting their first password here, so
+      // clearing the flag is safe whether or not the row was a guest.
+      isGuest: false,
       updatedAt: new Date(),
     })
     .where(eq(users.id, user.id));
 
   return { ok: true, userId: user.id };
+}
+
+const GUEST_CLAIM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * Issue a single-use claim token for a guest user (post-checkout). Reuses
+ * the password-reset token columns + the existing `consumePasswordResetToken`
+ * endpoint — the customer ends up at `/reset-password/{token}` and sets
+ * their first password. Token TTL is longer (30 days) because guests may
+ * not check email immediately.
+ *
+ * Returns the raw token + the deep link so the caller can include them in
+ * the order-confirmation email. We DON'T send the email here because the
+ * order-confirmation email is already templated elsewhere; embedding the
+ * claim link in that email avoids a second message hitting the inbox.
+ */
+export async function issueGuestClaimToken(
+  userId: string,
+  appUrl: string
+): Promise<{ rawToken: string; claimUrl: string }> {
+  const { raw, hash } = newToken();
+  const expiresAt = new Date(Date.now() + GUEST_CLAIM_TTL_MS);
+  await db
+    .update(users)
+    .set({
+      passwordResetTokenHash: hash,
+      passwordResetExpiresAt: expiresAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+  const claimUrl = `${appUrl}/reset-password/${encodeURIComponent(raw)}?claim=1`;
+  return { rawToken: raw, claimUrl };
 }

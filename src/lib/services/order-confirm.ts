@@ -1,8 +1,9 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, previews, generationAttempts } from "@/lib/db/schema";
+import { orders, orderPhotos, previews, generationAttempts, users } from "@/lib/db/schema";
 import { getAiGenerationQueue, getMeshProcessingQueue, getEmailQueue } from "@/lib/queue/queues";
 import type { Locale } from "@/lib/i18n/types";
+import { issueGuestClaimToken } from "@/lib/services/password-reset";
 
 /**
  * Kick off post-payment processing for an order that is already in `status='paid'`.
@@ -181,6 +182,35 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
     } catch (err) {
       console.error(
         `kickOff: confirmation email enqueue failed for ${result.order.id}`,
+        err
+      );
+    }
+
+    // Q6: if the buyer placed this order as a guest (no password set), send
+    // them a separate "claim your account" email with a 30-day token that
+    // lets them set a password and access /account. Best-effort — failure
+    // doesn't roll back order kickoff.
+    try {
+      const buyer = await db.query.users.findFirst({
+        where: eq(users.id, result.order.userId),
+        columns: { id: true, isGuest: true, email: true, fullName: true },
+      });
+      if (buyer?.isGuest) {
+        const appUrl =
+          process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com";
+        const { claimUrl } = await issueGuestClaimToken(buyer.id, appUrl);
+        await getEmailQueue().add("guest-claim", {
+          type: "guest_account_claim",
+          to: buyer.email,
+          orderNumber: result.order.orderNumber,
+          customerName: buyer.fullName,
+          claimUrl,
+          locale,
+        });
+      }
+    } catch (err) {
+      console.error(
+        `kickOff: guest claim email enqueue failed for ${result.order.id}`,
         err
       );
     }

@@ -263,6 +263,11 @@ const en = {
   "upsell.rush_shipping.label": "Rush shipping",
   "upsell.rush_shipping.description": "1–2 business day shipping after production.",
   "gallery.search.placeholder": "Search by name or tag…",
+  "create.guest.title": "Contact info",
+  "create.guest.subtitle": "No signup required. We'll email you a link to claim your account after purchase.",
+  "create.guest.fullName": "Full name",
+  "create.guest.email": "Email",
+  "create.guest.alreadyHaveAccount": "Already have an account? Sign in",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

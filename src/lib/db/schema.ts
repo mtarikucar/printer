@@ -106,6 +106,24 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "assign_manufacturer",
   "mark_havale_paid",
   "mark_payment_expired",
+  "gallery_approve",
+  "gallery_reject",
+  "gallery_reward",
+]);
+
+/**
+ * Lifecycle of a customer-requested gallery publication.
+ *   `none`      → never requested (default for legacy rows + non-published orders)
+ *   `pending`   → customer opted in via PublishToggle, awaiting admin moderation
+ *   `approved`  → admin approved; `isPublic` flipped true and the figurine appears
+ *                 in the gallery
+ *   `rejected`  → admin rejected; `galleryReviewReason` stores the moderator note
+ */
+export const galleryReviewStatusEnum = pgEnum("gallery_review_status", [
+  "none",
+  "pending",
+  "approved",
+  "rejected",
 ]);
 
 export const figurineSizeEnum = pgEnum("figurine_size", [
@@ -278,6 +296,17 @@ export const orders = pgTable("orders", {
   publishedAt: timestamp("published_at"),
   galleryCategory: text("gallery_category"),
   galleryTags: jsonb("gallery_tags").$type<string[]>(),
+  // Customer-requested gallery publication moderation (Q4 in roadmap).
+  // `isPublic` only flips true when reviewStatus reaches `approved`.
+  galleryReviewStatus: galleryReviewStatusEnum("gallery_review_status")
+    .notNull()
+    .default("none"),
+  galleryReviewReason: text("gallery_review_reason"),
+  // Optional reward: when admin chooses to grant a gift card during gallery
+  // approval, this FK links to the issued card so customer support can audit.
+  galleryRewardGiftCardId: uuid("gallery_reward_gift_card_id").references(
+    (): any => giftCards.id // eslint-disable-line @typescript-eslint/no-explicit-any
+  ),
   manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id),
   manufacturerStatus: manufacturerOrderStatusEnum("manufacturer_status"),
   assignedToManufacturerAt: timestamp("assigned_to_manufacturer_at"),

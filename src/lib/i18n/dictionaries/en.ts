@@ -158,6 +158,20 @@ const en = {
   "publish.makePublic": "Share to Gallery",
   "publish.makePrivate": "Remove from Gallery",
   "publish.success": "Your figurine is now in the gallery!",
+  // Q4 gallery moderation states
+  "publish.submit": "Apply to publish in gallery",
+  "publish.withdraw": "Withdraw submission",
+  "publish.pendingTitle": "Your submission is under review",
+  "publish.pendingBody":
+    "Our team reviews submissions within 1-2 days. We'll email you when it's approved.",
+  "publish.pendingSubmitted":
+    "Submission received! We'll notify you of the review outcome by email.",
+  "publish.rejectedTitle": "Submission declined",
+  "publish.rejectedBody":
+    "This figurine wasn't published. You can edit the photo and try again if you like.",
+  "publish.rejectedReasonLabel": "Reason:",
+  "publish.rewardHint":
+    "Standout figurines may earn a gift card from us — worth applying!",
   "publish.removed": "Removed from gallery.",
   "publish.failed": "Failed to update. Please try again.",
   "publish.sharedSince": "Shared since",

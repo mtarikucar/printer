@@ -160,6 +160,20 @@ const tr: Dictionary = {
   "publish.makePublic": "Galeriye Paylaş",
   "publish.makePrivate": "Galeriden Kaldır",
   "publish.success": "Figürününüz artık galeride!",
+  // Q4 gallery moderation states
+  "publish.submit": "Galeride yayınlamak için başvur",
+  "publish.withdraw": "Başvuruyu geri çek",
+  "publish.pendingTitle": "Başvurunuz inceleniyor",
+  "publish.pendingBody":
+    "Ekibimiz figürinizi 1-2 gün içinde değerlendirip onayladığında galeride yayınlanacak.",
+  "publish.pendingSubmitted":
+    "Başvurunuz alındı! İnceleme sonucunu e-posta ile bildireceğiz.",
+  "publish.rejectedTitle": "Başvuru reddedildi",
+  "publish.rejectedBody":
+    "Bu figürin galeride yayınlanmadı. İsterseniz fotoğrafı düzenleyip tekrar deneyebilirsiniz.",
+  "publish.rejectedReasonLabel": "Sebep:",
+  "publish.rewardHint":
+    "Onaylanan özel figürinler için hediye çeki verme şansımız var — başvurmaya değer!",
   "publish.removed": "Galeriden kaldırıldı.",
   "publish.failed": "Güncelleme başarısız. Lütfen tekrar deneyin.",
   "publish.sharedSince": "Paylaşım tarihi",

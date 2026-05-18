@@ -73,18 +73,46 @@ export async function POST(
         .slice(0, 5)
     : null;
 
+  if (isPublic) {
+    // Customer requested gallery publication → moves into admin moderation
+    // queue. `isPublic` stays FALSE until an admin approves; the customer's
+    // PublishToggle reads `galleryReviewStatus` and shows the appropriate
+    // banner ("waiting for moderation" vs "published" vs "rejected").
+    //
+    // We still capture the customer's preferred displayName / category /
+    // tags so the admin queue can review them; admin can override at
+    // approval time.
+    await db
+      .update(orders)
+      .set({
+        publicDisplayName: displayName || null,
+        galleryCategory: validCategory || null,
+        galleryTags: validTags && validTags.length > 0 ? validTags : null,
+        galleryReviewStatus: "pending",
+        galleryReviewReason: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, order.id));
+
+    return NextResponse.json({
+      success: true,
+      isPublic: false,
+      pendingReview: true,
+    });
+  }
+
+  // Customer un-publishing — flip everything off + reset the review state
+  // so a future re-publication starts fresh (not stuck on a previous
+  // rejection note).
   await db
     .update(orders)
     .set({
-      isPublic,
-      publicDisplayName: isPublic ? (displayName || null) : order.publicDisplayName,
-      // Always set publishedAt when publishing (prevents null cursor breaking pagination)
-      publishedAt: isPublic ? new Date() : order.publishedAt,
-      galleryCategory: isPublic ? (validCategory || null) : order.galleryCategory,
-      galleryTags: isPublic ? (validTags && validTags.length > 0 ? validTags : null) : order.galleryTags,
+      isPublic: false,
+      galleryReviewStatus: "none",
+      galleryReviewReason: null,
       updatedAt: new Date(),
     })
     .where(eq(orders.id, order.id));
 
-  return NextResponse.json({ success: true, isPublic });
+  return NextResponse.json({ success: true, isPublic: false });
 }

@@ -87,6 +87,8 @@ interface OrderData {
   createdAt: string;
   isPublic: boolean;
   publicDisplayName: string | null;
+  galleryReviewStatus?: "none" | "pending" | "approved" | "rejected";
+  galleryReviewReason?: string | null;
   glbUrl: string | null;
   paymentMethod: "card" | "bank_transfer" | "gift_card_full" | null;
   paymentStatus: "pending" | "awaiting_transfer" | "succeeded" | "failed" | "expired";
@@ -660,6 +662,8 @@ export default function TrackPage({
                 initialIsPublic={order.isPublic}
                 initialDisplayName={order.publicDisplayName}
                 initialPublishedAt={null}
+                initialReviewStatus={order.galleryReviewStatus ?? "none"}
+                initialReviewReason={order.galleryReviewReason ?? null}
               />
             )}
           </div>

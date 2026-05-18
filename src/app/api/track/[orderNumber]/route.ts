@@ -57,6 +57,8 @@ export async function GET(
       createdAt: order.createdAt,
       isPublic: order.isPublic,
       publicDisplayName: order.publicDisplayName,
+      galleryReviewStatus: order.galleryReviewStatus,
+      galleryReviewReason: order.galleryReviewReason,
       glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,

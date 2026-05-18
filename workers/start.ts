@@ -6,7 +6,11 @@ import { startPreviewGenerationWorker } from "../src/lib/queue/workers/preview-g
 import { startPreviewCleanupWorker } from "../src/lib/queue/workers/preview-cleanup.worker";
 import { startPaymentDeadlineWorker } from "../src/lib/queue/workers/payment-deadline.worker";
 import { startDekontOcrWorker } from "../src/lib/queue/workers/dekont-ocr.worker";
-import { getPreviewCleanupQueue } from "../src/lib/queue/queues";
+import { startScoringEvaluationsCleanupWorker } from "../src/lib/queue/workers/scoring-evaluations-cleanup.worker";
+import {
+  getPreviewCleanupQueue,
+  getScoringEvaluationsCleanupQueue,
+} from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
 
@@ -17,12 +21,20 @@ const previewWorker = startPreviewGenerationWorker();
 const cleanupWorker = startPreviewCleanupWorker();
 const paymentDeadlineWorker = startPaymentDeadlineWorker();
 const dekontOcrWorker = startDekontOcrWorker();
+const scoringEvalCleanupWorker = startScoringEvaluationsCleanupWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
   "preview-cleanup-hourly",
   { every: 3600000 },
   { name: "preview-cleanup" }
+);
+
+// Q7: drop manufacturer_assignment_evaluations older than 30d, daily.
+getScoringEvaluationsCleanupQueue().upsertJobScheduler(
+  "scoring-evaluations-cleanup-daily",
+  { every: 24 * 3600 * 1000 },
+  { name: "scoring-evaluations-cleanup" }
 );
 
 console.log("All workers started:");
@@ -33,6 +45,7 @@ console.log("  - preview-generation (concurrency: 3)");
 console.log("  - preview-cleanup (repeatable: every 1h)");
 console.log("  - payment-deadline (concurrency: 2)");
 console.log("  - dekont-ocr (concurrency: 2)");
+console.log("  - scoring-evaluations-cleanup (repeatable: every 24h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -44,6 +57,7 @@ async function shutdown() {
     cleanupWorker.close(),
     paymentDeadlineWorker.close(),
     dekontOcrWorker.close(),
+    scoringEvalCleanupWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

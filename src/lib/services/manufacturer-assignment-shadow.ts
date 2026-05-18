@@ -22,6 +22,9 @@ import {
  * the canary.
  *
  * Authoritative selection:
+ *   - `forceProfile` set → admin escape hatch (?weights=v1|v2 on admin
+ *     order detail). Bypasses canary, no log row written (intent is
+ *     diagnostic, not a real assignment decision).
  *   - shouldUseV2(orderId, MANUFACTURER_SCORING_V2_PERCENT) === true → v2 wins
  *   - otherwise v1 wins (shadow mode default)
  *
@@ -35,8 +38,16 @@ import {
  * authoritative ranking still comes back.
  */
 export async function rankForOrderWithShadow(
-  orderId: string
+  orderId: string,
+  forceProfile?: ScoringProfile
 ): Promise<CandidateScore[]> {
+  // Escape hatch: admin diagnostic view. Skip the canary logic + shadow
+  // log entirely; the admin just wants to see what a profile would pick
+  // without affecting the rollout signal.
+  if (forceProfile) {
+    return rankManufacturersForOrder(orderId, forceProfile);
+  }
+
   const percent = getCanaryPercent();
   const useV2 = shouldUseV2(orderId, percent);
   const authoritativeProfile: ScoringProfile = useV2 ? "v2" : "v1";

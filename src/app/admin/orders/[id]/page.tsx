@@ -13,11 +13,19 @@ import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-s
 
 export default async function AdminOrderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ weights?: string }>;
 }) {
   const { id } = await params;
+  const { weights: weightsParam } = await searchParams;
   const locale = await getLocale();
+  // Q7 escape hatch — admin can append ?weights=v1 or ?weights=v2 to
+  // see the ranked list under a specific profile regardless of canary
+  // percent. Skips evaluation logging.
+  const forceProfile =
+    weightsParam === "v1" || weightsParam === "v2" ? weightsParam : undefined;
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, id),
@@ -52,8 +60,9 @@ export default async function AdminOrderDetailPage({
 
   // Rank candidates for the assignment recommendation UI. Goes through
   // the Q7 shadow wrapper which logs both v1/v2 winners and returns the
-  // authoritative one (v1 until canary expands).
-  const candidates = await rankForOrderWithShadow(id);
+  // authoritative one (v1 until canary expands). ?weights=v1|v2 query
+  // param bypasses canary for admin diagnostics.
+  const candidates = await rankForOrderWithShadow(id, forceProfile);
 
   const latestGeneration = order.generationAttempts.find(
     (g) => g.status === "succeeded"
@@ -163,6 +172,21 @@ export default async function AdminOrderDetailPage({
 
   return (
     <div className="p-8 max-w-7xl">
+      {forceProfile && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <strong>Q7 escape hatch:</strong> ranking shown under forced
+          profile <code className="text-xs bg-amber-100 px-1 rounded">
+            {forceProfile}
+          </code>. This view is diagnostic and is NOT logged to
+          scoring-evaluations.{" "}
+          <a
+            href={`/admin/orders/${id}`}
+            className="underline hover:text-amber-700"
+          >
+            Clear override
+          </a>
+        </div>
+      )}
       <OrderDetailClient data={serialized} locale={locale} />
     </div>
   );

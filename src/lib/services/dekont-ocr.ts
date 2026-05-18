@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { extname } from "path";
+import { execFile } from "node:child_process";
 
 const TURKISH_BANKING_KEYWORDS = [
   "havale",
@@ -63,20 +64,59 @@ export type OcrConfidence = "high" | "medium" | "low";
 const FUZZY_REFERENCE_THRESHOLD = 0.85;
 
 /**
+ * Rasterize a PDF buffer's first page to a PNG buffer using poppler-utils'
+ * `pdftoppm` CLI. The Docker base stage installs `poppler-utils`. -r 200
+ * gives us ~200 DPI which is enough for tesseract on typical dekonts
+ * without ballooning RAM. -f 1 -l 1 limits to page 1 (most dekonts are
+ * one page; multi-page ones still have summary info on page 1).
+ *
+ * `pdftoppm - -` reads PDF from stdin and writes PNG to stdout via the
+ * `-png` flag, so we never touch the filesystem.
+ */
+function rasterizePdfToPng(pdfBuffer: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      "pdftoppm",
+      ["-r", "200", "-png", "-f", "1", "-l", "1", "-", "-"],
+      { encoding: "buffer", maxBuffer: 50 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        if (!stdout || (stdout as Buffer).length === 0) {
+          reject(new Error("pdftoppm produced no output"));
+          return;
+        }
+        resolve(stdout as Buffer);
+      }
+    );
+    child.stdin?.end(pdfBuffer);
+  });
+}
+
+/**
  * Pre-process the receipt image for OCR: grayscale + normalize + cap width.
  *
- * PDF receipts are NOT auto-processed: rasterising a PDF requires poppler-utils
- * (or a JS alternative like pdf2pic) which isn't in the stock Docker image. PDF
- * uploads therefore fail OCR with `PDF_NOT_SUPPORTED`, land in the `awaiting_review`
- * draft state, and surface to admin for manual confirmation via the drafts panel.
- * If PDF dekonts become common, install poppler-utils and switch this branch to
- * rasterise page 1.
+ * PDF receipts are rasterised to a PNG via `pdftoppm` (poppler-utils,
+ * installed in the Docker base stage) so they go through the same sharp
+ * pipeline as image uploads. If pdftoppm fails (corrupt PDF, missing
+ * binary in dev), we surface `PDF_RASTERIZE_FAILED` and the worker drops
+ * the draft into the `awaiting_review` state — same fallback as before
+ * the Q1 PDF-support ship.
  */
 async function preprocessImage(buffer: Buffer, mime: string): Promise<Buffer> {
+  let workingBuffer = buffer;
   if (mime === "application/pdf") {
-    throw new Error("PDF_NOT_SUPPORTED");
+    try {
+      workingBuffer = await rasterizePdfToPng(buffer);
+    } catch (err) {
+      const reason =
+        err instanceof Error ? err.message : "Unknown pdftoppm error";
+      throw new Error(`PDF_RASTERIZE_FAILED: ${reason}`);
+    }
   }
-  return sharp(buffer)
+  return sharp(workingBuffer)
     .rotate() // honor EXIF
     .grayscale()
     .resize({ width: 1500, withoutEnlargement: true })

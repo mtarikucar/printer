@@ -1,12 +1,17 @@
 // Smoke test for Q1 bank-specific dekont parsers.
 //
-// Runs synthetic dekont text (no real OCR) through detectBank + extractByBank
-// to verify each bank's labeled-value extractor pulls the correct amount,
-// IBAN, sender, and date. Skips the actual tesseract step.
+// Two modes:
+//   default → synthetic text through detectBank + extractByBank (fast)
+//   --pdf   → synthesize a PDF per fixture with pdfkit, then run the full
+//             ocrDekont pipeline (pdftoppm → sharp → tesseract → parser).
+//             Requires `pdftoppm` in PATH (installed in the Docker base
+//             stage; on dev machines without it, --pdf gracefully skips).
 //
 // Run with: npx tsx scripts/test-dekont-parsers.ts
+//      or:  npx tsx scripts/test-dekont-parsers.ts --pdf
 
-import { detectBank, extractByBank } from "../src/lib/services/dekont-ocr";
+import { execFileSync } from "node:child_process";
+import { detectBank, extractByBank, ocrDekont } from "../src/lib/services/dekont-ocr";
 
 interface Fixture {
   name: string;
@@ -125,3 +130,93 @@ for (const fx of fixtures) {
 
 console.log(`\n${pass}/${pass + fail} fixtures passed`);
 if (fail > 0) process.exit(1);
+
+// ─── PDF mode (--pdf flag) ─────────────────────────────────────
+//
+// Synthesizes a minimal one-page PDF from each fixture's text, then runs
+// the full ocrDekont() pipeline. Verifies the pdftoppm rasterize → sharp
+// → tesseract chain works end-to-end. We don't assert exact field
+// equality because tesseract introduces noise on rasterized synthetic
+// PDFs — instead we assert bank detection still resolves correctly,
+// which is the most stable signal across OCR noise.
+
+async function runPdfMode() {
+  // Verify pdftoppm is available; skip gracefully if not (dev machines
+  // without poppler-utils installed should still be able to run the
+  // default text-mode tests above).
+  try {
+    execFileSync("pdftoppm", ["-v"], { stdio: "ignore" });
+  } catch {
+    console.log(
+      "\n[--pdf] pdftoppm not found in PATH — skipping PDF mode. " +
+        "Install poppler-utils to enable."
+    );
+    return;
+  }
+
+  // pdfkit is required only in --pdf mode. Dynamic import so the default
+  // mode doesn't pay the cost on machines that never run --pdf.
+  const PDFDocumentMod = await import("pdfkit");
+  const PDFDocument = (PDFDocumentMod.default ??
+    PDFDocumentMod) as typeof import("pdfkit");
+
+  function synthesizePdf(text: string): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+      // Use a font size large enough that tesseract has a chance on the
+      // ~200 DPI rasterized output.
+      doc.fontSize(14).text(text, { lineGap: 4 });
+      doc.end();
+    });
+  }
+
+  console.log("\n[--pdf] Running OCR pipeline on synthesized PDFs…");
+  let pdfPass = 0;
+  let pdfFail = 0;
+
+  for (const fx of fixtures) {
+    if (fx.expectedBank === "generic") continue; // bank detection signal only
+    try {
+      const pdf = await synthesizePdf(fx.text);
+      const result = await ocrDekont(pdf, "test.pdf", "FIG-NONE");
+      if (result.failureReason) {
+        console.log(`✗ ${fx.name} (PDF): ${result.failureReason}`);
+        pdfFail++;
+        continue;
+      }
+      // Soft assertion: bank detection should still resolve. OCR noise
+      // doesn't tend to corrupt the bank header on a clean synthesized PDF.
+      if (result.bank === fx.expectedBank) {
+        console.log(`✓ ${fx.name} (PDF) — bank detected: ${result.bank}`);
+        pdfPass++;
+      } else {
+        console.log(
+          `✗ ${fx.name} (PDF) — expected bank ${fx.expectedBank}, got ${result.bank}`
+        );
+        console.log(`    OCR text snippet: ${result.rawText.slice(0, 120)}…`);
+        pdfFail++;
+      }
+    } catch (err) {
+      console.log(
+        `✗ ${fx.name} (PDF) threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      pdfFail++;
+    }
+  }
+
+  console.log(`\n[--pdf] ${pdfPass}/${pdfPass + pdfFail} PDF fixtures passed`);
+  if (pdfFail > 0) process.exit(1);
+}
+
+if (process.argv.includes("--pdf")) {
+  runPdfMode().catch((err) => {
+    console.error("[--pdf] runner failed:", err);
+    process.exit(1);
+  });
+}

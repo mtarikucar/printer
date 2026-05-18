@@ -14,7 +14,8 @@
     "workers": "npx tsx workers/start.ts",
     "test:e2e": "playwright test",
     "test:tax-id": "tsx scripts/test-tax-id.ts",
-    "test:dekont-parsers": "tsx scripts/test-dekont-parsers.ts"
+    "test:dekont-parsers": "tsx scripts/test-dekont-parsers.ts",
+    "backfill:gallery-slugs": "tsx scripts/backfill-gallery-slugs.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

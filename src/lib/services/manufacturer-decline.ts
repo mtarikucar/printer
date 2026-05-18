@@ -3,8 +3,44 @@ import { db } from "@/lib/db";
 import { orders, manufacturerActions } from "@/lib/db/schema";
 import { rankManufacturersForOrder } from "@/lib/services/manufacturer-assignment";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { getEmailQueue } from "@/lib/queue/queues";
 
 const MAX_DECLINES_BEFORE_ADMIN = 3;
+
+/**
+ * Best-effort admin notification when an order needs manual assignment.
+ * Two trigger paths: hit the decline cap, or no eligible candidate left.
+ * Email failure doesn't roll back the decline — the adminNotes flag is the
+ * durable signal.
+ */
+async function notifyAdminManualAssignment(args: {
+  orderNumber: string;
+  orderId: string;
+  reason: string;
+  declineCount: number;
+}): Promise<void> {
+  const adminEmail = process.env.ADMIN_EMAIL || "system@figurunica.com";
+  try {
+    await getEmailQueue().add("admin-manual-assignment", {
+      type: "admin_custom",
+      to: adminEmail,
+      orderNumber: args.orderNumber,
+      customerName: "Admin",
+      customSubject: `Manuel atama gerekli — ${args.orderNumber}`,
+      customBody:
+        `Sipariş ${args.orderNumber} otomatik üretici atamasından çıktı.\n\n` +
+        `Sebep: ${args.reason}\n` +
+        `Reddeden üretici sayısı: ${args.declineCount}\n\n` +
+        `Lütfen /admin/orders üzerinden manuel olarak bir üretici atayın.`,
+      locale: "tr",
+    });
+  } catch (err) {
+    console.error(
+      `[N12] admin manual-assignment email enqueue failed for ${args.orderNumber}`,
+      err
+    );
+  }
+}
 
 export type DeclineResult =
   | { ok: true; action: "reassigned"; newManufacturerId: string }
@@ -108,6 +144,12 @@ export async function declineOrder(args: {
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+    await notifyAdminManualAssignment({
+      orderNumber: result.orderNumber,
+      orderId,
+      reason: `Max declines reached (${result.declinedCount})`,
+      declineCount: result.declinedCount,
+    });
     return {
       ok: true,
       action: "admin_queue",
@@ -133,6 +175,12 @@ export async function declineOrder(args: {
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+    await notifyAdminManualAssignment({
+      orderNumber: result.orderNumber,
+      orderId,
+      reason: "No eligible manufacturer remaining",
+      declineCount: result.declinedCount,
+    });
     return {
       ok: true,
       action: "admin_queue",

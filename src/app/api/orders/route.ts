@@ -8,7 +8,11 @@ import {
   users,
 } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
-import { PRICES_KURUS } from "@/lib/config/prices";
+import {
+  PRICES_KURUS,
+  UPSELL_PRICES_KURUS,
+  calculateUpsellAmount,
+} from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
 import {
@@ -63,7 +67,11 @@ export async function POST(request: NextRequest) {
     }
 
     const reference = buildDraftReference();
-    const amountKurus = PRICES_KURUS[validated.figurineSize];
+    // Dedupe upsells here so the DB row, gift-card math, and PayTR basket
+    // all see the same canonical list (server-trusted, not client-trusted).
+    const upsellKeys = Array.from(new Set(validated.upsells));
+    const upsellAmountKurus = calculateUpsellAmount(upsellKeys);
+    const amountKurus = PRICES_KURUS[validated.figurineSize] + upsellAmountKurus;
 
     let giftCardId: string | undefined;
     if (validated.giftCardCode) {
@@ -194,6 +202,8 @@ export async function POST(request: NextRequest) {
           giftCardId: giftCardId || null,
           giftCardAmountKurus,
           havaleDiscountKurus,
+          upsells: upsellKeys.length > 0 ? upsellKeys : null,
+          upsellAmountKurus,
           paymentMethod: finalPaymentMethod,
           status: "pending",
           paytrMerchantOid,
@@ -295,6 +305,18 @@ export async function POST(request: NextRequest) {
     const sizeLabel =
       d[`sizes.${validated.figurineSize}` as keyof typeof d] || validated.figurineSize;
 
+    // PayTR basket entries — the figurine itself plus one row per upsell so
+    // the customer's PayTR statement (and our refund-flow logs) show what
+    // was actually paid for. The first row covers the figurine net of the
+    // upsell total to keep the basket sum equal to paymentAmountKurus.
+    const figurineRowKurus = paymentAmountKurus - upsellAmountKurus;
+    const upsellBasketRows = upsellKeys.map((key) => ({
+      name:
+        d[`upsell.${key}.label` as keyof typeof d] || key,
+      priceTRY: (UPSELL_PRICES_KURUS[key] / 100).toFixed(2),
+      quantity: 1,
+    }));
+
     try {
       const paytrResult = await createPaytrToken({
         orderNumber: draft.reference,
@@ -307,9 +329,10 @@ export async function POST(request: NextRequest) {
         basket: [
           {
             name: `Figurin (${sizeLabel})`,
-            priceTRY: (paymentAmountKurus / 100).toFixed(2),
+            priceTRY: (figurineRowKurus / 100).toFixed(2),
             quantity: 1,
           },
+          ...upsellBasketRows,
         ],
         locale,
       });

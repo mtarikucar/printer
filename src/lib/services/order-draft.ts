@@ -97,6 +97,8 @@ export async function promoteDraftToOrder(
         amountKurus: draft.amountKurus,
         havaleDiscountKurus: draft.havaleDiscountKurus,
         giftCardAmountKurus: draft.giftCardAmountKurus,
+        upsells: draft.upsells,
+        upsellAmountKurus: draft.upsellAmountKurus,
         paidAt: new Date(),
         manufacturerStatus: "unassigned",
       })

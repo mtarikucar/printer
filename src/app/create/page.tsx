@@ -104,6 +104,26 @@ export default function CreatePage() {
   // Payment method state
   const [paymentMethod, setPaymentMethod] = useState<"card" | "bank_transfer">("card");
 
+  // Checkout upsells (Q10). Three optional add-ons with stable keys; pricing
+  // is duplicated here (in kuruş) to drive the live total without an extra
+  // round-trip. Server re-derives from `src/lib/config/prices.ts` so a
+  // tampered client never gets a discount.
+  const UPSELLS = [
+    { key: "extra_paint" as const, priceKurus: 4900 },
+    { key: "gift_wrap" as const, priceKurus: 2900 },
+    { key: "rush_shipping" as const, priceKurus: 7900 },
+  ];
+  const [selectedUpsells, setSelectedUpsells] = useState<string[]>([]);
+  const toggleUpsell = (key: string) => {
+    setSelectedUpsells((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+  const upsellTotalKurus = selectedUpsells.reduce(
+    (acc, key) => acc + (UPSELLS.find((u) => u.key === key)?.priceKurus ?? 0),
+    0
+  );
+
   // Loading stage rotation
   const [loadingStage, setLoadingStage] = useState(0);
   // Elapsed seconds since the preview job started. Drives the deterministic
@@ -593,6 +613,7 @@ export default function CreatePage() {
           previewId: previewId || undefined,
           giftCardCode: gcApplied?.code || undefined,
           paymentMethod,
+          upsells: selectedUpsells,
         }),
       });
 
@@ -1225,6 +1246,61 @@ export default function CreatePage() {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Upsells (Q10) — opt-in add-ons for AOV lift. Each row shows
+                  the kuruş price computed from the same constants the server
+                  validates against. */}
+              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-225">
+                <div className="p-6">
+                  <h3 className="text-sm font-medium text-text-secondary mb-3">
+                    {d["create.upsells.title"]}
+                  </h3>
+                  <p className="text-xs text-text-muted mb-4">
+                    {d["create.upsells.subtitle"]}
+                  </p>
+                  <div className="space-y-2">
+                    {UPSELLS.map((u) => {
+                      const checked = selectedUpsells.includes(u.key);
+                      return (
+                        <label
+                          key={u.key}
+                          className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
+                            checked
+                              ? "bg-green-500/10 border-green-500/30"
+                              : "bg-bg-surface border-bg-subtle hover:bg-bg-elevated"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleUpsell(u.key)}
+                            className="mt-1"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-text-primary">
+                                {d[`upsell.${u.key}.label` as keyof typeof d]}
+                              </span>
+                              <span className="text-sm text-text-secondary shrink-0">
+                                +₺{(u.priceKurus / 100).toFixed(2)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-text-muted mt-0.5">
+                              {d[`upsell.${u.key}.description` as keyof typeof d]}
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {upsellTotalKurus > 0 && (
+                    <p className="text-xs text-text-muted mt-3 text-right">
+                      {d["create.upsells.added"]} +₺
+                      {(upsellTotalKurus / 100).toFixed(2)}
+                    </p>
+                  )}
                 </div>
               </div>
 

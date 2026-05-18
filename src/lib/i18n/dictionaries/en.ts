@@ -253,6 +253,15 @@ const en = {
   "create.savedAddresses.label": "Pick a saved address",
   "create.savedAddresses.placeholder": "— Type manually or pick an address —",
   "create.savedAddresses.hint": "Manage saved addresses at /account → My Addresses.",
+  "create.upsells.title": "Extra touches",
+  "create.upsells.subtitle": "Want to add a few extras to your order?",
+  "create.upsells.added": "Added:",
+  "upsell.extra_paint.label": "Extra paint coat",
+  "upsell.extra_paint.description": "Richer colors and sharper detail.",
+  "upsell.gift_wrap.label": "Gift wrap",
+  "upsell.gift_wrap.description": "Kraft box + ribbon presentation.",
+  "upsell.rush_shipping.label": "Rush shipping",
+  "upsell.rush_shipping.description": "1–2 business day shipping after production.",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

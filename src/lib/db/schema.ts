@@ -250,6 +250,12 @@ export const orderDrafts = pgTable("order_drafts", {
   giftCardId: uuid("gift_card_id").references((): any => giftCards.id),
   giftCardAmountKurus: integer("gift_card_amount_kurus").notNull().default(0),
   havaleDiscountKurus: integer("havale_discount_kurus").notNull().default(0),
+  // Checkout add-ons (Q10): keys like "extra_paint", "gift_wrap",
+  // "rush_shipping". Pricing lives in src/lib/config/prices.ts; the sum is
+  // stored alongside in `upsellAmountKurus` so admin tooling doesn't have to
+  // re-derive it from the keys.
+  upsells: jsonb("upsells").$type<string[]>(),
+  upsellAmountKurus: integer("upsell_amount_kurus").notNull().default(0),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
   status: orderDraftStatusEnum("status").notNull().default("pending"),
   // PayTR
@@ -307,6 +313,11 @@ export const orders = pgTable("orders", {
   amountKurus: integer("amount_kurus").notNull(),
   havaleDiscountKurus: integer("havale_discount_kurus").notNull().default(0),
   giftCardAmountKurus: integer("gift_card_amount_kurus").notNull().default(0),
+  // Copied verbatim from the draft when an order is promoted. See orderDrafts
+  // for the schema rationale; the manufacturer queue UI reads these to
+  // surface "gift wrap" / "rush" handling flags on the print card.
+  upsells: jsonb("upsells").$type<string[]>(),
+  upsellAmountKurus: integer("upsell_amount_kurus").notNull().default(0),
   paidAt: timestamp("paid_at").notNull().defaultNow(),
   shippedAt: timestamp("shipped_at"),
   trackingNumber: text("tracking_number"),

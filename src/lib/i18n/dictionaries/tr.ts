@@ -255,6 +255,15 @@ const tr: Dictionary = {
   "create.savedAddresses.label": "Kayıtlı adreslerimden seç",
   "create.savedAddresses.placeholder": "— Manuel doldur veya bir adres seç —",
   "create.savedAddresses.hint": "Yeni adresleri /account → Adreslerim'den yönetebilirsin.",
+  "create.upsells.title": "Ekstra dokunuşlar",
+  "create.upsells.subtitle": "Siparişine birkaç ekstra eklemek ister misin?",
+  "create.upsells.added": "Eklendi:",
+  "upsell.extra_paint.label": "Ekstra boya katmanı",
+  "upsell.extra_paint.description": "Daha doygun renkler ve detay vurgusu.",
+  "upsell.gift_wrap.label": "Hediye paketi",
+  "upsell.gift_wrap.description": "Şık kraft kutu + kurdele ile teslimat.",
+  "upsell.rush_shipping.label": "Hızlı kargo",
+  "upsell.rush_shipping.description": "Üretim sonrası kargo süresi 1-2 iş günü.",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

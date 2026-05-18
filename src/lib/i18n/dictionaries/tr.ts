@@ -264,6 +264,7 @@ const tr: Dictionary = {
   "upsell.gift_wrap.description": "Şık kraft kutu + kurdele ile teslimat.",
   "upsell.rush_shipping.label": "Hızlı kargo",
   "upsell.rush_shipping.description": "Üretim sonrası kargo süresi 1-2 iş günü.",
+  "gallery.search.placeholder": "İsim veya etikete göre ara…",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

@@ -262,6 +262,7 @@ const en = {
   "upsell.gift_wrap.description": "Kraft box + ribbon presentation.",
   "upsell.rush_shipping.label": "Rush shipping",
   "upsell.rush_shipping.description": "1–2 business day shipping after production.",
+  "gallery.search.placeholder": "Search by name or tag…",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

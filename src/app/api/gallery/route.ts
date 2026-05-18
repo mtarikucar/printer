@@ -18,6 +18,11 @@ export async function GET(request: NextRequest) {
   const styleFilter = request.nextUrl.searchParams.get("style");
   const categoryFilter = request.nextUrl.searchParams.get("category");
   const tagFilter = request.nextUrl.searchParams.get("tag");
+  // Q9: keyword search across publicDisplayName + galleryTags. Trimmed +
+  // lowercased server-side; capped so a 10KB query string can't blow up the
+  // ILIKE pattern.
+  const rawQ = request.nextUrl.searchParams.get("q") ?? "";
+  const q = rawQ.trim().slice(0, 60).toLowerCase();
 
   const conditions = [
     eq(orders.isPublic, true),
@@ -55,6 +60,16 @@ export async function GET(request: NextRequest) {
 
   if (tagFilter) {
     conditions.push(sql`${orders.galleryTags} @> ${JSON.stringify([tagFilter])}::jsonb`);
+  }
+
+  if (q.length > 0) {
+    // Match against publicDisplayName OR any tag (substring, case-insensitive).
+    // Tags are stored lower-cased at write time (publish route already does
+    // `.toLowerCase()`), so a single ILIKE on the jsonb::text catches them.
+    const pattern = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+    conditions.push(
+      sql`(lower(${orders.publicDisplayName}) LIKE ${pattern} OR lower(${orders.galleryTags}::text) LIKE ${pattern})`
+    );
   }
 
   const publicOrders = await db.query.orders.findMany({

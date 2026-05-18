@@ -38,7 +38,11 @@ export function GalleryGrid({
   const [loading, setLoading] = useState(false);
   const [activeStyle, setActiveStyle] = useState("all");
   const [activeCategory, setActiveCategory] = useState("all");
-  const filtersRef = useRef({ style: "all", category: "all" });
+  // Q9: keyword search. We debounce client-side so each keystroke doesn't
+  // fire a request; the active value used by the API is `debouncedQ`.
+  const [query, setQuery] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const filtersRef = useRef({ style: "all", category: "all", q: "" });
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<string | null>(initialCursor);
@@ -47,7 +51,11 @@ export function GalleryGrid({
 
   // Fetch items (used for both filter changes and infinite scroll)
   const fetchItems = useCallback(
-    async (filters: { style: string; category: string }, cursorVal: string | null, append: boolean) => {
+    async (
+      filters: { style: string; category: string; q: string },
+      cursorVal: string | null,
+      append: boolean
+    ) => {
       // For infinite scroll, skip if already fetching
       if (append && fetchingRef.current) return;
 
@@ -62,6 +70,7 @@ export function GalleryGrid({
         const params = new URLSearchParams();
         if (filters.style !== "all") params.set("style", filters.style);
         if (filters.category !== "all") params.set("category", filters.category);
+        if (filters.q) params.set("q", filters.q);
         if (cursorVal) params.set("cursor", cursorVal);
 
         const res = await fetch(`/api/gallery?${params.toString()}`, { signal: controller.signal });
@@ -82,17 +91,35 @@ export function GalleryGrid({
   );
 
   const applyFilters = useCallback(
-    (style: string, category: string) => {
+    (style: string, category: string, q: string) => {
       setActiveStyle(style);
       setActiveCategory(category);
-      filtersRef.current = { style, category };
+      filtersRef.current = { style, category, q };
       setItems([]);
       setCursor(null);
       cursorRef.current = null;
-      fetchItems({ style, category }, null, false);
+      fetchItems({ style, category, q }, null, false);
     },
     [fetchItems]
   );
+
+  // Debounce keyword input — refire applyFilters 300ms after typing stops.
+  // We skip the initial mount (empty query == initial state already loaded).
+  const initialMountRef = useRef(true);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(query.trim()), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+  useEffect(() => {
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
+      return;
+    }
+    applyFilters(activeStyle, activeCategory, debouncedQ);
+    // intentionally omit activeStyle/activeCategory: they trigger via their
+    // own onSelect handlers which already call applyFilters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ]);
 
   // Infinite scroll via IntersectionObserver
   useEffect(() => {
@@ -116,17 +143,18 @@ export function GalleryGrid({
   if (items.length === 0 && !loading) {
     return (
       <>
+        <SearchBar value={query} onChange={setQuery} d={d} />
         <FilterTabs
           items={STYLE_FILTERS}
           active={activeStyle}
-          onSelect={(s) => applyFilters(s, activeCategory)}
+          onSelect={(s) => applyFilters(s, activeCategory, debouncedQ)}
           color="green"
           d={d}
         />
         <FilterTabs
           items={CATEGORY_FILTERS}
           active={activeCategory}
-          onSelect={(c) => applyFilters(activeStyle, c)}
+          onSelect={(c) => applyFilters(activeStyle, c, debouncedQ)}
           color="blue"
           d={d}
         />
@@ -145,18 +173,19 @@ export function GalleryGrid({
 
   return (
     <>
+      <SearchBar value={query} onChange={setQuery} d={d} />
       {/* Filter tabs */}
       <FilterTabs
         items={STYLE_FILTERS}
         active={activeStyle}
-        onSelect={(s) => applyFilters(s, activeCategory)}
+        onSelect={(s) => applyFilters(s, activeCategory, debouncedQ)}
         color="green"
         d={d}
       />
       <FilterTabs
         items={CATEGORY_FILTERS}
         active={activeCategory}
-        onSelect={(c) => applyFilters(activeStyle, c)}
+        onSelect={(c) => applyFilters(activeStyle, c, debouncedQ)}
         color="blue"
         d={d}
       />
@@ -187,6 +216,44 @@ export function GalleryGrid({
         <GalleryModal item={selectedItem} onClose={() => setSelectedItem(null)} />
       )}
     </>
+  );
+}
+
+// ─── Search Bar ──────────────────────────────────────────────
+
+function SearchBar({
+  value,
+  onChange,
+  d,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  d: Record<string, string>;
+}) {
+  return (
+    <div className="mb-4 relative">
+      <svg
+        className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+        />
+      </svg>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={d["gallery.search.placeholder"] || "Search…"}
+        className="input-base pl-9"
+        maxLength={60}
+      />
+    </div>
   );
 }
 

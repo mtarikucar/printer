@@ -78,7 +78,15 @@ function rasterizePdfToPng(pdfBuffer: Buffer): Promise<Buffer> {
     const child = execFile(
       "pdftoppm",
       ["-r", "200", "-png", "-f", "1", "-l", "1", "-", "-"],
-      { encoding: "buffer", maxBuffer: 50 * 1024 * 1024 },
+      {
+        encoding: "buffer",
+        maxBuffer: 50 * 1024 * 1024,
+        // Defense against a maliciously-crafted PDF that hangs pdftoppm.
+        // Normal single-page rasterization completes in <2s; 30s gives
+        // plenty of headroom for unusually large/dense pages while
+        // still bounding worst-case worker stall.
+        timeout: 30_000,
+      },
       (err, stdout) => {
         if (err) {
           reject(err);

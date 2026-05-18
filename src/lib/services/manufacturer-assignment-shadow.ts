@@ -55,9 +55,22 @@ export async function rankForOrderWithShadow(
 
   // Run both rankings in parallel. The authoritative one is what we
   // return; the shadow one is for the log row.
+  //
+  // Critical: the shadow profile MUST NOT take down the authoritative
+  // path. A broken v2 (env weight misparse, schema drift, OTD query
+  // failure on a manufacturer with weird timestamps) would otherwise
+  // crash the admin order page AND the N12 decline retry. Wrap the
+  // shadow ranker in its own catch so it degrades to an empty list and
+  // the log still gets a row (with a null shadow winner).
   const [authoritative, shadow] = await Promise.all([
     rankManufacturersForOrder(orderId, authoritativeProfile),
-    rankManufacturersForOrder(orderId, shadowProfile),
+    rankManufacturersForOrder(orderId, shadowProfile).catch((err) => {
+      console.warn(
+        `[Q7 shadow] ${shadowProfile} ranking failed for order ${orderId}:`,
+        err
+      );
+      return [] as CandidateScore[];
+    }),
   ]);
 
   // Best-effort logging — outside any transaction the caller may be in.

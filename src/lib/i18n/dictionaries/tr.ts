@@ -275,6 +275,10 @@ const tr: Dictionary = {
   "manufacturer.orderDetail.declineLink": "Sipariş için uygun değilim — reddet",
   "manufacturer.orderDetail.declineReasonPlaceholder": "Sebebiniz (opsiyonel)…",
   "manufacturer.orderDetail.confirmDecline": "Reddet",
+  "nav.styles": "Stiller",
+  "styles.indexTitle": "Figürin Stilleri",
+  "styles.indexSubtitle": "5 farklı tarzdan kendinize en uygun olanı seçin. Her stilin detayını ve örneklerini inceleyebilirsiniz.",
+  "styles.learnMore": "Detayları gör",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

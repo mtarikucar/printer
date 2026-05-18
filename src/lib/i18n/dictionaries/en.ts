@@ -273,6 +273,10 @@ const en = {
   "manufacturer.orderDetail.declineLink": "Not the right fit — decline",
   "manufacturer.orderDetail.declineReasonPlaceholder": "Reason (optional)…",
   "manufacturer.orderDetail.confirmDecline": "Decline",
+  "nav.styles": "Styles",
+  "styles.indexTitle": "Figurine Styles",
+  "styles.indexSubtitle": "Pick the style that suits your gift. Each style has its own dedicated page with examples and details.",
+  "styles.learnMore": "Learn more",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

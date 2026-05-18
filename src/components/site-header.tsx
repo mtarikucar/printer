@@ -47,6 +47,7 @@ export function SiteHeader() {
     .toUpperCase() || "?";
 
   const navLinks = [
+    { href: "/styles", label: d["nav.styles"] },
     { href: "/gallery", label: d["nav.gallery"] },
     { href: "/create", label: d["nav.create"] },
     ...(user ? [{ href: "/account", label: d["nav.myOrders"] }] : []),

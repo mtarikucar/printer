@@ -407,6 +407,178 @@ export function HowItWorks({ d }: { d: FigurunicaDict }) {
   );
 }
 
+/**
+ * Trust signals — testimonials + stats + payment badges.
+ *
+ * Lives between FAQ and CtaBand on the landing page. Built with plain
+ * Tailwind (not the module.css design system of the rest of figurunica/)
+ * because the cards reuse the shared `.card` / `.trust-pill` classes from
+ * globals.css and the stat row is essentially a `.btn-amber`-style block —
+ * keeping it portable lets us drop the same TrustSignals on per-style
+ * landing pages later (Q2) without redesign.
+ *
+ * Note on copy: the testimonials are placeholders pending real customer
+ * permission to use names + photos. Names/cities are realistic Turkish but
+ * intentionally not tied to actual orders. Replace before any growth push
+ * (TR consumer-protection law prefers attributed reviews).
+ */
+export function TrustSignals({ d }: { d: FigurunicaDict }) {
+  const testimonials = [
+    {
+      quote: d["landing.fig.trust.t1.quote"],
+      name: d["landing.fig.trust.t1.name"],
+      location: d["landing.fig.trust.t1.location"],
+    },
+    {
+      quote: d["landing.fig.trust.t2.quote"],
+      name: d["landing.fig.trust.t2.name"],
+      location: d["landing.fig.trust.t2.location"],
+    },
+    {
+      quote: d["landing.fig.trust.t3.quote"],
+      name: d["landing.fig.trust.t3.name"],
+      location: d["landing.fig.trust.t3.location"],
+    },
+  ];
+
+  const stats = [
+    {
+      v: d["landing.fig.trust.statOrders"],
+      l: d["landing.fig.trust.statOrdersLabel"],
+    },
+    {
+      v: d["landing.fig.trust.statRating"],
+      l: d["landing.fig.trust.statRatingLabel"],
+    },
+    {
+      v: d["landing.fig.trust.statShipping"],
+      l: d["landing.fig.trust.statShippingLabel"],
+    },
+  ];
+
+  const badges = [
+    {
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 11c-1.105 0-2 .9-2 2v3a2 2 0 002 2 2 2 0 002-2v-3c0-1.1-.895-2-2-2zm6-2V8a6 6 0 10-12 0v1a3 3 0 00-3 3v8a3 3 0 003 3h12a3 3 0 003-3v-8a3 3 0 00-3-3z"
+          />
+        </svg>
+      ),
+      label: d["landing.fig.trust.badge.ssl"],
+    },
+    {
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3 10h18M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z"
+          />
+        </svg>
+      ),
+      label: d["landing.fig.trust.badge.payment"],
+    },
+    {
+      icon: (
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+          />
+        </svg>
+      ),
+      label: d["landing.fig.trust.badge.refund"],
+    },
+  ];
+
+  return (
+    <section className="px-4 sm:px-6 py-16 sm:py-24 bg-bg-base">
+      <div className="max-w-5xl mx-auto">
+        <div className="text-center mb-12">
+          <p className="text-xs font-semibold tracking-[0.2em] text-green-500 mb-2">
+            {d["landing.fig.trust.eyebrow"]}
+          </p>
+          <h2 className="text-2xl sm:text-3xl font-serif text-text-primary">
+            {d["landing.fig.trust.title"]}
+          </h2>
+        </div>
+
+        {/* Stat strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12">
+          {stats.map((s) => (
+            <div
+              key={s.l}
+              className="card p-6 text-center"
+            >
+              <p className="text-3xl font-mono font-bold text-green-500">{s.v}</p>
+              <p className="text-sm text-text-muted mt-1">{s.l}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Testimonials */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+          {testimonials.map((t) => (
+            <figure key={t.name} className="card p-6">
+              <svg
+                className="w-6 h-6 text-green-500/60 mb-3"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path d="M9.4 7C5.9 7 3 9.9 3 13.4v3.5h6.4V13.4H5.9c0-1.9 1.5-3.5 3.5-3.5V7zm9 0c-3.5 0-6.4 2.9-6.4 6.4v3.5h6.4V13.4h-3.5c0-1.9 1.5-3.5 3.5-3.5V7z" />
+              </svg>
+              <blockquote className="text-sm text-text-secondary leading-relaxed">
+                {t.quote}
+              </blockquote>
+              <figcaption className="mt-4 pt-4 border-t border-bg-subtle">
+                <p className="text-sm font-semibold text-text-primary">
+                  {t.name}
+                </p>
+                <p className="text-xs text-text-muted">{t.location}</p>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+
+        {/* Badge strip */}
+        <div className="flex flex-wrap justify-center gap-3">
+          {badges.map((b) => (
+            <span
+              key={b.label}
+              className="trust-pill"
+            >
+              {b.icon}
+              {b.label}
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function CtaBand({ d }: { d: FigurunicaDict }) {
   return (
     <section className={s("cta-band")}>

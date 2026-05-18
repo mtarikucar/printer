@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import type { FigurunicaDict } from "./dict";
-import { HeroIntro, StyleGallery, HowItWorks, CtaBand, FigFooter, FloatingCta } from "./sections";
+import {
+  HeroIntro,
+  StyleGallery,
+  HowItWorks,
+  TrustSignals,
+  CtaBand,
+  FigFooter,
+  FloatingCta,
+} from "./sections";
 import { ScrollJourney } from "./journey";
 import { FaqSection } from "./faq";
 import styles from "./figurunica.module.css";
@@ -30,6 +38,7 @@ export function FigurunicaLanding({ d }: { d: FigurunicaDict }) {
       <ScrollJourney d={d} />
       <StyleGallery d={d} />
       <HowItWorks d={d} />
+      <TrustSignals d={d} />
       <FaqSection d={d} />
       <CtaBand d={d} />
       <FigFooter d={d} />

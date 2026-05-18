@@ -10,7 +10,7 @@ import {
 import { createOrderSchema } from "@/lib/validators/order";
 import {
   PRICES_KURUS,
-  UPSELL_PRICES_KURUS,
+  allocatePaytrBasket,
   calculateUpsellAmount,
 } from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
@@ -381,45 +381,17 @@ export async function POST(request: NextRequest) {
     const sizeLabel =
       d[`sizes.${validated.figurineSize}` as keyof typeof d] || validated.figurineSize;
 
-    // PayTR basket entries — the figurine itself plus one row per upsell so
-    // the customer's PayTR statement (and our refund-flow logs) show what
-    // was actually paid for.
-    //
-    // Edge case (review C3): if a gift card covers most of the figurine
-    // and the upsell total approaches/exceeds the remaining payment, the
-    // naive `paymentAmount - upsellTotal` figurine row can go negative
-    // (PayTR rejects basket). Strategy: clamp the figurine row to 0 and
-    // proportionally reduce upsell rows so the basket sum still equals
-    // paymentAmountKurus. We allocate from the largest upsells first so
-    // small ones survive at full price when possible.
-    const figurineGross = paymentAmountKurus - upsellAmountKurus;
-    let figurineRowKurus = Math.max(0, figurineGross);
-    // upsellBudget = how much the basket has left for upsells after the
-    // (possibly-clamped) figurine row.
-    let upsellBudget = paymentAmountKurus - figurineRowKurus;
-    const sortedUpsells = [...upsellKeys].sort(
-      (a, b) => UPSELL_PRICES_KURUS[b] - UPSELL_PRICES_KURUS[a]
-    );
-    const upsellBasketRows: Array<{ name: string; priceTRY: string; quantity: number }> = [];
-    for (const key of sortedUpsells) {
-      const full = UPSELL_PRICES_KURUS[key];
-      const allocated = Math.max(0, Math.min(full, upsellBudget));
-      upsellBudget -= allocated;
-      // Skip zero-allocated rows so PayTR doesn't see basket lines that
-      // contribute nothing. The customer still sees the gift-card
-      // discount line in our /track receipt UI.
-      if (allocated > 0) {
-        upsellBasketRows.push({
-          name: d[`upsell.${key}.label` as keyof typeof d] || key,
-          priceTRY: (allocated / 100).toFixed(2),
-          quantity: 1,
-        });
-      }
-    }
-    // After allocation any rounding diff stays on the figurine row.
-    // (We never call this with paymentAmountKurus < 0 — fully covered
-    // orders skip this branch entirely.)
-    figurineRowKurus += upsellBudget;
+    // PayTR basket: figurine + per-upsell rows, summing to
+    // paymentAmountKurus. See allocatePaytrBasket for the gift-card +
+    // upsell edge-case handling (review C3).
+    const basket = allocatePaytrBasket({
+      paymentAmountKurus,
+      figurineName: `Figurin (${sizeLabel})`,
+      upsellAmountKurus,
+      upsellKeys,
+      upsellLabel: (key) =>
+        (d[`upsell.${key}.label` as keyof typeof d] as string) || key,
+    });
 
     try {
       const paytrResult = await createPaytrToken({
@@ -430,14 +402,7 @@ export async function POST(request: NextRequest) {
         userAddress: `${addr.mahalle ? addr.mahalle + ", " : ""}${addr.adres}, ${addr.ilce}/${addr.il}`,
         userPhone: addr.telefon,
         userIp,
-        basket: [
-          {
-            name: `Figurin (${sizeLabel})`,
-            priceTRY: (figurineRowKurus / 100).toFixed(2),
-            quantity: 1,
-          },
-          ...upsellBasketRows,
-        ],
+        basket,
         locale,
       });
 

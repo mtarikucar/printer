@@ -40,3 +40,66 @@ export function calculateUpsellAmount(upsells: string[] | null | undefined): num
   }
   return total;
 }
+
+export interface PaytrBasketRow {
+  name: string;
+  /** Two-decimal stringified TRY, e.g. "1399.00" — PayTR's format. */
+  priceTRY: string;
+  quantity: number;
+}
+
+/**
+ * Allocate `paymentAmountKurus` across the figurine row and one row
+ * per selected upsell so the basket sum exactly equals
+ * paymentAmountKurus. Handles the edge case (review C3) where a gift
+ * card covers most of the figurine but the upsell total exceeds the
+ * remaining payment — the naive "figurine = payment - upsells" math
+ * would go negative and PayTR would reject the basket.
+ *
+ * Strategy: clamp the figurine row to 0 (never negative), then
+ * distribute the remaining payment budget across upsells largest-first.
+ * Zero-allocated upsell rows are filtered out so PayTR statement
+ * doesn't show empty lines.
+ *
+ * Caller is responsible for ensuring `paymentAmountKurus >= 0` (fully
+ * covered orders skip the PayTR path entirely).
+ */
+export function allocatePaytrBasket(args: {
+  paymentAmountKurus: number;
+  figurineName: string;
+  upsellAmountKurus: number;
+  upsellKeys: string[];
+  upsellLabel: (key: string) => string;
+}): PaytrBasketRow[] {
+  const figurineGross = args.paymentAmountKurus - args.upsellAmountKurus;
+  let figurineRowKurus = Math.max(0, figurineGross);
+  let upsellBudget = args.paymentAmountKurus - figurineRowKurus;
+
+  const sortedUpsells = [...args.upsellKeys].sort(
+    (a, b) => (UPSELL_PRICES_KURUS[b] ?? 0) - (UPSELL_PRICES_KURUS[a] ?? 0)
+  );
+
+  const upsellBasketRows: PaytrBasketRow[] = [];
+  for (const key of sortedUpsells) {
+    const full = UPSELL_PRICES_KURUS[key] ?? 0;
+    const allocated = Math.max(0, Math.min(full, upsellBudget));
+    upsellBudget -= allocated;
+    if (allocated > 0) {
+      upsellBasketRows.push({
+        name: args.upsellLabel(key),
+        priceTRY: (allocated / 100).toFixed(2),
+        quantity: 1,
+      });
+    }
+  }
+  figurineRowKurus += upsellBudget;
+
+  return [
+    {
+      name: args.figurineName,
+      priceTRY: (figurineRowKurus / 100).toFixed(2),
+      quantity: 1,
+    },
+    ...upsellBasketRows,
+  ];
+}

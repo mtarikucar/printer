@@ -54,6 +54,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const rows = await db
       .select({
         orderNumber: orders.orderNumber,
+        gallerySlug: orders.gallerySlug,
         publishedAt: orders.publishedAt,
         updatedAt: orders.updatedAt,
       })
@@ -67,11 +68,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .orderBy(desc(orders.publishedAt))
       .limit(5000);
 
+    // Rows approved before Q3 don't have a slug yet. Fall back to a
+    // fragment URL on /gallery so the orderNumber still lands somewhere
+    // usable; once admin re-saves the row a slug gets generated.
     galleryEntries = rows.map((r) => ({
-      url: `${baseUrl}/gallery#${encodeURIComponent(r.orderNumber)}`,
+      url: r.gallerySlug
+        ? `${baseUrl}/gallery/${r.gallerySlug}`
+        : `${baseUrl}/gallery#${encodeURIComponent(r.orderNumber)}`,
       lastModified: r.updatedAt ?? r.publishedAt ?? now,
       changeFrequency: "monthly" as const,
-      priority: 0.5,
+      priority: r.gallerySlug ? 0.7 : 0.5,
     }));
   } catch (err) {
     // Sitemap generation must never crash the route — if DB is down at

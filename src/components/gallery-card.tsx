@@ -12,6 +12,9 @@ export interface GalleryItem {
   publishedAt: string | null;
   glbUrl: string | null;
   thumbnailUrl: string | null;
+  /** Q3: SEO-friendly shareable slug. Null for legacy rows pre-Q3 — those
+   *  open only in the modal until an admin re-saves the row. */
+  slug: string | null;
 }
 
 const STYLE_BADGE_COLORS: Record<string, string> = {

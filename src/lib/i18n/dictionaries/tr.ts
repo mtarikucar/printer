@@ -270,6 +270,8 @@ const tr: Dictionary = {
   "create.guest.fullName": "Ad Soyad",
   "create.guest.email": "E-posta",
   "create.guest.alreadyHaveAccount": "Hesabınız var mı? Giriş yapın",
+  "gallery.permalink": "Bu figüre özel bağlantı",
+  "gallery.backToGallery": "Galeriye dön",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

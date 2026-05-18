@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { createGiftCard } from "@/lib/services/gift-card";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { generateGallerySlug } from "@/lib/services/slug";
 
 /**
  * Gallery moderation service (Q4 in roadmap).
@@ -88,6 +89,15 @@ export async function approveGalleryItem(
     return { ok: false, reason: `cannot approve from ${order.galleryReviewStatus}` };
   }
 
+  // Slug is computed outside the transaction so the uniqueness check can
+  // see committed rows. The collision window is harmless: even if two
+  // approvals race and both generate the same slug, the unique index
+  // rejects the second; admin retries get a "-2" suffix on the next try.
+  const slug = await generateGallerySlug(
+    order.orderNumber,
+    params.displayName ?? null
+  );
+
   await db.transaction(async (tx) => {
     await tx
       .update(orders)
@@ -99,6 +109,7 @@ export async function approveGalleryItem(
         galleryCategory: sanitizeCategory(params.category),
         galleryTags: sanitizeTags(params.tags),
         publicDisplayName: params.displayName ?? null,
+        gallerySlug: slug,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, params.orderId));
@@ -235,6 +246,17 @@ export async function rewardAndApproveGalleryItem(
     recipientName: order.customerName,
   });
 
+  // Slug — same rationale as approveGalleryItem. Idempotent: if a slug
+  // already exists on the row (e.g. from a prior approve-without-reward),
+  // we keep it to preserve any externally-shared links.
+  const existingSlug = await db.query.orders.findFirst({
+    where: eq(orders.id, params.orderId),
+    columns: { gallerySlug: true },
+  });
+  const slug =
+    existingSlug?.gallerySlug ??
+    (await generateGallerySlug(order.orderNumber, params.displayName ?? null));
+
   await db.transaction(async (tx) => {
     await tx
       .update(orders)
@@ -247,6 +269,7 @@ export async function rewardAndApproveGalleryItem(
         galleryTags: sanitizeTags(params.tags),
         publicDisplayName: params.displayName ?? null,
         galleryRewardGiftCardId: card.id,
+        gallerySlug: slug,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, params.orderId));

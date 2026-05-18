@@ -268,6 +268,8 @@ const en = {
   "create.guest.fullName": "Full name",
   "create.guest.email": "Email",
   "create.guest.alreadyHaveAccount": "Already have an account? Sign in",
+  "gallery.permalink": "Permalink to this figurine",
+  "gallery.backToGallery": "Back to gallery",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

@@ -340,6 +340,10 @@ export const orders = pgTable("orders", {
   isPublic: boolean("is_public").notNull().default(false),
   publicDisplayName: text("public_display_name"),
   publishedAt: timestamp("published_at"),
+  // Q3: SEO-friendly shareable URL fragment, e.g. "ayse-yilmaz-fig-abc123".
+  // Set when admin approves the gallery item; null otherwise. Unique so a
+  // single slug always resolves to one order — collisions get a suffix.
+  gallerySlug: text("gallery_slug").unique(),
   galleryCategory: text("gallery_category"),
   galleryTags: jsonb("gallery_tags").$type<string[]>(),
   // Customer-requested gallery publication moderation (Q4 in roadmap).

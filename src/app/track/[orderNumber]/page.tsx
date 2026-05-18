@@ -239,7 +239,7 @@ export default function TrackPage({
             continue;
           }
           if (!cancelled) {
-            setVerifyError(d["track.verifyFailed"]);
+            setVerifyError(d["track.verify.failed"]);
             setVerifying(false);
           }
           return;
@@ -247,13 +247,16 @@ export default function TrackPage({
         if (cancelled) return;
 
         if (res.status === 401) {
-          setVerifyError(d["track.verifyAuthLost"]);
+          setVerifyError(d["track.verify.authLost"]);
           setVerifying(false);
           return;
         }
         if (res.status === 429) {
-          // Rate limited — bail to the background poller. No banner: the
-          // poller will pick up the eventual success.
+          // Rate limited (per-user or per-orderNumber). Surface a banner so
+          // the user knows nothing is happening behind the scenes — they can
+          // wait and use the manual button later. Background poller still
+          // runs every 30s and will pick up a webhook-driven success.
+          setVerifyError(d["track.verify.failed"]);
           setVerifying(false);
           return;
         }
@@ -298,7 +301,7 @@ export default function TrackPage({
             continue;
           }
           if (!cancelled) {
-            setVerifyError(d["track.verifyStillWaiting"]);
+            setVerifyError(d["track.verify.stillWaiting"]);
             setVerifying(false);
           }
           return;
@@ -311,7 +314,7 @@ export default function TrackPage({
           continue;
         }
         if (!cancelled) {
-          setVerifyError(d["track.verifyFailed"]);
+          setVerifyError(d["track.verify.failed"]);
           setVerifying(false);
         }
         return;
@@ -337,11 +340,13 @@ export default function TrackPage({
         }
       );
       if (res.status === 401) {
-        setVerifyError(d["track.verifyAuthLost"]);
+        setVerifyError(d["track.verify.authLost"]);
         return;
       }
       if (res.status === 429) {
-        // Mirror the loop: bail silently — poller will recover.
+        // Surface a banner so a rapid-click user understands they hit the
+        // limit. Keeps parity with the auto-loop's 429 handling.
+        setVerifyError(d["track.verify.failed"]);
         return;
       }
       const data = (await res.json().catch(() => null)) as
@@ -360,11 +365,11 @@ export default function TrackPage({
       // Still waiting / verify_error.
       setVerifyError(
         data?.state === "waiting"
-          ? d["track.verifyStillWaiting"]
-          : d["track.verifyFailed"]
+          ? d["track.verify.stillWaiting"]
+          : d["track.verify.failed"]
       );
     } catch {
-      setVerifyError(d["track.verifyFailed"]);
+      setVerifyError(d["track.verify.failed"]);
     } finally {
       setManualVerifying(false);
     }
@@ -395,16 +400,21 @@ export default function TrackPage({
           </div>
         ) : order ? (
           <div className="space-y-6 animate-fade-in-up">
-            {/* Post-PayTR redirect toast */}
-            {paymentParam === "success" && order.paymentStatus !== "succeeded" && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
-                <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full mt-0.5 shrink-0" />
-                <div className="text-sm">
-                  <p className="font-semibold text-blue-900">{d["payment.processing"]}</p>
-                  <p className="text-blue-700">{d["track.paymentSuccessPending"]}</p>
+            {/* Post-PayTR redirect "we're updating" toast — suppressed when
+                the verify-payment retry loop has settled into a non-success
+                state (`verifyError` set), because that banner is more
+                informative and showing both at once is contradictory. */}
+            {paymentParam === "success" &&
+              order.paymentStatus !== "succeeded" &&
+              !verifyError && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
+                  <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full mt-0.5 shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-semibold text-blue-900">{d["payment.processing"]}</p>
+                    <p className="text-blue-700">{d["track.paymentSuccessPending"]}</p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
             {paymentParam === "success" && order.paymentStatus === "succeeded" && (
               <div className="rounded-xl border border-green-200 bg-green-50 p-4 flex items-start gap-3">
                 <svg
@@ -469,12 +479,18 @@ export default function TrackPage({
                   <button
                     type="button"
                     onClick={handleManualVerify}
-                    disabled={manualVerifying}
+                    // Disable while EITHER the manual click is in flight OR
+                    // the auto-loop is still iterating. Without the second
+                    // flag a user could press the button between the loop
+                    // setting `verifyError` and `setVerifying(false)`
+                    // flushing, queueing a duplicate fetch that the server
+                    // would have to rate-limit.
+                    disabled={manualVerifying || verifying}
                     className="mt-3 inline-flex items-center px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:bg-gray-300"
                   >
                     {manualVerifying
-                      ? d["track.checkingPaytr"]
-                      : d["track.checkPaytrStatus"]}
+                      ? d["track.verify.checking"]
+                      : d["track.verify.checkStatus"]}
                   </button>
                 </div>
               </div>

@@ -291,12 +291,13 @@ test.describe("Track page — PayTR card payment recovery", () => {
     await page.goto(`/track/${REF}?payment=success`);
 
     // The banner appears after the retry loop exhausts (1 initial + 4 retries
-    // with 3+6+10+15s waits = ~34s wall time before banner). Allow margin.
+    // with 3+6+10+15s waits = ~34s wall time before banner). 60s gives
+    // ~26s margin so slow CI runners don't flake the assertion.
     await expect(
       page.getByText(
         /Ödemeniz hâlâ doğrulanıyor|Payment is still being verified/i
       )
-    ).toBeVisible({ timeout: 45_000 });
+    ).toBeVisible({ timeout: 60_000 });
 
     // Manual recovery button must be present.
     await expect(

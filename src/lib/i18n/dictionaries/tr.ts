@@ -1048,14 +1048,14 @@ const tr: Dictionary = {
   "track.retryPayment.desc":
     "Önceki deneme tamamlanmadı. Tekrar dene'ye dokunarak güvenli ödemeye yönlendirilirsiniz.",
   "track.retryPayment.button": "Ödemeyi tekrar dene",
-  "track.verifyStillWaiting":
+  "track.verify.stillWaiting":
     "Ödemeniz hâlâ doğrulanıyor. Birkaç dakika içinde güncellenmezse 'PayTR durumunu sorgula' butonuna basın.",
-  "track.verifyAuthLost":
+  "track.verify.authLost":
     "Oturumunuz sona erdi. Sayfayı yenileyin ve yeniden giriş yapın.",
-  "track.verifyFailed":
+  "track.verify.failed":
     "Doğrulama tamamlanamadı. Sayfayı yenileyin veya destek ekibi ile iletişime geçin.",
-  "track.checkPaytrStatus": "PayTR durumunu sorgula",
-  "track.checkingPaytr": "Sorgulanıyor...",
+  "track.verify.checkStatus": "PayTR durumunu sorgula",
+  "track.verify.checking": "Sorgulanıyor...",
   "track.cancelled.title": "Sipariş iptal edildi",
   "track.bankTransferPaid.title": "Havale alındı",
   "track.bankTransferPaid.viewReceipt": "Dekontu görüntüle",

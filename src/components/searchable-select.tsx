@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { Input } from "@/components/ui";
 
 interface SearchableSelectProps {
   options: string[];
@@ -122,10 +123,9 @@ export function SearchableSelect({
 
   return (
     <div ref={containerRef} className="relative">
-      <input
+      <Input
         ref={inputRef}
         type="text"
-        className="input-base"
         placeholder={value || placeholder}
         value={open ? query : value}
         required={required && !value}

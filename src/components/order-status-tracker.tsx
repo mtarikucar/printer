@@ -2,6 +2,7 @@
 
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
+import { Card } from "@/components/ui";
 
 function getSteps(d: Dictionary) {
   return [
@@ -36,7 +37,7 @@ export function OrderStatusTracker({
 
   if (status === "pending_payment") {
     return (
-      <div className="card bg-bg-elevated border-l-4 border-yellow-500 p-6">
+      <Card className="bg-bg-elevated border-l-4 border-yellow-500 p-6">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 bg-yellow-500/20 rounded-full flex items-center justify-center shrink-0">
             <svg className="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -52,13 +53,13 @@ export function OrderStatusTracker({
             </p>
           </div>
         </div>
-      </div>
+      </Card>
     );
   }
 
   if (isFailed) {
     return (
-      <div className="card bg-bg-elevated border-l-4 border-amber-500 p-6">
+      <Card className="bg-bg-elevated border-l-4 border-amber-500 p-6">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 bg-amber-500/20 rounded-full flex items-center justify-center shrink-0">
             <svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -74,7 +75,7 @@ export function OrderStatusTracker({
             </p>
           </div>
         </div>
-      </div>
+      </Card>
     );
   }
 

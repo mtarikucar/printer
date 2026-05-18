@@ -9,6 +9,7 @@ import { BankTransferInstructions } from "@/components/bank-transfer-instruction
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
+import { Card } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +64,7 @@ export default async function HavalePage({
       <main className="min-h-screen bg-bg-base">
         <SiteHeader />
         <div className="max-w-3xl mx-auto px-4 py-12 space-y-6">
-          <div className="card p-6 sm:p-8">
+          <Card className="p-6 sm:p-8">
             <h1 className="text-2xl font-serif text-text-primary">
               {d["havale.page.title"]}
             </h1>
@@ -74,7 +75,7 @@ export default async function HavalePage({
             <p className="text-sm text-text-muted mt-2">
               {d["havale.page.instructions"]}
             </p>
-          </div>
+          </Card>
 
           <BankTransferInstructions
             orderNumber={draft.reference}
@@ -86,21 +87,21 @@ export default async function HavalePage({
           />
 
           {ocrStatus === "scanning" && (
-            <div className="card p-4 border-l-4 border-blue-500 text-sm text-blue-900 bg-blue-50">
+            <Card className="p-4 border-l-4 border-blue-500 text-sm text-blue-900 bg-blue-50">
               {d["havale.page.ocrScanning"]}
-            </div>
+            </Card>
           )}
 
           {ocrStatus === "high" && (
-            <div className="card p-4 border-l-4 border-green-500 text-sm text-green-900 bg-green-50">
+            <Card className="p-4 border-l-4 border-green-500 text-sm text-green-900 bg-green-50">
               {d["havale.page.ocrHigh"]}
-            </div>
+            </Card>
           )}
 
           {(ocrStatus === "medium" || ocrStatus === "low") && (
-            <div className="card p-4 border-l-4 border-amber-500 text-sm text-amber-900 bg-amber-50">
+            <Card className="p-4 border-l-4 border-amber-500 text-sm text-amber-900 bg-amber-50">
               {d["havale.page.ocrMedium"]}
-            </div>
+            </Card>
           )}
 
           <p className="text-center text-xs text-text-muted">

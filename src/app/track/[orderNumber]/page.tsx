@@ -9,6 +9,7 @@ import { SiteHeader } from "@/components/site-header";
 import { BankTransferInstructions } from "@/components/bank-transfer-instructions";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatDateLong } from "@/lib/i18n/format";
+import { Button, Card } from "@/components/ui";
 
 function ReorderButton({ orderNumber: on }: { orderNumber: string }) {
   const d = useDictionary();
@@ -41,13 +42,14 @@ function ReorderButton({ orderNumber: on }: { orderNumber: string }) {
   };
 
   return (
-    <button
+    <Button
       onClick={handleReorder}
-      disabled={loading}
-      className="btn-primary text-sm !py-2 !px-6"
+      loading={loading}
+      size="sm"
+      className="!px-6"
     >
       {loading ? d["track.reordering"] : d["track.reorder"]}
-    </button>
+    </Button>
   );
 }
 
@@ -396,9 +398,9 @@ export default function TrackPage({
             </div>
             <h1 className="mt-4 text-2xl font-serif text-text-primary">{d["track.notFound"]}</h1>
             <p className="mt-2 text-text-secondary">{error}</p>
-            <a href="/" className="btn-primary mt-6 inline-flex">
+            <Button href="/" className="mt-6 inline-flex">
               {d["common.backHome"]}
-            </a>
+            </Button>
           </div>
         ) : order ? (
           <div className="space-y-6 animate-fade-in-up">
@@ -499,7 +501,7 @@ export default function TrackPage({
             )}
 
             {/* Order info card */}
-            <div className="card p-6 sm:p-8">
+            <Card className="p-6 sm:p-8">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h1 className="text-2xl font-serif text-text-primary">
@@ -517,7 +519,7 @@ export default function TrackPage({
                   {formatDateLong(order.paidAt, locale)}
                 </p>
               )}
-            </div>
+            </Card>
 
             {/* Retry payment for failed card orders. Hidden while a returning
                 PayTR verification is in flight so we don't show the user a "retry"
@@ -526,33 +528,34 @@ export default function TrackPage({
               order.status === "pending_payment" &&
               order.paymentMethod === "card" &&
               (order.paymentStatus === "failed" || order.paymentStatus === "pending") && (
-                <div className="card p-6 border-l-4 border-amber-500">
+                <Card padding="md" className="border-l-4 border-amber-500">
                   <h2 className="text-lg font-serif text-text-primary mb-2">
                     {d["track.retryPayment.title"]}
                   </h2>
                   <p className="text-sm text-text-secondary mb-4">
                     {d["track.retryPayment.desc"]}
                   </p>
-                  <button
+                  <Button
                     type="button"
                     onClick={handleRetryPayment}
-                    disabled={retrying}
-                    className="btn-primary !py-2 !px-6 text-sm"
+                    loading={retrying}
+                    size="sm"
+                    className="!px-6"
                   >
                     {retrying ? d["payment.processing"] : d["track.retryPayment.button"]}
-                  </button>
-                </div>
+                  </Button>
+                </Card>
               )}
 
             {/* Failure / rejected banner */}
             {(order.status === "rejected" || order.paymentStatus === "expired") &&
               order.failureReason && (
-                <div className="card p-6 border-l-4 border-red-500">
+                <Card padding="md" className="border-l-4 border-red-500">
                   <h2 className="text-lg font-serif text-text-primary mb-2">
                     {d["track.cancelled.title"]}
                   </h2>
                   <p className="text-sm text-text-secondary">{order.failureReason}</p>
-                </div>
+                </Card>
               )}
 
             {/* Bank transfer instructions (awaiting transfer) */}
@@ -569,7 +572,7 @@ export default function TrackPage({
 
             {/* Bank transfer history (after successful payment) */}
             {order.bankTransferHistory && (
-              <div className="card p-6">
+              <Card padding="md">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
                     <svg
@@ -608,31 +611,31 @@ export default function TrackPage({
                     )}
                   </div>
                 </div>
-              </div>
+              </Card>
             )}
 
             {/* Status tracker card */}
-            <div className="card shadow-elevated p-6 sm:p-8">
+            <Card elevated className="p-6 sm:p-8">
               <OrderStatusTracker
                 status={order.status}
                 trackingNumber={order.trackingNumber}
               />
-            </div>
+            </Card>
 
             {/* 3D model viewer */}
             {order.glbUrl && (
-              <div className="card overflow-hidden">
+              <Card className="overflow-hidden">
                 <ModelViewer
                   url={order.glbUrl}
                   className="w-full h-72 sm:h-96"
                 />
-              </div>
+              </Card>
             )}
 
             {/* Reorder block: instant repeat (same settings) + modify-and-reorder
                 (same photo, customer can change size/style/modifier first). */}
             {order.status !== "pending_payment" && order.status !== "rejected" && (
-              <div className="card p-6 space-y-4">
+              <Card padding="md" className="space-y-4">
                 <div>
                   <h2 className="text-lg font-serif text-text-primary mb-2">{d["track.reorder"]}</h2>
                   <p className="text-sm text-text-secondary mb-3">{d["track.reorderDesc"]}</p>
@@ -645,14 +648,16 @@ export default function TrackPage({
                   <p className="text-xs text-text-muted mb-3">
                     {d["track.reorderModifyDesc"]}
                   </p>
-                  <a
+                  <Button
                     href={`/create?fromOrder=${encodeURIComponent(order.orderNumber)}`}
-                    className="btn-secondary text-sm !py-2 !px-6 inline-flex"
+                    variant="secondary"
+                    size="sm"
+                    className="!px-6 inline-flex"
                   >
                     {d["track.reorderModify"]}
-                  </a>
+                  </Button>
                 </div>
-              </div>
+              </Card>
             )}
 
             {/* Publish toggle */}

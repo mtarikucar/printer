@@ -9,6 +9,7 @@ import { SiteHeader } from "@/components/site-header";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { GalleryDetailViewer } from "@/components/gallery-detail-viewer";
+import { Button, Card } from "@/components/ui";
 
 const GALLERY_STATUSES = ["approved", "printing", "shipped", "delivered"] as const;
 
@@ -150,7 +151,7 @@ export default async function GalleryDetailPage({
           name={name}
         />
 
-        <div className="mt-6 card p-6">
+        <Card padding="md" className="mt-6">
           <h1 className="text-2xl md:text-3xl font-serif text-text-primary">
             {name}
           </h1>
@@ -185,17 +186,14 @@ export default async function GalleryDetailPage({
           )}
 
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link
-              href={`/create?style=${order.style}`}
-              className="btn-primary text-sm"
-            >
+            <Button href={`/create?style=${order.style}`} size="sm">
               {d["gallery.createYourOwn"]}
-            </Link>
-            <Link href="/gallery" className="btn-secondary text-sm">
+            </Button>
+            <Button href="/gallery" variant="secondary" size="sm">
               {d["gallery.backToGallery"] ?? d["nav.gallery"]}
-            </Link>
+            </Button>
           </div>
-        </div>
+        </Card>
       </div>
     </main>
   );

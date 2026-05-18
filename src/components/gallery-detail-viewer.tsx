@@ -3,6 +3,7 @@
 import { ModelViewer } from "@/components/model-viewer";
 import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Card } from "@/components/ui";
 
 /**
  * Hero block on /gallery/[slug]. Mirrors the gallery modal but inline.
@@ -21,7 +22,7 @@ export function GalleryDetailViewer({
   const hasBoth = !!thumbnailUrl && !!glbUrl;
 
   return (
-    <div className="card overflow-hidden">
+    <Card className="overflow-hidden">
       <div className="aspect-square md:aspect-[4/3] bg-bg-elevated">
         {hasBoth ? (
           <BeforeAfterSlider
@@ -48,6 +49,6 @@ export function GalleryDetailViewer({
           />
         ) : null}
       </div>
-    </div>
+    </Card>
   );
 }

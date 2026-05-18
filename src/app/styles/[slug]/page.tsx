@@ -6,6 +6,7 @@ import { SiteHeader } from "@/components/site-header";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { STYLE_LANDING, STYLE_SLUGS, type StyleSlug } from "@/lib/styles/landing-content";
+import { Button, Card } from "@/components/ui";
 
 // Pre-render all 5 style pages at build time so they're statically cached
 // (good for SEO + CDN; no DB lookup needed).
@@ -94,15 +95,12 @@ export default async function StyleLandingPage({
               {content.heroSubtitle}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link
-                href={`/create?style=${entry.slug}`}
-                className="btn-primary text-sm"
-              >
+              <Button href={`/create?style=${entry.slug}`} size="sm">
                 {content.ctaPrimary}
-              </Link>
-              <Link href="/gallery" className="btn-secondary text-sm">
+              </Button>
+              <Button href="/gallery" variant="secondary" size="sm">
                 {content.ctaSecondary}
-              </Link>
+              </Button>
             </div>
           </div>
           <div className="order-1 md:order-2 relative aspect-square rounded-2xl overflow-hidden shadow-elevated bg-bg-elevated">
@@ -124,14 +122,14 @@ export default async function StyleLandingPage({
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {content.features.map((f) => (
-              <div key={f.title} className="card p-6">
+              <Card key={f.title} padding="md">
                 <h3 className="text-base font-semibold text-text-primary mb-2">
                   {f.title}
                 </h3>
                 <p className="text-sm text-text-secondary leading-relaxed">
                   {f.body}
                 </p>
-              </div>
+              </Card>
             ))}
           </div>
         </section>
@@ -141,7 +139,7 @@ export default async function StyleLandingPage({
           <h2 className="text-2xl md:text-3xl font-serif text-text-primary mb-6 text-center">
             {content.perfectForHeading}
           </h2>
-          <div className="card p-6 max-w-2xl mx-auto">
+          <Card padding="md" className="max-w-2xl mx-auto">
             <ul className="space-y-3">
               {content.perfectForItems.map((item) => (
                 <li
@@ -165,25 +163,24 @@ export default async function StyleLandingPage({
                 </li>
               ))}
             </ul>
-          </div>
+          </Card>
         </section>
 
         {/* Bottom CTA */}
-        <section className="text-center py-12 card">
-          <h2 className="text-3xl md:text-4xl font-serif text-text-primary">
-            {content.heroTitle}
-          </h2>
-          <p className="mt-3 text-text-secondary max-w-xl mx-auto">
-            {content.heroSubtitle}
-          </p>
-          <div className="mt-6">
-            <Link
-              href={`/create?style=${entry.slug}`}
-              className="btn-primary"
-            >
-              {content.ctaPrimary}
-            </Link>
-          </div>
+        <section>
+          <Card className="text-center py-12">
+            <h2 className="text-3xl md:text-4xl font-serif text-text-primary">
+              {content.heroTitle}
+            </h2>
+            <p className="mt-3 text-text-secondary max-w-xl mx-auto">
+              {content.heroSubtitle}
+            </p>
+            <div className="mt-6">
+              <Button href={`/create?style=${entry.slug}`}>
+                {content.ctaPrimary}
+              </Button>
+            </div>
+          </Card>
         </section>
       </div>
     </main>

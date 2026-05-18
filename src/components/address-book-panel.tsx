@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card, Input, FormField, Textarea } from "@/components/ui";
 
 type Address = {
   id: string;
@@ -163,9 +164,9 @@ export function AddressBookPanel() {
           {d["account.addresses.intro"]}
         </p>
         {!adding && !editingId && (
-          <button onClick={startAdd} className="btn-primary text-sm !py-2 !px-4">
+          <Button onClick={startAdd} size="sm">
             {d["account.addresses.add"]}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -182,16 +183,16 @@ export function AddressBookPanel() {
       )}
 
       {addresses.length === 0 && !adding && (
-        <div className="card p-8 text-center">
+        <Card padding="lg" className="text-center">
           <p className="text-sm text-text-muted">
             {d["account.addresses.empty"]}
           </p>
-        </div>
+        </Card>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {addresses.map((a) => (
-          <div key={a.id} className="card p-5">
+          <Card key={a.id} padding="md">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -235,7 +236,7 @@ export function AddressBookPanel() {
                 {d["common.delete"]}
               </button>
             </div>
-          </div>
+          </Card>
         ))}
       </div>
     </div>
@@ -264,97 +265,68 @@ function AddressForm({
     setForm({ ...form, [k]: v });
 
   return (
-    <div className="card p-5 space-y-3">
+    <Card padding="md" className="space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.label"]}
-          </label>
-          <input
+        <FormField label={d["account.addresses.field.label"]}>
+          <Input
             type="text"
             value={form.label}
             onChange={(e) => upd("label", e.target.value)}
-            className="input-base"
             placeholder={d["account.addresses.field.labelPlaceholder"]}
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.fullName"]}
-          </label>
-          <input
+        </FormField>
+        <FormField label={d["account.addresses.field.fullName"]}>
+          <Input
             type="text"
             value={form.fullName}
             onChange={(e) => upd("fullName", e.target.value)}
-            className="input-base"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.phone"]}
-          </label>
-          <input
+        </FormField>
+        <FormField label={d["account.addresses.field.phone"]}>
+          <Input
             type="tel"
             value={form.phone}
             onChange={(e) => upd("phone", e.target.value)}
-            className="input-base"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.postaKodu"]}
-          </label>
-          <input
+        </FormField>
+        <FormField label={d["account.addresses.field.postaKodu"]}>
+          <Input
             type="text"
             value={form.postaKodu}
             onChange={(e) => upd("postaKodu", e.target.value)}
-            className="input-base"
           />
-        </div>
-        <div className="sm:col-span-2">
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.adres"]}
-          </label>
-          <textarea
+        </FormField>
+        <FormField
+          label={d["account.addresses.field.adres"]}
+          className="sm:col-span-2"
+        >
+          <Textarea
             value={form.adres}
             onChange={(e) => upd("adres", e.target.value)}
             rows={2}
-            className="input-base"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.mahalle"]}
-          </label>
-          <input
+        </FormField>
+        <FormField label={d["account.addresses.field.mahalle"]}>
+          <Input
             type="text"
             value={form.mahalle}
             onChange={(e) => upd("mahalle", e.target.value)}
-            className="input-base"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.ilce"]}
-          </label>
-          <input
+        </FormField>
+        <FormField label={d["account.addresses.field.ilce"]}>
+          <Input
             type="text"
             value={form.ilce}
             onChange={(e) => upd("ilce", e.target.value)}
-            className="input-base"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            {d["account.addresses.field.il"]}
-          </label>
-          <input
+        </FormField>
+        <FormField label={d["account.addresses.field.il"]}>
+          <Input
             type="text"
             value={form.il}
             onChange={(e) => upd("il", e.target.value)}
-            className="input-base"
           />
-        </div>
+        </FormField>
       </div>
 
       <label className="flex items-center gap-2 text-sm">
@@ -369,25 +341,17 @@ function AddressForm({
       {error && <p className="text-sm text-error">{error}</p>}
 
       <div className="flex gap-2 justify-end">
-        <button
-          onClick={onCancel}
-          className="btn-secondary text-sm !py-2 !px-4"
-          disabled={saving}
-        >
+        <Button onClick={onCancel} variant="secondary" size="sm" disabled={saving}>
           {d["common.cancel"]}
-        </button>
-        <button
-          onClick={onSubmit}
-          className="btn-primary text-sm !py-2 !px-4"
-          disabled={saving}
-        >
+        </Button>
+        <Button onClick={onSubmit} size="sm" loading={saving}>
           {saving
             ? d["common.loading"]
             : isEditing
               ? d["common.save"]
               : d["account.addresses.add"]}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

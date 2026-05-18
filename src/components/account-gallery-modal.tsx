@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
+import { Button, Input } from "@/components/ui";
 import type { AccountPreview } from "@/components/account-gallery-card";
 
 export function AccountGalleryModal({
@@ -153,49 +153,58 @@ export function AccountGalleryModal({
           <div className="flex gap-3 mt-5">
             {hasOrder ? (
               <>
-                <Link
+                <Button
                   href={`/track/${preview.order!.orderNumber}`}
-                  className="btn-secondary flex-1 !block text-center text-sm"
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 !block text-center"
                 >
                   {d["account.gallery.trackOrder"]}
-                </Link>
+                </Button>
                 {preview.glbUrl && (
-                  <Link
+                  <Button
                     href={`/create?previewId=${preview.id}`}
-                    className="btn-primary flex-1 !block text-center text-sm"
+                    size="sm"
+                    className="flex-1 !block text-center"
                   >
                     {d["account.orders.reorder"]}
-                  </Link>
+                  </Button>
                 )}
-                <Link
+                <Button
                   href="/create"
-                  className="btn-secondary flex-1 !block text-center text-sm"
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 !block text-center"
                 >
                   {d["account.gallery.createAnother"]}
-                </Link>
+                </Button>
               </>
             ) : preview.glbUrl ? (
               <>
-                <Link
+                <Button
                   href={`/create?previewId=${preview.id}`}
-                  className="btn-primary flex-1 !block text-center text-sm"
+                  size="sm"
+                  className="flex-1 !block text-center"
                 >
                   {d["account.gallery.orderThis"]}
-                </Link>
-                <Link
+                </Button>
+                <Button
                   href="/create"
-                  className="btn-secondary flex-1 !block text-center text-sm"
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 !block text-center"
                 >
                   {d["account.gallery.createAnother"]}
-                </Link>
+                </Button>
               </>
             ) : (
-              <Link
+              <Button
                 href="/create"
-                className="btn-primary flex-1 !block text-center text-sm"
+                size="sm"
+                className="flex-1 !block text-center"
               >
                 {d["account.gallery.createAnother"]}
-              </Link>
+              </Button>
             )}
           </div>
         </div>
@@ -391,12 +400,12 @@ function PublishModal({
             <label className="block text-xs font-medium text-text-muted mb-1.5">
               {d["publish.displayNameLabel"] ?? "Display Name"}
             </label>
-            <input
+            <Input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder={d["publish.displayNamePlaceholder"] ?? "Display name (optional)"}
-              className="input-base text-sm"
+              className="text-sm"
             />
           </div>
 
@@ -444,7 +453,7 @@ function PublishModal({
               </div>
             )}
             {tags.length < 5 && (
-              <input
+              <Input
                 type="text"
                 value={tagInput}
                 onChange={(e) => setTagInput(e.target.value)}
@@ -455,7 +464,7 @@ function PublishModal({
                   }
                 }}
                 placeholder={d["publish.tagsPlaceholder"] ?? "Type a tag and press Enter"}
-                className="input-base text-sm mb-2"
+                className="text-sm mb-2"
               />
             )}
             <div className="flex flex-wrap gap-1">
@@ -475,19 +484,22 @@ function PublishModal({
 
         {/* Actions */}
         <div className="flex gap-3 mt-6">
-          <button
+          <Button
             onClick={onClose}
-            className="btn-secondary flex-1 text-sm"
+            variant="secondary"
+            size="sm"
+            className="flex-1"
           >
             {d["common.cancel"] ?? "Cancel"}
-          </button>
-          <button
-            disabled={saving}
+          </Button>
+          <Button
+            loading={saving}
             onClick={handlePublish}
-            className="btn-primary flex-1 text-sm !bg-blue-500 hover:!bg-blue-600 disabled:opacity-50"
+            size="sm"
+            className="flex-1 !bg-blue-500 hover:!bg-blue-600 disabled:opacity-50"
           >
             {saving ? (d["common.loading"] ?? "...") : (d["publish.makePublic"] ?? "Publish to Gallery")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

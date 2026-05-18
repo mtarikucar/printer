@@ -11,6 +11,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
+import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
 import { PRICES_KURUS } from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 
@@ -652,7 +653,7 @@ export default function CreatePage() {
       <main className="min-h-screen bg-bg-base">
         <SiteHeader />
         <div className="max-w-lg mx-auto px-4 py-20">
-          <div className="card shadow-elevated overflow-hidden">
+          <Card elevated className="overflow-hidden">
             <div className="p-8 text-center">
               <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce-in">
                 <svg className="w-10 h-10 text-green-500" viewBox="0 0 24 24" fill="currentColor">
@@ -671,15 +672,15 @@ export default function CreatePage() {
                 </p>
               )}
               <div className="space-y-3 animate-fade-in-up delay-400">
-                <button
+                <Button
                   onClick={() => router.push(`/track/${submittedOrderNumber}`)}
-                  className="btn-primary w-full"
+                  fullWidth
                 >
                   {d["create.orderSubmitted.track"]}
-                </button>
+                </Button>
               </div>
             </div>
-          </div>
+          </Card>
         </div>
       </main>
     );
@@ -691,7 +692,7 @@ export default function CreatePage() {
       <main className="min-h-screen bg-bg-base">
         <SiteHeader />
         <div className="max-w-lg mx-auto px-4 py-20">
-          <div className="card shadow-elevated overflow-hidden">
+          <Card elevated className="overflow-hidden">
             <div className="p-8 text-center">
               <div className="w-20 h-20 bg-success-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce-in">
                 <svg className="w-10 h-10 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -701,14 +702,14 @@ export default function CreatePage() {
               <h1 className="text-2xl font-serif text-text-primary mb-2 animate-fade-in-up delay-200">{d["create.revision.sent"]}</h1>
               <p className="text-text-secondary mb-2 animate-fade-in-up delay-300">{d["create.revision.sentMessage"]}</p>
               <p className="text-sm text-text-muted mb-8 animate-fade-in-up delay-300">{d["create.revision.sent.next"]}</p>
-              <button
+              <Button
                 onClick={() => router.push("/")}
-                className="btn-primary animate-fade-in-up delay-400"
+                className="animate-fade-in-up delay-400"
               >
                 {d["create.revision.backHome"]}
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         </div>
       </main>
     );
@@ -843,52 +844,48 @@ export default function CreatePage() {
                   />
                 </div>
               ) : photoKey && !selectedFile ? (
-                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
-                  <div className="p-6">
-                    <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
-                    <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
-                      <img
-                        src={photoPreviewUrl ?? `/api/files/${photoKey}`}
-                        alt="Uploaded photo"
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                    <div className="mt-4 flex justify-center">
-                      <button
-                        type="button"
-                        onClick={() => { setPhotoKey(null); }}
-                        className="btn-secondary"
-                      >
-                        {d["create.changePhoto"]}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
-                  <div className="p-6">
-                    <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
-                    <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
-                    <UploadDropzone
-                      onUploadComplete={(key, previewUrl) => {
-                        setPhotoKey(key);
-                        // `previewUrl` is the server-signed URL from /api/upload
-                        // (not a blob:). Persisting it lets the photo card
-                        // survive a login-redirect roundtrip AND a future
-                        // FILES_REQUIRE_SIGNATURE=1 flip in prod.
-                        setPhotoPreviewUrl(previewUrl ?? null);
-                        setError(null);
-                      }}
-                      onError={setError}
-                      onFileSelected={(file) => {
-                        setSelectedFile(file);
-                        setIsEditing(true);
-                        setPhotoKey(null);
-                        setError(null);
-                      }}
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                  <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
+                  <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
+                    <img
+                      src={photoPreviewUrl ?? `/api/files/${photoKey}`}
+                      alt="Uploaded photo"
+                      className="w-full h-full object-contain"
                     />
                   </div>
-                </div>
+                  <div className="mt-4 flex justify-center">
+                    <Button
+                      type="button"
+                      onClick={() => { setPhotoKey(null); }}
+                      variant="secondary"
+                    >
+                      {d["create.changePhoto"]}
+                    </Button>
+                  </div>
+                </Card>
+              ) : (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                  <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
+                  <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
+                  <UploadDropzone
+                    onUploadComplete={(key, previewUrl) => {
+                      setPhotoKey(key);
+                      // `previewUrl` is the server-signed URL from /api/upload
+                      // (not a blob:). Persisting it lets the photo card
+                      // survive a login-redirect roundtrip AND a future
+                      // FILES_REQUIRE_SIGNATURE=1 flip in prod.
+                      setPhotoPreviewUrl(previewUrl ?? null);
+                      setError(null);
+                    }}
+                    onError={setError}
+                    onFileSelected={(file) => {
+                      setSelectedFile(file);
+                      setIsEditing(true);
+                      setPhotoKey(null);
+                      setError(null);
+                    }}
+                  />
+                </Card>
               )}
 
               {error && (
@@ -900,17 +897,20 @@ export default function CreatePage() {
                 </div>
               )}
 
-              <button
+              <Button
                 type="button"
                 onClick={handleGeneratePreview}
-                disabled={submitting || (!photoKey && !selectedFile) || loggedIn === null}
-                className="btn-primary w-full text-lg !py-3.5 animate-fade-in-up delay-400"
+                disabled={(!photoKey && !selectedFile) || loggedIn === null}
+                loading={submitting}
+                size="lg"
+                fullWidth
+                className="animate-fade-in-up delay-400"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
                 </svg>
                 {submitting ? d["common.loading"] : d["create.generatePreview"]}
-              </button>
+              </Button>
 
               {loggedIn === false && photoKey && (
                 <div className="flex items-center gap-2 justify-center text-sm text-amber-400 animate-fade-in-up delay-400">
@@ -927,7 +927,7 @@ export default function CreatePage() {
         {/* Step 1: Generating (Loading) */}
         {step === 1 && (
           <div className="animate-fade-in flex flex-col items-center justify-center py-8">
-            <div className="card shadow-elevated overflow-hidden max-w-md mx-auto w-full">
+            <Card elevated className="overflow-hidden max-w-md mx-auto w-full">
               {previewError ? (
                 /* Failed state */
                 <div className="p-8 text-center">
@@ -938,9 +938,9 @@ export default function CreatePage() {
                   </div>
                   <h2 className="text-2xl font-serif text-text-primary mb-2">{d["create.preview.failed"]}</h2>
                   <p className="text-text-secondary mb-6">{d["create.preview.failedMessage"]}</p>
-                  <button onClick={handleRetryPreview} className="btn-primary">
+                  <Button onClick={handleRetryPreview}>
                     {d["create.preview.retry"]}
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 /* Loading state */
@@ -993,7 +993,7 @@ export default function CreatePage() {
                   </div>
                 </>
               )}
-            </div>
+            </Card>
           </div>
         )}
 
@@ -1015,29 +1015,32 @@ export default function CreatePage() {
               </span>
             </div>
 
-            <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-200">
+            <Card elevated className="overflow-hidden animate-fade-in-up delay-200">
               <ModelViewer url={previewGlbUrl} previewMode />
-            </div>
+            </Card>
 
             <div className="mt-4 sm:mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4 animate-fade-in-up delay-300">
-              <button
+              <Button
                 onClick={handleApprove}
-                className="btn-primary flex-1 text-lg !py-3.5"
+                size="lg"
+                className="flex-1"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
                 {d["create.preview.approve"]}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => setRevisionModalOpen(true)}
-                className="btn-amber flex-1 text-lg !py-3.5"
+                variant="amber"
+                size="lg"
+                className="flex-1"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
                 {d["create.preview.requestRevision"]}
-              </button>
+              </Button>
             </div>
 
             {loggedIn === false && (
@@ -1052,7 +1055,7 @@ export default function CreatePage() {
             {/* Revision Modal */}
             {revisionModalOpen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop bg-black/50 backdrop-blur-sm">
-                <div className="card p-6 w-full max-w-lg animate-scale-in">
+                <Card padding="md" className="w-full max-w-lg animate-scale-in">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-serif text-text-primary">{d["create.revision.title"]}</h3>
                     <button
@@ -1065,26 +1068,27 @@ export default function CreatePage() {
                     </button>
                   </div>
                   <p className="text-sm text-text-secondary mb-4">{d["create.revision.description"]}</p>
-                  <textarea
+                  <Textarea
                     value={revisionNote}
                     onChange={(e) => setRevisionNote(e.target.value)}
                     placeholder={d["create.revision.placeholder"]}
                     maxLength={1000}
                     rows={4}
-                    className="input-base resize-none"
+                    className="resize-none"
                   />
                   <div className="flex justify-between items-center mt-2 mb-4">
                     <span />
                     <span className="text-xs text-text-muted">{revisionNote.length}/1000</span>
                   </div>
-                  <button
+                  <Button
                     onClick={handleRevisionSubmit}
-                    disabled={revisionSending || !revisionNote.trim()}
-                    className="btn-primary w-full"
+                    disabled={!revisionNote.trim()}
+                    loading={revisionSending}
+                    fullWidth
                   >
                     {revisionSending ? d["create.revision.sending"] : d["create.revision.send"]}
-                  </button>
-                </div>
+                  </Button>
+                </Card>
               </div>
             )}
           </div>
@@ -1116,68 +1120,54 @@ export default function CreatePage() {
                   claim the account via a 30-day token. Logged-in customers
                   don't see this card. */}
               {!loggedIn && (
-                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-100">
-                  <div className="p-6">
-                    <h3 className="text-sm font-medium text-text-secondary mb-1">
-                      {d["create.guest.title"]}
-                    </h3>
-                    <p className="text-xs text-text-muted mb-4">
-                      {d["create.guest.subtitle"]}
-                    </p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                          {d["create.guest.fullName"]}
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={guestName}
-                          onChange={(e) => setGuestName(e.target.value)}
-                          className="input-base"
-                          autoComplete="name"
-                          minLength={2}
-                          maxLength={120}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                          {d["create.guest.email"]}
-                        </label>
-                        <input
-                          type="email"
-                          required
-                          value={guestEmail}
-                          onChange={(e) => setGuestEmail(e.target.value)}
-                          className="input-base"
-                          autoComplete="email"
-                        />
-                      </div>
-                    </div>
-                    <p className="text-xs text-text-muted mt-3">
-                      <Link href="/login?redirect=/create" className="underline">
-                        {d["create.guest.alreadyHaveAccount"]}
-                      </Link>
-                    </p>
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-100">
+                  <h3 className="text-sm font-medium text-text-secondary mb-1">
+                    {d["create.guest.title"]}
+                  </h3>
+                  <p className="text-xs text-text-muted mb-4">
+                    {d["create.guest.subtitle"]}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label={d["create.guest.fullName"]} required>
+                      <Input
+                        type="text"
+                        required
+                        value={guestName}
+                        onChange={(e) => setGuestName(e.target.value)}
+                        autoComplete="name"
+                        minLength={2}
+                        maxLength={120}
+                      />
+                    </FormField>
+                    <FormField label={d["create.guest.email"]} required>
+                      <Input
+                        type="email"
+                        required
+                        value={guestEmail}
+                        onChange={(e) => setGuestEmail(e.target.value)}
+                        autoComplete="email"
+                      />
+                    </FormField>
                   </div>
-                </div>
+                  <p className="text-xs text-text-muted mt-3">
+                    <Link href="/login?redirect=/create" className="underline">
+                      {d["create.guest.alreadyHaveAccount"]}
+                    </Link>
+                  </p>
+                </Card>
               )}
 
               {/* Saved address dropdown (Q5) — only shown when the logged-in
                   customer already has saved addresses; new customers see the
                   empty form unchanged. */}
               {savedAddresses.length > 0 && (
-                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-150">
-                  <div className="p-6">
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                      {d["create.savedAddresses.label"]}
-                    </label>
-                    <select
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-150">
+                  <FormField label={d["create.savedAddresses.label"]}>
+                    <Select
                       defaultValue=""
                       onChange={(e) => {
                         if (e.target.value) applySavedAddress(e.target.value);
                       }}
-                      className="input-base"
                     >
                       <option value="">
                         {d["create.savedAddresses.placeholder"]}
@@ -1190,194 +1180,192 @@ export default function CreatePage() {
                             : ""}
                         </option>
                       ))}
-                    </select>
-                    <p className="text-xs text-text-muted mt-2">
-                      {d["create.savedAddresses.hint"]}
-                    </p>
-                  </div>
-                </div>
+                    </Select>
+                  </FormField>
+                  <p className="text-xs text-text-muted mt-2">
+                    {d["create.savedAddresses.hint"]}
+                  </p>
+                </Card>
               )}
 
               {/* Form Card */}
-              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-200">
-                <div className="p-6">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.city"]}</label>
-                      <select
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-200">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label={d["create.city"]} required>
+                    <Select
+                      required
+                      value={form.il}
+                      onChange={(e) => updateField("il", e.target.value)}
+                    >
+                      <option value="">{d["create.city.placeholder"]}</option>
+                      {PROVINCES.map((il) => (
+                        <option key={il} value={il}>{il}</option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label={d["create.district"]} required>
+                    {form.il ? (
+                      <Select
                         required
-                        value={form.il}
-                        onChange={(e) => updateField("il", e.target.value)}
-                        className="input-base"
+                        value={form.ilce}
+                        onChange={(e) => updateField("ilce", e.target.value)}
                       >
-                        <option value="">{d["create.city.placeholder"]}</option>
-                        {PROVINCES.map((il) => (
-                          <option key={il} value={il}>{il}</option>
+                        <option value="">{d["create.district.placeholder"]}</option>
+                        {districtOptions.map((district) => (
+                          <option key={district} value={district}>{district}</option>
                         ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.district"]}</label>
-                      {form.il ? (
-                        <select
-                          required
-                          value={form.ilce}
-                          onChange={(e) => updateField("ilce", e.target.value)}
-                          className="input-base"
-                        >
-                          <option value="">{d["create.district.placeholder"]}</option>
-                          {districtOptions.map((district) => (
-                            <option key={district} value={district}>{district}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="input-base opacity-60 cursor-not-allowed text-text-muted">
-                          {d["create.district.selectCity"]}
-                        </div>
-                      )}
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.neighborhood"]}</label>
-                      <SearchableSelect
-                        options={neighborhoodOptions}
-                        value={form.mahalle}
-                        onChange={(val) => setForm((prev) => ({ ...prev, mahalle: val }))}
-                        placeholder={d["create.neighborhood.placeholder"]}
-                        disabled={!form.ilce}
-                        disabledPlaceholder={d["create.neighborhood.selectDistrict"]}
-                        loading={neighborhoodLoading}
-                        loadingText={d["create.neighborhood.loading"]}
-                        required
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.address"]}</label>
-                      <input
-                        type="text"
-                        required
-                        value={form.adres}
-                        onChange={(e) => updateField("adres", e.target.value)}
-                        className="input-base"
-                        placeholder={d["create.address.placeholder"]}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["create.postalCode"]}</label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={5}
-                        value={form.postaKodu}
-                        onChange={(e) => updateField("postaKodu", e.target.value)}
-                        className="input-base"
-                        placeholder={d["create.postalCode.placeholder"]}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["common.phone"]}</label>
-                      <input
-                        type="tel"
-                        required
-                        value={form.telefon}
-                        onChange={(e) => updateField("telefon", e.target.value)}
-                        className="input-base"
-                        placeholder={d["create.phone.placeholder"]}
-                      />
-                    </div>
-                  </div>
+                      </Select>
+                    ) : (
+                      <div className="input-base opacity-60 cursor-not-allowed text-text-muted">
+                        {d["create.district.selectCity"]}
+                      </div>
+                    )}
+                  </FormField>
+                  <FormField
+                    label={d["create.neighborhood"]}
+                    required
+                    className="sm:col-span-2"
+                  >
+                    <SearchableSelect
+                      options={neighborhoodOptions}
+                      value={form.mahalle}
+                      onChange={(val) => setForm((prev) => ({ ...prev, mahalle: val }))}
+                      placeholder={d["create.neighborhood.placeholder"]}
+                      disabled={!form.ilce}
+                      disabledPlaceholder={d["create.neighborhood.selectDistrict"]}
+                      loading={neighborhoodLoading}
+                      loadingText={d["create.neighborhood.loading"]}
+                      required
+                    />
+                  </FormField>
+                  <FormField
+                    label={d["create.address"]}
+                    required
+                    className="sm:col-span-2"
+                  >
+                    <Input
+                      type="text"
+                      required
+                      value={form.adres}
+                      onChange={(e) => updateField("adres", e.target.value)}
+                      placeholder={d["create.address.placeholder"]}
+                    />
+                  </FormField>
+                  <FormField label={d["create.postalCode"]} required>
+                    <Input
+                      type="text"
+                      required
+                      maxLength={5}
+                      value={form.postaKodu}
+                      onChange={(e) => updateField("postaKodu", e.target.value)}
+                      placeholder={d["create.postalCode.placeholder"]}
+                    />
+                  </FormField>
+                  <FormField label={d["common.phone"]} required>
+                    <Input
+                      type="tel"
+                      required
+                      value={form.telefon}
+                      onChange={(e) => updateField("telefon", e.target.value)}
+                      placeholder={d["create.phone.placeholder"]}
+                    />
+                  </FormField>
                 </div>
-              </div>
+              </Card>
 
               {/* Upsells (Q10) — opt-in add-ons for AOV lift. Each row shows
                   the kuruş price computed from the same constants the server
                   validates against. */}
-              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-225">
-                <div className="p-6">
-                  <h3 className="text-sm font-medium text-text-secondary mb-3">
-                    {d["create.upsells.title"]}
-                  </h3>
-                  <p className="text-xs text-text-muted mb-4">
-                    {d["create.upsells.subtitle"]}
-                  </p>
-                  <div className="space-y-2">
-                    {UPSELLS.map((u) => {
-                      const checked = selectedUpsells.includes(u.key);
-                      return (
-                        <label
-                          key={u.key}
-                          className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
-                            checked
-                              ? "bg-green-500/10 border-green-500/30"
-                              : "bg-bg-surface border-bg-subtle hover:bg-bg-elevated"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleUpsell(u.key)}
-                            className="mt-1"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-text-primary">
-                                {d[`upsell.${u.key}.label` as keyof typeof d]}
-                              </span>
-                              <span className="text-sm text-text-secondary shrink-0">
-                                +₺{(u.priceKurus / 100).toFixed(2)}
-                              </span>
-                            </div>
-                            <p className="text-xs text-text-muted mt-0.5">
-                              {d[`upsell.${u.key}.description` as keyof typeof d]}
-                            </p>
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-225">
+                <h3 className="text-sm font-medium text-text-secondary mb-3">
+                  {d["create.upsells.title"]}
+                </h3>
+                <p className="text-xs text-text-muted mb-4">
+                  {d["create.upsells.subtitle"]}
+                </p>
+                <div className="space-y-2">
+                  {UPSELLS.map((u) => {
+                    const checked = selectedUpsells.includes(u.key);
+                    return (
+                      <label
+                        key={u.key}
+                        className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
+                          checked
+                            ? "bg-green-500/10 border-green-500/30"
+                            : "bg-bg-surface border-bg-subtle hover:bg-bg-elevated"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleUpsell(u.key)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-text-primary">
+                              {d[`upsell.${u.key}.label` as keyof typeof d]}
+                            </span>
+                            <span className="text-sm text-text-secondary shrink-0">
+                              +₺{(u.priceKurus / 100).toFixed(2)}
+                            </span>
                           </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {upsellTotalKurus > 0 && (
-                    <p className="text-xs text-text-muted mt-3 text-right">
-                      {d["create.upsells.added"]} +₺
-                      {(upsellTotalKurus / 100).toFixed(2)}
-                    </p>
-                  )}
+                          <p className="text-xs text-text-muted mt-0.5">
+                            {d[`upsell.${u.key}.description` as keyof typeof d]}
+                          </p>
+                        </div>
+                      </label>
+                    );
+                  })}
                 </div>
-              </div>
+                {upsellTotalKurus > 0 && (
+                  <p className="text-xs text-text-muted mt-3 text-right">
+                    {d["create.upsells.added"]} +₺
+                    {(upsellTotalKurus / 100).toFixed(2)}
+                  </p>
+                )}
+              </Card>
 
               {/* Gift Card */}
-              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-250">
-                <div className="p-6">
-                  <h3 className="text-sm font-medium text-text-secondary mb-3">{d["giftCard.hasCard"]}</h3>
-                  {gcApplied ? (
-                    <div className="flex items-center justify-between bg-green-500/10 rounded-lg p-3">
-                      <div>
-                        <p className="text-sm font-medium text-green-400">{d["giftCard.applied"]}</p>
-                        <p className="text-xs text-green-400 font-mono">{gcApplied.code}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setGcApplied(null); setGcCode(""); }}
-                        className="text-sm text-red-400 hover:text-red-300"
-                      >
-                        {d["giftCard.remove"]}
-                      </button>
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-250">
+                <h3 className="text-sm font-medium text-text-secondary mb-3">{d["giftCard.hasCard"]}</h3>
+                {gcApplied ? (
+                  <div className="flex items-center justify-between bg-green-500/10 rounded-lg p-3">
+                    <div>
+                      <p className="text-sm font-medium text-green-400">{d["giftCard.applied"]}</p>
+                      <p className="text-xs text-green-400 font-mono">{gcApplied.code}</p>
                     </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={gcCode}
-                        onChange={(e) => setGcCode(e.target.value.toUpperCase())}
-                        placeholder={d["giftCard.enterCode"]}
-                        className="input-base flex-1 font-mono"
-                      />
-                      <button type="button" onClick={handleApplyGiftCard} disabled={gcApplying || !gcCode.trim()} className="btn-secondary whitespace-nowrap">
-                        {gcApplying ? d["giftCard.applying"] : d["giftCard.apply"]}
-                      </button>
-                    </div>
-                  )}
-                  {gcError && <p className="text-sm text-error mt-2">{gcError}</p>}
-                </div>
-              </div>
+                    <button
+                      type="button"
+                      onClick={() => { setGcApplied(null); setGcCode(""); }}
+                      className="text-sm text-red-400 hover:text-red-300"
+                    >
+                      {d["giftCard.remove"]}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={gcCode}
+                      onChange={(e) => setGcCode(e.target.value.toUpperCase())}
+                      placeholder={d["giftCard.enterCode"]}
+                      className="flex-1 font-mono"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handleApplyGiftCard}
+                      disabled={!gcCode.trim()}
+                      loading={gcApplying}
+                      variant="secondary"
+                      className="whitespace-nowrap"
+                    >
+                      {gcApplying ? d["giftCard.applying"] : d["giftCard.apply"]}
+                    </Button>
+                  </div>
+                )}
+                {gcError && <p className="text-sm text-error mt-2">{gcError}</p>}
+              </Card>
 
               {/* Payment Method Selector */}
               {(() => {
@@ -1387,10 +1375,9 @@ export default function CreatePage() {
                 const isFullyCovered = remaining <= 0;
                 if (isFullyCovered) return null;
                 return (
-                  <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-275">
-                    <div className="p-6">
-                      <h3 className="text-sm font-medium text-text-secondary mb-3">{d["payment.method.title"]}</h3>
-                      <div className="space-y-2">
+                  <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-275">
+                    <h3 className="text-sm font-medium text-text-secondary mb-3">{d["payment.method.title"]}</h3>
+                    <div className="space-y-2">
                         <label
                           className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition ${
                             paymentMethod === "card"
@@ -1436,15 +1423,13 @@ export default function CreatePage() {
                             <p className="text-xs text-text-secondary mt-1">{d["payment.method.bankTransfer.desc"]}</p>
                           </div>
                         </label>
-                      </div>
                     </div>
-                  </div>
+                  </Card>
                 );
               })()}
 
               {/* Order Summary Card */}
-              <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-300">
-                <div className="p-6">
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-text-secondary">{selectedSizeObj?.label} ({selectedSizeObj?.height})</span>
                     <span className="font-mono font-bold text-text-primary">₺{selectedSizeObj?.price}</span>
@@ -1484,8 +1469,7 @@ export default function CreatePage() {
                       </>
                     );
                   })()}
-                </div>
-              </div>
+              </Card>
 
               {error && (
                 <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
@@ -1501,10 +1485,12 @@ export default function CreatePage() {
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
                 const showLock = !isFullyCovered;
                 return (
-                  <button
+                  <Button
                     type="submit"
-                    disabled={submitting}
-                    className="btn-primary w-full text-lg !py-3.5 inline-flex items-center justify-center gap-2"
+                    loading={submitting}
+                    size="lg"
+                    fullWidth
+                    className="inline-flex items-center justify-center gap-2"
                   >
                     {showLock && (
                       <svg
@@ -1522,7 +1508,7 @@ export default function CreatePage() {
                       </svg>
                     )}
                     {submitting ? d["create.submitting"] : isFullyCovered ? d["giftCard.fullyCovered"] : d["create.submitButton"]}
-                  </button>
+                  </Button>
                 );
               })()}
             </form>

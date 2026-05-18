@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { CropperRef } from "react-advanced-cropper";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Card } from "@/components/ui";
 import { EditorCanvas } from "./editor-canvas";
 import { EditorToolbar } from "./editor-toolbar";
 import { EditorAdjustments } from "./editor-adjustments";
@@ -206,7 +207,7 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
   }
 
   return (
-    <div className="card shadow-elevated overflow-hidden animate-fade-in-up">
+    <Card elevated className="overflow-hidden animate-fade-in-up">
       <div className="h-1 bg-gradient-to-r from-green-500 to-green-800" />
 
       {/* Header */}
@@ -253,6 +254,6 @@ export function PhotoEditor({ file, onCancel, exportRef }: PhotoEditorProps) {
       <div className="px-6 py-4 border-t border-bg-subtle">
         <EditorAdjustments adjustments={adjustments} onChange={setAdjustments} />
       </div>
-    </div>
+    </Card>
   );
 }

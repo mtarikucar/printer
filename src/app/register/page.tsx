@@ -6,6 +6,7 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card, Input, FormField } from "@/components/ui";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -87,7 +88,7 @@ export default function RegisterPage() {
           <div className="text-center mb-6">
             <span className="text-xl font-serif text-text-primary">Figurine Studio</span>
           </div>
-          <div className="card p-8">
+          <Card padding="lg">
             <h1 className="text-2xl font-serif text-text-primary text-center">
               {d["register.title"]}
             </h1>
@@ -100,26 +101,21 @@ export default function RegisterPage() {
               <div className="flex-1 h-px bg-bg-subtle" />
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["register.fullName"]}</label>
-                <input type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} className="input-base" placeholder={d["register.placeholder.fullName"]} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["common.email"]}</label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="input-base" placeholder={d["login.placeholder.email"]} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["common.phone"]}</label>
-                <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} className="input-base" placeholder={d["register.placeholder.phone"]} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["common.password"]}</label>
-                <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className="input-base" placeholder={d["register.placeholder.password"]} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">{d["register.passwordConfirm"]}</label>
-                <input type="password" required value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} className="input-base" />
-              </div>
+              <FormField label={d["register.fullName"]} required>
+                <Input type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder={d["register.placeholder.fullName"]} />
+              </FormField>
+              <FormField label={d["common.email"]} required>
+                <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={d["login.placeholder.email"]} />
+              </FormField>
+              <FormField label={d["common.phone"]} required>
+                <Input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={d["register.placeholder.phone"]} />
+              </FormField>
+              <FormField label={d["common.password"]} required>
+                <Input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={d["register.placeholder.password"]} />
+              </FormField>
+              <FormField label={d["register.passwordConfirm"]} required>
+                <Input type="password" required value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} />
+              </FormField>
               {error && (
                 <div className="bg-error-50 text-error rounded-xl p-3 text-sm text-center flex items-center justify-center gap-2">
                   <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -128,11 +124,11 @@ export default function RegisterPage() {
                   {error}
                 </div>
               )}
-              <button type="submit" disabled={loading} className="btn-primary w-full !block text-center">
+              <Button type="submit" fullWidth loading={loading} className="!block text-center">
                 {loading ? d["register.submitting"] : d["register.submit"]}
-              </button>
+              </Button>
             </form>
-          </div>
+          </Card>
           <p className="mt-6 text-sm text-center text-text-muted">
             {d["register.hasAccount"]}{" "}
             <Link href={loginHref} className="text-green-500 hover:text-green-400 font-semibold">

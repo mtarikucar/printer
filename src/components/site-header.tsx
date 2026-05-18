@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { UserDropdown } from "@/components/user-dropdown";
+import { Button } from "@/components/ui";
 
 interface AuthUser {
   id: string;
@@ -86,18 +87,12 @@ export function SiteHeader() {
             <UserDropdown user={user} onLogout={handleLogout} />
           ) : (
             <div className="flex items-center gap-3">
-              <Link
-                href="/login"
-                className="btn-secondary text-sm !py-2 !px-4"
-              >
+              <Button href="/login" variant="secondary" size="sm" className="!px-4">
                 {d["nav.login"]}
-              </Link>
-              <Link
-                href="/create"
-                className="btn-primary text-sm !py-2 !px-5"
-              >
+              </Button>
+              <Button href="/create" size="sm" className="!px-5">
                 {d["landing.nav.getStarted"]}
-              </Link>
+              </Button>
             </div>
           )}
         </nav>
@@ -202,20 +197,25 @@ export function SiteHeader() {
               </>
             ) : (
               <div className="flex flex-col gap-2 px-4 py-2">
-                <Link
+                <Button
                   href="/login"
                   onClick={() => setMenuOpen(false)}
-                  className="btn-secondary w-full text-sm !py-3"
+                  variant="secondary"
+                  fullWidth
+                  size="sm"
+                  className="!py-3"
                 >
                   {d["nav.login"]}
-                </Link>
-                <Link
+                </Button>
+                <Button
                   href="/create"
                   onClick={() => setMenuOpen(false)}
-                  className="btn-primary w-full text-sm !py-3"
+                  fullWidth
+                  size="sm"
+                  className="!py-3"
                 >
                   {d["landing.nav.getStarted"]}
-                </Link>
+                </Button>
               </div>
             )}
           </div>

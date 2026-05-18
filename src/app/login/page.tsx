@@ -6,6 +6,7 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card, Input, FormField } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -88,7 +89,7 @@ export default function LoginPage() {
           <div className="text-center mb-6">
             <span className="text-xl font-serif text-text-primary">Figurine Studio</span>
           </div>
-          <div className="card p-8">
+          <Card padding="lg">
             <h1 className="text-2xl font-serif text-text-primary text-center">
               {d["login.title"]}
             </h1>
@@ -101,12 +102,15 @@ export default function LoginPage() {
               <div className="flex-1 h-px bg-bg-subtle" />
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                  {d["common.email"]}
-                </label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="input-base" placeholder={d["login.placeholder.email"]} />
-              </div>
+              <FormField label={d["common.email"]} required>
+                <Input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={d["login.placeholder.email"]}
+                />
+              </FormField>
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm font-medium text-text-secondary">
@@ -119,7 +123,12 @@ export default function LoginPage() {
                     {d["auth.forgot.link"]}
                   </Link>
                 </div>
-                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="input-base" />
+                <Input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
               </div>
               {error && (
                 <div className="bg-error-50 text-error rounded-xl p-3 text-sm text-center flex items-center justify-center gap-2">
@@ -129,11 +138,11 @@ export default function LoginPage() {
                   {error}
                 </div>
               )}
-              <button type="submit" disabled={loading} className="btn-primary w-full !block text-center">
+              <Button type="submit" fullWidth loading={loading} className="!block text-center">
                 {loading ? d["login.submitting"] : d["login.submit"]}
-              </button>
+              </Button>
             </form>
-          </div>
+          </Card>
           <p className="mt-6 text-sm text-center text-text-muted">
             {d["login.noAccount"]}{" "}
             <Link href={registerHref} className="text-green-500 hover:text-green-400 font-semibold">

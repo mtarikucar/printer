@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card, Input, FormField } from "@/components/ui";
 
 export default function ForgotPasswordPage() {
   const d = useDictionary();
@@ -41,60 +42,48 @@ export default function ForgotPasswordPage() {
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
       <div className="max-w-md mx-auto px-4 py-16">
-        <div className="card shadow-elevated overflow-hidden">
-          <div className="p-8">
-            <h1 className="text-2xl font-serif text-text-primary mb-2">
-              {d["auth.forgot.title"]}
-            </h1>
-            {submitted ? (
-              <div className="space-y-4 mt-4">
-                <p className="text-sm text-text-secondary">
-                  {d["auth.forgot.sentBody"]}
+        <Card padding="lg" elevated className="overflow-hidden">
+          <h1 className="text-2xl font-serif text-text-primary mb-2">
+            {d["auth.forgot.title"]}
+          </h1>
+          {submitted ? (
+            <div className="space-y-4 mt-4">
+              <p className="text-sm text-text-secondary">
+                {d["auth.forgot.sentBody"]}
+              </p>
+              <Button href="/login" variant="secondary" size="sm">
+                {d["auth.forgot.backToLogin"]}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-text-secondary mb-6">
+                {d["auth.forgot.subtitle"]}
+              </p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <FormField label={d["common.email"]} required>
+                  <Input
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="ornek@email.com"
+                  />
+                </FormField>
+                {error && <p className="text-sm text-error">{error}</p>}
+                <Button type="submit" disabled={!email} loading={loading} fullWidth>
+                  {loading ? d["common.loading"] : d["auth.forgot.submit"]}
+                </Button>
+                <p className="text-center text-sm">
+                  <Link href="/login" className="text-text-muted hover:text-text-primary underline">
+                    {d["auth.forgot.backToLogin"]}
+                  </Link>
                 </p>
-                <Link href="/login" className="btn-secondary inline-flex text-sm">
-                  {d["auth.forgot.backToLogin"]}
-                </Link>
-              </div>
-            ) : (
-              <>
-                <p className="text-sm text-text-secondary mb-6">
-                  {d["auth.forgot.subtitle"]}
-                </p>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                      {d["common.email"]}
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="input-base"
-                      placeholder="ornek@email.com"
-                    />
-                  </div>
-                  {error && (
-                    <p className="text-sm text-error">{error}</p>
-                  )}
-                  <button
-                    type="submit"
-                    disabled={loading || !email}
-                    className="btn-primary w-full"
-                  >
-                    {loading ? d["common.loading"] : d["auth.forgot.submit"]}
-                  </button>
-                  <p className="text-center text-sm">
-                    <Link href="/login" className="text-text-muted hover:text-text-primary underline">
-                      {d["auth.forgot.backToLogin"]}
-                    </Link>
-                  </p>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
+              </form>
+            </>
+          )}
+        </Card>
       </div>
     </main>
   );

@@ -8,6 +8,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { AccountGalleryCard } from "@/components/account-gallery-card";
 import { AccountGalleryModal } from "@/components/account-gallery-modal";
 import { AddressBookPanel } from "@/components/address-book-panel";
+import { Button, Card } from "@/components/ui";
 import type { AccountPreview } from "@/components/account-gallery-card";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-context";
@@ -217,21 +218,21 @@ export default function AccountPage() {
           <div className="animate-fade-in-up">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-serif text-text-primary">{d["account.creations.title"]}</h2>
-              <Link href="/create" className="btn-primary text-sm !py-2 !px-4">
+              <Button href="/create" size="sm">
                 {d["account.orders.new"]}
-              </Link>
+              </Button>
             </div>
 
             {previews.length === 0 ? (
-              <div className="card p-12 text-center">
+              <Card className="p-12 text-center">
                 <svg className="w-16 h-16 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                 </svg>
                 <p className="mt-4 text-text-muted">{d["account.orders.empty"]}</p>
-                <Link href="/create" className="btn-primary mt-6 inline-flex">
+                <Button href="/create" className="mt-6 inline-flex">
                   {d["account.orders.createFirst"]}
-                </Link>
-              </div>
+                </Button>
+              </Card>
             ) : (
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -245,13 +246,15 @@ export default function AccountPage() {
                 </div>
                 {cursor && (
                   <div className="flex justify-center mt-6">
-                    <button
+                    <Button
                       onClick={loadMore}
-                      disabled={loadingMore}
-                      className="btn-secondary text-sm !py-2 !px-6"
+                      loading={loadingMore}
+                      variant="secondary"
+                      size="sm"
+                      className="!px-6"
                     >
                       {loadingMore ? d["account.gallery.loading"] : d["account.gallery.loadMore"]}
-                    </button>
+                    </Button>
                   </div>
                 )}
               </>
@@ -263,17 +266,17 @@ export default function AccountPage() {
         {tab === "orders" && (
           <div className="animate-fade-in-up">
             {customerOrders.length === 0 ? (
-              <div className="card p-12 text-center">
+              <Card className="p-12 text-center">
                 <svg className="w-16 h-16 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
                 <p className="mt-4 text-text-muted">{d["account.orders.empty"]}</p>
-                <Link href="/create" className="btn-primary mt-6 inline-flex">
+                <Button href="/create" className="mt-6 inline-flex">
                   {d["account.orders.createFirst"]}
-                </Link>
-              </div>
+                </Button>
+              </Card>
             ) : (
-              <div className="card overflow-hidden">
+              <Card className="overflow-hidden">
                 {/* Desktop table */}
                 <div className="hidden sm:block">
                   <table className="w-full text-sm">
@@ -366,7 +369,7 @@ export default function AccountPage() {
                     );
                   })}
                 </div>
-              </div>
+              </Card>
             )}
           </div>
         )}
@@ -377,7 +380,7 @@ export default function AccountPage() {
         {/* Tab: Profile */}
         {tab === "profile" && user && (
           <div className="animate-fade-in-up">
-            <div className="card p-6 sm:p-8">
+            <Card className="p-6 sm:p-8">
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-14 h-14 rounded-full bg-green-500 flex items-center justify-center text-white text-lg font-bold shrink-0">
                   {initials}
@@ -394,14 +397,14 @@ export default function AccountPage() {
                 </div>
               )}
               <div className="pt-4 border-t border-bg-subtle mt-2">
-                <button onClick={handleLogout} className="btn-secondary text-sm !py-2 !px-4">
+                <Button onClick={handleLogout} variant="secondary" size="sm">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                   </svg>
                   {d["common.logout"]}
-                </button>
+                </Button>
               </div>
-            </div>
+            </Card>
           </div>
         )}
       </div>

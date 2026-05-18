@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card } from "@/components/ui";
 
 interface BankInfo {
   bankName: string;
@@ -65,13 +66,15 @@ function CopyableField({ label, value }: { label: string; value: string }) {
         <p className="text-xs uppercase tracking-wide text-text-muted">{label}</p>
         <p className="font-mono text-sm text-text-primary break-all">{value}</p>
       </div>
-      <button
+      <Button
         type="button"
         onClick={handleCopy}
-        className="shrink-0 text-xs btn-secondary !px-3 !py-1.5"
+        variant="secondary"
+        size="sm"
+        className="shrink-0 !px-3 !py-1.5 text-xs"
       >
         {copied ? d["bankTransfer.copied"] : d["bankTransfer.copy"]}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -123,7 +126,7 @@ export function BankTransferInstructions({
   };
 
   return (
-    <div className="card shadow-elevated p-6 sm:p-8 border-l-4 border-amber-500 animate-fade-in-up">
+    <Card elevated className="p-6 sm:p-8 border-l-4 border-amber-500 animate-fade-in-up">
       <div className="flex items-start gap-3 mb-4">
         <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
           <svg
@@ -229,16 +232,18 @@ export function BankTransferInstructions({
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 className="text-sm"
               />
-              <button
+              <Button
                 type="button"
                 onClick={handleUpload}
-                disabled={!file || uploading}
-                className="btn-primary !py-2 !px-4 text-sm"
+                disabled={!file}
+                loading={uploading}
+                size="sm"
+                className="!px-4"
               >
                 {uploading
                   ? d["bankTransfer.uploading"]
                   : d["bankTransfer.uploadButton"]}
-              </button>
+              </Button>
             </div>
             {uploadError && (
               <p className="text-sm text-error mt-2">{uploadError}</p>
@@ -246,6 +251,6 @@ export function BankTransferInstructions({
           </>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

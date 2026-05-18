@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatDateLong } from "@/lib/i18n/format";
+import { Button } from "@/components/ui";
 import type { GalleryItem } from "@/components/gallery-card";
 
 export function GalleryModal({
@@ -124,17 +124,15 @@ export function GalleryModal({
           )}
 
           <div className="mt-5 flex gap-2">
-            <Link
-              href="/create"
-              className="btn-primary flex-1 !block text-center"
-            >
+            <Button href="/create" className="flex-1 !block text-center">
               {d["gallery.createYourOwn"]}
-            </Link>
+            </Button>
             {item.slug && (
-              <Link
+              <Button
                 href={`/gallery/${item.slug}`}
-                className="btn-secondary !block text-center"
+                variant="secondary"
                 title={d["gallery.permalink"]}
+                className="!block text-center"
               >
                 <svg
                   className="w-5 h-5"
@@ -149,7 +147,7 @@ export function GalleryModal({
                     d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
                   />
                 </svg>
-              </Link>
+              </Button>
             )}
           </div>
         </div>

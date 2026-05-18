@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card, Input, FormField } from "@/components/ui";
 
 export default function ResetPasswordPage({
   params,
@@ -59,67 +60,58 @@ export default function ResetPasswordPage({
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
       <div className="max-w-md mx-auto px-4 py-16">
-        <div className="card shadow-elevated overflow-hidden">
-          <div className="p-8">
-            <h1 className="text-2xl font-serif text-text-primary mb-2">
-              {d["auth.reset.title"]}
-            </h1>
-            {success ? (
-              <div className="space-y-4 mt-4">
-                <p className="text-sm text-green-700 bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-                  {d["auth.reset.successBody"]}
-                </p>
-                <Link href="/login" className="btn-primary inline-flex text-sm">
-                  {d["auth.reset.goToLogin"]}
-                </Link>
-              </div>
-            ) : (
-              <>
-                <p className="text-sm text-text-secondary mb-6">
-                  {d["auth.reset.subtitle"]}
-                </p>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                      {d["auth.reset.newPassword"]}
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      minLength={6}
-                      autoComplete="new-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="input-base"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                      {d["auth.reset.confirmPassword"]}
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      minLength={6}
-                      autoComplete="new-password"
-                      value={confirm}
-                      onChange={(e) => setConfirm(e.target.value)}
-                      className="input-base"
-                    />
-                  </div>
-                  {error && <p className="text-sm text-error">{error}</p>}
-                  <button
-                    type="submit"
-                    disabled={loading || !password || !confirm}
-                    className="btn-primary w-full"
-                  >
-                    {loading ? d["common.loading"] : d["auth.reset.submit"]}
-                  </button>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
+        <Card padding="lg" elevated className="overflow-hidden">
+          <h1 className="text-2xl font-serif text-text-primary mb-2">
+            {d["auth.reset.title"]}
+          </h1>
+          {success ? (
+            <div className="space-y-4 mt-4">
+              <p className="text-sm text-green-700 bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                {d["auth.reset.successBody"]}
+              </p>
+              <Button href="/login" size="sm">
+                {d["auth.reset.goToLogin"]}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-text-secondary mb-6">
+                {d["auth.reset.subtitle"]}
+              </p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <FormField label={d["auth.reset.newPassword"]} required>
+                  <Input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </FormField>
+                <FormField label={d["auth.reset.confirmPassword"]} required>
+                  <Input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                  />
+                </FormField>
+                {error && <p className="text-sm text-error">{error}</p>}
+                <Button
+                  type="submit"
+                  disabled={!password || !confirm}
+                  loading={loading}
+                  fullWidth
+                >
+                  {loading ? d["common.loading"] : d["auth.reset.submit"]}
+                </Button>
+              </form>
+            </>
+          )}
+        </Card>
       </div>
     </main>
   );

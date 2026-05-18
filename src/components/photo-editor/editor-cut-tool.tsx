@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { Button, Card } from "@/components/ui";
 
 type CutMode = "lasso" | "eraser";
 
@@ -424,7 +425,7 @@ export function EditorCutTool({ imageSrc, onApply, onCancel }: EditorCutToolProp
   }, []);
 
   return (
-    <div className="card shadow-elevated overflow-hidden animate-fade-in-up">
+    <Card elevated className="overflow-hidden animate-fade-in-up">
       <div className="h-1 bg-gradient-to-r from-green-500 to-green-800" />
 
       {/* Mode selector + instruction */}
@@ -511,17 +512,18 @@ export function EditorCutTool({ imageSrc, onApply, onCancel }: EditorCutToolProp
             {d["editor.cut.cancel"]}
           </button>
         </div>
-        <button
+        <Button
           type="button"
           onClick={handleApply}
           disabled={!canApply}
-          className="btn-primary !py-2 !px-5 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          size="sm"
+          className="!px-5 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {mode === "lasso" && points.length > 0 && points.length <= 10
             ? d["editor.cut.tooFewPoints"]
             : d["editor.cut.apply"]}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

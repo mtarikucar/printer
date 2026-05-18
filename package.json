@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "workers": "npx tsx workers/start.ts",
     "test:e2e": "playwright test",
-    "test:tax-id": "tsx scripts/test-tax-id.ts"
+    "test:tax-id": "tsx scripts/test-tax-id.ts",
+    "test:dekont-parsers": "tsx scripts/test-dekont-parsers.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

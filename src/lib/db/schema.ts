@@ -281,6 +281,14 @@ export const orderDrafts = pgTable("order_drafts", {
     /** Set by ocrDekont when called with expectedIban: true=match,
      *  false=mismatch (fraud signal), null/undefined=no expected supplied. */
     ibanMatchesExpected?: boolean | null;
+    /** Bank identified by header keywords; "generic" if no bank parser matched. */
+    bank?:
+      | "garanti"
+      | "ziraat"
+      | "is_bankasi"
+      | "yapi_kredi"
+      | "akbank"
+      | "generic";
   }>(),
   receiptOcrConfidence: ocrConfidenceEnum("receipt_ocr_confidence"),
   receiptOcrFailureReason: text("receipt_ocr_failure_reason"),

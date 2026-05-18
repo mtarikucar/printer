@@ -24,6 +24,14 @@ const TURKISH_BANKING_KEYWORDS = [
 export const RECEIPT_OCR_AMOUNT_TOLERANCE_KURUS = 100; // ±1 TL
 export const RECEIPT_OCR_MIN_KEYWORD_MATCHES = 1;
 
+export type DetectedBank =
+  | "garanti"
+  | "ziraat"
+  | "is_bankasi"
+  | "yapi_kredi"
+  | "akbank"
+  | "generic";
+
 export interface OcrResult {
   rawText: string;
   amountKurus?: number;
@@ -40,6 +48,10 @@ export interface OcrResult {
    *  a different IBAN was detected (potential fraud signal); `null` means
    *  either no IBAN was extracted OR no expected was supplied. */
   ibanMatchesExpected: boolean | null;
+  /** Issuer bank identified from header keywords. Defaults to "generic" if
+   *  no bank-specific pattern matched; downstream logging uses this to track
+   *  per-bank parser accuracy. */
+  bank: DetectedBank;
   failureReason?: string;
 }
 
@@ -187,6 +199,179 @@ function normaliseIban(iban: string): string {
   return iban.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
 
+// ─── Bank-specific parsing (Q1) ────────────────────────────────────
+//
+// Each Turkish bank lays out its dekont slip differently. The generic
+// regex-based parsers above work on most slips but lose precision when the
+// amount appears next to non-amount numbers (account #, reference #) or
+// when "Gönderen" is on a label-only line and the actual name follows on
+// the next line. The functions below add a labeled-field extractor that
+// runs first; the generic parsers stay as a fallback when the bank parser
+// returns nothing.
+
+interface BankConfig {
+  /** Header keywords that identify the bank. Case-insensitive substring match. */
+  detect: string[];
+  /** Label variants the bank uses for each field. We look on the same line
+   *  first (after a `:` or `-`) and then on the next non-empty line. */
+  amountLabels: string[];
+  ibanLabels: string[];
+  senderLabels: string[];
+  dateLabels: string[];
+}
+
+const BANK_CONFIGS: Record<Exclude<DetectedBank, "generic">, BankConfig> = {
+  garanti: {
+    detect: ["garanti bbva", "garanti bankası", "garanti bankasi", "garantibbva"],
+    amountLabels: ["toplam tutar", "işlem tutarı", "islem tutari", "tutar"],
+    ibanLabels: ["alıcı iban", "alici iban", "karşı hesap iban", "karsi hesap iban", "iban"],
+    senderLabels: ["gönderen", "gonderen"],
+    dateLabels: ["işlem tarihi", "islem tarihi", "tarih"],
+  },
+  ziraat: {
+    detect: ["ziraat bankası", "ziraat bankasi", "t.c. ziraat", "tc ziraat", "ziraatbank"],
+    amountLabels: ["tutar (tl)", "işlem tutarı", "islem tutari", "tutar"],
+    ibanLabels: ["alıcı iban", "alici iban", "iban"],
+    senderLabels: ["gönderen ad soyad", "gonderen ad soyad", "gönderen", "gonderen"],
+    dateLabels: ["işlem tarihi", "islem tarihi", "tarih"],
+  },
+  is_bankasi: {
+    detect: ["türkiye iş bankası", "turkiye is bankasi", "iş bankası", "is bankasi", "işbank", "isbank"],
+    amountLabels: ["işlem tutarı", "islem tutari", "tutar"],
+    ibanLabels: ["alıcı iban", "alici iban", "karşı iban", "karsi iban", "iban"],
+    senderLabels: ["gönderen", "gonderen"],
+    dateLabels: ["işlem tarihi", "islem tarihi", "tarih"],
+  },
+  yapi_kredi: {
+    detect: ["yapı kredi", "yapi kredi", "yapikredi"],
+    amountLabels: ["tutar", "işlem tutarı", "islem tutari"],
+    ibanLabels: ["alıcı iban", "alici iban", "iban"],
+    senderLabels: ["gönderen", "gonderen"],
+    dateLabels: ["işlem tarihi", "islem tarihi", "tarih"],
+  },
+  akbank: {
+    detect: ["akbank"],
+    amountLabels: ["tutar", "işlem tutarı", "islem tutari"],
+    ibanLabels: ["alıcı iban", "alici iban", "iban"],
+    senderLabels: ["gönderen", "gonderen"],
+    dateLabels: ["işlem tarihi", "islem tarihi", "tarih"],
+  },
+};
+
+/**
+ * Lower-case + strip combining diacritics so Turkish "İ"/"Ş"/"Ğ"/"Ç" all
+ * match against ASCII-only keyword forms ("garanti", "is bankasi"). Tesseract
+ * occasionally emits the combining-dot form even when the visual text is plain
+ * Turkish, so we normalise both sides of the match.
+ */
+function foldForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+export function detectBank(text: string): DetectedBank {
+  const folded = foldForMatch(text);
+  for (const [bank, cfg] of Object.entries(BANK_CONFIGS) as Array<
+    [Exclude<DetectedBank, "generic">, BankConfig]
+  >) {
+    if (cfg.detect.some((kw) => folded.includes(foldForMatch(kw)))) return bank;
+  }
+  return "generic";
+}
+
+/**
+ * Find the value associated with one of the given labels. Tries inline first
+ * ("Tutar: 1.299,50") then the next non-empty line ("Tutar\n1.299,50"). Returns
+ * the raw value string (caller parses to typed value).
+ */
+function extractLabelledValue(
+  text: string,
+  labels: string[]
+): string | undefined {
+  const lines = text.split(/\r?\n/);
+  // Pre-fold labels and each line for Turkish-aware matching, but slice into
+  // the ORIGINAL line (preserving diacritics + casing) to return the value
+  // unchanged for downstream display.
+  const foldedLabels = labels.map((l) => foldForMatch(l));
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const folded = foldForMatch(line);
+    for (const label of foldedLabels) {
+      const idx = folded.indexOf(label);
+      if (idx === -1) continue;
+      // Inline: "Tutar: 1.299,50 TL". We slice the original line by the same
+      // index — NFD-stripping changes character count when combining marks
+      // exist, but in practice Turkish dekonts use the precomposed forms so
+      // indices align. If not, the tail will still trim cleanly because we
+      // strip leading punctuation.
+      const tail = line
+        .slice(idx + label.length)
+        .replace(/^[\s:\-—–]+/, "")
+        .trim();
+      if (tail) return tail;
+      // Stacked: value on the next non-empty line.
+      for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+        const cand = lines[j].trim();
+        if (cand) return cand;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseAmountStringToKurus(raw: string): number | undefined {
+  const match = raw.match(/(\d{1,3}(?:[.\s]\d{3})*[,.]\d{2})/);
+  if (!match) return undefined;
+  const normalized = match[1].replace(/[\s.]/g, "").replace(",", ".");
+  const v = Number(normalized);
+  if (!Number.isFinite(v) || v < 1) return undefined;
+  return Math.round(v * 100);
+}
+
+/**
+ * Run the bank-specific extractors. Returned fields override the generic
+ * parsers only when defined — undefined leaves the generic value intact.
+ */
+export function extractByBank(
+  bank: DetectedBank,
+  text: string
+): {
+  amountKurus?: number;
+  iban?: string;
+  sender?: string;
+  date?: string;
+} {
+  if (bank === "generic") return {};
+  const cfg = BANK_CONFIGS[bank];
+
+  const amountRaw = extractLabelledValue(text, cfg.amountLabels);
+  const amountKurus = amountRaw ? parseAmountStringToKurus(amountRaw) : undefined;
+
+  const ibanRaw = extractLabelledValue(text, cfg.ibanLabels);
+  const ibanMatch = ibanRaw?.match(/TR\s*\d[\d\s]{20,30}/i);
+  const iban = ibanMatch
+    ? ibanMatch[0].replace(/\s+/g, "").toUpperCase().slice(0, 26)
+    : undefined;
+
+  const sender = extractLabelledValue(text, cfg.senderLabels)?.slice(0, 80);
+
+  const dateRaw = extractLabelledValue(text, cfg.dateLabels);
+  let date: string | undefined;
+  if (dateRaw) {
+    const m = dateRaw.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+    if (m) {
+      const [, d, mo, y] = m;
+      const yyyy = y.length === 2 ? `20${y}` : y;
+      date = `${yyyy}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+  }
+
+  return { amountKurus, iban, sender, date };
+}
+
 export interface OcrDekontOptions {
   /** Merchant's expected receiving IBAN. When supplied, the result's
    *  `ibanMatchesExpected` is filled in; otherwise it's `null`. */
@@ -219,6 +404,7 @@ export async function ocrDekont(
       referenceFuzzyMatched: false,
       keywordMatches: 0,
       ibanMatchesExpected: null,
+      bank: "generic",
       failureReason:
         err instanceof Error ? err.message : "Image preprocessing failed",
     };
@@ -237,6 +423,7 @@ export async function ocrDekont(
       referenceFuzzyMatched: false,
       keywordMatches: 0,
       ibanMatchesExpected: null,
+      bank: "generic",
       failureReason: err instanceof Error ? err.message : "OCR failed",
     };
   }
@@ -259,7 +446,12 @@ export async function ocrDekont(
   const referenceFound = exactFound || fuzzyFound;
   const referenceFuzzyMatched = fuzzyFound;
 
-  const iban = parseIban(text);
+  // Bank detection → bank-specific labeled-value extraction → generic
+  // regex fallback. Each field prefers the bank parser's answer if defined.
+  const bank = detectBank(text);
+  const bankFields = extractByBank(bank, text);
+
+  const iban = bankFields.iban ?? parseIban(text);
   const ibanMatchesExpected = options.expectedIban
     ? iban
       ? normaliseIban(iban) === normaliseIban(options.expectedIban)
@@ -268,14 +460,15 @@ export async function ocrDekont(
 
   return {
     rawText: text,
-    amountKurus: parseAmountToKurus(text),
+    amountKurus: bankFields.amountKurus ?? parseAmountToKurus(text),
     iban,
-    sender: parseSender(text),
-    date: parseDate(text),
+    sender: bankFields.sender ?? parseSender(text),
+    date: bankFields.date ?? parseDate(text),
     referenceFound,
     referenceFuzzyMatched,
     keywordMatches: countKeywords(text),
     ibanMatchesExpected,
+    bank,
   };
 }
 

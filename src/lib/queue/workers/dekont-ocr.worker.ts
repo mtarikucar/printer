@@ -76,6 +76,7 @@ async function processJob(job: Job<DekontOcrJobData>) {
         referenceFuzzyMatched: result.referenceFuzzyMatched,
         date: result.date,
         ibanMatchesExpected: result.ibanMatchesExpected,
+        bank: result.bank,
       },
       receiptOcrConfidence: confidence,
       receiptOcrFailureReason: result.failureReason ?? null,

@@ -154,6 +154,11 @@ export const users = pgTable("users", {
   fullName: text("full_name").notNull(),
   phone: text("phone"),
   defaultAddress: jsonb("default_address").$type<TurkishAddress>(),
+  // Password-reset flow (N3 in roadmap). Tokens are sha256 hashes of the
+  // single-use raw token emailed to the user; the raw value never lives in
+  // the DB so a leak of this table doesn't grant account access.
+  passwordResetTokenHash: text("password_reset_token_hash"),
+  passwordResetExpiresAt: timestamp("password_reset_expires_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -108,9 +108,17 @@ export default function LoginPage() {
                 <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="input-base" placeholder={d["login.placeholder.email"]} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                  {d["common.password"]}
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-medium text-text-secondary">
+                    {d["common.password"]}
+                  </label>
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs text-text-muted hover:text-green-500 transition-colors"
+                  >
+                    {d["auth.forgot.link"]}
+                  </Link>
+                </div>
                 <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="input-base" />
               </div>
               {error && (

@@ -11,6 +11,26 @@ const en = {
   "common.phone": "Phone",
   "common.loading": "Loading...",
   "common.error": "An error occurred",
+
+  // Password reset (N3)
+  "auth.forgot.title": "Forgot password",
+  "auth.forgot.subtitle":
+    "Enter your email — if an account exists, we'll send you a reset link.",
+  "auth.forgot.submit": "Send reset link",
+  "auth.forgot.sentBody":
+    "If this email is registered, you'll receive a reset link within a few minutes. Check your spam folder too.",
+  "auth.forgot.backToLogin": "Back to login",
+  "auth.forgot.link": "Forgot password?",
+  "auth.reset.title": "Set a new password",
+  "auth.reset.subtitle": "Enter your new password twice.",
+  "auth.reset.newPassword": "New password",
+  "auth.reset.confirmPassword": "Confirm password",
+  "auth.reset.submit": "Update password",
+  "auth.reset.successBody":
+    "Password updated. Redirecting you to the login page…",
+  "auth.reset.goToLogin": "Sign in",
+  "auth.reset.minLength": "Password must be at least 6 characters",
+  "auth.reset.mismatch": "Passwords don't match",
   "common.backHome": "Back to Home",
   "common.yes": "Yes",
   "common.no": "No",

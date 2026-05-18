@@ -13,6 +13,26 @@ const tr: Dictionary = {
   "common.phone": "Telefon",
   "common.loading": "Yükleniyor...",
   "common.error": "Bir hata oluştu",
+
+  // Password reset (N3)
+  "auth.forgot.title": "Şifremi unuttum",
+  "auth.forgot.subtitle":
+    "E-postanızı girin; hesabınız bulunursa size sıfırlama bağlantısı gönderilir.",
+  "auth.forgot.submit": "Sıfırlama bağlantısı gönder",
+  "auth.forgot.sentBody":
+    "Eğer bu e-posta sistemimizde kayıtlıysa, birkaç dakika içinde sıfırlama bağlantısını alacaksınız. Spam klasörünü de kontrol etmeyi unutmayın.",
+  "auth.forgot.backToLogin": "Girişe geri dön",
+  "auth.forgot.link": "Şifremi unuttum",
+  "auth.reset.title": "Yeni şifre belirleyin",
+  "auth.reset.subtitle": "Yeni şifrenizi iki kez yazın.",
+  "auth.reset.newPassword": "Yeni şifre",
+  "auth.reset.confirmPassword": "Yeni şifre (tekrar)",
+  "auth.reset.submit": "Şifreyi güncelle",
+  "auth.reset.successBody":
+    "Şifreniz güncellendi. Giriş sayfasına yönlendiriliyorsunuz…",
+  "auth.reset.goToLogin": "Giriş yap",
+  "auth.reset.minLength": "Şifre en az 6 karakter olmalı",
+  "auth.reset.mismatch": "İki şifre eşleşmiyor",
   "common.backHome": "Ana Sayfaya Dön",
   "common.yes": "Evet",
   "common.no": "Hayır",

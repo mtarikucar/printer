@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturerActions } from "@/lib/db/schema";
-import { rankManufacturersForOrder } from "@/lib/services/manufacturer-assignment";
+import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { getEmailQueue } from "@/lib/queue/queues";
 
@@ -158,7 +158,11 @@ export async function declineOrder(args: {
   }
 
   // Step 3a: attempt automatic reassignment to next-best eligible.
-  const candidates = await rankManufacturersForOrder(orderId);
+  // Goes through the Q7 shadow wrapper — same authoritative pick as
+  // admin UI, plus the parallel evaluation is logged. Shadow logging
+  // is fire-and-forget inside the wrapper, so a failure here doesn't
+  // roll back the decline.
+  const candidates = await rankForOrderWithShadow(orderId);
   const next = candidates.find(
     (c) =>
       c.eligible &&

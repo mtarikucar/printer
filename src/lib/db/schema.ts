@@ -480,6 +480,38 @@ export const manufacturerActions = pgTable("manufacturer_actions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Q7: shadow + canary log for manufacturer scoring v2 rollout. Every
+// assignment evaluation writes one row capturing both v1 + v2 winners
+// (or v2 alone once cutover happens). Used by /admin/scoring-evaluations
+// to eyeball disagreement before flipping the percent dial up.
+//
+// Unique (order_id, weights_version) prevents N12 decline-retry storms
+// from filling the table with duplicate evaluations for the same order
+// against the same scoring profile.
+export const manufacturerAssignmentEvaluations = pgTable(
+  "manufacturer_assignment_evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    v1WinnerId: uuid("v1_winner_id").references(() => manufacturers.id),
+    v2WinnerId: uuid("v2_winner_id").references(() => manufacturers.id),
+    v1Scores: jsonb("v1_scores"),
+    v2Scores: jsonb("v2_scores"),
+    weightsVersion: text("weights_version").notNull(),
+    /** "v1" while shadow, flips per-row as canary expands and at cutover. */
+    authoritative: text("authoritative").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    orderVersionUnique: uniqueIndex("mfg_eval_order_version_idx").on(
+      t.orderId,
+      t.weightsVersion
+    ),
+  })
+);
+
 // Admin → manufacturer notifications. Email is the delivery channel; this row is the durable record + inbox source.
 export const manufacturerNotifications = pgTable("manufacturer_notifications", {
   id: uuid("id").primaryKey().defaultRandom(),

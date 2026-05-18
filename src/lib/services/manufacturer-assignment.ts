@@ -1,17 +1,21 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers, orders, manufacturerActions } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { regionOf } from "@/lib/data/turkey-regions";
-
-const WEIGHTS = {
-  distance: 0.4,
-  load: 0.35,
-  reliability: 0.2,
-  compliance: 0.05,
-} as const;
+import {
+  getAssignmentWeights,
+  type ScoringProfile,
+} from "@/lib/config/manufacturer-scoring";
 
 const ACTIVE_MFG_STATUSES = ["assigned", "accepted", "printing"] as const;
+
+// v2: thresholds for on-time-delivery scoring. A manufacturer shipping
+// within these windows gets full credit; beyond them they lose points
+// linearly until floor 0.
+const OTD_PRINT_TARGET_MS = 7 * 24 * 60 * 60 * 1000; // 7 days assign → print
+const OTD_SHIP_TARGET_MS = 3 * 24 * 60 * 60 * 1000; // 3 days print → ship
+const OTD_LOOKBACK = 20;
 
 export interface CandidateScore {
   manufacturerId: string;
@@ -28,6 +32,7 @@ export interface CandidateScore {
     distance: number;
     load: number;
     reliability: number;
+    onTimeDelivery: number;
     compliance: number;
   };
   totalScore: number;
@@ -50,6 +55,56 @@ function loadScore(currentLoad: number, max: number): number {
   if (currentLoad >= max) return 0;
   const ratio = currentLoad / max;
   return Math.max(0, Math.round((1 - ratio) * 100));
+}
+
+/**
+ * On-time-delivery score (Q7 v2). Looks at the last 20 completed orders
+ * for this manufacturer and measures actual assign→print and print→ship
+ * windows against targets. Returns 0-100 where 100 = consistently
+ * shipping within target windows. Defaults to 70 (same neutral floor as
+ * reliability) when there aren't enough completed orders.
+ *
+ * v1 ignores this signal entirely (weight = 0); v2 gives it material
+ * weight via getAssignmentWeights.
+ */
+async function onTimeDeliveryScoreFor(manufacturerId: string): Promise<number> {
+  const rows = await db
+    .select({
+      assignedAt: orders.assignedToManufacturerAt,
+      printedAt: orders.manufacturerPrintedAt,
+      shippedAt: orders.shippedAt,
+    })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.manufacturerId, manufacturerId),
+        isNotNull(orders.shippedAt),
+        isNotNull(orders.assignedToManufacturerAt),
+        isNotNull(orders.manufacturerPrintedAt)
+      )
+    )
+    .orderBy(desc(orders.shippedAt))
+    .limit(OTD_LOOKBACK);
+
+  if (rows.length < 3) return 70; // not enough signal, neutral
+
+  let totalPctSum = 0;
+  for (const r of rows) {
+    if (!r.assignedAt || !r.printedAt || !r.shippedAt) continue;
+    const printDelta = r.printedAt.getTime() - r.assignedAt.getTime();
+    const shipDelta = r.shippedAt.getTime() - r.printedAt.getTime();
+    // Each segment scored linearly: 100 if at/under target, 0 at 2× target.
+    const printScore = Math.max(
+      0,
+      Math.min(100, 100 * (2 - printDelta / OTD_PRINT_TARGET_MS))
+    );
+    const shipScore = Math.max(
+      0,
+      Math.min(100, 100 * (2 - shipDelta / OTD_SHIP_TARGET_MS))
+    );
+    totalPctSum += (printScore + shipScore) / 2;
+  }
+  return Math.round(totalPctSum / rows.length);
 }
 
 async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
@@ -85,14 +140,23 @@ async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
   return Math.round((good / total) * 100);
 }
 
+/**
+ * Rank candidates for an order using either v1 (legacy) or v2 (Q7
+ * rollout). Profile defaults to v1 so existing callers stay on the
+ * authoritative algorithm during shadow phase; Q7 dual-write code calls
+ * with `"v2"` explicitly to capture the parallel evaluation.
+ */
 export async function rankManufacturersForOrder(
-  orderId: string
+  orderId: string,
+  profile: ScoringProfile = "v1"
 ): Promise<CandidateScore[]> {
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
     columns: { shippingAddress: true },
   });
   if (!order) return [];
+
+  const weights = getAssignmentWeights(profile);
 
   const shipping = order.shippingAddress as TurkishAddress | null;
   const orderCity = shipping?.il;
@@ -130,10 +194,18 @@ export async function rankManufacturersForOrder(
       const currentLoad = loadMap.get(m.id) ?? 0;
       const max = m.maxConcurrentOrders;
 
+      const [reliability, onTimeDelivery] = await Promise.all([
+        reliabilityScoreFor(m.id),
+        // v1 doesn't use OTD — skip the query to keep v1 ranking fast.
+        weights.onTimeDelivery > 0
+          ? onTimeDeliveryScoreFor(m.id)
+          : Promise.resolve(70),
+      ]);
       const scores = {
         distance: distanceScore(orderCity, city ?? undefined),
         load: loadScore(currentLoad, max),
-        reliability: await reliabilityScoreFor(m.id),
+        reliability,
+        onTimeDelivery,
         compliance:
           (m.requiresManualTaxReview ? 60 : 100) +
           (m.iban ? 0 : -10) +
@@ -142,10 +214,11 @@ export async function rankManufacturersForOrder(
       scores.compliance = Math.max(0, Math.min(100, scores.compliance));
 
       const totalScore =
-        scores.distance * WEIGHTS.distance +
-        scores.load * WEIGHTS.load +
-        scores.reliability * WEIGHTS.reliability +
-        scores.compliance * WEIGHTS.compliance;
+        scores.distance * weights.distance +
+        scores.load * weights.load +
+        scores.reliability * weights.reliability +
+        scores.onTimeDelivery * weights.onTimeDelivery +
+        scores.compliance * weights.compliance;
 
       let eligible = true;
       let ineligibleReason: string | undefined;
@@ -167,6 +240,8 @@ export async function rankManufacturersForOrder(
       if (scores.load >= 80) reasons.push("Düşük yük");
       else if (scores.load <= 30 && eligible) reasons.push("Yüksek yük");
       if (scores.reliability >= 85) reasons.push("Güvenilir");
+      if (weights.onTimeDelivery > 0 && scores.onTimeDelivery >= 85)
+        reasons.push("Hızlı teslimat");
       if (m.requiresManualTaxReview) reasons.push("Vergi incelemede");
       if (!m.iban) reasons.push("⚠ IBAN eksik");
 

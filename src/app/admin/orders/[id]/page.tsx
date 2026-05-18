@@ -9,7 +9,7 @@ import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl } from "@/lib/services/storage";
-import { rankManufacturersForOrder } from "@/lib/services/manufacturer-assignment";
+import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 
 export default async function AdminOrderDetailPage({
   params,
@@ -50,8 +50,10 @@ export default async function AdminOrderDetailPage({
     columns: { id: true, companyName: true },
   });
 
-  // Rank candidates for the assignment recommendation UI.
-  const candidates = await rankManufacturersForOrder(id);
+  // Rank candidates for the assignment recommendation UI. Goes through
+  // the Q7 shadow wrapper which logs both v1/v2 winners and returns the
+  // authoritative one (v1 until canary expands).
+  const candidates = await rankForOrderWithShadow(id);
 
   const latestGeneration = order.generationAttempts.find(
     (g) => g.status === "succeeded"

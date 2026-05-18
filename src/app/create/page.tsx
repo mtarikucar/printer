@@ -63,6 +63,26 @@ export default function CreatePage() {
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [neighborhoodLoading, setNeighborhoodLoading] = useState(false);
 
+  // Saved address book (Q5). Loaded when the customer reaches the shipping
+  // step. Selecting one fully prefills the form (incl. dropdown options) and
+  // skips the city/district cascade resets.
+  type SavedAddress = {
+    id: string;
+    label: string;
+    fullName: string;
+    phone: string;
+    adres: string;
+    mahalle: string | null;
+    ilce: string;
+    il: string;
+    postaKodu: string;
+    isDefault: boolean;
+  };
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [savedAddressLoadedFor, setSavedAddressLoadedFor] = useState<
+    string | null
+  >(null);
+
   // Preview state
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
@@ -289,6 +309,53 @@ export default function CreatePage() {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  // Fetch saved addresses lazily — only once the customer is logged in AND
+  // has actually reached the shipping step. Cached per user id so re-mounting
+  // step 3 doesn't trigger duplicate fetches.
+  useEffect(() => {
+    if (step !== 3) return;
+    if (!loggedIn || !currentUserId) return;
+    if (savedAddressLoadedFor === currentUserId) return;
+    fetch("/api/customer/addresses")
+      .then((r) => (r.ok ? r.json() : { addresses: [] }))
+      .then((data) => {
+        setSavedAddresses(data.addresses ?? []);
+        setSavedAddressLoadedFor(currentUserId);
+      })
+      .catch(() => setSavedAddressLoadedFor(currentUserId));
+  }, [step, loggedIn, currentUserId, savedAddressLoadedFor]);
+
+  const applySavedAddress = (id: string) => {
+    const addr = savedAddresses.find((a) => a.id === id);
+    if (!addr) return;
+    setForm({
+      adres: addr.adres,
+      mahalle: addr.mahalle ?? "",
+      ilce: addr.ilce,
+      il: addr.il,
+      postaKodu: addr.postaKodu,
+      telefon: addr.phone,
+    });
+    // Repopulate the cascading dropdowns so the selected city/district are
+    // valid options against the static + remote lists.
+    setDistrictOptions(DISTRICTS[addr.il] ?? []);
+    if (addr.mahalle) {
+      setNeighborhoodOptions([addr.mahalle]);
+    } else {
+      setNeighborhoodOptions([]);
+    }
+    setNeighborhoodLoading(true);
+    fetch(
+      `/api/address/neighborhoods?il=${encodeURIComponent(
+        addr.il
+      )}&ilce=${encodeURIComponent(addr.ilce)}`
+    )
+      .then((r) => r.json())
+      .then((data) => setNeighborhoodOptions(data.neighborhoods ?? []))
+      .catch(() => {})
+      .finally(() => setNeighborhoodLoading(false));
+  };
 
   const updateField = (field: keyof FormData, value: string) => {
     if (field === "il") {
@@ -1036,6 +1103,41 @@ export default function CreatePage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-8">
+              {/* Saved address dropdown (Q5) — only shown when the logged-in
+                  customer already has saved addresses; new customers see the
+                  empty form unchanged. */}
+              {savedAddresses.length > 0 && (
+                <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-150">
+                  <div className="p-6">
+                    <label className="block text-sm font-medium text-text-secondary mb-1.5">
+                      {d["create.savedAddresses.label"]}
+                    </label>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (e.target.value) applySavedAddress(e.target.value);
+                      }}
+                      className="input-base"
+                    >
+                      <option value="">
+                        {d["create.savedAddresses.placeholder"]}
+                      </option>
+                      {savedAddresses.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.label} — {a.ilce}, {a.il}
+                          {a.isDefault
+                            ? ` (${d["account.addresses.default"]})`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-text-muted mt-2">
+                      {d["create.savedAddresses.hint"]}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Form Card */}
               <div className="card shadow-elevated overflow-hidden animate-fade-in-up delay-200">
                 <div className="p-6">

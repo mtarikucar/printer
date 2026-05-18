@@ -250,6 +250,9 @@ const en = {
   "account.addresses.field.ilce": "District",
   "account.addresses.field.il": "City",
   "account.addresses.field.postaKodu": "Postal code",
+  "create.savedAddresses.label": "Pick a saved address",
+  "create.savedAddresses.placeholder": "— Type manually or pick an address —",
+  "create.savedAddresses.hint": "Manage saved addresses at /account → My Addresses.",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

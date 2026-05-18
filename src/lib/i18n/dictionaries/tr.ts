@@ -252,6 +252,9 @@ const tr: Dictionary = {
   "account.addresses.field.ilce": "İlçe",
   "account.addresses.field.il": "İl",
   "account.addresses.field.postaKodu": "Posta Kodu",
+  "create.savedAddresses.label": "Kayıtlı adreslerimden seç",
+  "create.savedAddresses.placeholder": "— Manuel doldur veya bir adres seç —",
+  "create.savedAddresses.hint": "Yeni adresleri /account → Adreslerim'den yönetebilirsin.",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

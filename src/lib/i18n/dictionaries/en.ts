@@ -253,6 +253,7 @@ const en = {
   // Preview generation
   "create.preview.generating": "Creating your 3D figurine...",
   "create.preview.estimatedTime": "This usually takes 2-3 minutes",
+  "create.preview.almostReady": "Almost ready — just a few more seconds",
   "create.preview.crafting": "AI is sculpting your figurine...",
   "create.preview.almostDone": "Almost done! Adding final details...",
   "create.preview.ready": "Your 3D figurine is ready!",
@@ -959,6 +960,8 @@ const en = {
   "account.orders.unpublish": "Unpublish",
   "track.reorder": "Order Again",
   "track.reorderDesc": "Reorder this figurine with the same settings.",
+  "track.reorderModify": "Modify & reorder",
+  "track.reorderModifyDesc": "Use the same photo but change the size, style, or modifiers.",
   "track.reordering": "Creating...",
 
   // API - Reorder

@@ -86,6 +86,10 @@ export default function CreatePage() {
 
   // Loading stage rotation
   const [loadingStage, setLoadingStage] = useState(0);
+  // Elapsed seconds since the preview job started. Drives the deterministic
+  // progress bar + mm:ss display on the generating step. Reset on step change.
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const PREVIEW_TARGET_SECONDS = 300; // 5-minute polling budget (matches /api/preview poll loop)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const editorExportRef = useRef<(() => Promise<Blob | null>) | null>(null);
@@ -201,6 +205,25 @@ export default function CreatePage() {
       .catch(() => {});
   }, [searchParams]);
 
+  // Restore from ?fromOrder= query param — "modify and reorder" flow from the
+  // track page. Pulls the prior order's photoKey + size + style + modifiers
+  // and prefills the form. Customer lands on step 0 with everything filled
+  // in and can change anything before submitting.
+  useEffect(() => {
+    const qFromOrder = searchParams.get("fromOrder");
+    if (!qFromOrder) return;
+    fetch(`/api/customer/orders/${qFromOrder}/snapshot`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        if (data.photoKey) setPhotoKey(data.photoKey);
+        if (data.figurineSize) setSelectedSize(data.figurineSize);
+        if (data.style) setSelectedStyle(data.style);
+        if (Array.isArray(data.modifiers)) setSelectedModifiers(data.modifiers);
+      })
+      .catch(() => {});
+  }, [searchParams]);
+
   // Loading stage cycle
   useEffect(() => {
     if (step !== 1 || previewError) return;
@@ -208,6 +231,22 @@ export default function CreatePage() {
     const interval = setInterval(() => {
       setLoadingStage((prev) => (prev + 1) % 4);
     }, 18000);
+    return () => clearInterval(interval);
+  }, [step, previewError]);
+
+  // Elapsed-time ticker for the generating step. Drives the deterministic
+  // progress bar so the customer sees actual progression instead of an
+  // indeterminate-looking infinite shimmer.
+  useEffect(() => {
+    if (step !== 1 || previewError) {
+      setElapsedSec(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedSec(0);
+    const interval = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
     return () => clearInterval(interval);
   }, [step, previewError]);
 
@@ -851,13 +890,31 @@ export default function CreatePage() {
                     <h2 className="text-2xl font-serif text-text-primary mb-2">{d["create.preview.generating"]}</h2>
                     <p className="text-text-muted mb-6">{d["create.preview.estimatedTime"]}</p>
 
-                    <div className="w-64 mx-auto mb-6">
+                    {/* Deterministic progress + mm:ss elapsed.
+                        Caps at 95% — the remaining 5% is "model handoff"
+                        and the actual completion flips us to step 2 anyway,
+                        so showing 100% before that is misleading. */}
+                    <div className="w-64 mx-auto mb-3">
                       <div className="h-1.5 bg-bg-muted rounded-full overflow-hidden">
-                        <div className="loading-progress-bar" />
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-green-500 to-green-800 transition-all duration-1000 ease-linear"
+                          style={{
+                            width: `${Math.min(95, (elapsedSec / PREVIEW_TARGET_SECONDS) * 100)}%`,
+                          }}
+                        />
                       </div>
                     </div>
 
-                    <p className="text-sm text-text-muted">{loadingStages[loadingStage]}</p>
+                    <p className="text-xs font-mono text-text-muted mb-2">
+                      {Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}
+                      <span className="opacity-50"> / ~5:00</span>
+                    </p>
+
+                    <p className="text-sm text-text-muted">
+                      {elapsedSec >= 270
+                        ? d["create.preview.almostReady"]
+                        : loadingStages[loadingStage]}
+                    </p>
                   </div>
                 </>
               )}

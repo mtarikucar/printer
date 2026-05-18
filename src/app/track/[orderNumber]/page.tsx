@@ -627,12 +627,29 @@ export default function TrackPage({
               </div>
             )}
 
-            {/* Reorder button */}
+            {/* Reorder block: instant repeat (same settings) + modify-and-reorder
+                (same photo, customer can change size/style/modifier first). */}
             {order.status !== "pending_payment" && order.status !== "rejected" && (
-              <div className="card p-6">
-                <h2 className="text-lg font-serif text-text-primary mb-2">{d["track.reorder"]}</h2>
-                <p className="text-sm text-text-secondary mb-4">{d["track.reorderDesc"]}</p>
-                <ReorderButton orderNumber={order.orderNumber} />
+              <div className="card p-6 space-y-4">
+                <div>
+                  <h2 className="text-lg font-serif text-text-primary mb-2">{d["track.reorder"]}</h2>
+                  <p className="text-sm text-text-secondary mb-3">{d["track.reorderDesc"]}</p>
+                  <ReorderButton orderNumber={order.orderNumber} />
+                </div>
+                <div className="pt-4 border-t border-bg-subtle">
+                  <h3 className="text-sm font-medium text-text-primary mb-1">
+                    {d["track.reorderModify"]}
+                  </h3>
+                  <p className="text-xs text-text-muted mb-3">
+                    {d["track.reorderModifyDesc"]}
+                  </p>
+                  <a
+                    href={`/create?fromOrder=${encodeURIComponent(order.orderNumber)}`}
+                    className="btn-secondary text-sm !py-2 !px-6 inline-flex"
+                  >
+                    {d["track.reorderModify"]}
+                  </a>
+                </div>
               </div>
             )}
 

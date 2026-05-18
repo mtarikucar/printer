@@ -136,7 +136,10 @@ export function UploadDropzone({
       {...getRootProps()}
       className={`card cursor-pointer transition-all border-2 border-dashed overflow-hidden ${
         isDragActive
-          ? "border-green-500/50 bg-green-500/5"
+          ? // Stronger drag affordance: full-color border, tinted background,
+            // and an elevated shadow so the user gets unambiguous feedback
+            // that the drop will land.
+            "border-green-500 bg-green-500/10 shadow-elevated scale-[1.01]"
           : "border-bg-subtle hover:border-green-500/50 hover:bg-bg-elevated"
       }`}
     >
@@ -146,7 +149,13 @@ export function UploadDropzone({
       <input {...getInputProps()} />
       <div className="p-8 space-y-5">
         {/* Icon */}
-        <div className="mx-auto bg-bg-elevated w-20 h-20 rounded-2xl flex items-center justify-center border border-bg-subtle">
+        <div
+          className={`mx-auto w-20 h-20 rounded-2xl flex items-center justify-center border transition-colors ${
+            isDragActive
+              ? "bg-green-500/20 border-green-500/40"
+              : "bg-bg-elevated border-bg-subtle"
+          }`}
+        >
           <svg
             className="h-10 w-10 text-green-500 animate-float"
             fill="none"

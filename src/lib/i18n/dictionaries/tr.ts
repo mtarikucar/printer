@@ -255,6 +255,7 @@ const tr: Dictionary = {
   // Preview generation
   "create.preview.generating": "3D figurine'iniz oluşturuluyor...",
   "create.preview.estimatedTime": "Bu işlem genellikle 2-3 dakika sürer",
+  "create.preview.almostReady": "Neredeyse hazır… birkaç saniye daha",
   "create.preview.crafting": "Yapay zeka figurine'inizi şekillendiriyor...",
   "create.preview.almostDone": "Neredeyse bitti! Son detaylar ekleniyor...",
   "create.preview.ready": "3D figurine'iniz hazır!",
@@ -965,6 +966,8 @@ const tr: Dictionary = {
   "account.orders.unpublish": "Gizle",
   "track.reorder": "Tekrar Sipariş Ver",
   "track.reorderDesc": "Aynı ayarlarla bu figürini tekrar sipariş edin.",
+  "track.reorderModify": "Düzenle ve yeni sipariş ver",
+  "track.reorderModifyDesc": "Aynı fotoğrafla farklı boyut, stil veya modifier seçin.",
   "track.reordering": "Oluşturuluyor...",
 
   // API - Tekrar Sipariş

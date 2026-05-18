@@ -208,7 +208,7 @@ function countKeywords(text: string): number {
  * Iterative Levenshtein distance. Standard DP; runs over short strings
  * (reference is ~12 chars). Returns edit distance.
  */
-function levenshtein(a: string, b: string): number {
+export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -231,7 +231,7 @@ function levenshtein(a: string, b: string): number {
  * (where N = needle.length) and return true if any has Levenshtein similarity
  * ≥ threshold. `needle` should already be normalised (alphanumeric uppercase).
  */
-function fuzzyContains(haystack: string, needle: string, threshold: number): boolean {
+export function fuzzyContains(haystack: string, needle: string, threshold: number): boolean {
   if (needle.length === 0) return false;
   if (haystack.length < needle.length) return false;
   for (let i = 0; i + needle.length <= haystack.length; i++) {

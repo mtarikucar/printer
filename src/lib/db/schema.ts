@@ -362,6 +362,10 @@ export const orders = pgTable("orders", {
   assignedToManufacturerAt: timestamp("assigned_to_manufacturer_at"),
   manufacturerAcceptedAt: timestamp("manufacturer_accepted_at"),
   manufacturerPrintedAt: timestamp("manufacturer_printed_at"),
+  // N12: list of manufacturers who declined this order. Used by the
+  // reassignment service to skip them on retry and to cap the reassign
+  // count (3 declines → admin manual queue).
+  declinedManufacturerIds: jsonb("declined_manufacturer_ids").$type<string[]>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -272,6 +272,9 @@ const tr: Dictionary = {
   "create.guest.alreadyHaveAccount": "Hesabınız var mı? Giriş yapın",
   "gallery.permalink": "Bu figüre özel bağlantı",
   "gallery.backToGallery": "Galeriye dön",
+  "manufacturer.orderDetail.declineLink": "Sipariş için uygun değilim — reddet",
+  "manufacturer.orderDetail.declineReasonPlaceholder": "Sebebiniz (opsiyonel)…",
+  "manufacturer.orderDetail.confirmDecline": "Reddet",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

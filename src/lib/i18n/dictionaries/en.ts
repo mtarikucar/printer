@@ -270,6 +270,9 @@ const en = {
   "create.guest.alreadyHaveAccount": "Already have an account? Sign in",
   "gallery.permalink": "Permalink to this figurine",
   "gallery.backToGallery": "Back to gallery",
+  "manufacturer.orderDetail.declineLink": "Not the right fit — decline",
+  "manufacturer.orderDetail.declineReasonPlaceholder": "Reason (optional)…",
+  "manufacturer.orderDetail.confirmDecline": "Decline",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

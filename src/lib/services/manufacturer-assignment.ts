@@ -69,7 +69,14 @@ async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
   for (const r of rows) {
     if (r.action === "shipped" || r.action === "printed" || r.action === "accepted") {
       good++;
-    } else if (r.action === "rejected" || r.action === "cancelled") {
+    } else if (
+      r.action === "rejected" ||
+      r.action === "cancelled" ||
+      r.action === "decline"
+    ) {
+      // N12: a manufacturer-initiated decline costs reliability score; the
+      // score feeds back into ranking so chronic decliners drift down the
+      // candidate list and eventually become ineligible by score weight.
       bad++;
     }
   }

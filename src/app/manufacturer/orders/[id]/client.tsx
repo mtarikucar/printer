@@ -434,6 +434,16 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                     : (d["manufacturer.orderDetail.acceptOrder" as keyof typeof d] as string) ||
                       "Accept Order"}
                 </button>
+
+                {/* N12: decline path. Reveals a small textarea + confirm
+                    button so a misclick can't accidentally storm-reassign. */}
+                <DeclineBlock
+                  loading={loading === "decline"}
+                  onDecline={(reason) =>
+                    performAction("decline", reason ? { reason } : {})
+                  }
+                  d={d}
+                />
               </div>
             </div>
           )}
@@ -817,6 +827,73 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// N12: collapsible decline block. Two-step UX (link → form) means the
+// destructive action can't be triggered by a single misclick. The textarea
+// is optional; the reason is logged on the manufacturer_actions row so
+// admins can audit decline patterns later.
+function DeclineBlock({
+  loading,
+  onDecline,
+  d,
+}: {
+  loading: boolean;
+  onDecline: (reason: string) => void;
+  d: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-3 text-xs text-text-muted hover:text-red-600 transition-colors"
+      >
+        {d["manufacturer.orderDetail.declineLink"] ||
+          "Sipariş için uygun değilim — reddet"}
+      </button>
+    );
+  }
+  return (
+    <div className="mt-4 w-full max-w-xs bg-white border border-red-200 rounded-xl p-3">
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={
+          d["manufacturer.orderDetail.declineReasonPlaceholder"] ||
+          "Sebebiniz (opsiyonel)…"
+        }
+        rows={2}
+        maxLength={500}
+        className="w-full text-sm bg-bg-base border border-bg-subtle rounded-lg p-2 mb-2"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setReason("");
+          }}
+          className="flex-1 px-3 py-1.5 text-xs text-text-secondary border border-bg-subtle rounded-lg hover:bg-bg-elevated"
+          disabled={loading}
+        >
+          {d["common.cancel"] || "Cancel"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDecline(reason.trim())}
+          disabled={loading}
+          className="flex-1 px-3 py-1.5 text-xs text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:bg-red-400"
+        >
+          {loading
+            ? d["manufacturer.orderDetail.processing"] || "…"
+            : d["manufacturer.orderDetail.confirmDecline"] || "Reddet"}
+        </button>
       </div>
     </div>
   );

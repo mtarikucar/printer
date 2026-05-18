@@ -1,0 +1,1 @@
+ALTER TABLE "orders" ADD COLUMN "declined_manufacturer_ids" jsonb;

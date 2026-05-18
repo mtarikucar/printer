@@ -7,6 +7,7 @@ import { orderDrafts } from "../../db/schema";
 import { getFileBuffer } from "../../services/storage";
 import { ocrDekont, scoreOcr } from "../../services/dekont-ocr";
 import { promoteDraftToOrder } from "../../services/order-draft";
+import { getBankDetails } from "../../config/payment";
 import type { Locale } from "../../i18n/types";
 
 function localeOf(value: string | null | undefined): Locale {
@@ -50,8 +51,14 @@ async function processJob(job: Job<DekontOcrJobData>) {
 
   const expectedAmountKurus =
     draft.amountKurus - draft.giftCardAmountKurus - draft.havaleDiscountKurus;
+  // Merchant's receiving IBAN — passing it in lets the OCR cross-check the
+  // extracted IBAN. Mismatch = fraud signal → score forced to "low" (admin
+  // review). Match = confidence boost.
+  const { iban: expectedIban } = getBankDetails();
 
-  const result = await ocrDekont(buffer, receiptKey, draft.reference);
+  const result = await ocrDekont(buffer, receiptKey, draft.reference, {
+    expectedIban: expectedIban || undefined,
+  });
   const confidence = scoreOcr(result, expectedAmountKurus);
 
   // Re-assert staleness in the WHERE clause: if the customer uploaded a new
@@ -66,7 +73,9 @@ async function processJob(job: Job<DekontOcrJobData>) {
         iban: result.iban,
         sender: result.sender,
         referenceFound: result.referenceFound,
+        referenceFuzzyMatched: result.referenceFuzzyMatched,
         date: result.date,
+        ibanMatchesExpected: result.ibanMatchesExpected,
       },
       receiptOcrConfidence: confidence,
       receiptOcrFailureReason: result.failureReason ?? null,
@@ -139,6 +148,19 @@ export function startDekontOcrWorker() {
   const worker = new Worker<DekontOcrJobData>("dekont-ocr", processJob, {
     connection: getRedisConnection(),
     concurrency: 2,
+    // Stalled-job detection: tesseract OCR is CPU-bound and sometimes hangs
+    // on adversarial input (very large images, malformed JPEG, etc.). Without
+    // this config a stuck job blocks a worker slot indefinitely and the
+    // customer's draft sits in `pending` forever.
+    //
+    // `stalledInterval` = how often BullMQ checks each running job for
+    // staleness. `maxStalledCount` = how many times a job can be marked
+    // stalled before BullMQ moves it to the `failed` set (where our
+    // `failed` handler below parks the draft for admin review).
+    //
+    // 30s interval × max 1 stall = ~30-60s before stuck jobs escalate.
+    stalledInterval: 30_000,
+    maxStalledCount: 1,
   });
 
   worker.on("completed", (job) => {

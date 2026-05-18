@@ -1053,6 +1053,16 @@ const en = {
   "track.cancelled.title": "Order cancelled",
   "track.bankTransferPaid.title": "Bank transfer received",
   "track.bankTransferPaid.viewReceipt": "View receipt",
+  "havale.page.title": "Bank transfer payment",
+  "havale.page.reference": "Order reference:",
+  "havale.page.instructions":
+    "Send your payment to the IBAN below, writing the order reference in the description. Then upload the receipt — we'll verify it automatically and start your order.",
+  "havale.page.ocrScanning":
+    "Receipt received, checking automatically. Your order will start as soon as we have high confidence.",
+  "havale.page.ocrHigh": "Receipt verified — starting your order.",
+  "havale.page.ocrMedium":
+    "Receipt received but couldn't be verified automatically. Our team will check it manually and start your order shortly.",
+  "havale.page.supportContact": "Questions?",
 
   // Payment method selector
   "payment.method.title": "Payment Method",

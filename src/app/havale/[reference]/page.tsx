@@ -7,6 +7,7 @@ import { getBankDetails } from "@/lib/config/payment";
 import { SiteHeader } from "@/components/site-header";
 import { BankTransferInstructions } from "@/components/bank-transfer-instructions";
 import { getLocale } from "@/lib/i18n/get-locale";
+import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export default async function HavalePage({
   }
 
   const locale = await getLocale();
+  const d = getDictionary(locale);
   const bank = getBankDetails();
   const finalAmountKurus =
     draft.amountKurus - draft.giftCardAmountKurus - draft.havaleDiscountKurus;
@@ -63,15 +65,14 @@ export default async function HavalePage({
         <div className="max-w-3xl mx-auto px-4 py-12 space-y-6">
           <div className="card p-6 sm:p-8">
             <h1 className="text-2xl font-serif text-text-primary">
-              Havale ile ödeme
+              {d["havale.page.title"]}
             </h1>
             <p className="text-text-secondary mt-1">
-              Sipariş referansı:{" "}
+              {d["havale.page.reference"]}{" "}
               <span className="font-mono text-green-500">{draft.reference}</span>
             </p>
             <p className="text-sm text-text-muted mt-2">
-              Aşağıdaki IBAN&apos;a, açıklama alanına sipariş referansınızı yazarak ödemenizi yapın.
-              Ardından dekontu yükleyin; sistemimiz otomatik kontrol edip siparişinizi başlatacaktır.
+              {d["havale.page.instructions"]}
             </p>
           </div>
 
@@ -86,26 +87,24 @@ export default async function HavalePage({
 
           {ocrStatus === "scanning" && (
             <div className="card p-4 border-l-4 border-blue-500 text-sm text-blue-900 bg-blue-50">
-              Dekontunuz alındı, otomatik kontrol ediliyor… Yüksek güven oluştuğunda
-              siparişiniz otomatik olarak başlatılacak.
+              {d["havale.page.ocrScanning"]}
             </div>
           )}
 
           {ocrStatus === "high" && (
             <div className="card p-4 border-l-4 border-green-500 text-sm text-green-900 bg-green-50">
-              Dekontunuz doğrulandı, siparişiniz başlatılıyor.
+              {d["havale.page.ocrHigh"]}
             </div>
           )}
 
           {(ocrStatus === "medium" || ocrStatus === "low") && (
             <div className="card p-4 border-l-4 border-amber-500 text-sm text-amber-900 bg-amber-50">
-              Dekontunuz alındı ancak otomatik doğrulanamadı. Ekibimiz manuel olarak kontrol edip
-              siparişinizi en kısa sürede başlatacak.
+              {d["havale.page.ocrMedium"]}
             </div>
           )}
 
           <p className="text-center text-xs text-text-muted">
-            Sorularınız için{" "}
+            {d["havale.page.supportContact"]}{" "}
             <a href="mailto:siparis@figurunica.com" className="underline">
               siparis@figurunica.com
             </a>

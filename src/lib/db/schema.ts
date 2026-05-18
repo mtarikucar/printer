@@ -224,7 +224,12 @@ export const orderDrafts = pgTable("order_drafts", {
     iban?: string;
     sender?: string;
     referenceFound?: boolean;
+    /** True when matched via fuzzy (Levenshtein) rather than exact substring. */
+    referenceFuzzyMatched?: boolean;
     date?: string;
+    /** Set by ocrDekont when called with expectedIban: true=match,
+     *  false=mismatch (fraud signal), null/undefined=no expected supplied. */
+    ibanMatchesExpected?: boolean | null;
   }>(),
   receiptOcrConfidence: ocrConfidenceEnum("receipt_ocr_confidence"),
   receiptOcrFailureReason: text("receipt_ocr_failure_reason"),

@@ -31,11 +31,24 @@ export interface OcrResult {
   sender?: string;
   date?: string;
   referenceFound: boolean;
+  /** True only when an `expectedReference` substring or fuzzy match was found
+   *  AND the fuzzy distance ratio is ≥ FUZZY_REFERENCE_THRESHOLD. */
+  referenceFuzzyMatched: boolean;
   keywordMatches: number;
+  /** Set when `ocrDekont` is called with `expectedIban`. `true` means the
+   *  extracted IBAN matched the expected merchant IBAN exactly; `false` means
+   *  a different IBAN was detected (potential fraud signal); `null` means
+   *  either no IBAN was extracted OR no expected was supplied. */
+  ibanMatchesExpected: boolean | null;
   failureReason?: string;
 }
 
 export type OcrConfidence = "high" | "medium" | "low";
+
+/** Minimum Levenshtein-based similarity to count a reference as fuzzy-matched.
+ *  0.85 catches single-character OCR mistakes (e.g. O↔0, I↔l) without letting
+ *  random alphanumeric noise look like a reference. */
+const FUZZY_REFERENCE_THRESHOLD = 0.85;
 
 /**
  * Pre-process the receipt image for OCR: grayscale + normalize + cap width.
@@ -131,10 +144,60 @@ function countKeywords(text: string): number {
   );
 }
 
+/**
+ * Iterative Levenshtein distance. Standard DP; runs over short strings
+ * (reference is ~12 chars). Returns edit distance.
+ */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const prev = new Array(b.length + 1);
+  const curr = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+/**
+ * Sliding-window fuzzy match: scan every length-N substring of `haystack`
+ * (where N = needle.length) and return true if any has Levenshtein similarity
+ * ≥ threshold. `needle` should already be normalised (alphanumeric uppercase).
+ */
+function fuzzyContains(haystack: string, needle: string, threshold: number): boolean {
+  if (needle.length === 0) return false;
+  if (haystack.length < needle.length) return false;
+  for (let i = 0; i + needle.length <= haystack.length; i++) {
+    const window = haystack.slice(i, i + needle.length);
+    const distance = levenshtein(window, needle);
+    const similarity = 1 - distance / needle.length;
+    if (similarity >= threshold) return true;
+  }
+  return false;
+}
+
+function normaliseIban(iban: string): string {
+  return iban.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+}
+
+export interface OcrDekontOptions {
+  /** Merchant's expected receiving IBAN. When supplied, the result's
+   *  `ibanMatchesExpected` is filled in; otherwise it's `null`. */
+  expectedIban?: string;
+}
+
 export async function ocrDekont(
   buffer: Buffer,
   storageKey: string,
-  expectedReference: string
+  expectedReference: string,
+  options: OcrDekontOptions = {}
 ): Promise<OcrResult> {
   const ext = extname(storageKey).toLowerCase();
   const mime =
@@ -153,7 +216,9 @@ export async function ocrDekont(
     return {
       rawText: "",
       referenceFound: false,
+      referenceFuzzyMatched: false,
       keywordMatches: 0,
+      ibanMatchesExpected: null,
       failureReason:
         err instanceof Error ? err.message : "Image preprocessing failed",
     };
@@ -169,28 +234,48 @@ export async function ocrDekont(
     return {
       rawText: "",
       referenceFound: false,
+      referenceFuzzyMatched: false,
       keywordMatches: 0,
+      ibanMatchesExpected: null,
       failureReason: err instanceof Error ? err.message : "OCR failed",
     };
   }
 
-  const normalizedText = text.replace(/\s+/g, " ");
-  const referenceFound = normalizedText
-    .toUpperCase()
-    .includes(expectedReference.toUpperCase()) ||
-    normalizedText
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, "")
-      .includes(expectedReference.replace(/[^A-Z0-9]/gi, "").toUpperCase());
+  // Exact-substring lookup (current behaviour) + fuzzy fallback on the
+  // alphanumeric-stripped form. Fuzzy match catches typical single-character
+  // OCR errors (O↔0, I↔1↔l, S↔5) without false-positives on random noise.
+  const upperText = text.toUpperCase();
+  const stripped = upperText.replace(/[^A-Z0-9]/g, "");
+  const refUpper = expectedReference.toUpperCase();
+  const refStripped = refUpper.replace(/[^A-Z0-9]/g, "");
+
+  const exactFound =
+    upperText.includes(refUpper) || stripped.includes(refStripped);
+  const fuzzyFound =
+    !exactFound &&
+    refStripped.length >= 6 &&
+    fuzzyContains(stripped, refStripped, FUZZY_REFERENCE_THRESHOLD);
+
+  const referenceFound = exactFound || fuzzyFound;
+  const referenceFuzzyMatched = fuzzyFound;
+
+  const iban = parseIban(text);
+  const ibanMatchesExpected = options.expectedIban
+    ? iban
+      ? normaliseIban(iban) === normaliseIban(options.expectedIban)
+      : false
+    : null;
 
   return {
     rawText: text,
     amountKurus: parseAmountToKurus(text),
-    iban: parseIban(text),
+    iban,
     sender: parseSender(text),
     date: parseDate(text),
     referenceFound,
+    referenceFuzzyMatched,
     keywordMatches: countKeywords(text),
+    ibanMatchesExpected,
   };
 }
 
@@ -200,14 +285,26 @@ export function scoreOcr(
 ): OcrConfidence {
   if (result.failureReason) return "low";
 
+  // Hard floor: an extracted IBAN that does NOT match the expected merchant
+  // IBAN is a strong fraud signal — never auto-promote, even if amount and
+  // reference look right. Force admin review.
+  if (result.ibanMatchesExpected === false) return "low";
+
   const amountOk =
     result.amountKurus !== undefined &&
     Math.abs(result.amountKurus - expectedAmountKurus) <=
       RECEIPT_OCR_AMOUNT_TOLERANCE_KURUS;
   const refOk = result.referenceFound;
   const keywordsOk = result.keywordMatches >= RECEIPT_OCR_MIN_KEYWORD_MATCHES;
+  // Boost: matching IBAN substantively strengthens "this is the right payment"
+  // signal even when amount or reference parsing has minor errors.
+  const ibanOk = result.ibanMatchesExpected === true;
 
   if (amountOk && refOk && keywordsOk) return "high";
+  // Treat an IBAN-confirmed transfer with EITHER amount OR reference as high
+  // confidence: the IBAN match is itself a very strong signal that we have
+  // the right receipt.
+  if (ibanOk && (amountOk || refOk)) return "high";
   if (amountOk || refOk) return "medium";
   return "low";
 }

@@ -1059,6 +1059,16 @@ const tr: Dictionary = {
   "track.cancelled.title": "Sipariş iptal edildi",
   "track.bankTransferPaid.title": "Havale alındı",
   "track.bankTransferPaid.viewReceipt": "Dekontu görüntüle",
+  "havale.page.title": "Havale ile ödeme",
+  "havale.page.reference": "Sipariş referansı:",
+  "havale.page.instructions":
+    "Aşağıdaki IBAN'a, açıklama alanına sipariş referansınızı yazarak ödemenizi yapın. Ardından dekontu yükleyin; sistemimiz otomatik kontrol edip siparişinizi başlatacaktır.",
+  "havale.page.ocrScanning":
+    "Dekontunuz alındı, otomatik kontrol ediliyor… Yüksek güven oluştuğunda siparişiniz otomatik olarak başlatılacak.",
+  "havale.page.ocrHigh": "Dekontunuz doğrulandı, siparişiniz başlatılıyor.",
+  "havale.page.ocrMedium":
+    "Dekontunuz alındı ancak otomatik doğrulanamadı. Ekibimiz manuel olarak kontrol edip siparişinizi en kısa sürede başlatacak.",
+  "havale.page.supportContact": "Sorularınız için",
 
   // Ödeme yöntemi seçimi
   "payment.method.title": "Ödeme Yöntemi",

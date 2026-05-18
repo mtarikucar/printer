@@ -18,7 +18,8 @@
     "test:scoring-v2": "tsx scripts/test-scoring-v2.ts",
     "test:upsells": "tsx scripts/test-upsells.ts",
     "test:slug": "tsx scripts/test-slug.ts",
-    "test:unit": "npx tsx scripts/test-tax-id.ts && npx tsx scripts/test-dekont-parsers.ts && npx tsx scripts/test-scoring-v2.ts && npx tsx scripts/test-upsells.ts && npx tsx scripts/test-slug.ts",
+    "test:ocr-confidence": "tsx scripts/test-ocr-confidence.ts",
+    "test:unit": "npx tsx scripts/test-tax-id.ts && npx tsx scripts/test-dekont-parsers.ts && npx tsx scripts/test-scoring-v2.ts && npx tsx scripts/test-upsells.ts && npx tsx scripts/test-slug.ts && npx tsx scripts/test-ocr-confidence.ts",
     "backfill:gallery-slugs": "tsx scripts/backfill-gallery-slugs.ts"
   },
   "dependencies": {

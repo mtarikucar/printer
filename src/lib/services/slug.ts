@@ -1,21 +1,34 @@
+import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 
 /**
- * Convert a free-form string to a URL-safe slug. Turkish characters fold to
- * ASCII (Ş→s, Ç→c, Ğ→g, İ→i, Ü→u, Ö→o) so slugs are readable in browser
- * status bars and email previews.
+ * Convert a free-form string to a URL-safe slug. Turkish characters fold
+ * to ASCII (Ş→s, Ç→c, Ğ→g, İ→i, Ü→u, Ö→o) so slugs are readable in
+ * browser status bars and email previews.
+ *
+ * IMPORTANT: Turkish substitutions run BEFORE `.toLowerCase()` and cover
+ * BOTH cases. Doing it the other way around relies on locale-correct
+ * lowering (`"İ".toLowerCase() === "i̇"` in V8, but `"i"` in Turkish
+ * locale), which is environment-dependent and dropped diacritic marks
+ * differently across runtimes. Explicit substitution is locale-safe.
+ *
+ * The combining-mark strip uses an explicit `̀-ͯ` Unicode
+ * range — earlier versions used a literal-character range which is
+ * fragile across editor encodings.
  */
-function kebabify(input: string): string {
+export function kebabify(input: string): string {
   return input
+    // Turkish-specific folding, both cases, before toLowerCase.
+    .replace(/[İI]/g, "i")
+    .replace(/[ıI]/g, "i")
+    .replace(/[şŞ]/g, "s")
+    .replace(/[ğĞ]/g, "g")
+    .replace(/[çÇ]/g, "c")
+    .replace(/[öÖ]/g, "o")
+    .replace(/[üÜ]/g, "u")
     .toLowerCase()
-    .replace(/ı/g, "i")
-    .replace(/ş/g, "s")
-    .replace(/ğ/g, "g")
-    .replace(/ç/g, "c")
-    .replace(/ö/g, "o")
-    .replace(/ü/g, "u")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
@@ -41,9 +54,9 @@ export async function generateGallerySlug(
   const orderPart = kebabify(orderNumber);
   const base = namePart ? `${namePart}-${orderPart}` : orderPart;
 
-  // Collision check — extremely unlikely given orderPart includes the order
-  // number, but defensive against schema changes that might let two rows
-  // collide. Append `-2`, `-3`, ... until unique.
+  // Collision check — extremely unlikely given orderPart includes the
+  // order number, but defensive against schema changes that might let
+  // two rows collide. Append `-2`, `-3`, ... until unique.
   let candidate = base;
   let suffix = 1;
   while (true) {
@@ -54,9 +67,20 @@ export async function generateGallerySlug(
     if (!existing) return candidate;
     suffix += 1;
     candidate = `${base}-${suffix}`;
-    if (suffix > 50) {
-      // Hard cap — should be unreachable; fall back to order number alone.
-      return `${orderPart}-${Date.now()}`;
-    }
+    if (suffix > 50) break;
   }
+
+  // Pathological-collision fallback. Use a cryptographic random suffix
+  // (NOT Date.now() — two simultaneous fallbacks in the same ms would
+  // produce identical slugs and the second insert would throw on the
+  // unique index). Re-check once; if even THIS collides we surrender
+  // and let the caller's unique-constraint violation propagate.
+  const randomFallback = `${orderPart}-${crypto.randomBytes(4).toString("hex")}`;
+  const dup = await db.query.orders.findFirst({
+    where: eq(orders.gallerySlug, randomFallback),
+    columns: { id: true },
+  });
+  if (!dup) return randomFallback;
+  // 2^32 birthday on a single row — effectively unreachable.
+  return `${orderPart}-${crypto.randomBytes(8).toString("hex")}`;
 }

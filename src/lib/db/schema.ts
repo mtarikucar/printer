@@ -190,23 +190,37 @@ export const users = pgTable("users", {
 // `defaultAddress` on users is for legacy/single-address compatibility; this
 // table lets a customer keep multiple labeled addresses ("Ev", "İş") and
 // prefill the /create flow without re-typing.
-export const userAddresses = pgTable("user_addresses", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  label: text("label").notNull(),
-  fullName: text("full_name").notNull(),
-  phone: text("phone").notNull(),
-  adres: text("adres").notNull(),
-  mahalle: text("mahalle"),
-  ilce: text("ilce").notNull(),
-  il: text("il").notNull(),
-  postaKodu: text("posta_kodu").notNull(),
-  isDefault: boolean("is_default").notNull().default(false),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const userAddresses = pgTable(
+  "user_addresses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    fullName: text("full_name").notNull(),
+    phone: text("phone").notNull(),
+    adres: text("adres").notNull(),
+    mahalle: text("mahalle"),
+    ilce: text("ilce").notNull(),
+    il: text("il").notNull(),
+    postaKodu: text("posta_kodu").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    // Q5 review I3: partial unique index enforces "at most one default
+    // per user" at the DB level. Catches the race where two
+    // concurrent createAddress calls both see existing.length === 0
+    // and both try to insert with isDefault=true; the loser's INSERT
+    // fails on this index and the service catch-block can retry as
+    // non-default. Same protection covers setDefaultAddress.
+    oneDefaultPerUser: uniqueIndex("user_addresses_one_default_idx")
+      .on(t.userId)
+      .where(sql`${t.isDefault} = true`),
+  })
+);
 
 export const previews = pgTable("previews", {
   id: uuid("id").primaryKey().defaultRandom(),

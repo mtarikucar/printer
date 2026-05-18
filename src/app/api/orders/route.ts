@@ -68,13 +68,39 @@ export async function POST(request: NextRequest) {
         );
       }
       const email = validated.guestEmail.trim().toLowerCase();
+      // Security (review C1): refuse to attach a guest order to an
+      // existing user that has a real password OR is no longer flagged
+      // as a guest. Otherwise an attacker who knows a victim's email
+      // can mutate the victim's order history AND trigger the post-
+      // purchase "claim your account" email, which contains a working
+      // password-reset link to a real account.
+      //
+      // For existing GUEST rows (passwordHash=null, isGuest=true) we
+      // do still attach — that's a returning guest placing a second
+      // order before claiming. Their claim token rotates per order;
+      // we accept the trade-off that the latest order's link is the
+      // valid one (this is also the natural mental model for the
+      // recipient).
       const existing = await db.query.users.findFirst({
         where: eq(users.email, email),
       });
+      if (existing && (existing.passwordHash || !existing.isGuest)) {
+        return NextResponse.json(
+          {
+            error: d["api.auth.emailRegistered"] ?? "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
+            code: "email_registered",
+          },
+          { status: 409 }
+        );
+      }
       if (existing) {
         user = existing;
       } else {
-        const [created] = await db
+        // ON CONFLICT (email) DO NOTHING handles the race between two
+        // simultaneous guest checkouts with the same email (review C2):
+        // both miss findFirst, both attempt insert; the loser gets back
+        // an empty array and we re-select.
+        const inserted = await db
           .insert(users)
           .values({
             email,
@@ -83,8 +109,28 @@ export async function POST(request: NextRequest) {
             passwordHash: null,
             isGuest: true,
           })
+          .onConflictDoNothing({ target: users.email })
           .returning();
-        user = created;
+        if (inserted[0]) {
+          user = inserted[0];
+        } else {
+          // Concurrent insert won the race. Re-fetch and re-validate
+          // (the row we now see might be a password-holding user if a
+          // legitimate registration completed in between).
+          const raced = await db.query.users.findFirst({
+            where: eq(users.email, email),
+          });
+          if (!raced || raced.passwordHash || !raced.isGuest) {
+            return NextResponse.json(
+              {
+                error: d["api.auth.emailRegistered"] ?? "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
+                code: "email_registered",
+              },
+              { status: 409 }
+            );
+          }
+          user = raced;
+        }
       }
     }
 
@@ -337,15 +383,43 @@ export async function POST(request: NextRequest) {
 
     // PayTR basket entries — the figurine itself plus one row per upsell so
     // the customer's PayTR statement (and our refund-flow logs) show what
-    // was actually paid for. The first row covers the figurine net of the
-    // upsell total to keep the basket sum equal to paymentAmountKurus.
-    const figurineRowKurus = paymentAmountKurus - upsellAmountKurus;
-    const upsellBasketRows = upsellKeys.map((key) => ({
-      name:
-        d[`upsell.${key}.label` as keyof typeof d] || key,
-      priceTRY: (UPSELL_PRICES_KURUS[key] / 100).toFixed(2),
-      quantity: 1,
-    }));
+    // was actually paid for.
+    //
+    // Edge case (review C3): if a gift card covers most of the figurine
+    // and the upsell total approaches/exceeds the remaining payment, the
+    // naive `paymentAmount - upsellTotal` figurine row can go negative
+    // (PayTR rejects basket). Strategy: clamp the figurine row to 0 and
+    // proportionally reduce upsell rows so the basket sum still equals
+    // paymentAmountKurus. We allocate from the largest upsells first so
+    // small ones survive at full price when possible.
+    const figurineGross = paymentAmountKurus - upsellAmountKurus;
+    let figurineRowKurus = Math.max(0, figurineGross);
+    // upsellBudget = how much the basket has left for upsells after the
+    // (possibly-clamped) figurine row.
+    let upsellBudget = paymentAmountKurus - figurineRowKurus;
+    const sortedUpsells = [...upsellKeys].sort(
+      (a, b) => UPSELL_PRICES_KURUS[b] - UPSELL_PRICES_KURUS[a]
+    );
+    const upsellBasketRows: Array<{ name: string; priceTRY: string; quantity: number }> = [];
+    for (const key of sortedUpsells) {
+      const full = UPSELL_PRICES_KURUS[key];
+      const allocated = Math.max(0, Math.min(full, upsellBudget));
+      upsellBudget -= allocated;
+      // Skip zero-allocated rows so PayTR doesn't see basket lines that
+      // contribute nothing. The customer still sees the gift-card
+      // discount line in our /track receipt UI.
+      if (allocated > 0) {
+        upsellBasketRows.push({
+          name: d[`upsell.${key}.label` as keyof typeof d] || key,
+          priceTRY: (allocated / 100).toFixed(2),
+          quantity: 1,
+        });
+      }
+    }
+    // After allocation any rounding diff stays on the figurine row.
+    // (We never call this with paymentAmountKurus < 0 — fully covered
+    // orders skip this branch entirely.)
+    figurineRowKurus += upsellBudget;
 
     try {
       const paytrResult = await createPaytrToken({

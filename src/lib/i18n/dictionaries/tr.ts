@@ -616,6 +616,7 @@ const tr: Dictionary = {
   // API Errors
   "api.auth.required": "Giriş yapmanız gerekiyor",
   "api.auth.userNotFound": "Kullanıcı bulunamadı",
+  "api.auth.emailRegistered": "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
   "api.order.createFailed": "Sipariş oluşturma başarısız",
   "api.auth.emailPasswordRequired": "E-posta ve şifre zorunludur",
   "api.auth.invalidCredentials": "E-posta veya şifre hatalı",

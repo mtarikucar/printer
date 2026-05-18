@@ -613,6 +613,7 @@ const en = {
   // API Errors
   "api.auth.required": "You must be logged in",
   "api.auth.userNotFound": "User not found",
+  "api.auth.emailRegistered": "This email is already registered. Please sign in.",
   "api.order.createFailed": "Order creation failed",
   "api.auth.emailPasswordRequired": "Email and password are required",
   "api.auth.invalidCredentials": "Invalid email or password",

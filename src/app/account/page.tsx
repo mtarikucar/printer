@@ -7,6 +7,7 @@ import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { AccountGalleryCard } from "@/components/account-gallery-card";
 import { AccountGalleryModal } from "@/components/account-gallery-modal";
+import { AddressBookPanel } from "@/components/address-book-panel";
 import type { AccountPreview } from "@/components/account-gallery-card";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-context";
@@ -148,6 +149,17 @@ export default function AccountPage() {
       ),
     },
     {
+      key: "addresses",
+      label: d["account.tab.addresses"],
+      desc: d["account.tab.addresses.desc"],
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0L6.343 16.657A8 8 0 1117.657 16.657z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      ),
+    },
+    {
       key: "profile",
       label: d["account.tab.profile"],
       desc: d["account.tab.profile.desc"],
@@ -174,7 +186,7 @@ export default function AccountPage() {
         </nav>
 
         {/* Tab Bar */}
-        <div className="grid grid-cols-3 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -358,6 +370,9 @@ export default function AccountPage() {
             )}
           </div>
         )}
+
+        {/* Tab: Addresses */}
+        {tab === "addresses" && <AddressBookPanel />}
 
         {/* Tab: Profile */}
         {tab === "profile" && user && (

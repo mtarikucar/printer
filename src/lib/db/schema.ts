@@ -181,6 +181,28 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Saved shipping addresses for logged-in customers (Q5 in roadmap).
+// `defaultAddress` on users is for legacy/single-address compatibility; this
+// table lets a customer keep multiple labeled addresses ("Ev", "İş") and
+// prefill the /create flow without re-typing.
+export const userAddresses = pgTable("user_addresses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  fullName: text("full_name").notNull(),
+  phone: text("phone").notNull(),
+  adres: text("adres").notNull(),
+  mahalle: text("mahalle"),
+  ilce: text("ilce").notNull(),
+  il: text("il").notNull(),
+  postaKodu: text("posta_kodu").notNull(),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const previews = pgTable("previews", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id),
@@ -446,6 +468,14 @@ export const usersRelations = relations(users, ({ many }) => ({
   drafts: many(orderDrafts),
   previews: many(previews),
   giftCards: many(giftCards),
+  addresses: many(userAddresses),
+}));
+
+export const userAddressesRelations = relations(userAddresses, ({ one }) => ({
+  user: one(users, {
+    fields: [userAddresses.userId],
+    references: [users.id],
+  }),
 }));
 
 export const previewsRelations = relations(previews, ({ one }) => ({

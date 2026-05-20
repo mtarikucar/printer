@@ -39,7 +39,7 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
     const meshyInput = isLocal
       ? `data:image/png;base64,${styledBuffer.toString("base64")}`
       : styledUrl;
-    const result = await generateWithMeshy(meshyInput);
+    const result = await generateWithMeshy(meshyInput, style);
 
     // Download GLB and save to local storage
     const glbBuffer = await downloadFile(result.glbUrl);

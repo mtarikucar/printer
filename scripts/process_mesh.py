@@ -37,14 +37,87 @@ def load_mesh(input_path: str) -> trimesh.Trimesh:
         raise ValueError(f"Unexpected type from trimesh.load: {type(scene)}")
 
 
-def keep_largest_component(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-    """If mesh has multiple disconnected bodies, keep only the largest."""
+def keep_largest_component(mesh: trimesh.Trimesh) -> tuple[trimesh.Trimesh, bool]:
+    """If mesh has multiple disconnected bodies, keep only the largest.
+
+    Returns (largest_component, dropped_significant). dropped_significant is
+    True if any discarded component had >=10% of the largest's volume/area —
+    a signal that Meshy interpreted the image as a multi-piece object and the
+    user may want to review the result.
+    """
     components = mesh.split()
     if len(components) <= 1:
-        return mesh
+        return mesh, False
 
-    largest = max(components, key=lambda m: m.volume if m.is_volume else m.area)
-    return largest
+    def size(m):
+        return m.volume if m.is_volume else m.area
+
+    sized = [(c, size(c)) for c in components]
+    sized.sort(key=lambda p: p[1], reverse=True)
+    largest, largest_size = sized[0]
+    dropped_significant = any(
+        s > 0 and (s / largest_size) >= 0.10 for _, s in sized[1:]
+    )
+    return largest, dropped_significant
+
+
+def estimate_min_wall_thickness_mm(mesh: trimesh.Trimesh) -> float | None:
+    """Estimate the thinnest wall of the mesh by sampling surface points and
+    measuring inward ray distance. Returns None on failure.
+
+    This is a coarse heuristic — good enough to flag obvious risk regions
+    (< 1mm for FDM) without the cost of a full medial-axis computation.
+    """
+    try:
+        # Sample up to 2000 points uniformly on the surface.
+        sample_count = min(2000, max(200, len(mesh.faces) // 10))
+        points, face_idx = trimesh.sample.sample_surface(mesh, sample_count)
+        # Inward direction = -face_normal at each sample.
+        normals = mesh.face_normals[face_idx]
+        ray_origins = points - normals * 1e-4  # nudge inside the surface
+        ray_directions = -normals
+
+        # Cast inward rays; nearest hit distance = local thickness.
+        locations, index_ray, _ = mesh.ray.intersects_location(
+            ray_origins=ray_origins,
+            ray_directions=ray_directions,
+            multiple_hits=False,
+        )
+        if len(locations) == 0:
+            return None
+        distances = np.linalg.norm(locations - ray_origins[index_ray], axis=1)
+        # Filter degenerate near-zero hits (grazing rays / self-intersection).
+        valid = distances[distances > 0.05]
+        if len(valid) == 0:
+            return None
+        return float(np.percentile(valid, 1))  # 1st percentile as min estimate
+    except Exception as e:
+        print(f"Warning: wall-thickness estimate failed: {e}", file=sys.stderr)
+        return None
+
+
+def repair_self_intersections(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
+    """Run an extra pymeshlab pass to fix non-manifold faces left over after
+    the primary repair step. No-op if the mesh is already clean."""
+    try:
+        ms = pymeshlab.MeshSet()
+        m = pymeshlab.Mesh(
+            vertex_matrix=mesh.vertices.astype(np.float64),
+            face_matrix=mesh.faces.astype(np.int32),
+        )
+        ms.add_mesh(m)
+        ms.meshing_repair_non_manifold_faces()
+        repaired = ms.current_mesh()
+        if repaired.face_number() != mesh.faces.shape[0]:
+            repairs.append("repair_non_manifold_faces")
+        return trimesh.Trimesh(
+            vertices=repaired.vertex_matrix(),
+            faces=repaired.face_matrix(),
+            process=True,
+        )
+    except Exception as e:
+        print(f"Warning: repair_non_manifold_faces failed: {e}", file=sys.stderr)
+        return mesh
 
 
 def repair_with_pymeshlab(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
@@ -207,7 +280,7 @@ def process_mesh(input_path: str, output_stl_path: str, report_path: str):
 
     # Keep largest component
     original_components = len(mesh.split())
-    mesh = keep_largest_component(mesh)
+    mesh, dropped_significant = keep_largest_component(mesh)
     if original_components > 1:
         repairs.append(f"kept_largest_of_{original_components}_components")
         print(f"  Kept largest of {original_components} components")
@@ -217,12 +290,18 @@ def process_mesh(input_path: str, output_stl_path: str, report_path: str):
     mesh = repair_with_pymeshlab(mesh, repairs)
     print(f"  After repair: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
 
+    # Extra pass for self-intersections / non-manifold faces missed above.
+    mesh = repair_self_intersections(mesh, repairs)
+
     # Decimate if needed
     mesh = decimate_if_needed(mesh, repairs=repairs)
 
     # Scale to target height
     print("Scaling to 80mm height...")
     mesh = scale_to_target(mesh, target_height_mm=80.0)
+
+    # Wall-thickness estimate happens AFTER scaling so the value is in mm.
+    min_wall_mm = estimate_min_wall_thickness_mm(mesh)
 
     # Add base
     print("Adding base...")
@@ -232,6 +311,16 @@ def process_mesh(input_path: str, output_stl_path: str, report_path: str):
     report = validate_mesh(mesh)
     report["base_added"] = base_added
     report["repairs_applied"] = repairs
+    report["dropped_significant_component"] = dropped_significant
+    report["min_wall_thickness_estimate_mm"] = (
+        round(min_wall_mm, 3) if min_wall_mm is not None else None
+    )
+    risks: list[str] = []
+    if min_wall_mm is not None and min_wall_mm < 1.0:
+        risks.append("thin_walls")
+    if dropped_significant:
+        risks.append("dropped_significant_component")
+    report["print_risk"] = risks
     report["processing_time_seconds"] = round(time.time() - start_time, 2)
 
     print(f"  Watertight: {report['is_watertight']}")

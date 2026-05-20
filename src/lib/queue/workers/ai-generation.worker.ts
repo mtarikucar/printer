@@ -103,7 +103,7 @@ async function processJob(job: Job<AiGenerationJobData>) {
     const imageBuffer = await downloadFile(imageUrl);
     const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
     const styledBase64 = `data:image/png;base64,${styledBuffer.toString("base64")}`;
-    const result = await generateWithMeshy(styledBase64);
+    const result = await generateWithMeshy(styledBase64, style);
 
     await db
       .update(generationAttempts)

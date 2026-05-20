@@ -1,10 +1,45 @@
+import type { FigurineStyle } from "./style-transfer";
+
 interface MeshyResult {
   glbUrl: string;
   taskId: string;
   durationMs: number;
 }
 
-export async function generateWithMeshy(imageBase64: string): Promise<MeshyResult> {
+// Pose mode hint sent to Meshy. Chibi/Disney get strict T-pose (matches their
+// upstream image guidance and prevents arm-fused-to-torso non-manifold issues);
+// other styles keep Meshy's default (empty string) to let the model honor the
+// existing image pose.
+export function poseModeForStyle(style: FigurineStyle): "t-pose" | "" {
+  if (style === "disney" || style === "chibi") return "t-pose";
+  return "";
+}
+
+export function buildMeshyBody(imageBase64: string, style: FigurineStyle) {
+  return {
+    image_url: imageBase64,
+    ai_model: "meshy-6",
+    enable_pbr: false,
+    should_remesh: true,
+    // triangle topology: slicers consume triangles directly; quad meshes are
+    // intended for animation rigs and add ambiguity for our STL pipeline.
+    topology: "triangle",
+    target_polycount: 50000,
+    should_texture: false,
+    pose_mode: poseModeForStyle(style),
+    // Keep the style-transferred image verbatim; Meshy's "enhance" pass can
+    // re-interpret the silhouette and reintroduce thin or floating details.
+    image_enhancement: false,
+    // Strip baked lighting so geometry inference focuses on form, not shadow.
+    remove_lighting: true,
+    moderation: true,
+  };
+}
+
+export async function generateWithMeshy(
+  imageBase64: string,
+  style: FigurineStyle,
+): Promise<MeshyResult> {
   const startTime = Date.now();
 
   // Create task — Meshy v1 API with Meshy-6 model (base64 image).
@@ -16,15 +51,7 @@ export async function generateWithMeshy(imageBase64: string): Promise<MeshyResul
       Authorization: `Bearer ${process.env.MESHY_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      image_url: imageBase64,
-      ai_model: "meshy-6",
-      enable_pbr: false,
-      should_remesh: true,
-      topology: "quad",
-      target_polycount: 50000,
-      should_texture: false,
-    }),
+    body: JSON.stringify(buildMeshyBody(imageBase64, style)),
     signal: AbortSignal.timeout(30_000),
   });
 

@@ -1517,8 +1517,24 @@ const tr: Dictionary = {
 
   "landing.fig.footer.copyright": "© 2026 Figurine Studio",
   "landing.fig.footer.tagline": "Istanbul'da el yapımı · dünyaya kargo",
+  "landing.fig.footer.phoneLabel": "Telefon",
+  "landing.fig.footer.addressLabel": "Adres",
+  "landing.fig.footer.emailLabel": "E-posta",
+  "landing.fig.footer.contactLink": "İletişim",
 
   "landing.fig.scroll.cue": "Yolculuğu izlemek için kaydır",
+
+  // Contact page
+  "contact.meta.title": "İletişim — Figurine Studio",
+  "contact.title": "Bize Ulaşın",
+  "contact.subtitle":
+    "Siparişinizle ilgili sorular, özel istekler ya da başka bir konu için aşağıdaki kanallardan bize ulaşabilirsiniz.",
+  "contact.phone.label": "Telefon",
+  "contact.phone.note": "Pzt–Cmt, 10:00–18:00 (UTC+3)",
+  "contact.email.label": "E-posta",
+  "contact.email.note": "Genellikle bir iş günü içinde yanıt veriyoruz.",
+  "contact.address.label": "Adres",
+  "contact.address.mapsCta": "Haritada Aç",
 
 };
 

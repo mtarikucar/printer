@@ -1257,10 +1257,35 @@
 .footer {
   padding: 60px 32px 40px;
   max-width: 1200px; margin: 0 auto;
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; flex-direction: column; gap: 20px;
   font-family: var(--font-jetbrains), monospace; font-size: 11px;
   color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em;
   border-top: 1px solid var(--rule);
+}
+.footer-top {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 16px;
+}
+.footer-bottom {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px 22px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+  text-transform: none; letter-spacing: normal;
+  font-size: 12px;
+}
+.footer-link {
+  color: var(--ink-3); text-decoration: none;
+  transition: color 0.2s ease;
+}
+.footer-link:hover { color: var(--ink); }
+.footer-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+  color: var(--ink-3);
+  opacity: 0.65;
+  margin-right: 8px;
 }
 
 /* ---------- FAQ ---------- */
@@ -1617,5 +1642,7 @@
   .section { padding: 72px 18px; }
   .cta-band { margin: 40px 16px 24px; padding: 44px 22px; border-radius: 20px; }
   .faq-section { padding: 72px 18px; }
-  .footer { flex-direction: column; gap: 8px; text-align: center; padding: 40px 20px 32px; }
+  .footer { gap: 14px; text-align: center; padding: 40px 20px 32px; }
+  .footer-top { flex-direction: column; gap: 8px; }
+  .footer-bottom { flex-direction: column; align-items: center; gap: 10px; padding-top: 14px; }
 }

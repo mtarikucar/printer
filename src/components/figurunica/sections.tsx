@@ -4,6 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { FigurunicaDict } from "./dict";
 import styles from "./figurunica.module.css";
+import {
+  CONTACT_PHONE_DISPLAY,
+  CONTACT_PHONE_HREF,
+  CONTACT_EMAIL,
+  CONTACT_EMAIL_HREF,
+  CONTACT_ADDRESS_FULL,
+  CONTACT_MAPS_URL,
+} from "@/lib/config/contact";
 
 const s = (key: string) => (styles as Record<string, string>)[key] ?? "";
 const cx = (...names: Array<string | false | null | undefined>) =>
@@ -600,8 +608,38 @@ export function CtaBand({ d }: { d: FigurunicaDict }) {
 export function FigFooter({ d }: { d: FigurunicaDict }) {
   return (
     <footer className={s("footer")}>
-      <span>{d["landing.fig.footer.copyright"]}</span>
-      <span>{d["landing.fig.footer.tagline"]}</span>
+      <div className={s("footer-top")}>
+        <span>{d["landing.fig.footer.copyright"]}</span>
+        <span>{d["landing.fig.footer.tagline"]}</span>
+      </div>
+      <div className={s("footer-bottom")}>
+        <a href={CONTACT_PHONE_HREF} className={s("footer-link")}>
+          <span className={s("footer-label")}>
+            {d["landing.fig.footer.phoneLabel"]}
+          </span>
+          {CONTACT_PHONE_DISPLAY}
+        </a>
+        <a
+          href={CONTACT_MAPS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={s("footer-link")}
+        >
+          <span className={s("footer-label")}>
+            {d["landing.fig.footer.addressLabel"]}
+          </span>
+          {CONTACT_ADDRESS_FULL}
+        </a>
+        <a href={CONTACT_EMAIL_HREF} className={s("footer-link")}>
+          <span className={s("footer-label")}>
+            {d["landing.fig.footer.emailLabel"]}
+          </span>
+          {CONTACT_EMAIL}
+        </a>
+        <Link href="/contact" className={s("footer-link")}>
+          {d["landing.fig.footer.contactLink"]}
+        </Link>
+      </div>
     </footer>
   );
 }

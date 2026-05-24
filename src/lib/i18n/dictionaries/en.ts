@@ -1511,8 +1511,24 @@ const en = {
 
   "landing.fig.footer.copyright": "© 2026 Figurine Studio",
   "landing.fig.footer.tagline": "Handmade in Istanbul · shipped worldwide",
+  "landing.fig.footer.phoneLabel": "Phone",
+  "landing.fig.footer.addressLabel": "Address",
+  "landing.fig.footer.emailLabel": "Email",
+  "landing.fig.footer.contactLink": "Contact",
 
   "landing.fig.scroll.cue": "Scroll to follow the journey",
+
+  // Contact page
+  "contact.meta.title": "Contact — Figurine Studio",
+  "contact.title": "Get in touch",
+  "contact.subtitle":
+    "Questions about your order, a custom request, or anything else — reach out via any of the channels below.",
+  "contact.phone.label": "Phone",
+  "contact.phone.note": "Mon–Sat, 10:00–18:00 (UTC+3)",
+  "contact.email.label": "Email",
+  "contact.email.note": "We typically reply within one business day.",
+  "contact.address.label": "Address",
+  "contact.address.mapsCta": "Open in Maps",
 
 } as const;
 

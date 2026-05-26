@@ -1515,6 +1515,9 @@ const en = {
   "landing.fig.footer.addressLabel": "Address",
   "landing.fig.footer.emailLabel": "Email",
   "landing.fig.footer.contactLink": "Contact",
+  "landing.fig.footer.mfrPrompt": "Want to become a manufacturer?",
+  "landing.fig.footer.mfrApply": "Apply",
+  "landing.fig.footer.mfrLogin": "Manufacturer login",
 
   "landing.fig.scroll.cue": "Scroll to follow the journey",
 

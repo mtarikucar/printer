@@ -1287,6 +1287,33 @@
   opacity: 0.65;
   margin-right: 8px;
 }
+.footer-mfr {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 12px 22px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+  text-transform: none; letter-spacing: normal;
+  font-size: 12px;
+}
+.footer-mfr-prompt {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+  color: var(--ink-3);
+  opacity: 0.7;
+}
+.footer-mfr-actions {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px 18px;
+}
+.footer-mfr-apply {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: gap 0.2s ease, color 0.2s ease;
+}
+.footer-mfr-apply:hover { gap: 8px; color: var(--accent, var(--ink)); }
 
 /* ---------- FAQ ---------- */
 .faq-section {
@@ -1645,4 +1672,6 @@
   .footer { gap: 14px; text-align: center; padding: 40px 20px 32px; }
   .footer-top { flex-direction: column; gap: 8px; }
   .footer-bottom { flex-direction: column; align-items: center; gap: 10px; padding-top: 14px; }
+  .footer-mfr { flex-direction: column; align-items: center; gap: 10px; padding-top: 14px; }
+  .footer-mfr-actions { justify-content: center; }
 }

@@ -640,6 +640,22 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
           {d["landing.fig.footer.contactLink"]}
         </Link>
       </div>
+      <div className={s("footer-mfr")}>
+        <span className={s("footer-mfr-prompt")}>
+          {d["landing.fig.footer.mfrPrompt"]}
+        </span>
+        <div className={s("footer-mfr-actions")}>
+          <Link
+            href="/manufacturer/register"
+            className={s("footer-mfr-apply")}
+          >
+            {d["landing.fig.footer.mfrApply"]} →
+          </Link>
+          <Link href="/manufacturer/login" className={s("footer-link")}>
+            {d["landing.fig.footer.mfrLogin"]}
+          </Link>
+        </div>
+      </div>
     </footer>
   );
 }

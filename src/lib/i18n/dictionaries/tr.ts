@@ -1521,6 +1521,9 @@ const tr: Dictionary = {
   "landing.fig.footer.addressLabel": "Adres",
   "landing.fig.footer.emailLabel": "E-posta",
   "landing.fig.footer.contactLink": "İletişim",
+  "landing.fig.footer.mfrPrompt": "Üretici olmak ister misiniz?",
+  "landing.fig.footer.mfrApply": "Başvur",
+  "landing.fig.footer.mfrLogin": "Üretici girişi",
 
   "landing.fig.scroll.cue": "Yolculuğu izlemek için kaydır",
 

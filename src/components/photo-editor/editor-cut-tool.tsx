@@ -173,7 +173,7 @@ export function EditorCutTool({ imageSrc, onApply, onCancel }: EditorCutToolProp
 
         // Draw lasso stroke line
         buildSmoothPath(ctx, currentPoints, closed);
-        ctx.strokeStyle = "#10B981";
+        ctx.strokeStyle = "#00D4FF";
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 3]);
         ctx.stroke();

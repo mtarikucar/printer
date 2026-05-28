@@ -91,7 +91,15 @@ export const env = {
 
   ADMIN_EMAIL: required("ADMIN_EMAIL"),
 
-  APP_URL: optional("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
+  // Never fall back to localhost in production — email links and payment
+  // redirects are built on this. Prefer the canonical domain if the env var is
+  // somehow unset on a prod box; only dev/build fall back to localhost.
+  APP_URL: optional(
+    "NEXT_PUBLIC_APP_URL",
+    process.env.NODE_ENV === "production"
+      ? "https://figurunica.com"
+      : "http://localhost:3000"
+  ),
 
   TRUSTED_PROXY_IPS: optional("TRUSTED_PROXY_IPS", "")
     .split(",")

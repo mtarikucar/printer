@@ -62,6 +62,12 @@ export function AdminSidebar({
       badge: 0,
     },
     {
+      href: "/admin/gallery",
+      label: "Galeri (Yayında)",
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11.48 3.5l2.2 4.46 4.92.72-3.56 3.47.84 4.9L11.48 14.8 7.08 17.55l.84-4.9L4.36 9.18l4.92-.72 2.2-4.96z" />,
+      badge: 0,
+    },
+    {
       href: "/admin/scoring-evaluations",
       label: "Scoring v2",
       icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />,
@@ -77,7 +83,8 @@ export function AdminSidebar({
       </div>
       <nav className="flex-1 p-4 space-y-1">
         {links.map((link) => {
-          const isActive = pathname.startsWith(link.href);
+          const isActive =
+            pathname === link.href || pathname.startsWith(link.href + "/");
           return (
             <Link
               key={link.href}

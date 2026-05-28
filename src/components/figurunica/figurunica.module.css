@@ -1,6 +1,9 @@
 .root {
-  --bg: #FAFAF7;
-  --bg-soft: #F3F2EC;
+  /* Accent + background linked to the global design tokens
+     (src/app/globals.css @theme) so the landing and the rest of the app
+     share ONE source of truth. Ink/rule stay local to the landing. */
+  --bg: var(--color-bg-base);
+  --bg-soft: var(--color-bg-elevated);
   --bg-card: #FFFFFF;
   --ink: #0B0C0F;
   --ink-2: #2A2B30;
@@ -8,9 +11,9 @@
   --ink-4: #A5A5AA;
   --rule: rgba(11,12,15,0.08);
   --rule-strong: rgba(11,12,15,0.16);
-  --accent: #00D4FF;
-  --accent-2: #22E4FF;
-  --accent-soft: rgba(0,212,255,0.12);
+  --accent: var(--color-accent);
+  --accent-2: var(--color-accent-2);
+  --accent-soft: var(--color-accent-soft);
 
   background:
     radial-gradient(1200px 600px at 50% -200px, rgba(0,212,255,0.04), transparent 60%),

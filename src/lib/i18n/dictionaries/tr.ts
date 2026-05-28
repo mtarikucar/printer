@@ -41,6 +41,7 @@ const tr: Dictionary = {
   "common.save": "Kaydet",
   "common.cancel": "İptal",
   "common.delete": "Sil",
+  "common.close": "Kapat",
 
   // Sizes
   "sizes.kucuk": "Küçük",
@@ -129,6 +130,10 @@ const tr: Dictionary = {
   "gallery.createYourOwn": "Kendininkini Oluştur",
   "gallery.featured": "Öne Çıkan Figürinler",
   "gallery.viewModel": "Modeli Gör",
+  "gallery.filter.styleLabel": "Stil",
+  "gallery.filter.categoryLabel": "Kategori",
+  "gallery.error": "Galeri yüklenemedi. Lütfen tekrar deneyin.",
+  "gallery.retry": "Tekrar dene",
   "gallery.filter.all": "Tümü",
   "gallery.filter.realistic": "Gerçekçi",
   "gallery.filter.object": "3D Obje",

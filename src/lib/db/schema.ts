@@ -109,6 +109,8 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "gallery_approve",
   "gallery_reject",
   "gallery_reward",
+  "gallery_feature",
+  "gallery_unfeature",
 ]);
 
 /**
@@ -371,6 +373,11 @@ export const orders = pgTable("orders", {
   galleryRewardGiftCardId: uuid("gallery_reward_gift_card_id").references(
     (): any => giftCards.id // eslint-disable-line @typescript-eslint/no-explicit-any
   ),
+  // Admin-curated highlight. Featured items surface in the "Öne Çıkan
+  // Figürinler" rail at the top of the public gallery. Only meaningful when
+  // isPublic=true; galleryFeaturedAt drives the rail ordering (newest first).
+  galleryFeatured: boolean("gallery_featured").notNull().default(false),
+  galleryFeaturedAt: timestamp("gallery_featured_at"),
   manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id),
   manufacturerStatus: manufacturerOrderStatusEnum("manufacturer_status"),
   assignedToManufacturerAt: timestamp("assigned_to_manufacturer_at"),

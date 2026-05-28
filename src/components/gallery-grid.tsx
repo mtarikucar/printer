@@ -28,14 +28,17 @@ const CATEGORY_FILTERS = [
 export function GalleryGrid({
   initialItems,
   initialCursor,
+  initialFeatured = [],
 }: {
   initialItems: GalleryItem[];
   initialCursor: string | null;
+  initialFeatured?: GalleryItem[];
 }) {
   const d = useDictionary();
   const [items, setItems] = useState<GalleryItem[]>(initialItems);
-  const [cursor, setCursor] = useState<string | null>(initialCursor);
+  const [, setCursor] = useState<string | null>(initialCursor);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
   const [activeStyle, setActiveStyle] = useState("all");
   const [activeCategory, setActiveCategory] = useState("all");
   // Q9: keyword search. We debounce client-side so each keystroke doesn't
@@ -74,14 +77,19 @@ export function GalleryGrid({
         if (cursorVal) params.set("cursor", cursorVal);
 
         const res = await fetch(`/api/gallery?${params.toString()}`, { signal: controller.signal });
-        if (!res.ok) return;
+        if (!res.ok) {
+          setError(true);
+          return;
+        }
 
         const data = await res.json();
+        setError(false);
         setItems((prev) => (append ? [...prev, ...data.items] : data.items));
         setCursor(data.nextCursor);
         cursorRef.current = data.nextCursor;
       } catch (e) {
         if ((e as Error).name === "AbortError") return; // expected on filter change
+        setError(true);
       } finally {
         fetchingRef.current = false;
         setLoading(false);
@@ -102,6 +110,11 @@ export function GalleryGrid({
     },
     [fetchItems]
   );
+
+  const retry = useCallback(() => {
+    setError(false);
+    fetchItems(filtersRef.current, null, false);
+  }, [fetchItems]);
 
   // Debounce keyword input — refire applyFilters 300ms after typing stops.
   // We skip the initial mount (empty query == initial state already loaded).
@@ -139,83 +152,115 @@ export function GalleryGrid({
     return () => observer.disconnect();
   }, [fetchItems]);
 
-  // Empty state
-  if (items.length === 0 && !loading) {
-    return (
-      <>
-        <SearchBar value={query} onChange={setQuery} d={d} />
-        <FilterTabs
-          items={STYLE_FILTERS}
-          active={activeStyle}
-          onSelect={(s) => applyFilters(s, activeCategory, debouncedQ)}
-          color="green"
-          d={d}
-        />
-        <FilterTabs
-          items={CATEGORY_FILTERS}
-          active={activeCategory}
-          onSelect={(c) => applyFilters(activeStyle, c, debouncedQ)}
-          color="blue"
-          d={d}
-        />
-        <Card padding="lg" className="text-center mt-8 !p-12">
-          <svg className="w-20 h-20 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <p className="mt-6 text-lg font-medium text-text-secondary">{d["gallery.empty"]}</p>
-          <Button href="/create" className="mt-6 inline-flex">
-            {d["gallery.createYourOwn"]}
-          </Button>
-        </Card>
-      </>
-    );
-  }
+  // The curated "featured" rail only makes sense on the default, unfiltered
+  // view — once the visitor filters/searches, the grid takes over.
+  const isDefaultView =
+    activeStyle === "all" && activeCategory === "all" && !query.trim();
+  const showFeatured = isDefaultView && initialFeatured.length > 0;
+  const isEmpty = items.length === 0 && !loading;
 
   return (
     <>
+      {showFeatured && (
+        <FeaturedRail items={initialFeatured} onSelect={setSelectedItem} d={d} />
+      )}
+
       <SearchBar value={query} onChange={setQuery} d={d} />
-      {/* Filter tabs */}
       <FilterTabs
         items={STYLE_FILTERS}
         active={activeStyle}
         onSelect={(s) => applyFilters(s, activeCategory, debouncedQ)}
-        color="green"
+        color="accent"
+        label={d["gallery.filter.styleLabel"] || "Stil"}
         d={d}
       />
       <FilterTabs
         items={CATEGORY_FILTERS}
         active={activeCategory}
         onSelect={(c) => applyFilters(activeStyle, c, debouncedQ)}
-        color="blue"
+        color="ink"
+        label={d["gallery.filter.categoryLabel"] || "Kategori"}
         d={d}
       />
 
-      {/* Masonry layout */}
-      <div className="columns-2 md:columns-3 lg:columns-4 gap-4 sm:gap-6 [&>*]:mb-4 sm:[&>*]:mb-6 mt-8">
-        {items.map((item) => (
-          <div key={item.id} className="break-inside-avoid">
-            <GalleryCard item={item} onClick={() => setSelectedItem(item)} />
+      {isEmpty ? (
+        error ? (
+          <ErrorState onRetry={retry} d={d} />
+        ) : (
+          <EmptyState d={d} />
+        )
+      ) : (
+        <>
+          {/* Masonry layout */}
+          <div className="columns-2 md:columns-3 lg:columns-4 gap-4 sm:gap-6 [&>*]:mb-4 sm:[&>*]:mb-6 mt-8">
+            {items.map((item) => (
+              <div key={item.id} className="break-inside-avoid">
+                <GalleryCard item={item} onClick={() => setSelectedItem(item)} />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* Infinite scroll sentinel */}
-      <div ref={sentinelRef} className="h-4" />
+          {/* Infinite scroll sentinel */}
+          <div ref={sentinelRef} className="h-4" />
 
-      {/* Loading indicator */}
-      {loading && (
-        <div className="flex justify-center py-8">
-          <svg className="animate-spin w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-        </div>
+          {/* Loading indicator */}
+          {loading && (
+            <div className="flex justify-center py-8" role="status" aria-live="polite">
+              <svg className="animate-spin w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="sr-only">{d["gallery.loading"]}</span>
+            </div>
+          )}
+
+          {/* Inline error while paginating an already-populated grid */}
+          {error && !loading && (
+            <div className="flex justify-center py-6">
+              <Button variant="secondary" onClick={retry}>
+                {d["gallery.retry"] || "Tekrar dene"}
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {selectedItem && (
         <GalleryModal item={selectedItem} onClose={() => setSelectedItem(null)} />
       )}
     </>
+  );
+}
+
+// ─── Featured Rail ───────────────────────────────────────────
+
+function FeaturedRail({
+  items,
+  onSelect,
+  d,
+}: {
+  items: GalleryItem[];
+  onSelect: (item: GalleryItem) => void;
+  d: Record<string, string>;
+}) {
+  return (
+    <section className="mb-10" aria-labelledby="gallery-featured-heading">
+      <div className="flex items-center gap-2 mb-4">
+        <svg className="w-5 h-5 text-green-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2l2.9 6.1 6.7.9-4.9 4.7 1.2 6.6L12 18.3 6.1 21.3l1.2-6.6L2.4 9l6.7-.9L12 2z" />
+        </svg>
+        <h2 id="gallery-featured-heading" className="text-lg font-semibold text-text-primary">
+          {d["gallery.featured"]}
+        </h2>
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-3 -mx-4 px-4 snap-x [scrollbar-width:thin]">
+        {items.map((item) => (
+          <div key={item.id} className="snap-start shrink-0 w-52 sm:w-60">
+            <GalleryCard item={item} onClick={() => onSelect(item)} />
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -237,6 +282,7 @@ function SearchBar({
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
+        aria-hidden="true"
       >
         <path
           strokeLinecap="round"
@@ -250,6 +296,7 @@ function SearchBar({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={d["gallery.search.placeholder"] || "Search…"}
+        aria-label={d["gallery.search.placeholder"] || "Search"}
         className="pl-9"
         maxLength={60}
       />
@@ -264,27 +311,33 @@ function FilterTabs({
   active,
   onSelect,
   color,
+  label,
   d,
 }: {
   items: readonly { key: string; labelKey: string }[];
   active: string;
   onSelect: (key: string) => void;
-  color: "green" | "blue";
+  color: "accent" | "ink";
+  label?: string;
   d: Record<string, string>;
 }) {
-  const activeClass = color === "green"
-    ? "bg-green-600 text-white border-green-600"
-    : "bg-blue-600 text-white border-blue-600";
-  const hoverClass = color === "green"
-    ? "hover:border-green-500 hover:text-green-600"
-    : "hover:border-blue-500 hover:text-blue-600";
+  const activeClass =
+    color === "accent"
+      ? "bg-green-600 text-white border-green-600"
+      : "bg-ink text-white border-ink";
+  const hoverClass =
+    color === "accent"
+      ? "hover:border-green-500 hover:text-green-600"
+      : "hover:border-ink hover:text-text-primary";
 
   return (
-    <div className="flex gap-2 flex-wrap mb-3">
+    <div className="flex gap-2 flex-wrap mb-3" role="group" aria-label={label}>
       {items.map((item) => (
         <button
           key={item.key}
+          type="button"
           onClick={() => onSelect(item.key)}
+          aria-pressed={active === item.key}
           className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${
             active === item.key
               ? activeClass
@@ -295,5 +348,37 @@ function FilterTabs({
         </button>
       ))}
     </div>
+  );
+}
+
+// ─── Empty / Error states ────────────────────────────────────
+
+function EmptyState({ d }: { d: Record<string, string> }) {
+  return (
+    <Card padding="lg" className="text-center mt-8 !p-12">
+      <svg className="w-20 h-20 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+      <p className="mt-6 text-lg font-medium text-text-secondary">{d["gallery.empty"]}</p>
+      <Button href="/create" className="mt-6 inline-flex">
+        {d["gallery.createYourOwn"]}
+      </Button>
+    </Card>
+  );
+}
+
+function ErrorState({ onRetry, d }: { onRetry: () => void; d: Record<string, string> }) {
+  return (
+    <Card padding="lg" className="text-center mt-8 !p-12">
+      <svg className="w-16 h-16 text-text-muted mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+      </svg>
+      <p className="mt-6 text-lg font-medium text-text-secondary">
+        {d["gallery.error"] || "Galeri yüklenemedi."}
+      </p>
+      <Button onClick={onRetry} variant="secondary" className="mt-6 inline-flex">
+        {d["gallery.retry"] || "Tekrar dene"}
+      </Button>
+    </Card>
   );
 }

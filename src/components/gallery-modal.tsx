@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ModelViewer } from "@/components/model-viewer";
 import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
@@ -17,38 +17,74 @@ export function GalleryModal({
 }) {
   const d = useDictionary();
   const locale = useLocale();
+  const dialogRef = useRef<HTMLDivElement>(null);
 
+  // Accessibility: focus the dialog on open, trap Tab within it, restore
+  // focus to the trigger on close, and close on Escape.
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    dialog?.focus();
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "Tab" && dialog) {
+        const focusables = dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
-    document.addEventListener("keydown", handleEsc);
+
+    document.addEventListener("keydown", handleKey);
     document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", handleEsc);
+      document.removeEventListener("keydown", handleKey);
       document.body.style.overflow = "";
+      previouslyFocused?.focus?.();
     };
   }, [onClose]);
 
   const sizeLabel =
     d[`sizes.${item.figurineSize}` as keyof typeof d] || item.figurineSize;
 
+  const title = item.publicDisplayName || d["gallery.anonymous"];
   const hasBoth = !!item.thumbnailUrl && !!item.glbUrl;
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={`relative card shadow-elevated w-full mx-4 overflow-hidden h-[90vh] flex flex-col animate-scale-in ${hasBoth ? "max-w-4xl" : "max-w-2xl"}`}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={`relative card shadow-elevated w-full overflow-hidden max-h-[90vh] flex flex-col animate-scale-in focus:outline-none ${hasBoth ? "max-w-4xl" : "max-w-2xl"}`}
+      >
         {/* Close button */}
         <button
           onClick={onClose}
+          aria-label={d["common.close"] || "Kapat"}
           className="absolute top-4 right-4 z-10 p-2 bg-bg-elevated/80 backdrop-blur-sm rounded-full text-text-muted hover:text-text-primary transition-colors"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -60,7 +96,7 @@ export function GalleryModal({
                 <div className="w-full h-full bg-bg-elevated">
                   <img
                     src={item.thumbnailUrl!}
-                    alt=""
+                    alt={d["gallery.modal.originalPhoto"]}
                     className="w-full h-full object-contain"
                   />
                 </div>
@@ -84,7 +120,7 @@ export function GalleryModal({
               <div className="w-full h-full bg-bg-elevated relative">
                 <img
                   src={item.thumbnailUrl}
-                  alt=""
+                  alt={title}
                   className="w-full h-full object-contain"
                 />
               </div>
@@ -97,7 +133,7 @@ export function GalleryModal({
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold text-text-primary">
-                {item.publicDisplayName || d["gallery.anonymous"]}
+                {title}
               </h3>
               <div className="flex items-center gap-3 mt-1 text-sm text-text-muted">
                 <span className="bg-bg-elevated text-green-500 px-2 py-0.5 rounded-full text-xs font-medium border border-bg-subtle">
@@ -139,6 +175,7 @@ export function GalleryModal({
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
+                  aria-hidden="true"
                 >
                   <path
                     strokeLinecap="round"

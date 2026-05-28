@@ -6,6 +6,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { GalleryGrid } from "@/components/gallery-grid";
+import { normalizeFileUrl } from "@/lib/services/storage";
 
 const GALLERY_STATUSES = [
   "approved",
@@ -69,8 +70,51 @@ export default async function GalleryPage() {
     tags: order.galleryTags ?? [],
     slug: order.gallerySlug ?? null,
     publishedAt: order.publishedAt?.toISOString() ?? null,
-    glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
-    thumbnailUrl: order.photos[0]?.originalUrl ?? null,
+    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+    thumbnailUrl: normalizeFileUrl(order.photos[0]?.originalUrl ?? null),
+  }));
+
+  // Admin-curated highlights for the "Öne Çıkan Figürinler" rail.
+  const featuredOrders = await db.query.orders.findMany({
+    where: and(
+      eq(orders.isPublic, true),
+      eq(orders.galleryFeatured, true),
+      inArray(orders.status, [...GALLERY_STATUSES])
+    ),
+    orderBy: [desc(orders.galleryFeaturedAt)],
+    limit: 10,
+    columns: {
+      id: true,
+      publicDisplayName: true,
+      figurineSize: true,
+      style: true,
+      galleryCategory: true,
+      galleryTags: true,
+      gallerySlug: true,
+      publishedAt: true,
+      createdAt: true,
+    },
+    with: {
+      photos: { columns: { originalUrl: true }, limit: 1 },
+      generationAttempts: {
+        where: eq(generationAttempts.status, "succeeded"),
+        columns: { outputGlbUrl: true },
+        orderBy: [desc(generationAttempts.createdAt)],
+        limit: 1,
+      },
+    },
+  });
+  const featured = featuredOrders.map((order) => ({
+    id: order.id,
+    publicDisplayName: order.publicDisplayName,
+    figurineSize: order.figurineSize,
+    style: order.style,
+    category: order.galleryCategory,
+    tags: order.galleryTags ?? [],
+    slug: order.gallerySlug ?? null,
+    publishedAt: order.publishedAt?.toISOString() ?? null,
+    glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+    thumbnailUrl: normalizeFileUrl(order.photos[0]?.originalUrl ?? null),
   }));
 
   const lastOrder = publicOrders[11]; // 12th item (0-indexed)
@@ -94,7 +138,7 @@ export default async function GalleryPage() {
       </section>
 
       <section className="max-w-6xl mx-auto px-4 py-12 pb-20">
-        <GalleryGrid initialItems={items} initialCursor={nextCursor} />
+        <GalleryGrid initialItems={items} initialCursor={nextCursor} initialFeatured={featured} />
       </section>
     </main>
   );

@@ -9,34 +9,49 @@
   --font-serif: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains);
 
-  /* Background scale (light) */
-  --color-bg-base: #FFFFFF;
-  --color-bg-surface: rgba(0,0,0,0.02);
-  --color-bg-elevated: #F9FAFB;
-  --color-bg-muted: #F3F4F6;
-  --color-bg-subtle: rgba(0,0,0,0.06);
+  /* Background scale — warm "atelier" neutrals (premium identity) */
+  --color-bg-base: #FAFAF7;
+  --color-bg-surface: rgba(11,12,15,0.02);
+  --color-bg-elevated: #F3F2EC;
+  --color-bg-muted: #ECEAE1;
+  --color-bg-subtle: rgba(11,12,15,0.07);
 
-  /* Green accent (emerald) */
-  --color-green-300: #6EE7B7;
-  --color-green-400: #34D399;
-  --color-green-500: #10B981;
-  --color-green-600: #059669;
-  --color-green-700: #047857;
-  --color-green-800: #065F46;
-  --color-green-900: #064E3B;
+  /* Brand accent — cyan ramp. Repoints the legacy `green-*` utilities to the
+     premium cyan identity so every `*-green-*` class re-skins automatically.
+     Tuned so `500` stays readable as text/links on light backgrounds. */
+  --color-green-50:  #ECFEFF;
+  --color-green-100: #CDF6FD;
+  --color-green-200: #A0EBF8;
+  --color-green-300: #5FD9EE;
+  --color-green-400: #1FC0DC;
+  --color-green-500: #0891B2;
+  --color-green-600: #0E7490;
+  --color-green-700: #155E75;
+  --color-green-800: #164E63;
+  --color-green-900: #0B3D4C;
+  --color-green-950: #06262F;
 
-  /* Beige accent → neutral */
-  --color-beige-300: rgba(0,0,0,0.04);
-  --color-beige-400: rgba(0,0,0,0.06);
-  --color-beige-500: rgba(0,0,0,0.08);
-  --color-beige-600: rgba(0,0,0,0.12);
+  /* Bright brand glow — decorative fills, focus glow, hero accents */
+  --color-accent: #00D4FF;
+  --color-accent-2: #22E4FF;
+  --color-accent-soft: rgba(0,212,255,0.12);
 
-  /* Text */
-  --color-text-primary: #111827;
-  --color-text-secondary: #4B5563;
-  --color-text-muted: #9CA3AF;
+  /* Ink — primary actions & dark surfaces */
+  --color-ink: #0B0C0F;
+  --color-ink-2: #2A2B30;
 
-  /* Semantic */
+  /* Beige accent → neutral (warm) */
+  --color-beige-300: rgba(11,12,15,0.04);
+  --color-beige-400: rgba(11,12,15,0.06);
+  --color-beige-500: rgba(11,12,15,0.08);
+  --color-beige-600: rgba(11,12,15,0.12);
+
+  /* Text — warm ink scale */
+  --color-text-primary: #0B0C0F;
+  --color-text-secondary: #44464E;
+  --color-text-muted: #8A8C93;
+
+  /* Semantic — kept distinct from the brand (success green, error red, warn amber) */
   --color-success: #059669;
   --color-success-50: rgba(5,150,105,0.1);
   --color-success-500: #059669;
@@ -48,7 +63,7 @@
   --color-warning-500: #F59E0B;
 
   /* Border */
-  --color-border-default: rgba(0,0,0,0.08);
+  --color-border-default: rgba(11,12,15,0.08);
 
   /* Shadows */
   --shadow-card: 0 0 0 1px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.06);
@@ -57,8 +72,8 @@
 }
 
 :root {
-  --background: #FFFFFF;
-  --foreground: #111827;
+  --background: #FAFAF7;
+  --foreground: #0B0C0F;
   color-scheme: light;
 }
 
@@ -187,8 +202,8 @@ body {
 }
 
 .input-base:focus {
-  border-color: var(--color-green-500);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.18);
 }
 
 select.input-base {
@@ -214,20 +229,20 @@ select.input-base option {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.75rem 1.75rem;
-  background: var(--color-green-500);
+  background: var(--color-ink);
   color: white;
   font-weight: 600;
   border-radius: 0.75rem;
-  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 1px 3px rgba(11, 12, 15, 0.25);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   cursor: pointer;
   border: none;
 }
 
 .btn-primary:hover {
-  background: var(--color-green-600);
+  background: #1a1b20;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 10px 30px -10px rgba(11, 12, 15, 0.45), 0 0 22px rgba(0, 212, 255, 0.18);
 }
 
 .btn-primary:active { transform: translateY(0); }
@@ -354,7 +369,7 @@ select.input-base option {
 
 /* Hero section — light with subtle depth */
 .landing-hero {
-  background: linear-gradient(180deg, #F8FAF9 0%, #FFFFFF 100%);
+  background: linear-gradient(180deg, #F3F2EC 0%, #FFFFFF 100%);
   position: relative;
   overflow: hidden;
 }
@@ -364,8 +379,8 @@ select.input-base option {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(16,185,129,0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(16,185,129,0.04) 0%, transparent 50%);
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,212,255,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(0,212,255,0.04) 0%, transparent 50%);
   pointer-events: none;
 }
 
@@ -404,8 +419,8 @@ select.input-base option {
 
 .style-card:hover {
   transform: translateY(-4px) scale(1.02);
-  border-color: rgba(16,185,129,0.3);
-  box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 0 20px rgba(16,185,129,0.06);
+  border-color: rgba(0,212,255,0.3);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 0 20px rgba(0,212,255,0.06);
 }
 
 /* Section heading with decorative line */
@@ -422,7 +437,7 @@ select.input-base option {
   transform: translateX(-50%);
   width: 48px;
   height: 3px;
-  background: linear-gradient(90deg, #10B981, #34D399);
+  background: linear-gradient(90deg, #00D4FF, #22E4FF);
   border-radius: 2px;
 }
 
@@ -464,7 +479,7 @@ select.input-base option {
 }
 
 .step-card:hover {
-  border-color: rgba(16,185,129,0.2);
+  border-color: rgba(0,212,255,0.2);
   box-shadow: 0 8px 28px rgba(0,0,0,0.06);
   transform: translateY(-2px);
 }
@@ -486,7 +501,7 @@ select.input-base option {
 
 /* CTA section */
 .cta-section {
-  background: linear-gradient(180deg, #F0FDF4 0%, #ECFDF5 50%, #F0FDF4 100%);
+  background: linear-gradient(180deg, #F3F2EC 0%, #ECFEFF 50%, #F3F2EC 100%);
   position: relative;
   overflow: hidden;
 }
@@ -495,7 +510,7 @@ select.input-base option {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(16,185,129,0.06) 0%, transparent 70%);
+  background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(0,212,255,0.06) 0%, transparent 70%);
   pointer-events: none;
 }
 
@@ -517,13 +532,13 @@ select.input-base option {
 }
 
 .price-row-popular {
-  border: 2px solid #10B981;
-  box-shadow: 0 0 0 3px rgba(16,185,129,0.08);
+  border: 2px solid #00D4FF;
+  box-shadow: 0 0 0 3px rgba(0,212,255,0.08);
 }
 
 /* Alt bg section */
 .section-alt {
-  background: #F8FAF9;
+  background: #F3F2EC;
 }
 
 /* ============================================

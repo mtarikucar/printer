@@ -37,6 +37,16 @@ export function SearchableSelect({
     ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
     : options;
 
+  // Reset the keyboard highlight when the query or option set changes. Done
+  // during render (React's recommended alternative to an effect) so it doesn't
+  // trigger an extra paint / cascading render.
+  const [prevKey, setPrevKey] = useState(`${query}|${filtered.length}`);
+  const curKey = `${query}|${filtered.length}`;
+  if (curKey !== prevKey) {
+    setPrevKey(curKey);
+    setHighlightIndex(0);
+  }
+
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -47,11 +57,6 @@ export function SearchableSelect({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
-
-  // Reset highlight when filtered list changes
-  useEffect(() => {
-    setHighlightIndex(0);
-  }, [filtered.length, query]);
 
   // Scroll highlighted item into view
   useEffect(() => {

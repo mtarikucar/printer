@@ -120,5 +120,14 @@ export async function GET(request: NextRequest) {
     ? `${(lastOrder.publishedAt ?? lastOrder.createdAt).toISOString()}|${lastOrder.id}`
     : null;
 
-  return NextResponse.json({ items, nextCursor });
+  return NextResponse.json(
+    { items, nextCursor },
+    {
+      headers: {
+        // Public, immutable-ish listing — let the CDN/browser serve it for a
+        // minute and revalidate in the background for the next 5.
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+      },
+    }
+  );
 }

@@ -39,6 +39,7 @@ const en = {
   "common.save": "Save",
   "common.cancel": "Cancel",
   "common.delete": "Delete",
+  "common.close": "Close",
 
   // Sizes
   "sizes.kucuk": "Small",
@@ -127,6 +128,10 @@ const en = {
   "gallery.createYourOwn": "Create Your Own",
   "gallery.featured": "Featured Figurines",
   "gallery.viewModel": "View Model",
+  "gallery.filter.styleLabel": "Style",
+  "gallery.filter.categoryLabel": "Category",
+  "gallery.error": "Couldn't load the gallery. Please try again.",
+  "gallery.retry": "Try again",
   "gallery.filter.all": "All",
   "gallery.filter.realistic": "Realistic",
   "gallery.filter.object": "3D Object",

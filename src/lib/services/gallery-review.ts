@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { createGiftCard } from "@/lib/services/gift-card";
@@ -324,6 +324,79 @@ export async function listPendingGalleryReviews(limit = 100) {
       createdAt: true,
     },
     orderBy: (o, { asc }) => [asc(o.createdAt)],
+    limit,
+  });
+}
+
+/**
+ * Toggle an item's "featured" highlight. Only published (isPublic) items can
+ * be featured — otherwise it would surface in the public rail without being in
+ * the gallery. Idempotent; logged in admin_actions for audit.
+ */
+export async function setGalleryFeatured(params: {
+  orderId: string;
+  adminEmail: string;
+  featured: boolean;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const order = await db.query.orders.findFirst({
+    where: eq(orders.id, params.orderId),
+    columns: { id: true, isPublic: true, galleryFeatured: true },
+  });
+  if (!order) return { ok: false, reason: "not_found" };
+  if (params.featured && !order.isPublic) {
+    return { ok: false, reason: "not_public" };
+  }
+  if (order.galleryFeatured === params.featured) {
+    return { ok: true }; // no-op
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(orders)
+      .set({
+        galleryFeatured: params.featured,
+        galleryFeaturedAt: params.featured ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, params.orderId));
+
+    await tx.insert(adminActions).values({
+      orderId: params.orderId,
+      action: params.featured ? "gallery_feature" : "gallery_unfeature",
+      adminEmail: params.adminEmail,
+    });
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Published gallery items for the admin curation page — featured first, then
+ * most recently published. Cover photo included for a thumbnail.
+ */
+export async function listPublishedGalleryItems(limit = 200) {
+  return db.query.orders.findMany({
+    where: and(
+      eq(orders.isPublic, true),
+      inArray(orders.status, ["approved", "printing", "shipped", "delivered"])
+    ),
+    columns: {
+      id: true,
+      orderNumber: true,
+      customerName: true,
+      publicDisplayName: true,
+      figurineSize: true,
+      style: true,
+      galleryCategory: true,
+      galleryTags: true,
+      gallerySlug: true,
+      galleryFeatured: true,
+      publishedAt: true,
+    },
+    with: {
+      photos: { columns: { originalUrl: true }, limit: 1 },
+    },
+    orderBy: (o, { desc }) => [desc(o.galleryFeatured), desc(o.publishedAt)],
     limit,
   });
 }

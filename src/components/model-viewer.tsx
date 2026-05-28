@@ -38,7 +38,7 @@ function LoadingSpinner() {
   return (
     <mesh ref={ref}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="#10B981" wireframe />
+      <meshStandardMaterial color="#00D4FF" wireframe />
     </mesh>
   );
 }
@@ -77,10 +77,10 @@ export function ModelViewer({
       <div className={className || defaultClass}>
         <Canvas camera={{ position: [0, 2, 5], fov: 45 }}>
           {/* Warm dark background */}
-          <color attach="background" args={["#F3F4F6"]} />
+          <color attach="background" args={["#F3F2EC"]} />
           <ambientLight intensity={previewMode ? 0.4 : 0.3} />
           {/* Emerald key light */}
-          <directionalLight position={[5, 5, 5]} intensity={1} color="#10B981" />
+          <directionalLight position={[5, 5, 5]} intensity={1} color="#00D4FF" />
           {/* Cool fill light */}
           <directionalLight position={[-5, 3, -5]} intensity={0.5} color="#1E293B" />
           {previewMode && (

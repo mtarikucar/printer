@@ -128,7 +128,7 @@ export function verifyFileSignature(
 }
 
 export function getPublicUrl(relativePath: string): string {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === "production" ? "https://figurunica.com" : "http://localhost:3000");
   const { exp, sig } = signFilePath(relativePath);
   return `${appUrl}/api/files/${relativePath}?exp=${exp}&sig=${sig}`;
 }
@@ -142,7 +142,7 @@ export function normalizeFileUrl(url: string | null): string | null {
   if (!url) return null;
   const match = url.match(/\/api\/files\/([^?#]+)/);
   if (match) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === "production" ? "https://figurunica.com" : "http://localhost:3000");
     const relativePath = match[1];
     const { exp, sig } = signFilePath(relativePath);
     return `${appUrl}/api/files/${relativePath}?exp=${exp}&sig=${sig}`;

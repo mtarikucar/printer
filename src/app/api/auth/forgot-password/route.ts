@@ -47,7 +47,10 @@ export async function POST(request: NextRequest) {
   }
 
   const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    process.env.NEXT_PUBLIC_APP_URL ??
+    (process.env.NODE_ENV === "production"
+      ? "https://figurunica.com"
+      : "http://localhost:3000");
 
   // Fire and respond — DON'T await all the way; we want a uniform fast
   // response time. (The function itself swallows errors.)

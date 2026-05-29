@@ -44,7 +44,9 @@ interface SendEmailParams {
     | "bank_transfer_needs_review"
     | "payment_expired"
     | "manufacturer_notification"
-    | "guest_account_claim";
+    | "guest_account_claim"
+    | "qc_submitted"
+    | "new_message";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -319,6 +321,36 @@ function getTemplates(locale: Locale) {
       `,
     }),
 
+    new_message: (p) => ({
+      subject: d["email.newMessage.subject"].replace("{orderNumber}", escHtml(p.orderNumber)),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.newMessage.heading"]}</h1>
+          <p>${d["email.newMessage.body"].replace("{orderNumber}", escHtml(p.orderNumber))}</p>
+          <a href="${trackUrl(p.orderNumber)}"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["email.adminCustom.trackButton"]}
+          </a>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
+
+    qc_submitted: (p) => ({
+      subject: d["email.qcSubmitted.subject"].replace("{orderNumber}", escHtml(p.orderNumber)),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.qcSubmitted.heading"]}</h1>
+          <p>${d["email.qcSubmitted.body"].replace("{companyName}", escHtml(p.companyName || "")).replace("{orderNumber}", escHtml(p.orderNumber))}</p>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/admin/qc-queue"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            ${d["admin.qcQueue.title"]}
+          </a>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
+
     bank_transfer_instructions: (p) => ({
       subject: d["email.bankTransfer.subject"].replace("{orderNumber}", escHtml(p.orderNumber)),
       html: `
@@ -472,6 +504,7 @@ const RECIPIENT_OVERRIDES: Partial<
   order_assigned: (p) => p.manufacturerEmail,
   manufacturer_shipped: (p) => p.adminEmail,
   revision_request: (p) => p.adminEmail,
+  qc_submitted: (p) => p.adminEmail,
 };
 
 function resolveRecipient(params: SendEmailParams): string {

@@ -8,6 +8,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { AccountGalleryCard } from "@/components/account-gallery-card";
 import { AccountGalleryModal } from "@/components/account-gallery-modal";
 import { AddressBookPanel } from "@/components/address-book-panel";
+import { NotificationBell } from "@/components/notification-bell";
 import { Button, Card } from "@/components/ui";
 import type { AccountPreview } from "@/components/account-gallery-card";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
@@ -177,14 +178,17 @@ export default function AccountPage() {
       <SiteHeader />
 
       <div className="max-w-4xl mx-auto px-4 py-12">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-text-muted mb-6">
-          <Link href="/" className="hover:text-green-500 transition-colors">
-            {d["nav.home"]}
-          </Link>
-          <span>/</span>
-          <span className="text-text-primary font-medium">{d["account.title"]}</span>
-        </nav>
+        {/* Breadcrumb + notifications */}
+        <div className="flex items-center justify-between mb-6">
+          <nav className="flex items-center gap-2 text-sm text-text-muted">
+            <Link href="/" className="hover:text-green-500 transition-colors">
+              {d["nav.home"]}
+            </Link>
+            <span>/</span>
+            <span className="text-text-primary font-medium">{d["account.title"]}</span>
+          </nav>
+          <NotificationBell />
+        </div>
 
         {/* Tab Bar */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">

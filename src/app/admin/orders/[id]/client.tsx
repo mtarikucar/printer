@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
+import { OrderChat } from "@/components/order-chat";
 
 const MeshSculptor = dynamic(
   () => import("@/components/mesh-sculptor/MeshSculptor").then((m) => m.MeshSculptor),
@@ -40,6 +41,7 @@ interface OrderData {
   paymentStatus: "succeeded" | "refunded";
   havaleDiscountKurus: number;
   bankTransferReceiptUrl: string | null;
+  customerNote: string | null;
 }
 
 interface Props {
@@ -54,6 +56,9 @@ interface Props {
     manufacturer?: { id: string; companyName: string; contactPerson: string; status: string } | null;
     manufacturerActions?: { id: string; action: string; notes: string | null; createdAt: string }[];
     manufacturerStatus?: string | null;
+    qcRound?: number;
+    qcPhotos?: { id: string; url: string; reviewStatus: string }[];
+    qcReviews?: { id: string; round: number; decision: string; reason: string | null; adminEmail: string; createdAt: string }[];
     assignedToManufacturerAt?: string | null;
     activeManufacturers?: { id: string; companyName: string }[];
     candidates?: {
@@ -121,7 +126,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, assignedToManufacturerAt, activeManufacturers, candidates } = data;
+  const { order, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -130,6 +135,8 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedManufacturerId, setSelectedManufacturerId] = useState("");
+  const [qcRejectReason, setQcRejectReason] = useState("");
+  const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -576,6 +583,109 @@ export function OrderDetailClient({ data, locale }: Props) {
               )}
             </div>
           )}
+
+          {/* ─── QC Review (admin gate before shipping) ─────── */}
+          {manufacturerStatus === "qc_pending" && (
+            <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-semibold text-gray-900">{d["admin.qc.title"]}</h3>
+                  <p className="text-xs text-gray-500">{d["admin.qc.description"]}</p>
+                </div>
+              </div>
+
+              {qcPhotos && qcPhotos.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+                  {qcPhotos.map((p) => (
+                    <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.url} alt="" className="w-full h-32 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 mb-4">{d["admin.qc.noPhotos"]}</p>
+              )}
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => performAction("qc-approve")}
+                  disabled={!!loading}
+                  className="w-full px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
+                >
+                  {loading === "qc-approve" ? d["admin.qc.processing"] : d["admin.qc.approve"]}
+                </button>
+                <div className="border-t border-gray-100 pt-3">
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">{d["admin.qc.rejectReason"]}</label>
+                  <textarea
+                    value={qcRejectReason}
+                    onChange={(e) => setQcRejectReason(e.target.value)}
+                    rows={2}
+                    maxLength={1000}
+                    className="w-full text-sm border border-gray-200 rounded-lg p-2 mb-2 focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                  <button
+                    onClick={() => { if (qcRejectReason.trim()) performAction("qc-reject", { reason: qcRejectReason.trim() }); }}
+                    disabled={!!loading || !qcRejectReason.trim()}
+                    className="w-full px-6 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {loading === "qc-reject" ? d["admin.qc.processing"] : d["admin.qc.reject"]}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* QC review history */}
+          {qcReviews && qcReviews.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.qc.history"]}</h3>
+              <div className="space-y-2">
+                {qcReviews.map((r) => (
+                  <div key={r.id} className="flex items-start gap-2 text-xs">
+                    <span className={`px-2 py-0.5 rounded-full font-semibold shrink-0 ${r.decision === "approved" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                      {r.decision === "approved" ? d["admin.qc.approved"] : d["admin.qc.rejected"]}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-gray-500">{d["admin.qc.round"]} {r.round} · {formatDateTime(r.createdAt, loc)}</p>
+                      {r.reason && <p className="text-gray-600 mt-0.5">{r.reason}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ─── Order conversations (customer + manufacturer channels) ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">{d["admin.chat.title"]}</h3>
+            <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
+              <button
+                onClick={() => setChatTab("customer_admin")}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${chatTab === "customer_admin" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                {d["admin.chat.customerTab"]}
+              </button>
+              <button
+                onClick={() => setChatTab("manufacturer_admin")}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${chatTab === "manufacturer_admin" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                {d["admin.chat.manufacturerTab"]}
+              </button>
+            </div>
+            {chatTab === "manufacturer_admin" && !manufacturer ? (
+              <p className="text-sm text-gray-400 py-4">{d["admin.chat.noManufacturer"]}</p>
+            ) : (
+              <OrderChat
+                key={chatTab}
+                basePath={`/api/admin/orders/${order.id}/messages`}
+                query={`?channel=${chatTab}`}
+              />
+            )}
+          </div>
 
           {/* Manufacturer Assignment — ranked recommendations */}
           {canAssignManufacturer && candidates && candidates.length > 0 && (

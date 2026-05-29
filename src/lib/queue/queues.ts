@@ -43,7 +43,9 @@ export interface EmailJobData {
     | "bank_transfer_auto_confirmed"
     | "bank_transfer_needs_review"
     | "payment_expired"
-    | "manufacturer_notification";
+    | "manufacturer_notification"
+    | "qc_submitted"
+    | "new_message";
   to: string;
   orderNumber: string;
   customerName: string;

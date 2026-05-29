@@ -46,12 +46,19 @@ export default async function AdminLayout({
     .from(orderDrafts)
     .where(sql`${orderDrafts.status} = 'awaiting_review'`);
 
+  // Count orders awaiting QC photo approval.
+  const [qcPendingCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(sql`${orders.manufacturerStatus} = 'qc_pending'`);
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       <AdminSidebar
         reviewCount={reviewCount.count}
         pendingManufacturerCount={pendingMfgCount.count}
         draftReviewCount={draftReviewCount.count}
+        qcPendingCount={qcPendingCount.count}
       />
       <main className="flex-1 overflow-auto text-gray-900">{children}</main>
     </div>

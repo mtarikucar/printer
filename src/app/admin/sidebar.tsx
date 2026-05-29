@@ -10,10 +10,12 @@ export function AdminSidebar({
   reviewCount,
   pendingManufacturerCount,
   draftReviewCount,
+  qcPendingCount,
 }: {
   reviewCount: number;
   pendingManufacturerCount: number;
   draftReviewCount: number;
+  qcPendingCount: number;
 }) {
   const pathname = usePathname();
   const d = useDictionary();
@@ -50,9 +52,39 @@ export function AdminSidebar({
       badge: 0,
     },
     {
+      href: "/admin/qc-queue",
+      label: d["admin.nav.qcQueue"],
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />,
+      badge: qcPendingCount,
+    },
+    {
       href: "/admin/gift-cards",
       label: d["admin.nav.giftCards"],
       icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />,
+      badge: 0,
+    },
+    {
+      href: "/admin/payouts",
+      label: "Ödemeler",
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />,
+      badge: 0,
+    },
+    {
+      href: "/admin/kyc-queue",
+      label: "KYC & Belgeler",
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />,
+      badge: 0,
+    },
+    {
+      href: "/admin/disputes",
+      label: "Anlaşmazlıklar",
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />,
+      badge: 0,
+    },
+    {
+      href: "/admin/analytics",
+      label: "Analitik",
+      icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />,
       badge: 0,
     },
     {

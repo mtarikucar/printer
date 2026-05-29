@@ -47,6 +47,9 @@ export function createShipOrderSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
   return z.object({
     trackingNumber: z.string().min(1, d["validator.tracking.required"]),
+    carrier: z
+      .enum(["yurtici", "aras", "mng", "ptt", "surat", "other"])
+      .optional(),
   });
 }
 

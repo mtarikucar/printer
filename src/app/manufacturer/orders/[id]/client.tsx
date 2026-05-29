@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
+import { QcPhotoUploader } from "@/components/qc-photo-uploader";
+import { OrderChat } from "@/components/order-chat";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
@@ -20,6 +22,8 @@ interface OrderData {
   modifiers: string[] | null;
   status: string;
   manufacturerStatus: string | null;
+  qcRound: number;
+  customerNote: string | null;
   shippingAddress: {
     adres: string;
     mahalle?: string;
@@ -40,6 +44,8 @@ interface Props {
   data: {
     order: OrderData;
     photos: { id: string; originalUrl: string }[];
+    qcPhotos: { id: string; url: string }[];
+    qcRejectReason: string | null;
     glbUrl: string | null;
     stlUrl: string | null;
     actions: {
@@ -57,6 +63,9 @@ const MFR_STATUS_COLORS: Record<string, string> = {
   accepted: "bg-indigo-100 text-indigo-700",
   printing: "bg-purple-100 text-purple-700",
   printed: "bg-amber-100 text-amber-700",
+  qc_pending: "bg-amber-100 text-amber-700",
+  qc_rejected: "bg-red-100 text-red-700",
+  qc_approved: "bg-emerald-100 text-emerald-700",
   shipped: "bg-emerald-100 text-emerald-700",
 };
 
@@ -64,6 +73,7 @@ const ACTION_ICONS: Record<string, string> = {
   accept: "M5 13l4 4L19 7",
   start_printing: "M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z",
   finish_printing: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  submit_qc: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z",
   ship: "M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4",
 };
 
@@ -71,10 +81,11 @@ const ACTION_DOT_COLORS: Record<string, string> = {
   accept: "bg-indigo-500",
   start_printing: "bg-purple-500",
   finish_printing: "bg-amber-500",
+  submit_qc: "bg-amber-500",
   ship: "bg-emerald-500",
 };
 
-const TIMELINE_STEPS = ["assigned", "accepted", "printing", "printed", "shipped"];
+const TIMELINE_STEPS = ["assigned", "accepted", "printing", "printed", "qc_pending", "shipped"];
 
 // Step icons as SVG path data
 const STEP_ICONS: Record<string, { d: string; viewBox?: string }> = {
@@ -82,6 +93,7 @@ const STEP_ICONS: Record<string, { d: string; viewBox?: string }> = {
   accepted: { d: "M5 13l4 4L19 7" },
   printing: { d: "M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z" },
   printed: { d: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
+  qc_pending: { d: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
   shipped: { d: "M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" },
 };
 
@@ -91,13 +103,16 @@ const STATUS_ICONS: Record<string, string> = {
   accepted: "M5 13l4 4L19 7",
   printing: "M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z",
   printed: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
+  qc_pending: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  qc_rejected: "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  qc_approved: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
   shipped: "M5 13l4 4L19 7",
 };
 
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, glbUrl, stlUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, glbUrl, stlUrl, actions } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -107,6 +122,8 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"photo" | "model">("photo");
   const [addressCopied, setAddressCopied] = useState(false);
+  const [qcPhotoCount, setQcPhotoCount] = useState(qcPhotos.length);
+  const [shipCarrier, setShipCarrier] = useState("yurtici");
 
   // ─── Actions ─────────────────────────────────────────────
   const performAction = async (
@@ -149,15 +166,31 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   const canAccept = order.manufacturerStatus === "assigned";
   const canStartPrinting = order.manufacturerStatus === "accepted";
   const canFinishPrinting = order.manufacturerStatus === "printing";
-  const canShip = order.manufacturerStatus === "printed";
+  const canSubmitQc =
+    order.manufacturerStatus === "printed" ||
+    order.manufacturerStatus === "qc_rejected";
+  const isQcPending = order.manufacturerStatus === "qc_pending";
+  const canShip = order.manufacturerStatus === "qc_approved";
   const isShipped = order.manufacturerStatus === "shipped";
+  const canCancel = [
+    "accepted",
+    "printing",
+    "printed",
+    "qc_pending",
+    "qc_rejected",
+    "qc_approved",
+  ].includes(order.manufacturerStatus || "");
 
   const addr = order.shippingAddress;
 
   // Timeline
-  const currentStepIndex = TIMELINE_STEPS.indexOf(
-    order.manufacturerStatus || ""
-  );
+  // qc_rejected / qc_approved both render at the QC step on the timeline.
+  const timelineStatus =
+    order.manufacturerStatus === "qc_rejected" ||
+    order.manufacturerStatus === "qc_approved"
+      ? "qc_pending"
+      : order.manufacturerStatus || "";
+  const currentStepIndex = TIMELINE_STEPS.indexOf(timelineStatus);
 
   const copyAddress = () => {
     if (!addr) return;
@@ -538,6 +571,101 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
+          {canSubmitQc && (
+            <div className="rounded-2xl shadow-sm border border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100/50 p-5">
+              <div className="flex flex-col items-center text-center py-4">
+                <div className="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center mb-4">
+                  <svg className="w-7 h-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-bold text-amber-900 mb-1">
+                  {order.manufacturerStatus === "qc_rejected"
+                    ? d["manufacturer.orderDetail.qcRejectedTitle"]
+                    : d["manufacturer.orderDetail.qcTitle"]}
+                </h3>
+                <p className="text-sm text-amber-700/70 mb-4 max-w-sm">
+                  {order.manufacturerStatus === "qc_rejected"
+                    ? d["manufacturer.orderDetail.qcRejectedDescription"]
+                    : d["manufacturer.orderDetail.qcDescription"]}
+                </p>
+
+                {order.manufacturerStatus === "qc_rejected" && qcRejectReason && (
+                  <div className="mb-4 w-full max-w-sm bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm text-left">
+                    <span className="font-semibold">
+                      {d["manufacturer.orderDetail.qcRejectedReason"]}:
+                    </span>{" "}
+                    {qcRejectReason}
+                  </div>
+                )}
+
+                {error && (
+                  <div className="mb-4 w-full max-w-sm bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <div className="w-full max-w-sm">
+                  <QcPhotoUploader
+                    orderId={order.id}
+                    initialPhotos={qcPhotos}
+                    onCountChange={setQcPhotoCount}
+                  />
+                  <button
+                    onClick={() => performAction("submit-qc")}
+                    disabled={loading === "submit-qc" || qcPhotoCount < 1}
+                    className="mt-3 w-full px-6 py-3.5 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700 disabled:bg-amber-300 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                  >
+                    {loading === "submit-qc" && (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    )}
+                    {loading === "submit-qc"
+                      ? d["manufacturer.orderDetail.qcSubmitting"]
+                      : d["manufacturer.orderDetail.qcSubmit"]}
+                  </button>
+                  {qcPhotoCount < 1 && (
+                    <p className="text-xs text-amber-700/60 mt-2">
+                      {d["manufacturer.orderDetail.qcNeedPhoto"]}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isQcPending && (
+            <div className="rounded-2xl shadow-sm border border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100/30 p-5">
+              <div className="flex flex-col items-center text-center py-6">
+                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-bold text-amber-900 mb-1">
+                  {d["manufacturer.orderDetail.qcPendingTitle"]}
+                </h3>
+                <p className="text-sm text-amber-700/70 mb-4 max-w-sm">
+                  {d["manufacturer.orderDetail.qcPendingDescription"]}
+                </p>
+                {qcPhotos.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 w-full max-w-sm">
+                    {qcPhotos.map((p) => (
+                      <img
+                        key={p.id}
+                        src={p.url}
+                        alt=""
+                        className="w-full h-20 object-cover rounded-lg border border-amber-200"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {canShip && (
             <div className="rounded-2xl shadow-sm border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-5">
               <div className="flex flex-col items-center text-center py-4">
@@ -563,6 +691,17 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   </div>
                 )}
                 <div className="w-full max-w-sm space-y-3">
+                  <select
+                    value={shipCarrier}
+                    onChange={(e) => setShipCarrier(e.target.value)}
+                    className="w-full px-4 py-3 border border-emerald-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {["yurtici", "aras", "mng", "ptt", "surat", "other"].map((c) => (
+                      <option key={c} value={c}>
+                        {d[`carrier.${c}` as keyof typeof d] as string}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="text"
                     value={trackingNumber}
@@ -575,7 +714,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   />
                   <button
                     onClick={() =>
-                      performAction("ship", { trackingNumber })
+                      performAction("ship", { trackingNumber, carrier: shipCarrier })
                     }
                     disabled={
                       loading === "ship" || !trackingNumber.trim()
@@ -633,6 +772,8 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           {!canAccept &&
             !canStartPrinting &&
             !canFinishPrinting &&
+            !canSubmitQc &&
+            !isQcPending &&
             !canShip &&
             !isShipped && (
               <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
@@ -642,10 +783,40 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 </p>
               </div>
             )}
+          {/* Chat with admin */}
+          <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+              {d["manufacturer.orderDetail.chatTitle"]}
+            </h2>
+            <OrderChat basePath={`/api/manufacturer/orders/${order.id}/messages`} />
+          </div>
+
+          {/* Cancel-after-accept (returns to admin queue; counts as a strike) */}
+          {canCancel && (
+            <div className="text-center">
+              <CancelBlock
+                loading={loading === "cancel"}
+                onCancel={(reason) => performAction("cancel", reason ? { reason } : {})}
+                d={d}
+              />
+            </div>
+          )}
         </div>
 
         {/* ─── Right Sidebar (1/3) ────────────────────── */}
         <div className="space-y-5">
+          {/* Customer special-instructions note (read-only) */}
+          {order.customerNote && (
+            <div className="rounded-2xl shadow-sm border border-amber-200 bg-amber-50 p-4">
+              <h2 className="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                {d["manufacturer.orderDetail.customerNote"]}
+              </h2>
+              <p className="text-sm text-amber-900 whitespace-pre-wrap">{order.customerNote}</p>
+            </div>
+          )}
           {/* Order Info Card */}
           <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
@@ -893,6 +1064,70 @@ function DeclineBlock({
           {loading
             ? d["manufacturer.orderDetail.processing"] || "…"
             : d["manufacturer.orderDetail.confirmDecline"] || "Reddet"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Cancel-after-accept block. Two-step (link → confirm) so a misclick can't drop
+// an in-progress order back to the admin queue.
+function CancelBlock({
+  loading,
+  onCancel,
+  d,
+}: {
+  loading: boolean;
+  onCancel: (reason: string) => void;
+  d: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-xs text-gray-400 hover:text-red-600 transition-colors"
+      >
+        {d["manufacturer.orderDetail.cancelLink"]}
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2 w-full max-w-sm mx-auto bg-white border border-red-200 rounded-xl p-3 text-left">
+      <p className="text-xs text-red-700 mb-2">
+        {d["manufacturer.orderDetail.cancelConfirm"]}
+      </p>
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={d["manufacturer.orderDetail.cancelReason"]}
+        rows={2}
+        maxLength={500}
+        className="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg p-2 mb-2"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setReason("");
+          }}
+          className="flex-1 px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+          disabled={loading}
+        >
+          {d["common.cancel"] || "Vazgeç"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onCancel(reason.trim())}
+          disabled={loading}
+          className="flex-1 px-3 py-1.5 text-xs text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:bg-red-400"
+        >
+          {loading
+            ? d["manufacturer.orderDetail.processing"] || "…"
+            : d["manufacturer.orderDetail.cancel"]}
         </button>
       </div>
     </div>

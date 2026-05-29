@@ -9,11 +9,13 @@ import {
   generationAttempts,
   manufacturerActions,
   manufacturers,
+  qcPhotos,
+  qcReviews,
 } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
-import { normalizeFileUrl } from "@/lib/services/storage";
+import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { ManufacturerOrderDetailClient } from "./client";
 
 export default async function ManufacturerOrderDetailPage({
@@ -56,12 +58,37 @@ export default async function ManufacturerOrderDetailPage({
       manufacturerActions: {
         orderBy: [desc(manufacturerActions.createdAt)],
       },
+      qcPhotos: {
+        columns: {
+          id: true,
+          storageKey: true,
+          thumbnailKey: true,
+          round: true,
+          reviewStatus: true,
+        },
+        orderBy: [desc(qcPhotos.createdAt)],
+      },
+      qcReviews: {
+        columns: { decision: true, reason: true, round: true, createdAt: true },
+        orderBy: [desc(qcReviews.createdAt)],
+      },
     },
   });
 
   if (!order) notFound();
 
   const latestGeneration = order.generationAttempts[0] ?? null;
+
+  // Only the current round's photos are shown to the manufacturer; older
+  // (rejected) rounds stay in the DB as an audit trail.
+  const currentRoundPhotos = order.qcPhotos
+    .filter((p) => p.round === order.qcRound)
+    .map((p) => ({ id: p.id, url: getPublicUrl(p.thumbnailKey ?? p.storageKey) }));
+  const latestReject = order.qcReviews.find((r) => r.decision === "rejected");
+  const qcRejectReason =
+    order.manufacturerStatus === "qc_rejected"
+      ? latestReject?.reason ?? null
+      : null;
 
   const serialized = {
     order: {
@@ -74,6 +101,8 @@ export default async function ManufacturerOrderDetailPage({
       modifiers: order.modifiers as string[] | null,
       status: order.status,
       manufacturerStatus: order.manufacturerStatus,
+      qcRound: order.qcRound,
+      customerNote: order.customerNote,
       shippingAddress: order.shippingAddress as TurkishAddress | null,
       assignedToManufacturerAt:
         order.assignedToManufacturerAt?.toISOString() ?? null,
@@ -89,6 +118,8 @@ export default async function ManufacturerOrderDetailPage({
       id: p.id,
       originalUrl: p.originalUrl,
     })),
+    qcPhotos: currentRoundPhotos,
+    qcRejectReason,
     glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
     stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
     actions: order.manufacturerActions.map((a) => ({

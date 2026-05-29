@@ -101,6 +101,9 @@ COPY --chown=nextjs:nodejs workers ./workers
 COPY --chown=nextjs:nodejs scripts ./scripts
 COPY --chown=nextjs:nodejs src ./src
 COPY --chown=nextjs:nodejs drizzle.config.ts ./
+# Migration SQL files — so `docker exec printer_worker npx drizzle-kit migrate`
+# can apply pending migrations against the production DB after a deploy.
+COPY --chown=nextjs:nodejs drizzle ./drizzle
 
 USER nextjs
 

@@ -7,6 +7,9 @@ import { ModelViewer } from "@/components/model-viewer";
 import { PublishToggle } from "@/components/publish-toggle";
 import { SiteHeader } from "@/components/site-header";
 import { BankTransferInstructions } from "@/components/bank-transfer-instructions";
+import { CustomerOrderChat } from "@/components/customer-order-chat";
+import { OrderInvoice } from "@/components/order-invoice";
+import { OrderDispute } from "@/components/order-dispute";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatDateLong } from "@/lib/i18n/format";
 import { Button, Card } from "@/components/ui";
@@ -84,6 +87,7 @@ interface OrderData {
   status: string;
   customerName: string;
   trackingNumber: string | null;
+  carrier: string | null;
   paidAt: string | null;
   shippedAt: string | null;
   createdAt: string;
@@ -619,8 +623,23 @@ export default function TrackPage({
               <OrderStatusTracker
                 status={order.status}
                 trackingNumber={order.trackingNumber}
+                carrier={order.carrier}
               />
             </Card>
+
+            {/* Customer ↔ admin chat + special-instructions note (owner-only;
+                renders nothing for guests tracking by order number). */}
+            <CustomerOrderChat orderNumber={order.orderNumber} />
+
+            {/* KDV invoice (paid orders) */}
+            {order.paymentStatus === "succeeded" && (
+              <Card padding="md">
+                <OrderInvoice orderNumber={order.orderNumber} />
+              </Card>
+            )}
+
+            {/* Report-a-problem / dispute (shipped+ orders; owner-only) */}
+            <OrderDispute orderNumber={order.orderNumber} />
 
             {/* 3D model viewer */}
             {order.glbUrl && (

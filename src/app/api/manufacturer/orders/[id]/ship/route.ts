@@ -5,6 +5,9 @@ import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { createShipOrderSchema } from "@/lib/validators/order";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { accrueEarning } from "@/lib/services/payouts";
+import { notifyCustomer } from "@/lib/services/customer-notifications";
+import { sendSms } from "@/lib/services/sms";
 
 export async function POST(
   request: NextRequest,
@@ -40,6 +43,7 @@ export async function POST(
         manufacturerStatus: "shipped",
         status: "shipped",
         trackingNumber: validated.trackingNumber,
+        carrier: validated.carrier ?? null,
         shippedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -47,14 +51,15 @@ export async function POST(
         and(
           eq(orders.id, id),
           eq(orders.manufacturerId, session.manufacturerId),
-          eq(orders.manufacturerStatus, "printed")
+          // Ship gate: only orders that passed admin QC approval may ship.
+          eq(orders.manufacturerStatus, "qc_approved")
         )
       )
       .returning();
 
     if (!order) {
       return NextResponse.json(
-        { error: "Order not found or not in printed status" },
+        { error: "Order not found or not approved for shipping (QC required)" },
         { status: 400 }
       );
     }
@@ -65,6 +70,25 @@ export async function POST(
       action: "ship",
       notes: `Tracking: ${validated.trackingNumber}`,
     });
+
+    // Faz 2: accrue the manufacturer's earning for this completed order
+    // (idempotent on orderId; non-fatal if it fails).
+    await accrueEarning(order.id, session.manufacturerId, order.amountKurus).catch(
+      (e) => console.error("accrueEarning failed (non-fatal)", e)
+    );
+
+    // Faz 4: in-app notification + best-effort SMS
+    await notifyCustomer({
+      userId: order.userId,
+      orderId: order.id,
+      type: "order_shipped",
+      title: "Siparişiniz kargolandı",
+      body: `${order.orderNumber} numaralı siparişiniz kargoya verildi. Takip no: ${validated.trackingNumber}`,
+    });
+    await sendSms(
+      order.phone,
+      `Figurünica: ${order.orderNumber} siparişiniz kargolandı. Takip: ${validated.trackingNumber}`
+    );
 
     // Notify customer
     await getEmailQueue().add("shipped", {

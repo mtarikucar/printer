@@ -3,6 +3,7 @@
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import { Card } from "@/components/ui";
+import { trackingUrl } from "@/lib/services/carriers";
 
 function getSteps(d: Dictionary) {
   return [
@@ -12,6 +13,7 @@ function getSteps(d: Dictionary) {
     { key: "review", label: d["tracker.review.label"], description: d["tracker.review.description"] },
     { key: "approved", label: d["tracker.approved.label"], description: d["tracker.approved.description"] },
     { key: "printing", label: d["tracker.printing.label"], description: d["tracker.printing.description"] },
+    { key: "quality_check", label: d["tracker.quality_check.label"], description: d["tracker.quality_check.description"] },
     { key: "shipped", label: d["tracker.shipped.label"], description: d["tracker.shipped.description"] },
     { key: "delivered", label: d["tracker.delivered.label"], description: d["tracker.delivered.description"] },
   ] as const;
@@ -26,9 +28,11 @@ const FAILED_STATUSES = [
 export function OrderStatusTracker({
   status,
   trackingNumber,
+  carrier,
 }: {
   status: string;
   trackingNumber?: string | null;
+  carrier?: string | null;
 }) {
   const d = useDictionary();
   const STEPS = getSteps(d);
@@ -146,17 +150,19 @@ export function OrderStatusTracker({
                       {d["tracker.tracking"]} {trackingNumber}
                     </span>
                   </p>
-                  <a
-                    href={`https://www.yurticikargo.com/tr/online-servisler/gonderi-sorgula?code=${encodeURIComponent(trackingNumber)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-sm text-green-500 hover:text-green-400 font-medium transition-colors"
-                  >
-                    {d["tracker.trackOnYurtici"]}
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
+                  {trackingUrl(carrier, trackingNumber) && (
+                    <a
+                      href={trackingUrl(carrier, trackingNumber)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm text-green-500 hover:text-green-400 font-medium transition-colors"
+                    >
+                      {d["tracker.trackShipment"]}
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
                 </div>
               )}
             </div>

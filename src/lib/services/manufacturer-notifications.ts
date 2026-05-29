@@ -7,7 +7,8 @@ export type ManufacturerNotificationType =
   | "order_assigned"
   | "order_cancelled"
   | "admin_message"
-  | "system_announcement";
+  | "system_announcement"
+  | "qc_result";
 
 interface NotifyArgs {
   manufacturerId: string;

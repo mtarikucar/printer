@@ -6,6 +6,7 @@ import { orders, adminActions } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { notifyCustomer } from "@/lib/services/customer-notifications";
 
 export async function POST(
   request: NextRequest,
@@ -28,7 +29,7 @@ export async function POST(
   // Atomic status transition
   const [order] = await db
     .update(orders)
-    .set({ status: "delivered", adminNotes: body.notes, updatedAt: new Date() })
+    .set({ status: "delivered", deliveredAt: new Date(), adminNotes: body.notes, updatedAt: new Date() })
     .where(and(eq(orders.id, id), eq(orders.status, "shipped")))
     .returning();
 
@@ -52,6 +53,15 @@ export async function POST(
     orderNumber: order.orderNumber,
     customerName: order.customerName,
     locale,
+  });
+
+  // Faz 4: in-app notification
+  await notifyCustomer({
+    userId: order.userId,
+    orderId: order.id,
+    type: "order_delivered",
+    title: "Siparişiniz teslim edildi",
+    body: `${order.orderNumber} numaralı siparişiniz teslim edildi.`,
   });
 
   return NextResponse.json({ success: true });

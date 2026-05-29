@@ -8,6 +8,7 @@ import {
   uuid,
   pgEnum,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -44,6 +45,7 @@ export const orderStatusEnum = pgEnum("order_status", [
   "review",
   "approved",
   "printing",
+  "quality_check",
   "shipped",
   "delivered",
   "failed_generation",
@@ -111,6 +113,8 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "gallery_reward",
   "gallery_feature",
   "gallery_unfeature",
+  "qc_approve",
+  "qc_reject",
 ]);
 
 /**
@@ -163,8 +167,25 @@ export const manufacturerOrderStatusEnum = pgEnum("manufacturer_order_status", [
   "accepted",
   "printing",
   "printed",
+  "qc_pending",
+  "qc_rejected",
+  "qc_approved",
   "shipped",
 ]);
+
+// Faz 3: shipping carrier (drives the customer tracking deep-link).
+export const carrierEnum = pgEnum("carrier", [
+  "yurtici",
+  "aras",
+  "mng",
+  "ptt",
+  "surat",
+  "other",
+]);
+
+// Faz 3: IBAN change review gate. 'pending' means a new IBAN is parked in
+// manufacturers.pendingIban awaiting admin approval.
+export const ibanReviewStatusEnum = pgEnum("iban_review_status", ["none", "pending"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -350,6 +371,8 @@ export const orders = pgTable("orders", {
   paidAt: timestamp("paid_at").notNull().defaultNow(),
   shippedAt: timestamp("shipped_at"),
   trackingNumber: text("tracking_number"),
+  carrier: carrierEnum("carrier"),
+  deliveredAt: timestamp("delivered_at"),
   adminNotes: text("admin_notes"),
   failureReason: text("failure_reason"),
   retryCount: integer("retry_count").notNull().default(0),
@@ -387,6 +410,15 @@ export const orders = pgTable("orders", {
   // reassignment service to skip them on retry and to cap the reassign
   // count (3 declines → admin manual queue).
   declinedManufacturerIds: jsonb("declined_manufacturer_ids").$type<string[]>(),
+  // QC reprint loop: qcRound bumps on each admin rejection (so the manufacturer
+  // page shows only the current round); qcRejectionCount is a lifetime counter
+  // for escalation/metrics.
+  qcRound: integer("qc_round").notNull().default(1),
+  qcRejectionCount: integer("qc_rejection_count").notNull().default(0),
+  // Customer special instructions captured at checkout (e.g. "gift — no invoice
+  // in box"). Shown read-only to the manufacturer; editable by the customer
+  // until the order ships.
+  customerNote: text("customer_note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -400,6 +432,229 @@ export const orderPhotos = pgTable("order_photos", {
   thumbnailUrl: text("thumbnail_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ─── QC (quality control): finished-product photos + admin reviews ──────────
+export const qcPhotoReviewStatusEnum = pgEnum("qc_photo_review_status", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+
+// Manufacturer-uploaded photos of the FINISHED printed product, reviewed by an
+// admin before shipping is unlocked. Deliberately separate from order_photos
+// (the customer's INPUT photos) so the two never leak into each other's UI.
+// storageKey is a relative key (e.g. "qc-photos/<id>.jpg") re-signed on read.
+export const qcPhotos = pgTable("qc_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id),
+  manufacturerId: uuid("manufacturer_id")
+    .notNull()
+    .references(() => manufacturers.id),
+  round: integer("round").notNull().default(1),
+  storageKey: text("storage_key").notNull(),
+  thumbnailKey: text("thumbnail_key"),
+  reviewStatus: qcPhotoReviewStatusEnum("review_status")
+    .notNull()
+    .default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// One row per admin QC decision (per round): audit trail + the reject reason
+// surfaced back to the manufacturer.
+export const qcReviews = pgTable("qc_reviews", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id),
+  round: integer("round").notNull(),
+  decision: text("decision").notNull(), // 'approved' | 'rejected'
+  reason: text("reason"),
+  adminEmail: text("admin_email").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Per-order, two-channel messaging ───────────────────────────────────────
+export const messageChannelEnum = pgEnum("message_channel", [
+  "customer_admin",
+  "manufacturer_admin",
+]);
+export const messageSenderTypeEnum = pgEnum("message_sender_type", [
+  "customer",
+  "admin",
+  "manufacturer",
+]);
+
+// Bidirectional chat scoped to (orderId, channel). The two channels never mix:
+// customer↔admin and manufacturer↔admin. channel + senderType are always
+// derived server-side from the authenticated role (see order-messages.ts),
+// never from the request body, so a customer can't touch the manufacturer
+// channel and vice-versa. Two read-timestamps suffice (each channel has exactly
+// two participants: admin + one counterparty).
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id),
+    channel: messageChannelEnum("channel").notNull(),
+    senderType: messageSenderTypeEnum("sender_type").notNull(),
+    senderId: uuid("sender_id"), // user/manufacturer UUID; null for admin
+    senderEmail: text("sender_email"), // admin identity (NextAuth email)
+    body: text("body").notNull(),
+    attachmentKey: text("attachment_key"),
+    attachmentThumbnailKey: text("attachment_thumbnail_key"),
+    readByAdminAt: timestamp("read_by_admin_at"),
+    readByCounterpartyAt: timestamp("read_by_counterparty_at"),
+    flagged: boolean("flagged").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byOrderChannel: index("messages_order_channel_idx").on(
+      t.orderId,
+      t.channel,
+      t.createdAt
+    ),
+  })
+);
+
+// ─── Faz 2: manufacturer earnings + payouts + customer invoices ─────────────
+export const earningStatusEnum = pgEnum("earning_status", [
+  "pending",
+  "paid",
+  "reversed",
+]);
+export const payoutStatusEnum = pgEnum("payout_status", ["pending", "paid"]);
+export const invoiceStatusEnum = pgEnum("invoice_status", ["draft", "issued"]);
+
+// One earning row per order, accrued when the manufacturer ships. net = gross −
+// platform commission. Linked into a payout batch when paid; reversed on
+// refund/dispute (clawback).
+export const manufacturerEarnings = pgTable("manufacturer_earnings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id)
+    .unique(),
+  manufacturerId: uuid("manufacturer_id")
+    .notNull()
+    .references(() => manufacturers.id),
+  grossKurus: integer("gross_kurus").notNull(),
+  commissionKurus: integer("commission_kurus").notNull(),
+  netKurus: integer("net_kurus").notNull(),
+  commissionRateBps: integer("commission_rate_bps").notNull(),
+  status: earningStatusEnum("status").notNull().default("pending"),
+  payoutId: uuid("payout_id").references((): any => payouts.id), // eslint-disable-line @typescript-eslint/no-explicit-any
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// A payout batch aggregates a manufacturer's pending earnings into one transfer.
+export const payouts = pgTable("payouts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  manufacturerId: uuid("manufacturer_id")
+    .notNull()
+    .references(() => manufacturers.id),
+  totalKurus: integer("total_kurus").notNull(),
+  earningCount: integer("earning_count").notNull(),
+  status: payoutStatusEnum("status").notNull().default("pending"),
+  reference: text("reference"),
+  adminEmail: text("admin_email").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  paidAt: timestamp("paid_at"),
+});
+
+// Customer invoice (KDV-inclusive). invoiceNumber is 1:1 with the order.
+export const invoices = pgTable("invoices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id)
+    .unique(),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  subtotalKurus: integer("subtotal_kurus").notNull(),
+  kdvKurus: integer("kdv_kurus").notNull(),
+  totalKurus: integer("total_kurus").notNull(),
+  kdvRateBps: integer("kdv_rate_bps").notNull(),
+  status: invoiceStatusEnum("status").notNull().default("issued"),
+  providerRef: text("provider_ref"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Faz 3: manufacturer KYC documents + customer disputes ──────────────────
+export const docTypeEnum = pgEnum("manufacturer_doc_type", [
+  "vergi_levhasi",
+  "ticaret_sicil",
+  "imza_sirkuleri",
+  "kimlik",
+  "other",
+]);
+export const docReviewStatusEnum = pgEnum("doc_review_status", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+export const disputeStatusEnum = pgEnum("dispute_status", [
+  "open",
+  "resolved",
+  "rejected",
+]);
+
+// KYC documents a manufacturer uploads during/after onboarding; an admin
+// reviews each one. storageKey is a relative key under kyc-docs/.
+export const manufacturerDocuments = pgTable("manufacturer_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  manufacturerId: uuid("manufacturer_id")
+    .notNull()
+    .references(() => manufacturers.id),
+  type: docTypeEnum("type").notNull(),
+  storageKey: text("storage_key").notNull(),
+  status: docReviewStatusEnum("status").notNull().default("pending"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Customer-opened dispute on an order; admin resolves (optionally clawing back
+// the manufacturer's earning + refunding).
+export const disputes = pgTable("disputes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  category: text("category").notNull(), // not_as_described | damaged | not_received | other
+  description: text("description").notNull(),
+  status: disputeStatusEnum("status").notNull().default("open"),
+  resolution: text("resolution"),
+  adminEmail: text("admin_email"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+// ─── Faz 4: customer in-app notification center ─────────────────────────────
+export const customerNotifications = pgTable(
+  "customer_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    orderId: uuid("order_id").references(() => orders.id),
+    type: text("type").notNull(), // order_shipped | order_delivered | dispute_update | ...
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byUser: index("customer_notifications_user_idx").on(t.userId, t.createdAt),
+  })
+);
 
 export const generationAttempts = pgTable("generation_attempts", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -488,6 +743,13 @@ export const manufacturers = pgTable("manufacturers", {
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
   status: manufacturerStatusEnum("status").notNull().default("pending_approval"),
   notes: text("notes"),
+  // Faz 2/3: accumulating reliability strikes (late ship, cancel-after-accept,
+  // QC fail). Faz 3 policy auto-suspends past a threshold.
+  strikeCount: integer("strike_count").notNull().default(0),
+  // Faz 3: IBAN changes require admin re-approval. New value parks here until
+  // approved; the live `iban` is only updated on approval.
+  pendingIban: text("pending_iban"),
+  ibanReviewStatus: ibanReviewStatusEnum("iban_review_status").notNull().default("none"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -554,6 +816,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   previews: many(previews),
   giftCards: many(giftCards),
   addresses: many(userAddresses),
+  notifications: many(customerNotifications),
 }));
 
 export const userAddressesRelations = relations(userAddresses, ({ one }) => ({
@@ -605,11 +868,101 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     references: [manufacturers.id],
   }),
   manufacturerActions: many(manufacturerActions),
+  qcPhotos: many(qcPhotos),
+  qcReviews: many(qcReviews),
+  orderMessages: many(messages),
+  earning: one(manufacturerEarnings),
+  invoice: one(invoices),
+  disputes: many(disputes),
 }));
 
 export const orderPhotosRelations = relations(orderPhotos, ({ one }) => ({
   order: one(orders, {
     fields: [orderPhotos.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const qcPhotosRelations = relations(qcPhotos, ({ one }) => ({
+  order: one(orders, {
+    fields: [qcPhotos.orderId],
+    references: [orders.id],
+  }),
+  manufacturer: one(manufacturers, {
+    fields: [qcPhotos.manufacturerId],
+    references: [manufacturers.id],
+  }),
+}));
+
+export const qcReviewsRelations = relations(qcReviews, ({ one }) => ({
+  order: one(orders, {
+    fields: [qcReviews.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  order: one(orders, {
+    fields: [messages.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const manufacturerEarningsRelations = relations(manufacturerEarnings, ({ one }) => ({
+  order: one(orders, {
+    fields: [manufacturerEarnings.orderId],
+    references: [orders.id],
+  }),
+  manufacturer: one(manufacturers, {
+    fields: [manufacturerEarnings.manufacturerId],
+    references: [manufacturers.id],
+  }),
+  payout: one(payouts, {
+    fields: [manufacturerEarnings.payoutId],
+    references: [payouts.id],
+  }),
+}));
+
+export const payoutsRelations = relations(payouts, ({ one, many }) => ({
+  manufacturer: one(manufacturers, {
+    fields: [payouts.manufacturerId],
+    references: [manufacturers.id],
+  }),
+  earnings: many(manufacturerEarnings),
+}));
+
+export const invoicesRelations = relations(invoices, ({ one }) => ({
+  order: one(orders, {
+    fields: [invoices.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const manufacturerDocumentsRelations = relations(manufacturerDocuments, ({ one }) => ({
+  manufacturer: one(manufacturers, {
+    fields: [manufacturerDocuments.manufacturerId],
+    references: [manufacturers.id],
+  }),
+}));
+
+export const disputesRelations = relations(disputes, ({ one }) => ({
+  order: one(orders, {
+    fields: [disputes.orderId],
+    references: [orders.id],
+  }),
+  user: one(users, {
+    fields: [disputes.userId],
+    references: [users.id],
+  }),
+}));
+
+export const customerNotificationsRelations = relations(customerNotifications, ({ one }) => ({
+  user: one(users, {
+    fields: [customerNotifications.userId],
+    references: [users.id],
+  }),
+  order: one(orders, {
+    fields: [customerNotifications.orderId],
     references: [orders.id],
   }),
 }));
@@ -650,6 +1003,9 @@ export const manufacturersRelations = relations(manufacturers, ({ many }) => ({
   orders: many(orders),
   actions: many(manufacturerActions),
   notifications: many(manufacturerNotifications),
+  earnings: many(manufacturerEarnings),
+  payouts: many(payouts),
+  documents: many(manufacturerDocuments),
 }));
 
 export const manufacturerActionsRelations = relations(manufacturerActions, ({ one }) => ({

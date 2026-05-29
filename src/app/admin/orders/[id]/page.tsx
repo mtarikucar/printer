@@ -3,12 +3,12 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions } from "@/lib/db/schema";
+import { orders, orderPhotos, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
-import { normalizeFileUrl } from "@/lib/services/storage";
+import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 
 export default async function AdminOrderDetailPage({
@@ -46,6 +46,12 @@ export default async function AdminOrderDetailPage({
       manufacturer: true,
       manufacturerActions: {
         orderBy: [desc(manufacturerActions.createdAt)],
+      },
+      qcPhotos: {
+        orderBy: [desc(qcPhotos.createdAt)],
+      },
+      qcReviews: {
+        orderBy: [desc(qcReviews.createdAt)],
       },
     },
   });
@@ -97,6 +103,7 @@ export default async function AdminOrderDetailPage({
       bankTransferReceiptUrl: order.draftId
         ? `/api/admin/orders/${order.id}/receipt`
         : null,
+      customerNote: order.customerNote,
     },
     photos: order.photos.map(p => ({
       id: p.id,
@@ -162,6 +169,22 @@ export default async function AdminOrderDetailPage({
       createdAt: a.createdAt.toISOString(),
     })),
     manufacturerStatus: order.manufacturerStatus,
+    qcRound: order.qcRound,
+    qcPhotos: order.qcPhotos
+      .filter((p) => p.round === order.qcRound)
+      .map((p) => ({
+        id: p.id,
+        url: getPublicUrl(p.storageKey),
+        reviewStatus: p.reviewStatus,
+      })),
+    qcReviews: order.qcReviews.map((r) => ({
+      id: r.id,
+      round: r.round,
+      decision: r.decision,
+      reason: r.reason,
+      adminEmail: r.adminEmail,
+      createdAt: r.createdAt.toISOString(),
+    })),
     assignedToManufacturerAt: order.assignedToManufacturerAt?.toISOString() ?? null,
     activeManufacturers: activeManufacturers.map(m => ({
       id: m.id,

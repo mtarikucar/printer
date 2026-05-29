@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
+import { ManufacturerKyc } from "@/components/manufacturer-kyc";
 
 interface TurkishAddress {
   adres: string;
@@ -344,6 +345,8 @@ export default function ManufacturerProfilePage() {
           )}
         </div>
       </div>
+
+      <ManufacturerKyc />
     </div>
   );
 }

@@ -13,6 +13,14 @@ import { env } from "@/lib/env";
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   secret: env.AUTH_SECRET,
+  // Behind a TLS-terminating proxy (Traefik) the app receives HTTP internally,
+  // so NextAuth's per-request secure-cookie auto-detection flips cookie names
+  // between requests (authjs.* ↔ __Secure-/__Host-*). That mismatch breaks the
+  // CSRF double-submit check on the credentials POST (MissingCSRF) and means a
+  // session set as `authjs.session-token` is never read by middleware.ts, which
+  // hardcodes `__Secure-authjs.session-token`. Force secure cookies in prod so
+  // SET and READ are always consistent (browser↔proxy is always HTTPS).
+  useSecureCookies: process.env.NODE_ENV === "production",
   providers: [
     Credentials({
       name: "Admin Login",

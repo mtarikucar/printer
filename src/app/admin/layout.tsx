@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -14,6 +15,17 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // This layout wraps EVERY /admin/* route, including /admin/login. We must
+  // NOT run the auth gate (or the sidebar's DB count queries) for the login
+  // page: redirecting an unauthenticated /admin/login back to /admin/login
+  // re-enters this layout and redirects again — an infinite loop that hides
+  // the login form. Middleware forwards the path via x-pathname so we can
+  // detect the login page and render it bare (no shell, no gate, no queries).
+  const pathname = (await headers()).get("x-pathname") ?? "";
+  if (pathname === "/admin/login") {
+    return <>{children}</>;
+  }
+
   // Defense-in-depth: middleware already gates /admin/*, but if it's ever
   // mis-configured the layout would otherwise run DB queries and leak counts
   // in HTML. Verify the role claim here too.

@@ -33,6 +33,13 @@ async function getAdminToken(request: NextRequest) {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Forward the pathname to RSC layouts (App Router doesn't expose it to server
+  // components). The admin layout reads this to skip its auth gate + sidebar DB
+  // queries on /admin/login — otherwise an unauthenticated login visit redirects
+  // to /admin/login, which re-enters the layout and redirects again (infinite loop).
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", pathname);
+
   // Admin routes: properly verify the NextAuth JWT (signature + role claim).
   if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
     const token = await getAdminToken(request);
@@ -83,7 +90,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

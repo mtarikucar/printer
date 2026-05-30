@@ -32,7 +32,11 @@ services:
   migrate:
     image: ghcr.io/mtarikucar/printer/worker:latest
     container_name: printer_migrate
-    command: ["npx", "drizzle-kit", "push"]
+    # `migrate` (not `push`): deterministic + non-interactive. `push` prompts on
+    # create-vs-rename ambiguity and aborts in this non-TTY container, silently
+    # skipping schema changes. Requires drizzle/ + meta/_journal.json in the image
+    # (both committed) and the DB baselined once (see scripts/db/prod-baseline.sql).
+    command: ["npx", "drizzle-kit", "migrate"]
     env_file: ../.env
     environment:
       DATABASE_URL: postgres://printer:printer@postgres:5432/printer

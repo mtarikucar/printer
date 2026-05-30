@@ -39,6 +39,9 @@ const profileSchema = z.object({
   bankName: z.string().min(2).max(80).optional(),
   maxConcurrentOrders: z.number().int().min(1).max(50).optional(),
   acceptingOrders: z.boolean().optional(),
+  // Production materials this manufacturer prints (at least one). Persisted as
+  // `material_<m>` capability tags that drive material-based order routing.
+  materials: z.array(z.enum(["resin", "filament"])).min(1).optional(),
 });
 
 // Fields that materially affect payouts / order routing — restricted to active
@@ -135,6 +138,9 @@ export async function PATCH(request: NextRequest) {
   if (validated.bankName !== undefined) update.bankName = validated.bankName;
   if (validated.maxConcurrentOrders !== undefined) update.maxConcurrentOrders = validated.maxConcurrentOrders;
   if (validated.acceptingOrders !== undefined) update.acceptingOrders = validated.acceptingOrders;
+  if (validated.materials !== undefined) {
+    update.capabilities = validated.materials.map((m) => `material_${m}`);
+  }
   update.updatedAt = new Date();
 
   await db

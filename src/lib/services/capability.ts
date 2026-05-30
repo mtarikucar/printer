@@ -35,3 +35,18 @@ export function capabilityScore(
   const hit = required.filter((r) => set.has(r)).length;
   return hit / required.length;
 }
+
+// Whether a manufacturer can print the order's material. Material capabilities
+// are declared as `material_<m>` tags in manufacturers.capabilities. Legacy
+// behaviour: a manufacturer with no declared capabilities (or none of the
+// `material_*` kind) is treated as able to print any material — so existing
+// manufacturers keep receiving orders until they declare materials.
+export function manufacturerSupportsMaterial(
+  capabilities: string[] | null | undefined,
+  material: string
+): boolean {
+  if (!capabilities || capabilities.length === 0) return true;
+  const materialTags = capabilities.filter((c) => c.startsWith("material_"));
+  if (materialTags.length === 0) return true;
+  return materialTags.includes(`material_${material}`);
+}

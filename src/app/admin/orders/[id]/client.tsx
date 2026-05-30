@@ -24,6 +24,7 @@ interface OrderData {
   customerName: string;
   phone: string | null;
   figurineSize: string;
+  material: string;
   style: string;
   modifiers: string[] | null;
   shippingAddress: { adres: string; mahalle?: string; ilce: string; il: string; postaKodu: string; telefon: string } | null;
@@ -1008,6 +1009,10 @@ export function OrderDetailClient({ data, locale }: Props) {
               <div className="flex justify-between items-center">
                 <dt className="text-gray-400">{d["admin.orderDetail.size"]}</dt>
                 <dd className="font-medium text-gray-900">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</dd>
+              </div>
+              <div className="flex justify-between items-center">
+                <dt className="text-gray-400">{d["admin.orderDetail.material"]}</dt>
+                <dd className="font-medium text-gray-900">{d[`material.${order.material}` as keyof typeof d] || order.material}</dd>
               </div>
               <div className="flex justify-between items-center">
                 <dt className="text-gray-400">{d["admin.orderDetail.style"]}</dt>

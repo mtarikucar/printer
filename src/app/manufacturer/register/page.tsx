@@ -68,6 +68,14 @@ export default function ManufacturerRegisterPage() {
   // Capacity
   const [maxConcurrentOrders, setMaxConcurrentOrders] = useState(5);
 
+  // Production materials (capabilities). At least one required; drives which
+  // orders (resin vs filament) get routed to this manufacturer.
+  const [materials, setMaterials] = useState<string[]>(["resin"]);
+  const toggleMaterial = (key: string) =>
+    setMaterials((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -112,6 +120,11 @@ export default function ManufacturerRegisterPage() {
       return;
     }
 
+    if (materials.length === 0) {
+      setError("En az bir üretim malzemesi seçmelisiniz");
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/manufacturer/auth/register", {
@@ -137,6 +150,7 @@ export default function ManufacturerRegisterPage() {
           bankAccountHolder,
           bankName,
           maxConcurrentOrders: Number(maxConcurrentOrders),
+          materials,
           onboardingAccepted: true,
         }),
       });
@@ -340,6 +354,51 @@ export default function ManufacturerRegisterPage() {
               value={maxConcurrentOrders}
               onChange={(e) => setMaxConcurrentOrders(Number(e.target.value) || 1)}
             />
+          </fieldset>
+
+          {/* Üretim Malzemeleri */}
+          <fieldset>
+            <legend className="text-sm font-semibold text-gray-700">Üretim Malzemeleri *</legend>
+            <p className="text-xs text-gray-500 mt-1 mb-2">
+              Hangi malzemelerle baskı yapıyorsunuz? Siparişler yalnızca uygun
+              malzemeyi basabilen üreticilere atanır. (En az bir seçim)
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: "resin", label: "Reçine (Resin)", desc: "Yüksek detay, premium yüzey" },
+                { key: "filament", label: "Filament (FDM)", desc: "Ekonomik, dayanıklı baskı" },
+              ].map((m) => {
+                const active = materials.includes(m.key);
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => toggleMaterial(m.key)}
+                    className={`flex-1 min-w-[160px] text-left rounded-xl border p-3 transition ${
+                      active
+                        ? "border-indigo-500 bg-indigo-50"
+                        : "border-gray-200 bg-white hover:border-indigo-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-gray-900">{m.label}</span>
+                      <span
+                        className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
+                          active ? "bg-indigo-600 border-indigo-600" : "border-gray-300"
+                        }`}
+                      >
+                        {active && (
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">{m.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
           </fieldset>
 
           {error && (

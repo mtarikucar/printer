@@ -9,9 +9,9 @@ import {
 } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
 import {
-  PRICES_KURUS,
   allocatePaytrBasket,
   calculateUpsellAmount,
+  figurinePriceKurus,
 } from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
@@ -147,7 +147,8 @@ export async function POST(request: NextRequest) {
     // all see the same canonical list (server-trusted, not client-trusted).
     const upsellKeys = Array.from(new Set(validated.upsells));
     const upsellAmountKurus = calculateUpsellAmount(upsellKeys);
-    const amountKurus = PRICES_KURUS[validated.figurineSize] + upsellAmountKurus;
+    const amountKurus =
+      figurinePriceKurus(validated.figurineSize, validated.material) + upsellAmountKurus;
 
     let giftCardId: string | undefined;
     if (validated.giftCardCode) {
@@ -270,6 +271,7 @@ export async function POST(request: NextRequest) {
           phone: validated.shippingAddress.telefon,
           figurineSize: validated.figurineSize,
           style: validated.style,
+          material: validated.material,
           modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
           shippingAddress: validated.shippingAddress,
           photoKey: validated.photoKey,
@@ -380,13 +382,15 @@ export async function POST(request: NextRequest) {
     const paymentAmountKurus = amountKurus - giftCardAmountKurus;
     const sizeLabel =
       d[`sizes.${validated.figurineSize}` as keyof typeof d] || validated.figurineSize;
+    const materialLabel =
+      d[`material.${validated.material}` as keyof typeof d] || validated.material;
 
     // PayTR basket: figurine + per-upsell rows, summing to
     // paymentAmountKurus. See allocatePaytrBasket for the gift-card +
     // upsell edge-case handling (review C3).
     const basket = allocatePaytrBasket({
       paymentAmountKurus,
-      figurineName: `Figurin (${sizeLabel})`,
+      figurineName: `Figurin (${sizeLabel} · ${materialLabel})`,
       upsellAmountKurus,
       upsellKeys,
       upsellLabel: (key) =>

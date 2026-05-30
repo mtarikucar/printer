@@ -146,6 +146,10 @@ export const figurineStyleEnum = pgEnum("figurine_style", [
   "object",
 ]);
 
+// Print material — resin (premium) vs filament (FDM). Drives per-material
+// pricing and manufacturer routing. Default resin (historical behaviour).
+export const figurineMaterialEnum = pgEnum("figurine_material", ["resin", "filament"]);
+
 export const previewStatusEnum = pgEnum("preview_status", [
   "generating",
   "ready",
@@ -279,6 +283,7 @@ export const orderDrafts = pgTable("order_drafts", {
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
   style: figurineStyleEnum("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
+  material: figurineMaterialEnum("material").notNull().default("resin"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   photoKey: text("photo_key").notNull(),
   locale: text("locale").notNull().default("tr"),
@@ -355,6 +360,7 @@ export const orders = pgTable("orders", {
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
   style: figurineStyleEnum("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
+  material: figurineMaterialEnum("material").notNull().default("resin"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   status: orderStatusEnum("status").notNull().default("paid"),
   locale: text("locale").notNull().default("tr"),

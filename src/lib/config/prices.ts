@@ -1,8 +1,20 @@
-export const PRICES_KURUS: Record<string, number> = {
-  kucuk: 99900,
-  orta: 139900,
-  buyuk: 179900,
+export type FigurineMaterial = "resin" | "filament";
+
+// Per-material price table (kuruş). Resin is the premium base; filament (FDM)
+// is ₺300 cheaper per size. Tune values freely — this is the single source.
+export const FIGURINE_PRICES_KURUS: Record<FigurineMaterial, Record<string, number>> = {
+  resin: { kucuk: 99900, orta: 139900, buyuk: 179900 },
+  filament: { kucuk: 69900, orta: 109900, buyuk: 149900 },
 };
+
+// Resin table kept as PRICES_KURUS for back-compat (existing size-only callers).
+export const PRICES_KURUS: Record<string, number> = FIGURINE_PRICES_KURUS.resin;
+
+// Price for a (size, material) combo. Unknown material → resin; unknown size → 0.
+export function figurinePriceKurus(size: string, material: string): number {
+  const m: FigurineMaterial = material === "filament" ? "filament" : "resin";
+  return FIGURINE_PRICES_KURUS[m][size] ?? FIGURINE_PRICES_KURUS.resin[size] ?? 0;
+}
 
 /**
  * Checkout add-on SKUs (Q10). All prices in kuruş. Keys are stable identifiers

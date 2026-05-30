@@ -29,6 +29,7 @@ interface ManufacturerProfile {
   bankName: string | null;
   maxConcurrentOrders: number;
   acceptingOrders: boolean;
+  capabilities: string[] | null;
   status: string;
   createdAt: string;
 }
@@ -42,6 +43,16 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   pending_approval: { label: "Beklemede", color: "bg-amber-100 text-amber-700" },
   active: { label: "Aktif", color: "bg-emerald-100 text-emerald-700" },
   suspended: { label: "Askıya Alınmış", color: "bg-red-100 text-red-700" },
+};
+
+// Production materials. Stored on `capabilities` as `material_<key>` tags.
+const MATERIAL_OPTIONS = [
+  { key: "resin", label: "Reçine (Resin)", desc: "Yüksek detay, premium yüzey" },
+  { key: "filament", label: "Filament (FDM)", desc: "Ekonomik, dayanıklı baskı" },
+];
+const MATERIAL_LABELS: Record<string, string> = {
+  resin: "Reçine (Resin)",
+  filament: "Filament (FDM)",
 };
 
 export default function ManufacturerProfilePage() {
@@ -66,6 +77,11 @@ export default function ManufacturerProfilePage() {
   const [bankName, setBankName] = useState("");
   const [maxConcurrent, setMaxConcurrent] = useState(5);
   const [acceptingOrders, setAcceptingOrders] = useState(true);
+  const [materials, setMaterials] = useState<string[]>([]);
+  const toggleMaterial = (key: string) =>
+    setMaterials((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
 
   const districtOptions = useMemo(() => (il ? DISTRICTS[il] ?? [] : []), [il]);
 
@@ -92,6 +108,13 @@ export default function ManufacturerProfilePage() {
       setBankName(p.bankName ?? "");
       setMaxConcurrent(p.maxConcurrentOrders);
       setAcceptingOrders(p.acceptingOrders);
+      // Derive declared materials from capability tags. A legacy manufacturer
+      // with none declared accepts all — pre-check both so editing preserves
+      // that (saving an empty set would fail the server's min-1 rule).
+      const declared = (p.capabilities ?? [])
+        .filter((c) => c.startsWith("material_"))
+        .map((c) => c.replace("material_", ""));
+      setMaterials(declared.length > 0 ? declared : ["resin", "filament"]);
     } finally {
       setLoading(false);
     }
@@ -126,6 +149,7 @@ export default function ManufacturerProfilePage() {
           bankName,
           maxConcurrentOrders: Number(maxConcurrent),
           acceptingOrders,
+          materials,
         }),
       });
       const data = await res.json();
@@ -162,6 +186,9 @@ export default function ManufacturerProfilePage() {
     label: profile.status,
     color: "bg-gray-100 text-gray-700",
   };
+  const declaredMaterials = (profile.capabilities ?? [])
+    .filter((c) => c.startsWith("material_"))
+    .map((c) => c.replace("material_", ""));
   const inputCls =
     "w-full px-3 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
@@ -285,6 +312,61 @@ export default function ManufacturerProfilePage() {
               )}
             </div>
           </div>
+        </div>
+
+        <div>
+          <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-3">Üretim Malzemeleri</h3>
+          {editing ? (
+            <>
+              <p className="text-xs text-gray-500 mb-2">
+                Basabildiğiniz malzemeler. Siparişler yalnızca uygun malzemeyi
+                basabilen üreticilere atanır. (En az bir seçim)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {MATERIAL_OPTIONS.map((m) => {
+                  const active = materials.includes(m.key);
+                  return (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => toggleMaterial(m.key)}
+                      className={`flex-1 min-w-[160px] text-left rounded-xl border p-3 transition ${
+                        active
+                          ? "border-indigo-500 bg-indigo-50"
+                          : "border-gray-200 bg-white hover:border-indigo-300"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-gray-900">{m.label}</span>
+                        <span
+                          className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
+                            active ? "bg-indigo-600 border-indigo-600" : "border-gray-300"
+                          }`}
+                        >
+                          {active && (
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{m.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : declaredMaterials.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {declaredMaterials.map((m) => (
+                <span key={m} className="px-3 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                  {MATERIAL_LABELS[m] ?? m}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">Tüm malzemeler (beyan edilmemiş)</p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

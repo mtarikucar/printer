@@ -84,6 +84,7 @@ export default async function AdminOrderDetailPage({
       customerName: order.customerName,
       phone: order.phone,
       figurineSize: order.figurineSize,
+      material: order.material,
       style: order.style,
       modifiers: order.modifiers as string[] | null,
       shippingAddress: order.shippingAddress as TurkishAddress | null,

@@ -48,6 +48,12 @@ const tr: Dictionary = {
   "sizes.orta": "Orta",
   "sizes.buyuk": "Büyük",
 
+  // Materials
+  "material.resin": "Reçine",
+  "material.resin.desc": "Yüksek detay, premium yüzey",
+  "material.filament": "Filament",
+  "material.filament.desc": "Ekonomik FDM baskı",
+
   // Status labels
   "status.pending_payment": "Onay Bekleniyor",
   "status.paid": "Ödeme Alındı",
@@ -284,6 +290,9 @@ const tr: Dictionary = {
   "styles.indexTitle": "Figürin Stilleri",
   "styles.indexSubtitle": "5 farklı tarzdan kendinize en uygun olanı seçin. Her stilin detayını ve örneklerini inceleyebilirsiniz.",
   "styles.learnMore": "Detayları gör",
+
+  // Create — Material
+  "create.materialSelection": "Malzeme Seçimi",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",
@@ -538,6 +547,7 @@ const tr: Dictionary = {
   "admin.orderDetail.modelPreview": "3D Model Önizleme",
   "admin.orderDetail.orderDetails": "Sipariş Detayları",
   "admin.orderDetail.size": "Beden",
+  "admin.orderDetail.material": "Malzeme",
   "admin.orderDetail.amount": "Tutar",
   "admin.orderDetail.payment": "Ödeme",
   "admin.orderDetail.notPaid": "Henüz ödenmedi",
@@ -1316,6 +1326,7 @@ const tr: Dictionary = {
   "manufacturer.orderDetail.downloadStl": "STL İndir",
   "manufacturer.orderDetail.shippingAddress": "Teslimat Adresi",
   "manufacturer.orderDetail.figurineSize": "Figürin Boyutu",
+  "manufacturer.orderDetail.material": "Malzeme",
   "manufacturer.orderDetail.figurineStyle": "Stil",
   "manufacturer.orderDetail.actions": "Aksiyonlar",
   "manufacturer.orderDetail.actionHistory": "Aksiyon Geçmişi",

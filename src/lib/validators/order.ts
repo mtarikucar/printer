@@ -28,6 +28,7 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
       error: d["validator.size.invalid"],
     }),
     style: z.enum(["realistic", "disney", "anime", "chibi", "object"]).default("disney"),
+    material: z.enum(["resin", "filament"]).default("resin"),
     modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
     shippingAddress: createTurkishAddressSchema(locale),
     giftCardCode: z.string().optional(),

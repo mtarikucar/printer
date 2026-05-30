@@ -69,6 +69,7 @@ export async function GET(
   return NextResponse.json({
     photoKey,
     figurineSize: order.figurineSize,
+    material: order.material,
     style: order.style,
     modifiers: order.modifiers ?? [],
   });

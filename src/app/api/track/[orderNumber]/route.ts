@@ -50,6 +50,8 @@ export async function GET(
     return NextResponse.json({
       orderNumber: order.orderNumber,
       status: order.status,
+      figurineSize: order.figurineSize,
+      material: order.material,
       customerName: order.customerName,
       trackingNumber: order.trackingNumber,
       carrier: order.carrier,
@@ -106,6 +108,8 @@ export async function GET(
   return NextResponse.json({
     orderNumber: draft.reference,
     status: syntheticStatus,
+    figurineSize: draft.figurineSize,
+    material: draft.material,
     customerName: draft.customerName,
     trackingNumber: null,
     carrier: null,

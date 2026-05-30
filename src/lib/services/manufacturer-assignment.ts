@@ -7,8 +7,15 @@ import {
   getAssignmentWeights,
   type ScoringProfile,
 } from "@/lib/config/manufacturer-scoring";
+import { manufacturerSupportsMaterial } from "@/lib/services/capability";
 
 const ACTIVE_MFG_STATUSES = ["assigned", "accepted", "printing"] as const;
+
+// Human labels for the material a manufacturer can't print (ineligibleReason).
+const MATERIAL_LABEL_TR: Record<string, string> = {
+  resin: "reçine",
+  filament: "filament",
+};
 
 // v2: thresholds for on-time-delivery scoring. A manufacturer shipping
 // within these windows gets full credit; beyond them they lose points
@@ -152,7 +159,7 @@ export async function rankManufacturersForOrder(
 ): Promise<CandidateScore[]> {
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
-    columns: { shippingAddress: true },
+    columns: { shippingAddress: true, material: true },
   });
   if (!order) return [];
 
@@ -160,6 +167,7 @@ export async function rankManufacturersForOrder(
 
   const shipping = order.shippingAddress as TurkishAddress | null;
   const orderCity = shipping?.il;
+  const orderMaterial = order.material;
 
   const mfgs = await db.query.manufacturers.findMany({
     where: inArray(manufacturers.status, ["active"]),
@@ -222,7 +230,13 @@ export async function rankManufacturersForOrder(
 
       let eligible = true;
       let ineligibleReason: string | undefined;
-      if (!m.acceptingOrders) {
+      // Material hard-filter: an order routes only to manufacturers that declare
+      // they print its material. Legacy manufacturers with no declared material
+      // tags are treated as able to print any material (manufacturerSupportsMaterial).
+      if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
+        eligible = false;
+        ineligibleReason = `Malzeme uyumsuz (${MATERIAL_LABEL_TR[orderMaterial] ?? orderMaterial})`;
+      } else if (!m.acceptingOrders) {
         eligible = false;
         ineligibleReason = "Sipariş almıyor";
       } else if (currentLoad >= max) {

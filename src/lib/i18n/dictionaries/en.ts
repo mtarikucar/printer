@@ -46,6 +46,12 @@ const en = {
   "sizes.orta": "Medium",
   "sizes.buyuk": "Large",
 
+  // Materials
+  "material.resin": "Resin",
+  "material.resin.desc": "High detail, premium finish",
+  "material.filament": "Filament",
+  "material.filament.desc": "Economical FDM print",
+
   // Status labels
   "status.pending_payment": "Awaiting Confirmation",
   "status.paid": "Payment Received",
@@ -282,6 +288,9 @@ const en = {
   "styles.indexTitle": "Figurine Styles",
   "styles.indexSubtitle": "Pick the style that suits your gift. Each style has its own dedicated page with examples and details.",
   "styles.learnMore": "Learn more",
+
+  // Create — Material
+  "create.materialSelection": "Material Selection",
 
   // Create — Style
   "create.styleSelection": "Style Selection",
@@ -536,6 +545,7 @@ const en = {
   "admin.orderDetail.modelPreview": "3D Model Preview",
   "admin.orderDetail.orderDetails": "Order Details",
   "admin.orderDetail.size": "Size",
+  "admin.orderDetail.material": "Material",
   "admin.orderDetail.amount": "Amount",
   "admin.orderDetail.payment": "Payment",
   "admin.orderDetail.notPaid": "Not yet paid",
@@ -1310,6 +1320,7 @@ const en = {
   "manufacturer.orderDetail.downloadStl": "Download STL",
   "manufacturer.orderDetail.shippingAddress": "Shipping Address",
   "manufacturer.orderDetail.figurineSize": "Figurine Size",
+  "manufacturer.orderDetail.material": "Material",
   "manufacturer.orderDetail.figurineStyle": "Style",
   "manufacturer.orderDetail.actions": "Actions",
   "manufacturer.orderDetail.actionHistory": "Action History",

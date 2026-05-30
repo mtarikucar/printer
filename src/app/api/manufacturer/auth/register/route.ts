@@ -51,6 +51,13 @@ export async function POST(request: NextRequest) {
     bankAccountHolder: z.string().min(2).max(120),
     bankName: z.string().min(2).max(80),
     maxConcurrentOrders: z.number().int().min(1).max(50).default(5),
+    // Which production materials this manufacturer prints. Stored as
+    // `material_<m>` capability tags so the assignment filter can route orders
+    // only to manufacturers that can print the order's material.
+    materials: z
+      .array(z.enum(["resin", "filament"]))
+      .min(1, "En az bir üretim malzemesi seçmelisiniz")
+      .default(["resin"]),
     onboardingAccepted: z.literal(true, {
       message: "Onboarding bilgilendirmesi onaylanmalıdır",
     }),
@@ -112,6 +119,7 @@ export async function POST(request: NextRequest) {
         bankAccountHolder: validated.bankAccountHolder,
         bankName: validated.bankName,
         maxConcurrentOrders: validated.maxConcurrentOrders,
+        capabilities: validated.materials.map((m) => `material_${m}`),
         acceptingOrders: true,
         onboardingAcceptedAt: new Date(),
         status: "pending_approval",

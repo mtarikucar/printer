@@ -12,7 +12,7 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
-import { PRICES_KURUS } from "@/lib/config/prices";
+import { figurinePriceKurus } from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 
 const PhotoEditor = dynamic(
@@ -43,6 +43,7 @@ export default function CreatePage() {
   // the preview image survives a future flip of FILES_REQUIRE_SIGNATURE=1.
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
+  const [selectedMaterial, setSelectedMaterial] = useState<string>("resin");
   const [selectedStyle, setSelectedStyle] = useState<string>("disney");
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -144,10 +145,23 @@ export default function CreatePage() {
   const turnstileRef = useRef<TurnstileRef>(null);
 
   const SIZES = [
-    { key: "kucuk", label: d["sizes.kucuk"], price: "999", height: "~60mm" },
-    { key: "orta", label: d["sizes.orta"], price: "1.399", height: "~80mm" },
-    { key: "buyuk", label: d["sizes.buyuk"], price: "1.799", height: "~120mm" },
+    { key: "kucuk", label: d["sizes.kucuk"], height: "~60mm" },
+    { key: "orta", label: d["sizes.orta"], height: "~80mm" },
+    { key: "buyuk", label: d["sizes.buyuk"], height: "~120mm" },
   ] as const;
+
+  // Production materials. Resin = premium; filament (FDM) is cheaper. The price
+  // varies by (size, material) — see figurinePriceKurus (single source).
+  const MATERIALS = [
+    { key: "resin", label: d["material.resin"], desc: d["material.resin.desc"] },
+    { key: "filament", label: d["material.filament"], desc: d["material.filament.desc"] },
+  ] as const;
+
+  // Live price label for a (size, material), Turkish-grouped ("1.399"). Mirrors
+  // the server's figurinePriceKurus so the summary moves the instant material
+  // toggles; the server re-derives the trusted amount on submit.
+  const priceLabel = (sizeKey: string, materialKey: string) =>
+    Math.round(figurinePriceKurus(sizeKey, materialKey) / 100).toLocaleString("tr-TR");
 
   const STYLES = [
     { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
@@ -239,6 +253,7 @@ export default function CreatePage() {
       if (state.photoKey) setPhotoKey(state.photoKey);
       if (state.photoPreviewUrl) setPhotoPreviewUrl(state.photoPreviewUrl);
       if (state.selectedSize) setSelectedSize(state.selectedSize);
+      if (state.selectedMaterial) setSelectedMaterial(state.selectedMaterial);
       if (state.selectedStyle) setSelectedStyle(state.selectedStyle);
       if (state.selectedModifiers) setSelectedModifiers(state.selectedModifiers);
       if (state.previewId) setPreviewId(state.previewId);
@@ -281,6 +296,7 @@ export default function CreatePage() {
         if (!data) return;
         if (data.photoKey) setPhotoKey(data.photoKey);
         if (data.figurineSize) setSelectedSize(data.figurineSize);
+        if (data.material) setSelectedMaterial(data.material);
         if (data.style) setSelectedStyle(data.style);
         if (Array.isArray(data.modifiers)) setSelectedModifiers(data.modifiers);
       })
@@ -593,6 +609,7 @@ export default function CreatePage() {
         body: JSON.stringify({
           photoKey,
           figurineSize: selectedSize,
+          material: selectedMaterial,
           style: selectedStyle,
           modifiers: selectedModifiers,
           shippingAddress: form,
@@ -646,6 +663,7 @@ export default function CreatePage() {
   };
 
   const selectedSizeObj = SIZES.find((s) => s.key === selectedSize);
+  const selectedMaterialObj = MATERIALS.find((m) => m.key === selectedMaterial);
 
   // Order submitted — success screen
   if (orderSubmitted) {
@@ -763,7 +781,7 @@ export default function CreatePage() {
                       }`}
                     >
                       <p className={`text-sm font-semibold ${selectedSize === size.key ? "text-white" : "text-text-primary"}`}>{size.label} {size.height}</p>
-                      <p className={`text-base font-mono font-bold mt-0.5 ${selectedSize === size.key ? "text-white" : "text-green-500"}`}>₺{size.price}</p>
+                      <p className={`text-base font-mono font-bold mt-0.5 ${selectedSize === size.key ? "text-white" : "text-green-500"}`}>₺{priceLabel(size.key, selectedMaterial)}</p>
                     </button>
                   ))}
                 </div>
@@ -791,6 +809,31 @@ export default function CreatePage() {
                         <p className={`text-sm font-semibold ${selectedStyle === s.key ? "text-green-500" : "text-text-primary"}`}>{s.label}</p>
                         <p className={`text-xs mt-0.5 ${selectedStyle === s.key ? "text-green-500/80" : "text-text-muted"}`}>{s.desc}</p>
                       </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Material Selection */}
+              <div className="animate-fade-in-up delay-250">
+                <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.materialSelection"]}</h2>
+                <div className="flex gap-2">
+                  {MATERIALS.map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => setSelectedMaterial(m.key)}
+                      className={`flex-1 py-3 px-4 text-left rounded-xl transition-all ${
+                        selectedMaterial === m.key
+                          ? "bg-green-500 text-white"
+                          : "bg-bg-surface border border-bg-subtle hover:border-green-500/30"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-sm font-semibold ${selectedMaterial === m.key ? "text-white" : "text-text-primary"}`}>{m.label}</span>
+                        <span className={`text-base font-mono font-bold ${selectedMaterial === m.key ? "text-white" : "text-green-500"}`}>₺{priceLabel(selectedSize, m.key)}</span>
+                      </div>
+                      <p className={`text-xs mt-0.5 ${selectedMaterial === m.key ? "text-white/80" : "text-text-muted"}`}>{m.desc}</p>
                     </button>
                   ))}
                 </div>
@@ -1010,8 +1053,9 @@ export default function CreatePage() {
               <span className="trust-pill">
                 {d["create.preview.sizeLabel"]}: {selectedSizeObj?.label} ({selectedSizeObj?.height})
               </span>
+              <span className="trust-pill">{selectedMaterialObj?.label}</span>
               <span className="trust-pill">
-                {d["create.preview.priceLabel"]}: <span className="font-mono">₺{selectedSizeObj?.price}</span>
+                {d["create.preview.priceLabel"]}: <span className="font-mono">₺{priceLabel(selectedSize, selectedMaterial)}</span>
               </span>
             </div>
 
@@ -1369,7 +1413,7 @@ export default function CreatePage() {
 
               {/* Payment Method Selector */}
               {(() => {
-                const total = PRICES_KURUS[selectedSize] || 0;
+                const total = figurinePriceKurus(selectedSize, selectedMaterial);
                 const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                 const remaining = total - gcDiscount;
                 const isFullyCovered = remaining <= 0;
@@ -1431,11 +1475,11 @@ export default function CreatePage() {
               {/* Order Summary Card */}
               <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-text-secondary">{selectedSizeObj?.label} ({selectedSizeObj?.height})</span>
-                    <span className="font-mono font-bold text-text-primary">₺{selectedSizeObj?.price}</span>
+                    <span className="text-sm font-medium text-text-secondary">{selectedSizeObj?.label} ({selectedSizeObj?.height}) · {selectedMaterialObj?.label}</span>
+                    <span className="font-mono font-bold text-text-primary">₺{priceLabel(selectedSize, selectedMaterial)}</span>
                   </div>
                   {(() => {
-                    const total = PRICES_KURUS[selectedSize] || 0;
+                    const total = figurinePriceKurus(selectedSize, selectedMaterial);
                     const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                     const afterGc = total - gcDiscount;
                     const havaleDiscount =
@@ -1481,7 +1525,7 @@ export default function CreatePage() {
               )}
 
               {(() => {
-                const total = PRICES_KURUS[selectedSize] || 0;
+                const total = figurinePriceKurus(selectedSize, selectedMaterial);
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
                 const showLock = !isFullyCovered;
                 return (

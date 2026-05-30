@@ -3,6 +3,7 @@ import {
   orderRequirements,
   capabilityMatch,
   capabilityScore,
+  manufacturerSupportsMaterial,
 } from "../src/lib/services/capability";
 
 let passed = 0;
@@ -39,6 +40,33 @@ test("score is fraction of required tags met", () => {
   assert.equal(capabilityScore([], ["large_format"]), 0);
   assert.equal(capabilityScore(["large_format", "style_anime"], ["large_format"]), 1);
   assert.equal(capabilityScore(null, []), 1);
+});
+
+// ─── material capability (assignment hard-filter) ──────────────
+test("legacy: null/empty capabilities → supports all materials", () => {
+  assert.equal(manufacturerSupportsMaterial(null, "resin"), true);
+  assert.equal(manufacturerSupportsMaterial(undefined, "filament"), true);
+  assert.equal(manufacturerSupportsMaterial([], "resin"), true);
+});
+
+test("declared resin only → resin yes, filament no", () => {
+  assert.equal(manufacturerSupportsMaterial(["material_resin"], "resin"), true);
+  assert.equal(manufacturerSupportsMaterial(["material_resin"], "filament"), false);
+});
+
+test("declared filament only → filament yes, resin no", () => {
+  assert.equal(manufacturerSupportsMaterial(["material_filament"], "filament"), true);
+  assert.equal(manufacturerSupportsMaterial(["material_filament"], "resin"), false);
+});
+
+test("declared both → both yes", () => {
+  const caps = ["material_resin", "material_filament"];
+  assert.equal(manufacturerSupportsMaterial(caps, "resin"), true);
+  assert.equal(manufacturerSupportsMaterial(caps, "filament"), true);
+});
+
+test("non-material capabilities only → not excluded on material", () => {
+  assert.equal(manufacturerSupportsMaterial(["large_format"], "filament"), true);
 });
 
 for (const [name, fn] of cases) {

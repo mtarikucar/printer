@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, orderDrafts } from "@/lib/db/schema";
-import { PRICES_KURUS } from "@/lib/config/prices";
+import { figurinePriceKurus } from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { buildDraftReference } from "@/lib/services/order-draft";
 import { createPaytrToken, buildMerchantOid } from "@/lib/services/paytr";
@@ -79,7 +79,7 @@ export async function POST(
   }
 
   const reference = buildDraftReference();
-  const amountKurus = PRICES_KURUS[order.figurineSize];
+  const amountKurus = figurinePriceKurus(order.figurineSize, order.material);
 
   const havaleDiscountKurus =
     paymentMethod === "bank_transfer" ? calculateHavaleDiscount(amountKurus) : 0;
@@ -124,6 +124,7 @@ export async function POST(
         phone: order.phone,
         figurineSize: order.figurineSize,
         style: order.style,
+        material: order.material,
         modifiers: order.modifiers,
         shippingAddress: order.shippingAddress,
         photoKey,
@@ -193,6 +194,7 @@ export async function POST(
   const addr = order.shippingAddress;
   const userIp = await getClientIp();
   const sizeLabel = d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize;
+  const materialLabel = d[`material.${order.material}` as keyof typeof d] || order.material;
 
   try {
     const paytrResult = await createPaytrToken({
@@ -205,7 +207,7 @@ export async function POST(
       userIp,
       basket: [
         {
-          name: `Figurin (${sizeLabel})`,
+          name: `Figurin (${sizeLabel} · ${materialLabel})`,
           priceTRY: (amountKurus / 100).toFixed(2),
           quantity: 1,
         },

@@ -167,6 +167,21 @@ jobs:
             docker-compose -f "$COMPOSE_FILE" up -d --wait postgres redis 2>/dev/null || true
 
             # ─── 4. Run migration ────────────────────────────────────
+            # One-time cutover to `drizzle-kit migrate`: if this DB has never been
+            # baselined, bring it up to the full schema (idempotent, additive, no
+            # data loss) and mark 0000_baseline as applied so `migrate` won't try
+            # to recreate existing tables. Runs only on the first migrate-based
+            # deploy; later deploys skip straight to migrate.
+            if ! docker exec printer_postgres psql -U printer -d printer -tAc \
+                 "SELECT 1 FROM drizzle.__drizzle_migrations LIMIT 1" 2>/dev/null | grep -q 1; then
+                log "Ilk migrate-cutover: sema senkronize ediliyor + baseline..."
+                docker exec -i printer_postgres psql -U printer -d printer -v ON_ERROR_STOP=1 \
+                    < scripts/db/prod-sync-hotfix.sql
+                docker exec -i printer_postgres psql -U printer -d printer -v ON_ERROR_STOP=1 \
+                    < scripts/db/prod-baseline.sql
+                log "Cutover tamamlandi (sema + baseline)."
+            fi
+
             log "Veritabani migration calistiriliyor..."
             docker-compose -f "$COMPOSE_FILE" run --rm migrate
 

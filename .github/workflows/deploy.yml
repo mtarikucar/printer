@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Never run two deploys at once — they share one VPS (git reset --hard, docker
+# recreate, DB migrate) and would corrupt each other if interleaved. Queue the
+# newest and let the running one finish.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/${{ github.repository }}

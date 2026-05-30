@@ -22,8 +22,10 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "bg-red-100 text-red-700",
 };
 
-const STATUSES = [
-  "all",
+const BUCKET_ORDER = ["all", "needsAction", "inProgress", "completed", "problems"] as const;
+
+// Exact statuses for the power-user dropdown (every value used in admin.status.*)
+const EXACT_STATUSES = [
   "pending_payment",
   "paid",
   "generating",
@@ -53,7 +55,7 @@ interface OrdersClientProps {
   total: number;
   page: number;
   pageSize: number;
-  filters: { status?: string; q?: string; dateFrom?: string; dateTo?: string };
+  filters: { status?: string; bucket?: string; q?: string; dateFrom?: string; dateTo?: string };
   locale: string;
 }
 
@@ -75,7 +77,7 @@ export function OrdersClient({
   // Clear selection when orders change (filter/page navigation)
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [page, filters.status, filters.q, filters.dateFrom, filters.dateTo]);
+  }, [page, filters.status, filters.bucket, filters.q, filters.dateFrom, filters.dateTo]);
 
   const totalPages = Math.ceil(total / pageSize);
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -87,6 +89,7 @@ export function OrdersClient({
       const params = new URLSearchParams();
       const merged = {
         status: filters.status,
+        bucket: filters.bucket,
         q: filters.q,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
@@ -241,26 +244,47 @@ export function OrdersClient({
         </div>
       </div>
 
-      {/* Status filter tabs */}
-      <div className="flex gap-2 flex-wrap">
-        {STATUSES.map((s) => (
-          <Link
-            key={s}
-            href={buildUrl({
-              status: s === "all" ? undefined : s,
-              page: "1",
-            })}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              (s === "all" && !filters.status) || s === filters.status
-                ? "bg-gray-900 text-white"
-                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            {s === "all"
-              ? d["admin.orders.all"]
-              : d[`admin.status.${s}` as keyof typeof d] || s}
-          </Link>
-        ))}
+      {/* Status buckets + exact-status dropdown */}
+      <div className="flex gap-2 flex-wrap items-center">
+        {BUCKET_ORDER.map((b) => {
+          const active =
+            (b === "all" && !filters.bucket && !filters.status) ||
+            (b !== "all" && filters.bucket === b && !filters.status);
+          return (
+            <Link
+              key={b}
+              href={buildUrl({
+                bucket: b === "all" ? undefined : b,
+                status: undefined,
+                page: "1",
+              })}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                active
+                  ? "bg-gray-900 text-white"
+                  : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              {d[`admin.orders.bucket.${b}` as keyof typeof d]}
+            </Link>
+          );
+        })}
+
+        {/* Exact-status filter for power users (mutually exclusive with buckets) */}
+        <select
+          value={filters.status ?? ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            router.push(buildUrl({ status: v || undefined, bucket: undefined, page: "1" }));
+          }}
+          className="ml-auto px-3 py-1.5 rounded-lg text-sm border border-gray-200 bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-900"
+        >
+          <option value="">{d["admin.orders.exactStatus"]}</option>
+          {EXACT_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {d[`admin.status.${s}` as keyof typeof d] || s}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Bulk action toolbar */}

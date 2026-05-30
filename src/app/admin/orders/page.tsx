@@ -2,18 +2,28 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
-import { desc, eq, sql, and, count } from "drizzle-orm";
+import { desc, eq, sql, and, count, inArray } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { OrdersClient } from "./orders-client";
 
 const PAGE_SIZE = 25;
 
+// Map a coarse "bucket" filter to the set of order statuses it covers. Buckets
+// replace the old wall of 13 status chips; the exact-status dropdown still wins.
+const BUCKETS: Record<string, string[]> = {
+  needsAction: ["review"],
+  inProgress: ["paid", "generating", "processing_mesh", "approved", "printing", "shipped"],
+  completed: ["delivered"],
+  problems: ["failed_generation", "failed_mesh", "rejected"],
+};
+
 export default async function AdminOrdersPage({
   searchParams,
 }: {
   searchParams: Promise<{
     status?: string;
+    bucket?: string;
     page?: string;
     q?: string;
     dateFrom?: string;
@@ -22,6 +32,7 @@ export default async function AdminOrdersPage({
 }) {
   const {
     status: filterStatus,
+    bucket,
     page: pageParam,
     q,
     dateFrom,
@@ -37,6 +48,8 @@ export default async function AdminOrdersPage({
 
   if (filterStatus) {
     conditions.push(eq(orders.status, filterStatus as any));
+  } else if (bucket && BUCKETS[bucket]) {
+    conditions.push(inArray(orders.status, BUCKETS[bucket] as any));
   }
 
   if (q) {
@@ -90,7 +103,7 @@ export default async function AdminOrdersPage({
         total={totalCount}
         page={page}
         pageSize={PAGE_SIZE}
-        filters={{ status: filterStatus, q, dateFrom, dateTo }}
+        filters={{ status: filterStatus, bucket, q, dateFrom, dateTo }}
         locale={locale}
       />
     </div>

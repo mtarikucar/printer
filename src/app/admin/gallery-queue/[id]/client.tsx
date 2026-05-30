@@ -88,7 +88,7 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
       }
     );
     setLoading(null);
-    if (ok) router.push("/admin/gallery-queue");
+    if (ok) router.push("/admin/gallery?tab=queue");
   };
 
   const reject = async () => {
@@ -104,7 +104,7 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
       { reason: rejectReason }
     );
     setLoading(null);
-    if (ok) router.push("/admin/gallery-queue");
+    if (ok) router.push("/admin/gallery?tab=queue");
   };
 
   const reward = async () => {
@@ -129,7 +129,7 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
       }
     );
     setLoading(null);
-    if (ok) router.push("/admin/gallery-queue");
+    if (ok) router.push("/admin/gallery?tab=queue");
   };
 
   const isPending = review.galleryReviewStatus === "pending";
@@ -139,7 +139,7 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
       <div className="flex items-start justify-between">
         <div>
           <Link
-            href="/admin/gallery-queue"
+            href="/admin/gallery?tab=queue"
             className="text-sm text-indigo-600 hover:underline"
           >
             ← Galeri Kuyruğu

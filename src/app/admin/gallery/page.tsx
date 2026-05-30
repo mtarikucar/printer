@@ -1,16 +1,27 @@
 export const dynamic = "force-dynamic";
 
-import { listPublishedGalleryItems } from "@/lib/services/gallery-review";
+import { listPublishedGalleryItems, listPendingGalleryReviews } from "@/lib/services/gallery-review";
 import { normalizeFileUrl } from "@/lib/services/storage";
 import { AdminGalleryClient } from "./client";
 
 /**
- * Admin curation surface for the public gallery. Lists every published
- * figurine (featured first) and lets the admin toggle which ones appear in
- * the "Öne Çıkan Figürinler" rail at the top of /gallery.
+ * Admin gallery surface. Two sub-tabs on a single page:
+ *  - "Kuyruk" (?tab=queue): publication requests awaiting review (was /admin/gallery-queue).
+ *  - "Yayında" (default): published figurines + featured curation.
  */
-export default async function AdminGalleryPage() {
-  const rows = await listPublishedGalleryItems(200);
+export default async function AdminGalleryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  const initialTab = tab === "queue" ? "queue" : "published";
+
+  const [rows, pendingRows] = await Promise.all([
+    listPublishedGalleryItems(200),
+    listPendingGalleryReviews(200),
+  ]);
+
   const items = rows.map((r) => ({
     id: r.id,
     orderNumber: r.orderNumber,
@@ -25,5 +36,16 @@ export default async function AdminGalleryPage() {
     thumbnailUrl: normalizeFileUrl(r.photos[0]?.originalUrl ?? null),
   }));
 
-  return <AdminGalleryClient items={items} />;
+  const pending = pendingRows.map((it) => ({
+    id: it.id,
+    orderNumber: it.orderNumber,
+    name: it.publicDisplayName || it.customerName,
+    figurineSize: it.figurineSize,
+    style: it.style,
+    category: it.galleryCategory,
+    tags: it.galleryTags ?? [],
+    createdAt: it.createdAt.toISOString(),
+  }));
+
+  return <AdminGalleryClient items={items} pending={pending} initialTab={initialTab} />;
 }

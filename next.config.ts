@@ -13,6 +13,17 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["bullmq", "ioredis", "onnxruntime-node", "sharp"],
   // Turbopack handles node module resolution automatically — empty config silences the warning
   turbopack: {},
+  async redirects() {
+    return [
+      // Gallery queue list folded into /admin/gallery?tab=queue (the [id] detail
+      // route is unaffected — this exact source does not match nested paths).
+      {
+        source: "/admin/gallery-queue",
+        destination: "/admin/gallery?tab=queue",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {

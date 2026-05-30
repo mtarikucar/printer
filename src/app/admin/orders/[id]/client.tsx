@@ -156,6 +156,9 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [messagingOpen, setMessagingOpen] = useState(false);
   const [meshReportOpen, setMeshReportOpen] = useState(false);
 
+  // Detail view tab (Özet / Üretim / İletişim / Geçmiş)
+  const [tab, setTab] = useState<"summary" | "production" | "communication" | "history">("summary");
+
   // ─── Actions ─────────────────────────────────────────────
   const performAction = async (action: string, body: Record<string, any> = {}) => {
     setLoading(action);
@@ -379,31 +382,561 @@ export function OrderDetailClient({ data, locale }: Props) {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-5">
-        {/* ─── Left Column (2/3) ────────────────────────── */}
-        <div className="lg:col-span-2 space-y-5">
+      {/* ═══ Persistent Action Zone (what do I do now) ═══════════ */}
+      {/* Blocks below are mutually exclusive by order state, so at most one shows. */}
+      <div className="space-y-3 mb-6">
 
-          {/* ─── Photo + Model Card ───────────────────── */}
-          {(photos[0] || latestGeneration?.outputGlbUrl) && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className={`flex flex-col ${photos[0] && latestGeneration?.outputGlbUrl ? "sm:flex-row" : ""}`}>
-                {photos[0] && (
-                  <div className={`p-5 ${latestGeneration?.outputGlbUrl ? "sm:w-1/2 sm:border-r sm:border-gray-100" : "w-full"}`}>
-                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.originalPhoto"]}</h3>
-                    <div className="bg-gray-50 rounded-xl overflow-hidden">
-                      <img src={photos[0].originalUrl} alt={d["admin.orderDetail.customerPhoto"]} className="w-full max-h-72 object-contain" />
+        {/* ─── Primary Action Panel ─────────────────── */}
+        {hasAnyAction && (
+          <div className="space-y-3">
+            {primaryAction === "approve" && (
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-green-900">{d["admin.orderDetail.approve"]}</h3>
+                    <p className="text-sm text-green-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
+                    <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-green-200 rounded-xl text-sm placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
+                    <button onClick={() => performAction("approve")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm">
+                      {loading === "approve" ? d["admin.orderDetail.approving"] : d["admin.orderDetail.approve"]}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {primaryAction === "start-printing" && (
+              <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-2xl border border-purple-200 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-purple-900">{d["admin.orderDetail.startPrint"]}</h3>
+                    <p className="text-sm text-purple-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
+                    <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-purple-200 rounded-xl text-sm placeholder:text-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
+                    <button onClick={() => performAction("start-printing")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl hover:bg-purple-700 disabled:bg-gray-400 transition-colors shadow-sm">
+                      {loading === "start-printing" ? d["admin.orderDetail.startingPrint"] : d["admin.orderDetail.startPrint"]}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {primaryAction === "deliver" && (
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-green-900">{d["admin.orderDetail.deliver"]}</h3>
+                    <p className="text-sm text-green-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
+                    <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-green-200 rounded-xl text-sm placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
+                    <button onClick={() => performAction("deliver")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm">
+                      {loading === "deliver" ? d["admin.orderDetail.delivering"] : d["admin.orderDetail.deliver"]}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Ship section */}
+            {primaryAction === "ship-section" && (
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-emerald-900">{d["admin.orderDetail.kargoShip"]}</h3>
+                    <p className="text-sm text-emerald-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
+                    <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm placeholder:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
+                    <button onClick={() => performAction("ship-kargo")} disabled={!!loading} className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:bg-gray-400 transition-colors shadow-sm">
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
+                      {loading === "ship-kargo" ? d["admin.orderDetail.kargoCreating"] : d["admin.orderDetail.kargoShip"]}
+                    </button>
+                    <div className="flex items-center gap-3 mt-4">
+                      <div className="flex-1 border-t border-emerald-200" />
+                      <span className="text-xs text-emerald-500 font-medium">{d["admin.orderDetail.orManual"]}</span>
+                      <div className="flex-1 border-t border-emerald-200" />
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <input type="text" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow" placeholder={d["admin.orderDetail.trackingPlaceholder"]} />
+                      <button onClick={() => { if (trackingNumber.trim()) performAction("ship", { trackingNumber: trackingNumber.trim() }); }} disabled={!!loading || !trackingNumber.trim()} className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-xl hover:bg-gray-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors">
+                        {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
+                      </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* No primary action but notes input needed for secondary actions */}
+            {!primaryAction && hasAnyAction && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.adminNote"]}</label>
+                <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-2 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
+              </div>
+            )}
+
+            {/* Secondary actions */}
+            {(canRegenerate || canReject || canForceReview) && (
+              <div className="flex items-center gap-3 flex-wrap px-1">
+                {canRegenerate && (
+                  <button onClick={() => performAction("regenerate")} disabled={!!loading} className="text-sm text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors disabled:text-gray-400">
+                    {loading === "regenerate" ? d["admin.orderDetail.regenerating"] : d["admin.orderDetail.regenerate"]}
+                  </button>
                 )}
-                {latestGeneration?.outputGlbUrl && (
-                  <div className={`p-5 ${photos[0] ? "sm:w-1/2" : "w-full"}`}>
-                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.modelPreview"]}</h3>
-                    <ModelViewer url={latestGeneration.outputGlbUrl} className="w-full h-72 rounded-xl" />
-                  </div>
+                {canForceReview && (
+                  <button onClick={() => performAction("force-review")} disabled={!!loading} className="text-sm text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors disabled:text-gray-400">
+                    {loading === "force-review" ? d["admin.orderDetail.forcingReview"] : d["admin.orderDetail.forceReview"]}
+                  </button>
+                )}
+                {canReject && (
+                  <button onClick={() => { if (confirm(d["admin.orderDetail.rejectConfirm"])) performAction("reject", { reason: notes || d["admin.orderDetail.rejectDefault"] }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
+                    {loading === "reject" ? d["admin.orderDetail.rejecting"] : d["admin.orderDetail.reject"]}
+                  </button>
                 )}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Manufacturer Assignment — ranked recommendations */}
+        {canAssignManufacturer && candidates && candidates.length > 0 && (
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5 space-y-3">
+            <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider">{d["admin.orderDetail.assignManufacturer"]}</h3>
+            <p className="text-xs text-blue-700/80">
+              Mesafe · Yük · Güvenilirlik · Uygunluk skorlarına göre sıralandı. En iyi adaylar üstte.
+            </p>
+            <div className="space-y-2">
+              {candidates
+                .filter((c) => c.eligible)
+                .slice(0, 5)
+                .map((c, idx) => (
+                  <div
+                    key={c.manufacturerId}
+                    className={`bg-white rounded-xl border p-4 ${
+                      idx === 0 && c.totalScore >= 60 ? "border-emerald-300 ring-1 ring-emerald-100" : "border-gray-200"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-gray-900 truncate">{c.companyName}</h4>
+                          {idx === 0 && c.totalScore >= 60 && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">
+                              En uygun
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {c.city || "Şehir yok"}{c.district ? ` / ${c.district}` : ""} ·
+                          {" "}Yük {c.currentLoad}/{c.maxConcurrentOrders}
+                          {c.phone ? (
+                            <>
+                              {" "}· <a href={`tel:${c.phone}`} className="text-blue-600 hover:underline">{c.phone}</a>
+                            </>
+                          ) : null}
+                        </p>
+                        {c.reasons.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {c.reasons.map((r) => (
+                              <span key={r} className="text-[10px] bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-4 gap-2 mt-3">
+                          {(["distance", "load", "reliability", "compliance"] as const).map((k) => (
+                            <div key={k} className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-gray-500">
+                                <span>{k === "distance" ? "Mesafe" : k === "load" ? "Yük" : k === "reliability" ? "Güven" : "Uygun"}</span>
+                                <span>{c.scores[k]}</span>
+                              </div>
+                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-500" style={{ width: `${c.scores[k]}%` }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <div className="text-2xl font-bold text-blue-700">{c.totalScore}</div>
+                        <button
+                          onClick={() => {
+                            setSelectedManufacturerId(c.manufacturerId);
+                            // Pass the id directly to avoid the stale-closure
+                            // race where `selectedManufacturerId` is still ""
+                            // on this click (React state hasn't flushed yet).
+                            assignManufacturer(c.manufacturerId);
+                          }}
+                          disabled={!!loading}
+                          className="px-4 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+                        >
+                          {loading === "assign-manufacturer" && selectedManufacturerId === c.manufacturerId
+                            ? "Atanıyor..."
+                            : "Bu üreticiye ata"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
             </div>
-          )}
+
+            {candidates.some((c) => !c.eligible) && (
+              <details className="text-xs text-blue-700/80">
+                <summary className="cursor-pointer hover:text-blue-900">
+                  Uygun olmayan üreticiler ({candidates.filter((c) => !c.eligible).length})
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {candidates
+                    .filter((c) => !c.eligible)
+                    .map((c) => (
+                      <li key={c.manufacturerId} className="bg-white/50 rounded-lg px-3 py-1.5 flex justify-between">
+                        <span className="text-gray-700">{c.companyName}</span>
+                        <span className="text-gray-500">{c.ineligibleReason}</span>
+                      </li>
+                    ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Fallback: classic dropdown if no candidates ranked (no active manufacturers yet) */}
+        {canAssignManufacturer && (!candidates || candidates.length === 0) && activeManufacturers && activeManufacturers.length > 0 && (
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5">
+            <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-3">{d["admin.orderDetail.assignManufacturer"]}</h3>
+            <div className="flex gap-2">
+              <select
+                value={selectedManufacturerId}
+                onChange={(e) => setSelectedManufacturerId(e.target.value)}
+                className="flex-1 px-3 py-2 bg-white border border-blue-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-shadow"
+              >
+                <option value="">{d["admin.orderDetail.selectManufacturer"]}</option>
+                {activeManufacturers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.companyName}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => assignManufacturer()}
+                disabled={!selectedManufacturerId || !!loading}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors shadow-sm"
+              >
+                {loading === "assign-manufacturer" ? d["admin.orderDetail.assigning"] : d["admin.orderDetail.assign"]}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── QC Review (admin gate before shipping) ─────── */}
+        {manufacturerStatus === "qc_pending" && (
+          <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-gray-900">{d["admin.qc.title"]}</h3>
+                <p className="text-xs text-gray-500">{d["admin.qc.description"]}</p>
+              </div>
+            </div>
+
+            {qcPhotos && qcPhotos.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+                {qcPhotos.map((p) => (
+                  <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.url} alt="" className="w-full h-32 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 mb-4">{d["admin.qc.noPhotos"]}</p>
+            )}
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => performAction("qc-approve")}
+                disabled={!!loading}
+                className="w-full px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
+              >
+                {loading === "qc-approve" ? d["admin.qc.processing"] : d["admin.qc.approve"]}
+              </button>
+              <div className="border-t border-gray-100 pt-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">{d["admin.qc.rejectReason"]}</label>
+                <textarea
+                  value={qcRejectReason}
+                  onChange={(e) => setQcRejectReason(e.target.value)}
+                  rows={2}
+                  maxLength={1000}
+                  className="w-full text-sm border border-gray-200 rounded-lg p-2 mb-2 focus:outline-none focus:ring-2 focus:ring-red-400"
+                />
+                <button
+                  onClick={() => { if (qcRejectReason.trim()) performAction("qc-reject", { reason: qcRejectReason.trim() }); }}
+                  disabled={!!loading || !qcRejectReason.trim()}
+                  className="w-full px-6 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                >
+                  {loading === "qc-reject" ? d["admin.qc.processing"] : d["admin.qc.reject"]}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ Tab bar ═════════════════════════════════════════════ */}
+      <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+        {([
+          ["summary", "admin.orderDetail.tab.summary"],
+          ["production", "admin.orderDetail.tab.production"],
+          ["communication", "admin.orderDetail.tab.communication"],
+          ["history", "admin.orderDetail.tab.history"],
+        ] as const).map(([key, labelKey]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              tab === key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {d[labelKey]}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══ Özet (summary) ══════════════════════════════════════ */}
+      {tab === "summary" && (
+        <div className="grid lg:grid-cols-3 gap-5">
+          {/* Left column (2/3) */}
+          <div className="lg:col-span-2 space-y-5">
+
+            {/* ─── Photo + Model Card ───────────────────── */}
+            {(photos[0] || latestGeneration?.outputGlbUrl) && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className={`flex flex-col ${photos[0] && latestGeneration?.outputGlbUrl ? "sm:flex-row" : ""}`}>
+                  {photos[0] && (
+                    <div className={`p-5 ${latestGeneration?.outputGlbUrl ? "sm:w-1/2 sm:border-r sm:border-gray-100" : "w-full"}`}>
+                      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.originalPhoto"]}</h3>
+                      <div className="bg-gray-50 rounded-xl overflow-hidden">
+                        <img src={photos[0].originalUrl} alt={d["admin.orderDetail.customerPhoto"]} className="w-full max-h-72 object-contain" />
+                      </div>
+                    </div>
+                  )}
+                  {latestGeneration?.outputGlbUrl && (
+                    <div className={`p-5 ${photos[0] ? "sm:w-1/2" : "w-full"}`}>
+                      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.modelPreview"]}</h3>
+                      <ModelViewer url={latestGeneration.outputGlbUrl} className="w-full h-72 rounded-xl" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right column (1/3) */}
+          <div className="space-y-5">
+
+            {/* Customer Card */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">{d["admin.orderDetail.customerInfo"]}</h3>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{order.customerName}</p>
+                  <p className="text-xs text-gray-500 truncate">{order.email}</p>
+                  {(order.phone || addr?.telefon) && (
+                    <p className="text-xs text-gray-500">{order.phone || addr?.telefon}</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {(order.phone || addr?.telefon) && (
+                  <a href={`tel:${order.phone || addr?.telefon}`} title={d["admin.orderDetail.callCustomer"]} className="w-9 h-9 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600 transition-colors">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                  </a>
+                )}
+                <a href={`mailto:${order.email}`} title={d["admin.orderDetail.emailCustomer"]} className="w-9 h-9 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600 transition-colors">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                </a>
+              </div>
+            </div>
+
+            {/* Order Details Card */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.orderDetails"]}</h3>
+                {!editing && (
+                  <button onClick={() => setEditing(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">
+                    {d["admin.orderDetail.editOrder"]}
+                  </button>
+                )}
+              </div>
+              <dl className="space-y-3 text-sm">
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.size"]}</dt>
+                  <dd className="font-medium text-gray-900">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.material"]}</dt>
+                  <dd className="font-medium text-gray-900">{d[`material.${order.material}` as keyof typeof d] || order.material}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.style"]}</dt>
+                  <dd className="font-medium text-gray-900 capitalize">{d[`create.style.${order.style}` as keyof typeof d] || order.style}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.amount"]}</dt>
+                  <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus, loc)}</dd>
+                </div>
+                {order.giftCardAmountKurus > 0 && (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <dt className="text-gray-400">{d["admin.orderDetail.giftCardAmount"]}</dt>
+                      <dd className="font-medium"><span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-green-200">-{formatCurrency(order.giftCardAmountKurus, loc)}</span></dd>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <dt className="text-gray-400">{d["admin.orderDetail.remaining"]}</dt>
+                      <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus - order.giftCardAmountKurus, loc)}</dd>
+                    </div>
+                  </>
+                )}
+                {order.havaleDiscountKurus > 0 && (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.payment.havaleDiscount"]}</dt>
+                    <dd className="font-medium">
+                      <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-amber-200">
+                        -{formatCurrency(order.havaleDiscountKurus, loc)}
+                      </span>
+                    </dd>
+                  </div>
+                )}
+                {order.paymentMethod && (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.payment.method"]}</dt>
+                    <dd className="text-gray-700">
+                      {order.paymentMethod === "card" && d["admin.payment.method.card"]}
+                      {order.paymentMethod === "bank_transfer" && d["admin.payment.method.bankTransfer"]}
+                      {order.paymentMethod === "gift_card_full" && d["admin.payment.method.giftCardFull"]}
+                    </dd>
+                  </div>
+                )}
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.payment.status"]}</dt>
+                  <dd className="text-gray-700 text-xs">
+                    {d[`admin.payment.status.${order.paymentStatus}` as keyof typeof d] || order.paymentStatus}
+                  </dd>
+                </div>
+                {order.paymentMethod === "bank_transfer" && order.bankTransferReceiptUrl && (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.payment.receiptUploaded"]}</dt>
+                    <dd>
+                      <a
+                        href={order.bankTransferReceiptUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:text-blue-800 underline"
+                      >
+                        Görüntüle
+                      </a>
+                    </dd>
+                  </div>
+                )}
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.payment"]}</dt>
+                  <dd className="text-gray-700">{order.paidAt ? formatDateTime(order.paidAt, loc) : <span className="text-amber-600 font-medium">{d["admin.orderDetail.notPaid"]}</span>}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.createdAt"]}</dt>
+                  <dd className="text-gray-700">{formatDateTime(order.createdAt, loc)}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-400">{d["admin.orderDetail.retryCount"]}</dt>
+                  <dd className="text-gray-700">{order.retryCount}</dd>
+                </div>
+                {order.trackingNumber && (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.trackingNumber"]}</dt>
+                    <dd className="font-mono text-xs text-gray-900 bg-gray-50 px-2 py-0.5 rounded">{order.trackingNumber}</dd>
+                  </div>
+                )}
+                {order.failureReason && (
+                  <div className="pt-3 border-t border-gray-100">
+                    <dt className="text-red-600 font-medium text-xs">{d["admin.orderDetail.failureReason"]}</dt>
+                    <dd className="text-red-700 mt-1 text-xs break-all bg-red-50 px-3 py-2 rounded-lg">{order.failureReason}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+
+            {/* Shipping Address */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">{d["admin.orderDetail.shippingAddress"]}</h3>
+              {editing ? (
+                <div className="space-y-2">
+                  <input type="text" value={editAddress?.adres || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, adres: e.target.value } : null)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Adres" />
+                  <input type="text" value={editAddress?.mahalle || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, mahalle: e.target.value } : null)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Mahalle" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" value={editAddress?.ilce || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, ilce: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Ilce" />
+                    <input type="text" value={editAddress?.il || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, il: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Il" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" value={editAddress?.postaKodu || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, postaKodu: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Posta Kodu" />
+                    <input type="text" value={editAddress?.telefon || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, telefon: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Telefon" />
+                  </div>
+                  {/* Admin notes */}
+                  <div className="pt-2">
+                    <label className="block text-xs text-gray-400 mb-1">{d["admin.orderDetail.adminNote"]}</label>
+                    <textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} rows={2} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" />
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <button onClick={saveEdit} disabled={loading === "edit"} className="px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-400 transition-colors shadow-sm">
+                      {loading === "edit" ? d["admin.orderDetail.saving"] : d["admin.orderDetail.saveChanges"]}
+                    </button>
+                    <button onClick={() => { setEditing(false); setEditAddress(order.shippingAddress); setEditNotes(order.adminNotes || ""); }} className="px-4 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded-xl hover:bg-gray-200 transition-colors">
+                      {d["admin.orderDetail.cancel"]}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {addr && (
+                    <div className="text-sm text-gray-700 space-y-0.5">
+                      <div className="flex items-start gap-2">
+                        <svg className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        <div>
+                          {addr.mahalle && <p className="text-gray-600">{addr.mahalle}</p>}
+                          <p>{addr.adres}</p>
+                          <p>{addr.ilce} / {addr.il}</p>
+                          <p className="text-gray-500">{addr.postaKodu}</p>
+                          <p className="mt-1 text-gray-500">Tel: {addr.telefon}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {order.adminNotes && (
+                    <div className="mt-4 pt-4 border-t border-gray-100">
+                      <p className="text-xs text-gray-400 font-medium">{d["admin.orderDetail.adminNote"]}</p>
+                      <p className="text-sm text-gray-700 mt-1">{order.adminNotes}</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Üretim (production) ═════════════════════════════════ */}
+      {tab === "production" && (
+        <div className="space-y-5 max-w-3xl">
 
           {/* ─── Mesh Edit Button (review only) ─────── */}
           {order.status === "review" && latestGeneration?.outputGlbUrl && (
@@ -420,125 +953,6 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
               <svg className="w-5 h-5 text-indigo-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
             </button>
-          )}
-
-          {/* ─── Primary Action Panel ─────────────────── */}
-          {hasAnyAction && (
-            <div className="space-y-3">
-              {primaryAction === "approve" && (
-                <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-semibold text-green-900">{d["admin.orderDetail.approve"]}</h3>
-                      <p className="text-sm text-green-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
-                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-green-200 rounded-xl text-sm placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                      <button onClick={() => performAction("approve")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm">
-                        {loading === "approve" ? d["admin.orderDetail.approving"] : d["admin.orderDetail.approve"]}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {primaryAction === "start-printing" && (
-                <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-2xl border border-purple-200 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-semibold text-purple-900">{d["admin.orderDetail.startPrint"]}</h3>
-                      <p className="text-sm text-purple-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
-                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-purple-200 rounded-xl text-sm placeholder:text-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                      <button onClick={() => performAction("start-printing")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-purple-600 text-white text-sm font-semibold rounded-xl hover:bg-purple-700 disabled:bg-gray-400 transition-colors shadow-sm">
-                        {loading === "start-printing" ? d["admin.orderDetail.startingPrint"] : d["admin.orderDetail.startPrint"]}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {primaryAction === "deliver" && (
-                <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-200 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-semibold text-green-900">{d["admin.orderDetail.deliver"]}</h3>
-                      <p className="text-sm text-green-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
-                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-green-200 rounded-xl text-sm placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                      <button onClick={() => performAction("deliver")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm">
-                        {loading === "deliver" ? d["admin.orderDetail.delivering"] : d["admin.orderDetail.deliver"]}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Ship section */}
-              {primaryAction === "ship-section" && (
-                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200 p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base font-semibold text-emerald-900">{d["admin.orderDetail.kargoShip"]}</h3>
-                      <p className="text-sm text-emerald-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
-                      <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm placeholder:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                      <button onClick={() => performAction("ship-kargo")} disabled={!!loading} className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:bg-gray-400 transition-colors shadow-sm">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
-                        {loading === "ship-kargo" ? d["admin.orderDetail.kargoCreating"] : d["admin.orderDetail.kargoShip"]}
-                      </button>
-                      <div className="flex items-center gap-3 mt-4">
-                        <div className="flex-1 border-t border-emerald-200" />
-                        <span className="text-xs text-emerald-500 font-medium">{d["admin.orderDetail.orManual"]}</span>
-                        <div className="flex-1 border-t border-emerald-200" />
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        <input type="text" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow" placeholder={d["admin.orderDetail.trackingPlaceholder"]} />
-                        <button onClick={() => { if (trackingNumber.trim()) performAction("ship", { trackingNumber: trackingNumber.trim() }); }} disabled={!!loading || !trackingNumber.trim()} className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-xl hover:bg-gray-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors">
-                          {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* No primary action but notes input needed for secondary actions */}
-              {!primaryAction && hasAnyAction && (
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.adminNote"]}</label>
-                  <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-2 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                </div>
-              )}
-
-              {/* Secondary actions */}
-              {(canRegenerate || canReject || canForceReview) && (
-                <div className="flex items-center gap-3 flex-wrap px-1">
-                  {canRegenerate && (
-                    <button onClick={() => performAction("regenerate")} disabled={!!loading} className="text-sm text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors disabled:text-gray-400">
-                      {loading === "regenerate" ? d["admin.orderDetail.regenerating"] : d["admin.orderDetail.regenerate"]}
-                    </button>
-                  )}
-                  {canForceReview && (
-                    <button onClick={() => performAction("force-review")} disabled={!!loading} className="text-sm text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors disabled:text-gray-400">
-                      {loading === "force-review" ? d["admin.orderDetail.forcingReview"] : d["admin.orderDetail.forceReview"]}
-                    </button>
-                  )}
-                  {canReject && (
-                    <button onClick={() => { if (confirm(d["admin.orderDetail.rejectConfirm"])) performAction("reject", { reason: notes || d["admin.orderDetail.rejectDefault"] }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
-                      {loading === "reject" ? d["admin.orderDetail.rejecting"] : d["admin.orderDetail.reject"]}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
           )}
 
           {/* ─── Manufacturer Section ─────────────────── */}
@@ -585,61 +999,6 @@ export function OrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
-          {/* ─── QC Review (admin gate before shipping) ─────── */}
-          {manufacturerStatus === "qc_pending" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-5">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-900">{d["admin.qc.title"]}</h3>
-                  <p className="text-xs text-gray-500">{d["admin.qc.description"]}</p>
-                </div>
-              </div>
-
-              {qcPhotos && qcPhotos.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
-                  {qcPhotos.map((p) => (
-                    <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.url} alt="" className="w-full h-32 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
-                    </a>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-400 mb-4">{d["admin.qc.noPhotos"]}</p>
-              )}
-
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => performAction("qc-approve")}
-                  disabled={!!loading}
-                  className="w-full px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
-                >
-                  {loading === "qc-approve" ? d["admin.qc.processing"] : d["admin.qc.approve"]}
-                </button>
-                <div className="border-t border-gray-100 pt-3">
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">{d["admin.qc.rejectReason"]}</label>
-                  <textarea
-                    value={qcRejectReason}
-                    onChange={(e) => setQcRejectReason(e.target.value)}
-                    rows={2}
-                    maxLength={1000}
-                    className="w-full text-sm border border-gray-200 rounded-lg p-2 mb-2 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                  <button
-                    onClick={() => { if (qcRejectReason.trim()) performAction("qc-reject", { reason: qcRejectReason.trim() }); }}
-                    disabled={!!loading || !qcRejectReason.trim()}
-                    className="w-full px-6 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {loading === "qc-reject" ? d["admin.qc.processing"] : d["admin.qc.reject"]}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* QC review history */}
           {qcReviews && qcReviews.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -659,6 +1018,87 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             </div>
           )}
+
+          {/* Mesh Report (Collapsible) */}
+          {latestReport && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <button
+                onClick={() => setMeshReportOpen(!meshReportOpen)}
+                className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors"
+              >
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.meshReport"]}</h3>
+                <svg className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${meshReportOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              <div className={`transition-all duration-300 ease-in-out ${meshReportOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
+                <dl className="px-5 pb-5 space-y-3 text-sm border-t border-gray-100 pt-4">
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.watertight"]}</dt>
+                    <dd className="flex items-center gap-1.5">
+                      {latestReport.isWatertight ? (
+                        <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                      )}
+                      <span className={latestReport.isWatertight ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                        {latestReport.isWatertight ? d["common.yes"] : d["common.no"]}
+                      </span>
+                    </dd>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.solidVolume"]}</dt>
+                    <dd className="flex items-center gap-1.5">
+                      {latestReport.isVolume ? (
+                        <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                      )}
+                      <span className={latestReport.isVolume ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                        {latestReport.isVolume ? d["common.yes"] : d["common.no"]}
+                      </span>
+                    </dd>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.vertex"]}</dt>
+                    <dd className="text-gray-700">{formatNumber(latestReport.vertexCount, loc)}</dd>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.face"]}</dt>
+                    <dd className="text-gray-700">{formatNumber(latestReport.faceCount, loc)}</dd>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.component"]}</dt>
+                    <dd className="text-gray-700">{latestReport.componentCount}</dd>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.baseAdded"]}</dt>
+                    <dd className="text-gray-700">{latestReport.baseAdded ? d["common.yes"] : d["common.no"]}</dd>
+                  </div>
+                  {latestReport.boundingBox && typeof latestReport.boundingBox === "object" && (
+                    <div className="flex justify-between items-center">
+                      <dt className="text-gray-400">{d["admin.orderDetail.dimensions"]}</dt>
+                      <dd className="font-mono text-xs text-gray-700 bg-gray-50 px-2 py-0.5 rounded">{latestReport.boundingBox.size?.map((v: number) => v.toFixed(1)).join(" x ")}</dd>
+                    </div>
+                  )}
+                  {latestReport.repairsApplied && latestReport.repairsApplied.length > 0 && (
+                    <div className="pt-3 border-t border-gray-100">
+                      <dt className="text-gray-400 mb-2">{d["admin.orderDetail.repairsApplied"]}</dt>
+                      <dd className="flex flex-wrap gap-1">
+                        {latestReport.repairsApplied.map((r) => (
+                          <span key={r} className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium ring-1 ring-blue-200">{r}</span>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ İletişim (communication) ════════════════════════════ */}
+      {tab === "communication" && (
+        <div className="space-y-5 max-w-3xl">
 
           {/* ─── Order conversations (customer + manufacturer channels) ── */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -687,135 +1127,6 @@ export function OrderDetailClient({ data, locale }: Props) {
               />
             )}
           </div>
-
-          {/* Manufacturer Assignment — ranked recommendations */}
-          {canAssignManufacturer && candidates && candidates.length > 0 && (
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5 space-y-3">
-              <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider">{d["admin.orderDetail.assignManufacturer"]}</h3>
-              <p className="text-xs text-blue-700/80">
-                Mesafe · Yük · Güvenilirlik · Uygunluk skorlarına göre sıralandı. En iyi adaylar üstte.
-              </p>
-              <div className="space-y-2">
-                {candidates
-                  .filter((c) => c.eligible)
-                  .slice(0, 5)
-                  .map((c, idx) => (
-                    <div
-                      key={c.manufacturerId}
-                      className={`bg-white rounded-xl border p-4 ${
-                        idx === 0 && c.totalScore >= 60 ? "border-emerald-300 ring-1 ring-emerald-100" : "border-gray-200"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-semibold text-gray-900 truncate">{c.companyName}</h4>
-                            {idx === 0 && c.totalScore >= 60 && (
-                              <span className="text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">
-                                En uygun
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            {c.city || "Şehir yok"}{c.district ? ` / ${c.district}` : ""} ·
-                            {" "}Yük {c.currentLoad}/{c.maxConcurrentOrders}
-                            {c.phone ? (
-                              <>
-                                {" "}· <a href={`tel:${c.phone}`} className="text-blue-600 hover:underline">{c.phone}</a>
-                              </>
-                            ) : null}
-                          </p>
-                          {c.reasons.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {c.reasons.map((r) => (
-                                <span key={r} className="text-[10px] bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          <div className="grid grid-cols-4 gap-2 mt-3">
-                            {(["distance", "load", "reliability", "compliance"] as const).map((k) => (
-                              <div key={k} className="space-y-1">
-                                <div className="flex justify-between text-[10px] text-gray-500">
-                                  <span>{k === "distance" ? "Mesafe" : k === "load" ? "Yük" : k === "reliability" ? "Güven" : "Uygun"}</span>
-                                  <span>{c.scores[k]}</span>
-                                </div>
-                                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                  <div className="h-full bg-blue-500" style={{ width: `${c.scores[k]}%` }} />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="text-2xl font-bold text-blue-700">{c.totalScore}</div>
-                          <button
-                            onClick={() => {
-                              setSelectedManufacturerId(c.manufacturerId);
-                              // Pass the id directly to avoid the stale-closure
-                              // race where `selectedManufacturerId` is still ""
-                              // on this click (React state hasn't flushed yet).
-                              assignManufacturer(c.manufacturerId);
-                            }}
-                            disabled={!!loading}
-                            className="px-4 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
-                          >
-                            {loading === "assign-manufacturer" && selectedManufacturerId === c.manufacturerId
-                              ? "Atanıyor..."
-                              : "Bu üreticiye ata"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-
-              {candidates.some((c) => !c.eligible) && (
-                <details className="text-xs text-blue-700/80">
-                  <summary className="cursor-pointer hover:text-blue-900">
-                    Uygun olmayan üreticiler ({candidates.filter((c) => !c.eligible).length})
-                  </summary>
-                  <ul className="mt-2 space-y-1">
-                    {candidates
-                      .filter((c) => !c.eligible)
-                      .map((c) => (
-                        <li key={c.manufacturerId} className="bg-white/50 rounded-lg px-3 py-1.5 flex justify-between">
-                          <span className="text-gray-700">{c.companyName}</span>
-                          <span className="text-gray-500">{c.ineligibleReason}</span>
-                        </li>
-                      ))}
-                  </ul>
-                </details>
-              )}
-            </div>
-          )}
-
-          {/* Fallback: classic dropdown if no candidates ranked (no active manufacturers yet) */}
-          {canAssignManufacturer && (!candidates || candidates.length === 0) && activeManufacturers && activeManufacturers.length > 0 && (
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5">
-              <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-3">{d["admin.orderDetail.assignManufacturer"]}</h3>
-              <div className="flex gap-2">
-                <select
-                  value={selectedManufacturerId}
-                  onChange={(e) => setSelectedManufacturerId(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-white border border-blue-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-shadow"
-                >
-                  <option value="">{d["admin.orderDetail.selectManufacturer"]}</option>
-                  {activeManufacturers.map((m) => (
-                    <option key={m.id} value={m.id}>{m.companyName}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => assignManufacturer()}
-                  disabled={!selectedManufacturerId || !!loading}
-                  className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors shadow-sm"
-                >
-                  {loading === "assign-manufacturer" ? d["admin.orderDetail.assigning"] : d["admin.orderDetail.assign"]}
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* ─── Messaging Panel (Collapsible) ────────── */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -849,8 +1160,6 @@ export function OrderDetailClient({ data, locale }: Props) {
             </div>
           </div>
 
-          {/* ─── History Sections ─────────────────────── */}
-
           {/* Message History */}
           {adminMessages.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -880,6 +1189,12 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ Geçmiş (history) ════════════════════════════════════ */}
+      {tab === "history" && (
+        <div className="space-y-5 max-w-3xl">
 
           {/* Generation History */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -964,275 +1279,7 @@ export function OrderDetailClient({ data, locale }: Props) {
             </div>
           )}
         </div>
-
-        {/* ─── Right Sidebar (1/3) ───────────────────────── */}
-        <div className="space-y-5">
-
-          {/* Customer Card */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">{d["admin.orderDetail.customerInfo"]}</h3>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                {initials}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{order.customerName}</p>
-                <p className="text-xs text-gray-500 truncate">{order.email}</p>
-                {(order.phone || addr?.telefon) && (
-                  <p className="text-xs text-gray-500">{order.phone || addr?.telefon}</p>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {(order.phone || addr?.telefon) && (
-                <a href={`tel:${order.phone || addr?.telefon}`} title={d["admin.orderDetail.callCustomer"]} className="w-9 h-9 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600 transition-colors">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                </a>
-              )}
-              <a href={`mailto:${order.email}`} title={d["admin.orderDetail.emailCustomer"]} className="w-9 h-9 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600 transition-colors">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-              </a>
-            </div>
-          </div>
-
-          {/* Order Details Card */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.orderDetails"]}</h3>
-              {!editing && (
-                <button onClick={() => setEditing(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">
-                  {d["admin.orderDetail.editOrder"]}
-                </button>
-              )}
-            </div>
-            <dl className="space-y-3 text-sm">
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.size"]}</dt>
-                <dd className="font-medium text-gray-900">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</dd>
-              </div>
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.material"]}</dt>
-                <dd className="font-medium text-gray-900">{d[`material.${order.material}` as keyof typeof d] || order.material}</dd>
-              </div>
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.style"]}</dt>
-                <dd className="font-medium text-gray-900 capitalize">{d[`create.style.${order.style}` as keyof typeof d] || order.style}</dd>
-              </div>
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.amount"]}</dt>
-                <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus, loc)}</dd>
-              </div>
-              {order.giftCardAmountKurus > 0 && (
-                <>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.giftCardAmount"]}</dt>
-                    <dd className="font-medium"><span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-green-200">-{formatCurrency(order.giftCardAmountKurus, loc)}</span></dd>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.remaining"]}</dt>
-                    <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus - order.giftCardAmountKurus, loc)}</dd>
-                  </div>
-                </>
-              )}
-              {order.havaleDiscountKurus > 0 && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.payment.havaleDiscount"]}</dt>
-                  <dd className="font-medium">
-                    <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-amber-200">
-                      -{formatCurrency(order.havaleDiscountKurus, loc)}
-                    </span>
-                  </dd>
-                </div>
-              )}
-              {order.paymentMethod && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.payment.method"]}</dt>
-                  <dd className="text-gray-700">
-                    {order.paymentMethod === "card" && d["admin.payment.method.card"]}
-                    {order.paymentMethod === "bank_transfer" && d["admin.payment.method.bankTransfer"]}
-                    {order.paymentMethod === "gift_card_full" && d["admin.payment.method.giftCardFull"]}
-                  </dd>
-                </div>
-              )}
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.payment.status"]}</dt>
-                <dd className="text-gray-700 text-xs">
-                  {d[`admin.payment.status.${order.paymentStatus}` as keyof typeof d] || order.paymentStatus}
-                </dd>
-              </div>
-              {order.paymentMethod === "bank_transfer" && order.bankTransferReceiptUrl && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.payment.receiptUploaded"]}</dt>
-                  <dd>
-                    <a
-                      href={order.bankTransferReceiptUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-600 hover:text-blue-800 underline"
-                    >
-                      Görüntüle
-                    </a>
-                  </dd>
-                </div>
-              )}
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.payment"]}</dt>
-                <dd className="text-gray-700">{order.paidAt ? formatDateTime(order.paidAt, loc) : <span className="text-amber-600 font-medium">{d["admin.orderDetail.notPaid"]}</span>}</dd>
-              </div>
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.createdAt"]}</dt>
-                <dd className="text-gray-700">{formatDateTime(order.createdAt, loc)}</dd>
-              </div>
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-400">{d["admin.orderDetail.retryCount"]}</dt>
-                <dd className="text-gray-700">{order.retryCount}</dd>
-              </div>
-              {order.trackingNumber && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.orderDetail.trackingNumber"]}</dt>
-                  <dd className="font-mono text-xs text-gray-900 bg-gray-50 px-2 py-0.5 rounded">{order.trackingNumber}</dd>
-                </div>
-              )}
-              {order.failureReason && (
-                <div className="pt-3 border-t border-gray-100">
-                  <dt className="text-red-600 font-medium text-xs">{d["admin.orderDetail.failureReason"]}</dt>
-                  <dd className="text-red-700 mt-1 text-xs break-all bg-red-50 px-3 py-2 rounded-lg">{order.failureReason}</dd>
-                </div>
-              )}
-            </dl>
-          </div>
-
-          {/* Shipping Address */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">{d["admin.orderDetail.shippingAddress"]}</h3>
-            {editing ? (
-              <div className="space-y-2">
-                <input type="text" value={editAddress?.adres || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, adres: e.target.value } : null)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Adres" />
-                <input type="text" value={editAddress?.mahalle || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, mahalle: e.target.value } : null)} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Mahalle" />
-                <div className="grid grid-cols-2 gap-2">
-                  <input type="text" value={editAddress?.ilce || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, ilce: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Ilce" />
-                  <input type="text" value={editAddress?.il || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, il: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Il" />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input type="text" value={editAddress?.postaKodu || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, postaKodu: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Posta Kodu" />
-                  <input type="text" value={editAddress?.telefon || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, telefon: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Telefon" />
-                </div>
-                {/* Admin notes */}
-                <div className="pt-2">
-                  <label className="block text-xs text-gray-400 mb-1">{d["admin.orderDetail.adminNote"]}</label>
-                  <textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} rows={2} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" />
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <button onClick={saveEdit} disabled={loading === "edit"} className="px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-400 transition-colors shadow-sm">
-                    {loading === "edit" ? d["admin.orderDetail.saving"] : d["admin.orderDetail.saveChanges"]}
-                  </button>
-                  <button onClick={() => { setEditing(false); setEditAddress(order.shippingAddress); setEditNotes(order.adminNotes || ""); }} className="px-4 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded-xl hover:bg-gray-200 transition-colors">
-                    {d["admin.orderDetail.cancel"]}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {addr && (
-                  <div className="text-sm text-gray-700 space-y-0.5">
-                    <div className="flex items-start gap-2">
-                      <svg className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                      <div>
-                        {addr.mahalle && <p className="text-gray-600">{addr.mahalle}</p>}
-                        <p>{addr.adres}</p>
-                        <p>{addr.ilce} / {addr.il}</p>
-                        <p className="text-gray-500">{addr.postaKodu}</p>
-                        <p className="mt-1 text-gray-500">Tel: {addr.telefon}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {order.adminNotes && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-xs text-gray-400 font-medium">{d["admin.orderDetail.adminNote"]}</p>
-                    <p className="text-sm text-gray-700 mt-1">{order.adminNotes}</p>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Mesh Report (Collapsible) */}
-          {latestReport && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <button
-                onClick={() => setMeshReportOpen(!meshReportOpen)}
-                className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors"
-              >
-                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.meshReport"]}</h3>
-                <svg className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${meshReportOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-              </button>
-              <div className={`transition-all duration-300 ease-in-out ${meshReportOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
-                <dl className="px-5 pb-5 space-y-3 text-sm border-t border-gray-100 pt-4">
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.watertight"]}</dt>
-                    <dd className="flex items-center gap-1.5">
-                      {latestReport.isWatertight ? (
-                        <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-                      ) : (
-                        <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                      )}
-                      <span className={latestReport.isWatertight ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
-                        {latestReport.isWatertight ? d["common.yes"] : d["common.no"]}
-                      </span>
-                    </dd>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.solidVolume"]}</dt>
-                    <dd className="flex items-center gap-1.5">
-                      {latestReport.isVolume ? (
-                        <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-                      ) : (
-                        <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                      )}
-                      <span className={latestReport.isVolume ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
-                        {latestReport.isVolume ? d["common.yes"] : d["common.no"]}
-                      </span>
-                    </dd>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.vertex"]}</dt>
-                    <dd className="text-gray-700">{formatNumber(latestReport.vertexCount, loc)}</dd>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.face"]}</dt>
-                    <dd className="text-gray-700">{formatNumber(latestReport.faceCount, loc)}</dd>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.component"]}</dt>
-                    <dd className="text-gray-700">{latestReport.componentCount}</dd>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <dt className="text-gray-400">{d["admin.orderDetail.baseAdded"]}</dt>
-                    <dd className="text-gray-700">{latestReport.baseAdded ? d["common.yes"] : d["common.no"]}</dd>
-                  </div>
-                  {latestReport.boundingBox && typeof latestReport.boundingBox === "object" && (
-                    <div className="flex justify-between items-center">
-                      <dt className="text-gray-400">{d["admin.orderDetail.dimensions"]}</dt>
-                      <dd className="font-mono text-xs text-gray-700 bg-gray-50 px-2 py-0.5 rounded">{latestReport.boundingBox.size?.map((v: number) => v.toFixed(1)).join(" x ")}</dd>
-                    </div>
-                  )}
-                  {latestReport.repairsApplied && latestReport.repairsApplied.length > 0 && (
-                    <div className="pt-3 border-t border-gray-100">
-                      <dt className="text-gray-400 mb-2">{d["admin.orderDetail.repairsApplied"]}</dt>
-                      <dd className="flex flex-wrap gap-1">
-                        {latestReport.repairsApplied.map((r) => (
-                          <span key={r} className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium ring-1 ring-blue-200">{r}</span>
-                        ))}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Mesh Sculptor Overlay */}
       {sculptorOpen && latestGeneration?.outputGlbUrl && (

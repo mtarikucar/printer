@@ -52,9 +52,9 @@ backup_*.sql
 # Claude Code local settings
 /.claude/settings.local.json
 
-# drizzle: SQL migrations MUST be committed so deploys are reproducible and
-# code review can see schema changes. We ignore only the local cache.
-/drizzle/meta/_journal.json
+# drizzle: SQL migrations AND _journal.json MUST be committed — `drizzle-kit
+# migrate` reads the journal to enumerate which migrations to apply. Ignoring
+# it previously broke prod deploys (the journal was absent/stale in the image).
 
 # vercel
 .vercel

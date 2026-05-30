@@ -1,5 +1,5 @@
 {
-  "id": "4f5a95bf-df34-4b7b-86dd-918a7c5200fa",
+  "id": "2381e3d1-ae1f-4e5b-b4c1-7581e056013a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -127,6 +127,222 @@
           "tableTo": "orders",
           "columnsFrom": [
             "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.customer_notifications": {
+      "name": "customer_notifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "customer_notifications_user_idx": {
+          "name": "customer_notifications_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "customer_notifications_user_id_users_id_fk": {
+          "name": "customer_notifications_user_id_users_id_fk",
+          "tableFrom": "customer_notifications",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "customer_notifications_order_id_orders_id_fk": {
+          "name": "customer_notifications_order_id_orders_id_fk",
+          "tableFrom": "customer_notifications",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.disputes": {
+      "name": "disputes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "dispute_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_email": {
+          "name": "admin_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "disputes_order_id_orders_id_fk": {
+          "name": "disputes_order_id_orders_id_fk",
+          "tableFrom": "disputes",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "disputes_user_id_users_id_fk": {
+          "name": "disputes_user_id_users_id_fk",
+          "tableFrom": "disputes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
           ],
           "columnsTo": [
             "id"
@@ -541,6 +757,112 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.invoices": {
+      "name": "invoices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_number": {
+          "name": "invoice_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subtotal_kurus": {
+          "name": "subtotal_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kdv_kurus": {
+          "name": "kdv_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_kurus": {
+          "name": "total_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kdv_rate_bps": {
+          "name": "kdv_rate_bps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "invoice_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'issued'"
+        },
+        "provider_ref": {
+          "name": "provider_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "invoices_order_id_orders_id_fk": {
+          "name": "invoices_order_id_orders_id_fk",
+          "tableFrom": "invoices",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "invoices_order_id_unique": {
+          "name": "invoices_order_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "order_id"
+          ]
+        },
+        "invoices_invoice_number_unique": {
+          "name": "invoices_invoice_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "invoice_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.manufacturer_actions": {
       "name": "manufacturer_actions",
       "schema": "",
@@ -615,6 +937,350 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.manufacturer_assignment_evaluations": {
+      "name": "manufacturer_assignment_evaluations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "v1_winner_id": {
+          "name": "v1_winner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "v2_winner_id": {
+          "name": "v2_winner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "v1_scores": {
+          "name": "v1_scores",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "v2_scores": {
+          "name": "v2_scores",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "weights_version": {
+          "name": "weights_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "authoritative": {
+          "name": "authoritative",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mfg_eval_order_version_idx": {
+          "name": "mfg_eval_order_version_idx",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "weights_version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "manufacturer_assignment_evaluations_order_id_orders_id_fk": {
+          "name": "manufacturer_assignment_evaluations_order_id_orders_id_fk",
+          "tableFrom": "manufacturer_assignment_evaluations",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "manufacturer_assignment_evaluations_v1_winner_id_manufacturers_id_fk": {
+          "name": "manufacturer_assignment_evaluations_v1_winner_id_manufacturers_id_fk",
+          "tableFrom": "manufacturer_assignment_evaluations",
+          "tableTo": "manufacturers",
+          "columnsFrom": [
+            "v1_winner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manufacturer_assignment_evaluations_v2_winner_id_manufacturers_id_fk": {
+          "name": "manufacturer_assignment_evaluations_v2_winner_id_manufacturers_id_fk",
+          "tableFrom": "manufacturer_assignment_evaluations",
+          "tableTo": "manufacturers",
+          "columnsFrom": [
+            "v2_winner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.manufacturer_documents": {
+      "name": "manufacturer_documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "manufacturer_id": {
+          "name": "manufacturer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "manufacturer_doc_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "doc_review_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "review_note": {
+          "name": "review_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "manufacturer_documents_manufacturer_id_manufacturers_id_fk": {
+          "name": "manufacturer_documents_manufacturer_id_manufacturers_id_fk",
+          "tableFrom": "manufacturer_documents",
+          "tableTo": "manufacturers",
+          "columnsFrom": [
+            "manufacturer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.manufacturer_earnings": {
+      "name": "manufacturer_earnings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "manufacturer_id": {
+          "name": "manufacturer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gross_kurus": {
+          "name": "gross_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commission_kurus": {
+          "name": "commission_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "net_kurus": {
+          "name": "net_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commission_rate_bps": {
+          "name": "commission_rate_bps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "earning_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "payout_id": {
+          "name": "payout_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "manufacturer_earnings_order_id_orders_id_fk": {
+          "name": "manufacturer_earnings_order_id_orders_id_fk",
+          "tableFrom": "manufacturer_earnings",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manufacturer_earnings_manufacturer_id_manufacturers_id_fk": {
+          "name": "manufacturer_earnings_manufacturer_id_manufacturers_id_fk",
+          "tableFrom": "manufacturer_earnings",
+          "tableTo": "manufacturers",
+          "columnsFrom": [
+            "manufacturer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "manufacturer_earnings_payout_id_payouts_id_fk": {
+          "name": "manufacturer_earnings_payout_id_payouts_id_fk",
+          "tableFrom": "manufacturer_earnings",
+          "tableTo": "payouts",
+          "columnsFrom": [
+            "payout_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "manufacturer_earnings_order_id_unique": {
+          "name": "manufacturer_earnings_order_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "order_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -851,6 +1517,27 @@
           "primaryKey": false,
           "notNull": false
         },
+        "strike_count": {
+          "name": "strike_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pending_iban": {
+          "name": "pending_iban",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "iban_review_status": {
+          "name": "iban_review_status",
+          "type": "iban_review_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'none'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -978,6 +1665,144 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.messages": {
+      "name": "messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "message_channel",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_type": {
+          "name": "sender_type",
+          "type": "message_sender_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_id": {
+          "name": "sender_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sender_email": {
+          "name": "sender_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_key": {
+          "name": "attachment_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attachment_thumbnail_key": {
+          "name": "attachment_thumbnail_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "read_by_admin_at": {
+          "name": "read_by_admin_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "read_by_counterparty_at": {
+          "name": "read_by_counterparty_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "flagged": {
+          "name": "flagged",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "messages_order_channel_idx": {
+          "name": "messages_order_channel_idx",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "channel",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "messages_order_id_orders_id_fk": {
+          "name": "messages_order_id_orders_id_fk",
+          "tableFrom": "messages",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.order_drafts": {
       "name": "order_drafts",
       "schema": "",
@@ -1046,6 +1871,14 @@
           "primaryKey": false,
           "notNull": false
         },
+        "material": {
+          "name": "material",
+          "type": "figurine_material",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'resin'"
+        },
         "shipping_address": {
           "name": "shipping_address",
           "type": "jsonb",
@@ -1086,6 +1919,19 @@
         },
         "havale_discount_kurus": {
           "name": "havale_discount_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "upsells": {
+          "name": "upsells",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "upsell_amount_kurus": {
+          "name": "upsell_amount_kurus",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -1402,6 +2248,14 @@
           "primaryKey": false,
           "notNull": false
         },
+        "material": {
+          "name": "material",
+          "type": "figurine_material",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'resin'"
+        },
         "shipping_address": {
           "name": "shipping_address",
           "type": "jsonb",
@@ -1458,6 +2312,19 @@
           "notNull": true,
           "default": 0
         },
+        "upsells": {
+          "name": "upsells",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "upsell_amount_kurus": {
+          "name": "upsell_amount_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "paid_at": {
           "name": "paid_at",
           "type": "timestamp",
@@ -1474,6 +2341,19 @@
         "tracking_number": {
           "name": "tracking_number",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "carrier": {
+          "name": "carrier",
+          "type": "carrier",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -1515,6 +2395,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "gallery_slug": {
+          "name": "gallery_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "gallery_category": {
           "name": "gallery_category",
           "type": "text",
@@ -1524,6 +2410,39 @@
         "gallery_tags": {
           "name": "gallery_tags",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gallery_review_status": {
+          "name": "gallery_review_status",
+          "type": "gallery_review_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'none'"
+        },
+        "gallery_review_reason": {
+          "name": "gallery_review_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gallery_reward_gift_card_id": {
+          "name": "gallery_reward_gift_card_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gallery_featured": {
+          "name": "gallery_featured",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "gallery_featured_at": {
+          "name": "gallery_featured_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -1555,6 +2474,32 @@
         "manufacturer_printed_at": {
           "name": "manufacturer_printed_at",
           "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "declined_manufacturer_ids": {
+          "name": "declined_manufacturer_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "qc_round": {
+          "name": "qc_round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "qc_rejection_count": {
+          "name": "qc_rejection_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "customer_note": {
+          "name": "customer_note",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1614,6 +2559,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "orders_gallery_reward_gift_card_id_gift_cards_id_fk": {
+          "name": "orders_gallery_reward_gift_card_id_gift_cards_id_fk",
+          "tableFrom": "orders",
+          "tableTo": "gift_cards",
+          "columnsFrom": [
+            "gallery_reward_gift_card_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "orders_manufacturer_id_manufacturers_id_fk": {
           "name": "orders_manufacturer_id_manufacturers_id_fk",
           "tableFrom": "orders",
@@ -1636,8 +2594,100 @@
           "columns": [
             "order_number"
           ]
+        },
+        "orders_gallery_slug_unique": {
+          "name": "orders_gallery_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "gallery_slug"
+          ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.payouts": {
+      "name": "payouts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "manufacturer_id": {
+          "name": "manufacturer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_kurus": {
+          "name": "total_kurus",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "earning_count": {
+          "name": "earning_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "payout_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "reference": {
+          "name": "reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_email": {
+          "name": "admin_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "payouts_manufacturer_id_manufacturers_id_fk": {
+          "name": "payouts_manufacturer_id_manufacturers_id_fk",
+          "tableFrom": "payouts",
+          "tableTo": "manufacturers",
+          "columnsFrom": [
+            "manufacturer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1773,6 +2823,296 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.qc_photos": {
+      "name": "qc_photos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "manufacturer_id": {
+          "name": "manufacturer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round": {
+          "name": "round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thumbnail_key": {
+          "name": "thumbnail_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "review_status": {
+          "name": "review_status",
+          "type": "qc_photo_review_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "qc_photos_order_id_orders_id_fk": {
+          "name": "qc_photos_order_id_orders_id_fk",
+          "tableFrom": "qc_photos",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "qc_photos_manufacturer_id_manufacturers_id_fk": {
+          "name": "qc_photos_manufacturer_id_manufacturers_id_fk",
+          "tableFrom": "qc_photos",
+          "tableTo": "manufacturers",
+          "columnsFrom": [
+            "manufacturer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.qc_reviews": {
+      "name": "qc_reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round": {
+          "name": "round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_email": {
+          "name": "admin_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "qc_reviews_order_id_orders_id_fk": {
+          "name": "qc_reviews_order_id_orders_id_fk",
+          "tableFrom": "qc_reviews",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_addresses": {
+      "name": "user_addresses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "full_name": {
+          "name": "full_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "adres": {
+          "name": "adres",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mahalle": {
+          "name": "mahalle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ilce": {
+          "name": "ilce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "il": {
+          "name": "il",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "posta_kodu": {
+          "name": "posta_kodu",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "user_addresses_one_default_idx": {
+          "name": "user_addresses_one_default_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"user_addresses\".\"is_default\" = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "user_addresses_user_id_users_id_fk": {
+          "name": "user_addresses_user_id_users_id_fk",
+          "tableFrom": "user_addresses",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.users": {
       "name": "users",
       "schema": "",
@@ -1819,6 +3159,25 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "password_reset_token_hash": {
+          "name": "password_reset_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "password_reset_expires_at": {
+          "name": "password_reset_expires_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_guest": {
+          "name": "is_guest",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -1869,7 +3228,72 @@
         "force_review",
         "assign_manufacturer",
         "mark_havale_paid",
-        "mark_payment_expired"
+        "mark_payment_expired",
+        "gallery_approve",
+        "gallery_reject",
+        "gallery_reward",
+        "gallery_feature",
+        "gallery_unfeature",
+        "qc_approve",
+        "qc_reject"
+      ]
+    },
+    "public.carrier": {
+      "name": "carrier",
+      "schema": "public",
+      "values": [
+        "yurtici",
+        "aras",
+        "mng",
+        "ptt",
+        "surat",
+        "other"
+      ]
+    },
+    "public.dispute_status": {
+      "name": "dispute_status",
+      "schema": "public",
+      "values": [
+        "open",
+        "resolved",
+        "rejected"
+      ]
+    },
+    "public.doc_review_status": {
+      "name": "doc_review_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "approved",
+        "rejected"
+      ]
+    },
+    "public.manufacturer_doc_type": {
+      "name": "manufacturer_doc_type",
+      "schema": "public",
+      "values": [
+        "vergi_levhasi",
+        "ticaret_sicil",
+        "imza_sirkuleri",
+        "kimlik",
+        "other"
+      ]
+    },
+    "public.earning_status": {
+      "name": "earning_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "paid",
+        "reversed"
+      ]
+    },
+    "public.figurine_material": {
+      "name": "figurine_material",
+      "schema": "public",
+      "values": [
+        "resin",
+        "filament"
       ]
     },
     "public.figurine_size": {
@@ -1890,6 +3314,16 @@
         "anime",
         "chibi",
         "object"
+      ]
+    },
+    "public.gallery_review_status": {
+      "name": "gallery_review_status",
+      "schema": "public",
+      "values": [
+        "none",
+        "pending",
+        "approved",
+        "rejected"
       ]
     },
     "public.generation_provider": {
@@ -1932,6 +3366,22 @@
         "genel"
       ]
     },
+    "public.iban_review_status": {
+      "name": "iban_review_status",
+      "schema": "public",
+      "values": [
+        "none",
+        "pending"
+      ]
+    },
+    "public.invoice_status": {
+      "name": "invoice_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "issued"
+      ]
+    },
     "public.manufacturer_order_status": {
       "name": "manufacturer_order_status",
       "schema": "public",
@@ -1941,6 +3391,9 @@
         "accepted",
         "printing",
         "printed",
+        "qc_pending",
+        "qc_rejected",
+        "qc_approved",
         "shipped"
       ]
     },
@@ -1951,6 +3404,23 @@
         "pending_approval",
         "active",
         "suspended"
+      ]
+    },
+    "public.message_channel": {
+      "name": "message_channel",
+      "schema": "public",
+      "values": [
+        "customer_admin",
+        "manufacturer_admin"
+      ]
+    },
+    "public.message_sender_type": {
+      "name": "message_sender_type",
+      "schema": "public",
+      "values": [
+        "customer",
+        "admin",
+        "manufacturer"
       ]
     },
     "public.ocr_confidence": {
@@ -1984,6 +3454,7 @@
         "review",
         "approved",
         "printing",
+        "quality_check",
         "shipped",
         "delivered",
         "failed_generation",
@@ -2008,6 +3479,14 @@
         "refunded"
       ]
     },
+    "public.payout_status": {
+      "name": "payout_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "paid"
+      ]
+    },
     "public.preview_status": {
       "name": "preview_status",
       "schema": "public",
@@ -2018,6 +3497,15 @@
         "approved",
         "revision_requested",
         "expired"
+      ]
+    },
+    "public.qc_photo_review_status": {
+      "name": "qc_photo_review_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "approved",
+        "rejected"
       ]
     }
   },

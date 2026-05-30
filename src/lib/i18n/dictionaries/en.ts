@@ -501,6 +501,32 @@ const en = {
   "admin.nav.orders": "Orders",
   "admin.nav.printQueue": "Print Queue",
 
+  // Admin - Nav group headers
+  "admin.nav.group.general": "General",
+  "admin.nav.group.orders": "Orders",
+  "admin.nav.group.manufacturers": "Manufacturers",
+  "admin.nav.group.customer": "Customer",
+  "admin.nav.group.content": "Content",
+  "admin.nav.group.advanced": "Advanced",
+
+  // Admin - Order list buckets
+  "admin.orders.bucket.all": "All",
+  "admin.orders.bucket.needsAction": "Needs Action",
+  "admin.orders.bucket.inProgress": "In Progress",
+  "admin.orders.bucket.completed": "Completed",
+  "admin.orders.bucket.problems": "Problems",
+  "admin.orders.exactStatus": "Exact status",
+
+  // Admin - Order detail tabs
+  "admin.orderDetail.tab.summary": "Summary",
+  "admin.orderDetail.tab.production": "Production",
+  "admin.orderDetail.tab.communication": "Communication",
+  "admin.orderDetail.tab.history": "History",
+
+  // Admin - Gallery sub-tabs
+  "admin.gallery.tab.queue": "Queue",
+  "admin.gallery.tab.published": "Published",
+
   // Admin - Dashboard
   "admin.dashboard.title": "Dashboard",
   "admin.dashboard.subtitle": "Overview of your figurine business",

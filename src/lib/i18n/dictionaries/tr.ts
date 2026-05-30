@@ -503,6 +503,32 @@ const tr: Dictionary = {
   "admin.nav.orders": "Siparişler",
   "admin.nav.printQueue": "Baskı Kuyruğu",
 
+  // Admin - Nav group headers
+  "admin.nav.group.general": "Genel",
+  "admin.nav.group.orders": "Siparişler",
+  "admin.nav.group.manufacturers": "Üreticiler",
+  "admin.nav.group.customer": "Müşteri",
+  "admin.nav.group.content": "İçerik",
+  "admin.nav.group.advanced": "Gelişmiş",
+
+  // Admin - Order list buckets
+  "admin.orders.bucket.all": "Tümü",
+  "admin.orders.bucket.needsAction": "İşlem Bekleyen",
+  "admin.orders.bucket.inProgress": "Devam Eden",
+  "admin.orders.bucket.completed": "Tamamlanan",
+  "admin.orders.bucket.problems": "Sorunlu",
+  "admin.orders.exactStatus": "Tam durum",
+
+  // Admin - Order detail tabs
+  "admin.orderDetail.tab.summary": "Özet",
+  "admin.orderDetail.tab.production": "Üretim",
+  "admin.orderDetail.tab.communication": "İletişim",
+  "admin.orderDetail.tab.history": "Geçmiş",
+
+  // Admin - Gallery sub-tabs
+  "admin.gallery.tab.queue": "Kuyruk",
+  "admin.gallery.tab.published": "Yayında",
+
   // Admin - Dashboard
   "admin.dashboard.title": "Kontrol Paneli",
   "admin.dashboard.subtitle": "Figürin işletmenize genel bakış",

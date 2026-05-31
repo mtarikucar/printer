@@ -10,6 +10,9 @@ import {
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { kickOffOrderProcessing } from "@/lib/services/order-confirm";
+import { emitOrderChanged } from "@/lib/realtime/emit";
+import { publishRealtime } from "@/lib/realtime/bus";
+import { topics } from "@/lib/realtime/events";
 import {
   getPaymentDeadlineQueue,
   havaleExpireJobId,
@@ -131,15 +134,32 @@ export async function promoteDraftToOrder(
       orderId: order.id,
       orderNumber: order.orderNumber,
       locale: (draft.locale === "en" ? "en" : "tr") as Locale,
+      userId: order.userId,
+      manufacturerId: order.manufacturerId,
+      newOrder: true,
     };
   });
+
+  // New order row created at status=paid. Emit for the freshly-created order
+  // (no manufacturer yet — manufacturerStatus is "unassigned"). Skipped on the
+  // idempotent re-entry path where an existing order is returned.
+  if ("newOrder" in result && result.newOrder) {
+    await emitOrderChanged({
+      orderId: result.orderId,
+      orderNumber: result.orderNumber,
+      userId: result.userId,
+      manufacturerId: result.manufacturerId,
+      status: "paid",
+      manufacturerStatus: "unassigned",
+    });
+  }
 
   // Outside the transaction: cancel scheduled deadline jobs and kick generation.
   await cancelHavaleJobs(draftId);
 
   await kickOffOrderProcessing(result.orderId, result.locale);
 
-  return result;
+  return { orderId: result.orderId, orderNumber: result.orderNumber, locale: result.locale };
 }
 
 /**
@@ -182,6 +202,9 @@ export async function expireDraft(draftId: string): Promise<void> {
   if (!result) return;
   void SYSTEM_ADMIN_EMAIL;
 
+  // Draft moved to `expired` — refresh the admin drafts badge.
+  await publishRealtime([topics.admin()], { kind: "badge" });
+
   // Cancel the sibling reminder job. When `expireDraft` runs from its own
   // bullmq job that's redundant, but it's also called from admin force-expire
   // and the reminder would otherwise still fire 24h later.
@@ -205,15 +228,16 @@ export async function failDraft(
   draftId: string,
   failureReason: string
 ): Promise<void> {
-  await db.transaction(async (tx) => {
+  const failed = await db.transaction(async (tx) => {
     const [draft] = await tx
       .select()
       .from(orderDrafts)
       .where(eq(orderDrafts.id, draftId))
       .for("update");
 
-    if (!draft) return;
-    if (draft.status !== "pending" && draft.status !== "awaiting_review") return;
+    if (!draft) return false;
+    if (draft.status !== "pending" && draft.status !== "awaiting_review")
+      return false;
 
     await refundGiftCardForDraft(tx, draftId);
 
@@ -225,7 +249,14 @@ export async function failDraft(
         updatedAt: new Date(),
       })
       .where(eq(orderDrafts.id, draftId));
+
+    return true;
   });
+
+  // Draft moved to `failed` — refresh the admin drafts badge.
+  if (failed) {
+    await publishRealtime([topics.admin()], { kind: "badge" });
+  }
 
   // Cancel any scheduled bullmq jobs so they don't fire after the draft is
   // already in a terminal state. Best-effort; if Redis is down the worker's

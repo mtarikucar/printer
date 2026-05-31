@@ -4,6 +4,7 @@ import { orders, orderPhotos, previews, generationAttempts, users } from "@/lib/
 import { getAiGenerationQueue, getMeshProcessingQueue, getEmailQueue } from "@/lib/queue/queues";
 import type { Locale } from "@/lib/i18n/types";
 import { issueGuestClaimToken } from "@/lib/services/password-reset";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 /**
  * Kick off post-payment processing for an order that is already in `status='paid'`.
@@ -150,6 +151,14 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
       await revertToPaid();
       throw err;
     }
+    // paid -> processing_mesh confirmed (queue job enqueued, no revert).
+    await emitOrderChanged({
+      orderId: result.order.id,
+      orderNumber: result.order.orderNumber,
+      userId: result.order.userId,
+      manufacturerId: result.order.manufacturerId,
+      status: "processing_mesh",
+    });
   } else if (result.action === "generate") {
     try {
       await getAiGenerationQueue().add("generate", {
@@ -166,6 +175,23 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
       await revertToPaid();
       throw err;
     }
+    // paid -> generating confirmed (queue job enqueued, no revert).
+    await emitOrderChanged({
+      orderId: result.order.id,
+      orderNumber: result.order.orderNumber,
+      userId: result.order.userId,
+      manufacturerId: result.order.manufacturerId,
+      status: "generating",
+    });
+  } else if (result.action === "failed") {
+    // paid -> failed_generation committed in the transaction above.
+    await emitOrderChanged({
+      orderId: result.order.id,
+      orderNumber: result.order.orderNumber,
+      userId: result.order.userId,
+      manufacturerId: result.order.manufacturerId,
+      status: "failed_generation",
+    });
   }
 
   if (result.action !== "failed") {

@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 export async function POST(
   request: NextRequest,
@@ -55,6 +56,15 @@ export async function POST(
     orderId: id,
     manufacturerId: session.manufacturerId,
     action: "finish_printing",
+  });
+
+  await emitOrderChanged({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    userId: order.userId,
+    manufacturerId: order.manufacturerId,
+    status: order.status,
+    manufacturerStatus: order.manufacturerStatus,
   });
 
   return NextResponse.json({ success: true });

@@ -3,6 +3,8 @@ import { eq, and } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
+import { publishRealtime } from "@/lib/realtime/bus";
+import { topics } from "@/lib/realtime/events";
 
 export async function POST(
   _request: NextRequest,
@@ -31,6 +33,8 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  await publishRealtime([topics.admin()], { kind: "badge" });
 
   return NextResponse.json({ success: true });
 }

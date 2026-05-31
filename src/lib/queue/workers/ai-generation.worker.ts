@@ -8,6 +8,7 @@ import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../.
 import { db } from "../../db";
 import { orders, generationAttempts } from "../../db/schema";
 import { getEmailQueue } from "../queues";
+import { emitOrderChanged } from "../../realtime/emit";
 import { nanoid } from "nanoid";
 
 async function downloadFile(url: string): Promise<Buffer> {
@@ -85,6 +86,14 @@ async function processJob(job: Job<AiGenerationJobData>) {
     job.log(`Order ${orderId} is no longer in a generatable state, skipping`);
     return;
   }
+
+  await emitOrderChanged({
+    orderId: updated.id,
+    orderNumber: updated.orderNumber,
+    userId: updated.userId,
+    manufacturerId: updated.manufacturerId,
+    status: updated.status,
+  });
 
   // Create generation attempt record
   const attempt = await db
@@ -169,6 +178,13 @@ async function processJob(job: Job<AiGenerationJobData>) {
         to: order.email,
         orderNumber: order.orderNumber,
         customerName: order.customerName,
+      });
+      await emitOrderChanged({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        userId: order.userId,
+        manufacturerId: order.manufacturerId,
+        status: order.status,
       });
     }
 

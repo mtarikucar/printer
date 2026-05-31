@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions, manufacturers } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 export async function POST(
   request: NextRequest,
@@ -105,6 +106,15 @@ export async function POST(
         orderId: orderRetry.id,
       });
 
+      await emitOrderChanged({
+        orderId: orderRetry.id,
+        orderNumber: orderRetry.orderNumber,
+        userId: orderRetry.userId,
+        manufacturerId,
+        status: orderRetry.status,
+        manufacturerStatus: orderRetry.manufacturerStatus,
+      });
+
       return NextResponse.json({ success: true });
     }
 
@@ -122,6 +132,15 @@ export async function POST(
       subject: `Yeni sipariş atandı: ${order.orderNumber}`,
       body: `Sayın ${manufacturer.companyName},\n\n${order.orderNumber} numaralı sipariş size atandı. Lütfen üretici panelinizden 24 saat içinde kabul veya reddedin.\n\nMüşteri: ${order.customerName}`,
       orderId: order.id,
+    });
+
+    await emitOrderChanged({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      userId: order.userId,
+      manufacturerId,
+      status: order.status,
+      manufacturerStatus: order.manufacturerStatus,
     });
 
     return NextResponse.json({ success: true });

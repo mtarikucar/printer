@@ -4,6 +4,7 @@ import { orders, manufacturerActions } from "@/lib/db/schema";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 const MAX_DECLINES_BEFORE_ADMIN = 3;
 
@@ -121,6 +122,7 @@ export async function declineOrder(args: {
       declinedCount: nextDeclined.length,
       declinedList: nextDeclined,
       orderNumber: order.orderNumber,
+      userId: order.userId,
     };
   });
 
@@ -133,6 +135,16 @@ export async function declineOrder(args: {
   if (result.code === "wrong_status") {
     return { ok: false, reason: `wrong_status:${result.status}` };
   }
+
+  // Unassign committed: order cleared off the OLD manufacturer. Emit with the
+  // declining manufacturerId so that manufacturer's panel drops the order.
+  await emitOrderChanged({
+    orderId,
+    orderNumber: result.orderNumber,
+    userId: result.userId,
+    manufacturerId,
+    manufacturerStatus: "unassigned",
+  });
 
   // Step 3: cap check.
   if (result.declinedCount >= MAX_DECLINES_BEFORE_ADMIN) {
@@ -219,6 +231,16 @@ export async function declineOrder(args: {
       reason: "concurrent_assignment_lost_race",
     };
   }
+
+  // Reassign committed: order now assigned to the NEW manufacturer. Emit with
+  // the new manufacturerId so that manufacturer's panel picks the order up.
+  await emitOrderChanged({
+    orderId,
+    orderNumber: result.orderNumber,
+    userId: result.userId,
+    manufacturerId: next.manufacturerId,
+    manufacturerStatus: "assigned",
+  });
 
   // Best-effort notification to the newly-assigned manufacturer.
   try {

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 export async function POST(
   request: NextRequest,
@@ -47,6 +48,14 @@ export async function POST(
     notes: body.notes || "Manually moved to review",
   });
   void d;
+
+  await emitOrderChanged({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    userId: order.userId,
+    manufacturerId: order.manufacturerId,
+    status: order.status,
+  });
 
   return NextResponse.json({ success: true });
 }

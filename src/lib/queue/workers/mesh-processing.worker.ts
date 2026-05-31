@@ -10,6 +10,7 @@ import type { MeshProcessingJobData } from "../queues";
 import { getFileBuffer, saveFile, getPublicUrl } from "../../services/storage";
 import { db } from "../../db";
 import { orders, generationAttempts, meshReports } from "../../db/schema";
+import { emitOrderChanged } from "../../realtime/emit";
 import { nanoid } from "nanoid";
 
 const execFileAsync = promisify(execFile);
@@ -18,10 +19,26 @@ async function processJob(job: Job<MeshProcessingJobData>) {
   const { orderId, generationId, glbKey } = job.data;
 
   // Update order status
-  await db
+  const [processingOrder] = await db
     .update(orders)
     .set({ status: "processing_mesh", updatedAt: new Date() })
-    .where(eq(orders.id, orderId));
+    .where(eq(orders.id, orderId))
+    .returning({
+      id: orders.id,
+      orderNumber: orders.orderNumber,
+      userId: orders.userId,
+      manufacturerId: orders.manufacturerId,
+    });
+
+  if (processingOrder) {
+    await emitOrderChanged({
+      orderId: processingOrder.id,
+      orderNumber: processingOrder.orderNumber,
+      userId: processingOrder.userId,
+      manufacturerId: processingOrder.manufacturerId,
+      status: "processing_mesh",
+    });
+  }
 
   // Create temp directory for processing
   const tempDir = await mkdtemp(join(tmpdir(), "mesh-"));
@@ -91,6 +108,16 @@ async function processJob(job: Job<MeshProcessingJobData>) {
       .set({ status: "review", updatedAt: new Date() })
       .where(eq(orders.id, orderId));
 
+    if (processingOrder) {
+      await emitOrderChanged({
+        orderId: processingOrder.id,
+        orderNumber: processingOrder.orderNumber,
+        userId: processingOrder.userId,
+        manufacturerId: processingOrder.manufacturerId,
+        status: "review",
+      });
+    }
+
     job.log("Mesh processing complete, order ready for review");
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "unknown";
@@ -104,6 +131,16 @@ async function processJob(job: Job<MeshProcessingJobData>) {
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+
+    if (processingOrder) {
+      await emitOrderChanged({
+        orderId: processingOrder.id,
+        orderNumber: processingOrder.orderNumber,
+        userId: processingOrder.userId,
+        manufacturerId: processingOrder.manufacturerId,
+        status: "failed_mesh",
+      });
+    }
 
     throw error;
   } finally {

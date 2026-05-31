@@ -8,6 +8,7 @@ import { getEmailQueue } from "@/lib/queue/queues";
 import { accrueEarning } from "@/lib/services/payouts";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { sendSms } from "@/lib/services/sms";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 export async function POST(
   request: NextRequest,
@@ -112,6 +113,15 @@ export async function POST(
         companyName: manufacturer.companyName,
       });
     }
+
+    await emitOrderChanged({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      userId: order.userId,
+      manufacturerId: order.manufacturerId,
+      status: order.status,
+      manufacturerStatus: order.manufacturerStatus,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

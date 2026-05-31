@@ -6,6 +6,7 @@ import { orders, adminActions } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 const MAX_BULK_SIZE = 50;
 
@@ -59,6 +60,14 @@ export async function POST(request: NextRequest) {
     orderNumber: string;
     customerName: string;
   }> = [];
+  const emitJobs: Array<{
+    orderId: string;
+    orderNumber: string;
+    userId: string | null;
+    manufacturerId: string | null;
+    status: string | null;
+    manufacturerStatus: string | null;
+  }> = [];
 
   await db.transaction(async (tx) => {
     for (const order of eligible) {
@@ -96,6 +105,15 @@ export async function POST(request: NextRequest) {
         customerName: order.customerName,
       });
 
+      emitJobs.push({
+        orderId: updated.id,
+        orderNumber: updated.orderNumber,
+        userId: updated.userId,
+        manufacturerId: updated.manufacturerId,
+        status: updated.status,
+        manufacturerStatus: updated.manufacturerStatus,
+      });
+
       processed++;
     }
   });
@@ -109,6 +127,11 @@ export async function POST(request: NextRequest) {
       customerName: job.customerName,
       locale,
     });
+  }
+
+  // Emit realtime change once per affected order after the transaction commits
+  for (const job of emitJobs) {
+    await emitOrderChanged(job);
   }
 
   return NextResponse.json({ success: true, processed, skipped });

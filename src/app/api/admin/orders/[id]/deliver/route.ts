@@ -7,6 +7,7 @@ import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 export async function POST(
   request: NextRequest,
@@ -45,6 +46,14 @@ export async function POST(
     action: "deliver",
     adminEmail: session.user.email,
     notes: body.notes,
+  });
+
+  await emitOrderChanged({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    userId: order.userId,
+    manufacturerId: order.manufacturerId,
+    status: order.status,
   });
 
   await getEmailQueue().add("delivered", {

@@ -5,6 +5,7 @@ import { orders, manufacturers, manufacturerActions, qcPhotos } from "@/lib/db/s
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { qcNextStatus, type ManufacturerOrderStatus } from "@/lib/services/qc";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 // Manufacturer submits the current round of QC photos for admin review:
 // printed | qc_rejected → qc_pending (order.status → quality_check).
@@ -95,6 +96,15 @@ export async function POST(
       companyName: manufacturer.companyName,
     });
   }
+
+  await emitOrderChanged({
+    orderId: updated.id,
+    orderNumber: updated.orderNumber,
+    userId: updated.userId,
+    manufacturerId: updated.manufacturerId,
+    status: updated.status,
+    manufacturerStatus: updated.manufacturerStatus,
+  });
 
   return NextResponse.json({ success: true });
 }

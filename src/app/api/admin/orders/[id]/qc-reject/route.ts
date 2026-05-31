@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { orders, adminActions, qcPhotos, qcReviews } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { qcNextStatus, type ManufacturerOrderStatus } from "@/lib/services/qc";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 const rejectSchema = z.object({ reason: z.string().trim().min(1).max(1000) });
 
@@ -35,6 +36,7 @@ export async function POST(
       qcRound: true,
       manufacturerId: true,
       orderNumber: true,
+      userId: true,
     },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
@@ -96,6 +98,14 @@ export async function POST(
       orderId: id,
     }).catch((e) => console.error("notifyManufacturer qc_reject failed", e));
   }
+
+  await emitOrderChanged({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    userId: order.userId,
+    manufacturerId: order.manufacturerId,
+    manufacturerStatus: next,
+  });
 
   return NextResponse.json({ success: true });
 }

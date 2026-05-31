@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { applyStrike } from "@/lib/services/strikes";
+import { emitOrderChanged } from "@/lib/realtime/emit";
 
 // Manufacturer cancels an order they already accepted (printer broke, out of
 // material, etc.). Unlike "decline" (only allowed while `assigned`), this is
@@ -88,6 +89,15 @@ export async function POST(
 
   // Reliability strike — auto-suspends past the threshold (Faz 3).
   await applyStrike(session.manufacturerId);
+
+  await emitOrderChanged({
+    orderId: updated.id,
+    orderNumber: updated.orderNumber,
+    userId: updated.userId,
+    manufacturerId: updated.manufacturerId,
+    status: updated.status,
+    manufacturerStatus: updated.manufacturerStatus,
+  });
 
   return NextResponse.json({ success: true });
 }

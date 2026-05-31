@@ -13,6 +13,9 @@ import { RealtimeRefresher } from "@/lib/realtime/refresher";
 export function ManufacturerRealtimeShell({ children }: { children: ReactNode }) {
   return (
     <RealtimeProvider url="/api/realtime/manufacturer">
+      {/* Order events re-pull server-rendered data (sidebar badge, order list,
+          order detail). Notification events are handled by the notifications
+          page's own subscription (it's a self-fetching client component). */}
       <RealtimeRefresher match={(e) => e.kind === "order"} />
       {children}
     </RealtimeProvider>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 
 interface Notification {
   id: string;
@@ -42,6 +43,12 @@ export default function ManufacturerNotificationsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  // Realtime: refresh the instant a new manufacturer notification arrives (this
+  // page is mounted inside the manufacturer RealtimeProvider).
+  useRealtimeEvent((e) => {
+    if (e.kind === "notification" && e.scope === "manufacturer") void load();
+  });
 
   const markAllRead = async () => {
     await fetch("/api/manufacturer/notifications", {

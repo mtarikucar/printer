@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 
 export interface ChatMessage {
   id: string;
@@ -20,10 +21,15 @@ export function useOrderChat({
   basePath,
   query = "",
   active,
+  orderId,
 }: {
   basePath: string;
   query?: string;
   active: boolean;
+  // When provided, only realtime message events for THIS order trigger a
+  // refresh. Omit on pre-scoped streams (e.g. the public track page, whose
+  // stream already carries a single order's events).
+  orderId?: string;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -52,6 +58,15 @@ export function useOrderChat({
       setError("load");
     }
   }, [listUrl]);
+
+  // Realtime: refresh the moment a message event for this order arrives via the
+  // surface's SSE stream. No-ops when rendered outside a RealtimeProvider, so
+  // the polling effect below remains the fallback.
+  useRealtimeEvent((e) => {
+    if (e.kind === "message" && (!orderId || e.orderId === orderId)) {
+      refresh();
+    }
+  });
 
   const markRead = useCallback(async () => {
     try {

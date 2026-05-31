@@ -1124,6 +1124,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                 key={chatTab}
                 basePath={`/api/admin/orders/${order.id}/messages`}
                 query={`?channel=${chatTab}`}
+                orderId={order.id}
               />
             )}
           </div>

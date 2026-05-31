@@ -5,6 +5,7 @@ import { orders, manufacturers } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { ManufacturerSidebar } from "./sidebar";
+import { ManufacturerRealtimeShell } from "./realtime-shell";
 
 export default async function ManufacturerLayout({
   children,
@@ -40,12 +41,14 @@ export default async function ManufacturerLayout({
   if (manufacturer.status !== "active") {
     return (
       <LocaleProvider locale={locale}>
-        <div className="min-h-screen bg-gray-50 flex">
-          <ManufacturerSidebar newAssignmentCount={0} />
-          <main className="flex-1 overflow-auto text-gray-900">
-            {children}
-          </main>
-        </div>
+        <ManufacturerRealtimeShell>
+          <div className="min-h-screen bg-gray-50 flex">
+            <ManufacturerSidebar newAssignmentCount={0} />
+            <main className="flex-1 overflow-auto text-gray-900">
+              {children}
+            </main>
+          </div>
+        </ManufacturerRealtimeShell>
       </LocaleProvider>
     );
   }
@@ -60,14 +63,16 @@ export default async function ManufacturerLayout({
 
   return (
     <LocaleProvider locale={locale}>
-      <div className="min-h-screen bg-gray-50 flex">
-        <ManufacturerSidebar
-          newAssignmentCount={assignedCount.count}
-        />
-        <main className="flex-1 overflow-auto text-gray-900">
-          {children}
-        </main>
-      </div>
+      <ManufacturerRealtimeShell>
+        <div className="min-h-screen bg-gray-50 flex">
+          <ManufacturerSidebar
+            newAssignmentCount={assignedCount.count}
+          />
+          <main className="flex-1 overflow-auto text-gray-900">
+            {children}
+          </main>
+        </div>
+      </ManufacturerRealtimeShell>
     </LocaleProvider>
   );
 }

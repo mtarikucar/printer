@@ -16,7 +16,11 @@ import type { RealtimeEvent } from "./events";
 export function useRealtimeEvent(handler: (e: RealtimeEvent) => void): void {
   const ctx = useRealtimeContext();
   const ref = useRef(handler);
-  ref.current = handler;
+  // Keep the ref pointing at the latest handler without re-subscribing. Updated
+  // in an effect (not during render) so an inline closure is safe.
+  useEffect(() => {
+    ref.current = handler;
+  });
 
   useEffect(() => {
     if (!ctx) return;

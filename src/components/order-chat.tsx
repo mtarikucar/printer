@@ -15,16 +15,18 @@ export function OrderChat({
   canSend = true,
   active = true,
   heightClass = "h-80",
+  orderId,
 }: {
   basePath: string;
   query?: string;
   canSend?: boolean;
   active?: boolean;
   heightClass?: string;
+  orderId?: string;
 }) {
   const d = useDictionary();
   const loc = useLocale() as Locale;
-  const { messages, loaded, error, sending, send } = useOrderChat({ basePath, query, active });
+  const { messages, loaded, error, sending, send } = useOrderChat({ basePath, query, active, orderId });
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);

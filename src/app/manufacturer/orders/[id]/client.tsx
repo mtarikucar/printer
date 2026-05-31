@@ -789,7 +789,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
               {d["manufacturer.orderDetail.chatTitle"]}
             </h2>
-            <OrderChat basePath={`/api/manufacturer/orders/${order.id}/messages`} />
+            <OrderChat basePath={`/api/manufacturer/orders/${order.id}/messages`} orderId={order.id} />
           </div>
 
           {/* Cancel-after-accept (returns to admin queue; counts as a strike) */}

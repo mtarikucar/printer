@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { RealtimeProvider } from "@/lib/realtime/provider";
+import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 import { OrderStatusTracker } from "@/components/order-status-tracker";
 import { ModelViewer } from "@/components/model-viewer";
 import { PublishToggle } from "@/components/publish-toggle";
@@ -116,6 +118,14 @@ export default function TrackPage({
   params: Promise<{ orderNumber: string }>;
 }) {
   const { orderNumber } = use(params);
+  return (
+    <RealtimeProvider url={`/api/realtime/track/${orderNumber}`}>
+      <TrackPageInner orderNumber={orderNumber} />
+    </RealtimeProvider>
+  );
+}
+
+function TrackPageInner({ orderNumber }: { orderNumber: string }) {
   const d = useDictionary();
   const locale = useLocale();
   const searchParams = useSearchParams();
@@ -135,6 +145,21 @@ export default function TrackPage({
   const [verifying, setVerifying] = useState(paymentParam === "success");
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [manualVerifying, setManualVerifying] = useState(false);
+
+  // Realtime: refetch this order the instant its status changes (the server
+  // pushes an `order` event on the track stream). The 30s poll below remains a
+  // fallback when the stream is unavailable.
+  const refetchOrder = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/track/${orderNumber}`);
+      if (res.ok) setOrder(await res.json());
+    } catch {
+      /* transient — the background poll will catch up */
+    }
+  }, [orderNumber]);
+  useRealtimeEvent((e) => {
+    if (e.kind === "order") refetchOrder();
+  });
 
   const handleRetryPayment = async () => {
     setRetrying(true);

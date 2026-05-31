@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { RealtimeProvider } from "@/lib/realtime/provider";
+import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
@@ -35,6 +37,14 @@ interface CustomerOrder {
 }
 
 export default function AccountPage() {
+  return (
+    <RealtimeProvider url="/api/realtime/customer">
+      <AccountPageInner />
+    </RealtimeProvider>
+  );
+}
+
+function AccountPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const d = useDictionary();
@@ -47,6 +57,24 @@ export default function AccountPage() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountPreview | null>(null);
   const [customerOrders, setCustomerOrders] = useState<CustomerOrder[]>([]);
+
+  // Realtime: refetch the orders list when any of the customer's orders changes
+  // status. The notification bell (rendered below, inside the provider) also
+  // refreshes itself on notification events.
+  const refetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/customer/orders");
+      if (res.ok) {
+        const data = await res.json();
+        setCustomerOrders(data.orders || []);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useRealtimeEvent((e) => {
+    if (e.kind === "order") refetchOrders();
+  });
 
   useEffect(() => {
     async function load() {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 
 interface Notif {
   id: string;
@@ -45,6 +46,12 @@ export function NotificationBell() {
       clearInterval(t);
     };
   }, [load]);
+
+  // Realtime: refresh the instant a notification arrives (when mounted inside a
+  // customer RealtimeProvider). The 30s poll above stays as a fallback.
+  useRealtimeEvent((e) => {
+    if (e.kind === "notification" && e.scope === "customer") load();
+  });
 
   const toggle = async () => {
     const next = !open;

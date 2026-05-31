@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { orders, manufacturers, orderDrafts } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { AdminSidebar } from "./sidebar";
+import { AdminRealtimeShell } from "./realtime-shell";
 import { auth } from "@/lib/auth/config";
 
 export default async function AdminLayout({
@@ -65,14 +66,16 @@ export default async function AdminLayout({
     .where(sql`${orders.manufacturerStatus} = 'qc_pending'`);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <AdminSidebar
-        reviewCount={reviewCount.count}
-        pendingManufacturerCount={pendingMfgCount.count}
-        draftReviewCount={draftReviewCount.count}
-        qcPendingCount={qcPendingCount.count}
-      />
-      <main className="flex-1 overflow-auto text-gray-900">{children}</main>
-    </div>
+    <AdminRealtimeShell>
+      <div className="min-h-screen bg-gray-50 flex">
+        <AdminSidebar
+          reviewCount={reviewCount.count}
+          pendingManufacturerCount={pendingMfgCount.count}
+          draftReviewCount={draftReviewCount.count}
+          qcPendingCount={qcPendingCount.count}
+        />
+        <main className="flex-1 overflow-auto text-gray-900">{children}</main>
+      </div>
+    </AdminRealtimeShell>
   );
 }

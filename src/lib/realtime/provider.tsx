@@ -31,8 +31,8 @@ export function RealtimeProvider({
   url: string;
   children: ReactNode;
 }) {
-  const listenersRef = useRef<Set<Listener>>(null as unknown as Set<Listener>);
-  if (listenersRef.current === null) listenersRef.current = new Set();
+  // Stable per-instance listener set (useRef ignores the arg after first render).
+  const listenersRef = useRef<Set<Listener>>(new Set());
 
   useEffect(() => {
     const es = new EventSource(url, { withCredentials: true });

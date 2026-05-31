@@ -32,3 +32,18 @@ export function RealtimeRefresher({
 
   return null;
 }
+
+/**
+ * Like RealtimeRefresher, but calls a custom handler instead of router.refresh().
+ * For client-fetched pages (e.g. the public track page, the account orders list)
+ * that own their data via fetch() rather than server components. Mount inside a
+ * RealtimeProvider; the handler is held in a ref so an inline closure is fine.
+ */
+export function RealtimeReactor({
+  on,
+}: {
+  on: (e: RealtimeEvent) => void;
+}) {
+  useRealtimeEvent(on);
+  return null;
+}

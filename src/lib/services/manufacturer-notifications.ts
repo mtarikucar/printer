@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers, manufacturerNotifications } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { emitManufacturerNotification } from "@/lib/realtime/emit";
 
 export type ManufacturerNotificationType =
   | "order_assigned"
@@ -51,6 +52,9 @@ export async function notifyManufacturer({
       body,
     })
     .returning({ id: manufacturerNotifications.id });
+
+  // Realtime: nudge the manufacturer's notification surface to refetch.
+  await emitManufacturerNotification(manufacturerId).catch(() => {});
 
   try {
     await getEmailQueue().add("manufacturer-notification", {

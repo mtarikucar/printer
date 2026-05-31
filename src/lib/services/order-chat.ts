@@ -2,7 +2,8 @@ import { eq, and, asc, isNull, ne } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
 import { db } from "@/lib/db";
-import { messages } from "@/lib/db/schema";
+import { messages, orders } from "@/lib/db/schema";
+import { emitOrderMessage } from "@/lib/realtime/emit";
 import { saveFile, getPublicUrl } from "@/lib/services/storage";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
 import {
@@ -81,6 +82,28 @@ export async function createOrderMessage(args: {
       flagged: containsContactInfo(args.body),
     })
     .returning({ id: messages.id });
+
+  // Realtime: push to the counterpart surface(s) so the chat updates without a
+  // poll. Best-effort — a realtime failure must never fail the message write.
+  try {
+    const ord = await db.query.orders.findFirst({
+      where: eq(orders.id, args.orderId),
+      columns: { orderNumber: true, userId: true, manufacturerId: true },
+    });
+    if (ord) {
+      await emitOrderMessage({
+        orderId: args.orderId,
+        orderNumber: ord.orderNumber,
+        channel: args.channel,
+        senderType: args.senderType,
+        userId: ord.userId,
+        manufacturerId: ord.manufacturerId,
+      });
+    }
+  } catch {
+    /* best-effort realtime */
+  }
+
   return row.id;
 }
 

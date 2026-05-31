@@ -7,6 +7,7 @@ import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 export async function POST(
   request: NextRequest,
@@ -70,6 +71,18 @@ export async function POST(
     manufacturerId: order.manufacturerId,
     status: order.status,
   });
+
+  // If the order was assigned to a manufacturer, tell them it's cancelled
+  // (inbox + email + realtime) so an offline manufacturer doesn't keep working.
+  if (order.manufacturerId) {
+    await notifyManufacturer({
+      manufacturerId: order.manufacturerId,
+      type: "order_cancelled",
+      subject: `Sipariş ${order.orderNumber} iptal edildi`,
+      body: order.failureReason || "Sipariş yönetici tarafından iptal edildi.",
+      orderId: id,
+    }).catch((e) => console.error("notifyManufacturer (reject) failed", e));
+  }
 
   return NextResponse.json({ success: true });
 }

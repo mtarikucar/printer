@@ -6,6 +6,7 @@ import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { applyStrike } from "@/lib/services/strikes";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { getEmailQueue } from "@/lib/queue/queues";
 
 // Manufacturer cancels an order they already accepted (printer broke, out of
 // material, etc.). Unlike "decline" (only allowed while `assigned`), this is
@@ -31,7 +32,7 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const manufacturer = await db.query.manufacturers.findFirst({
     where: eq(manufacturers.id, session.manufacturerId),
-    columns: { status: true },
+    columns: { status: true, companyName: true },
   });
   if (!manufacturer || manufacturer.status !== "active") {
     return NextResponse.json({ error: "Your account is not active" }, { status: 403 });
@@ -98,6 +99,24 @@ export async function POST(
     status: updated.status,
     manufacturerStatus: updated.manufacturerStatus,
   });
+
+  // Alert admin by email — admin has no inbox; the realtime emit above already
+  // returns the order to the admin queue live, this adds the offline reach.
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (adminEmail) {
+    await getEmailQueue()
+      .add("manufacturer-cancelled", {
+        type: "manufacturer_cancelled",
+        to: adminEmail,
+        adminEmail,
+        orderNumber: updated.orderNumber,
+        customerName: manufacturer.companyName,
+        companyName: manufacturer.companyName,
+        cancelReason: reason,
+        locale: "tr",
+      })
+      .catch((e) => console.error("manufacturer-cancelled email enqueue failed", e));
+  }
 
   return NextResponse.json({ success: true });
 }

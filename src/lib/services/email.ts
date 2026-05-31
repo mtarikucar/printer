@@ -7,10 +7,12 @@ const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
   secure: process.env.SMTP_PORT === "465",
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
+  // Only authenticate when credentials are actually configured. Passing an
+  // auth object with empty user/pass makes nodemailer attempt PLAIN auth and
+  // throw "Missing credentials" against auth-less relays (e.g. local mailpit).
+  auth: process.env.SMTP_USER
+    ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    : undefined,
 });
 
 const FROM_EMAIL = process.env.SMTP_FROM || "Figurine Studio <siparis@figurunica.com>";
@@ -46,6 +48,7 @@ interface SendEmailParams {
     | "manufacturer_notification"
     | "guest_account_claim"
     | "qc_submitted"
+    | "manufacturer_cancelled"
     | "new_message";
   to: string;
   orderNumber: string;
@@ -54,6 +57,7 @@ interface SendEmailParams {
   adminEmail?: string;
   manufacturerEmail?: string;
   companyName?: string;
+  cancelReason?: string;
   photoUrl?: string;
   glbUrl?: string;
   revisionNote?: string;
@@ -351,6 +355,23 @@ function getTemplates(locale: Locale) {
       `,
     }),
 
+    // Internal admin alert: a manufacturer cancelled an order they had accepted.
+    manufacturer_cancelled: (p) => ({
+      subject: `Üretici siparişi iptal etti — ${escHtml(p.orderNumber)}`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">Üretici siparişi iptal etti</h1>
+          <p><strong>${escHtml(p.companyName || "Üretici")}</strong>, <strong>${escHtml(p.orderNumber)}</strong> numaralı siparişi kabul ettikten sonra iptal etti. Sipariş yeniden atama için yönetici kuyruğuna döndü.</p>
+          ${p.cancelReason ? `<p style="color:#6b7280;">Sebep: ${escHtml(p.cancelReason)}</p>` : ""}
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/admin/orders"
+             style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
+            Siparişler
+          </a>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
+
     bank_transfer_instructions: (p) => ({
       subject: d["email.bankTransfer.subject"].replace("{orderNumber}", escHtml(p.orderNumber)),
       html: `
@@ -505,6 +526,7 @@ const RECIPIENT_OVERRIDES: Partial<
   manufacturer_shipped: (p) => p.adminEmail,
   revision_request: (p) => p.adminEmail,
   qc_submitted: (p) => p.adminEmail,
+  manufacturer_cancelled: (p) => p.adminEmail,
 };
 
 function resolveRecipient(params: SendEmailParams): string {

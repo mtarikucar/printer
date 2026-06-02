@@ -9,7 +9,7 @@ import { manufacturerNotifications } from "../../db/schema";
 async function processJob(job: Job<EmailJobData>) {
   const {
     type, to, orderNumber, customerName, trackingNumber, locale,
-    adminEmail, manufacturerEmail, companyName,
+    adminEmail, manufacturerEmail, companyName, cancelReason,
     photoUrl, glbUrl, revisionNote,
     giftCardCode, giftCardAmount, giftCardMessage, senderName,
     customSubject, customBody,
@@ -23,7 +23,7 @@ async function processJob(job: Job<EmailJobData>) {
   try {
     await sendEmail({
       type, to, orderNumber, customerName, trackingNumber, locale,
-      adminEmail, manufacturerEmail, companyName,
+      adminEmail, manufacturerEmail, companyName, cancelReason,
       photoUrl, glbUrl, revisionNote,
       giftCardCode, giftCardAmount, giftCardMessage, senderName,
       customSubject, customBody,

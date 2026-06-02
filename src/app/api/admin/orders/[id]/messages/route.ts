@@ -117,7 +117,8 @@ export async function POST(
       manufacturerId: order.manufacturerId,
       type: "admin_message",
       subject: `Sipariş ${order.orderNumber} — yeni mesaj`,
-      body,
+      // Attachment-only replies have an empty body; don't send a blank inbox/email.
+      body: body || "Yeni bir ek dosya gönderildi.",
       orderId: id,
     }).catch((e) => console.error("notifyManufacturer (chat) failed", e));
   }

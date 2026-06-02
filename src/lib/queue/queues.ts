@@ -45,6 +45,7 @@ export interface EmailJobData {
     | "payment_expired"
     | "manufacturer_notification"
     | "qc_submitted"
+    | "manufacturer_cancelled"
     | "new_message";
   to: string;
   orderNumber: string;
@@ -53,6 +54,7 @@ export interface EmailJobData {
   adminEmail?: string;
   manufacturerEmail?: string;
   companyName?: string;
+  cancelReason?: string;
   photoUrl?: string;
   glbUrl?: string;
   revisionNote?: string;

@@ -160,6 +160,12 @@ jobs:
             fi
 
             # ─── 2. Login to GHCR & Pull images ─────────────────────
+            # Pre-deploy disk cleanup
+            log "Disk temizleniyor..."
+            docker image prune -af --filter "until=12h" > /dev/null 2>&1 || true
+            docker builder prune -af > /dev/null 2>&1 || true
+            rm -f "$PROJECT_DIR"/backup_predeploy_*.sql 2>/dev/null || true
+            log "Disk temizlendi: $(df -h / | tail -1 | awk '{ print $4 }') bos"
             log "Image'lar cekiliyor..."
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker pull "${IMAGE_BASE}/app:${IMAGE_TAG}"

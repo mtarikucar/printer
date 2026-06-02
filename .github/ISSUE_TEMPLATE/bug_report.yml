@@ -1,0 +1,75 @@
+---
+name: Bug Report
+description: Bir hata bildirin
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Hatayı bildirdiğiniz için teşekkürler! Lütfen aşağıdaki bilgileri mümkün olduğunca detaylı doldurun.
+  - type: textarea
+    id: description
+    attributes:
+      label: Hata Açıklaması
+      description: Hatayı kısaca açıklayın
+      placeholder: Ne oldu?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Tekrarlama Adımları
+      description: Hatayı tekrarlamak için gereken adımlar
+      placeholder: |
+        1. '...' sayfasına git
+        2. '...' butonuna tıkla
+        3. Hatayı gör
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Beklenen Davranış
+      description: Ne olmasını bekliyordunuz?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Gerçekleşen Davranış
+      description: Bunun yerine ne oldu?
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Önem Derecesi
+      options:
+        - Kritik (Sistem çalışmıyor)
+        - Yüksek (Ana özellik bozuk)
+        - Orta (Küçük özellik bozuk)
+        - Düşük (Kozmetik/UI)
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Ortam
+      options:
+        - Production
+        - Staging
+        - Local
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Loglar / Ekran Görüntüsü
+      description: Konsol hataları, sunucu logları veya ekran görüntüleri
+  - type: textarea
+    id: context
+    attributes:
+      label: Ek Bilgi
+      description: Tarayıcı, cihaz, kullanıcı bilgisi vs.

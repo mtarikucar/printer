@@ -1,0 +1,47 @@
+---
+name: Database Change
+description: Veritabanı değişikliği gerektiren iş
+title: "[DB] "
+labels: ["database", "migration"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Veritabanı değişikliği talebi. Migration gerektirir.
+  - type: textarea
+    id: description
+    attributes:
+      label: Değişiklik Açıklaması
+      description: Hangi tablo/kolon/enum değişecek?
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Değişiklik Türü
+      options:
+        - Yeni tablo
+        - Yeni kolon
+        - Kolon tipi değişikliği
+        - Yeni enum / enum değeri
+        - Index ekleme
+        - Veri migrasyonu
+        - Tablo/kolon silme
+    validations:
+      required: true
+  - type: textarea
+    id: sql
+    attributes:
+      label: SQL / Schema Değişikliği
+      description: Varsa SQL veya Drizzle schema değişikliği
+      render: sql
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Kontrol Listesi
+      options:
+        - label: Migration dosyası oluşturuldu
+        - label: Staging'de test edildi
+        - label: Production'da uygulandı
+        - label: Rollback planı hazır

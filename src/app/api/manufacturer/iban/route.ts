@@ -14,6 +14,20 @@ export async function PATCH(request: NextRequest) {
   const session = await getManufacturerSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // IBAN is a payout-sensitive field. Mirror the profile route's gate: only an
+  // active account may stage a payout-IBAN change. A 7-day session that outlives
+  // a suspension must not be able to redirect payouts.
+  const current = await db.query.manufacturers.findFirst({
+    where: eq(manufacturers.id, session.manufacturerId),
+    columns: { status: true },
+  });
+  if (!current || current.status !== "active") {
+    return NextResponse.json(
+      { error: "Hesabınız aktif değil; IBAN değişikliği yapılamaz." },
+      { status: 403 }
+    );
+  }
+
   const body = await request.json().catch(() => ({}));
   const parsed = schema.safeParse(body);
   if (!parsed.success) {

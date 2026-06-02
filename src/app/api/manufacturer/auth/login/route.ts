@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import {
@@ -8,6 +8,12 @@ import {
   setManufacturerSessionCookie,
 } from "@/lib/services/manufacturer-auth";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
+
+// A valid (bcryptjs $2b$12$) hash of a random throwaway string. Compared against
+// when the email is unknown so login timing is constant regardless of whether
+// the account exists — closes the user-enumeration oracle.
+const DUMMY_PASSWORD_HASH =
+  "$2b$12$utgd4Q/94rLXhJkG9wIHVe8LPzCmfhKc6IoCR0lSVPgAv5qADycfC";
 
 export async function POST(request: NextRequest) {
   const ip = extractClientIp(request);
@@ -30,19 +36,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Case-insensitive lookup so 'Foo@x.com' and 'foo@x.com' resolve to the same
+    // account (registration also normalizes), preventing duplicate/lockout.
     const manufacturer = await db.query.manufacturers.findFirst({
-      where: eq(manufacturers.email, email),
+      where: sql`lower(${manufacturers.email}) = ${String(email).toLowerCase()}`,
     });
 
-    if (!manufacturer) {
-      return NextResponse.json(
-        { error: "Invalid email or password" },
-        { status: 401 }
-      );
-    }
-
-    const valid = await verifyPassword(password, manufacturer.passwordHash);
-    if (!valid) {
+    // Always run a bcrypt comparison — even when the email is unknown — so the
+    // response time doesn't reveal whether an email is a registered manufacturer.
+    const hashToCheck = manufacturer?.passwordHash ?? DUMMY_PASSWORD_HASH;
+    const valid = await verifyPassword(password, hashToCheck);
+    if (!manufacturer || !valid) {
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }

@@ -1,7 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
-import { shouldAutoSuspend } from "@/lib/services/performance";
+import { STRIKE_SUSPEND_THRESHOLD } from "@/lib/services/performance";
 
 // Record a reliability strike and auto-suspend the manufacturer once they reach
 // the threshold (Faz 3 policy). Returns the new count + whether they were
@@ -19,12 +19,21 @@ export async function applyStrike(
     });
   if (!row) return { strikeCount: 0, suspended: false };
 
-  if (shouldAutoSuspend(row.strikeCount) && row.status === "active") {
-    await db
-      .update(manufacturers)
-      .set({ status: "suspended", updatedAt: new Date() })
-      .where(eq(manufacturers.id, manufacturerId));
-    return { strikeCount: row.strikeCount, suspended: true };
-  }
-  return { strikeCount: row.strikeCount, suspended: false };
+  // Auto-suspend atomically: gate the transition on the row STILL being active
+  // AND over threshold in the same statement. Doing the check off the earlier
+  // snapshot (row.status) races an admin re-activation in the gap and could
+  // clobber it; the guarded UPDATE only suspends if it's genuinely still active.
+  const [suspendedRow] = await db
+    .update(manufacturers)
+    .set({ status: "suspended", updatedAt: new Date() })
+    .where(
+      and(
+        eq(manufacturers.id, manufacturerId),
+        eq(manufacturers.status, "active"),
+        gte(manufacturers.strikeCount, STRIKE_SUSPEND_THRESHOLD)
+      )
+    )
+    .returning({ id: manufacturers.id });
+
+  return { strikeCount: row.strikeCount, suspended: !!suspendedRow };
 }

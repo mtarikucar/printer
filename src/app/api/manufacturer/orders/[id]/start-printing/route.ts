@@ -59,13 +59,17 @@ export async function POST(
     action: "start_printing",
   });
 
-  // Notify customer
-  await getEmailQueue().add("printing", {
-    type: "order_printing",
-    to: order.email,
-    orderNumber: order.orderNumber,
-    customerName: order.customerName,
-  });
+  // Notify customer — non-fatal: the status transition is already committed, so
+  // a queue/Redis blip must not surface as a 500 that makes the manufacturer
+  // retry against a guard that no longer matches.
+  await getEmailQueue()
+    .add("printing", {
+      type: "order_printing",
+      to: order.email,
+      orderNumber: order.orderNumber,
+      customerName: order.customerName,
+    })
+    .catch((e) => console.error("printing email enqueue failed", e));
 
   await emitOrderChanged({
     orderId: order.id,

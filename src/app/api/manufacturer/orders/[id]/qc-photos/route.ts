@@ -86,9 +86,11 @@ export async function POST(
     const ext = isPng ? "png" : "jpg";
 
     // Re-encode through sharp to strip EXIF/GPS metadata (sharp drops metadata
-    // by default) and produce a thumbnail. Fall back to the raw buffer if sharp
-    // can't process the image.
-    let mainBuffer: Buffer = buffer;
+    // by default) and produce a thumbnail. If sharp can't process the image we
+    // REJECT it rather than persisting the raw upload — a raw write would keep
+    // EXIF/GPS metadata and could store a magic-byte-valid polyglot that is
+    // later served (potential stored-XSS / data leak via the file endpoint).
+    let mainBuffer: Buffer;
     let thumbnailKey: string | null = null;
     try {
       const oriented = sharp(buffer).rotate();
@@ -103,8 +105,10 @@ export async function POST(
         .toBuffer();
       thumbnailKey = await saveFile(thumb, "qc-photos", `${nanoid()}.jpg`);
     } catch {
-      mainBuffer = buffer;
-      thumbnailKey = null;
+      return NextResponse.json(
+        { error: "Görsel işlenemedi; lütfen geçerli bir JPEG/PNG yükleyin." },
+        { status: 400 }
+      );
     }
 
     const storageKey = await saveFile(mainBuffer, "qc-photos", `${nanoid()}.${ext}`);

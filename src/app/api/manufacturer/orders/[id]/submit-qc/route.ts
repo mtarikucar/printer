@@ -87,14 +87,17 @@ export async function POST(
   // Notify admin there's a QC review waiting (recipient overridden to adminEmail).
   const adminEmail = process.env.ADMIN_EMAIL;
   if (adminEmail) {
-    await getEmailQueue().add("qc-submitted", {
-      type: "qc_submitted",
-      to: order.email,
-      adminEmail,
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
-      companyName: manufacturer.companyName,
-    });
+    // Non-fatal: status already committed, don't 500 on a queue blip.
+    await getEmailQueue()
+      .add("qc-submitted", {
+        type: "qc_submitted",
+        to: order.email,
+        adminEmail,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        companyName: manufacturer.companyName,
+      })
+      .catch((e) => console.error("qc-submitted email enqueue failed", e));
   }
 
   await emitOrderChanged({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
@@ -81,8 +81,13 @@ export async function POST(request: NextRequest) {
       requiresManualTaxReview = false;
     }
 
+    // Normalize email to lowercase so case variants can't create duplicate
+    // accounts or bypass the "already registered" check (login matches case-
+    // insensitively too).
+    const normalizedEmail = validated.email.toLowerCase();
+
     const existing = await db.query.manufacturers.findFirst({
-      where: eq(manufacturers.email, validated.email),
+      where: sql`lower(${manufacturers.email}) = ${normalizedEmail}`,
     });
     if (existing) {
       return NextResponse.json(
@@ -105,7 +110,7 @@ export async function POST(request: NextRequest) {
     const [manufacturer] = await db
       .insert(manufacturers)
       .values({
-        email: validated.email,
+        email: normalizedEmail,
         passwordHash,
         companyName: validated.companyName,
         contactPerson: validated.contactPerson,

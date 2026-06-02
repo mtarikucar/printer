@@ -78,40 +78,47 @@ export async function POST(
       (e) => console.error("accrueEarning failed (non-fatal)", e)
     );
 
-    // Faz 4: in-app notification + best-effort SMS
+    // Faz 4: in-app notification + best-effort SMS. All side-effects below run
+    // AFTER the irreversible status commit, so each is non-fatal — a failure in
+    // one must not abort the rest (esp. emitOrderChanged) or surface a false 500
+    // for an order that is actually shipped.
     await notifyCustomer({
       userId: order.userId,
       orderId: order.id,
       type: "order_shipped",
       title: "Siparişiniz kargolandı",
       body: `${order.orderNumber} numaralı siparişiniz kargoya verildi. Takip no: ${validated.trackingNumber}`,
-    });
+    }).catch((e) => console.error("notifyCustomer (shipped) failed", e));
     await sendSms(
       order.phone,
       `Figurünica: ${order.orderNumber} siparişiniz kargolandı. Takip: ${validated.trackingNumber}`
-    );
+    ).catch((e) => console.error("sendSms (shipped) failed", e));
 
     // Notify customer
-    await getEmailQueue().add("shipped", {
-      type: "order_shipped",
-      to: order.email,
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
-      trackingNumber: validated.trackingNumber,
-    });
+    await getEmailQueue()
+      .add("shipped", {
+        type: "order_shipped",
+        to: order.email,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        trackingNumber: validated.trackingNumber,
+      })
+      .catch((e) => console.error("shipped email enqueue failed", e));
 
     // Notify admin with manufacturer-specific email
     const adminEmail = process.env.ADMIN_EMAIL;
     if (adminEmail) {
-      await getEmailQueue().add("manufacturer-shipped", {
-        type: "manufacturer_shipped",
-        to: order.email,
-        adminEmail,
-        orderNumber: order.orderNumber,
-        customerName: order.customerName,
-        trackingNumber: validated.trackingNumber,
-        companyName: manufacturer.companyName,
-      });
+      await getEmailQueue()
+        .add("manufacturer-shipped", {
+          type: "manufacturer_shipped",
+          to: order.email,
+          adminEmail,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          trackingNumber: validated.trackingNumber,
+          companyName: manufacturer.companyName,
+        })
+        .catch((e) => console.error("manufacturer-shipped email enqueue failed", e));
     }
 
     await emitOrderChanged({

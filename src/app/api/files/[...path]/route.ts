@@ -49,6 +49,10 @@ export async function GET(
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": contentType,
+        // Never let the browser MIME-sniff a stored upload into an executable
+        // type — defuses a polyglot (valid image header + HTML/JS body) being
+        // served and run in our origin.
+        "X-Content-Type-Options": "nosniff",
         // Signed URLs are unique per `exp` value, so we can still cache them
         // aggressively. Unsigned (legacy) URLs cache as before.
         "Cache-Control": signatureValid

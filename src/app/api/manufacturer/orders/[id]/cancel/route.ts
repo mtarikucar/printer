@@ -62,6 +62,10 @@ export async function POST(
       declinedManufacturerIds: Array.from(new Set([...declined, session.manufacturerId])),
       assignedToManufacturerAt: null,
       manufacturerAcceptedAt: null,
+      // Durable admin flag so the order is visibly back in the manual queue even
+      // if ADMIN_EMAIL is unset / the alert email fails (mirrors decline's N12
+      // adminNotes). Append, don't overwrite a concurrent note.
+      adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${"[İPTAL] Üretici kabul sonrası iptal etti — manuel atama gerekli."} ELSE ${orders.adminNotes} || E'\n' || ${"[İPTAL] Üretici kabul sonrası iptal etti — manuel atama gerekli."} END`,
       // Fresh QC round for the next manufacturer; prior photos stay as audit.
       qcRound: sql`${orders.qcRound} + 1`,
       updatedAt: new Date(),

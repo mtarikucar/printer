@@ -159,9 +159,18 @@ export async function rankManufacturersForOrder(
 ): Promise<CandidateScore[]> {
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
-    columns: { shippingAddress: true, material: true },
+    columns: { shippingAddress: true, material: true, declinedManufacturerIds: true },
   });
   if (!order) return [];
+
+  // Manufacturers who already declined or cancelled-after-accept for THIS order
+  // must not be re-offered it — otherwise the admin candidate list (and any
+  // auto-assignment caller) can ping-pong the order back to a refusing partner.
+  const declinedIds = new Set(
+    Array.isArray(order.declinedManufacturerIds)
+      ? (order.declinedManufacturerIds as string[])
+      : []
+  );
 
   const weights = getAssignmentWeights(profile);
 
@@ -233,7 +242,10 @@ export async function rankManufacturersForOrder(
       // Material hard-filter: an order routes only to manufacturers that declare
       // they print its material. Legacy manufacturers with no declared material
       // tags are treated as able to print any material (manufacturerSupportsMaterial).
-      if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
+      if (declinedIds.has(m.id)) {
+        eligible = false;
+        ineligibleReason = "Bu siparişi daha önce reddetti / iptal etti";
+      } else if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
         eligible = false;
         ineligibleReason = `Malzeme uyumsuz (${MATERIAL_LABEL_TR[orderMaterial] ?? orderMaterial})`;
       } else if (!m.acceptingOrders) {

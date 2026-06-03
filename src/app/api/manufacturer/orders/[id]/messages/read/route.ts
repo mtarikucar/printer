@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { markChannelRead } from "@/lib/services/order-chat";
+import { getNotificationQueue, mfgMessageEmailJobId } from "@/lib/queue/queues";
 
 export async function POST(
   request: NextRequest,
@@ -19,5 +20,12 @@ export async function POST(
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
 
   await markChannelRead(order.id, "manufacturer_admin", "counterparty");
+
+  // Manufacturer has now seen the thread — cancel any pending "unread message"
+  // email scheduled by the admin messages route.
+  await getNotificationQueue()
+    .remove(mfgMessageEmailJobId(order.id))
+    .catch(() => {});
+
   return NextResponse.json({ success: true });
 }

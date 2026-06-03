@@ -7,6 +7,7 @@ import { startPreviewCleanupWorker } from "../src/lib/queue/workers/preview-clea
 import { startPaymentDeadlineWorker } from "../src/lib/queue/workers/payment-deadline.worker";
 import { startDekontOcrWorker } from "../src/lib/queue/workers/dekont-ocr.worker";
 import { startScoringEvaluationsCleanupWorker } from "../src/lib/queue/workers/scoring-evaluations-cleanup.worker";
+import { startNotificationWorker } from "../src/lib/queue/workers/notification.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -22,6 +23,7 @@ const cleanupWorker = startPreviewCleanupWorker();
 const paymentDeadlineWorker = startPaymentDeadlineWorker();
 const dekontOcrWorker = startDekontOcrWorker();
 const scoringEvalCleanupWorker = startScoringEvaluationsCleanupWorker();
+const notificationWorker = startNotificationWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -46,6 +48,7 @@ console.log("  - preview-cleanup (repeatable: every 1h)");
 console.log("  - payment-deadline (concurrency: 2)");
 console.log("  - dekont-ocr (concurrency: 2)");
 console.log("  - scoring-evaluations-cleanup (repeatable: every 24h)");
+console.log("  - notification (concurrency: 5)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -58,6 +61,7 @@ async function shutdown() {
     paymentDeadlineWorker.close(),
     dekontOcrWorker.close(),
     scoringEvalCleanupWorker.close(),
+    notificationWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

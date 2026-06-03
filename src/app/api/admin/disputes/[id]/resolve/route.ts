@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { disputes } from "@/lib/db/schema";
 import { reverseEarning } from "@/lib/services/payouts";
 import { applyStrike } from "@/lib/services/strikes";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 const schema = z.object({
   action: z.enum(["resolve", "reject"]),
@@ -53,6 +54,13 @@ export async function POST(
   if (parsed.data.action === "resolve" && parsed.data.clawback) {
     await reverseEarning(dispute.order.id);
     if (dispute.order.manufacturerId) {
+      await notifyManufacturer({
+        manufacturerId: dispute.order.manufacturerId,
+        type: "system_announcement",
+        subject: "Sipariş anlaşmazlığı sonucu hak ediş iadesi",
+        body: "Bir müşteri anlaşmazlığı sizin aleyhinize sonuçlandığı için ilgili siparişin hak edişi geri alındı ve hesabınıza bir ihlal kaydı işlendi. Detaylar için üretici panelinizi inceleyin.",
+        orderId: dispute.order.id,
+      }).catch((e) => console.error("notifyManufacturer (clawback) failed", e));
       await applyStrike(dispute.order.manufacturerId);
     }
   }

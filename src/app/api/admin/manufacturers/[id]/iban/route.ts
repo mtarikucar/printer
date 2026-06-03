@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 const schema = z.object({ action: z.enum(["approve", "reject"]) });
 
@@ -48,6 +49,19 @@ export async function POST(
       .set({ pendingIban: null, ibanReviewStatus: "none", updatedAt: new Date() })
       .where(eq(manufacturers.id, id));
   }
+
+  await notifyManufacturer({
+    manufacturerId: id,
+    type: "system_announcement",
+    subject:
+      parsed.data.action === "approve"
+        ? "IBAN değişikliğiniz onaylandı"
+        : "IBAN değişikliğiniz reddedildi",
+    body:
+      parsed.data.action === "approve"
+        ? "Yeni IBAN bilginiz onaylandı ve ödemeleriniz bu hesaba yapılacaktır."
+        : "IBAN değişiklik talebiniz reddedildi. Mevcut IBAN bilginiz korunmaktadır. Lütfen bilgileri kontrol edip tekrar deneyin.",
+  }).catch((e) => console.error("notifyManufacturer (iban) failed", e));
 
   return NextResponse.json({ success: true });
 }

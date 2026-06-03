@@ -2,6 +2,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import { STRIKE_SUSPEND_THRESHOLD } from "@/lib/services/performance";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 // Record a reliability strike and auto-suspend the manufacturer once they reach
 // the threshold (Faz 3 policy). Returns the new count + whether they were
@@ -34,6 +35,15 @@ export async function applyStrike(
       )
     )
     .returning({ id: manufacturers.id });
+
+  if (suspendedRow) {
+    await notifyManufacturer({
+      manufacturerId,
+      type: "system_announcement",
+      subject: "Hesabınız askıya alındı",
+      body: "Tekrar eden olumsuzluklar (geç kargo, iptal veya kalite sorunları) nedeniyle üretici hesabınız otomatik olarak askıya alındı. Yeni sipariş alamazsınız. Durumu görüşmek için lütfen bizimle iletişime geçin.",
+    }).catch((e) => console.error("notifyManufacturer (auto-suspend) failed", e));
+  }
 
   return { strikeCount: row.strikeCount, suspended: !!suspendedRow };
 }

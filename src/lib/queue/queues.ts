@@ -100,6 +100,7 @@ let previewCleanupQueue: Queue | null = null;
 let paymentDeadlineQueue: Queue | null = null;
 let dekontOcrQueue: Queue | null = null;
 let scoringEvaluationsCleanupQueue: Queue | null = null;
+let notificationQueue: Queue | null = null;
 
 export function getAiGenerationQueue(): Queue {
   if (!aiGenerationQueue) {
@@ -217,6 +218,29 @@ export function getDekontOcrQueue(): Queue {
   return dekontOcrQueue;
 }
 
+// Delayed/cancellable notifications (e.g. "manufacturer has an unread chat
+// message for N minutes" → email). Jobs are scheduled with a stable jobId so a
+// burst of messages keeps a single pending email, and the read-receipt route
+// can remove it.
+export function getNotificationQueue(): Queue {
+  if (!notificationQueue) {
+    notificationQueue = new Queue("notification", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 30000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return notificationQueue;
+}
+
+export interface ManufacturerMessageEmailJobData {
+  orderId: string;
+}
+
 // Job IDs are keyed by draft id (matches the new draft-based payment lifecycle).
 export function havaleReminderJobId(draftId: string): string {
   return `havale-reminder-${draftId}`;
@@ -224,4 +248,9 @@ export function havaleReminderJobId(draftId: string): string {
 
 export function havaleExpireJobId(draftId: string): string {
   return `havale-expire-${draftId}`;
+}
+
+// Keyed by order id: one pending unread-message email per order at a time.
+export function mfgMessageEmailJobId(orderId: string): string {
+  return `mfg-msg-email-${orderId}`;
 }

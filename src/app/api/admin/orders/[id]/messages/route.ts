@@ -3,7 +3,11 @@ import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
-import { getEmailQueue } from "@/lib/queue/queues";
+import {
+  getEmailQueue,
+  getNotificationQueue,
+  mfgMessageEmailJobId,
+} from "@/lib/queue/queues";
 import {
   listOrderMessages,
   createOrderMessage,
@@ -11,7 +15,6 @@ import {
   saveChatAttachment,
 } from "@/lib/services/order-chat";
 import type { MessageChannel } from "@/lib/services/order-messages";
-import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 // Admin is the only role that can read/write either channel; the channel comes
 // from a validated query param (?channel=customer_admin|manufacturer_admin).
@@ -75,18 +78,13 @@ export async function POST(
     }
   }
 
-  // Coalesced notify: reach the counterpart (customer email / manufacturer
-  // inbox+email) only if they currently have no unread admin messages — avoids a
-  // burst of notifications for back-to-back admin replies. The chat itself still
-  // updates live per-message via the realtime `message` event.
+  // Customer email is coalesced: only on the first unread message (avoids a
+  // burst for back-to-back admin replies). The chat updates live per-message
+  // via the realtime `message` event regardless.
   let shouldEmailCustomer = false;
-  let shouldNotifyManufacturer = false;
   if (channel === "customer_admin") {
     const unreadBefore = await countChannelUnread(id, channel, "counterparty");
     shouldEmailCustomer = unreadBefore === 0;
-  } else if (channel === "manufacturer_admin" && order.manufacturerId) {
-    const unreadBefore = await countChannelUnread(id, channel, "counterparty");
-    shouldNotifyManufacturer = unreadBefore === 0;
   }
 
   await createOrderMessage({
@@ -111,16 +109,19 @@ export async function POST(
       .catch((e) => console.error("new_message email enqueue failed", e));
   }
 
-  // Manufacturer offline reach: inbox row + email + realtime notification.
-  if (shouldNotifyManufacturer && order.manufacturerId) {
-    await notifyManufacturer({
-      manufacturerId: order.manufacturerId,
-      type: "admin_message",
-      subject: `Sipariş ${order.orderNumber} — yeni mesaj`,
-      // Attachment-only replies have an empty body; don't send a blank inbox/email.
-      body: body || "Yeni bir ek dosya gönderildi.",
-      orderId: id,
-    }).catch((e) => console.error("notifyManufacturer (chat) failed", e));
+  // Manufacturer: the message is delivered live in-app. Schedule a delayed
+  // "unread message" email that fires in 30 min — UNLESS the manufacturer reads
+  // the thread first (the read-receipt route removes this job). A stable jobId
+  // means back-to-back messages keep one pending email, timed from the first
+  // unread message.
+  if (channel === "manufacturer_admin" && order.manufacturerId) {
+    await getNotificationQueue()
+      .add(
+        "manufacturer-message-email",
+        { orderId: id },
+        { jobId: mfgMessageEmailJobId(id), delay: 30 * 60 * 1000 }
+      )
+      .catch((e) => console.error("mfg message-email schedule failed", e));
   }
 
   return NextResponse.json({ success: true });

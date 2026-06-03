@@ -88,22 +88,28 @@ export async function createPayoutForManufacturer(
 }
 
 // Mark a pending payout paid → its earnings flip to "paid". Idempotent.
+// Returns the manufacturerId + total on success (for notification), or null if
+// the payout was not found / already paid.
 export async function markPayoutPaid(
   payoutId: string,
   reference: string | null
-): Promise<boolean> {
+): Promise<{ manufacturerId: string; totalKurus: number } | null> {
   return db.transaction(async (tx) => {
     const [payout] = await tx
       .update(payouts)
       .set({ status: "paid", paidAt: new Date(), reference })
       .where(and(eq(payouts.id, payoutId), eq(payouts.status, "pending")))
-      .returning({ id: payouts.id });
-    if (!payout) return false;
+      .returning({
+        id: payouts.id,
+        manufacturerId: payouts.manufacturerId,
+        totalKurus: payouts.totalKurus,
+      });
+    if (!payout) return null;
     await tx
       .update(manufacturerEarnings)
       .set({ status: "paid", updatedAt: new Date() })
       .where(eq(manufacturerEarnings.payoutId, payoutId));
-    return true;
+    return { manufacturerId: payout.manufacturerId, totalKurus: payout.totalKurus };
   });
 }
 

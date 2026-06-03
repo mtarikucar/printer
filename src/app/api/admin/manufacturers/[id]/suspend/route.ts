@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 export async function POST(
   _request: NextRequest,
@@ -35,6 +36,13 @@ export async function POST(
   }
 
   await publishRealtime([topics.admin()], { kind: "badge" });
+
+  await notifyManufacturer({
+    manufacturerId: id,
+    type: "system_announcement",
+    subject: "Hesabınız askıya alındı",
+    body: "Üretici hesabınız geçici olarak askıya alındı. Yeni sipariş alamaz ve ürün satışı yapamazsınız. Ayrıntılar için lütfen bizimle iletişime geçin.",
+  }).catch((e) => console.error("notifyManufacturer (suspend) failed", e));
 
   return NextResponse.json({ success: true });
 }

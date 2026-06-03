@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 export async function POST(
   _request: NextRequest,
@@ -35,6 +36,13 @@ export async function POST(
   }
 
   await publishRealtime([topics.admin()], { kind: "badge" });
+
+  await notifyManufacturer({
+    manufacturerId: id,
+    type: "system_announcement",
+    subject: "Hesabınız yeniden aktif edildi",
+    body: "Üretici hesabınızdaki askı kaldırıldı. Yeniden sipariş alabilir ve ürün satabilirsiniz. Tekrar aramızda olmanıza sevindik!",
+  }).catch((e) => console.error("notifyManufacturer (reactivate) failed", e));
 
   return NextResponse.json({ success: true });
 }

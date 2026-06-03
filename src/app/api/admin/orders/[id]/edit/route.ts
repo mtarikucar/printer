@@ -6,6 +6,7 @@ import { orders, adminActions, TurkishAddress } from "@/lib/db/schema";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { normalizePhone } from "@/lib/phone";
+import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 export async function POST(
   request: NextRequest,
@@ -70,6 +71,18 @@ export async function POST(
     adminEmail: session.user.email,
     notes: `Edited fields: ${changedFields.join(", ") || "none"}`,
   });
+
+  // Notify the assigned manufacturer when the shipping address changed — they
+  // ship to that address, so they must see the update. (adminNotes is internal.)
+  if (order.manufacturerId && changedFields.includes("shippingAddress")) {
+    await notifyManufacturer({
+      manufacturerId: order.manufacturerId,
+      type: "system_announcement",
+      subject: `Sipariş güncellendi — ${order.orderNumber}`,
+      body: `${order.orderNumber} numaralı siparişin teslimat adresi güncellendi. Lütfen kargolamadan önce üretici panelinden güncel adresi kontrol edin.`,
+      orderId: id,
+    }).catch((e) => console.error("notifyManufacturer (order edit) failed", e));
+  }
 
   return NextResponse.json({ success: true });
 }

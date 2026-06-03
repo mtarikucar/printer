@@ -7,10 +7,7 @@ import type { TurkishAddress } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { isValidTrIban, normalizeIban } from "@/lib/services/iban";
-
-// Turkish mobile / landline shape: optional +90 prefix, then 5XXXXXXXXX (10 digits)
-// or full 11-digit form. Reject all-alpha and obvious garbage.
-const trPhoneRegex = /^(?:\+?90)?[2-5]\d{9}$/;
+import { phoneField } from "@/lib/phone";
 
 const addressSchema = z.object({
   adres: z.string().min(5),
@@ -18,17 +15,13 @@ const addressSchema = z.object({
   ilce: z.string().min(1),
   il: z.string().min(1),
   postaKodu: z.string().min(4),
-  telefon: z.string().regex(trPhoneRegex, "Invalid phone number"),
+  telefon: phoneField(),
 });
 
 const profileSchema = z.object({
   contactPerson: z.string().min(1).max(100).optional(),
-  phone: z.string().regex(trPhoneRegex, "Invalid phone number").optional(),
-  whatsappPhone: z
-    .string()
-    .regex(trPhoneRegex, "Invalid WhatsApp phone")
-    .nullable()
-    .optional(),
+  phone: phoneField().optional(),
+  whatsappPhone: phoneField().nullable().optional(),
   address: addressSchema.optional(),
   iban: z
     .string()

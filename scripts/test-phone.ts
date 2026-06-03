@@ -6,8 +6,8 @@ import {
   formatPhoneDisplay,
   COUNTRIES,
   DEFAULT_COUNTRY,
+  phoneField,
 } from "../src/lib/phone";
-import { phoneField } from "../src/lib/phone";
 
 let passed = 0;
 function check(name: string, fn: () => void) {

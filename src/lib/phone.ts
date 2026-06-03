@@ -7,6 +7,7 @@ import {
   type CountryCode,
 } from "libphonenumber-js/core";
 import metadata from "libphonenumber-js/metadata.min.json";
+import { z } from "zod";
 
 export type { CountryCode };
 
@@ -34,8 +35,11 @@ export const COUNTRIES: Country[] = [
   { iso: "AE", name: "الإمارات", dialCode: "+971", flag: "🇦🇪" },
 ];
 
-function parsePhoneNumberFromString(input: string, country: CountryCode) {
-  return _parsePhoneNumber(input, country, metadata as never);
+/** Single point where the `metadata as never` cast lives. */
+function parseRaw(input: string, country?: CountryCode) {
+  return country
+    ? _parsePhoneNumber(input, country, metadata as never)
+    : _parsePhoneNumber(input, metadata as never);
 }
 
 /**
@@ -49,7 +53,7 @@ export function normalizePhone(
 ): string | null {
   if (!input || !input.trim()) return null;
   try {
-    const parsed = parsePhoneNumberFromString(input.trim(), country);
+    const parsed = parseRaw(input.trim(), country);
     if (!parsed || !parsed.isValid()) return null;
     return parsed.number; // E.164
   } catch {
@@ -68,7 +72,7 @@ export function isValidPhone(
 export function formatPhoneDisplay(e164: string): string {
   try {
     // For E.164 input we don't need a default country hint
-    const parsed = _parsePhoneNumber(e164, metadata as never);
+    const parsed = parseRaw(e164);
     return parsed ? parsed.formatInternational() : e164;
   } catch {
     return e164;
@@ -79,14 +83,12 @@ export function formatPhoneDisplay(e164: string): string {
 export function detectCountry(e164: string | null | undefined): CountryCode {
   if (!e164) return DEFAULT_COUNTRY;
   try {
-    const parsed = _parsePhoneNumber(e164, metadata as never);
+    const parsed = parseRaw(e164);
     return (parsed?.country as CountryCode) ?? DEFAULT_COUNTRY;
   } catch {
     return DEFAULT_COUNTRY;
   }
 }
-
-import { z } from "zod";
 
 /**
  * Zod field for a phone number. Accepts a user-typed or already-E.164 string,

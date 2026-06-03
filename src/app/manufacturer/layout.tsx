@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { ManufacturerSidebar } from "./sidebar";
 import { ManufacturerRealtimeShell } from "./realtime-shell";
+import { VerificationGate } from "./verification-gate";
 
 export default async function ManufacturerLayout({
   children,
@@ -33,6 +34,18 @@ export default async function ManufacturerLayout({
     return (
       <LocaleProvider locale={locale}>
         {children}
+      </LocaleProvider>
+    );
+  }
+
+  // Conditionally-approved manufacturers see only the printer-photo upload gate
+  if (manufacturer.status === "conditionally_approved") {
+    return (
+      <LocaleProvider locale={locale}>
+        <VerificationGate
+          companyName={manufacturer.companyName}
+          alreadyUploaded={manufacturer.printerPhotoUploadedAt != null}
+        />
       </LocaleProvider>
     );
   }

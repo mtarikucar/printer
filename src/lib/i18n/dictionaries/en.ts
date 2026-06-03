@@ -647,6 +647,7 @@ const en = {
   "validator.postalCode.required": "Postal code is required",
   "validator.postalCode.invalid": "Invalid postal code",
   "validator.phone.min": "Phone number must be at least 10 characters",
+  "validator.phone.invalid": "Please enter a valid phone number",
   "validator.photo.required": "Photo is required",
   "validator.size.invalid": "Invalid size selection",
   "validator.tracking.required": "Tracking number is required",

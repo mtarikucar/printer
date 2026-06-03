@@ -20,7 +20,7 @@ export function createTurkishAddressSchema(locale: Locale = defaultLocale) {
       .string()
       .min(1, d["validator.postalCode.required"])
       .regex(/^\d{5}$/, d["validator.postalCode.invalid"]),
-    telefon: phoneField(defaultCountryForLocale(locale), d["validator.phone.min"]),
+    telefon: phoneField(defaultCountryForLocale(locale), d["validator.phone.invalid"]),
   });
 }
 

@@ -650,6 +650,7 @@ const tr: Dictionary = {
   "validator.postalCode.required": "Posta kodu zorunludur",
   "validator.postalCode.invalid": "Geçersiz posta kodu",
   "validator.phone.min": "Telefon numarası en az 10 karakter olmalıdır",
+  "validator.phone.invalid": "Geçerli bir telefon numarası girin",
   "validator.photo.required": "Fotoğraf zorunludur",
   "validator.size.invalid": "Geçersiz beden seçimi",
   "validator.tracking.required": "Kargo takip numarası zorunludur",

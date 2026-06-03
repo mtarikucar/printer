@@ -16,15 +16,18 @@ import { formatPhoneDisplay } from "@/lib/phone";
 interface OrderData {
   id: string;
   orderNumber: string;
+  orderType: "custom" | "marketplace";
   customerName: string;
   phone: string | null;
-  figurineSize: string;
+  figurineSize: string | null;
   material: string;
   style: string;
   modifiers: string[] | null;
   status: string;
   manufacturerStatus: string | null;
   qcRound: number;
+  quantity: number;
+  productTitleSnapshot: string | null;
   customerNote: string | null;
   shippingAddress: {
     adres: string;
@@ -48,6 +51,11 @@ interface Props {
     photos: { id: string; originalUrl: string }[];
     qcPhotos: { id: string; url: string }[];
     qcRejectReason: string | null;
+    marketplaceProduct: {
+      title: string;
+      description: string;
+      images: string[];
+    } | null;
     glbUrl: string | null;
     stlUrl: string | null;
     actions: {
@@ -114,7 +122,8 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, glbUrl, stlUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, glbUrl, stlUrl, actions } = data;
+  const isMarketplace = order.orderType === "marketplace";
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -365,8 +374,47 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left column (2/3) */}
         <div className="lg:col-span-2 space-y-5">
+          {/* ─── Marketplace product card ──────────────── */}
+          {isMarketplace && marketplaceProduct && (
+            <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                  {(d["manufacturer.orderDetail.marketplaceBadge" as keyof typeof d] as string) ||
+                    "Pazaryeri ürünü"}
+                </span>
+                {order.quantity > 1 && (
+                  <span className="text-xs font-medium text-gray-500">
+                    × {order.quantity}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                {marketplaceProduct.title}
+              </h3>
+              {marketplaceProduct.images.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
+                  {marketplaceProduct.images.map((url) => (
+                    <img
+                      key={url}
+                      src={url}
+                      alt={marketplaceProduct.title}
+                      className="w-full h-40 object-cover rounded-xl border border-gray-100"
+                    />
+                  ))}
+                </div>
+              )}
+              <p className="mt-3 text-sm text-gray-600 whitespace-pre-line">
+                {marketplaceProduct.description}
+              </p>
+              <p className="mt-3 text-xs text-gray-500">
+                {(d["manufacturer.orderDetail.marketplaceHint" as keyof typeof d] as string) ||
+                  "Listelediğiniz ürünü basıp kargolayın."}
+              </p>
+            </div>
+          )}
+
           {/* ─── Photo + Model Hero Card (Tabbed) ──────── */}
-          {(photos.length > 0 || glbUrl) && (
+          {!isMarketplace && (photos.length > 0 || glbUrl) && (
             <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
               {/* Tab pills */}
               <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">

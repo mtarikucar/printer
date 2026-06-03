@@ -46,7 +46,7 @@ interface OrdersClientProps {
     orderNumber: string;
     customerName: string;
     email: string;
-    figurineSize: string;
+    figurineSize: string | null;
     style: string;
     status: string;
     amountKurus: number;

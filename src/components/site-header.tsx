@@ -48,6 +48,7 @@ export function SiteHeader() {
     .toUpperCase() || "?";
 
   const navLinks = [
+    { href: "/shop", label: d["nav.shop" as keyof typeof d] || "Mağaza" },
     { href: "/styles", label: d["nav.styles"] },
     { href: "/gallery", label: d["nav.gallery"] },
     { href: "/create", label: d["nav.create"] },

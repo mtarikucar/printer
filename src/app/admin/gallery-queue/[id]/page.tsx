@@ -53,7 +53,7 @@ export default async function AdminGalleryReviewPage({
           orderNumber: order.orderNumber,
           customerName: order.customerName,
           email: order.email,
-          figurineSize: order.figurineSize,
+          figurineSize: order.figurineSize ?? "",
           style: order.style,
           modifiers: order.modifiers ?? [],
           publicDisplayName: order.publicDisplayName,

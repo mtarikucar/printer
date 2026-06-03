@@ -71,6 +71,8 @@ export default async function ManufacturerOrdersPage({
       columns: {
         id: true,
         orderNumber: true,
+        orderType: true,
+        productTitleSnapshot: true,
         customerName: true,
         figurineSize: true,
         style: true,
@@ -92,6 +94,8 @@ export default async function ManufacturerOrdersPage({
         orders={orderRows.map((o) => ({
           id: o.id,
           orderNumber: o.orderNumber,
+          orderType: o.orderType,
+          productTitleSnapshot: o.productTitleSnapshot,
           customerName: o.customerName,
           figurineSize: o.figurineSize,
           style: o.style,

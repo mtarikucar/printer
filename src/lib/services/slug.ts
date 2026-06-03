@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders } from "@/lib/db/schema";
+import { orders, products } from "@/lib/db/schema";
 
 /**
  * Convert a free-form string to a URL-safe slug. Turkish characters fold
@@ -83,4 +83,26 @@ export async function generateGallerySlug(
   if (!dup) return randomFallback;
   // 2^32 birthday on a single row — effectively unreachable.
   return `${orderPart}-${crypto.randomBytes(8).toString("hex")}`;
+}
+
+/**
+ * Build a marketplace product slug from its title, minted on approval/create.
+ * Unlike gallery slugs the title alone isn't unique, so we always append a
+ * short random suffix and collision-check against products.slug.
+ *
+ *   "Ejderha Figürü" → "ejderha-figuru-a1b2c3"
+ */
+export async function generateProductSlug(title: string): Promise<string> {
+  const base = kebabify(title) || "urun";
+  let candidate = `${base}-${crypto.randomBytes(3).toString("hex")}`;
+  for (let i = 0; i < 5; i++) {
+    const existing = await db.query.products.findFirst({
+      where: eq(products.slug, candidate),
+      columns: { id: true },
+    });
+    if (!existing) return candidate;
+    candidate = `${base}-${crypto.randomBytes(4).toString("hex")}`;
+  }
+  // Pathological fallback — effectively unreachable.
+  return `${base}-${crypto.randomBytes(8).toString("hex")}`;
 }

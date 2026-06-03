@@ -5,7 +5,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { db } from "@/lib/db";
-import { orders, manufacturers, orderDrafts } from "@/lib/db/schema";
+import { orders, manufacturers, orderDrafts, products } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { AdminSidebar } from "./sidebar";
 import { AdminRealtimeShell } from "./realtime-shell";
@@ -65,12 +65,19 @@ export default async function AdminLayout({
     .from(orders)
     .where(sql`${orders.manufacturerStatus} = 'qc_pending'`);
 
+  // Count products awaiting moderation.
+  const [pendingProductCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(products)
+    .where(sql`${products.status} = 'pending_review'`);
+
   return (
     <AdminRealtimeShell>
       <div className="min-h-screen bg-gray-50 flex">
         <AdminSidebar
           reviewCount={reviewCount.count}
           pendingManufacturerCount={pendingMfgCount.count}
+          pendingProductCount={pendingProductCount.count}
           draftReviewCount={draftReviewCount.count}
           qcPendingCount={qcPendingCount.count}
         />

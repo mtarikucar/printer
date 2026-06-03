@@ -9,7 +9,10 @@ import {
   giftCardRedemptions,
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
-import { kickOffOrderProcessing } from "@/lib/services/order-confirm";
+import {
+  kickOffOrderProcessing,
+  kickOffMarketplaceOrder,
+} from "@/lib/services/order-confirm";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
@@ -64,20 +67,24 @@ export async function promoteDraftToOrder(
       if (draft.status === "confirmed" && draft.promotedOrderId) {
         const existing = await tx.query.orders.findFirst({
           where: eq(orders.id, draft.promotedOrderId),
-          columns: { id: true, orderNumber: true, locale: true },
+          columns: { id: true, orderNumber: true, locale: true, orderType: true },
         });
         if (existing) {
           return {
             orderId: existing.id,
             orderNumber: existing.orderNumber,
             locale: (existing.locale === "en" ? "en" : "tr") as Locale,
+            // Carry orderType so the post-tx kickoff branch doesn't mistakenly
+            // run generation on a re-entered (already-promoted) marketplace order.
+            orderType: existing.orderType,
+            alreadyPromoted: true as const,
           };
         }
       }
       throw new Error(`DRAFT_NOT_PROMOTABLE:${draft.status}`);
     }
 
-    const photoUrl = getPublicUrl(draft.photoKey);
+    const isMarketplace = draft.orderType === "marketplace";
 
     const [order] = await tx
       .insert(orders)
@@ -104,14 +111,34 @@ export async function promoteDraftToOrder(
         upsells: draft.upsells,
         upsellAmountKurus: draft.upsellAmountKurus,
         paidAt: new Date(),
-        manufacturerStatus: "unassigned",
+        // Marketplace fields copied from the draft.
+        orderType: draft.orderType,
+        productId: draft.productId,
+        sellerManufacturerId: draft.sellerManufacturerId,
+        productTitleSnapshot: draft.productTitleSnapshot,
+        quantity: draft.quantity,
+        // Marketplace: auto-assign the owning seller (no AI gen, no scoring).
+        // A platform/admin product (no seller) stays unassigned for the admin
+        // queue. Custom orders start unassigned and go through generation.
+        manufacturerId:
+          isMarketplace && draft.sellerManufacturerId
+            ? draft.sellerManufacturerId
+            : null,
+        manufacturerStatus:
+          isMarketplace && draft.sellerManufacturerId ? "assigned" : "unassigned",
+        assignedToManufacturerAt:
+          isMarketplace && draft.sellerManufacturerId ? new Date() : null,
       })
       .returning();
 
-    await tx.insert(orderPhotos).values({
-      orderId: order.id,
-      originalUrl: photoUrl,
-    });
+    // Custom orders carry the customer's input photo into order_photos so
+    // generation can pick it up. Marketplace orders have no input photo.
+    if (!isMarketplace && draft.photoKey) {
+      await tx.insert(orderPhotos).values({
+        orderId: order.id,
+        originalUrl: getPublicUrl(draft.photoKey),
+      });
+    }
 
     // Reassign any draft-scoped gift-card redemption to the new order.
     await tx
@@ -136,13 +163,18 @@ export async function promoteDraftToOrder(
       locale: (draft.locale === "en" ? "en" : "tr") as Locale,
       userId: order.userId,
       manufacturerId: order.manufacturerId,
+      orderType: order.orderType,
+      manufacturerStatus: order.manufacturerStatus,
+      email: order.email,
+      customerName: order.customerName,
+      sellerManufacturerId: order.sellerManufacturerId,
+      productTitleSnapshot: order.productTitleSnapshot,
       newOrder: true,
     };
   });
 
-  // New order row created at status=paid. Emit for the freshly-created order
-  // (no manufacturer yet — manufacturerStatus is "unassigned"). Skipped on the
-  // idempotent re-entry path where an existing order is returned.
+  // New order row created at status=paid. Emit for the freshly-created order.
+  // Skipped on the idempotent re-entry path where an existing order is returned.
   if ("newOrder" in result && result.newOrder) {
     await emitOrderChanged({
       orderId: result.orderId,
@@ -150,14 +182,38 @@ export async function promoteDraftToOrder(
       userId: result.userId,
       manufacturerId: result.manufacturerId,
       status: "paid",
-      manufacturerStatus: "unassigned",
+      manufacturerStatus: result.manufacturerStatus ?? "unassigned",
     });
   }
 
-  // Outside the transaction: cancel scheduled deadline jobs and kick generation.
+  // Outside the transaction: cancel scheduled deadline jobs and kick off the
+  // appropriate fulfillment path.
   await cancelHavaleJobs(draftId);
 
-  await kickOffOrderProcessing(result.orderId, result.locale);
+  if (result.orderType === "marketplace") {
+    // Marketplace: skip AI generation/mesh entirely. On first promotion
+    // ("newOrder") notify the seller + email the customer. On an idempotent
+    // re-entry (webhook retry) do nothing — the seller was already notified and
+    // re-emailing would spam the customer.
+    if ("newOrder" in result && result.newOrder) {
+      await kickOffMarketplaceOrder(
+        {
+          id: result.orderId,
+          email: result.email,
+          orderNumber: result.orderNumber,
+          customerName: result.customerName,
+          userId: result.userId,
+          sellerManufacturerId: result.sellerManufacturerId ?? null,
+          productTitleSnapshot: result.productTitleSnapshot ?? null,
+        },
+        result.locale
+      );
+    }
+  } else {
+    // Custom: kickOffOrderProcessing is idempotent (no-ops unless status='paid')
+    // and doubles as a self-heal retry on the re-entry path.
+    await kickOffOrderProcessing(result.orderId, result.locale);
+  }
 
   return { orderId: result.orderId, orderNumber: result.orderNumber, locale: result.locale };
 }

@@ -59,6 +59,12 @@ export const paymentMethodEnum = pgEnum("payment_method", [
   "gift_card_full",
 ]);
 
+// Marketplace vs custom fulfillment. `custom` = the legacy photo→AI→print flow.
+// `marketplace` = a customer bought a ready-made product a seller (manufacturer
+// or admin/platform) listed; no AI generation, the owning seller is auto-assigned.
+// Default `custom` keeps every legacy row + the existing checkout path unchanged.
+export const orderTypeEnum = pgEnum("order_type", ["custom", "marketplace"]);
+
 // orders only contain paid orders, so paymentStatus is succeeded or refunded.
 export const paymentStatusEnum = pgEnum("payment_status", [
   "succeeded",
@@ -193,6 +199,24 @@ export const carrierEnum = pgEnum("carrier", [
 // manufacturers.pendingIban awaiting admin approval.
 export const ibanReviewStatusEnum = pgEnum("iban_review_status", ["none", "pending"]);
 
+// ─── Marketplace: seller-listed products ────────────────────────────────────
+// Product lifecycle. Sellers create as `draft`, submit to `pending_review`,
+// an admin approves to `active` (buyable + visible) or `rejected`. `archived`
+// hides a previously-active listing. Admin/platform products skip straight to
+// `active` on create (no self-review).
+export const productStatusEnum = pgEnum("product_status", [
+  "draft",
+  "pending_review",
+  "active",
+  "rejected",
+  "archived",
+]);
+
+// Who owns/fulfills the product: a `seller` (manufacturer, the common case) or
+// the platform itself (`admin`). Admin products carry a NULL manufacturerId and
+// are fulfilled through the existing admin order pipeline.
+export const productOwnerTypeEnum = pgEnum("product_owner_type", ["seller", "admin"]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
@@ -282,12 +306,25 @@ export const orderDrafts = pgTable("order_drafts", {
   email: text("email").notNull(),
   customerName: text("customer_name").notNull(),
   phone: text("phone"),
-  figurineSize: figurineSizeEnum("figurine_size").notNull(),
+  // Custom-order fields. Nullable since marketplace drafts carry no uploaded
+  // photo / size choice — the product defines what's printed.
+  figurineSize: figurineSizeEnum("figurine_size"),
   style: figurineStyleEnum("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
-  photoKey: text("photo_key").notNull(),
+  photoKey: text("photo_key"),
+  // Marketplace fields (null for custom drafts). See orderTypeEnum.
+  orderType: orderTypeEnum("order_type").notNull().default("custom"),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  productId: uuid("product_id").references((): any => products.id),
+  sellerManufacturerId: uuid("seller_manufacturer_id").references(
+    () => manufacturers.id
+  ),
+  // Immutable copy of the product title at purchase time, so invoices/history
+  // survive a later product edit or archive.
+  productTitleSnapshot: text("product_title_snapshot"),
+  quantity: integer("quantity").notNull().default(1),
   locale: text("locale").notNull().default("tr"),
   amountKurus: integer("amount_kurus").notNull(),
   // The forward ref is safe — drizzle resolves the arrow lazily, and at runtime
@@ -359,11 +396,22 @@ export const orders = pgTable("orders", {
   email: text("email").notNull(),
   customerName: text("customer_name").notNull(),
   phone: text("phone"),
-  figurineSize: figurineSizeEnum("figurine_size").notNull(),
+  // Custom-order field. Nullable since marketplace orders carry no size choice.
+  figurineSize: figurineSizeEnum("figurine_size"),
   style: figurineStyleEnum("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
+  // Marketplace fields (null for custom orders). Copied from the draft on
+  // promotion. sellerManufacturerId snapshots the product owner at purchase.
+  orderType: orderTypeEnum("order_type").notNull().default("custom"),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  productId: uuid("product_id").references((): any => products.id),
+  sellerManufacturerId: uuid("seller_manufacturer_id").references(
+    () => manufacturers.id
+  ),
+  productTitleSnapshot: text("product_title_snapshot"),
+  quantity: integer("quantity").notNull().default(1),
   status: orderStatusEnum("status").notNull().default("paid"),
   locale: text("locale").notNull().default("tr"),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
@@ -823,6 +871,69 @@ export const manufacturerNotifications = pgTable("manufacturer_notifications", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Marketplace products ───────────────────────────────────────────────────
+// A ready-made product a seller lists for sale. Made-to-order: no stock/quantity
+// tracking — when bought, the owning manufacturer is auto-assigned to print &
+// ship. ownerType="admin" products carry a NULL manufacturerId (platform-owned).
+export const products = pgTable(
+  "products",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // SEO URL fragment for /shop/[slug]; minted on approval/create with a
+    // collision suffix (mirrors orders.gallerySlug). Unique so a slug always
+    // resolves to one product.
+    slug: text("slug").unique(),
+    ownerType: productOwnerTypeEnum("owner_type").notNull().default("seller"),
+    // The fulfilling seller. NULL when ownerType="admin" (platform product).
+    manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    // Seller-set, KDV-inclusive (same convention as figurine prices).
+    priceKurus: integer("price_kurus").notNull(),
+    material: figurineMaterialEnum("material"),
+    category: text("category"),
+    leadTimeDays: integer("lead_time_days").default(7),
+    // Denormalized cover image key for list cards (avoids a join on /shop).
+    primaryImageKey: text("primary_image_key"),
+    status: productStatusEnum("status").notNull().default("draft"),
+    rejectionReason: text("rejection_reason"),
+    reviewedByEmail: text("reviewed_by_email"),
+    reviewedAt: timestamp("reviewed_at"),
+    submittedAt: timestamp("submitted_at"),
+    createdByAdminEmail: text("created_by_admin_email"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byStatusCreated: index("products_status_created_idx").on(
+      t.status,
+      t.createdAt
+    ),
+    byManufacturerStatus: index("products_manufacturer_status_idx").on(
+      t.manufacturerId,
+      t.status
+    ),
+  })
+);
+
+// Product gallery images. storageKey is a relative key under products/,
+// re-signed on read via getPublicUrl (mirrors qcPhotos).
+export const productImages = pgTable(
+  "product_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    storageKey: text("storage_key").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_images_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   orders: many(orders),
@@ -858,6 +969,10 @@ export const orderDraftsRelations = relations(orderDrafts, ({ one }) => ({
     fields: [orderDrafts.promotedOrderId],
     references: [orders.id],
   }),
+  product: one(products, {
+    fields: [orderDrafts.productId],
+    references: [products.id],
+  }),
 }));
 
 export const ordersRelations = relations(orders, ({ one, many }) => ({
@@ -888,6 +1003,14 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   earning: one(manufacturerEarnings),
   invoice: one(invoices),
   disputes: many(disputes),
+  product: one(products, {
+    fields: [orders.productId],
+    references: [products.id],
+  }),
+  sellerManufacturer: one(manufacturers, {
+    fields: [orders.sellerManufacturerId],
+    references: [manufacturers.id],
+  }),
 }));
 
 export const orderPhotosRelations = relations(orderPhotos, ({ one }) => ({
@@ -1020,6 +1143,23 @@ export const manufacturersRelations = relations(manufacturers, ({ many }) => ({
   earnings: many(manufacturerEarnings),
   payouts: many(payouts),
   documents: many(manufacturerDocuments),
+  products: many(products),
+}));
+
+export const productsRelations = relations(products, ({ one, many }) => ({
+  manufacturer: one(manufacturers, {
+    fields: [products.manufacturerId],
+    references: [manufacturers.id],
+  }),
+  images: many(productImages),
+  orders: many(orders),
+}));
+
+export const productImagesRelations = relations(productImages, ({ one }) => ({
+  product: one(products, {
+    fields: [productImages.productId],
+    references: [products.id],
+  }),
 }));
 
 export const manufacturerActionsRelations = relations(manufacturerActions, ({ one }) => ({

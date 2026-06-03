@@ -72,6 +72,10 @@ export default async function ManufacturerOrderDetailPage({
         columns: { decision: true, reason: true, round: true, createdAt: true },
         orderBy: [desc(qcReviews.createdAt)],
       },
+      product: {
+        columns: { id: true, title: true, description: true, leadTimeDays: true },
+        with: { images: { columns: { storageKey: true, sortOrder: true } } },
+      },
     },
   });
 
@@ -90,10 +94,24 @@ export default async function ManufacturerOrderDetailPage({
       ? latestReject?.reason ?? null
       : null;
 
+  // Marketplace orders: surface the listed product (title, description, images)
+  // instead of the AI-generated model. Custom orders leave these null/empty.
+  const marketplaceProduct =
+    order.orderType === "marketplace" && order.product
+      ? {
+          title: order.productTitleSnapshot ?? order.product.title,
+          description: order.product.description,
+          images: [...order.product.images]
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((img) => getPublicUrl(img.storageKey)),
+        }
+      : null;
+
   const serialized = {
     order: {
       id: order.id,
       orderNumber: order.orderNumber,
+      orderType: order.orderType,
       customerName: order.customerName,
       phone: order.phone,
       figurineSize: order.figurineSize,
@@ -103,6 +121,8 @@ export default async function ManufacturerOrderDetailPage({
       status: order.status,
       manufacturerStatus: order.manufacturerStatus,
       qcRound: order.qcRound,
+      quantity: order.quantity,
+      productTitleSnapshot: order.productTitleSnapshot,
       customerNote: order.customerNote,
       shippingAddress: order.shippingAddress as TurkishAddress | null,
       assignedToManufacturerAt:
@@ -121,6 +141,7 @@ export default async function ManufacturerOrderDetailPage({
     })),
     qcPhotos: currentRoundPhotos,
     qcRejectReason,
+    marketplaceProduct,
     glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
     stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
     actions: order.manufacturerActions.map((a) => ({

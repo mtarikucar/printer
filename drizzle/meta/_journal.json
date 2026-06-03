@@ -15,6 +15,13 @@
       "when": 1780472651084,
       "tag": "0001_awesome_silver_centurion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780477288200,
+      "tag": "0002_glossy_fallen_one",
+      "breakpoints": true
     }
   ]
 }

@@ -26,7 +26,9 @@ export default async function AdminGalleryPage({
     id: r.id,
     orderNumber: r.orderNumber,
     name: r.publicDisplayName || r.customerName,
-    figurineSize: r.figurineSize,
+    // Gallery only ever contains custom figurines (marketplace products are not
+    // published here), so figurineSize is always set; coalesce for the type.
+    figurineSize: r.figurineSize ?? "",
     style: r.style,
     category: r.galleryCategory,
     tags: r.galleryTags ?? [],
@@ -40,7 +42,7 @@ export default async function AdminGalleryPage({
     id: it.id,
     orderNumber: it.orderNumber,
     name: it.publicDisplayName || it.customerName,
-    figurineSize: it.figurineSize,
+    figurineSize: it.figurineSize ?? "",
     style: it.style,
     category: it.galleryCategory,
     tags: it.galleryTags ?? [],

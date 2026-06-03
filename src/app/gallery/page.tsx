@@ -64,7 +64,7 @@ export default async function GalleryPage() {
   const items = publicOrders.slice(0, 12).map((order) => ({
     id: order.id,
     publicDisplayName: order.publicDisplayName,
-    figurineSize: order.figurineSize,
+    figurineSize: order.figurineSize ?? "",
     style: order.style,
     category: order.galleryCategory,
     tags: order.galleryTags ?? [],
@@ -107,7 +107,7 @@ export default async function GalleryPage() {
   const featured = featuredOrders.map((order) => ({
     id: order.id,
     publicDisplayName: order.publicDisplayName,
-    figurineSize: order.figurineSize,
+    figurineSize: order.figurineSize ?? "",
     style: order.style,
     category: order.galleryCategory,
     tags: order.galleryTags ?? [],

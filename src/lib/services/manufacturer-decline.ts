@@ -123,6 +123,7 @@ export async function declineOrder(args: {
       declinedList: nextDeclined,
       orderNumber: order.orderNumber,
       userId: order.userId,
+      orderType: order.orderType,
     };
   });
 
@@ -145,6 +146,29 @@ export async function declineOrder(args: {
     manufacturerId,
     manufacturerStatus: "unassigned",
   });
+
+  // Marketplace orders can only be fulfilled by the product's OWNING seller —
+  // the scoring-based reassignment below would hand the order to a different
+  // manufacturer who never listed (and cannot produce) that specific product.
+  // The owning seller just declined, so route straight to the admin queue for
+  // manual resolution (typically cancel + refund).
+  if (result.orderType === "marketplace") {
+    const note = `[Marketplace] Satıcı siparişi reddetti — bu ürünü yalnızca sahibi üretici basabilir; admin çözümü gerekiyor (iptal/iade).`;
+    await db
+      .update(orders)
+      .set({
+        adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId));
+    await notifyAdminManualAssignment({
+      orderNumber: result.orderNumber,
+      orderId,
+      reason: "Marketplace seller declined — only the owning seller can fulfil",
+      declineCount: result.declinedCount,
+    });
+    return { ok: true, action: "admin_queue", reason: "marketplace_seller_declined" };
+  }
 
   // Step 3: cap check.
   if (result.declinedCount >= MAX_DECLINES_BEFORE_ADMIN) {

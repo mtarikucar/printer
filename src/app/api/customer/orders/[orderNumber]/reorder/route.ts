@@ -78,6 +78,15 @@ export async function POST(
     );
   }
 
+  // This route reconstructs a CUSTOM figurine draft. Marketplace orders have no
+  // figurineSize/photo — to re-buy, the customer goes back to the product page.
+  if (order.orderType === "marketplace" || !order.figurineSize) {
+    return NextResponse.json(
+      { error: d["api.order.notReorderable"] },
+      { status: 400 }
+    );
+  }
+
   const reference = buildDraftReference();
   const amountKurus = figurinePriceKurus(order.figurineSize, order.material);
 

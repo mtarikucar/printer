@@ -22,10 +22,12 @@ import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
 interface OrderData {
   id: string;
   orderNumber: string;
+  orderType: "custom" | "marketplace";
+  productTitleSnapshot: string | null;
   email: string;
   customerName: string;
   phone: string | null;
-  figurineSize: string;
+  figurineSize: string | null;
   material: string;
   style: string;
   modifiers: string[] | null;
@@ -797,17 +799,33 @@ export function OrderDetailClient({ data, locale }: Props) {
                 )}
               </div>
               <dl className="space-y-3 text-sm">
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.orderDetail.size"]}</dt>
-                  <dd className="font-medium text-gray-900">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</dd>
-                </div>
+                {order.orderType === "marketplace" ? (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">
+                      {d["admin.orderDetail.product" as keyof typeof d] || "Ürün"}
+                    </dt>
+                    <dd className="font-medium text-gray-900 flex items-center gap-2">
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                        {d["shop.title" as keyof typeof d] || "Mağaza"}
+                      </span>
+                      {order.productTitleSnapshot}
+                    </dd>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <dt className="text-gray-400">{d["admin.orderDetail.size"]}</dt>
+                      <dd className="font-medium text-gray-900">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</dd>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <dt className="text-gray-400">{d["admin.orderDetail.style"]}</dt>
+                      <dd className="font-medium text-gray-900 capitalize">{d[`create.style.${order.style}` as keyof typeof d] || order.style}</dd>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between items-center">
                   <dt className="text-gray-400">{d["admin.orderDetail.material"]}</dt>
                   <dd className="font-medium text-gray-900">{d[`material.${order.material}` as keyof typeof d] || order.material}</dd>
-                </div>
-                <div className="flex justify-between items-center">
-                  <dt className="text-gray-400">{d["admin.orderDetail.style"]}</dt>
-                  <dd className="font-medium text-gray-900 capitalize">{d[`create.style.${order.style}` as keyof typeof d] || order.style}</dd>
                 </div>
                 <div className="flex justify-between items-center">
                   <dt className="text-gray-400">{d["admin.orderDetail.amount"]}</dt>

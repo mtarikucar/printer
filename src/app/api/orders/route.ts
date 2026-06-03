@@ -6,8 +6,10 @@ import {
   giftCards,
   giftCardRedemptions,
   users,
+  products,
 } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
+import { createMarketplaceOrderSchema } from "@/lib/validators/product";
 import {
   allocatePaytrBasket,
   calculateUpsellAmount,
@@ -45,8 +47,58 @@ export async function POST(request: NextRequest) {
     const session = await getSessionUser();
 
     const body = await request.json();
-    const validated = createOrderSchema(locale).parse(body);
-    const previewId: string | undefined = body.previewId;
+
+    // Branch custom (photo→AI figurine) vs marketplace (buy a ready-made
+    // product). Both share the address/payment/gift-card/guest fields, so we
+    // parse into the matching schema and read shared fields via `common`.
+    const orderType: "custom" | "marketplace" =
+      body?.orderType === "marketplace" ? "marketplace" : "custom";
+
+    const customInput =
+      orderType === "custom" ? createOrderSchema(locale).parse(body) : null;
+    const mpInput =
+      orderType === "marketplace"
+        ? createMarketplaceOrderSchema(locale).parse(body)
+        : null;
+    // Common checkout fields present in both schemas.
+    const common = (customInput ?? mpInput)!;
+
+    // Marketplace: load + gate the product (only `active` listings are buyable).
+    let product:
+      | (typeof products.$inferSelect & {
+          manufacturer: { status: string } | null;
+        })
+      | null = null;
+    if (orderType === "marketplace") {
+      product =
+        (await db.query.products.findFirst({
+          where: eq(products.id, mpInput!.productId),
+          with: { manufacturer: { columns: { status: true } } },
+        })) ?? null;
+      if (!product || product.status !== "active") {
+        return NextResponse.json(
+          { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
+          { status: 400 }
+        );
+      }
+      // A seller-owned product is only buyable while its seller is active. If
+      // the seller was suspended after listing, the order would auto-assign to
+      // them and then get stuck (they cannot accept) — refuse the purchase
+      // instead. Platform/admin products (no manufacturer) are always buyable.
+      if (
+        product.ownerType === "seller" &&
+        product.manufacturer?.status !== "active"
+      ) {
+        return NextResponse.json(
+          { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Custom orders may reference an approved preview; marketplace never does.
+    const previewId: string | undefined =
+      orderType === "custom" ? body.previewId : undefined;
 
     // Guest checkout (Q6): if no session, we expect guestEmail + guestName
     // in the body. We attach the order to an existing user with that email
@@ -61,13 +113,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: d["api.auth.userNotFound"] }, { status: 401 });
       }
     } else {
-      if (!validated.guestEmail || !validated.guestName) {
+      if (!common.guestEmail || !common.guestName) {
         return NextResponse.json(
           { error: d["api.auth.required"] },
           { status: 401 }
         );
       }
-      const email = validated.guestEmail.trim().toLowerCase();
+      const email = common.guestEmail.trim().toLowerCase();
       // Security (review C1): refuse to attach a guest order to an
       // existing user that has a real password OR is no longer flagged
       // as a guest. Otherwise an attacker who knows a victim's email
@@ -104,8 +156,8 @@ export async function POST(request: NextRequest) {
           .insert(users)
           .values({
             email,
-            fullName: validated.guestName,
-            phone: validated.shippingAddress.telefon,
+            fullName: common.guestName,
+            phone: common.shippingAddress.telefon,
             passwordHash: null,
             isGuest: true,
           })
@@ -138,21 +190,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: d["api.order.createFailed"] }, { status: 400 });
     }
 
-    if (!validated.photoKey.startsWith("photos/") || validated.photoKey.includes("..")) {
+    if (
+      orderType === "custom" &&
+      (!customInput!.photoKey.startsWith("photos/") ||
+        customInput!.photoKey.includes(".."))
+    ) {
       return NextResponse.json({ error: d["api.order.createFailed"] }, { status: 400 });
     }
 
     const reference = buildDraftReference();
     // Dedupe upsells here so the DB row, gift-card math, and PayTR basket
     // all see the same canonical list (server-trusted, not client-trusted).
-    const upsellKeys = Array.from(new Set(validated.upsells));
+    const upsellKeys = Array.from(new Set(common.upsells));
     const upsellAmountKurus = calculateUpsellAmount(upsellKeys);
-    const amountKurus =
-      figurinePriceKurus(validated.figurineSize, validated.material) + upsellAmountKurus;
+    // Item price: marketplace = seller-set price × quantity; custom = config
+    // figurine price. figurinePriceKurus is NOT used for marketplace.
+    const quantity = orderType === "marketplace" ? mpInput!.quantity : 1;
+    const itemAmountKurus =
+      orderType === "marketplace"
+        ? product!.priceKurus * quantity
+        : figurinePriceKurus(customInput!.figurineSize, customInput!.material);
+    const amountKurus = itemAmountKurus + upsellAmountKurus;
 
     let giftCardId: string | undefined;
-    if (validated.giftCardCode) {
-      const gcResult = await validateGiftCard(validated.giftCardCode);
+    if (common.giftCardCode) {
+      const gcResult = await validateGiftCard(common.giftCardCode);
       if (!gcResult.valid) {
         const errorKey = `giftCard.error.${gcResult.error}` as keyof typeof d;
         return NextResponse.json({ error: d[errorKey] || d["common.error"] }, { status: 400 });
@@ -244,7 +306,7 @@ export async function POST(request: NextRequest) {
 
       const finalPaymentMethod: "card" | "bank_transfer" | "gift_card_full" = isCovered
         ? "gift_card_full"
-        : validated.paymentMethod === "bank_transfer"
+        : common.paymentMethod === "bank_transfer"
         ? "bank_transfer"
         : "card";
 
@@ -268,13 +330,30 @@ export async function POST(request: NextRequest) {
           previewId: previewId || null,
           email: user.email,
           customerName: user.fullName,
-          phone: validated.shippingAddress.telefon,
-          figurineSize: validated.figurineSize,
-          style: validated.style,
-          material: validated.material,
-          modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
-          shippingAddress: validated.shippingAddress,
-          photoKey: validated.photoKey,
+          phone: common.shippingAddress.telefon,
+          // Custom item fields (null for marketplace).
+          figurineSize: customInput?.figurineSize ?? null,
+          style: customInput?.style ?? "realistic",
+          modifiers:
+            customInput && customInput.modifiers.length > 0
+              ? customInput.modifiers
+              : null,
+          // Material: custom from selection; marketplace inherits the product's
+          // (display only), defaulting resin.
+          material:
+            orderType === "marketplace"
+              ? product!.material ?? "resin"
+              : customInput!.material,
+          photoKey: customInput?.photoKey ?? null,
+          // Marketplace item fields (null for custom).
+          orderType,
+          productId: orderType === "marketplace" ? product!.id : null,
+          sellerManufacturerId:
+            orderType === "marketplace" ? product!.manufacturerId : null,
+          productTitleSnapshot:
+            orderType === "marketplace" ? product!.title : null,
+          quantity,
+          shippingAddress: common.shippingAddress,
           locale,
           amountKurus,
           giftCardId: giftCardId || null,
@@ -377,20 +456,32 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── Card via PayTR ──────────────────────────────────────────
-    const addr = validated.shippingAddress;
+    const addr = common.shippingAddress;
     const userIp = await getClientIp();
     const paymentAmountKurus = amountKurus - giftCardAmountKurus;
-    const sizeLabel =
-      d[`sizes.${validated.figurineSize}` as keyof typeof d] || validated.figurineSize;
-    const materialLabel =
-      d[`material.${validated.material}` as keyof typeof d] || validated.material;
+
+    // Basket item name: marketplace = product title; custom = "Figurin (size ·
+    // material)".
+    let figurineName: string;
+    if (orderType === "marketplace") {
+      figurineName =
+        quantity > 1 ? `${product!.title} × ${quantity}` : product!.title;
+    } else {
+      const sizeLabel =
+        d[`sizes.${customInput!.figurineSize}` as keyof typeof d] ||
+        customInput!.figurineSize;
+      const materialLabel =
+        d[`material.${customInput!.material}` as keyof typeof d] ||
+        customInput!.material;
+      figurineName = `Figurin (${sizeLabel} · ${materialLabel})`;
+    }
 
     // PayTR basket: figurine + per-upsell rows, summing to
     // paymentAmountKurus. See allocatePaytrBasket for the gift-card +
     // upsell edge-case handling (review C3).
     const basket = allocatePaytrBasket({
       paymentAmountKurus,
-      figurineName: `Figurin (${sizeLabel} · ${materialLabel})`,
+      figurineName,
       upsellAmountKurus,
       upsellKeys,
       upsellLabel: (key) =>

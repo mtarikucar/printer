@@ -21,8 +21,10 @@ interface ManufacturerOrdersClientProps {
   orders: Array<{
     id: string;
     orderNumber: string;
+    orderType: "custom" | "marketplace";
+    productTitleSnapshot: string | null;
     customerName: string;
-    figurineSize: string;
+    figurineSize: string | null;
     style: string;
     modifiers: string[] | null;
     manufacturerStatus: string | null;
@@ -150,14 +152,28 @@ export function ManufacturerOrdersClient({
                   {order.customerName}
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  {(d[
-                    `sizes.${order.figurineSize}` as keyof typeof d
-                  ] as string) || order.figurineSize}
+                  {order.orderType === "marketplace" ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                        {(d["shop.title" as keyof typeof d] as string) ||
+                          "Mağaza"}
+                      </span>
+                      <span className="text-gray-700 truncate max-w-[160px]">
+                        {order.productTitleSnapshot}
+                      </span>
+                    </span>
+                  ) : (
+                    (d[
+                      `sizes.${order.figurineSize}` as keyof typeof d
+                    ] as string) || order.figurineSize
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  {(d[
-                    `styles.${order.style}` as keyof typeof d
-                  ] as string) || order.style}
+                  {order.orderType === "marketplace"
+                    ? "—"
+                    : (d[
+                        `styles.${order.style}` as keyof typeof d
+                      ] as string) || order.style}
                 </td>
                 <td className="px-4 py-3">
                   <span

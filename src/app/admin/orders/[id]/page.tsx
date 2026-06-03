@@ -80,6 +80,8 @@ export default async function AdminOrderDetailPage({
     order: {
       id: order.id,
       orderNumber: order.orderNumber,
+      orderType: order.orderType,
+      productTitleSnapshot: order.productTitleSnapshot,
       email: order.email,
       customerName: order.customerName,
       phone: order.phone,

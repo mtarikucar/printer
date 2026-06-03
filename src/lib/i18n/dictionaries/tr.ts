@@ -1416,6 +1416,15 @@ const tr: Dictionary = {
   "admin.manufacturers.statusPending": "Beklemede",
   "admin.manufacturers.statusActive": "Aktif",
   "admin.manufacturers.statusSuspended": "Askıya Alınmış",
+  "admin.manufacturers.statusConditional": "Koşullu onaylı",
+  "admin.manufacturers.statusRejected": "Reddedildi",
+  "admin.manufacturers.filterConditional": "Koşullu",
+  "admin.manufacturers.filterRejected": "Reddedildi",
+  "admin.manufacturers.conditionallyApprove": "Koşullu onayla",
+  "admin.manufacturers.approve": "Onayla",
+  "admin.manufacturers.reject": "Reddet",
+  "admin.manufacturers.viewPrinterPhoto": "Yazıcı fotoğrafı",
+  "admin.manufacturers.awaitingPhoto": "Fotoğraf bekleniyor",
 
   // Admin - Sipariş Detay (üretici bölümü)
   "admin.orderDetail.assignManufacturer": "Üreticiye Ata",

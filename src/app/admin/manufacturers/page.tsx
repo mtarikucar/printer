@@ -1,8 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
-import { manufacturers, orders } from "@/lib/db/schema";
+import { manufacturers, orders, manufacturerDocuments } from "@/lib/db/schema";
 import { desc, sql, eq, and, notInArray } from "drizzle-orm";
+import { getPublicUrl } from "@/lib/services/storage";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { ManufacturersClient } from "./manufacturers-client";
 
@@ -32,6 +33,15 @@ export default async function AdminManufacturersPage() {
     activeOrderCounts.map((r) => [r.manufacturerId, r.count])
   );
 
+  const photos = await db.query.manufacturerDocuments.findMany({
+    where: eq(manufacturerDocuments.type, "printer_photo"),
+    orderBy: [desc(manufacturerDocuments.createdAt)],
+  });
+  const photoMap = new Map<string, string>();
+  for (const p of photos) {
+    if (!photoMap.has(p.manufacturerId)) photoMap.set(p.manufacturerId, getPublicUrl(p.storageKey));
+  }
+
   const serialized = allManufacturers.map((m) => ({
     id: m.id,
     companyName: m.companyName,
@@ -44,6 +54,9 @@ export default async function AdminManufacturersPage() {
     status: m.status,
     activeOrders: countMap.get(m.id) ?? 0,
     createdAt: m.createdAt.toISOString(),
+    rejectionReason: m.rejectionReason,
+    printerPhotoUploadedAt: m.printerPhotoUploadedAt ? m.printerPhotoUploadedAt.toISOString() : null,
+    printerPhotoUrl: photoMap.get(m.id) ?? null,
   }));
 
   return (

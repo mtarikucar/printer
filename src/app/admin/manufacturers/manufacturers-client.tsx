@@ -18,23 +18,32 @@ interface Manufacturer {
   status: string;
   activeOrders: number;
   createdAt: string;
+  rejectionReason: string | null;
+  printerPhotoUploadedAt: string | null;
+  printerPhotoUrl: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
   pending_approval: "bg-amber-100 text-amber-700",
   active: "bg-green-100 text-green-700",
   suspended: "bg-red-100 text-red-700",
+  conditionally_approved: "bg-blue-100 text-blue-700",
+  rejected: "bg-gray-200 text-gray-600",
 };
 
 const STATUS_LABEL_KEY: Record<string, string> = {
   pending_approval: "admin.manufacturers.statusPending",
   active: "admin.manufacturers.statusActive",
   suspended: "admin.manufacturers.statusSuspended",
+  conditionally_approved: "admin.manufacturers.statusConditional",
+  rejected: "admin.manufacturers.statusRejected",
 };
 
 type FilterTab =
   | "all"
   | "pending_approval"
+  | "conditionally_approved"
+  | "rejected"
   | "manual_review"
   | "active"
   | "suspended";
@@ -64,12 +73,19 @@ export function ManufacturersClient({
 
   const performAction = async (
     id: string,
-    action: "activate" | "suspend"
+    action: "activate" | "suspend" | "conditionally-approve" | "approve" | "reject"
   ) => {
+    let body: string | undefined;
+    if (action === "reject") {
+      const reason = window.prompt("Reddetme sebebi (opsiyonel, üreticiye e-posta ile iletilir):") ?? undefined;
+      body = JSON.stringify({ reason });
+    }
     setLoading(`${action}-${id}`);
     try {
       const res = await fetch(`/api/admin/manufacturers/${id}/${action}`, {
         method: "POST",
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -85,6 +101,8 @@ export function ManufacturersClient({
   const tabs: { key: FilterTab; label: string }[] = [
     { key: "all", label: d["admin.manufacturers.filterAll"] },
     { key: "pending_approval", label: d["admin.manufacturers.filterPending"] },
+    { key: "conditionally_approved", label: d["admin.manufacturers.filterConditional"] },
+    { key: "rejected", label: d["admin.manufacturers.filterRejected"] },
     {
       key: "manual_review",
       label: d["admin.manufacturers.filterManualReview"],
@@ -195,17 +213,62 @@ export function ManufacturersClient({
                     {formatDate(m.createdAt, loc)}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2 justify-end">
-                      {(m.status === "pending_approval" ||
-                        m.status === "suspended") && (
+                    <div className="flex gap-2 justify-end items-center">
+                      {m.status === "pending_approval" && (
+                        <>
+                          <button
+                            onClick={() => performAction(m.id, "conditionally-approve")}
+                            disabled={loading === `conditionally-approve-${m.id}`}
+                            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+                          >
+                            {d["admin.manufacturers.conditionallyApprove"]}
+                          </button>
+                          <button
+                            onClick={() => performAction(m.id, "reject")}
+                            disabled={loading === `reject-${m.id}`}
+                            className="px-3 py-1.5 bg-gray-600 text-white text-xs font-medium rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors"
+                          >
+                            {d["admin.manufacturers.reject"]}
+                          </button>
+                        </>
+                      )}
+                      {m.status === "conditionally_approved" && (
+                        <>
+                          {m.printerPhotoUrl ? (
+                            <a
+                              href={m.printerPhotoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 border border-gray-300 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-50"
+                            >
+                              {d["admin.manufacturers.viewPrinterPhoto"]}
+                            </a>
+                          ) : (
+                            <span className="text-xs text-gray-400">{d["admin.manufacturers.awaitingPhoto"]}</span>
+                          )}
+                          <button
+                            onClick={() => performAction(m.id, "approve")}
+                            disabled={!m.printerPhotoUploadedAt || loading === `approve-${m.id}`}
+                            className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {d["admin.manufacturers.approve"]}
+                          </button>
+                          <button
+                            onClick={() => performAction(m.id, "reject")}
+                            disabled={loading === `reject-${m.id}`}
+                            className="px-3 py-1.5 bg-gray-600 text-white text-xs font-medium rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors"
+                          >
+                            {d["admin.manufacturers.reject"]}
+                          </button>
+                        </>
+                      )}
+                      {m.status === "suspended" && (
                         <button
                           onClick={() => performAction(m.id, "activate")}
                           disabled={loading === `activate-${m.id}`}
                           className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors"
                         >
-                          {loading === `activate-${m.id}`
-                            ? d["admin.manufacturers.activating"]
-                            : d["admin.manufacturers.activate"]}
+                          {loading === `activate-${m.id}` ? d["admin.manufacturers.activating"] : d["admin.manufacturers.activate"]}
                         </button>
                       )}
                       {m.status === "active" && (
@@ -214,9 +277,7 @@ export function ManufacturersClient({
                           disabled={loading === `suspend-${m.id}`}
                           className="px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors"
                         >
-                          {loading === `suspend-${m.id}`
-                            ? d["admin.manufacturers.suspending"]
-                            : d["admin.manufacturers.suspend"]}
+                          {loading === `suspend-${m.id}` ? d["admin.manufacturers.suspending"] : d["admin.manufacturers.suspend"]}
                         </button>
                       )}
                     </div>

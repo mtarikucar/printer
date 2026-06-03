@@ -1410,6 +1410,15 @@ const en = {
   "admin.manufacturers.statusPending": "Pending",
   "admin.manufacturers.statusActive": "Active",
   "admin.manufacturers.statusSuspended": "Suspended",
+  "admin.manufacturers.statusConditional": "Conditionally approved",
+  "admin.manufacturers.statusRejected": "Rejected",
+  "admin.manufacturers.filterConditional": "Conditional",
+  "admin.manufacturers.filterRejected": "Rejected",
+  "admin.manufacturers.conditionallyApprove": "Conditionally approve",
+  "admin.manufacturers.approve": "Approve",
+  "admin.manufacturers.reject": "Reject",
+  "admin.manufacturers.viewPrinterPhoto": "View printer photo",
+  "admin.manufacturers.awaitingPhoto": "Awaiting photo",
 
   // Admin - Order Detail (manufacturer section)
   "admin.orderDetail.assignManufacturer": "Assign to Manufacturer",

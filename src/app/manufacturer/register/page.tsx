@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
+import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
+import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 const ONBOARDING_TEXT = `# Üretici Ortaklığı Bilgilendirmesi
 
@@ -44,7 +46,9 @@ export default function ManufacturerRegisterPage() {
   const [companyName, setCompanyName] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [email, setEmail] = useState("");
+  const [phoneCountry, setPhoneCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [phone, setPhone] = useState("");
+  const [waCountry, setWaCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [whatsappPhone, setWhatsappPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -125,6 +129,20 @@ export default function ManufacturerRegisterPage() {
       return;
     }
 
+    const phoneE164 = phoneInputToE164(phoneCountry, phone);
+    if (!phoneE164) {
+      setError("Geçerli bir telefon numarası girin");
+      return;
+    }
+    let whatsappE164: string | null = null;
+    if (whatsappPhone.trim()) {
+      whatsappE164 = phoneInputToE164(waCountry, whatsappPhone);
+      if (!whatsappE164) {
+        setError("Geçerli bir WhatsApp numarası girin");
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/manufacturer/auth/register", {
@@ -134,8 +152,8 @@ export default function ManufacturerRegisterPage() {
           companyName,
           contactPerson,
           email,
-          phone,
-          whatsappPhone: whatsappPhone || null,
+          phone: phoneE164,
+          whatsappPhone: whatsappE164,
           taxId: taxIdTrimmed || null,
           password,
           address: {
@@ -144,7 +162,7 @@ export default function ManufacturerRegisterPage() {
             ilce,
             il,
             postaKodu,
-            telefon: phone,
+            telefon: phoneE164,
           },
           iban: ibanClean,
           bankAccountHolder,
@@ -263,11 +281,22 @@ export default function ManufacturerRegisterPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Telefon *</label>
-                <input type="tel" className={inputCls} required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="05XX XXX XXXX" />
+                <PhoneInput
+                  required
+                  country={phoneCountry}
+                  nationalNumber={phone}
+                  onCountryChange={setPhoneCountry}
+                  onNationalNumberChange={setPhone}
+                />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">WhatsApp (opsiyonel, admin iletişimi için)</label>
-                <input type="tel" className={inputCls} value={whatsappPhone} onChange={(e) => setWhatsappPhone(e.target.value)} />
+                <PhoneInput
+                  country={waCountry}
+                  nationalNumber={whatsappPhone}
+                  onCountryChange={setWaCountry}
+                  onNationalNumberChange={setWhatsappPhone}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Şifre *</label>

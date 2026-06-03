@@ -49,7 +49,10 @@ interface SendEmailParams {
     | "guest_account_claim"
     | "qc_submitted"
     | "manufacturer_cancelled"
-    | "new_message";
+    | "new_message"
+    | "manufacturer_welcome"
+    | "manufacturer_approved"
+    | "manufacturer_rejected";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -83,6 +86,7 @@ interface SendEmailParams {
   notificationType?: string;
   // Q6: deep link to /reset-password/{token}?claim=1 for guest checkout.
   claimUrl?: string;
+  rejectionReason?: string;
 }
 
 function formatKurus(kurus?: number): string {
@@ -512,6 +516,53 @@ function getTemplates(locale: Locale) {
         </div>
       `,
     }),
+
+    manufacturer_welcome: (p) => ({
+      subject: d["email.mfrWelcome.subject"],
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color:#1f2937;">
+          <h1 style="color:#1a1a1a;">${d["email.mfrWelcome.heading"].replace("{companyName}", escHtml(p.companyName || ""))}</h1>
+          <p>${d["email.mfrWelcome.body"]}</p>
+          <p style="margin:24px 0;">
+            <a href="${process.env.NEXT_PUBLIC_APP_URL}/manufacturer/login"
+               style="display:inline-block;background:#4f46e5;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">
+              ${d["email.mfrWelcome.button"]}
+            </a>
+          </p>
+          <p style="font-size:13px;color:#6b7280;">${d["email.mfrWelcome.footer"]}</p>
+          <p style="margin-top:24px;color:#999;font-size:12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
+
+    manufacturer_approved: (p) => ({
+      subject: d["email.mfrApproved.subject"],
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color:#1f2937;">
+          <h1 style="color:#1a1a1a;">${d["email.mfrApproved.heading"].replace("{companyName}", escHtml(p.companyName || ""))}</h1>
+          <p>${d["email.mfrApproved.body"]}</p>
+          <p style="margin:24px 0;">
+            <a href="${process.env.NEXT_PUBLIC_APP_URL}/manufacturer/orders"
+               style="display:inline-block;background:#10b981;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">
+              ${d["email.mfrApproved.button"]}
+            </a>
+          </p>
+          <p style="margin-top:24px;color:#999;font-size:12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
+
+    manufacturer_rejected: (p) => ({
+      subject: d["email.mfrRejected.subject"],
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color:#1f2937;">
+          <h1 style="color:#1a1a1a;">${d["email.mfrRejected.heading"]}</h1>
+          <p>${d["email.mfrRejected.body"]}</p>
+          ${p.rejectionReason ? `<p style="color:#6b7280;"><strong>${d["email.mfrRejected.reasonLabel"]}:</strong> ${escHtml(p.rejectionReason)}</p>` : ""}
+          <p style="margin-top:24px;color:#999;font-size:12px;">Figurine Studio</p>
+        </div>
+      `,
+    }),
   };
 
   return templates;
@@ -527,6 +578,9 @@ const RECIPIENT_OVERRIDES: Partial<
   revision_request: (p) => p.adminEmail,
   qc_submitted: (p) => p.adminEmail,
   manufacturer_cancelled: (p) => p.adminEmail,
+  manufacturer_welcome: (p) => p.manufacturerEmail,
+  manufacturer_approved: (p) => p.manufacturerEmail,
+  manufacturer_rejected: (p) => p.manufacturerEmail,
 };
 
 function resolveRecipient(params: SendEmailParams): string {

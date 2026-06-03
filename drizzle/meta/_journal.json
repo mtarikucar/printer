@@ -8,6 +8,13 @@
       "when": 1780157096420,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780472651084,
+      "tag": "0001_awesome_silver_centurion",
+      "breakpoints": true
     }
   ]
 }

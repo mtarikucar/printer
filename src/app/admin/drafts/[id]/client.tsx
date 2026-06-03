@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { formatPhoneDisplay } from "@/lib/phone";
 
 interface DraftView {
   id: string;
@@ -194,7 +195,7 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between"><dt className="text-gray-500">Ad</dt><dd className="text-gray-900">{draft.customerName}</dd></div>
             <div className="flex justify-between"><dt className="text-gray-500">E-posta</dt><dd className="text-gray-900">{draft.email}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">Telefon</dt><dd className="text-gray-900">{draft.phone ?? "—"}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">Telefon</dt><dd className="text-gray-900">{draft.phone ? formatPhoneDisplay(draft.phone) : "—"}</dd></div>
           </dl>
         </section>
 

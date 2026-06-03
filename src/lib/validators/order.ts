@@ -2,6 +2,12 @@ import { z } from "zod";
 import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { phoneField } from "@/lib/phone";
+
+function defaultCountryForLocale(_locale: Locale) {
+  // Shipping is Turkey-only today; default the parser to TR regardless of UI locale.
+  return "TR" as const;
+}
 
 export function createTurkishAddressSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
@@ -14,9 +20,7 @@ export function createTurkishAddressSchema(locale: Locale = defaultLocale) {
       .string()
       .min(1, d["validator.postalCode.required"])
       .regex(/^\d{5}$/, d["validator.postalCode.invalid"]),
-    telefon: z
-      .string()
-      .min(10, d["validator.phone.min"]),
+    telefon: phoneField(defaultCountryForLocale(locale), d["validator.phone.invalid"]),
   });
 }
 

@@ -7,11 +7,12 @@ import {
   setDefaultAddress,
   updateAddress,
 } from "@/lib/services/address-book";
+import { phoneField } from "@/lib/phone";
 
 const updateSchema = z.object({
   label: z.string().trim().min(1).max(50),
   fullName: z.string().trim().min(2).max(120),
-  phone: z.string().trim().min(7).max(30),
+  phone: phoneField(),
   adres: z.string().trim().min(5).max(500),
   mahalle: z.string().trim().max(120).optional().nullable(),
   ilce: z.string().trim().min(2).max(80),

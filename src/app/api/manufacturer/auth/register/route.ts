@@ -8,9 +8,7 @@ import { hashPassword } from "@/lib/services/manufacturer-auth";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { parseTaxId } from "@/lib/services/tax-id";
 import { isValidTrIban, normalizeIban } from "@/lib/services/iban";
-
-// Turkish phone shape — see profile/route.ts for rationale.
-const trPhoneRegex = /^(?:\+?90)?[2-5]\d{9}$/;
+import { phoneField } from "@/lib/phone";
 
 export async function POST(request: NextRequest) {
   const ip = extractClientIp(request);
@@ -28,7 +26,7 @@ export async function POST(request: NextRequest) {
     ilce: z.string().min(1),
     il: z.string().min(1),
     postaKodu: z.string().min(4),
-    telefon: z.string().regex(trPhoneRegex, "Invalid phone number"),
+    telefon: phoneField(),
   });
 
   const registerSchema = z.object({
@@ -36,12 +34,8 @@ export async function POST(request: NextRequest) {
     password: z.string().min(6, "Password must be at least 6 characters"),
     companyName: z.string().min(1, "Company name is required").max(100),
     contactPerson: z.string().min(1, "Contact person is required").max(100),
-    phone: z.string().regex(trPhoneRegex, "Invalid phone number"),
-    whatsappPhone: z
-      .string()
-      .regex(trPhoneRegex, "Invalid WhatsApp phone")
-      .optional()
-      .nullable(),
+    phone: phoneField(),
+    whatsappPhone: phoneField().optional().nullable(),
     taxId: z.string().optional().nullable(),
     address: addressSchema,
     iban: z

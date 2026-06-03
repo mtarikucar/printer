@@ -650,6 +650,7 @@ const tr: Dictionary = {
   "validator.postalCode.required": "Posta kodu zorunludur",
   "validator.postalCode.invalid": "Geçersiz posta kodu",
   "validator.phone.min": "Telefon numarası en az 10 karakter olmalıdır",
+  "validator.phone.invalid": "Geçerli bir telefon numarası girin",
   "validator.photo.required": "Fotoğraf zorunludur",
   "validator.size.invalid": "Geçersiz beden seçimi",
   "validator.tracking.required": "Kargo takip numarası zorunludur",
@@ -1415,6 +1416,16 @@ const tr: Dictionary = {
   "admin.manufacturers.statusPending": "Beklemede",
   "admin.manufacturers.statusActive": "Aktif",
   "admin.manufacturers.statusSuspended": "Askıya Alınmış",
+  "admin.manufacturers.statusConditional": "Koşullu onaylı",
+  "admin.manufacturers.statusRejected": "Reddedildi",
+  "admin.manufacturers.filterConditional": "Koşullu",
+  "admin.manufacturers.filterRejected": "Reddedildi",
+  "admin.manufacturers.conditionallyApprove": "Koşullu onayla",
+  "admin.manufacturers.approve": "Onayla",
+  "admin.manufacturers.reject": "Reddet",
+  "admin.manufacturers.rejectPrompt": "Reddetme sebebi (opsiyonel, üreticiye e-posta ile iletilir):",
+  "admin.manufacturers.viewPrinterPhoto": "Yazıcı fotoğrafı",
+  "admin.manufacturers.awaitingPhoto": "Fotoğraf bekleniyor",
 
   // Admin - Sipariş Detay (üretici bölümü)
   "admin.orderDetail.assignManufacturer": "Üreticiye Ata",
@@ -1640,6 +1651,22 @@ const tr: Dictionary = {
   "email.newMessage.heading": "Yeni bir mesajınız var",
   "email.newMessage.body":
     "Ekibimiz {orderNumber} numaralı siparişiniz hakkında yanıt verdi. Okuyup yanıtlamak için siparişinizi açın.",
+  "email.mfrWelcome.subject": "Figurine Studio'ya hoş geldiniz — son bir adım",
+  "email.mfrWelcome.heading": "Tebrikler, {companyName}!",
+  "email.mfrWelcome.body":
+    "Üretici başvurunuz koşullu olarak onaylandı. Güven ve kalite programımız kapsamında üretim kapasitenizi daha yakından tanımak istiyoruz. Son adım olarak, hâlihazırda kullandığınız 3D yazıcı(lar)ın bir fotoğrafını yükleyin.",
+  "email.mfrWelcome.button": "Yazıcı fotoğrafını yükle",
+  "email.mfrWelcome.footer": "Yükledikten sonra hesabınız 24 saat içinde incelenecektir.",
+  "email.mfrApproved.subject": "Figurine Studio üretici hesabınız onaylandı",
+  "email.mfrApproved.heading": "Onaylandınız, {companyName}!",
+  "email.mfrApproved.body":
+    "Hesabınız artık tamamen aktif. Giriş yapıp sipariş atamaları almaya başlayabilirsiniz.",
+  "email.mfrApproved.button": "Üretici panelini aç",
+  "email.mfrRejected.subject": "Figurine Studio başvurunuz hakkında",
+  "email.mfrRejected.heading": "Başvurunuz hakkında",
+  "email.mfrRejected.body":
+    "İlginiz için teşekkür ederiz. Üretici başvurunuzu şu anda onaylayamıyoruz.",
+  "email.mfrRejected.reasonLabel": "Sebep",
   "chat.title": "Mesajlar",
   "chat.placeholder": "Bir mesaj yazın…",
   "chat.send": "Gönder",

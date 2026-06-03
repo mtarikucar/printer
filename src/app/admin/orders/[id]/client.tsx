@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { OrderChat } from "@/components/order-chat";
+import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
+import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 const MeshSculptor = dynamic(
   () => import("@/components/mesh-sculptor/MeshSculptor").then((m) => m.MeshSculptor),
@@ -144,6 +146,8 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [sculptorOpen, setSculptorOpen] = useState(false);
   const [editNotes, setEditNotes] = useState(order.adminNotes || "");
   const [editAddress, setEditAddress] = useState(order.shippingAddress);
+  const [editTelefonCountry, setEditTelefonCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
+  const [editTelefonNational, setEditTelefonNational] = useState("");
 
   // Messaging state (email-only after WhatsApp removal)
   const [selectedTemplate, setSelectedTemplate] = useState("custom");
@@ -180,12 +184,16 @@ export function OrderDetailClient({ data, locale }: Props) {
   };
 
   const saveEdit = async () => {
+    const telefonE164 = phoneInputToE164(editTelefonCountry, editTelefonNational);
+    const addressToSave = editAddress
+      ? { ...editAddress, telefon: telefonE164 ?? editAddress.telefon }
+      : editAddress;
     setLoading("edit");
     try {
       const res = await fetch(`/api/admin/orders/${order.id}/edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminNotes: editNotes, shippingAddress: editAddress }),
+        body: JSON.stringify({ adminNotes: editNotes, shippingAddress: addressToSave }),
       });
       if (res.ok) {
         setEditing(false);
@@ -774,7 +782,12 @@ export function OrderDetailClient({ data, locale }: Props) {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.orderDetails"]}</h3>
                 {!editing && (
-                  <button onClick={() => setEditing(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">
+                  <button onClick={() => {
+                    const seed = e164ToPhoneInput(order.shippingAddress?.telefon);
+                    setEditTelefonCountry(seed.country);
+                    setEditTelefonNational(seed.nationalNumber);
+                    setEditing(true);
+                  }} className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors">
                     {d["admin.orderDetail.editOrder"]}
                   </button>
                 )}
@@ -889,7 +902,12 @@ export function OrderDetailClient({ data, locale }: Props) {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <input type="text" value={editAddress?.postaKodu || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, postaKodu: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Posta Kodu" />
-                    <input type="text" value={editAddress?.telefon || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, telefon: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Telefon" />
+                    <PhoneInput
+                      country={editTelefonCountry}
+                      nationalNumber={editTelefonNational}
+                      onCountryChange={setEditTelefonCountry}
+                      onNationalNumberChange={setEditTelefonNational}
+                    />
                   </div>
                   {/* Admin notes */}
                   <div className="pt-2">

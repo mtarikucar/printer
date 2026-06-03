@@ -67,6 +67,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (manufacturer.status === "rejected") {
+      return NextResponse.json(
+        { error: "Your application was not approved. Our team will contact you regarding next steps." },
+        { status: 403 }
+      );
+    }
+
     const token = createManufacturerSessionToken(
       manufacturer.id,
       manufacturer.email

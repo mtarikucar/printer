@@ -44,6 +44,7 @@ export async function GET() {
       capabilities: manufacturer.capabilities,
       onboardingAcceptedAt: manufacturer.onboardingAcceptedAt,
       status: manufacturer.status,
+      printerPhotoUploadedAt: manufacturer.printerPhotoUploadedAt,
       createdAt: manufacturer.createdAt,
     },
   });

@@ -518,6 +518,9 @@ const tr: Dictionary = {
   "create.preview.dragToRotate": "Döndürmek için sürükleyin, yakınlaştırmak için sıkıştırın",
   "create.preview.approve": "Onayla ve Devam Et",
   "create.preview.requestRevision": "Revizyon İste",
+  "create.preview.downloadLabel": "Modeli indir:",
+  "create.preview.downloadStl": "STL",
+  "create.preview.downloadObj": "OBJ",
 
   // Revision
   "create.revision.title": "Revizyon Talebi",
@@ -1518,6 +1521,7 @@ const tr: Dictionary = {
   "manufacturer.orderDetail.model3d": "3D Model",
   "manufacturer.orderDetail.downloadGlb": "GLB İndir",
   "manufacturer.orderDetail.downloadStl": "STL İndir",
+  "manufacturer.orderDetail.downloadObj": "OBJ İndir",
   "manufacturer.orderDetail.shippingAddress": "Teslimat Adresi",
   "manufacturer.orderDetail.figurineSize": "Figürin Boyutu",
   "manufacturer.orderDetail.material": "Malzeme",

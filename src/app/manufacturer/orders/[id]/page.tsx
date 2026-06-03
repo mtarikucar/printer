@@ -51,7 +51,7 @@ export default async function ManufacturerOrderDetailPage({
       },
       generationAttempts: {
         where: eq(generationAttempts.status, "succeeded"),
-        columns: { id: true, outputGlbUrl: true, outputStlUrl: true },
+        columns: { id: true, outputGlbUrl: true, outputStlUrl: true, outputObjUrl: true },
         orderBy: [desc(generationAttempts.createdAt)],
         limit: 1,
       },
@@ -144,6 +144,7 @@ export default async function ManufacturerOrderDetailPage({
     marketplaceProduct,
     glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
     stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
+    objUrl: normalizeFileUrl(latestGeneration?.outputObjUrl ?? null),
     actions: order.manufacturerActions.map((a) => ({
       id: a.id,
       action: a.action,

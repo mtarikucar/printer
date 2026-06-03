@@ -40,6 +40,8 @@ export async function GET(
       return NextResponse.json({
         status: "failed",
         glbUrl: normalizeFileUrl(preview.glbUrl),
+        objUrl: normalizeFileUrl(preview.objUrl),
+        stlUrl: normalizeFileUrl(preview.stlUrl),
         errorMessage: timedOutMessage,
         createdAt: preview.createdAt,
         photoKey: preview.photoKey,
@@ -50,6 +52,8 @@ export async function GET(
   return NextResponse.json({
     status: preview.status,
     glbUrl: normalizeFileUrl(preview.glbUrl),
+    objUrl: normalizeFileUrl(preview.objUrl),
+    stlUrl: normalizeFileUrl(preview.stlUrl),
     errorMessage: preview.errorMessage,
     createdAt: preview.createdAt,
     photoKey: preview.photoKey,

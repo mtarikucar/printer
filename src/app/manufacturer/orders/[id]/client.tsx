@@ -58,6 +58,7 @@ interface Props {
     } | null;
     glbUrl: string | null;
     stlUrl: string | null;
+    objUrl: string | null;
     actions: {
       id: string;
       action: string;
@@ -122,7 +123,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, glbUrl, stlUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, glbUrl, stlUrl, objUrl, actions } = data;
   const isMarketplace = order.orderType === "marketplace";
   const router = useRouter();
   const d = useDictionary();
@@ -306,6 +307,28 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
               </svg>
               {(d["manufacturer.orderDetail.downloadStl" as keyof typeof d] as string) ||
                 "Download STL"}
+            </a>
+          )}
+          {objUrl && (
+            <a
+              href={`/api/manufacturer/orders/${order.id}/download-obj`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-600 hover:bg-slate-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-slate-200 transition-all hover:shadow-md hover:shadow-slate-200"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              {(d["manufacturer.orderDetail.downloadObj" as keyof typeof d] as string) ||
+                "Download OBJ"}
             </a>
           )}
         </div>

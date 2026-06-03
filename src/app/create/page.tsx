@@ -14,6 +14,8 @@ import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
 import { figurinePriceKurus } from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
+import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
+import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 const PhotoEditor = dynamic(
   () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
@@ -65,6 +67,8 @@ export default function CreatePage() {
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [neighborhoodLoading, setNeighborhoodLoading] = useState(false);
+  const [telefonCountry, setTelefonCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
+  const [telefonNational, setTelefonNational] = useState("");
 
   // Saved address book (Q5). Loaded when the customer reaches the shipping
   // step. Selecting one fully prefills the form (incl. dropdown options) and
@@ -388,6 +392,9 @@ export default function CreatePage() {
   const applySavedAddress = (id: string) => {
     const addr = savedAddresses.find((a) => a.id === id);
     if (!addr) return;
+    const phoneSeed = e164ToPhoneInput(addr.phone);
+    setTelefonCountry(phoneSeed.country);
+    setTelefonNational(phoneSeed.nationalNumber);
     setForm({
       adres: addr.adres,
       mahalle: addr.mahalle ?? "",
@@ -599,6 +606,13 @@ export default function CreatePage() {
       return;
     }
 
+    const telefonE164 = phoneInputToE164(telefonCountry, telefonNational);
+    if (!telefonE164) {
+      setError("Geçerli bir telefon numarası girin");
+      return;
+    }
+    const submitForm = { ...form, telefon: telefonE164 };
+
     setSubmitting(true);
     setError(null);
 
@@ -612,7 +626,7 @@ export default function CreatePage() {
           material: selectedMaterial,
           style: selectedStyle,
           modifiers: selectedModifiers,
-          shippingAddress: form,
+          shippingAddress: submitForm,
           previewId: previewId || undefined,
           giftCardCode: gcApplied?.code || undefined,
           paymentMethod,
@@ -1306,12 +1320,12 @@ export default function CreatePage() {
                     />
                   </FormField>
                   <FormField label={d["common.phone"]} required>
-                    <Input
-                      type="tel"
+                    <PhoneInput
                       required
-                      value={form.telefon}
-                      onChange={(e) => updateField("telefon", e.target.value)}
-                      placeholder={d["create.phone.placeholder"]}
+                      country={telefonCountry}
+                      nationalNumber={telefonNational}
+                      onCountryChange={setTelefonCountry}
+                      onNationalNumberChange={setTelefonNational}
                     />
                   </FormField>
                 </div>

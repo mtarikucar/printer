@@ -28,7 +28,6 @@ interface FormData {
   ilce: string;
   il: string;
   postaKodu: string;
-  telefon: string;
 }
 
 // Steps: 0=Size+Photo, 1=Generating, 2=Preview, 3=Shipping+Payment
@@ -62,7 +61,6 @@ export default function CreatePage() {
     ilce: "",
     il: "",
     postaKodu: "",
-    telefon: "",
   });
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
@@ -401,7 +399,6 @@ export default function CreatePage() {
       ilce: addr.ilce,
       il: addr.il,
       postaKodu: addr.postaKodu,
-      telefon: addr.phone,
     });
     // Repopulate the cascading dropdowns so the selected city/district are
     // valid options against the static + remote lists.

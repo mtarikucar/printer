@@ -23,7 +23,6 @@ type Address = {
 type FormState = {
   label: string;
   fullName: string;
-  phone: string;
   adres: string;
   mahalle: string;
   ilce: string;
@@ -35,7 +34,6 @@ type FormState = {
 const emptyForm: FormState = {
   label: "",
   fullName: "",
-  phone: "",
   adres: "",
   mahalle: "",
   ilce: "",
@@ -89,7 +87,6 @@ export function AddressBookPanel() {
     setForm({
       label: a.label,
       fullName: a.fullName,
-      phone: a.phone,
       adres: a.adres,
       mahalle: a.mahalle ?? "",
       ilce: a.ilce,

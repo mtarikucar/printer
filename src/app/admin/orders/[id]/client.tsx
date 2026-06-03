@@ -185,6 +185,10 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   const saveEdit = async () => {
     const telefonE164 = phoneInputToE164(editTelefonCountry, editTelefonNational);
+    if (editTelefonNational.trim() !== "" && telefonE164 === null) {
+      alert("Geçerli bir telefon numarası girin");
+      return;
+    }
     const addressToSave = editAddress
       ? { ...editAddress, telefon: telefonE164 ?? editAddress.telefon }
       : editAddress;

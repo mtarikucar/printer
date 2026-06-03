@@ -1641,6 +1641,22 @@ const tr: Dictionary = {
   "email.newMessage.heading": "Yeni bir mesajınız var",
   "email.newMessage.body":
     "Ekibimiz {orderNumber} numaralı siparişiniz hakkında yanıt verdi. Okuyup yanıtlamak için siparişinizi açın.",
+  "email.mfrWelcome.subject": "Figurine Studio'ya hoş geldiniz — son bir adım",
+  "email.mfrWelcome.heading": "Tebrikler, {companyName}!",
+  "email.mfrWelcome.body":
+    "Üretici başvurunuz koşullu olarak onaylandı. Güven ve kalite programımız kapsamında üretim kapasitenizi daha yakından tanımak istiyoruz. Son adım olarak, hâlihazırda kullandığınız 3D yazıcı(lar)ın bir fotoğrafını yükleyin.",
+  "email.mfrWelcome.button": "Yazıcı fotoğrafını yükle",
+  "email.mfrWelcome.footer": "Yükledikten sonra hesabınız 24 saat içinde incelenecektir.",
+  "email.mfrApproved.subject": "Figurine Studio üretici hesabınız onaylandı",
+  "email.mfrApproved.heading": "Onaylandınız, {companyName}!",
+  "email.mfrApproved.body":
+    "Hesabınız artık tamamen aktif. Giriş yapıp sipariş atamaları almaya başlayabilirsiniz.",
+  "email.mfrApproved.button": "Üretici panelini aç",
+  "email.mfrRejected.subject": "Figurine Studio başvurunuz hakkında",
+  "email.mfrRejected.heading": "Başvurunuz hakkında",
+  "email.mfrRejected.body":
+    "İlginiz için teşekkür ederiz. Üretici başvurunuzu şu anda onaylayamıyoruz.",
+  "email.mfrRejected.reasonLabel": "Sebep",
   "chat.title": "Mesajlar",
   "chat.placeholder": "Bir mesaj yazın…",
   "chat.send": "Gönder",

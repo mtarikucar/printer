@@ -1635,6 +1635,22 @@ const en = {
   "email.newMessage.heading": "You have a new message",
   "email.newMessage.body":
     "Our team replied about your order {orderNumber}. Open your order to read and reply.",
+  "email.mfrWelcome.subject": "Welcome to Figurine Studio — one last step",
+  "email.mfrWelcome.heading": "Congratulations, {companyName}!",
+  "email.mfrWelcome.body":
+    "Your manufacturer application has been conditionally approved. As part of our trust & quality program, we'd like to learn more about your production capabilities. As a last step, please upload a photo of the 3D printer(s) you currently use.",
+  "email.mfrWelcome.button": "Upload printer photo",
+  "email.mfrWelcome.footer": "After uploading, your account will be reviewed within 24 hours.",
+  "email.mfrApproved.subject": "Your Figurine Studio manufacturer account is approved",
+  "email.mfrApproved.heading": "You're approved, {companyName}!",
+  "email.mfrApproved.body":
+    "Your account is now fully active. You can log in and start receiving order assignments.",
+  "email.mfrApproved.button": "Open manufacturer panel",
+  "email.mfrRejected.subject": "Update on your Figurine Studio application",
+  "email.mfrRejected.heading": "About your application",
+  "email.mfrRejected.body":
+    "Thank you for your interest. We're unable to approve your manufacturer application at this time.",
+  "email.mfrRejected.reasonLabel": "Reason",
   "chat.title": "Messages",
   "chat.placeholder": "Type a message…",
   "chat.send": "Send",

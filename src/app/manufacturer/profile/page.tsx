@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { ManufacturerKyc } from "@/components/manufacturer-kyc";
+import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
+import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 interface TurkishAddress {
   adres: string;
@@ -65,7 +67,9 @@ export default function ManufacturerProfilePage() {
 
   // Editable form state
   const [contactPerson, setContactPerson] = useState("");
+  const [phoneCountry, setPhoneCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [phone, setPhone] = useState("");
+  const [waCountry, setWaCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [whatsappPhone, setWhatsappPhone] = useState("");
   const [il, setIl] = useState("");
   const [ilce, setIlce] = useState("");
@@ -96,8 +100,12 @@ export default function ManufacturerProfilePage() {
       const p: ManufacturerProfile = data.manufacturer;
       setProfile(p);
       setContactPerson(p.contactPerson);
-      setPhone(p.phone);
-      setWhatsappPhone(p.whatsappPhone ?? "");
+      const phoneSeed = e164ToPhoneInput(p.phone);
+      setPhoneCountry(phoneSeed.country);
+      setPhone(phoneSeed.nationalNumber);
+      const waSeed = e164ToPhoneInput(p.whatsappPhone);
+      setWaCountry(waSeed.country);
+      setWhatsappPhone(waSeed.nationalNumber);
       setIl(p.address?.il ?? "");
       setIlce(p.address?.ilce ?? "");
       setMahalle(p.address?.mahalle ?? "");
@@ -125,6 +133,19 @@ export default function ManufacturerProfilePage() {
   }, []);
 
   const handleSave = async () => {
+    const phoneE164 = phoneInputToE164(phoneCountry, phone);
+    if (!phoneE164) {
+      setSaveError("Geçerli bir telefon numarası girin");
+      return;
+    }
+    let whatsappE164: string | null = null;
+    if (whatsappPhone.trim()) {
+      whatsappE164 = phoneInputToE164(waCountry, whatsappPhone);
+      if (!whatsappE164) {
+        setSaveError("Geçerli bir WhatsApp numarası girin");
+        return;
+      }
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -134,15 +155,15 @@ export default function ManufacturerProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contactPerson,
-          phone,
-          whatsappPhone: whatsappPhone || null,
+          phone: phoneE164,
+          whatsappPhone: whatsappE164,
           address: {
             adres,
             mahalle: mahalle || undefined,
             ilce,
             il,
             postaKodu,
-            telefon: phone,
+            telefon: phoneE164,
           },
           iban: ibanClean,
           bankAccountHolder,
@@ -242,7 +263,13 @@ export default function ManufacturerProfilePage() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Telefon</label>
             {editing ? (
-              <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <PhoneInput
+                required
+                country={phoneCountry}
+                nationalNumber={phone}
+                onCountryChange={setPhoneCountry}
+                onNationalNumberChange={setPhone}
+              />
             ) : (
               <p className="text-gray-900">{profile.phone}</p>
             )}
@@ -250,7 +277,12 @@ export default function ManufacturerProfilePage() {
           <div className="sm:col-span-2">
             <label className="block text-xs font-medium text-gray-500 mb-1">WhatsApp (opsiyonel)</label>
             {editing ? (
-              <input className={inputCls} value={whatsappPhone} onChange={(e) => setWhatsappPhone(e.target.value)} />
+              <PhoneInput
+                country={waCountry}
+                nationalNumber={whatsappPhone}
+                onCountryChange={setWaCountry}
+                onNationalNumberChange={setWhatsappPhone}
+              />
             ) : (
               <p className="text-gray-900">{profile.whatsappPhone ?? "—"}</p>
             )}

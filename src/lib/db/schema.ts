@@ -161,8 +161,10 @@ export const previewStatusEnum = pgEnum("preview_status", [
 
 export const manufacturerStatusEnum = pgEnum("manufacturer_status", [
   "pending_approval",
+  "conditionally_approved",
   "active",
   "suspended",
+  "rejected",
 ]);
 
 export const manufacturerOrderStatusEnum = pgEnum("manufacturer_order_status", [
@@ -595,6 +597,7 @@ export const docTypeEnum = pgEnum("manufacturer_doc_type", [
   "ticaret_sicil",
   "imza_sirkuleri",
   "kimlik",
+  "printer_photo",
   "other",
 ]);
 export const docReviewStatusEnum = pgEnum("doc_review_status", [
@@ -748,6 +751,11 @@ export const manufacturers = pgTable("manufacturers", {
   // Onboarding
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
   status: manufacturerStatusEnum("status").notNull().default("pending_approval"),
+  // Verification flow (issue #2): rejection note shown to the applicant, and the
+  // timestamp the conditionally-approved manufacturer uploaded their 3D-printer
+  // photo (gates the admin "Approve" action + the manufacturer upload screen).
+  rejectionReason: text("rejection_reason"),
+  printerPhotoUploadedAt: timestamp("printer_photo_uploaded_at"),
   notes: text("notes"),
   // Faz 2/3: accumulating reliability strikes (late ship, cancel-after-accept,
   // QC fail). Faz 3 policy auto-suspends past a threshold.

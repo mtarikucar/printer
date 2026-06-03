@@ -85,3 +85,26 @@ export function detectCountry(e164: string | null | undefined): CountryCode {
     return DEFAULT_COUNTRY;
   }
 }
+
+import { z } from "zod";
+
+/**
+ * Zod field for a phone number. Accepts a user-typed or already-E.164 string,
+ * validates it against `country` (default TR), and transforms to E.164.
+ * Compose with `.optional()` / `.nullable()` at the call site.
+ */
+export function phoneField(
+  country: CountryCode = DEFAULT_COUNTRY,
+  message = "Invalid phone number"
+) {
+  return z
+    .string()
+    .transform((v, ctx) => {
+      const e164 = normalizePhone(v, country);
+      if (!e164) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+        return z.NEVER;
+      }
+      return e164;
+    });
+}

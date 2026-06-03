@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { z } from "zod";
 import {
   normalizePhone,
   isValidPhone,
@@ -6,6 +7,7 @@ import {
   COUNTRIES,
   DEFAULT_COUNTRY,
 } from "../src/lib/phone";
+import { phoneField } from "../src/lib/phone";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -42,6 +44,26 @@ check("formatPhoneDisplay returns international form", () => {
 check("Türkiye is the default country and first in list", () => {
   assert.strictEqual(DEFAULT_COUNTRY, "TR");
   assert.strictEqual(COUNTRIES[0].iso, "TR");
+});
+
+check("phoneField accepts E.164 and passes through", () => {
+  const schema = z.object({ phone: phoneField() });
+  const r = schema.parse({ phone: "+905321234567" });
+  assert.strictEqual(r.phone, "+905321234567");
+});
+check("phoneField normalizes a national TR number", () => {
+  const schema = z.object({ phone: phoneField() });
+  const r = schema.parse({ phone: "0532 123 45 67" });
+  assert.strictEqual(r.phone, "+905321234567");
+});
+check("phoneField rejects garbage", () => {
+  const schema = z.object({ phone: phoneField() });
+  assert.throws(() => schema.parse({ phone: "nope" }));
+});
+check("phoneField().optional().nullable() allows null", () => {
+  const schema = z.object({ phone: phoneField().nullable().optional() });
+  assert.strictEqual(schema.parse({ phone: null }).phone, null);
+  assert.strictEqual(schema.parse({}).phone, undefined);
 });
 
 console.log(`\nphone: ${passed} checks passed`);

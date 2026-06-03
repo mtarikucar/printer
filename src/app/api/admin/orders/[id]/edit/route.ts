@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orders, adminActions, TurkishAddress } from "@/lib/db/schema";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { normalizePhone } from "@/lib/phone";
 
 export async function POST(
   request: NextRequest,
@@ -44,6 +45,14 @@ export async function POST(
   }
 
   if (body.shippingAddress !== undefined) {
+    const addr = body.shippingAddress;
+    if (addr.telefon) {
+      const normalized = normalizePhone(addr.telefon, "TR");
+      if (!normalized) {
+        return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
+      }
+      body.shippingAddress = { ...addr, telefon: normalized };
+    }
     updates.shippingAddress = body.shippingAddress;
     changedFields.push("shippingAddress");
   }

@@ -7,7 +7,7 @@ import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { OrderChat } from "@/components/order-chat";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
-import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
 const MeshSculptor = dynamic(
   () => import("@/components/mesh-sculptor/MeshSculptor").then((m) => m.MeshSculptor),
@@ -938,7 +938,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                           <p>{addr.adres}</p>
                           <p>{addr.ilce} / {addr.il}</p>
                           <p className="text-gray-500">{addr.postaKodu}</p>
-                          <p className="mt-1 text-gray-500">Tel: {addr.telefon}</p>
+                          <p className="mt-1 text-gray-500">Tel: {addr.telefon ? formatPhoneDisplay(addr.telefon) : "—"}</p>
                         </div>
                       </div>
                     </div>

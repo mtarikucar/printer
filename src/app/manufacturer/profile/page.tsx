@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { ManufacturerKyc } from "@/components/manufacturer-kyc";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
-import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
 interface TurkishAddress {
   adres: string;
@@ -271,7 +271,7 @@ export default function ManufacturerProfilePage() {
                 onNationalNumberChange={setPhone}
               />
             ) : (
-              <p className="text-gray-900">{profile.phone}</p>
+              <p className="text-gray-900">{profile.phone ? formatPhoneDisplay(profile.phone) : "—"}</p>
             )}
           </div>
           <div className="sm:col-span-2">

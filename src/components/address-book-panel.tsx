@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Card, Input, FormField, Textarea } from "@/components/ui";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
-import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
 type Address = {
   id: string;
@@ -219,7 +219,7 @@ export function AddressBookPanel() {
                   )}
                 </div>
                 <p className="text-sm text-text-secondary mt-1">{a.fullName}</p>
-                <p className="text-xs text-text-muted">{a.phone}</p>
+                <p className="text-xs text-text-muted">{a.phone ? formatPhoneDisplay(a.phone) : "—"}</p>
               </div>
             </div>
             <div className="text-sm text-text-secondary space-y-0.5 mb-4">

@@ -11,6 +11,7 @@ import {
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { phoneField } from "@/lib/phone";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
     email: z.string().email(d["api.auth.emailInvalid"]),
     password: z.string().min(6, d["api.auth.passwordMin"]),
     fullName: z.string().min(1, d["api.auth.fullNameRequired"]).max(100),
-    phone: z.string().min(10, d["api.auth.phoneMin"]),
+    phone: phoneField(),
   });
 
   try {

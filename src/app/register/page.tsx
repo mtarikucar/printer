@@ -7,6 +7,8 @@ import { SiteHeader } from "@/components/site-header";
 import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Card, Input, FormField } from "@/components/ui";
+import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
+import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -15,6 +17,7 @@ export default function RegisterPage() {
   const d = useDictionary();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [phoneCountry, setPhoneCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -44,13 +47,19 @@ export default function RegisterPage() {
       return;
     }
 
+    const phoneE164 = phoneInputToE164(phoneCountry, phone);
+    if (!phoneE164) {
+      setError("Geçerli bir telefon numarası girin");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, email, phone, password }),
+        body: JSON.stringify({ fullName, email, phone: phoneE164, password }),
       });
 
       const data = await res.json();
@@ -108,7 +117,13 @@ export default function RegisterPage() {
                 <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={d["login.placeholder.email"]} />
               </FormField>
               <FormField label={d["common.phone"]} required>
-                <Input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={d["register.placeholder.phone"]} />
+                <PhoneInput
+                  required
+                  country={phoneCountry}
+                  nationalNumber={phone}
+                  onCountryChange={setPhoneCountry}
+                  onNationalNumberChange={setPhone}
+                />
               </FormField>
               <FormField label={d["common.password"]} required>
                 <Input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={d["register.placeholder.password"]} />

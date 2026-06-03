@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Card, Input, FormField, Textarea } from "@/components/ui";
+import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
+import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 type Address = {
   id: string;
@@ -49,6 +51,8 @@ export function AddressBookPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [phoneCountry, setPhoneCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
+  const [phoneNational, setPhoneNational] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,12 +75,17 @@ export function AddressBookPanel() {
 
   const startAdd = () => {
     setForm(emptyForm);
+    setPhoneCountry(DEFAULT_COUNTRY);
+    setPhoneNational("");
     setEditingId(null);
     setAdding(true);
     setError(null);
   };
 
   const startEdit = (a: Address) => {
+    const phoneSeed = e164ToPhoneInput(a.phone);
+    setPhoneCountry(phoneSeed.country);
+    setPhoneNational(phoneSeed.nationalNumber);
     setForm({
       label: a.label,
       fullName: a.fullName,
@@ -100,13 +109,18 @@ export function AddressBookPanel() {
   };
 
   const submit = async () => {
+    const phoneE164 = phoneInputToE164(phoneCountry, phoneNational);
+    if (!phoneE164) {
+      setError("Geçerli bir telefon numarası girin");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const payload = {
         label: form.label,
         fullName: form.fullName,
-        phone: form.phone,
+        phone: phoneE164,
         adres: form.adres,
         mahalle: form.mahalle || null,
         ilce: form.ilce,
@@ -174,6 +188,10 @@ export function AddressBookPanel() {
         <AddressForm
           form={form}
           setForm={setForm}
+          phoneCountry={phoneCountry}
+          phoneNational={phoneNational}
+          onPhoneCountryChange={setPhoneCountry}
+          onPhoneNationalChange={setPhoneNational}
           saving={saving}
           error={error}
           onSubmit={submit}
@@ -246,6 +264,10 @@ export function AddressBookPanel() {
 function AddressForm({
   form,
   setForm,
+  phoneCountry,
+  phoneNational,
+  onPhoneCountryChange,
+  onPhoneNationalChange,
   saving,
   error,
   onSubmit,
@@ -254,6 +276,10 @@ function AddressForm({
 }: {
   form: FormState;
   setForm: (f: FormState) => void;
+  phoneCountry: CountryCode;
+  phoneNational: string;
+  onPhoneCountryChange: (c: CountryCode) => void;
+  onPhoneNationalChange: (v: string) => void;
   saving: boolean;
   error: string | null;
   onSubmit: () => void;
@@ -283,10 +309,11 @@ function AddressForm({
           />
         </FormField>
         <FormField label={d["account.addresses.field.phone"]}>
-          <Input
-            type="tel"
-            value={form.phone}
-            onChange={(e) => upd("phone", e.target.value)}
+          <PhoneInput
+            country={phoneCountry}
+            nationalNumber={phoneNational}
+            onCountryChange={onPhoneCountryChange}
+            onNationalNumberChange={onPhoneNationalChange}
           />
         </FormField>
         <FormField label={d["account.addresses.field.postaKodu"]}>

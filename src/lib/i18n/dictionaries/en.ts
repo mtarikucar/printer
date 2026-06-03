@@ -1417,6 +1417,7 @@ const en = {
   "admin.manufacturers.conditionallyApprove": "Conditionally approve",
   "admin.manufacturers.approve": "Approve",
   "admin.manufacturers.reject": "Reject",
+  "admin.manufacturers.rejectPrompt": "Rejection reason (optional, emailed to the manufacturer):",
   "admin.manufacturers.viewPrinterPhoto": "View printer photo",
   "admin.manufacturers.awaitingPhoto": "Awaiting photo",
 

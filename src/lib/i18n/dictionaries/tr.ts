@@ -1423,6 +1423,7 @@ const tr: Dictionary = {
   "admin.manufacturers.conditionallyApprove": "Koşullu onayla",
   "admin.manufacturers.approve": "Onayla",
   "admin.manufacturers.reject": "Reddet",
+  "admin.manufacturers.rejectPrompt": "Reddetme sebebi (opsiyonel, üreticiye e-posta ile iletilir):",
   "admin.manufacturers.viewPrinterPhoto": "Yazıcı fotoğrafı",
   "admin.manufacturers.awaitingPhoto": "Fotoğraf bekleniyor",
 

@@ -77,7 +77,8 @@ export function ManufacturersClient({
   ) => {
     let body: string | undefined;
     if (action === "reject") {
-      const reason = window.prompt("Reddetme sebebi (opsiyonel, üreticiye e-posta ile iletilir):") ?? undefined;
+      const input = window.prompt(d["admin.manufacturers.rejectPrompt"]);
+      const reason = input && input.trim() ? input.trim() : undefined;
       body = JSON.stringify({ reason });
     }
     setLoading(`${action}-${id}`);
@@ -194,6 +195,11 @@ export function ManufacturersClient({
                     >
                       {d[STATUS_LABEL_KEY[m.status] as keyof typeof d] || m.status}
                     </span>
+                    {m.status === "rejected" && m.rejectionReason ? (
+                      <p className="mt-1 text-xs text-gray-500 max-w-[200px] truncate" title={m.rejectionReason}>
+                        {m.rejectionReason}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     {m.taxId && m.taxIdType ? (

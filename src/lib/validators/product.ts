@@ -61,6 +61,7 @@ export function createMarketplaceOrderSchema(locale: Locale = defaultLocale) {
     // when there is no session cookie.
     guestEmail: z.string().email("Invalid email").optional(),
     guestName: z.string().min(2).max(120).optional(),
+    marketingConsent: z.boolean().optional().default(false),
   });
 }
 

@@ -21,6 +21,7 @@ interface User {
   email: string;
   fullName: string;
   phone: string;
+  marketingConsent: boolean;
 }
 
 interface CustomerOrder {
@@ -129,6 +130,21 @@ function AccountPageInner() {
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/");
+  };
+
+  const toggleMarketingConsent = async () => {
+    if (!user) return;
+    const next = !user.marketingConsent;
+    setUser({ ...user, marketingConsent: next });
+    try {
+      await fetch("/api/customer/marketing-consent", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marketingConsent: next }),
+      });
+    } catch {
+      setUser((prev) => (prev ? { ...prev, marketingConsent: !next } : prev));
+    }
   };
 
   if (loading) {
@@ -428,6 +444,27 @@ function AccountPageInner() {
                   <p className="text-sm text-text-primary mt-0.5">{user.phone}</p>
                 </div>
               )}
+              <div className="py-3 border-t border-bg-subtle flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-text-primary">{d["account.emailPrefs.marketing"]}</p>
+                  <p className="text-xs text-text-muted mt-0.5">{d["account.emailPrefs.hint"]}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={user.marketingConsent}
+                  onClick={toggleMarketingConsent}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    user.marketingConsent ? "bg-green-500" : "bg-bg-subtle"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                      user.marketingConsent ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
               <div className="pt-4 border-t border-bg-subtle mt-2">
                 <Button onClick={handleLogout} variant="secondary" size="sm">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

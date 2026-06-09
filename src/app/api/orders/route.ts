@@ -161,6 +161,8 @@ export async function POST(request: NextRequest) {
             phone: common.shippingAddress.telefon,
             passwordHash: null,
             isGuest: true,
+            marketingConsent: common.marketingConsent ?? false,
+            marketingConsentAt: common.marketingConsent ? new Date() : null,
           })
           .onConflictDoNothing({ target: users.email })
           .returning();

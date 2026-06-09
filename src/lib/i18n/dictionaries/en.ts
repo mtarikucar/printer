@@ -406,6 +406,8 @@ const en = {
   "account.tab.addresses": "My Addresses",
   "account.tab.addresses.desc": "Saved shipping addresses",
   "account.profile.phone": "Phone",
+  "account.emailPrefs.marketing": "Campaign emails",
+  "account.emailPrefs.hint": "News, offers and new styles by email/SMS",
   "account.addresses.intro": "Saved addresses prefill your /create order.",
   "account.addresses.add": "Add New Address",
   "account.addresses.empty": "You have no saved addresses yet.",

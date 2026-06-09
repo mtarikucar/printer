@@ -408,6 +408,8 @@ const tr: Dictionary = {
   "account.tab.addresses": "Adreslerim",
   "account.tab.addresses.desc": "Kayıtlı teslimat adresleri",
   "account.profile.phone": "Telefon",
+  "account.emailPrefs.marketing": "Kampanya e-postaları",
+  "account.emailPrefs.hint": "Haber, fırsat ve yeni stiller için e-posta/SMS",
   "account.addresses.intro": "Kayıtlı adresleriniz /create siparişinde ön doldurulur.",
   "account.addresses.add": "Yeni Adres Ekle",
   "account.addresses.empty": "Henüz kayıtlı bir adresiniz yok.",

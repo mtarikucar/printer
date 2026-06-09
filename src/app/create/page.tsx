@@ -135,6 +135,7 @@ export default function CreatePage() {
   // their JWT/session.
   const [guestEmail, setGuestEmail] = useState("");
   const [guestName, setGuestName] = useState("");
+  const [marketingConsent, setMarketingConsent] = useState(false);
 
   // Loading stage rotation
   const [loadingStage, setLoadingStage] = useState(0);
@@ -643,6 +644,7 @@ export default function CreatePage() {
           upsells: selectedUpsells,
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
+          marketingConsent: !loggedIn ? marketingConsent : undefined,
         }),
       });
 
@@ -1250,6 +1252,20 @@ export default function CreatePage() {
                       />
                     </FormField>
                   </div>
+                  <label className="flex items-start gap-2.5 text-xs text-text-muted mt-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={marketingConsent}
+                      onChange={(e) => setMarketingConsent(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-bg-subtle text-green-500 focus:ring-green-500"
+                    />
+                    <span>
+                      {d["register.marketingConsent"]}{" "}
+                      <Link href="/ticari-ileti" className="text-green-500 hover:text-green-400">
+                        {d["register.marketingConsentLink"]}
+                      </Link>
+                    </span>
+                  </label>
                   <p className="text-xs text-text-muted mt-3">
                     <Link href="/login?redirect=/create" className="underline">
                       {d["create.guest.alreadyHaveAccount"]}

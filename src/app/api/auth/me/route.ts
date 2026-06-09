@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
       fullName: user.fullName,
       phone: user.phone,
       defaultAddress: user.defaultAddress,
+      marketingConsent: user.marketingConsent,
       isAdmin: adminEmails.includes(user.email.toLowerCase()),
     },
   });

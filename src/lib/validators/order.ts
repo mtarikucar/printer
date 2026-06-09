@@ -48,6 +48,9 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     // session cookie; logged-in customers get their identity from the JWT.
     guestEmail: z.string().email("Invalid email").optional(),
     guestName: z.string().min(2).max(120).optional(),
+    // İYS opt-in captured at guest checkout (logged-in users manage it in
+    // their account). Defaults false.
+    marketingConsent: z.boolean().optional().default(false),
   });
 }
 

@@ -338,12 +338,7 @@ export function HeroIntro({ d }: { d: FigurunicaDict }) {
         <div className={s("ticker-track")}>
           {Array.from({ length: 2 }).map((_, k) => (
             <span key={k} className={s("ticker-chunk")}>
-              <span className={s("t-dot")} /> printing · ege, istanbul · chibi ·
-              <span className={s("t-dot")} /> shipped · mei, singapore · realistic ·
-              <span className={s("t-dot")} /> sculpting · juno, berlin · anime ·
-              <span className={s("t-dot")} /> packed · raúl, madrid · storybook ·
-              <span className={s("t-dot")} /> printing · ana, lisbon · chibi ·
-              <span className={s("t-dot")} /> printing · theo, paris · realistic ·
+              <span className={s("t-dot")} /> {d["landing.fig.ticker"]}
             </span>
           ))}
         </div>

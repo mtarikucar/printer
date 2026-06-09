@@ -102,6 +102,7 @@ export const FIGURUNICA_KEYS = [
   "landing.fig.ctaBand.button",
   "landing.fig.floating.text",
   "landing.fig.floating.button",
+  "landing.fig.ticker",
   "landing.fig.footer.copyright",
   "landing.fig.footer.tagline",
   "landing.fig.footer.phoneLabel",

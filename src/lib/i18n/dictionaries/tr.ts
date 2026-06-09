@@ -1638,6 +1638,7 @@ const tr: Dictionary = {
 
   // Landing - Figurunica (premium scroll-journey tasarımı)
   "landing.fig.hero.eyebrow": "Fotoğrafından kişiye özel 3D figürin",
+  "landing.fig.ticker": "Ankara'da üretim · Türkiye'de ücretsiz kargo · PayTR 3D Secure · Baskıdan önce önizleme · Siparişe özel · Reçine & filament ·",
   "landing.fig.hero.titleLead": "Fotoğrafını",
   "landing.fig.hero.titleItalic": "bir",
   "landing.fig.hero.titleAccent": "figürine dönüştür.",

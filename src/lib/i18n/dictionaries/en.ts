@@ -1632,6 +1632,7 @@ const en = {
 
   // Landing - Figurunica (premium scroll-journey design)
   "landing.fig.hero.eyebrow": "Custom 3D figurines from your photo",
+  "landing.fig.ticker": "Made in Ankara · Free shipping in Türkiye · PayTR 3D Secure · Preview before we print · Made to order · Resin & filament ·",
   "landing.fig.hero.titleLead": "Turn your photo",
   "landing.fig.hero.titleItalic": "into a",
   "landing.fig.hero.titleAccent": "figurine.",

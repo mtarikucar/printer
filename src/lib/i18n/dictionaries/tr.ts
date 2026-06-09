@@ -126,6 +126,11 @@ const tr: Dictionary = {
 
   // ─── Marketplace / Shop ──────────────────────────────────────
   "shop.title": "Mağaza",
+  "shop.sort.label": "Sırala",
+  "shop.sort.newest": "En yeni",
+  "shop.sort.priceAsc": "Fiyat: artan",
+  "shop.sort.priceDesc": "Fiyat: azalan",
+  "shop.results": "ürün",
   "shop.subtitle": "Üreticilerimizin hazır baskı ürünlerini keşfedin.",
   "shop.empty": "Henüz ürün yok.",
   "shop.filter.all": "Tümü",

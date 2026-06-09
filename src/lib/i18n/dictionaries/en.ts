@@ -124,6 +124,11 @@ const en = {
 
   // ─── Marketplace / Shop ──────────────────────────────────────
   "shop.title": "Shop",
+  "shop.sort.label": "Sort",
+  "shop.sort.newest": "Newest",
+  "shop.sort.priceAsc": "Price: low to high",
+  "shop.sort.priceDesc": "Price: high to low",
+  "shop.results": "results",
   "shop.subtitle": "Discover ready-made prints from our makers.",
   "shop.empty": "No products yet.",
   "shop.filter.all": "All",

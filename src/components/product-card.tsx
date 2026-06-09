@@ -71,11 +71,12 @@ export function ProductCard({ product }: { product: ProductListItem }) {
         <p className="mt-1 text-base font-semibold text-text-primary">
           {formatCurrency(product.priceKurus, locale)}
         </p>
-        {product.sellerName && (
-          <p className="mt-0.5 text-xs text-text-muted truncate">
-            {product.sellerName}
-          </p>
-        )}
+        <p className="mt-1 flex items-center gap-1 text-xs text-text-muted truncate">
+          <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9l1-5h16l1 5M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9M3 9h18" />
+          </svg>
+          <span className="truncate">{product.sellerName ?? "Figurunica"}</span>
+        </p>
       </div>
     </Link>
   );

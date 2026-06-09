@@ -13,11 +13,13 @@ export function ProductGrid({
   activeCategory,
   availableCategories,
   activeSort = "newest",
+  query,
 }: {
   products: ProductListItem[];
   activeCategory?: string | null;
   availableCategories?: string[];
   activeSort?: SortKey;
+  query?: string | null;
 }) {
   const d = useDictionary();
 
@@ -33,13 +35,14 @@ export function ProductGrid({
       cat === activeCategory
   );
 
-  // Hrefs preserve the *other* axis: changing category keeps the sort, and
-  // changing sort keeps the category. Defaults (no category / newest) are
-  // omitted so the canonical URLs stay clean and shareable.
+  // Hrefs preserve the other axes (category / sort / search) so filters
+  // compose. Defaults (no category / newest / no query) are omitted to keep
+  // canonical URLs clean and shareable.
   const buildHref = (cat: string | null, sort: SortKey) => {
     const params = new URLSearchParams();
     if (cat) params.set("category", cat);
     if (sort !== "newest") params.set("sort", sort);
+    if (query) params.set("q", query);
     const qs = params.toString();
     return qs ? `/shop?${qs}` : "/shop";
   };
@@ -79,10 +82,17 @@ export function ProductGrid({
         ))}
       </div>
 
-      {/* Toolbar: result count + sort. */}
+      {/* Toolbar: result count (+ active search term) + sort. */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-8 border-t border-border-default pt-4">
-        <p className="text-sm text-text-muted">
-          {products.length} {d["shop.results"]}
+        <p className="flex items-center gap-2 text-sm text-text-muted">
+          {query && (
+            <span className="rounded-full bg-bg-elevated px-2.5 py-0.5 font-medium text-text-primary">
+              “{query}”
+            </span>
+          )}
+          <span>
+            {products.length} {d["shop.results"]}
+          </span>
         </p>
         <div className="flex items-center gap-1 text-sm">
           <span className="mr-1 hidden text-text-muted sm:inline">

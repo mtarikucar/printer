@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, ilike } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
@@ -24,11 +24,12 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function ShopPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; sort?: string }>;
+  searchParams: Promise<{ category?: string; sort?: string; q?: string }>;
 }) {
   const locale = await getLocale();
   const d = getDictionary(locale);
-  const { category, sort } = await searchParams;
+  const { category, sort, q } = await searchParams;
+  const term = q?.trim() || null;
 
   // Only a known category narrows the query; anything else lists everything.
   const activeCategory =
@@ -47,10 +48,12 @@ export default async function ShopPage({
         ? [desc(products.priceKurus)]
         : [desc(products.createdAt)];
 
+  const conditions = [eq(products.status, "active")];
+  if (activeCategory) conditions.push(eq(products.category, activeCategory));
+  if (term) conditions.push(ilike(products.title, `%${term}%`));
+
   const rows = await db.query.products.findMany({
-    where: activeCategory
-      ? and(eq(products.status, "active"), eq(products.category, activeCategory))
-      : eq(products.status, "active"),
+    where: and(...conditions),
     orderBy,
     with: {
       manufacturer: { columns: { companyName: true } },
@@ -99,6 +102,7 @@ export default async function ShopPage({
           activeCategory={activeCategory}
           availableCategories={availableCategories}
           activeSort={activeSort}
+          query={term}
         />
       </section>
     </main>

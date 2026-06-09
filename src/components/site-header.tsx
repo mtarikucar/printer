@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
@@ -20,6 +20,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -39,6 +40,13 @@ export function SiteHeader() {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     router.push("/");
+  };
+
+  const handleSearch = (e: FormEvent) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    router.push(q ? `/shop?q=${encodeURIComponent(q)}` : "/shop");
+    setMenuOpen(false);
   };
 
   const initials = user?.fullName
@@ -95,6 +103,28 @@ export function SiteHeader() {
         <Link href="/" className="flex items-center gap-2 text-xl text-text-primary">
           <span className="font-serif">Figurunica</span>
         </Link>
+
+        {/* Search (desktop) */}
+        <form onSubmit={handleSearch} className="mx-6 hidden max-w-md flex-1 md:flex">
+          <div className="relative w-full">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={d["store.search.placeholder"]}
+              aria-label={d["store.search.aria"]}
+              className="w-full rounded-full border border-border-default bg-bg-elevated/60 py-2 pl-4 pr-11 text-sm text-text-primary placeholder:text-text-muted focus:border-green-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20"
+            />
+            <button
+              type="submit"
+              aria-label={d["store.search.aria"]}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-text-muted transition-colors hover:text-green-600"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </button>
+          </div>
+        </form>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
@@ -180,6 +210,30 @@ export function SiteHeader() {
             )}
           </button>
         </div>
+      </div>
+
+      {/* Search (mobile) */}
+      <div className="border-t border-bg-subtle/50 px-4 py-2.5 md:hidden">
+        <form onSubmit={handleSearch}>
+          <div className="relative">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={d["store.search.placeholder"]}
+              aria-label={d["store.search.aria"]}
+              className="w-full rounded-full border border-border-default bg-bg-elevated/60 py-2 pl-4 pr-11 text-sm text-text-primary placeholder:text-text-muted focus:border-green-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20"
+            />
+            <button
+              type="submit"
+              aria-label={d["store.search.aria"]}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-text-muted hover:text-green-600"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Mobile menu */}

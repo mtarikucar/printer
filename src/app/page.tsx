@@ -2,22 +2,22 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { SiteHeader } from "@/components/site-header";
-import { MarketplaceLanding } from "@/components/marketplace/landing";
+import { StorefrontHome } from "@/components/marketplace/storefront";
 import { type ProductListItem } from "@/components/product-card";
 import { getPublicUrl } from "@/lib/services/storage";
 
 export const revalidate = 60;
 
 export default async function HomePage() {
-  // Newest active products for the featured strip on the marketplace landing.
+  // Active catalog for the storefront — grouped into shelves client-side.
   const rows = await db.query.products.findMany({
     where: eq(products.status, "active"),
     orderBy: [desc(products.createdAt)],
-    limit: 8,
+    limit: 60,
     with: { manufacturer: { columns: { companyName: true } } },
   });
 
-  const featured: ProductListItem[] = rows.map((p) => ({
+  const items: ProductListItem[] = rows.map((p) => ({
     id: p.id,
     slug: p.slug,
     title: p.title,
@@ -32,7 +32,7 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
-      <MarketplaceLanding featured={featured} />
+      <StorefrontHome products={items} />
     </main>
   );
 }

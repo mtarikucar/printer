@@ -17,7 +17,7 @@ import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { CreatePathSelector } from "@/components/create/path-selector";
-import { UploadModelFlow } from "@/components/create/coming-soon-flow";
+import { UploadModelFlow } from "@/components/create/upload-model-flow";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
 
 const PhotoEditor = dynamic(

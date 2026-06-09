@@ -36,6 +36,13 @@
       "when": 1781001362025,
       "tag": "0004_smooth_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781010224316,
+      "tag": "0005_moaning_stone_men",
+      "breakpoints": true
     }
   ]
 }

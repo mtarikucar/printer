@@ -155,3 +155,62 @@ export const PLATFORM_COMMISSION_RATE_BPS = 3000;
 // Turkish VAT (KDV) applied to customer invoices. Catalogue prices are
 // KDV-inclusive, so the invoice breaks the paid total into base + KDV.
 export const KDV_RATE_BPS = 2000; // 20%
+
+// ─── Faz 3: customer-uploaded model pricing (geometry-based) ─────────────────
+// Price is driven by the *scaled* print volume — the model-prep worker scales
+// the mesh to the customer's target height, then measures volume. Resin is the
+// premium material. All values in kuruş; tune freely.
+export const UPLOAD_MODEL_BASE_KURUS: Record<FigurineMaterial, number> = {
+  resin: 9900, // ₺99 setup/handling base
+  filament: 6900, // ₺69
+};
+export const UPLOAD_MODEL_PER_CM3_KURUS: Record<FigurineMaterial, number> = {
+  resin: 1500, // ₺15 / cm³
+  filament: 900, // ₺9 / cm³
+};
+export const UPLOAD_MODEL_MIN_KURUS: Record<FigurineMaterial, number> = {
+  resin: 14900, // ₺149 floor
+  filament: 9900, // ₺99 floor
+};
+// Above this auto price — or outside the print envelope — fall back to a manual
+// quote rather than charging automatically.
+export const UPLOAD_MODEL_MAX_AUTO_KURUS = 5_000_000; // ₺50,000
+export const PRINT_ENVELOPE_MM = { x: 220, y: 220, z: 250 };
+
+/**
+ * Auto price (kuruş) for an uploaded model from its SCALED print volume.
+ * `volumeMm3` is the volume after scaling to the target height. Unknown material
+ * → resin. Rounded to the nearest ₺1, floored at the per-material minimum.
+ */
+export function uploadModelPriceKurus(volumeMm3: number, material: string): number {
+  const m: FigurineMaterial = material === "filament" ? "filament" : "resin";
+  const volumeCm3 = Math.max(0, volumeMm3) / 1000; // mm³ → cm³
+  const raw = UPLOAD_MODEL_BASE_KURUS[m] + volumeCm3 * UPLOAD_MODEL_PER_CM3_KURUS[m];
+  const rounded = Math.round(raw / 100) * 100; // nearest ₺1
+  return Math.max(UPLOAD_MODEL_MIN_KURUS[m], rounded);
+}
+
+/**
+ * Whether an uploaded model must go to a manual quote instead of auto pricing.
+ * Trips when geometry isn't a closed volume, the auto price exceeds the cap, or
+ * the bounding box exceeds the print envelope.
+ */
+export function uploadModelNeedsQuote(args: {
+  isVolume: boolean | null;
+  volumeMm3: number | null;
+  boundingBoxMm: { x: number; y: number; z: number } | null;
+  material: string;
+}): boolean {
+  if (!args.isVolume || !args.volumeMm3 || args.volumeMm3 <= 0) return true;
+  if (uploadModelPriceKurus(args.volumeMm3, args.material) > UPLOAD_MODEL_MAX_AUTO_KURUS) {
+    return true;
+  }
+  const bb = args.boundingBoxMm;
+  if (
+    bb &&
+    (bb.x > PRINT_ENVELOPE_MM.x || bb.y > PRINT_ENVELOPE_MM.y || bb.z > PRINT_ENVELOPE_MM.z)
+  ) {
+    return true;
+  }
+  return false;
+}

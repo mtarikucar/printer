@@ -22,7 +22,7 @@ import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
 interface OrderData {
   id: string;
   orderNumber: string;
-  orderType: "custom" | "marketplace";
+  orderType: "custom" | "marketplace" | "upload";
   productTitleSnapshot: string | null;
   email: string;
   customerName: string;

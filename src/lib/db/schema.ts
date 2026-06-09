@@ -3,6 +3,7 @@ import {
   text,
   timestamp,
   integer,
+  doublePrecision,
   jsonb,
   boolean,
   uuid,
@@ -63,7 +64,16 @@ export const paymentMethodEnum = pgEnum("payment_method", [
 // `marketplace` = a customer bought a ready-made product a seller (manufacturer
 // or admin/platform) listed; no AI generation, the owning seller is auto-assigned.
 // Default `custom` keeps every legacy row + the existing checkout path unchanged.
-export const orderTypeEnum = pgEnum("order_type", ["custom", "marketplace"]);
+export const orderTypeEnum = pgEnum("order_type", ["custom", "marketplace", "upload"]);
+
+// Faz 3: lifecycle of a customer-uploaded STL/OBJ model.
+export const uploadModelStatusEnum = pgEnum("upload_model_status", [
+  "uploaded", // file saved, not yet processed
+  "processing", // model-prep worker running (geometry validate + GLB preview)
+  "ready", // priced, previewable, orderable
+  "review", // needs a manual quote (guardrail tripped)
+  "failed", // unprocessable file
+]);
 
 // orders only contain paid orders, so paymentStatus is succeeded or refunded.
 export const paymentStatusEnum = pgEnum("payment_status", [
@@ -323,6 +333,9 @@ export const orderDrafts = pgTable("order_drafts", {
     .notNull()
     .references(() => users.id),
   previewId: uuid("preview_id").references(() => previews.id),
+  // Faz 3: customer-uploaded STL/OBJ model (null for custom/marketplace).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  uploadedModelId: uuid("uploaded_model_id").references((): any => uploadedModels.id),
   email: text("email").notNull(),
   customerName: text("customer_name").notNull(),
   phone: text("phone"),
@@ -413,6 +426,9 @@ export const orders = pgTable("orders", {
     .notNull()
     .references(() => users.id),
   previewId: uuid("preview_id").references(() => previews.id),
+  // Faz 3: customer-uploaded STL/OBJ model (null for custom/marketplace).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  uploadedModelId: uuid("uploaded_model_id").references((): any => uploadedModels.id),
   draftId: uuid("draft_id").references(() => orderDrafts.id),
   email: text("email").notNull(),
   customerName: text("customer_name").notNull(),
@@ -954,6 +970,42 @@ export const productImages = pgTable(
   },
   (t) => ({
     byProduct: index("product_images_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
+// ─── Faz 3: customer-uploaded models (STL/OBJ → print) ──────────────────────
+// One row per uploaded model (modeled on `previews`). The upload + server-side
+// geometry (volume / bbox / wall-thickness, via process_upload_model.py) drive
+// auto pricing; a guardrail failure flips status→review for a manual quote.
+export const uploadedModels = pgTable(
+  "uploaded_models",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id),
+    sourceKey: text("source_key").notNull(),
+    sourceFormat: text("source_format").notNull(), // 'stl' | 'obj'
+    fileName: text("file_name").notNull(),
+    fileSizeBytes: integer("file_size_bytes").notNull(),
+    targetHeightMm: integer("target_height_mm").notNull().default(80),
+    material: figurineMaterialEnum("material").notNull().default("resin"),
+    status: uploadModelStatusEnum("status").notNull().default("uploaded"),
+    // Geometry — filled by the model-prep worker.
+    isVolume: boolean("is_volume"),
+    volumeMm3: doublePrecision("volume_mm3"),
+    boundingBoxMm: jsonb("bounding_box_mm").$type<{ x: number; y: number; z: number }>(),
+    minWallThicknessMm: doublePrecision("min_wall_thickness_mm"),
+    printRisk: jsonb("print_risk").$type<string[]>(),
+    glbPreviewKey: text("glb_preview_key"),
+    thumbnailKey: text("thumbnail_key"),
+    // Auto price (kuruş) when geometry is clean; null + needsQuote otherwise.
+    priceKurus: integer("price_kurus"),
+    needsQuote: boolean("needs_quote").notNull().default(false),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byUser: index("uploaded_models_user_idx").on(t.userId, t.createdAt),
   })
 );
 

@@ -21,7 +21,7 @@ interface ManufacturerOrdersClientProps {
   orders: Array<{
     id: string;
     orderNumber: string;
-    orderType: "custom" | "marketplace";
+    orderType: "custom" | "marketplace" | "upload";
     productTitleSnapshot: string | null;
     customerName: string;
     figurineSize: string | null;

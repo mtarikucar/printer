@@ -16,7 +16,7 @@ import { formatPhoneDisplay } from "@/lib/phone";
 interface OrderData {
   id: string;
   orderNumber: string;
-  orderType: "custom" | "marketplace";
+  orderType: "custom" | "marketplace" | "upload";
   customerName: string;
   phone: string | null;
   figurineSize: string | null;

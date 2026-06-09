@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -16,6 +16,8 @@ import { figurinePriceKurus, finishSurchargeKurus } from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { CreatePathSelector } from "@/components/create/path-selector";
+import { UploadModelFlow, DesignToProductFlow } from "@/components/create/coming-soon-flow";
 
 const PhotoEditor = dynamic(
   () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
@@ -33,7 +35,7 @@ interface FormData {
 // Steps: 0=Size+Photo, 1=Generating, 2=Preview, 3=Shipping+Payment
 type Step = 0 | 1 | 2 | 3;
 
-export default function CreatePage() {
+function CustomCreateFlow() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const d = useDictionary();
@@ -236,7 +238,11 @@ export default function CreatePage() {
   const styleQueryAppliedRef = useRef(false);
   useEffect(() => {
     if (styleQueryAppliedRef.current) return;
-    const styleParam = searchParams.get("style");
+    // ?path=object enters this flow with the object style preselected, so the
+    // homepage / nav / path-selector can all use the uniform ?path= scheme.
+    const styleParam =
+      searchParams.get("style") ??
+      (searchParams.get("path") === "object" ? "object" : null);
     if (!styleParam) return;
     if (["realistic", "storybook", "anime", "chibi", "object"].includes(styleParam)) {
       setSelectedStyle(styleParam);
@@ -1678,5 +1684,36 @@ export default function CreatePage() {
       </div>
       <Turnstile ref={turnstileRef} />
     </main>
+  );
+}
+
+// /create routes by ?path=: a cold landing shows the production-path selector;
+// upload & design open their (coming-soon) flows; figure/object — or an
+// in-progress preview/order — open the photo→3D custom flow above.
+function CreateRouter() {
+  const searchParams = useSearchParams();
+  const path = searchParams.get("path");
+  if (path === "upload") return <UploadModelFlow />;
+  if (path === "design") return <DesignToProductFlow />;
+  const hasContext =
+    !!path ||
+    !!searchParams.get("style") ||
+    !!searchParams.get("previewId") ||
+    !!searchParams.get("fromOrder");
+  if (!hasContext) return <CreatePathSelector />;
+  return <CustomCreateFlow />;
+}
+
+export default function CreatePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-bg-base">
+          <SiteHeader />
+        </main>
+      }
+    >
+      <CreateRouter />
+    </Suspense>
   );
 }

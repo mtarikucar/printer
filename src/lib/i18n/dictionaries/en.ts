@@ -1037,27 +1037,15 @@ const en = {
   "landing.faq.q8": "Can I see a preview before printing?",
   "landing.faq.a8": "Yes! After our AI generates your 3D model, you'll receive a digital preview. You can approve it before we start printing.",
 
-  // Trust signals (landing — testimonials + stats + badges)
+  // Trust signals (landing — stats + badges)
   "landing.fig.trust.eyebrow": "TRUST",
-  "landing.fig.trust.title": "What our customers say",
+  "landing.fig.trust.title": "Why Figurunica",
   "landing.fig.trust.statOrders": "Ankara",
   "landing.fig.trust.statOrdersLabel": "Studio & support",
   "landing.fig.trust.statRating": "Resin",
   "landing.fig.trust.statRatingLabel": "Durable SLA prints",
   "landing.fig.trust.statShipping": "Free",
   "landing.fig.trust.statShippingLabel": "shipping · Turkey-wide",
-  "landing.fig.trust.t1.quote":
-    "It looks so much like my photo that my mom couldn't believe it at first. Lovely detail, careful packaging.",
-  "landing.fig.trust.t1.name": "Selin Y.",
-  "landing.fig.trust.t1.location": "Istanbul",
-  "landing.fig.trust.t2.quote":
-    "Ordered as a wedding gift — everyone was thrilled. The paint kit is genuinely useful too.",
-  "landing.fig.trust.t2.name": "Mehmet A.",
-  "landing.fig.trust.t2.location": "Ankara",
-  "landing.fig.trust.t3.quote":
-    "Got it for my kid's birthday — he carried it around for days. Resin print is tough; it survives drops.",
-  "landing.fig.trust.t3.name": "Ayşe K.",
-  "landing.fig.trust.t3.location": "Izmir",
   "landing.fig.trust.badge.ssl": "256-bit SSL encrypted",
   "landing.fig.trust.badge.payment": "PayTR 3D Secure checkout",
   "landing.fig.trust.badge.refund": "Money-back if you're not happy",

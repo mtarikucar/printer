@@ -426,24 +426,6 @@ export function HowItWorks({ d }: { d: FigurunicaDict }) {
  * (TR consumer-protection law prefers attributed reviews).
  */
 export function TrustSignals({ d }: { d: FigurunicaDict }) {
-  const testimonials = [
-    {
-      quote: d["landing.fig.trust.t1.quote"],
-      name: d["landing.fig.trust.t1.name"],
-      location: d["landing.fig.trust.t1.location"],
-    },
-    {
-      quote: d["landing.fig.trust.t2.quote"],
-      name: d["landing.fig.trust.t2.name"],
-      location: d["landing.fig.trust.t2.location"],
-    },
-    {
-      quote: d["landing.fig.trust.t3.quote"],
-      name: d["landing.fig.trust.t3.name"],
-      location: d["landing.fig.trust.t3.location"],
-    },
-  ];
-
   const stats = [
     {
       v: d["landing.fig.trust.statOrders"],
@@ -538,30 +520,6 @@ export function TrustSignals({ d }: { d: FigurunicaDict }) {
               <p className="text-3xl font-mono font-bold text-green-500">{s.v}</p>
               <p className="text-sm text-text-muted mt-1">{s.l}</p>
             </div>
-          ))}
-        </div>
-
-        {/* Testimonials */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-          {testimonials.map((t) => (
-            <figure key={t.name} className="card p-6">
-              <svg
-                className="w-6 h-6 text-green-500/60 mb-3"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path d="M9.4 7C5.9 7 3 9.9 3 13.4v3.5h6.4V13.4H5.9c0-1.9 1.5-3.5 3.5-3.5V7zm9 0c-3.5 0-6.4 2.9-6.4 6.4v3.5h6.4V13.4h-3.5c0-1.9 1.5-3.5 3.5-3.5V7z" />
-              </svg>
-              <blockquote className="text-sm text-text-secondary leading-relaxed">
-                {t.quote}
-              </blockquote>
-              <figcaption className="mt-4 pt-4 border-t border-bg-subtle">
-                <p className="text-sm font-semibold text-text-primary">
-                  {t.name}
-                </p>
-                <p className="text-xs text-text-muted">{t.location}</p>
-              </figcaption>
-            </figure>
           ))}
         </div>
 

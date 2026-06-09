@@ -1043,27 +1043,15 @@ const tr: Dictionary = {
   "landing.faq.q8": "Baskı öncesi önizleme görebilir miyim?",
   "landing.faq.a8": "Evet! Yapay zekamız 3D modelinizi oluşturduktan sonra dijital bir önizleme alırsınız. Baskıya başlamadan önce onaylayabilirsiniz.",
 
-  // Trust signals (landing — testimonials + stats + badges)
+  // Trust signals (landing — stats + badges)
   "landing.fig.trust.eyebrow": "GÜVEN",
-  "landing.fig.trust.title": "Müşterilerimiz neler söylüyor?",
+  "landing.fig.trust.title": "Neden Figurunica?",
   "landing.fig.trust.statOrders": "Ankara",
   "landing.fig.trust.statOrdersLabel": "Stüdyo & destek",
   "landing.fig.trust.statRating": "Reçine",
   "landing.fig.trust.statRatingLabel": "Dayanıklı SLA baskı",
   "landing.fig.trust.statShipping": "Ücretsiz",
   "landing.fig.trust.statShippingLabel": "kargo · Türkiye geneli",
-  "landing.fig.trust.t1.quote":
-    "Fotoğrafıma o kadar benziyor ki annem ilk gördüğünde inanamadı. Detaylar harika, paketleme özenli.",
-  "landing.fig.trust.t1.name": "Selin Y.",
-  "landing.fig.trust.t1.location": "İstanbul",
-  "landing.fig.trust.t2.quote":
-    "Düğün hediyesi olarak ısmarladım, herkes hayran kaldı. Boyama kiti de gerçekten kullanışlıymış.",
-  "landing.fig.trust.t2.name": "Mehmet A.",
-  "landing.fig.trust.t2.location": "Ankara",
-  "landing.fig.trust.t3.quote":
-    "Çocuğumun yıldönümü için aldım, ufaklık günlerce gezdirdi. Reçine baskı çok sağlam, düşse bile kırılmıyor.",
-  "landing.fig.trust.t3.name": "Ayşe K.",
-  "landing.fig.trust.t3.location": "İzmir",
   "landing.fig.trust.badge.ssl": "256-bit SSL şifreli",
   "landing.fig.trust.badge.payment": "PayTR 3D Secure ödeme",
   "landing.fig.trust.badge.refund": "Memnun değilseniz iade",

@@ -14,10 +14,10 @@ export default async function OnBilgilendirmePage() {
       <SiteHeader />
       <div className="max-w-3xl mx-auto px-5 py-16 md:py-24">
         <h1 className="font-display text-4xl md:text-5xl text-text-primary mb-4">
-          {isTr ? "On Bilgilendirme Formu" : "Preliminary Information Form"}
+          {isTr ? "Ön Bilgilendirme Formu" : "Preliminary Information Form"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son guncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -25,110 +25,110 @@ export default async function OnBilgilendirmePage() {
           {isTr ? (
             <>
               <p>
-                Bu On Bilgilendirme Formu, 6502 sayili Tuketicinin Korunmasi Hakkinda Kanun ve Mesafeli Sozlesmeler
-                Yonetmeligi kapsaminda, Figurunica (&quot;Satici&quot;) tarafindan figurunica.com uzerinden sunulan
-                kisiye ozel figurin urunlerine iliskin olarak siparis vermeden once sizi bilgilendirmek amaciyla
-                hazirlanmistir. Siparisi onaylayarak bu formda yer alan tum hususlari okudugunuzu ve kabul ettiginizi
-                beyan etmis sayilirsiniz.
+                Bu Ön Bilgilendirme Formu, 6502 sayılı Tüketicinin Korunması Hakkında Kanun ve Mesafeli Sözleşmeler
+                Yönetmeliği kapsamında, Figurunica (&quot;Satıcı&quot;) tarafından figurunica.com üzerinden sunulan
+                kişiye özel figürin ürünlerine ilişkin olarak sipariş vermeden önce sizi bilgilendirmek amacıyla
+                hazırlanmıştır. Siparişi onaylayarak bu formda yer alan tüm hususları okuduğunuzu ve kabul ettiğinizi
+                beyan etmiş sayılırsınız.
               </p>
 
-              <h2>1. Satici Bilgileri</h2>
+              <h2>1. Satıcı Bilgileri</h2>
               <ul>
                 <li><strong>Unvan:</strong> Figurunica</li>
                 <li><strong>Web sitesi:</strong> figurunica.com</li>
                 <li><strong>E-posta:</strong> info@figurunica.com</li>
                 <li><strong>Telefon:</strong> +90 546 678 04 95</li>
-                <li><strong>Adres:</strong> Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li><strong>Adres:</strong> Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 
-              <h2>2. Urunun Temel Nitelikleri ve Fiyati</h2>
+              <h2>2. Ürünün Temel Nitelikleri ve Fiyatı</h2>
               <p>
-                Siparise konu urun, tarafinizca yuklenen fotograftan olusturulan kisiye ozel (kisisellestirilmis)
-                bir figurindir. Urunun temel nitelikleri siparis sirasinda secilen seceneklere gore belirlenir:
+                Siparişe konu ürün, tarafınızca yüklenen fotoğraftan oluşturulan kişiye özel (kişiselleştirilmiş)
+                bir figürindir. Ürünün temel nitelikleri sipariş sırasında seçilen seçeneklere göre belirlenir:
               </p>
               <ul>
-                <li><strong>Boyut ve taban fiyat (recine, KDV dahil):</strong> Kucuk (~60mm) 999 TL, Orta (~80mm) 1.399 TL, Buyuk (~120mm) 1.799 TL. Filament secenegi her boyutta 300 TL daha uygundur.</li>
-                <li><strong>Materyal:</strong> Recine (premium) veya filament.</li>
-                <li><strong>Bitis / paket secenekleri:</strong>
+                <li><strong>Boyut ve taban fiyat (reçine, KDV dahil):</strong> Küçük (~60mm) 999 TL, Orta (~80mm) 1.399 TL, Büyük (~120mm) 1.799 TL. Filament seçeneği her boyutta 300 TL daha uygundur.</li>
+                <li><strong>Materyal:</strong> Reçine (premium) veya filament.</li>
+                <li><strong>Bitiş / paket seçenekleri:</strong>
                   <ul>
-                    <li><strong>Boyanabilir Kit</strong> (varsayilan, fiyata dahil): recine baski, zimparali, primerli ve mini boya kiti.</li>
-                    <li><strong>Collector Raw</strong> (-100 TL): boyasiz yuksek detayli recine, boya kiti yok.</li>
-                    <li><strong>El Boyamasi</strong> (+800 TL): profesyonel el boyamasi, QC fotografi ve hediye kutusu.</li>
-                    <li><strong>Luks Vitrin</strong> (+1.500 TL): premium kaide, isim plakasi, sert kutu ve tam el boyamasi.</li>
+                    <li><strong>Boyanabilir Kit</strong> (varsayılan, fiyata dahil): reçine baskı, zımparalı, primerli ve mini boya kiti.</li>
+                    <li><strong>Collector Raw</strong> (-100 TL): boyasız yüksek detaylı reçine, boya kiti yok.</li>
+                    <li><strong>El Boyaması</strong> (+800 TL): profesyonel el boyaması, QC fotoğrafı ve hediye kutusu.</li>
+                    <li><strong>Lüks Vitrin</strong> (+1.500 TL): premium kaide, isim plakası, sert kutu ve tam el boyaması.</li>
                   </ul>
                 </li>
-                <li><strong>Istege bagli eklentiler:</strong> Ekstra boya (49 TL), hediye paketi (29 TL), hizli kargo (79 TL).</li>
+                <li><strong>İsteğe bağlı eklentiler:</strong> Ekstra boya (49 TL), hediye paketi (29 TL), hızlı kargo (79 TL).</li>
               </ul>
               <p>
-                Tum fiyatlar Turk Lirasi (TL) cinsinden ve KDV dahildir. Yukaridaki tutarlar bilgilendirme amaclidir;
-                secilen boyut, materyal, bitis ve eklentilere gore hesaplanan guncel ve baglayici nihai fiyat,
-                herhangi bir gizli ek ucret olmaksizin odeme oncesinde siparis ekraninda acikca gosterilir.
+                Tüm fiyatlar Türk Lirası (TL) cinsinden ve KDV dahildir. Yukarıdaki tutarlar bilgilendirme amaçlıdır;
+                seçilen boyut, materyal, bitiş ve eklentilere göre hesaplanan güncel ve bağlayıcı nihai fiyat,
+                herhangi bir gizli ek ücret olmaksızın ödeme öncesinde sipariş ekranında açıkça gösterilir.
               </p>
 
-              <h2>3. Odeme Sekli</h2>
-              <p>Odemenizi asagidaki yontemlerden biriyle gerceklestirebilirsiniz:</p>
+              <h2>3. Ödeme Şekli</h2>
+              <p>Ödemenizi aşağıdaki yöntemlerden biriyle gerçekleştirebilirsiniz:</p>
               <ul>
-                <li><strong>Kredi karti / banka karti:</strong> PayTR altyapisi uzerinden 3D Secure ile guvenli odeme.</li>
-                <li><strong>Havale / EFT:</strong> Banka hesabimiza yapilan transfer ile odeme.</li>
+                <li><strong>Kredi kartı / banka kartı:</strong> PayTR altyapısı üzerinden 3D Secure ile güvenli ödeme.</li>
+                <li><strong>Havale / EFT:</strong> Banka hesabımıza yapılan transfer ile ödeme.</li>
               </ul>
               <p>
-                Kart bilgileriniz tarafimizca saklanmaz; odeme islemi dogrudan PayTR&apos;nin guvenli altyapisinda islenir.
-                Havale/EFT secildiginde uretim sureci, odemenin hesabimiza gectiginin teyit edilmesinin ardindan baslar.
+                Kart bilgileriniz tarafımızca saklanmaz; ödeme işlemi doğrudan PayTR&apos;nin güvenli altyapısında işlenir.
+                Havale/EFT seçildiğinde üretim süreci, ödemenin hesabımıza geçtiğinin teyit edilmesinin ardından başlar.
               </p>
 
-              <h2>4. Teslimat Sekli ve Suresi</h2>
+              <h2>4. Teslimat Şekli ve Süresi</h2>
               <ul>
-                <li>Urunler Yurtici Kargo ile gonderilir.</li>
-                <li>Turkiye ici kargo ucretsizdir.</li>
-                <li>Uretim suresi, dijital onizlemeyi onaylamanizdan sonra genellikle 5-7 is gunudur.</li>
-                <li>Uretimi tamamlanan urunun kargoya verilmesinin ardindan teslimat 2-3 is gunu surer.</li>
-                <li>Belirtilen sureler tahmini olup yogun donemlerde uzayabilir.</li>
-                <li>Teslimat, siparis sirasinda belirttiginiz adrese yapilir; adres degisikligi icin uretim baslamadan once bizimle iletisime geciniz.</li>
+                <li>Ürünler Yurtiçi Kargo ile gönderilir.</li>
+                <li>Türkiye içi kargo ücretsizdir.</li>
+                <li>Üretim süresi, dijital önizlemeyi onaylamanızdan sonra genellikle 5-7 iş günüdür.</li>
+                <li>Üretimi tamamlanan ürünün kargoya verilmesinin ardından teslimat 2-3 iş günü sürer.</li>
+                <li>Belirtilen süreler tahmini olup yoğun dönemlerde uzayabilir.</li>
+                <li>Teslimat, sipariş sırasında belirttiğiniz adrese yapılır; adres değişikliği için üretim başlamadan önce bizimle iletişime geçiniz.</li>
               </ul>
 
-              <h2>5. Cayma Hakki ve Kullanim Kosullari</h2>
+              <h2>5. Cayma Hakkı ve Kullanım Koşulları</h2>
               <p>
-                Mesafeli Sozlesmeler Yonetmeligi uyarinca, standart (kisiye ozel olmayan) urunlerde tuketici, malin
-                teslim tarihinden itibaren 14 (on dort) gun icinde hicbir gerekce gostermeksizin ve cezai sart
-                odemeksizin sozlesmeden cayma hakkina sahiptir.
+                Mesafeli Sözleşmeler Yönetmeliği uyarınca, standart (kişiye özel olmayan) ürünlerde tüketici, malın
+                teslim tarihinden itibaren 14 (on dört) gün içinde hiçbir gerekçe göstermeksizin ve cezai şart
+                ödemeksizin sözleşmeden cayma hakkına sahiptir.
               </p>
               <ul>
-                <li>Cayma suresi, malin tuketiciye teslim edildigi gun baslar.</li>
-                <li>Cayma hakkinin kullanildigi durumlarda urun, faturasi ve varsa hediye/aksesuarlari ile birlikte hasarsiz olarak iade edilmelidir.</li>
-                <li>Cayma bildiriminin, asagida belirtilen surede ve adrese yapilmasi gerekir.</li>
+                <li>Cayma süresi, malın tüketiciye teslim edildiği gün başlar.</li>
+                <li>Cayma hakkının kullanıldığı durumlarda ürün, faturası ve varsa hediye/aksesuarları ile birlikte hasarsız olarak iade edilmelidir.</li>
+                <li>Cayma bildiriminin, aşağıda belirtilen sürede ve adrese yapılması gerekir.</li>
               </ul>
 
-              <h2>6. Cayma Hakkinin Kullanilamayacagi Haller</h2>
+              <h2>6. Cayma Hakkının Kullanılamayacağı Haller</h2>
               <p>
-                Mesafeli Sozlesmeler Yonetmeligi&apos;nin 15. maddesi geregince, tuketicinin istekleri veya kisisel
-                ihtiyaclari dogrultusunda hazirlanan, kisisellestirilen mallar cayma hakki istisnasi kapsamindadir.
+                Mesafeli Sözleşmeler Yönetmeliği&apos;nin 15. maddesi gereğince, tüketicinin istekleri veya kişisel
+                ihtiyaçları doğrultusunda hazırlanan, kişiselleştirilen mallar cayma hakkı istisnası kapsamındadır.
               </p>
               <ul>
-                <li>Yukledginiz fotograftan size ozel olarak uretilen figurinler kisisellestirilmis mal niteliginde oldugundan cayma hakki kapsami disindadir.</li>
-                <li>Bu nedenle, onizleme onayinin verilmesi ve uretimin baslamasinin ardindan kisiye ozel urunlerde cayma hakki kullanilamaz.</li>
-                <li>Cayma hakkinin kullanilamamasi, urunun ayipli veya hasarli teslim edilmesi halinde sahip oldugunuz tuketici haklarini ortadan kaldirmaz; bu haklar saklidir.</li>
+                <li>Yüklediğiniz fotoğraftan size özel olarak üretilen figürinler kişiselleştirilmiş mal niteliğinde olduğundan cayma hakkı kapsamı dışındadır.</li>
+                <li>Bu nedenle, önizleme onayının verilmesi ve üretimin başlamasının ardından kişiye özel ürünlerde cayma hakkı kullanılamaz.</li>
+                <li>Cayma hakkının kullanılamaması, ürünün ayıplı veya hasarlı teslim edilmesi halinde sahip olduğunuz tüketici haklarını ortadan kaldırmaz; bu haklar saklıdır.</li>
               </ul>
 
-              <h2>7. Cayma Bildiriminin Yapilacagi Adres</h2>
+              <h2>7. Cayma Bildiriminin Yapılacağı Adres</h2>
               <p>
-                Cayma hakkina (standart urunler icin) veya ayipli/hasarli urune iliskin taleplerinizi asagidaki
-                kanallardan iletebilirsiniz. Ayipli/hasarli urun durumunda, urunun fotografi ve sorunun aciklamasi
-                ile basvurmaniz surecin hizlanmasini saglar.
+                Cayma hakkına (standart ürünler için) veya ayıplı/hasarlı ürüne ilişkin taleplerinizi aşağıdaki
+                kanallardan iletebilirsiniz. Ayıplı/hasarlı ürün durumunda, ürünün fotoğrafı ve sorunun açıklaması
+                ile başvurmanız sürecin hızlanmasını sağlar.
               </p>
               <ul>
                 <li><strong>E-posta:</strong> info@figurunica.com</li>
-                <li><strong>Adres:</strong> Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li><strong>Adres:</strong> Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 
-              <h2>8. Sikayet ve Itiraz Mercii</h2>
+              <h2>8. Şikayet ve İtiraz Mercii</h2>
               <p>
-                Siparisinize iliskin sikayet ve itirazlarinizi oncelikle info@figurunica.com adresi uzerinden bize
-                iletebilirsiniz. Uyusmazligin cozulememesi halinde, Ticaret Bakanligi tarafindan her yil belirlenen
-                parasal sinirlar dahilinde:
+                Siparişinize ilişkin şikayet ve itirazlarınızı öncelikle info@figurunica.com adresi üzerinden bize
+                iletebilirsiniz. Uyuşmazlığın çözülememesi halinde, Ticaret Bakanlığı tarafından her yıl belirlenen
+                parasal sınırlar dahilinde:
               </p>
               <ul>
-                <li>Yerlesim yerinizdeki <strong>Tuketici Hakem Heyeti&apos;ne</strong>, veya</li>
-                <li>Yetkili <strong>Tuketici Mahkemesi&apos;ne</strong> basvurabilirsiniz.</li>
+                <li>Yerleşim yerinizdeki <strong>Tüketici Hakem Heyeti&apos;ne</strong>, veya</li>
+                <li>Yetkili <strong>Tüketici Mahkemesi&apos;ne</strong> başvurabilirsiniz.</li>
               </ul>
             </>
           ) : (

@@ -14,10 +14,10 @@ export default async function PrivacyPage() {
       <SiteHeader />
       <div className="max-w-3xl mx-auto px-5 py-16 md:py-24">
         <h1 className="font-display text-4xl md:text-5xl text-text-primary mb-4">
-          {isTr ? "Gizlilik Politikasi" : "Privacy Policy"}
+          {isTr ? "Gizlilik Politikası" : "Privacy Policy"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son guncelleme: 31 Mart 2026" : "Last updated: March 31, 2026"}
+          {isTr ? "Son güncelleme: 31 Mart 2026" : "Last updated: March 31, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -25,158 +25,158 @@ export default async function PrivacyPage() {
           {isTr ? (
             <>
               <p>
-                Figurunica (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) olarak kisisel verilerinizin korunmasina buyuk onem veriyoruz.
-                Bu Gizlilik Politikasi, 6698 sayili Kisisel Verilerin Korunmasi Kanunu (&quot;KVKK&quot;) ve ilgili mevzuat kapsaminda
-                kisisel verilerinizin nasil toplandigi, islendigi, saklandigi ve korundugunun aciklanmaktadir.
+                Figurunica (&quot;Şirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) olarak kişisel verilerinizin korunmasına büyük önem veriyoruz.
+                Bu Gizlilik Politikası, 6698 sayılı Kişisel Verilerin Korunması Kanunu (&quot;KVKK&quot;) ve ilgili mevzuat kapsamında
+                kişisel verilerinizin nasıl toplandığı, işlendiği, saklandığı ve korunduğunu açıklamaktadır.
               </p>
 
               <h2>1. Veri Sorumlusu</h2>
               <p>
-                Kisisel verileriniz bakimindan veri sorumlusu Figurunica&apos;dur. Bize asagidaki kanallardan ulasabilirsiniz:
+                Kişisel verileriniz bakımından veri sorumlusu Figurunica&apos;dur. Bize aşağıdaki kanallardan ulaşabilirsiniz:
               </p>
               <ul>
                 <li>E-posta: info@figurunica.com</li>
                 <li>Web sitesi: figurunica.com</li>
               </ul>
 
-              <h2>2. Toplanan Kisisel Veriler</h2>
-              <p>Hizmetlerimizi sunabilmek icin asagidaki kisisel verileri topluyoruz:</p>
+              <h2>2. Toplanan Kişisel Veriler</h2>
+              <p>Hizmetlerimizi sunabilmek için aşağıdaki kişisel verileri topluyoruz:</p>
 
               <h3>2.1 Hesap Bilgileri</h3>
               <ul>
                 <li>Ad soyad</li>
                 <li>E-posta adresi</li>
-                <li>Telefon numarasi</li>
-                <li>Sifre (sifreli/hashli olarak saklanir)</li>
+                <li>Telefon numarası</li>
+                <li>Şifre (şifreli/hashli olarak saklanır)</li>
               </ul>
 
-              <h3>2.2 Siparis ve Teslimat Bilgileri</h3>
+              <h3>2.2 Sipariş ve Teslimat Bilgileri</h3>
               <ul>
-                <li>Teslimat adresi (il, ilce, mahalle, posta kodu)</li>
-                <li>Siparis gecmisi ve durumu</li>
-                <li>Figurin boyutu, stili ve tercihler</li>
+                <li>Teslimat adresi (il, ilçe, mahalle, posta kodu)</li>
+                <li>Sipariş geçmişi ve durumu</li>
+                <li>Figürin boyutu, stili ve tercihler</li>
               </ul>
 
-              <h3>2.3 Fotograflar ve Gorseller</h3>
+              <h3>2.3 Fotoğraflar ve Görseller</h3>
               <ul>
-                <li>Figurin olusturmak icin yuklediginiz fotograflar</li>
-                <li>AI tarafindan olusturulan 3D model onizlemeleri</li>
-                <li>Galeriye paylasmayi tercih ettiginiz figurin gorselleri</li>
+                <li>Figürin oluşturmak için yüklediğiniz fotoğraflar</li>
+                <li>AI tarafından oluşturulan 3D model önizlemeleri</li>
+                <li>Galeriye paylaşmayı tercih ettiğiniz figürin görselleri</li>
               </ul>
 
-              <h3>2.4 Odeme Bilgileri</h3>
+              <h3>2.4 Ödeme Bilgileri</h3>
               <ul>
-                <li>Odeme islemleri PayTR uzerinden gerceklestirilir. Kredi karti bilgileriniz tarafimizca saklanmaz; dogrudan PayTRPayTR&apos;inapos;nin guvenli altyapisinda islenir.</li>
-                <li>Hediye karti kodlari ve bakiye bilgileri</li>
+                <li>Ödeme işlemleri PayTR üzerinden gerçekleştirilir. Kredi kartı bilgileriniz tarafımızca saklanmaz; doğrudan PayTR&apos;nin güvenli altyapısında işlenir.</li>
+                <li>Hediye kartı kodları ve bakiye bilgileri</li>
               </ul>
 
               <h3>2.5 Teknik Veriler</h3>
               <ul>
                 <li>IP adresi</li>
-                <li>Tarayici turu ve surumu</li>
+                <li>Tarayıcı türü ve sürümü</li>
                 <li>Cihaz bilgileri</li>
-                <li>Cerez verileri</li>
-                <li>Sayfa goruntulenme ve etkilesim verileri</li>
+                <li>Çerez verileri</li>
+                <li>Sayfa görüntülenme ve etkileşim verileri</li>
               </ul>
 
-              <h2>3. Verilerin Islenme Amaclari</h2>
-              <p>Kisisel verileriniz asagidaki amaclarla islenmektedir:</p>
+              <h2>3. Verilerin İşlenme Amaçları</h2>
+              <p>Kişisel verileriniz aşağıdaki amaçlarla işlenmektedir:</p>
               <ul>
-                <li>Siparis olusturma, uretim surecinin yonetimi ve teslimat</li>
-                <li>Yapay zeka destekli 3D model olusturma hizmetinin sunulmasi</li>
-                <li>Odeme islemlerinin gerceklestirilmesi ve fatura duzenlenmesi</li>
-                <li>Musteri destek taleplerinin karsilanmasi</li>
-                <li>Siparis durumu hakkinda bilgilendirme (e-posta)</li>
-                <li>Hizmet kalitesinin arttirilmasi ve iyilestirme calismalari</li>
-                <li>Yasal yukumluluklerin yerine getirilmesi</li>
-                <li>Dolandiricilik onleme ve guvenlik</li>
+                <li>Sipariş oluşturma, üretim sürecinin yönetimi ve teslimat</li>
+                <li>Yapay zeka destekli 3D model oluşturma hizmetinin sunulması</li>
+                <li>Ödeme işlemlerinin gerçekleştirilmesi ve fatura düzenlenmesi</li>
+                <li>Müşteri destek taleplerinin karşılanması</li>
+                <li>Sipariş durumu hakkında bilgilendirme (e-posta)</li>
+                <li>Hizmet kalitesinin arttırılması ve iyileştirme çalışmaları</li>
+                <li>Yasal yükümlülüklerin yerine getirilmesi</li>
+                <li>Dolandırıcılık önleme ve güvenlik</li>
               </ul>
 
-              <h2>4. Verilerin Islenmesinin Hukuki Sebebi</h2>
-              <p>Kisisel verileriniz KVKK&apos;nin 5. maddesi kapsaminda asagidaki hukuki sebeplerle islenmektedir:</p>
+              <h2>4. Verilerin İşlenmesinin Hukuki Sebebi</h2>
+              <p>Kişisel verileriniz KVKK&apos;nın 5. maddesi kapsamında aşağıdaki hukuki sebeplerle işlenmektedir:</p>
               <ul>
-                <li>Sozlesmenin kurulmasi veya ifasi icin gerekli olmasi (siparis ve teslimat)</li>
-                <li>Kanunlarda acikca ongorulmesi (vergi mevzuati, tuketici haklar)</li>
-                <li>Meşru menfaatlerimiz icin zorunlu olmasi (hizmet iyilestirme, guvenlik)</li>
-                <li>Acik rizaniz (pazarlama iletisimleri, galeri paylasimlari)</li>
+                <li>Sözleşmenin kurulması veya ifası için gerekli olması (sipariş ve teslimat)</li>
+                <li>Kanunlarda açıkça öngörülmesi (vergi mevzuatı, tüketici hakları)</li>
+                <li>Meşru menfaatlerimiz için zorunlu olması (hizmet iyileştirme, güvenlik)</li>
+                <li>Açık rızanız (pazarlama iletişimleri, galeri paylaşımları)</li>
               </ul>
 
-              <h2>5. Verilerin Aktarilmasi</h2>
-              <p>Kisisel verileriniz asagidaki taraflarla paylassilabilir:</p>
+              <h2>5. Verilerin Aktarılması</h2>
+              <p>Kişisel verileriniz aşağıdaki taraflarla paylaşılabilir:</p>
               <ul>
-                <li><strong>Odeme isleme:</strong> PayTR (PCI DSS uyumlu odeme altyapisi)</li>
-                <li><strong>Bulut depolama:</strong> Amazon Web Services (AWS S3 — fotograf ve 3D model depolama)</li>
-                <li><strong>E-posta hizmeti:</strong> Resend (siparis bildirimleri)</li>
-                <li><strong>Yapay zeka hizmeti:</strong> Meshy.ai (3D model olusturma — yalnizca fotograflar islenir)</li>
-                <li><strong>Kargo sirketleri:</strong> Teslimat icin gerekli adres ve iletisim bilgileri</li>
-                <li><strong>Uretici firmalar:</strong> Uretim icin gerekli siparis detaylari</li>
+                <li><strong>Ödeme işleme:</strong> PayTR (PCI DSS uyumlu ödeme altyapısı)</li>
+                <li><strong>Bulut depolama:</strong> Amazon Web Services (AWS S3 — fotoğraf ve 3D model depolama)</li>
+                <li><strong>E-posta hizmeti:</strong> Resend (sipariş bildirimleri)</li>
+                <li><strong>Yapay zeka hizmeti:</strong> Meshy.ai (3D model oluşturma — yalnızca fotoğraflar işlenir)</li>
+                <li><strong>Kargo şirketleri:</strong> Teslimat için gerekli adres ve iletişim bilgileri</li>
+                <li><strong>Üretici firmalar:</strong> Üretim için gerekli sipariş detayları</li>
                 <li><strong>Yasal makamlar:</strong> Kanuni zorunluluk halinde yetkili kurumlara</li>
               </ul>
               <p>
-                Verileriniz yurt disinda bulunan hizmet saglayicilara aktarilabilir. Bu aktarimlar, KVKK&apos;nin 9. maddesi
-                kapsaminda gerekli onlemler alinarak gerceklestirilir.
+                Verileriniz yurt dışında bulunan hizmet sağlayıcılara aktarılabilir. Bu aktarımlar, KVKK&apos;nın 9. maddesi
+                kapsamında gerekli önlemler alınarak gerçekleştirilir.
               </p>
 
-              <h2>6. Verilerin Saklanma Suresi</h2>
+              <h2>6. Verilerin Saklanma Süresi</h2>
               <ul>
-                <li><strong>Hesap bilgileri:</strong> Hesap aktif oldugu surece</li>
-                <li><strong>Siparis bilgileri:</strong> Yasal zorunluluklar geregi en az 10 yil (Turk Ticaret Kanunu)</li>
-                <li><strong>Fotograflar:</strong> Siparis tamamlandiktan 90 gun sonra otomatik silinir (galeriye paylastiginiz gorseller haric)</li>
-                <li><strong>3D modeller:</strong> Siparis tamamlandiktan 90 gun sonra otomatik silinir</li>
-                <li><strong>Odeme kayitlari:</strong> 10 yil (vergi mevzuati)</li>
+                <li><strong>Hesap bilgileri:</strong> Hesap aktif olduğu sürece</li>
+                <li><strong>Sipariş bilgileri:</strong> Yasal zorunluluklar gereği en az 10 yıl (Türk Ticaret Kanunu)</li>
+                <li><strong>Fotoğraflar:</strong> Sipariş tamamlandıktan 90 gün sonra otomatik silinir (galeriye paylaştığınız görseller hariç)</li>
+                <li><strong>3D modeller:</strong> Sipariş tamamlandıktan 90 gün sonra otomatik silinir</li>
+                <li><strong>Ödeme kayıtları:</strong> 10 yıl (vergi mevzuatı)</li>
                 <li><strong>Teknik loglar:</strong> 6 ay</li>
               </ul>
 
-              <h2>7. Cerezler</h2>
-              <p>Web sitemizde asagidaki cerezler kullanilmaktadir:</p>
+              <h2>7. Çerezler</h2>
+              <p>Web sitemizde aşağıdaki çerezler kullanılmaktadır:</p>
               <ul>
-                <li><strong>Zorunlu cerezler:</strong> Oturum yonetimi, dil tercihi, guvenlik (Cloudflare Turnstile)</li>
-                <li><strong>Islevsel cerezler:</strong> Kullanici tercihlerinin hatirlarnmasi</li>
+                <li><strong>Zorunlu çerezler:</strong> Oturum yönetimi, dil tercihi, güvenlik (Cloudflare Turnstile)</li>
+                <li><strong>İşlevsel çerezler:</strong> Kullanıcı tercihlerinin hatırlanması</li>
               </ul>
-              <p>Pazarlama veya ucuncu taraf izleme cerezleri kullanmiyoruz.</p>
+              <p>Pazarlama veya üçüncü taraf izleme çerezleri kullanmıyoruz.</p>
 
-              <h2>8. Veri Guvenligine Iliskin Onlemler</h2>
+              <h2>8. Veri Güvenliğine İlişkin Önlemler</h2>
               <ul>
-                <li>SSL/TLS sifreleme ile veri iletimi</li>
-                <li>Sifrelerin bcrypt ile hashli saklanmasi</li>
-                <li>Odeme bilgilerinin PayTR tarafindan PCI DSS standartlarina uygun islenmesi</li>
-                <li>Erisim kontrolu ve yetkilendirme mekanizmalari</li>
-                <li>Duzgun veri yedekleme proseduri</li>
+                <li>SSL/TLS şifreleme ile veri iletimi</li>
+                <li>Şifrelerin bcrypt ile hashli saklanması</li>
+                <li>Ödeme bilgilerinin PayTR tarafından PCI DSS standartlarına uygun işlenmesi</li>
+                <li>Erişim kontrolü ve yetkilendirme mekanizmaları</li>
+                <li>Düzgün veri yedekleme prosedürü</li>
               </ul>
 
-              <h2>9. Kisisel Veri Sahibinin Haklari</h2>
-              <p>KVKK&apos;nin 11. maddesi uyarinca asagidaki haklara sahipsiniz:</p>
+              <h2>9. Kişisel Veri Sahibinin Hakları</h2>
+              <p>KVKK&apos;nın 11. maddesi uyarınca aşağıdaki haklara sahipsiniz:</p>
               <ul>
-                <li>Kisisel verilerinizin islenip islenmedigini ogrenme</li>
-                <li>Kisisel verileriniz islenmisse buna iliskin bilgi talep etme</li>
-                <li>Kisisel verilerinizin islenme amacini ve bunlarin amacina uygun kullanilip kullanilmadigini ogrenme</li>
-                <li>Yurt icinde veya yurt disinda kisisel verilerin aktarildigi ucuncu kisileri bilme</li>
-                <li>Kisisel verilerin eksik veya yanlis islenmis olmasi halinde bunlarin duzeltilmesini isteme</li>
-                <li>Kisisel verilerin silinmesini veya yok edilmesini isteme</li>
-                <li>Islenen verilerin munhasiran otomatik sistemler vasitasiyla analiz edilmesi suretiyle aleyhine bir sonucun ortaya cikmasina itiraz etme</li>
-                <li>Kisisel verilerin kanuna aykiri olarak islenmesi sebebiyle zarara ugramaniz halinde zararin giderilmesini talep etme</li>
+                <li>Kişisel verilerinizin işlenip işlenmediğini öğrenme</li>
+                <li>Kişisel verileriniz işlenmişse buna ilişkin bilgi talep etme</li>
+                <li>Kişisel verilerinizin işlenme amacını ve bunların amacına uygun kullanılıp kullanılmadığını öğrenme</li>
+                <li>Yurt içinde veya yurt dışında kişisel verilerin aktarıldığı üçüncü kişileri bilme</li>
+                <li>Kişisel verilerin eksik veya yanlış işlenmiş olması halinde bunların düzeltilmesini isteme</li>
+                <li>Kişisel verilerin silinmesini veya yok edilmesini isteme</li>
+                <li>İşlenen verilerin münhasıran otomatik sistemler vasıtasıyla analiz edilmesi suretiyle aleyhine bir sonucun ortaya çıkmasına itiraz etme</li>
+                <li>Kişisel verilerin kanuna aykırı olarak işlenmesi sebebiyle zarara uğramanız halinde zararın giderilmesini talep etme</li>
               </ul>
               <p>
-                Bu haklarinizi kullanmak icin info@figurunica.com adresine basvurabilirsiniz.
-                Basvurular en gec 30 gun icinde ucretsiz olarak sonuclandirilir.
+                Bu haklarınızı kullanmak için info@figurunica.com adresine başvurabilirsiniz.
+                Başvurular en geç 30 gün içinde ücretsiz olarak sonuçlandırılır.
               </p>
 
-              <h2>10. Cocuklarin Gizliligi</h2>
+              <h2>10. Çocukların Gizliliği</h2>
               <p>
-                Hizmetlerimiz 18 yasindan kucuklere yonelik degildir. Bilecek sekilde 18 yas alti kullanicilara
-                ait kisisel veri toplamamaktayiz. Bir cocugun kisisel verisinin tarafimiza ulastigini fark etmeniz
-                halinde lutfen bizimle iletisime gecin.
+                Hizmetlerimiz 18 yaşından küçüklere yönelik değildir. Bilecek şekilde 18 yaş altı kullanıcılara
+                ait kişisel veri toplamamaktayız. Bir çocuğun kişisel verisinin tarafımıza ulaştığını fark etmeniz
+                halinde lütfen bizimle iletişime geçin.
               </p>
 
-              <h2>11. Politika Degisiklikleri</h2>
+              <h2>11. Politika Değişiklikleri</h2>
               <p>
-                Bu Gizlilik Politikasi&apos;ni zaman zaman guncelleyebiliriz. Degisiklikler web sitemizde yayinlandigindan itibaren
-                gecerli olacaktir. Onemli degisiklikler hakkinda kayitli kullanicilara e-posta ile bildirim yapilir.
+                Bu Gizlilik Politikası&apos;nı zaman zaman güncelleyebiliriz. Değişiklikler web sitemizde yayınlandığından itibaren
+                geçerli olacaktır. Önemli değişiklikler hakkında kayıtlı kullanıcılara e-posta ile bildirim yapılır.
               </p>
 
-              <h2>12. Iletisim</h2>
+              <h2>12. İletişim</h2>
               <p>
-                Gizlilik politikamiz hakkinda sorulariniz veya talepleriniz icin bizimle iletisime gecebilirsiniz:
+                Gizlilik politikamız hakkında sorularınız veya talepleriniz için bizimle iletişime geçebilirsiniz:
               </p>
               <ul>
                 <li>E-posta: info@figurunica.com</li>
@@ -224,7 +224,7 @@ export default async function PrivacyPage() {
 
               <h3>2.4 Payment Information</h3>
               <ul>
-                <li>Payments are processed through PayTR. Your credit card details are never stored by us; they are processed directly on PayTRPayTR&apos;sapos;s secure infrastructure.</li>
+                <li>Payments are processed through PayTR. Your credit card details are never stored by us; they are processed directly on PayTR&apos;s secure infrastructure.</li>
                 <li>Gift card codes and balance information</li>
               </ul>
 

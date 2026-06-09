@@ -2,7 +2,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
 
 export const metadata = {
-  title: "Ticari Elektronik Ileti Onay Metni — Figurunica",
+  title: "Ticari Elektronik İleti Onay Metni — Figurunica",
 };
 
 export default async function CommercialMessageConsentPage() {
@@ -14,10 +14,10 @@ export default async function CommercialMessageConsentPage() {
       <SiteHeader />
       <div className="max-w-3xl mx-auto px-5 py-16 md:py-24">
         <h1 className="font-display text-4xl md:text-5xl text-text-primary mb-4">
-          {isTr ? "Ticari Elektronik Ileti Onay Metni" : "Commercial Electronic Message Consent"}
+          {isTr ? "Ticari Elektronik İleti Onay Metni" : "Commercial Electronic Message Consent"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son guncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -25,56 +25,56 @@ export default async function CommercialMessageConsentPage() {
           {isTr ? (
             <>
               <p>
-                Bu metin, 6563 sayili Elektronik Ticaretin Duzenlenmesi Hakkinda Kanun ve Ticari Iletisim ve Ticari
-                Elektronik Iletiler Hakkinda Yonetmelik kapsaminda, Figurunica tarafindan gonderilecek ticari elektronik
-                iletilere iliskin onayinizi duzenler. Onay tamamen istege baglidir.
+                Bu metin, 6563 sayılı Elektronik Ticaretin Düzenlenmesi Hakkında Kanun ve Ticari İletişim ve Ticari
+                Elektronik İletiler Hakkında Yönetmelik kapsamında, Figurunica tarafından gönderilecek ticari elektronik
+                iletilere ilişkin onayınızı düzenler. Onay tamamen isteğe bağlıdır.
               </p>
 
-              <h2>1. Onayin Kapsami</h2>
+              <h2>1. Onayın Kapsamı</h2>
               <p>
-                Onay vermeniz halinde Figurunica; kampanya, indirim, yeni urun, hatirlatma ve benzeri tanitim
-                iceriklerini asagidaki kanallar uzerinden sizinle paylasabilir:
+                Onay vermeniz halinde Figurunica; kampanya, indirim, yeni ürün, hatırlatma ve benzeri tanıtım
+                içeriklerini aşağıdaki kanallar üzerinden sizinle paylaşabilir:
               </p>
               <ul>
                 <li>E-posta</li>
                 <li>SMS</li>
               </ul>
 
-              <h2>2. Veri Sorumlusu / Hizmet Saglayici</h2>
+              <h2>2. Veri Sorumlusu / Hizmet Sağlayıcı</h2>
               <ul>
                 <li>Unvan: Figurunica</li>
                 <li>E-posta: info@figurunica.com</li>
                 <li>Telefon: +90 546 678 04 95</li>
-                <li>Adres: Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li>Adres: Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 
-              <h2>3. Onayin Alinmasi ve IYS Kaydi</h2>
+              <h2>3. Onayın Alınması ve İYS Kaydı</h2>
               <p>
-                Onayiniz, kayit sirasinda ilgili kutucugu isaretlemeniz ile alinir ve onay tarihi sistemlerimize
-                kaydedilir. Ticari elektronik ileti onaylari, mevzuat geregi Ileti Yonetim Sistemi&apos;ne (IYS) iletilir;
-                onay durumunuzu IYS uzerinden de yonetebilirsiniz.
+                Onayınız, kayıt sırasında ilgili kutucuğu işaretlemeniz ile alınır ve onay tarihi sistemlerimize
+                kaydedilir. Ticari elektronik ileti onayları, mevzuat gereği İleti Yönetim Sistemi&apos;ne (İYS) iletilir;
+                onay durumunuzu İYS üzerinden de yönetebilirsiniz.
               </p>
 
-              <h2>4. Onaydan Vazgecme (Ret Hakki)</h2>
+              <h2>4. Onaydan Vazgeçme (Ret Hakkı)</h2>
               <p>
-                Diledginiz zaman, ucretsiz olarak ve gerekce gostermeksizin ticari elektronik ileti almayi
-                reddedebilirsiniz. Ret hakkinizi su yollarla kullanabilirsiniz:
+                Dilediğiniz zaman, ücretsiz olarak ve gerekçe göstermeksizin ticari elektronik ileti almayı
+                reddedebilirsiniz. Ret hakkınızı şu yollarla kullanabilirsiniz:
               </p>
               <ul>
-                <li>Gonderilen her e-postadaki abonelikten cik / ileti almak istemiyorum baglantisi,</li>
+                <li>Gönderilen her e-postadaki abonelikten çık / ileti almak istemiyorum bağlantısı,</li>
                 <li>info@figurunica.com adresine talebinizi iletmek,</li>
-                <li>IYS uzerinden onayinizi geri almak.</li>
+                <li>İYS üzerinden onayınızı geri almak.</li>
               </ul>
               <p>
-                Ret talebiniz, mevzuatta ongorulen sure icinde islenir ve bu sureden sonra tarafiniza ticari elektronik
-                ileti gonderilmez. Siparis durumu, teslimat ve odeme gibi islemsel (bilgilendirme amacli) bildirimler bu
-                kapsamda degildir ve hizmetin saglanmasi icin gonderilmeye devam eder.
+                Ret talebiniz, mevzuatta öngörülen süre içinde işlenir ve bu süreden sonra tarafınıza ticari elektronik
+                ileti gönderilmez. Sipariş durumu, teslimat ve ödeme gibi işlemsel (bilgilendirme amaçlı) bildirimler bu
+                kapsamda değildir ve hizmetin sağlanması için gönderilmeye devam eder.
               </p>
 
-              <h2>5. Kisisel Verilerin Korunmasi</h2>
+              <h2>5. Kişisel Verilerin Korunması</h2>
               <p>
-                Iletisim bilgileriniz yalnizca onay verdiginiz kanallarda ve belirtilen amaclarla islenir. Ayrintili
-                bilgi icin <a href="/privacy">Gizlilik Politikasi</a> sayfamizi inceleyebilirsiniz.
+                İletişim bilgileriniz yalnızca onay verdiğiniz kanallarda ve belirtilen amaçlarla işlenir. Ayrıntılı
+                bilgi için <a href="/privacy">Gizlilik Politikası</a> sayfamızı inceleyebilirsiniz.
               </p>
             </>
           ) : (

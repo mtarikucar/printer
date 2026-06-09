@@ -2,7 +2,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
 
 export const metadata = {
-  title: "Kargo ve Teslimat Politikasi — Figurunica",
+  title: "Kargo ve Teslimat Politikası — Figurunica",
 };
 
 export default async function KargoPage() {
@@ -14,10 +14,10 @@ export default async function KargoPage() {
       <SiteHeader />
       <div className="max-w-3xl mx-auto px-5 py-16 md:py-24">
         <h1 className="font-display text-4xl md:text-5xl text-text-primary mb-4">
-          {isTr ? "Kargo ve Teslimat Politikasi" : "Shipping & Delivery Policy"}
+          {isTr ? "Kargo ve Teslimat Politikası" : "Shipping & Delivery Policy"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son guncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -25,69 +25,69 @@ export default async function KargoPage() {
           {isTr ? (
             <>
               <p>
-                Bu Kargo ve Teslimat Politikasi, Figurunica (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafindan
-                hazirlanan kisiye ozel figurinlerin uretim ve teslimat surecini aciklamaktadir. Sorulariniz icin
-                info@figurunica.com adresinden veya +90 546 678 04 95 numarali telefondan bize ulasabilirsiniz.
+                Bu Kargo ve Teslimat Politikası, Figurunica (&quot;Şirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafından
+                hazırlanan kişiye özel figürinlerin üretim ve teslimat sürecini açıklamaktadır. Sorularınız için
+                info@figurunica.com adresinden veya +90 546 678 04 95 numaralı telefondan bize ulaşabilirsiniz.
               </p>
 
-              <h2>1. Kargo Firmasi ve Ucret</h2>
+              <h2>1. Kargo Firması ve Ücret</h2>
               <ul>
-                <li>Gonderilerimiz <strong>Yurtici Kargo</strong> ile gerceklestirilir.</li>
-                <li>Turkiye ici kargo <strong>ucretsizdir</strong>; siparis bedeline ek bir kargo ucreti yansitilmaz.</li>
-                <li>Gonderiler Ankara (Etimesgut) merkezimizden hazirlanip kargoya verilir.</li>
+                <li>Gönderilerimiz <strong>Yurtiçi Kargo</strong> ile gerçekleştirilir.</li>
+                <li>Türkiye içi kargo <strong>ücretsizdir</strong>; sipariş bedeline ek bir kargo ücreti yansıtılmaz.</li>
+                <li>Gönderiler Ankara (Etimesgut) merkezimizden hazırlanıp kargoya verilir.</li>
               </ul>
 
-              <h2>2. Uretim Suresi</h2>
+              <h2>2. Üretim Süresi</h2>
               <p>
-                Her figurin siparise ozel olarak uretildigi icin uretim, onizleme onayindan sonra baslar.
+                Her figürin siparişe özel olarak üretildiği için üretim, önizleme onayından sonra başlar.
               </p>
               <ul>
-                <li>Kisiye ozel figuriniz, onizleme onayindan sonra <strong>5-7 is gunu</strong> icinde uretilir.</li>
-                <li>Uretim suresi yogun donemlerde bir miktar uzayabilir; bu durumda sizi e-posta ile bilgilendiririz.</li>
-                <li>Uretim suresi yalnizca is gunlerini kapsar; hafta sonu ve resmi tatiller dahil degildir.</li>
+                <li>Kişiye özel figüriniz, önizleme onayından sonra <strong>5-7 iş günü</strong> içinde üretilir.</li>
+                <li>Üretim süresi yoğun dönemlerde bir miktar uzayabilir; bu durumda sizi e-posta ile bilgilendiririz.</li>
+                <li>Üretim süresi yalnızca iş günlerini kapsar; hafta sonu ve resmi tatiller dahil değildir.</li>
               </ul>
 
-              <h2>3. Teslimat Suresi</h2>
+              <h2>3. Teslimat Süresi</h2>
               <ul>
-                <li>Uretim tamamlandiktan sonra gonderiniz kargoya verilir.</li>
-                <li>Turkiye ici kargo teslimati genellikle <strong>2-3 is gunu</strong> surer.</li>
-                <li>Teslimat suresi, bulundugunuz il ve ilceye gore degisiklik gosterebilir.</li>
+                <li>Üretim tamamlandıktan sonra gönderiniz kargoya verilir.</li>
+                <li>Türkiye içi kargo teslimatı genellikle <strong>2-3 iş günü</strong> sürer.</li>
+                <li>Teslimat süresi, bulunduğunuz il ve ilçeye göre değişiklik gösterebilir.</li>
               </ul>
 
               <h2>4. Toplam Teslimat Tahmini</h2>
               <p>
-                Onizleme onayindan urununuzun elinize ulasmasina kadar gecen toplam sure yaklasik
-                <strong> 7-10 is gunudur</strong>. Bu sure, uretim (5-7 is gunu) ve kargo (2-3 is gunu)
-                asamalarinin toplamidir ve tahmini olup garanti edilmez.
+                Önizleme onayından ürününüzün elinize ulaşmasına kadar geçen toplam süre yaklaşık
+                <strong> 7-10 iş günüdür</strong>. Bu süre, üretim (5-7 iş günü) ve kargo (2-3 iş günü)
+                aşamalarının toplamıdır ve tahmini olup garanti edilmez.
               </p>
 
               <h2>5. Kargo Takibi</h2>
               <ul>
-                <li>Gonderiniz kargoya verildiginde, kargo takip numaraniz e-posta ile sizinle paylasilir.</li>
-                <li>Siparisinizin durumunu ve kargo hareketlerini istediginiz zaman <strong>/track</strong> sayfasindan takip edebilirsiniz.</li>
-                <li>Takip numarasi kargo firmasinin sistemine islendikten kisa bir sure sonra aktif hale gelir.</li>
+                <li>Gönderiniz kargoya verildiğinde, kargo takip numaranız e-posta ile sizinle paylaşılır.</li>
+                <li>Siparişinizin durumunu ve kargo hareketlerini istediğiniz zaman <strong>/track</strong> sayfasından takip edebilirsiniz.</li>
+                <li>Takip numarası kargo firmasının sistemine işlendikten kısa bir süre sonra aktif hale gelir.</li>
               </ul>
 
-              <h2>6. Teslim Edilemeyen Gonderiler</h2>
+              <h2>6. Teslim Edilemeyen Gönderiler</h2>
               <ul>
-                <li>Adreste bulunamama, yanlis/eksik adres veya iletisim kurulamamasi nedeniyle teslim edilemeyen gonderiler tarafimiza iade donebilir.</li>
-                <li>Iade donen gonderilerin tekrar gonderimi icin sizinle iletisime geceriz ve adres bilgilerinizi teyit ederiz.</li>
-                <li>Musteriden kaynaklanan nedenlerle (hatali adres, teslim alinmamasi) iade donen gonderilerin tekrar gonderiminde olusabilecek ek kargo masraflari talep edilebilir.</li>
-                <li>Teslimatin sorunsuz tamamlanabilmesi icin lutfen adres ve telefon bilgilerinizin guncel ve eksiksiz oldugundan emin olun.</li>
+                <li>Adreste bulunamama, yanlış/eksik adres veya iletişim kurulamaması nedeniyle teslim edilemeyen gönderiler tarafımıza iade dönebilir.</li>
+                <li>İade dönen gönderilerin tekrar gönderimi için sizinle iletişime geçeriz ve adres bilgilerinizi teyit ederiz.</li>
+                <li>Müşteriden kaynaklanan nedenlerle (hatalı adres, teslim alınmaması) iade dönen gönderilerin tekrar gönderiminde oluşabilecek ek kargo masrafları talep edilebilir.</li>
+                <li>Teslimatın sorunsuz tamamlanabilmesi için lütfen adres ve telefon bilgilerinizin güncel ve eksiksiz olduğundan emin olun.</li>
               </ul>
 
-              <h2>7. Uluslararasi Teslimat</h2>
+              <h2>7. Uluslararası Teslimat</h2>
               <p>
-                Su an icin yalnizca <strong>Turkiye ici</strong> teslimat yapilmaktadir. Uluslararasi teslimat
-                yakinda hizmete girecek olup, talep uzerine degerlendirilmektedir. Yurt disi gonderim talebiniz
-                icin info@figurunica.com adresinden bize ulasabilirsiniz.
+                Şu an için yalnızca <strong>Türkiye içi</strong> teslimat yapılmaktadır. Uluslararası teslimat
+                yakında hizmete girecek olup, talep üzerine değerlendirilmektedir. Yurt dışı gönderim talebiniz
+                için info@figurunica.com adresinden bize ulaşabilirsiniz.
               </p>
 
-              <h2>8. Hasarli Paket</h2>
+              <h2>8. Hasarlı Paket</h2>
               <ul>
-                <li>Gonderinizi teslim aldiginizda paketi kontrol etmenizi oneririz.</li>
-                <li>Urun hasarli ulastiysa, teslimattan sonra <strong>48 saat icinde</strong> hasarin fotograflari ile birlikte info@figurunica.com adresine bildirim yapmaniz gerekir.</li>
-                <li>Hasar tarafimizca dogrulandiginda, urununuz <strong>ucretsiz olarak yeniden gonderilir</strong>.</li>
+                <li>Gönderinizi teslim aldığınızda paketi kontrol etmenizi öneririz.</li>
+                <li>Ürün hasarlı ulaştıysa, teslimattan sonra <strong>48 saat içinde</strong> hasarın fotoğrafları ile birlikte info@figurunica.com adresine bildirim yapmanız gerekir.</li>
+                <li>Hasar tarafımızca doğrulandığında, ürününüz <strong>ücretsiz olarak yeniden gönderilir</strong>.</li>
               </ul>
             </>
           ) : (

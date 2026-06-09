@@ -14,10 +14,10 @@ export default async function TermsPage() {
       <SiteHeader />
       <div className="max-w-3xl mx-auto px-5 py-16 md:py-24">
         <h1 className="font-display text-4xl md:text-5xl text-text-primary mb-4">
-          {isTr ? "Kullanim Kosullari" : "Terms of Service"}
+          {isTr ? "Kullanım Koşulları" : "Terms of Service"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son guncelleme: 31 Mart 2026" : "Last updated: March 31, 2026"}
+          {isTr ? "Son güncelleme: 31 Mart 2026" : "Last updated: March 31, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -25,165 +25,165 @@ export default async function TermsPage() {
           {isTr ? (
             <>
               <p>
-                Bu Kullanim Kosullari (&quot;Kosullar&quot;), Figurunica (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafindan
-                figurunica.com web sitesi ve iliskili hizmetler uzerinden sunulan hizmetlerin kullanimina
-                iliskin sartlari duzenlemektedir. Hizmetlerimizi kullanarak bu Kosullar&apos;i kabul etmis sayilirsiniz.
+                Bu Kullanım Koşulları (&quot;Koşullar&quot;), Figurunica (&quot;Şirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafından
+                figurunica.com web sitesi ve ilişkili hizmetler üzerinden sunulan hizmetlerin kullanımına
+                ilişkin şartları düzenlemektedir. Hizmetlerimizi kullanarak bu Koşullar&apos;ı kabul etmiş sayılırsınız.
               </p>
 
-              <h2>1. Hizmet Tanimi</h2>
-              <p>Figurunica asagidaki hizmetleri sunmaktadir:</p>
+              <h2>1. Hizmet Tanımı</h2>
+              <p>Figurunica aşağıdaki hizmetleri sunmaktadır:</p>
               <ul>
-                <li>Kullanici tarafindan yuklenen fotograflardan yapay zeka destekli 3D model olusturma</li>
-                <li>Olusturulan 3D modellerin recine baski ile fiziksel figurin uretimi</li>
-                <li>Figurin ile birlikte boyama kiti (boyalar, fircalar, rehber) gonderimi</li>
-                <li>3D obje olusturma ve baski hizmeti</li>
-                <li>Dijital STL dosyasi satisi</li>
-                <li>Hediye karti satis ve kullanim hizmeti</li>
+                <li>Kullanıcı tarafından yüklenen fotoğraflardan yapay zeka destekli 3D model oluşturma</li>
+                <li>Oluşturulan 3D modellerin reçine baskı ile fiziksel figürin üretimi</li>
+                <li>Figürin ile birlikte boyama kiti (boyalar, fırçalar, rehber) gönderimi</li>
+                <li>3D obje oluşturma ve baskı hizmeti</li>
+                <li>Dijital STL dosyası satışı</li>
+                <li>Hediye kartı satış ve kullanım hizmeti</li>
               </ul>
 
-              <h2>2. Siparis Sureci</h2>
+              <h2>2. Sipariş Süreci</h2>
 
-              <h3>2.1 Siparis Olusturma</h3>
+              <h3>2.1 Sipariş Oluşturma</h3>
               <ul>
-                <li>Kullanici, web sitemiz uzerinden fotograf yukleyerek, figurin boyutunu ve stilini secerek siparis olusturur.</li>
-                <li>Siparis sonrasi yapay zekamiz bir 3D model onizlemesi olusturur.</li>
-                <li>Kullanici, 3D onizlemeyi inceleyip onayladiktan sonra odeme islemine gecer.</li>
-                <li>Odeme tamamlandiktan sonra uretim sureci baslar.</li>
+                <li>Kullanıcı, web sitemiz üzerinden fotoğraf yükleyerek, figürin boyutunu ve stilini seçerek sipariş oluşturur.</li>
+                <li>Sipariş sonrası yapay zekamız bir 3D model önizlemesi oluşturur.</li>
+                <li>Kullanıcı, 3D önizlemeyi inceleyip onayladıktan sonra ödeme işlemine geçer.</li>
+                <li>Ödeme tamamlandıktan sonra üretim süreci başlar.</li>
               </ul>
 
-              <h3>2.2 Onizleme ve Onay</h3>
+              <h3>2.2 Önizleme ve Onay</h3>
               <ul>
-                <li>Her siparis icin baski oncesi dijital onizleme sunulur.</li>
-                <li>Kullanici, onizlemeyi onaylayana kadar baski islemi baslamaz.</li>
-                <li>Onizleme, nihai urunun yaklasik bir temsilidir; malzeme, renk ve detaylarda kucuk farkliliklar olabilir.</li>
+                <li>Her sipariş için baskı öncesi dijital önizleme sunulur.</li>
+                <li>Kullanıcı, önizlemeyi onaylayana kadar baskı işlemi başlamaz.</li>
+                <li>Önizleme, nihai ürünün yaklaşık bir temsilidir; malzeme, renk ve detaylarda küçük farklılıklar olabilir.</li>
               </ul>
 
-              <h3>2.3 Uretim ve Teslimat</h3>
+              <h3>2.3 Üretim ve Teslimat</h3>
               <ul>
-                <li>Onaylanan siparisler genellikle 5-7 is gunu icinde uretilir.</li>
-                <li>Yurici kargo ucretsizdir ve 2-3 is gunu surer.</li>
-                <li>Belirtilen sureler tahmini olup, yogunluk donemlerinde uzayabilir.</li>
-                <li>Teslimat adresi siparis sirasinda belirtilen adrestir; adres degisikligi icin uretim baslamadan once iletisime geciniz.</li>
+                <li>Onaylanan siparişler genellikle 5-7 iş günü içinde üretilir.</li>
+                <li>Yurt içi kargo ücretsizdir ve 2-3 iş günü sürer.</li>
+                <li>Belirtilen süreler tahmini olup, yoğunluk dönemlerinde uzayabilir.</li>
+                <li>Teslimat adresi sipariş sırasında belirtilen adrestir; adres değişikliği için üretim başlamadan önce iletişime geçiniz.</li>
               </ul>
 
-              <h2>3. Fiyatlandirma ve Odeme</h2>
+              <h2>3. Fiyatlandırma ve Ödeme</h2>
 
               <h3>3.1 Fiyatlar</h3>
               <ul>
-                <li>Tum fiyatlar Turk Lirasi (TL) cinsinden ve KDV dahildir.</li>
-                <li>Guncel fiyatlar web sitemizde belirtilmektedir.</li>
-                <li>Sirket, fiyatlari onceden bildirimde bulunmaksizin degistirme hakkini sakli tutar. Degisiklikler mevcut siparisleri etkilemez.</li>
+                <li>Tüm fiyatlar Türk Lirası (TL) cinsinden ve KDV dahildir.</li>
+                <li>Güncel fiyatlar web sitemizde belirtilmektedir.</li>
+                <li>Şirket, fiyatları önceden bildirimde bulunmaksızın değiştirme hakkını saklı tutar. Değişiklikler mevcut siparişleri etkilemez.</li>
               </ul>
 
-              <h3>3.2 Odeme Yontemleri</h3>
+              <h3>3.2 Ödeme Yöntemleri</h3>
               <ul>
-                <li>Kredi karti / banka karti (PayTR uzerinden)</li>
-                <li>Hediye karti</li>
-                <li>Hediye karti + kredi karti kombinasyonu</li>
+                <li>Kredi kartı / banka kartı (PayTR üzerinden)</li>
+                <li>Hediye kartı</li>
+                <li>Hediye kartı + kredi kartı kombinasyonu</li>
               </ul>
 
-              <h3>3.3 Hediye Kartlari</h3>
+              <h3>3.3 Hediye Kartları</h3>
               <ul>
-                <li>Hediye kartlari satin alinma tarihinden itibaren 1 yil gecerlidir.</li>
-                <li>Hediye kartlari iade edilemez ve nakde cevrilemez.</li>
-                <li>Hediye karti bakiyesi siparis tutarini karsilamazsa, kalan tutar baska bir odeme yontemiyle tamamlanabilir.</li>
-                <li>Hediye karti bakiyesi siparis tutarini asarsa, kalan bakiye bir sonraki sipariste kullanilabilir.</li>
+                <li>Hediye kartları satın alınma tarihinden itibaren 1 yıl geçerlidir.</li>
+                <li>Hediye kartları iade edilemez ve nakde çevrilemez.</li>
+                <li>Hediye kartı bakiyesi sipariş tutarını karşılamazsa, kalan tutar başka bir ödeme yöntemiyle tamamlanabilir.</li>
+                <li>Hediye kartı bakiyesi sipariş tutarını aşarsa, kalan bakiye bir sonraki siparişte kullanılabilir.</li>
               </ul>
 
-              <h2>4. Iptal ve Iade Politikasi</h2>
+              <h2>4. İptal ve İade Politikası</h2>
 
-              <h3>4.1 Siparis Iptali</h3>
+              <h3>4.1 Sipariş İptali</h3>
               <ul>
-                <li>Uretim baslamadan once siparis iptal edilebilir.</li>
-                <li>Onizleme onayi verilmeden onceki siparisler ucretsiz iptal edilebilir.</li>
-                <li>Onizleme onaylandiktan ve uretim basladiktan sonra iptal kabul edilmez.</li>
+                <li>Üretim başlamadan önce sipariş iptal edilebilir.</li>
+                <li>Önizleme onayı verilmeden önceki siparişler ücretsiz iptal edilebilir.</li>
+                <li>Önizleme onaylandıktan ve üretim başladıktan sonra iptal kabul edilmez.</li>
               </ul>
 
-              <h3>4.2 Iade</h3>
+              <h3>4.2 İade</h3>
               <ul>
-                <li>Her figurin ozel uretim oldugu icin standart iade kabul edilmemektedir.</li>
-                <li>Urun hasar gormus veya hatali olarak teslim edilmisse, teslim tarihinden itibaren 14 gun icinde bizimle iletisime geciniz.</li>
-                <li>Kalite sorunu tespit edilmesi halinde ucretsiz yeniden uretim veya iade yapilir.</li>
-                <li>Urunun fotografi ve sorunun aciklamasi ile birlikte info@figurunica.com adresine basvuru yapilmalidir.</li>
+                <li>Her figürin özel üretim olduğu için standart iade kabul edilmemektedir.</li>
+                <li>Ürün hasar görmüş veya hatalı olarak teslim edilmişse, teslim tarihinden itibaren 14 gün içinde bizimle iletişime geçiniz.</li>
+                <li>Kalite sorunu tespit edilmesi halinde ücretsiz yeniden üretim veya iade yapılır.</li>
+                <li>Ürünün fotoğrafı ve sorunun açıklaması ile birlikte info@figurunica.com adresine başvuru yapılmalıdır.</li>
               </ul>
 
-              <h3>4.3 Mesafeli Satis Sozlesmesi</h3>
+              <h3>4.3 Mesafeli Satış Sözleşmesi</h3>
               <p>
-                6502 sayili Tuketicinin Korunmasi Hakkinda Kanun&apos;un 48. maddesi ve Mesafeli Sozlesmeler Yonetmeligi
-                kapsaminda, ozel uretim urunler (kisiye ozel figurinler) cayma hakki kapsaminda degildir.
-                Ancak urunun ayipli teslimi halinde tuketici haklari saklidir.
+                6502 sayılı Tüketicinin Korunması Hakkında Kanun&apos;un 48. maddesi ve Mesafeli Sözleşmeler Yönetmeliği
+                kapsamında, özel üretim ürünler (kişiye özel figürinler) cayma hakkı kapsamında değildir.
+                Ancak ürünün ayıplı teslimi halinde tüketici hakları saklıdır.
               </p>
 
-              <h2>5. Fikri Mulkiyet Haklari</h2>
+              <h2>5. Fikri Mülkiyet Hakları</h2>
 
-              <h3>5.1 Sirket Haklari</h3>
+              <h3>5.1 Şirket Hakları</h3>
               <ul>
-                <li>Figurunica markasi, logosu, web sitesi tasarimi, yazilimi ve icerigi Sirket&apos;in fikri mulkiyetidir.</li>
-                <li>Yapay zeka modelleri ve uretim surecleri Sirket&apos;e aittir.</li>
+                <li>Figurunica markası, logosu, web sitesi tasarımı, yazılımı ve içeriği Şirket&apos;in fikri mülkiyetidir.</li>
+                <li>Yapay zeka modelleri ve üretim süreçleri Şirket&apos;e aittir.</li>
               </ul>
 
-              <h3>5.2 Kullanici Icerigi</h3>
+              <h3>5.2 Kullanıcı İçeriği</h3>
               <ul>
-                <li>Yuklediginiz fotograflarin telif hakki size aittir.</li>
-                <li>Fotograf yukleyerek, bu fotografin figurin olusturma amacli islenmesine izin vermis olursunuz.</li>
-                <li>Galeriye paylastiginiz figurin gorsellerinin Sirket tarafindan tanitim amacli kullanilmasina izin vermis olursunuz.</li>
-                <li>Galeriden paylasimlarinizi istediginiz zaman kaldirabilirsiniz.</li>
+                <li>Yüklediğiniz fotoğrafların telif hakkı size aittir.</li>
+                <li>Fotoğraf yükleyerek, bu fotoğrafın figürin oluşturma amaçlı işlenmesine izin vermiş olursunuz.</li>
+                <li>Galeriye paylaştığınız figürin görsellerinin Şirket tarafından tanıtım amaçlı kullanılmasına izin vermiş olursunuz.</li>
+                <li>Galeriden paylaşımlarınızı istediğiniz zaman kaldırabilirsiniz.</li>
               </ul>
 
               <h3>5.3 Yasaklar</h3>
-              <p>Asagidaki icerikler icin siparis veremezsiniz:</p>
+              <p>Aşağıdaki içerikler için sipariş veremezsiniz:</p>
               <ul>
-                <li>Baskalarinin telif haklarina tecavuz eden icerikler</li>
-                <li>Pornografik, nefret iceren veya siddet iceren icerikler</li>
-                <li>Yasadisi faaliyetleri tesvik eden icerikler</li>
-                <li>Ucuncu kisilerin gizlilik haklarini ihlal eden icerikler</li>
+                <li>Başkalarının telif haklarına tecavüz eden içerikler</li>
+                <li>Pornografik, nefret içeren veya şiddet içeren içerikler</li>
+                <li>Yasadışı faaliyetleri teşvik eden içerikler</li>
+                <li>Üçüncü kişilerin gizlilik haklarını ihlal eden içerikler</li>
               </ul>
 
-              <h2>6. Sorumluluk Sinirlamasi</h2>
+              <h2>6. Sorumluluk Sınırlaması</h2>
 
               <h3>6.1 Hizmet Garantisi</h3>
               <ul>
-                <li>Yapay zeka tarafindan olusturulan 3D modellerin kalitesi, yuklenen fotografin kalitesine baglidir.</li>
-                <li>Onizleme ile nihai urun arasinda kucuk farkliliklar olabilir (renk tonlari, detay seviyeleri vb.).</li>
-                <li>3D baski surecinin dogasi geregi, her urun essizdir ve kucuk farkliliklar uretim toleranslari icerisindedir.</li>
+                <li>Yapay zeka tarafından oluşturulan 3D modellerin kalitesi, yüklenen fotoğrafın kalitesine bağlıdır.</li>
+                <li>Önizleme ile nihai ürün arasında küçük farklılıklar olabilir (renk tonları, detay seviyeleri vb.).</li>
+                <li>3D baskı sürecinin doğası gereği, her ürün eşsizdir ve küçük farklılıklar üretim toleransları içerisindedir.</li>
               </ul>
 
-              <h3>6.2 Sorumluluk Siniri</h3>
+              <h3>6.2 Sorumluluk Sınırı</h3>
               <ul>
-                <li>Sirket, hizmet kesintileri, teknik arizalar veya ucuncu taraf hizmet saglayicilardan kaynaklanan aksakliklar nedeniyle olusan dolayli zararlardan sorumlu degildir.</li>
-                <li>Sirket&apos;in toplam sorumlulugu, ilgili siparisin bedelini asmaz.</li>
+                <li>Şirket, hizmet kesintileri, teknik arızalar veya üçüncü taraf hizmet sağlayıcılardan kaynaklanan aksaklıklar nedeniyle oluşan dolaylı zararlardan sorumlu değildir.</li>
+                <li>Şirket&apos;in toplam sorumluluğu, ilgili siparişin bedelini aşmaz.</li>
               </ul>
 
-              <h2>7. Hesap Kullanimi</h2>
+              <h2>7. Hesap Kullanımı</h2>
               <ul>
-                <li>Hesabinizi baskasina devredemezsiniz.</li>
-                <li>Hesap bilgilerinizin guvenliginden siz sorumlusunuz.</li>
-                <li>Hesabinizda yetkisiz erisim farketmeniz halinde derhal bizimle iletisime geciniz.</li>
-                <li>Sirket, bu Kosullar&apos;i ihlal eden hesaplari askiya alma veya kapatma hakkini sakli tutar.</li>
+                <li>Hesabınızı başkasına devredemezsiniz.</li>
+                <li>Hesap bilgilerinizin güvenliğinden siz sorumlusunuz.</li>
+                <li>Hesabınızda yetkisiz erişim farketmeniz halinde derhal bizimle iletişime geçiniz.</li>
+                <li>Şirket, bu Koşullar&apos;ı ihlal eden hesapları askıya alma veya kapatma hakkını saklı tutar.</li>
               </ul>
 
-              <h2>8. Mucbir Sebepler</h2>
+              <h2>8. Mücbir Sebepler</h2>
               <p>
-                Dogal afetler, salginlar, savas, grev, hukumet kararlari, internet altyapi sorunlari ve benzeri
-                kontrol disinda gelisen olaylar nedeniyle hizmetlerin aksamasi veya gecikmesi halinde Sirket sorumlu tutulamaz.
+                Doğal afetler, salgınlar, savaş, grev, hükümet kararları, internet altyapı sorunları ve benzeri
+                kontrol dışında gelişen olaylar nedeniyle hizmetlerin aksaması veya gecikmesi halinde Şirket sorumlu tutulamaz.
               </p>
 
-              <h2>9. Uyusmazlik Cozumu</h2>
+              <h2>9. Uyuşmazlık Çözümü</h2>
               <ul>
-                <li>Bu Kosullar Turkiye Cumhuriyeti kanunlarina tabidir.</li>
-                <li>Uyusmazliklarda Istanbul Mahkemeleri ve Icra Daireleri yetkilidir.</li>
-                <li>Tuketici sikayetleri icin Tuketici Hakem Heyetlerine basvurulabilir.</li>
+                <li>Bu Koşullar Türkiye Cumhuriyeti kanunlarına tabidir.</li>
+                <li>Uyuşmazlıklarda İstanbul Mahkemeleri ve İcra Daireleri yetkilidir.</li>
+                <li>Tüketici şikayetleri için Tüketici Hakem Heyetlerine başvurulabilir.</li>
               </ul>
 
-              <h2>10. Degisiklikler</h2>
+              <h2>10. Değişiklikler</h2>
               <p>
-                Sirket, bu Kosullar&apos;i herhangi bir zamanda degistirme hakkini sakli tutar. Degisiklikler
-                web sitemizde yayinlandiginda yururluge girer. Onemli degisiklikler hakkinda kayitli
-                kullanicilara e-posta ile bildirim yapilir.
+                Şirket, bu Koşullar&apos;ı herhangi bir zamanda değiştirme hakkını saklı tutar. Değişiklikler
+                web sitemizde yayınlandığında yürürlüğe girer. Önemli değişiklikler hakkında kayıtlı
+                kullanıcılara e-posta ile bildirim yapılır.
               </p>
 
-              <h2>11. Iletisim</h2>
-              <p>Bu Kullanim Kosullari hakkinda sorulariniz icin:</p>
+              <h2>11. İletişim</h2>
+              <p>Bu Kullanım Koşulları hakkında sorularınız için:</p>
               <ul>
                 <li>E-posta: info@figurunica.com</li>
               </ul>

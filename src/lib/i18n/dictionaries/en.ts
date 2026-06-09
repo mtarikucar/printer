@@ -454,11 +454,13 @@ const en = {
   // Create — Finish / package tier (Faz 1.1)
   "create.finishSelection": "Finish",
   "create.finish.paintable_kit": "Paintable Kit",
-  "create.finish.paintable_kit.desc": "Primed print + a mini paint kit — you paint it.",
+  "create.finish.paintable_kit.desc": "Resin print, sanded & primed, plus a mini paint kit — you paint it. Included in the price.",
   "create.finish.hand_painted": "Hand-Painted",
-  "create.finish.hand_painted.desc": "We professionally hand-paint it for you before shipping.",
+  "create.finish.hand_painted.desc": "Resin print, professionally hand-painted, with a QC photo and gift box.",
   "create.finish.luxe_display": "Luxe Display",
-  "create.finish.luxe_display.desc": "Premium base, gift box, and full hand-painting.",
+  "create.finish.luxe_display.desc": "Premium base, name plate, hard case and full hand-painting — for weddings & corporate gifts.",
+  "create.finish.collector_raw": "Collector Raw",
+  "create.finish.collector_raw.desc": "Unpainted high-detail resin, no paint kit — for collectors who use their own paints.",
   "create.finish.included": "Included",
 
   // Create — Style

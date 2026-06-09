@@ -456,11 +456,13 @@ const tr: Dictionary = {
   // Create — Finish / paket katmanı (Faz 1.1)
   "create.finishSelection": "Bitiş",
   "create.finish.paintable_kit": "Boyanabilir Kit",
-  "create.finish.paintable_kit.desc": "Primer'lı baskı + mini boya kiti — sen boyarsın.",
+  "create.finish.paintable_kit.desc": "Reçine baskı, zımparalı ve primer'lı + mini boya kiti — sen boyarsın. Fiyata dahil.",
   "create.finish.hand_painted": "El Boyaması",
-  "create.finish.hand_painted.desc": "Kargodan önce senin için profesyonelce elle boyarız.",
+  "create.finish.hand_painted.desc": "Reçine baskı, profesyonelce elle boyanır; QC fotoğrafı ve hediye kutusu dahil.",
   "create.finish.luxe_display": "Lüks Vitrin",
-  "create.finish.luxe_display.desc": "Premium kaide, hediye kutusu ve tam el boyaması.",
+  "create.finish.luxe_display.desc": "Premium kaide, isim plakası, sert kutu ve tam el boyaması — düğün ve kurumsal hediyeler için.",
+  "create.finish.collector_raw": "Collector Raw",
+  "create.finish.collector_raw.desc": "Boyasız yüksek detaylı reçine, boya kiti yok — kendi boyasını kullanan koleksiyonerler için.",
   "create.finish.included": "Dahil",
 
   // Create — Style

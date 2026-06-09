@@ -29,10 +29,16 @@ export type FigurineFinish =
  * so the base price table is untouched — tune freely.
  */
 export const FINISH_SURCHARGES_KURUS: Record<FigurineFinish, number> = {
+  // Boyanabilir Kit — default: resin print, sanded, primed + a mini paint kit.
+  // Included in the base price (no surcharge).
   paintable_kit: 0,
-  collector_raw: 0,
-  hand_painted: 79900,
-  luxe_display: 149900,
+  // Collector Raw — unpainted high-detail resin print, no paint kit. For
+  // collectors/DIY who use their own paints; ₺100 less than the kit.
+  collector_raw: -10000,
+  // Hand-Painted — professional hand painting + QC photo + gift box.
+  hand_painted: 80000,
+  // Luxe Display — premium base + name plate + hard case + full hand paint.
+  luxe_display: 150000,
 };
 
 // Surcharge for a finish key. Unknown finish → 0 (treated as the default kit).

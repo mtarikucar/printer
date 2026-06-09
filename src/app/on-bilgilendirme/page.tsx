@@ -47,14 +47,22 @@ export default async function OnBilgilendirmePage() {
                 bir figurindir. Urunun temel nitelikleri siparis sirasinda secilen seceneklere gore belirlenir:
               </p>
               <ul>
-                <li><strong>Boyut:</strong> Siparis ekraninda sundugumuz boyut secenekleri arasindan secilir.</li>
-                <li><strong>Materyal:</strong> Recine veya filament secenekleri.</li>
-                <li><strong>Bitis (finish):</strong> Boyanabilir Kit, El Boyamasi veya Luks Vitrin secenekleri.</li>
+                <li><strong>Boyut ve taban fiyat (recine, KDV dahil):</strong> Kucuk (~60mm) 999 TL, Orta (~80mm) 1.399 TL, Buyuk (~120mm) 1.799 TL. Filament secenegi her boyutta 300 TL daha uygundur.</li>
+                <li><strong>Materyal:</strong> Recine (premium) veya filament.</li>
+                <li><strong>Bitis / paket secenekleri:</strong>
+                  <ul>
+                    <li><strong>Boyanabilir Kit</strong> (varsayilan, fiyata dahil): recine baski, zimparali, primerli ve mini boya kiti.</li>
+                    <li><strong>Collector Raw</strong> (-100 TL): boyasiz yuksek detayli recine, boya kiti yok.</li>
+                    <li><strong>El Boyamasi</strong> (+800 TL): profesyonel el boyamasi, QC fotografi ve hediye kutusu.</li>
+                    <li><strong>Luks Vitrin</strong> (+1.500 TL): premium kaide, isim plakasi, sert kutu ve tam el boyamasi.</li>
+                  </ul>
+                </li>
+                <li><strong>Istege bagli eklentiler:</strong> Ekstra boya (49 TL), hediye paketi (29 TL), hizli kargo (79 TL).</li>
               </ul>
               <p>
-                Tum fiyatlar Turk Lirasi (TL) cinsinden ve KDV dahildir. Secilen boyut, materyal ve bitise gore
-                hesaplanan nihai fiyat, herhangi bir ek ucret olmaksizin odeme oncesinde siparis ekraninda acikca
-                gosterilir.
+                Tum fiyatlar Turk Lirasi (TL) cinsinden ve KDV dahildir. Yukaridaki tutarlar bilgilendirme amaclidir;
+                secilen boyut, materyal, bitis ve eklentilere gore hesaplanan guncel ve baglayici nihai fiyat,
+                herhangi bir gizli ek ucret olmaksizin odeme oncesinde siparis ekraninda acikca gosterilir.
               </p>
 
               <h2>3. Odeme Sekli</h2>
@@ -147,14 +155,22 @@ export default async function OnBilgilendirmePage() {
                 Its essential characteristics are determined by the options selected during the order:
               </p>
               <ul>
-                <li><strong>Size:</strong> Selected from the size options offered on the order screen.</li>
-                <li><strong>Material:</strong> Resin or filament options.</li>
-                <li><strong>Finish:</strong> Paintable Kit, Hand-Painted, or Luxury Display options.</li>
+                <li><strong>Size and base price (resin, VAT included):</strong> Small (~60mm) 999 TL, Medium (~80mm) 1,399 TL, Large (~120mm) 1,799 TL. The filament option is 300 TL cheaper at every size.</li>
+                <li><strong>Material:</strong> Resin (premium) or filament.</li>
+                <li><strong>Finish / package options:</strong>
+                  <ul>
+                    <li><strong>Paintable Kit</strong> (default, included): resin print, sanded, primed and a mini paint kit.</li>
+                    <li><strong>Collector Raw</strong> (-100 TL): unpainted high-detail resin, no paint kit.</li>
+                    <li><strong>Hand-Painted</strong> (+800 TL): professional hand painting, QC photo and gift box.</li>
+                    <li><strong>Luxury Display</strong> (+1,500 TL): premium base, name plate, hard case and full hand painting.</li>
+                  </ul>
+                </li>
+                <li><strong>Optional add-ons:</strong> Extra paint (49 TL), gift wrap (29 TL), express shipping (79 TL).</li>
               </ul>
               <p>
-                All prices are in Turkish Lira (TL) and include VAT. The final price, calculated according to the
-                selected size, material, and finish, is displayed clearly on the order screen before payment, with no
-                hidden charges.
+                All prices are in Turkish Lira (TL) and include VAT. The figures above are for information; the current and
+                binding final price, calculated according to the selected size, material, finish and add-ons, is displayed
+                clearly on the order screen before payment, with no hidden charges.
               </p>
 
               <h2>3. Payment Method</h2>

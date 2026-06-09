@@ -166,14 +166,16 @@ export default function CreatePage() {
   const priceLabel = (sizeKey: string, materialKey: string) =>
     Math.round(figurinePriceKurus(sizeKey, materialKey) / 100).toLocaleString("tr-TR");
 
-  // Finish/package tiers (Faz 1.1). surchargeKurus mirrors the server's
-  // FINISH_SURCHARGES_KURUS; the server re-derives the trusted amount on submit.
-  // collector_raw exists in the enum but isn't surfaced here yet.
+  // Finish/package tiers (Faz 1.1). surchargeKurus is derived from the single
+  // source FINISH_SURCHARGES_KURUS via finishSurchargeKurus; the server
+  // re-derives the trusted amount on submit. collector_raw is cheaper (raw
+  // print, no paint kit) so its surcharge is negative.
   const FINISHES = [
-    { key: "paintable_kit" as const, surchargeKurus: 0,      label: d["create.finish.paintable_kit"], desc: d["create.finish.paintable_kit.desc"] },
-    { key: "hand_painted" as const,  surchargeKurus: 79900,  label: d["create.finish.hand_painted"],  desc: d["create.finish.hand_painted.desc"] },
-    { key: "luxe_display" as const,  surchargeKurus: 149900, label: d["create.finish.luxe_display"],   desc: d["create.finish.luxe_display.desc"] },
-  ] as const;
+    { key: "paintable_kit" as const, label: d["create.finish.paintable_kit"], desc: d["create.finish.paintable_kit.desc"] },
+    { key: "hand_painted" as const,  label: d["create.finish.hand_painted"],  desc: d["create.finish.hand_painted.desc"] },
+    { key: "luxe_display" as const,  label: d["create.finish.luxe_display"],   desc: d["create.finish.luxe_display.desc"] },
+    { key: "collector_raw" as const, label: d["create.finish.collector_raw"], desc: d["create.finish.collector_raw.desc"] },
+  ].map((f) => ({ ...f, surchargeKurus: finishSurchargeKurus(f.key) }));
 
   const STYLES = [
     { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
@@ -880,7 +882,11 @@ export default function CreatePage() {
                       <div className="flex items-center justify-between gap-2">
                         <span className={`text-sm font-semibold ${selectedFinish === f.key ? "text-white" : "text-text-primary"}`}>{f.label}</span>
                         <span className={`text-sm font-mono font-bold ${selectedFinish === f.key ? "text-white" : "text-green-500"}`}>
-                          {f.surchargeKurus > 0 ? `+₺${(f.surchargeKurus / 100).toLocaleString("tr-TR")}` : d["create.finish.included"]}
+                          {f.surchargeKurus > 0
+                            ? `+₺${(f.surchargeKurus / 100).toLocaleString("tr-TR")}`
+                            : f.surchargeKurus < 0
+                              ? `-₺${(Math.abs(f.surchargeKurus) / 100).toLocaleString("tr-TR")}`
+                              : d["create.finish.included"]}
                         </span>
                       </div>
                       <p className={`text-xs mt-0.5 ${selectedFinish === f.key ? "text-white/80" : "text-text-muted"}`}>{f.desc}</p>
@@ -1529,10 +1535,12 @@ export default function CreatePage() {
                     <span className="text-sm font-medium text-text-secondary">{selectedSizeObj?.label} ({selectedSizeObj?.height}) · {selectedMaterialObj?.label}</span>
                     <span className="font-mono font-bold text-text-primary">₺{priceLabel(selectedSize, selectedMaterial)}</span>
                   </div>
-                  {selectedFinishObj && selectedFinishObj.surchargeKurus > 0 && (
+                  {selectedFinishObj && selectedFinishObj.surchargeKurus !== 0 && (
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-text-secondary">{selectedFinishObj.label}</span>
-                      <span className="font-mono font-bold text-text-primary">+₺{(selectedFinishObj.surchargeKurus / 100).toLocaleString("tr-TR")}</span>
+                      <span className="font-mono font-bold text-text-primary">
+                        {selectedFinishObj.surchargeKurus > 0 ? "+" : "-"}₺{(Math.abs(selectedFinishObj.surchargeKurus) / 100).toLocaleString("tr-TR")}
+                      </span>
                     </div>
                   )}
                   {(() => {

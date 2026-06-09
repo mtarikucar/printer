@@ -174,6 +174,7 @@ const tr: Dictionary = {
   "cart.remove": "Kaldır",
   "cart.continue": "Alışverişe devam",
   "checkout.summary": "Sipariş özeti",
+  "checkout.giftCard": "Hediye kartı kodu (opsiyonel)",
   "design.title": "2D tasarım → 3D obje",
   "design.sub": "Logonu, çizimini ya da düz bir görseli yükle; onu 3D baskıya hazır bir objeye dönüştürelim.",
   "design.upload": "Tasarımını yükle",

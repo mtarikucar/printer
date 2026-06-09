@@ -170,6 +170,12 @@ export async function promoteDraftToOrder(
           productTitleSnapshot: order.productTitleSnapshot,
         });
       }
+      // Reassign any draft-scoped gift-card redemption to the first sub-order
+      // (so a later refund can restore the balance against a real order).
+      await tx
+        .update(giftCardRedemptions)
+        .set({ orderId: createdOrders[0].id })
+        .where(eq(giftCardRedemptions.draftId, draft.id));
       await tx
         .update(orderDrafts)
         .set({

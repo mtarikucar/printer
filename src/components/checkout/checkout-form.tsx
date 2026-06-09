@@ -41,6 +41,7 @@ export function CheckoutForm({
   const [phoneCountry, setPhoneCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [phoneNational, setPhoneNational] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"card" | "bank_transfer">("card");
+  const [giftCardCode, setGiftCardCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +82,7 @@ export function CheckoutForm({
           ...orderPayload,
           shippingAddress: { adres, mahalle, ilce, il, postaKodu, telefon },
           paymentMethod,
+          giftCardCode: giftCardCode.trim() || undefined,
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
         }),
@@ -202,6 +204,13 @@ export function CheckoutForm({
         onCountryChange={setPhoneCountry}
         onNationalNumberChange={setPhoneNational}
         required
+        className={inputCls}
+      />
+
+      <input
+        value={giftCardCode}
+        onChange={(e) => setGiftCardCode(e.target.value)}
+        placeholder={t("checkout.giftCard", "Hediye kartı kodu (opsiyonel)")}
         className={inputCls}
       />
 

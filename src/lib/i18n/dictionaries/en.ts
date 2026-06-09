@@ -172,6 +172,7 @@ const en = {
   "cart.remove": "Remove",
   "cart.continue": "Continue shopping",
   "checkout.summary": "Order summary",
+  "checkout.giftCard": "Gift card code (optional)",
   "design.title": "2D design → 3D object",
   "design.sub": "Upload a logo, drawing, or flat image and we'll turn it into a 3D-printable object.",
   "design.upload": "Upload your design",

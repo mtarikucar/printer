@@ -804,6 +804,19 @@ export function OrderDetailClient({ data, locale }: Props) {
                 )}
               </div>
               <dl className="space-y-3 text-sm">
+                {order.orderType === "upload" && (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">3D Model</dt>
+                    <dd>
+                      <a
+                        href={`/api/admin/orders/${order.id}/download-upload`}
+                        className="font-medium text-blue-600 hover:text-blue-800"
+                      >
+                        Modeli indir (STL/OBJ)
+                      </a>
+                    </dd>
+                  </div>
+                )}
                 {order.orderType === "marketplace" ? (
                   <div className="flex justify-between items-center">
                     <dt className="text-gray-400">

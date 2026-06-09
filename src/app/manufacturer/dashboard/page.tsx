@@ -10,6 +10,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import { AcceptingOrdersToggle } from "@/components/manufacturer/accepting-orders-toggle";
 
 export default async function ManufacturerDashboardPage() {
   const session = await getManufacturerSession();
@@ -100,6 +101,18 @@ export default async function ManufacturerDashboardPage() {
             <p className="mt-1 text-3xl font-bold text-gray-900">{s.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-gray-500">
+            Devam eden / Maks kapasite
+          </p>
+          <p className="mt-1 text-2xl font-bold text-gray-900">
+            {(assigned?.c ?? 0) + (printing?.c ?? 0)} / {manufacturer.maxConcurrentOrders}
+          </p>
+        </div>
+        <AcceptingOrdersToggle initial={manufacturer.acceptingOrders} />
       </div>
 
       <div className="mt-8 rounded-xl border border-gray-200 bg-white">

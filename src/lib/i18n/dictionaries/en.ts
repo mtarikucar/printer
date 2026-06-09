@@ -952,6 +952,7 @@ const en = {
   "email.delivered.subject": "Your figurine has been delivered! #{orderNumber}",
   "email.delivered.heading": "Hello {customerName}!",
   "email.delivered.body": "Your figurine has been delivered! We hope you enjoy painting it. Happy painting!",
+  "email.delivered.shareCta": "Happy with how it turned out? You can share your figurine in our community gallery from your order page below.",
   "email.delivered.orderNumber": "Order Number:",
   "email.delivered.trackButton": "Track Order",
 

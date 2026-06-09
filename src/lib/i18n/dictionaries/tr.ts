@@ -958,6 +958,7 @@ const tr: Dictionary = {
   "email.delivered.subject": "Figürününüz teslim edildi! #{orderNumber}",
   "email.delivered.heading": "Merhaba {customerName}!",
   "email.delivered.body": "Figürününüz teslim edildi! Boyamayı keyifle yapmanızı umuyoruz. İyi boyamalar!",
+  "email.delivered.shareCta": "Sonucu beğendin mi? Figürünü aşağıdaki sipariş sayfandan topluluk galerimizde paylaşabilirsin.",
   "email.delivered.orderNumber": "Sipariş Numarası:",
   "email.delivered.trackButton": "Siparişi Takip Et",
 

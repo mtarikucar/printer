@@ -270,6 +270,7 @@ function getTemplates(locale: Locale) {
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #1a1a1a;">${d["email.delivered.heading"].replace("{customerName}", escHtml(p.customerName))}</h1>
           <p>${d["email.delivered.body"]}</p>
+          <p style="color: #555;">${d["email.delivered.shareCta"]}</p>
           <p><strong>${d["email.delivered.orderNumber"]}</strong> ${p.orderNumber}</p>
           <a href="${trackUrl(p.orderNumber)}"
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">

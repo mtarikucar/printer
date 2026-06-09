@@ -961,6 +961,7 @@ export default function CreatePage() {
                   <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
                   <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
                   <UploadDropzone
+                    objectMode={selectedStyle === "object"}
                     onUploadComplete={(key, previewUrl) => {
                       setPhotoKey(key);
                       // `previewUrl` is the server-signed URL from /api/upload

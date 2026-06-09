@@ -9,12 +9,16 @@ interface UploadDropzoneProps {
   onUploadComplete: (key: string, previewUrl: string) => void;
   onError?: (error: string) => void;
   onFileSelected?: (file: File) => void;
+  /** When true, swap the human-figure photo tips (face/full-body) for
+   *  object-print guidance. Driven by the "3D Object" style. */
+  objectMode?: boolean;
 }
 
 export function UploadDropzone({
   onUploadComplete,
   onError,
   onFileSelected,
+  objectMode = false,
 }: UploadDropzoneProps) {
   const d = useDictionary();
   const [uploading, setUploading] = useState(false);
@@ -185,7 +189,7 @@ export function UploadDropzone({
             <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
-            {d["upload.tipBullet1"]}
+            {objectMode ? d["upload.tipBullet1.object"] : d["upload.tipBullet1"]}
           </span>
           <span className="trust-pill">
             <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -197,7 +201,7 @@ export function UploadDropzone({
             <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
-            {d["upload.tipBullet3"]}
+            {objectMode ? d["upload.tipBullet3.object"] : d["upload.tipBullet3"]}
           </span>
         </div>
       </div>

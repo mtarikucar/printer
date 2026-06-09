@@ -570,6 +570,8 @@ const tr: Dictionary = {
   "upload.tipBullet1": "Yüz net görünür olsun",
   "upload.tipBullet2": "İyi aydınlatma",
   "upload.tipBullet3": "Tam boy tercih edilir",
+  "upload.tipBullet1.object": "Tüm ürün görünür olsun",
+  "upload.tipBullet3.object": "Sade arka plan",
 
   // Create — Preview wow
   "create.preview.wow": "Figürününüz hazır!",

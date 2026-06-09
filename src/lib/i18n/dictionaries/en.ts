@@ -568,6 +568,8 @@ const en = {
   "upload.tipBullet1": "Face clearly visible",
   "upload.tipBullet2": "Good lighting",
   "upload.tipBullet3": "Full body preferred",
+  "upload.tipBullet1.object": "Whole item visible",
+  "upload.tipBullet3.object": "Plain background",
 
   // Create — Preview wow
   "create.preview.wow": "Your figurine is ready!",

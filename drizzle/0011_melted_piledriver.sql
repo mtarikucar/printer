@@ -1,0 +1,1 @@
+ALTER TYPE "public"."admin_action_type" ADD VALUE 'refund';

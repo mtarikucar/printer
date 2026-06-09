@@ -9,6 +9,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import { PayoutRequestButton } from "@/components/manufacturer/payout-request-button";
 
 export default async function ManufacturerEarningsPage() {
   const session = await getManufacturerSession();
@@ -77,6 +78,10 @@ export default async function ManufacturerEarningsPage() {
             {formatCurrency(paidTotal, locale)}
           </p>
         </div>
+      </div>
+
+      <div className="mb-8">
+        <PayoutRequestButton owedKurus={owed} />
       </div>
 
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">

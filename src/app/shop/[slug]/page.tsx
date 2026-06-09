@@ -9,6 +9,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { getPublicUrl } from "@/lib/services/storage";
 import { ProductDetailClient } from "./detail-client";
+import { ProductReviews } from "@/components/reviews/product-reviews";
 
 async function loadProduct(slug: string) {
   return db.query.products.findFirst({
@@ -72,6 +73,7 @@ export default async function ProductDetailPage({
             images,
           }}
         />
+        <ProductReviews productId={product.id} />
       </div>
     </main>
   );

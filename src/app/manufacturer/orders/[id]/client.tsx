@@ -16,7 +16,7 @@ import { formatPhoneDisplay } from "@/lib/phone";
 interface OrderData {
   id: string;
   orderNumber: string;
-  orderType: "custom" | "marketplace";
+  orderType: "custom" | "marketplace" | "upload";
   customerName: string;
   phone: string | null;
   figurineSize: string | null;
@@ -329,6 +329,17 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
               </svg>
               {(d["manufacturer.orderDetail.downloadObj" as keyof typeof d] as string) ||
                 "Download OBJ"}
+            </a>
+          )}
+          {order.orderType === "upload" && (
+            <a
+              href={`/api/manufacturer/orders/${order.id}/download-upload`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-emerald-200 transition-all hover:shadow-md hover:shadow-emerald-200"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Modeli indir
             </a>
           )}
         </div>

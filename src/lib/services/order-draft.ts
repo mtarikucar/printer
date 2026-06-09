@@ -1,9 +1,10 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
   orderDrafts,
   orders,
+  orderItems,
   orderPhotos,
   giftCards,
   giftCardRedemptions,
@@ -86,12 +87,112 @@ export async function promoteDraftToOrder(
 
     const isMarketplace = draft.orderType === "marketplace";
 
+    // Cart promotion (Faz 4): fan a multi-seller cart draft out into one order
+    // per seller, each re-pointing its own items and keeping the existing
+    // single-manufacturer invariant. parentReference groups the siblings.
+    if (draft.parentReference) {
+      const items = await tx
+        .select()
+        .from(orderItems)
+        .where(eq(orderItems.draftId, draft.id));
+      const groups = new Map<string, typeof items>();
+      for (const it of items) {
+        const key = it.sellerManufacturerId ?? "__platform__";
+        const g = groups.get(key);
+        if (g) g.push(it);
+        else groups.set(key, [it]);
+      }
+      const createdOrders: Array<{
+        id: string;
+        orderNumber: string;
+        userId: string;
+        manufacturerId: string | null;
+        manufacturerStatus: string | null;
+        email: string;
+        customerName: string;
+        sellerManufacturerId: string | null;
+        productTitleSnapshot: string | null;
+      }> = [];
+      let idx = 0;
+      for (const groupItems of groups.values()) {
+        idx++;
+        const sellerId = groupItems[0].sellerManufacturerId;
+        const groupAmount = groupItems.reduce((s, it) => s + it.lineTotalKurus, 0);
+        const groupQty = groupItems.reduce((s, it) => s + it.quantity, 0);
+        const title =
+          groupItems.length === 1
+            ? groupItems[0].productTitleSnapshot
+            : `${groupItems.length} ürün`;
+        const [order] = await tx
+          .insert(orders)
+          .values({
+            orderNumber: `${draft.reference}-${idx}`,
+            userId: draft.userId,
+            draftId: draft.id,
+            email: draft.email,
+            customerName: draft.customerName,
+            phone: draft.phone,
+            shippingAddress: draft.shippingAddress,
+            status: "paid",
+            locale: draft.locale,
+            paymentMethod: draft.paymentMethod,
+            paymentStatus: "succeeded",
+            amountKurus: groupAmount,
+            paidAt: new Date(),
+            orderType: "marketplace",
+            parentReference: draft.parentReference,
+            sellerManufacturerId: sellerId,
+            productTitleSnapshot: title,
+            quantity: groupQty,
+            manufacturerId: sellerId ?? null,
+            manufacturerStatus: sellerId ? "assigned" : "unassigned",
+            assignedToManufacturerAt: sellerId ? new Date() : null,
+          })
+          .returning();
+        await tx
+          .update(orderItems)
+          .set({ orderId: order.id })
+          .where(
+            inArray(
+              orderItems.id,
+              groupItems.map((i) => i.id)
+            )
+          );
+        createdOrders.push({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          userId: order.userId,
+          manufacturerId: order.manufacturerId,
+          manufacturerStatus: order.manufacturerStatus,
+          email: order.email,
+          customerName: order.customerName,
+          sellerManufacturerId: order.sellerManufacturerId,
+          productTitleSnapshot: order.productTitleSnapshot,
+        });
+      }
+      await tx
+        .update(orderDrafts)
+        .set({
+          status: "confirmed",
+          promotedOrderId: createdOrders[0].id,
+          promotedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(orderDrafts.id, draftId));
+      return {
+        cart: true as const,
+        orders: createdOrders,
+        locale: (draft.locale === "en" ? "en" : "tr") as Locale,
+      };
+    }
+
     const [order] = await tx
       .insert(orders)
       .values({
         orderNumber: draft.reference,
         userId: draft.userId,
         previewId: draft.previewId,
+        uploadedModelId: draft.uploadedModelId,
         draftId: draft.id,
         email: draft.email,
         customerName: draft.customerName,
@@ -173,6 +274,40 @@ export async function promoteDraftToOrder(
       newOrder: true,
     };
   });
+
+  // Cart promotion: one sub-order per seller. Emit + kick off each (no AI/mesh,
+  // straight to seller assignment). Idempotent re-entry returns the existing
+  // first order via the alreadyPromoted path (handled below).
+  if ("cart" in result && result.cart) {
+    await cancelHavaleJobs(draftId);
+    for (const o of result.orders) {
+      await emitOrderChanged({
+        orderId: o.id,
+        orderNumber: o.orderNumber,
+        userId: o.userId,
+        manufacturerId: o.manufacturerId,
+        status: "paid",
+        manufacturerStatus: o.manufacturerStatus ?? "unassigned",
+      });
+      await kickOffMarketplaceOrder(
+        {
+          id: o.id,
+          email: o.email,
+          orderNumber: o.orderNumber,
+          customerName: o.customerName,
+          userId: o.userId,
+          sellerManufacturerId: o.sellerManufacturerId ?? null,
+          productTitleSnapshot: o.productTitleSnapshot ?? null,
+        },
+        result.locale
+      );
+    }
+    return {
+      orderId: result.orders[0].id,
+      orderNumber: result.orders[0].orderNumber,
+      locale: result.locale,
+    };
+  }
 
   // New order row created at status=paid. Emit for the freshly-created order.
   // Skipped on the idempotent re-entry path where an existing order is returned.

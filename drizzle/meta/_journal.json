@@ -36,6 +36,55 @@
       "when": 1781001362025,
       "tag": "0004_smooth_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781010224316,
+      "tag": "0005_moaning_stone_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781013626029,
+      "tag": "0006_massive_outlaw_kid",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781014650396,
+      "tag": "0007_curvy_daredevil",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781014706431,
+      "tag": "0008_dry_hitman",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781015319634,
+      "tag": "0009_big_groot",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781016263582,
+      "tag": "0010_many_doomsday",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781016941845,
+      "tag": "0011_melted_piledriver",
+      "breakpoints": true
     }
   ]
 }

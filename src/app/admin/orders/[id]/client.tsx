@@ -22,7 +22,7 @@ import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
 interface OrderData {
   id: string;
   orderNumber: string;
-  orderType: "custom" | "marketplace";
+  orderType: "custom" | "marketplace" | "upload";
   productTitleSnapshot: string | null;
   email: string;
   customerName: string;
@@ -512,6 +512,11 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {canReject && (
                   <button onClick={() => { if (confirm(d["admin.orderDetail.rejectConfirm"])) performAction("reject", { reason: notes || d["admin.orderDetail.rejectDefault"] }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
                     {loading === "reject" ? d["admin.orderDetail.rejecting"] : d["admin.orderDetail.reject"]}
+                  </button>
+                )}
+                {order.paymentStatus === "succeeded" && (
+                  <button onClick={() => { if (confirm("İade işlemini onayla? Ödeme iade edilir ve üretici kazancı geri alınır.")) performAction("refund", { reason: notes || "Admin iadesi" }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
+                    {loading === "refund" ? "İade ediliyor…" : "İade et"}
                   </button>
                 )}
               </div>

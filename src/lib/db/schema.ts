@@ -3,6 +3,7 @@ import {
   text,
   timestamp,
   integer,
+  doublePrecision,
   jsonb,
   boolean,
   uuid,
@@ -63,7 +64,25 @@ export const paymentMethodEnum = pgEnum("payment_method", [
 // `marketplace` = a customer bought a ready-made product a seller (manufacturer
 // or admin/platform) listed; no AI generation, the owning seller is auto-assigned.
 // Default `custom` keeps every legacy row + the existing checkout path unchanged.
-export const orderTypeEnum = pgEnum("order_type", ["custom", "marketplace"]);
+export const orderTypeEnum = pgEnum("order_type", ["custom", "marketplace", "upload"]);
+
+// Faz 3: lifecycle of a customer-uploaded STL/OBJ model.
+export const uploadModelStatusEnum = pgEnum("upload_model_status", [
+  "uploaded", // file saved, not yet processed
+  "processing", // model-prep worker running (geometry validate + GLB preview)
+  "ready", // priced, previewable, orderable
+  "review", // needs a manual quote (guardrail tripped)
+  "failed", // unprocessable file
+]);
+
+// Faz 3: admin quote lifecycle for an upload that couldn't be auto-priced.
+export const uploadQuoteStatusEnum = pgEnum("upload_quote_status", [
+  "none",
+  "quoted",
+  "accepted",
+  "expired",
+  "rejected",
+]);
 
 // orders only contain paid orders, so paymentStatus is succeeded or refunded.
 export const paymentStatusEnum = pgEnum("payment_status", [
@@ -121,6 +140,7 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "gallery_unfeature",
   "qc_approve",
   "qc_reject",
+  "refund",
 ]);
 
 /**
@@ -166,6 +186,10 @@ export const figurineFinishEnum = pgEnum("figurine_finish", [
   "hand_painted",
   "collector_raw",
   "luxe_display",
+  // Object / design / upload prints (geometry, not character sculpts):
+  "raw",
+  "smoothed",
+  "painted",
 ]);
 
 export const previewStatusEnum = pgEnum("preview_status", [
@@ -323,6 +347,9 @@ export const orderDrafts = pgTable("order_drafts", {
     .notNull()
     .references(() => users.id),
   previewId: uuid("preview_id").references(() => previews.id),
+  // Faz 3: customer-uploaded STL/OBJ model (null for custom/marketplace).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  uploadedModelId: uuid("uploaded_model_id").references((): any => uploadedModels.id),
   email: text("email").notNull(),
   customerName: text("customer_name").notNull(),
   phone: text("phone"),
@@ -337,6 +364,8 @@ export const orderDrafts = pgTable("order_drafts", {
   photoKey: text("photo_key"),
   // Marketplace fields (null for custom drafts). See orderTypeEnum.
   orderType: orderTypeEnum("order_type").notNull().default("custom"),
+  // Faz 4: groups sibling sub-orders from one cart checkout (one order/seller).
+  parentReference: text("parent_reference"),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   productId: uuid("product_id").references((): any => products.id),
   sellerManufacturerId: uuid("seller_manufacturer_id").references(
@@ -413,6 +442,9 @@ export const orders = pgTable("orders", {
     .notNull()
     .references(() => users.id),
   previewId: uuid("preview_id").references(() => previews.id),
+  // Faz 3: customer-uploaded STL/OBJ model (null for custom/marketplace).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  uploadedModelId: uuid("uploaded_model_id").references((): any => uploadedModels.id),
   draftId: uuid("draft_id").references(() => orderDrafts.id),
   email: text("email").notNull(),
   customerName: text("customer_name").notNull(),
@@ -427,6 +459,8 @@ export const orders = pgTable("orders", {
   // Marketplace fields (null for custom orders). Copied from the draft on
   // promotion. sellerManufacturerId snapshots the product owner at purchase.
   orderType: orderTypeEnum("order_type").notNull().default("custom"),
+  // Faz 4: groups sibling sub-orders from one cart checkout (one order/seller).
+  parentReference: text("parent_reference"),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   productId: uuid("product_id").references((): any => products.id),
   sellerManufacturerId: uuid("seller_manufacturer_id").references(
@@ -954,6 +988,110 @@ export const productImages = pgTable(
   },
   (t) => ({
     byProduct: index("product_images_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
+// ─── Faz 3: customer-uploaded models (STL/OBJ → print) ──────────────────────
+// One row per uploaded model (modeled on `previews`). The upload + server-side
+// geometry (volume / bbox / wall-thickness, via process_upload_model.py) drive
+// auto pricing; a guardrail failure flips status→review for a manual quote.
+export const uploadedModels = pgTable(
+  "uploaded_models",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id),
+    sourceKey: text("source_key").notNull(),
+    sourceFormat: text("source_format").notNull(), // 'stl' | 'obj'
+    fileName: text("file_name").notNull(),
+    fileSizeBytes: integer("file_size_bytes").notNull(),
+    targetHeightMm: integer("target_height_mm").notNull().default(80),
+    material: figurineMaterialEnum("material").notNull().default("resin"),
+    status: uploadModelStatusEnum("status").notNull().default("uploaded"),
+    // Geometry — filled by the model-prep worker.
+    isVolume: boolean("is_volume"),
+    volumeMm3: doublePrecision("volume_mm3"),
+    boundingBoxMm: jsonb("bounding_box_mm").$type<{ x: number; y: number; z: number }>(),
+    minWallThicknessMm: doublePrecision("min_wall_thickness_mm"),
+    printRisk: jsonb("print_risk").$type<string[]>(),
+    glbPreviewKey: text("glb_preview_key"),
+    thumbnailKey: text("thumbnail_key"),
+    // Auto price (kuruş) when geometry is clean; null + needsQuote otherwise.
+    priceKurus: integer("price_kurus"),
+    needsQuote: boolean("needs_quote").notNull().default(false),
+    // Faz 3 quote-bridge — set by admin when geometry can't be auto-priced.
+    quotedPriceKurus: integer("quoted_price_kurus"),
+    quoteStatus: uploadQuoteStatusEnum("quote_status").notNull().default("none"),
+    quotedByEmail: text("quoted_by_email"),
+    quotedAt: timestamp("quoted_at"),
+    quoteExpiresAt: timestamp("quote_expires_at"),
+    // Contact email for the quote (guest uploads carry no userId).
+    contactEmail: text("contact_email"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byUser: index("uploaded_models_user_idx").on(t.userId, t.createdAt),
+  })
+);
+
+// Faz 4: line items for a multi-product cart order. Only cart (marketplace)
+// orders use these; single-item bespoke orders keep their scalar columns and
+// carry no orderItems. On promotion a cart draft fans out into one order per
+// seller, each re-pointing its own items from draftId → orderId.
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id").references(() => orders.id),
+    draftId: uuid("draft_id").references(() => orderDrafts.id),
+    productId: uuid("product_id").references(() => products.id),
+    sellerManufacturerId: uuid("seller_manufacturer_id").references(
+      () => manufacturers.id
+    ),
+    productTitleSnapshot: text("product_title_snapshot").notNull(),
+    unitPriceKurus: integer("unit_price_kurus").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    lineTotalKurus: integer("line_total_kurus").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byOrder: index("order_items_order_idx").on(t.orderId),
+    byDraft: index("order_items_draft_idx").on(t.draftId),
+  })
+);
+
+// Faz 5: product reviews. A customer may review a product they received — one
+// review per (product, user, order). Auto-approved with admin takedown.
+export const productReviewStatusEnum = pgEnum("product_review_status", [
+  "approved",
+  "pending",
+  "rejected",
+]);
+export const productReviews = pgTable(
+  "product_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    orderId: uuid("order_id").references(() => orders.id),
+    rating: integer("rating").notNull(),
+    title: text("title"),
+    body: text("body"),
+    status: productReviewStatusEnum("status").notNull().default("approved"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_reviews_product_idx").on(t.productId, t.status),
+    uniqPerOrder: uniqueIndex("product_reviews_unique_idx").on(
+      t.productId,
+      t.userId,
+      t.orderId
+    ),
   })
 );
 

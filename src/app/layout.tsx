@@ -4,6 +4,7 @@ import "./globals.css";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
+import { CartProvider } from "@/lib/cart/cart-context";
 import { GrainOverlay } from "@/components/grain-overlay";
 import { DebugConsole } from "@/components/debug-console";
 
@@ -78,9 +79,11 @@ export default async function RootLayout({
         className={`${inter.variable} ${interTight.variable} ${instrumentSerif.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${dmSerifDisplay.variable} font-sans antialiased bg-bg-base text-text-primary`}
       >
         <LocaleProvider locale={locale}>
-          {children}
-          <GrainOverlay />
-          <DebugConsole />
+          <CartProvider>
+            {children}
+            <GrainOverlay />
+            <DebugConsole />
+          </CartProvider>
         </LocaleProvider>
       </body>
     </html>

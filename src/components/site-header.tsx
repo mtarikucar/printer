@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { UserDropdown } from "@/components/user-dropdown";
 import { Button } from "@/components/ui";
+import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import { CartBadge } from "@/components/cart/cart-badge";
 
 interface AuthUser {
   id: string;
@@ -19,6 +21,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -40,6 +43,13 @@ export function SiteHeader() {
     router.push("/");
   };
 
+  const handleSearch = (e: FormEvent) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    router.push(q ? `/shop?q=${encodeURIComponent(q)}` : "/shop");
+    setMenuOpen(false);
+  };
+
   const initials = user?.fullName
     ?.split(" ")
     .map((n) => n[0])
@@ -47,22 +57,40 @@ export function SiteHeader() {
     .slice(0, 2)
     .toUpperCase() || "?";
 
-  // Two primary sections (Faz 1.3): the custom-figurine journey vs the
-  // ready-made 3D shop. Account is user-specific and appended separately.
-  const navGroups = [
+  // Marketplace-first nav: Pazaryeri (shop + categories) · Özel Üret (the
+  // production paths) · Nasıl Çalışır. Each top item links to its hub; sub-items
+  // open in a CSS-only dropdown (desktop) / nested list (mobile).
+  const nav = [
     {
-      labelKey: "nav.group.custom" as const,
-      links: [
-        { href: "/create", label: d["nav.create"] },
-        { href: "/styles", label: d["nav.styles"] },
-        { href: "/gallery", label: d["nav.gallery"] },
+      key: "market",
+      label: d["nav.market"],
+      href: "/shop",
+      items: [
+        { href: "/shop", label: d["landing.market.cats.all"] },
+        ...PRODUCT_CATEGORIES.map((c) => ({
+          href: `/shop?category=${c}`,
+          label: d[`product.category.${c}` as keyof typeof d],
+        })),
       ],
     },
     {
-      labelKey: "nav.group.shop" as const,
-      links: [
-        { href: "/shop", label: d["nav.shop" as keyof typeof d] || "Mağaza" },
+      key: "custom",
+      label: d["nav.custom"],
+      href: "/create",
+      items: [
+        { href: "/create?path=figure", label: d["landing.market.produce.figure.title"] },
+        { href: "/create?path=object", label: d["landing.market.produce.object.title"] },
+        { href: "/create?path=upload", label: d["landing.market.produce.upload.title"] },
+        { href: "/create?path=design", label: d["landing.market.produce.design.title"] },
+        { href: "/gallery", label: d["nav.gallery"] },
+        { href: "/figur", label: d["nav.styles"] },
       ],
+    },
+    {
+      key: "how",
+      label: d["nav.howItWorks"],
+      href: "/nasil-calisir",
+      items: [] as { href: string; label: string }[],
     },
   ];
   const accountLink = user
@@ -77,46 +105,77 @@ export function SiteHeader() {
           <span className="font-serif">Figurunica</span>
         </Link>
 
+        {/* Search (desktop) */}
+        <form onSubmit={handleSearch} className="mx-6 hidden max-w-md flex-1 md:flex">
+          <div className="relative w-full">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={d["store.search.placeholder"]}
+              aria-label={d["store.search.aria"]}
+              className="w-full rounded-full border border-border-default bg-bg-elevated/60 py-2 pl-4 pr-11 text-sm text-text-primary placeholder:text-text-muted focus:border-green-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20"
+            />
+            <button
+              type="submit"
+              aria-label={d["store.search.aria"]}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-text-muted transition-colors hover:text-green-600"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </button>
+          </div>
+        </form>
+
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
-          {navGroups.map((group, gi) => (
-            <div key={group.labelKey} className="flex items-center gap-6">
-              {gi > 0 && (
-                <span className="w-px h-4 bg-bg-subtle/70" aria-hidden="true" />
-              )}
-              {group.links.map((link) => (
+          {nav.map((item) => {
+            const active =
+              pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <div key={item.key} className="relative group">
                 <Link
-                  key={link.href}
-                  href={link.href}
-                  className={`relative text-sm font-medium transition-colors py-1 ${
-                    pathname === link.href
-                      ? "text-green-500"
-                      : "text-text-muted hover:text-green-400"
+                  href={item.href}
+                  className={`relative flex items-center gap-1 py-1 text-sm font-medium transition-colors ${
+                    active ? "text-green-500" : "text-text-muted hover:text-green-400"
                   }`}
                 >
-                  {link.label}
-                  {pathname === link.href && (
-                    <span className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-green-500 rounded-full" />
+                  {item.label}
+                  {item.items.length > 0 && (
+                    <svg className="h-3.5 w-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
                   )}
                 </Link>
-              ))}
-            </div>
-          ))}
+                {item.items.length > 0 && (
+                  <div className="invisible absolute left-1/2 top-full z-50 -translate-x-1/2 pt-3 opacity-0 transition-all duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                    <div className="card min-w-[210px] p-1.5">
+                      {item.items.map((sub) => (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          className="block rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+                        >
+                          {sub.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {accountLink && (
             <Link
               href={accountLink.href}
-              className={`relative text-sm font-medium transition-colors py-1 ${
-                pathname === accountLink.href
-                  ? "text-green-500"
-                  : "text-text-muted hover:text-green-400"
+              className={`py-1 text-sm font-medium transition-colors ${
+                pathname === accountLink.href ? "text-green-500" : "text-text-muted hover:text-green-400"
               }`}
             >
               {accountLink.label}
-              {pathname === accountLink.href && (
-                <span className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-green-500 rounded-full" />
-              )}
             </Link>
           )}
+          <CartBadge />
           <LanguageSwitcher />
           {authLoading ? (
             <div className="w-10 h-10 bg-bg-muted rounded-full animate-pulse" />
@@ -136,6 +195,7 @@ export function SiteHeader() {
 
         {/* Mobile hamburger */}
         <div className="flex items-center gap-3 md:hidden">
+          <CartBadge />
           <LanguageSwitcher />
           <button
             onClick={() => setMenuOpen(!menuOpen)}
@@ -155,27 +215,55 @@ export function SiteHeader() {
         </div>
       </div>
 
+      {/* Search (mobile) */}
+      <div className="border-t border-bg-subtle/50 px-4 py-2.5 md:hidden">
+        <form onSubmit={handleSearch}>
+          <div className="relative">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={d["store.search.placeholder"]}
+              aria-label={d["store.search.aria"]}
+              className="w-full rounded-full border border-border-default bg-bg-elevated/60 py-2 pl-4 pr-11 text-sm text-text-primary placeholder:text-text-muted focus:border-green-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500/20"
+            />
+            <button
+              type="submit"
+              aria-label={d["store.search.aria"]}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-text-muted hover:text-green-600"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* Mobile menu */}
       {menuOpen && (
         <nav className="md:hidden border-t border-bg-subtle bg-bg-base/95 backdrop-blur-xl animate-fade-in">
           <div className="max-w-6xl mx-auto px-4 py-3 space-y-1">
-            {navGroups.map((group) => (
-              <div key={group.labelKey} className="space-y-1">
-                <p className="px-4 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                  {d[group.labelKey]}
-                </p>
-                {group.links.map((link) => (
+            {nav.map((item) => (
+              <div key={item.key} className="space-y-0.5">
+                <Link
+                  href={item.href}
+                  onClick={() => setMenuOpen(false)}
+                  className={`block py-3 px-4 rounded-xl text-sm font-semibold transition-colors ${
+                    pathname === item.href
+                      ? "bg-bg-elevated text-green-500"
+                      : "text-text-primary hover:bg-bg-elevated"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+                {item.items.map((sub) => (
                   <Link
-                    key={link.href}
-                    href={link.href}
+                    key={sub.href}
+                    href={sub.href}
                     onClick={() => setMenuOpen(false)}
-                    className={`block py-3 px-4 rounded-xl text-sm font-medium transition-colors ${
-                      pathname === link.href
-                        ? "bg-bg-elevated text-green-500"
-                        : "text-text-secondary hover:bg-bg-elevated"
-                    }`}
+                    className="block rounded-xl py-2 pl-8 pr-4 text-sm text-text-secondary transition-colors hover:bg-bg-elevated"
                   >
-                    {link.label}
+                    {sub.label}
                   </Link>
                 ))}
               </div>
@@ -184,11 +272,7 @@ export function SiteHeader() {
               <Link
                 href={accountLink.href}
                 onClick={() => setMenuOpen(false)}
-                className={`block py-3 px-4 rounded-xl text-sm font-medium transition-colors ${
-                  pathname === accountLink.href
-                    ? "bg-bg-elevated text-green-500"
-                    : "text-text-secondary hover:bg-bg-elevated"
-                }`}
+                className="block py-3 px-4 rounded-xl text-sm font-semibold text-text-primary hover:bg-bg-elevated"
               >
                 {accountLink.label}
               </Link>

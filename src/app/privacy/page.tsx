@@ -66,7 +66,7 @@ export default async function PrivacyPage() {
 
               <h3>2.4 Odeme Bilgileri</h3>
               <ul>
-                <li>Odeme islemleri Stripe uzerinden gerceklestirilir. Kredi karti bilgileriniz tarafimizca saklanmaz; dogrudan Stripe&apos;in guvenli altyapisinda islenir.</li>
+                <li>Odeme islemleri PayTR uzerinden gerceklestirilir. Kredi karti bilgileriniz tarafimizca saklanmaz; dogrudan PayTRPayTR&apos;inapos;nin guvenli altyapisinda islenir.</li>
                 <li>Hediye karti kodlari ve bakiye bilgileri</li>
               </ul>
 
@@ -104,7 +104,7 @@ export default async function PrivacyPage() {
               <h2>5. Verilerin Aktarilmasi</h2>
               <p>Kisisel verileriniz asagidaki taraflarla paylassilabilir:</p>
               <ul>
-                <li><strong>Odeme isleme:</strong> Stripe Inc. (PCI DSS uyumlu odeme altyapisi)</li>
+                <li><strong>Odeme isleme:</strong> PayTR (PCI DSS uyumlu odeme altyapisi)</li>
                 <li><strong>Bulut depolama:</strong> Amazon Web Services (AWS S3 — fotograf ve 3D model depolama)</li>
                 <li><strong>E-posta hizmeti:</strong> Resend (siparis bildirimleri)</li>
                 <li><strong>Yapay zeka hizmeti:</strong> Meshy.ai (3D model olusturma — yalnizca fotograflar islenir)</li>
@@ -139,7 +139,7 @@ export default async function PrivacyPage() {
               <ul>
                 <li>SSL/TLS sifreleme ile veri iletimi</li>
                 <li>Sifrelerin bcrypt ile hashli saklanmasi</li>
-                <li>Odeme bilgilerinin Stripe tarafindan PCI DSS standartlarina uygun islenmesi</li>
+                <li>Odeme bilgilerinin PayTR tarafindan PCI DSS standartlarina uygun islenmesi</li>
                 <li>Erisim kontrolu ve yetkilendirme mekanizmalari</li>
                 <li>Duzgun veri yedekleme proseduri</li>
               </ul>
@@ -224,7 +224,7 @@ export default async function PrivacyPage() {
 
               <h3>2.4 Payment Information</h3>
               <ul>
-                <li>Payments are processed through Stripe. Your credit card details are never stored by us; they are processed directly on Stripe&apos;s secure infrastructure.</li>
+                <li>Payments are processed through PayTR. Your credit card details are never stored by us; they are processed directly on PayTRPayTR&apos;sapos;s secure infrastructure.</li>
                 <li>Gift card codes and balance information</li>
               </ul>
 
@@ -262,7 +262,7 @@ export default async function PrivacyPage() {
               <h2>5. Data Sharing</h2>
               <p>Your personal data may be shared with the following parties:</p>
               <ul>
-                <li><strong>Payment processing:</strong> Stripe Inc. (PCI DSS compliant payment infrastructure)</li>
+                <li><strong>Payment processing:</strong> PayTR (PCI DSS compliant payment infrastructure)</li>
                 <li><strong>Cloud storage:</strong> Amazon Web Services (AWS S3 — photo and 3D model storage)</li>
                 <li><strong>Email service:</strong> Resend (order notifications)</li>
                 <li><strong>AI service:</strong> Meshy.ai (3D model generation — only photos are processed)</li>
@@ -297,7 +297,7 @@ export default async function PrivacyPage() {
               <ul>
                 <li>SSL/TLS encryption for data transmission</li>
                 <li>Password hashing with bcrypt</li>
-                <li>Payment data processed by Stripe in accordance with PCI DSS standards</li>
+                <li>Payment data processed by PayTR in accordance with PCI DSS standards</li>
                 <li>Access control and authorization mechanisms</li>
                 <li>Regular data backup procedures</li>
               </ul>

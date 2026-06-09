@@ -640,6 +640,29 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
           {d["landing.fig.footer.contactLink"]}
         </Link>
       </div>
+      <div className={s("footer-bottom")}>
+        <Link href="/mesafeli-satis" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.distance"]}
+        </Link>
+        <Link href="/on-bilgilendirme" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.preinfo"]}
+        </Link>
+        <Link href="/iade" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.returns"]}
+        </Link>
+        <Link href="/kargo" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.shipping"]}
+        </Link>
+        <Link href="/cerez" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.cookies"]}
+        </Link>
+        <Link href="/privacy" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.privacy"]}
+        </Link>
+        <Link href="/terms" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.terms"]}
+        </Link>
+      </div>
       <div className={s("footer-mfr")}>
         <span className={s("footer-mfr-prompt")}>
           {d["landing.fig.footer.mfrPrompt"]}

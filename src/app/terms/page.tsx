@@ -77,7 +77,7 @@ export default async function TermsPage() {
 
               <h3>3.2 Odeme Yontemleri</h3>
               <ul>
-                <li>Kredi karti / banka karti (Stripe uzerinden)</li>
+                <li>Kredi karti / banka karti (PayTR uzerinden)</li>
                 <li>Hediye karti</li>
                 <li>Hediye karti + kredi karti kombinasyonu</li>
               </ul>
@@ -242,7 +242,7 @@ export default async function TermsPage() {
 
               <h3>3.2 Payment Methods</h3>
               <ul>
-                <li>Credit card / debit card (via Stripe)</li>
+                <li>Credit card / debit card (via PayTR)</li>
                 <li>Gift card</li>
                 <li>Gift card + credit card combination</li>
               </ul>

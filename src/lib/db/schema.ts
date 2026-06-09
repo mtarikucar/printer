@@ -363,6 +363,8 @@ export const orderDrafts = pgTable("order_drafts", {
   photoKey: text("photo_key"),
   // Marketplace fields (null for custom drafts). See orderTypeEnum.
   orderType: orderTypeEnum("order_type").notNull().default("custom"),
+  // Faz 4: groups sibling sub-orders from one cart checkout (one order/seller).
+  parentReference: text("parent_reference"),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   productId: uuid("product_id").references((): any => products.id),
   sellerManufacturerId: uuid("seller_manufacturer_id").references(
@@ -456,6 +458,8 @@ export const orders = pgTable("orders", {
   // Marketplace fields (null for custom orders). Copied from the draft on
   // promotion. sellerManufacturerId snapshots the product owner at purchase.
   orderType: orderTypeEnum("order_type").notNull().default("custom"),
+  // Faz 4: groups sibling sub-orders from one cart checkout (one order/seller).
+  parentReference: text("parent_reference"),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   productId: uuid("product_id").references((): any => products.id),
   sellerManufacturerId: uuid("seller_manufacturer_id").references(
@@ -1027,6 +1031,32 @@ export const uploadedModels = pgTable(
   },
   (t) => ({
     byUser: index("uploaded_models_user_idx").on(t.userId, t.createdAt),
+  })
+);
+
+// Faz 4: line items for a multi-product cart order. Only cart (marketplace)
+// orders use these; single-item bespoke orders keep their scalar columns and
+// carry no orderItems. On promotion a cart draft fans out into one order per
+// seller, each re-pointing its own items from draftId → orderId.
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id").references(() => orders.id),
+    draftId: uuid("draft_id").references(() => orderDrafts.id),
+    productId: uuid("product_id").references(() => products.id),
+    sellerManufacturerId: uuid("seller_manufacturer_id").references(
+      () => manufacturers.id
+    ),
+    productTitleSnapshot: text("product_title_snapshot").notNull(),
+    unitPriceKurus: integer("unit_price_kurus").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    lineTotalKurus: integer("line_total_kurus").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byOrder: index("order_items_order_idx").on(t.orderId),
+    byDraft: index("order_items_draft_idx").on(t.draftId),
   })
 );
 

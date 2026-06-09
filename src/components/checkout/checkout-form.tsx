@@ -18,10 +18,12 @@ export function CheckoutForm({
   orderPayload,
   priceKurus,
   submitLabel,
+  onSuccess,
 }: {
   orderPayload: Record<string, unknown>;
   priceKurus: number;
   submitLabel?: string;
+  onSuccess?: () => Promise<void> | void;
 }) {
   const d = useDictionary();
   const locale = useLocale();
@@ -91,6 +93,7 @@ export function CheckoutForm({
             : data.error || t("shop.checkout.failed", "Sipariş oluşturulamadı")
         );
       }
+      await onSuccess?.();
       const reference = data.reference ?? data.orderNumber;
       if (data.autoConfirmed) return void router.push(`/track/${reference}`);
       if (data.paymentMethod === "card" && data.iframeUrl) {

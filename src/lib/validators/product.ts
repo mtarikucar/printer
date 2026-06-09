@@ -65,6 +65,34 @@ export function createMarketplaceOrderSchema(locale: Locale = defaultLocale) {
   });
 }
 
+// Faz 4: multi-product cart checkout. Shares the address/payment/guest fields
+// with createMarketplaceOrderSchema; carries items[] instead of one productId.
+// giftCardCode/upsells are kept for type-compat with the shared `common` block
+// (the cart UI does not send them in v1).
+export function createCartOrderSchema(_locale: Locale = defaultLocale) {
+  return z.object({
+    items: z
+      .array(
+        z.object({
+          productId: z.string().uuid(),
+          quantity: z.number().int().min(1).max(20),
+        })
+      )
+      .min(1)
+      .max(50),
+    shippingAddress: createTurkishAddressSchema(_locale),
+    giftCardCode: z.string().optional(),
+    paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
+    upsells: z
+      .array(z.enum(["extra_paint", "gift_wrap", "rush_shipping"]))
+      .optional()
+      .default([]),
+    guestEmail: z.string().email("Invalid email").optional(),
+    guestName: z.string().min(2).max(120).optional(),
+    marketingConsent: z.boolean().optional().default(false),
+  });
+}
+
 export type CreateProductInput = z.infer<ReturnType<typeof createProductSchema>>;
 export type CreateMarketplaceOrderInput = z.infer<
   ReturnType<typeof createMarketplaceOrderSchema>

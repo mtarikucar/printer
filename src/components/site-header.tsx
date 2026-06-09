@@ -8,6 +8,7 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { UserDropdown } from "@/components/user-dropdown";
 import { Button } from "@/components/ui";
 import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import { CartBadge } from "@/components/cart/cart-badge";
 
 interface AuthUser {
   id: string;
@@ -174,6 +175,7 @@ export function SiteHeader() {
               {accountLink.label}
             </Link>
           )}
+          <CartBadge />
           <LanguageSwitcher />
           {authLoading ? (
             <div className="w-10 h-10 bg-bg-muted rounded-full animate-pulse" />
@@ -193,6 +195,7 @@ export function SiteHeader() {
 
         {/* Mobile hamburger */}
         <div className="flex items-center gap-3 md:hidden">
+          <CartBadge />
           <LanguageSwitcher />
           <button
             onClick={() => setMenuOpen(!menuOpen)}

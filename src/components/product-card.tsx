@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
+import { AddToCartButton } from "@/components/cart/add-to-cart-button";
 
 export interface ProductListItem {
   id: string;
@@ -77,6 +78,10 @@ export function ProductCard({ product }: { product: ProductListItem }) {
           </svg>
           <span className="truncate">{product.sellerName ?? "Figurunica"}</span>
         </p>
+        <AddToCartButton
+          productId={product.id}
+          className="mt-2 w-full rounded-full bg-green-600 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700 disabled:opacity-60"
+        />
       </div>
     </Link>
   );

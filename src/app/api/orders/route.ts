@@ -8,9 +8,13 @@ import {
   users,
   products,
   uploadedModels,
+  orderItems,
 } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
-import { createMarketplaceOrderSchema } from "@/lib/validators/product";
+import {
+  createMarketplaceOrderSchema,
+  createCartOrderSchema,
+} from "@/lib/validators/product";
 import { createUploadOrderSchema } from "@/lib/validators/upload";
 import {
   allocatePaytrBasket,
@@ -37,7 +41,7 @@ import {
   havaleReminderJobId,
 } from "@/lib/queue/queues";
 import { getClientIp } from "@/lib/utils/request";
-import { eq, and, or, isNull, count } from "drizzle-orm";
+import { eq, and, or, isNull, count, inArray } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -59,17 +63,20 @@ export async function POST(request: NextRequest) {
         : body?.orderType === "upload"
           ? "upload"
           : "custom";
+    // A marketplace body with items[] is a multi-product cart checkout.
+    const isCart = orderType === "marketplace" && Array.isArray(body?.items);
 
     const customInput =
       orderType === "custom" ? createOrderSchema(locale).parse(body) : null;
     const mpInput =
-      orderType === "marketplace"
+      orderType === "marketplace" && !isCart
         ? createMarketplaceOrderSchema(locale).parse(body)
         : null;
     const uploadInput =
       orderType === "upload" ? createUploadOrderSchema(locale).parse(body) : null;
+    const cartInput = isCart ? createCartOrderSchema(locale).parse(body) : null;
     // Common checkout fields present in all schemas.
-    const common = (customInput ?? mpInput ?? uploadInput)!;
+    const common = (customInput ?? mpInput ?? uploadInput ?? cartInput)!;
 
     // Marketplace: load + gate the product (only `active` listings are buyable).
     let product:
@@ -77,7 +84,7 @@ export async function POST(request: NextRequest) {
           manufacturer: { status: string } | null;
         })
       | null = null;
-    if (orderType === "marketplace") {
+    if (orderType === "marketplace" && !isCart) {
       product =
         (await db.query.products.findFirst({
           where: eq(products.id, mpInput!.productId),
@@ -101,6 +108,49 @@ export async function POST(request: NextRequest) {
           { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
           { status: 400 }
         );
+      }
+    }
+
+    // Cart: load + gate every line's product; build the validated line list
+    // (server-trusted prices). Same active-product + active-seller gates as the
+    // single-product path.
+    const cartLines: Array<{
+      productId: string;
+      sellerManufacturerId: string | null;
+      titleSnapshot: string;
+      unitPriceKurus: number;
+      quantity: number;
+      lineTotalKurus: number;
+    }> = [];
+    if (isCart) {
+      const rows = await db.query.products.findMany({
+        where: inArray(
+          products.id,
+          cartInput!.items.map((i) => i.productId)
+        ),
+        with: { manufacturer: { columns: { status: true } } },
+      });
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      for (const item of cartInput!.items) {
+        const p = byId.get(item.productId);
+        if (
+          !p ||
+          p.status !== "active" ||
+          (p.ownerType === "seller" && p.manufacturer?.status !== "active")
+        ) {
+          return NextResponse.json(
+            { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
+            { status: 400 }
+          );
+        }
+        cartLines.push({
+          productId: p.id,
+          sellerManufacturerId: p.manufacturerId ?? null,
+          titleSnapshot: p.title,
+          unitPriceKurus: p.priceKurus,
+          quantity: item.quantity,
+          lineTotalKurus: p.priceKurus * item.quantity,
+        });
       }
     }
 
@@ -236,9 +286,14 @@ export async function POST(request: NextRequest) {
     const upsellAmountKurus = calculateUpsellAmount(upsellKeys);
     // Item price: marketplace = seller-set price × quantity; custom = config
     // figurine price. figurinePriceKurus is NOT used for marketplace.
-    const quantity = orderType === "marketplace" ? mpInput!.quantity : 1;
-    const itemAmountKurus =
-      orderType === "marketplace"
+    const quantity = isCart
+      ? cartLines.reduce((s, l) => s + l.quantity, 0)
+      : orderType === "marketplace"
+        ? mpInput!.quantity
+        : 1;
+    const itemAmountKurus = isCart
+      ? cartLines.reduce((s, l) => s + l.lineTotalKurus, 0)
+      : orderType === "marketplace"
         ? product!.priceKurus * quantity
         : orderType === "upload"
           ? uploadedModel!.quoteStatus === "quoted" &&
@@ -383,11 +438,13 @@ export async function POST(request: NextRequest) {
           // Material: custom from selection; marketplace inherits the product's
           // (display only), defaulting resin.
           material:
-            orderType === "marketplace"
-              ? product!.material ?? "resin"
-              : orderType === "upload"
-                ? uploadedModel!.material
-                : customInput!.material,
+            isCart
+              ? "resin"
+              : orderType === "marketplace"
+                ? product!.material ?? "resin"
+                : orderType === "upload"
+                  ? uploadedModel!.material
+                  : customInput!.material,
           // Finish tier. Marketplace falls back to the default; upload prints
           // ship raw by default; custom uses the buyer's selection.
           finish:
@@ -399,11 +456,15 @@ export async function POST(request: NextRequest) {
           photoKey: customInput?.photoKey ?? null,
           // Marketplace item fields (null for custom).
           orderType,
-          productId: orderType === "marketplace" ? product!.id : null,
+          productId: orderType === "marketplace" && !isCart ? product!.id : null,
           sellerManufacturerId:
-            orderType === "marketplace" ? product!.manufacturerId : null,
-          productTitleSnapshot:
-            orderType === "marketplace" ? product!.title : null,
+            orderType === "marketplace" && !isCart ? product!.manufacturerId : null,
+          productTitleSnapshot: isCart
+            ? `Sepet (${cartLines.length} ürün)`
+            : orderType === "marketplace"
+              ? product!.title
+              : null,
+          parentReference: isCart ? reference : null,
           quantity,
           shippingAddress: common.shippingAddress,
           locale,
@@ -427,6 +488,20 @@ export async function POST(request: NextRequest) {
           amountKurus: giftCardAmountKurus,
           redeemedByUserId: user.id,
         });
+      }
+
+      if (isCart) {
+        await tx.insert(orderItems).values(
+          cartLines.map((l) => ({
+            draftId: newDraft.id,
+            productId: l.productId,
+            sellerManufacturerId: l.sellerManufacturerId,
+            productTitleSnapshot: l.titleSnapshot,
+            unitPriceKurus: l.unitPriceKurus,
+            quantity: l.quantity,
+            lineTotalKurus: l.lineTotalKurus,
+          }))
+        );
       }
 
       return {
@@ -515,7 +590,9 @@ export async function POST(request: NextRequest) {
     // Basket item name: marketplace = product title; custom = "Figurin (size ·
     // material)".
     let figurineName: string;
-    if (orderType === "marketplace") {
+    if (isCart) {
+      figurineName = `Sepet (${cartLines.length} ürün)`;
+    } else if (orderType === "marketplace") {
       figurineName =
         quantity > 1 ? `${product!.title} × ${quantity}` : product!.title;
     } else if (orderType === "upload") {

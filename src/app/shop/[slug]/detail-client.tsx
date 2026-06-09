@@ -10,6 +10,7 @@ import {
   phoneInputToE164,
 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { AddToCartButton } from "@/components/cart/add-to-cart-button";
 
 interface ProductDetail {
   id: string;
@@ -210,12 +211,15 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
         </p>
 
         {!checkoutOpen ? (
-          <button
-            onClick={() => setCheckoutOpen(true)}
-            className="mt-8 w-full btn-primary py-3 rounded-xl font-medium"
-          >
-            {t("shop.buy", "Satın Al")}
-          </button>
+          <div className="mt-8 space-y-2">
+            <AddToCartButton productId={product.id} />
+            <button
+              onClick={() => setCheckoutOpen(true)}
+              className="w-full rounded-xl border border-bg-subtle bg-bg-base py-3 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+            >
+              {t("shop.buy", "Satın Al")}
+            </button>
+          </div>
         ) : (
           <form onSubmit={handleBuy} className="mt-8 space-y-4">
             <h2 className="font-medium text-text-primary">

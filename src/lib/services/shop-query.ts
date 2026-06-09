@@ -71,6 +71,8 @@ export async function queryShopProducts(
     leadTimeDays: p.leadTimeDays,
     imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
     sellerName: p.manufacturer?.companyName ?? null,
+    ratingAvgX100: p.ratingAvgX100,
+    ratingCount: p.ratingCount,
   }));
   return { items, hasMore };
 }

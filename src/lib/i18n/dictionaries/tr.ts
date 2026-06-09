@@ -145,6 +145,7 @@ const tr: Dictionary = {
   "review.thanks": "Yorumun için teşekkürler!",
   "review.rating": "Puan",
   "review.bodyPlaceholder": "Deneyimini paylaş…",
+  "related.title": "Bunlar da ilgini çekebilir",
   "create.path.title": "Ne üretmek istersin?",
   "create.path.sub": "Bir üretim yolu seç. Fotoğraftan figür ve fotoğraftan obje bugün aktif; diğer iki yol çok yakında.",
   "create.soon.title": "Bu akış çok yakında",

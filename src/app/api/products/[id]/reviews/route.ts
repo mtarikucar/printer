@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, count, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productReviews, orders, orderItems, users } from "@/lib/db/schema";
+import { productReviews, orders, orderItems, users, products } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 
 export const runtime = "nodejs";
@@ -98,6 +98,19 @@ export async function POST(
       status: "approved",
     })
     .onConflictDoNothing();
+
+  // Refresh the denormalised rating shown on product cards.
+  const [agg] = await db
+    .select({ avg: sql<string>`avg(${productReviews.rating})`, cnt: count() })
+    .from(productReviews)
+    .where(and(eq(productReviews.productId, id), eq(productReviews.status, "approved")));
+  await db
+    .update(products)
+    .set({
+      ratingAvgX100: agg?.avg ? Math.round(Number(agg.avg) * 100) : 0,
+      ratingCount: Number(agg?.cnt ?? 0),
+    })
+    .where(eq(products.id, id));
 
   return NextResponse.json({ ok: true });
 }

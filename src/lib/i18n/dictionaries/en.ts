@@ -143,6 +143,7 @@ const en = {
   "review.thanks": "Thanks for your review!",
   "review.rating": "Rating",
   "review.bodyPlaceholder": "Share your experience…",
+  "related.title": "You might also like",
   "create.path.title": "What do you want to make?",
   "create.path.sub": "Pick a production path. Photo to figurine and photo to object are live today; the other two are coming soon.",
   "create.soon.title": "This flow is coming soon",

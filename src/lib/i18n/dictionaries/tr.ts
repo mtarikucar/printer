@@ -562,6 +562,12 @@ const tr: Dictionary = {
   "create.finish.luxe_display.desc": "Premium kaide, isim plakası, sert kutu ve tam el boyaması — düğün ve kurumsal hediyeler için.",
   "create.finish.collector_raw": "Collector Raw",
   "create.finish.collector_raw.desc": "Boyasız yüksek detaylı reçine, boya kiti yok — kendi boyasını kullanan koleksiyonerler için.",
+  "create.finish.raw": "Ham baskı",
+  "create.finish.raw.desc": "Baskı hâli, destekler temizlenmiş. Ek işlem yok.",
+  "create.finish.smoothed": "Pürüzsüz",
+  "create.finish.smoothed.desc": "Zımparalanmış + astarlı, temiz ve boyaya hazır yüzey.",
+  "create.finish.painted": "Boyalı",
+  "create.finish.painted.desc": "Senin için tek renk / temel boyama uygulanır.",
   "create.finish.included": "Dahil",
 
   // Create — Style

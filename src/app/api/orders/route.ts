@@ -13,8 +13,7 @@ import { createMarketplaceOrderSchema } from "@/lib/validators/product";
 import {
   allocatePaytrBasket,
   calculateUpsellAmount,
-  figurinePriceKurus,
-  finishSurchargeKurus,
+  itemPriceKurus,
 } from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
@@ -212,8 +211,12 @@ export async function POST(request: NextRequest) {
     const itemAmountKurus =
       orderType === "marketplace"
         ? product!.priceKurus * quantity
-        : figurinePriceKurus(customInput!.figurineSize, customInput!.material) +
-          finishSurchargeKurus(customInput!.finish);
+        : itemPriceKurus({
+            kind: customInput!.style === "object" ? "object" : "figure",
+            size: customInput!.figurineSize,
+            material: customInput!.material,
+            finish: customInput!.finish,
+          });
     const amountKurus = itemAmountKurus + upsellAmountKurus;
 
     let giftCardId: string | undefined;

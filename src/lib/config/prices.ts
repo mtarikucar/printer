@@ -214,3 +214,55 @@ export function uploadModelNeedsQuote(args: {
   }
   return false;
 }
+
+// ─── Per-type pricing + services (Faz 1) ─────────────────────────────────────
+// Figure keeps the 4 character packages above. Object/design/upload are
+// geometry prints with their own (lower) base table + a simpler finish set
+// (raw/smoothed/painted) — "hand_painted/luxe_display" only make sense for
+// character figurines.
+
+// Object/design base — decorative prints, below figurine (no character sculpt).
+export const OBJECT_PRICES_KURUS: Record<FigurineMaterial, Record<string, number>> = {
+  resin: { kucuk: 79900, orta: 109900, buyuk: 149900 },
+  filament: { kucuk: 54900, orta: 84900, buyuk: 119900 },
+};
+export function objectPriceKurus(size: string, material: string): number {
+  const m: FigurineMaterial = material === "filament" ? "filament" : "resin";
+  return OBJECT_PRICES_KURUS[m][size] ?? OBJECT_PRICES_KURUS.resin[size] ?? 0;
+}
+
+// Geometry-print finishes (object / design / upload).
+export type ObjectFinish = "raw" | "smoothed" | "painted";
+export const OBJECT_FINISH_SURCHARGES_KURUS: Record<ObjectFinish, number> = {
+  raw: 0, // as-printed, supports removed
+  smoothed: 15000, // +₺150 sanded + primed
+  painted: 40000, // +₺400 single-colour / basic paint
+};
+export function objectFinishSurchargeKurus(finish: string | null | undefined): number {
+  if (!finish) return 0;
+  return OBJECT_FINISH_SURCHARGES_KURUS[finish as ObjectFinish] ?? 0;
+}
+
+// Design = an object produced from a 2D source → object pricing + object finishes.
+export function designPriceKurus(size: string, material: string): number {
+  return objectPriceKurus(size, material);
+}
+
+// ─── Dispatcher: one trusted entry point for a bespoke item's base+finish ────
+export type ItemKind = "figure" | "object" | "design" | "upload";
+export function itemPriceKurus(args: {
+  kind: ItemKind;
+  size?: string; // figure / object / design
+  material: string;
+  finish?: string | null;
+  volumeMm3?: number; // upload (scaled volume)
+}): number {
+  const { kind, size = "orta", material, finish, volumeMm3 } = args;
+  if (kind === "upload") {
+    return uploadModelPriceKurus(volumeMm3 ?? 0, material) + objectFinishSurchargeKurus(finish);
+  }
+  if (kind === "object" || kind === "design") {
+    return objectPriceKurus(size, material) + objectFinishSurchargeKurus(finish);
+  }
+  return figurinePriceKurus(size, material) + finishSurchargeKurus(finish);
+}

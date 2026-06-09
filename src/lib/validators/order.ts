@@ -34,7 +34,15 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     style: z.enum(["realistic", "storybook", "anime", "chibi", "object"]).default("storybook"),
     material: z.enum(["resin", "filament"]).default("resin"),
     finish: z
-      .enum(["paintable_kit", "hand_painted", "collector_raw", "luxe_display"])
+      .enum([
+        "paintable_kit",
+        "hand_painted",
+        "collector_raw",
+        "luxe_display",
+        "raw",
+        "smoothed",
+        "painted",
+      ])
       .default("paintable_kit"),
     modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
     shippingAddress: createTurkishAddressSchema(locale),

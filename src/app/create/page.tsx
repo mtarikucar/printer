@@ -12,7 +12,12 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
-import { figurinePriceKurus, finishSurchargeKurus } from "@/lib/config/prices";
+import {
+  figurinePriceKurus,
+  finishSurchargeKurus,
+  objectPriceKurus,
+  objectFinishSurchargeKurus,
+} from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
@@ -166,22 +171,37 @@ function CustomCreateFlow() {
     { key: "filament", label: d["material.filament"], desc: d["material.filament.desc"] },
   ] as const;
 
-  // Live price label for a (size, material), Turkish-grouped ("1.399"). Mirrors
-  // the server's figurinePriceKurus so the summary moves the instant material
-  // toggles; the server re-derives the trusted amount on submit.
+  // Object/design (style="object") and character figurines have separate price
+  // tables + finish sets (Faz 1). These helpers pick the right one; the server
+  // re-derives the trusted amount on submit via itemPriceKurus.
+  const isObjectStyle = selectedStyle === "object";
+  const baseKurus = (sz: string, mat: string) =>
+    isObjectStyle ? objectPriceKurus(sz, mat) : figurinePriceKurus(sz, mat);
+  const finishKurus = (f: string) =>
+    isObjectStyle ? objectFinishSurchargeKurus(f) : finishSurchargeKurus(f);
+
+  // Live price label for a (size, material), Turkish-grouped ("1.399").
   const priceLabel = (sizeKey: string, materialKey: string) =>
-    Math.round(figurinePriceKurus(sizeKey, materialKey) / 100).toLocaleString("tr-TR");
+    Math.round(baseKurus(sizeKey, materialKey) / 100).toLocaleString("tr-TR");
 
   // Finish/package tiers (Faz 1.1). surchargeKurus is derived from the single
   // source FINISH_SURCHARGES_KURUS via finishSurchargeKurus; the server
   // re-derives the trusted amount on submit. collector_raw is cheaper (raw
   // print, no paint kit) so its surcharge is negative.
-  const FINISHES = [
-    { key: "paintable_kit" as const, label: d["create.finish.paintable_kit"], desc: d["create.finish.paintable_kit.desc"] },
-    { key: "hand_painted" as const,  label: d["create.finish.hand_painted"],  desc: d["create.finish.hand_painted.desc"] },
-    { key: "luxe_display" as const,  label: d["create.finish.luxe_display"],   desc: d["create.finish.luxe_display.desc"] },
-    { key: "collector_raw" as const, label: d["create.finish.collector_raw"], desc: d["create.finish.collector_raw.desc"] },
-  ].map((f) => ({ ...f, surchargeKurus: finishSurchargeKurus(f.key) }));
+  const FINISHES = (
+    isObjectStyle
+      ? [
+          { key: "raw", label: d["create.finish.raw"], desc: d["create.finish.raw.desc"] },
+          { key: "smoothed", label: d["create.finish.smoothed"], desc: d["create.finish.smoothed.desc"] },
+          { key: "painted", label: d["create.finish.painted"], desc: d["create.finish.painted.desc"] },
+        ]
+      : [
+          { key: "paintable_kit", label: d["create.finish.paintable_kit"], desc: d["create.finish.paintable_kit.desc"] },
+          { key: "hand_painted", label: d["create.finish.hand_painted"], desc: d["create.finish.hand_painted.desc"] },
+          { key: "luxe_display", label: d["create.finish.luxe_display"], desc: d["create.finish.luxe_display.desc"] },
+          { key: "collector_raw", label: d["create.finish.collector_raw"], desc: d["create.finish.collector_raw.desc"] },
+        ]
+  ).map((f) => ({ ...f, surchargeKurus: finishKurus(f.key) }));
 
   const STYLES = [
     { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
@@ -250,6 +270,18 @@ function CustomCreateFlow() {
       styleQueryAppliedRef.current = true;
     }
   }, [searchParams]);
+
+  // Keep the selected finish valid for the active flow: object/design use
+  // raw/smoothed/painted; figurines use the 4 packages (Faz 1).
+  useEffect(() => {
+    const objectFinishes = ["raw", "smoothed", "painted"];
+    const figureFinishes = ["paintable_kit", "hand_painted", "luxe_display", "collector_raw"];
+    if (selectedStyle === "object" && !objectFinishes.includes(selectedFinish)) {
+      setSelectedFinish("smoothed");
+    } else if (selectedStyle !== "object" && !figureFinishes.includes(selectedFinish)) {
+      setSelectedFinish("paintable_kit");
+    }
+  }, [selectedStyle, selectedFinish]);
 
   // Restore state from sessionStorage AFTER the auth check resolves. Gate on
   // `loggedIn` (tri-state: null while loading, then true/false). We must not
@@ -1529,7 +1561,7 @@ function CustomCreateFlow() {
 
               {/* Payment Method Selector */}
               {(() => {
-                const total = figurinePriceKurus(selectedSize, selectedMaterial);
+                const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish);
                 const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                 const remaining = total - gcDiscount;
                 const isFullyCovered = remaining <= 0;
@@ -1603,7 +1635,7 @@ function CustomCreateFlow() {
                     </div>
                   )}
                   {(() => {
-                    const total = figurinePriceKurus(selectedSize, selectedMaterial) + finishSurchargeKurus(selectedFinish);
+                    const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish);
                     const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                     const afterGc = total - gcDiscount;
                     const havaleDiscount =
@@ -1649,7 +1681,7 @@ function CustomCreateFlow() {
               )}
 
               {(() => {
-                const total = figurinePriceKurus(selectedSize, selectedMaterial) + finishSurchargeKurus(selectedFinish);
+                const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish);
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
                 const showLock = !isFullyCovered;
                 return (

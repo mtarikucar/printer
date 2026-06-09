@@ -176,6 +176,10 @@ export const figurineFinishEnum = pgEnum("figurine_finish", [
   "hand_painted",
   "collector_raw",
   "luxe_display",
+  // Object / design / upload prints (geometry, not character sculpts):
+  "raw",
+  "smoothed",
+  "painted",
 ]);
 
 export const previewStatusEnum = pgEnum("preview_status", [

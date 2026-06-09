@@ -560,6 +560,12 @@ const en = {
   "create.finish.luxe_display.desc": "Premium base, name plate, hard case and full hand-painting — for weddings & corporate gifts.",
   "create.finish.collector_raw": "Collector Raw",
   "create.finish.collector_raw.desc": "Unpainted high-detail resin, no paint kit — for collectors who use their own paints.",
+  "create.finish.raw": "Raw print",
+  "create.finish.raw.desc": "As-printed, supports removed. No extra finishing.",
+  "create.finish.smoothed": "Smoothed",
+  "create.finish.smoothed.desc": "Sanded + primed for a clean, paint-ready surface.",
+  "create.finish.painted": "Painted",
+  "create.finish.painted.desc": "Single-colour / basic paint applied for you.",
   "create.finish.included": "Included",
 
   // Create — Style

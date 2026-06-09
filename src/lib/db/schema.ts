@@ -952,6 +952,9 @@ export const products = pgTable(
     leadTimeDays: integer("lead_time_days").default(7),
     // Denormalized cover image key for list cards (avoids a join on /shop).
     primaryImageKey: text("primary_image_key"),
+    // Polish: denormalised rating for cards (recomputed on each review insert).
+    ratingAvgX100: integer("rating_avg_x100").notNull().default(0),
+    ratingCount: integer("rating_count").notNull().default(0),
     status: productStatusEnum("status").notNull().default("draft"),
     rejectionReason: text("rejection_reason"),
     reviewedByEmail: text("reviewed_by_email"),

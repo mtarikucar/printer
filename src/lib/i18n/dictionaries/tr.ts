@@ -192,6 +192,7 @@ const tr: Dictionary = {
   "manufacturer.orders.table.size": "Beden",
   "manufacturer.orders.table.status": "Durum",
   "manufacturer.orders.table.style": "Stil",
+  "manufacturer.orders.table.finish": "Bitiş",
   "manufacturer.products.title": "Ürünlerim",
   "manufacturer.products.new": "Yeni Ürün",
   "manufacturer.products.edit": "Düzenle",
@@ -449,6 +450,16 @@ const tr: Dictionary = {
 
   // Create — Material
   "create.materialSelection": "Malzeme Seçimi",
+
+  // Create — Finish / paket katmanı (Faz 1.1)
+  "create.finishSelection": "Bitiş",
+  "create.finish.paintable_kit": "Boyanabilir Kit",
+  "create.finish.paintable_kit.desc": "Primer'lı baskı + mini boya kiti — sen boyarsın.",
+  "create.finish.hand_painted": "El Boyaması",
+  "create.finish.hand_painted.desc": "Kargodan önce senin için profesyonelce elle boyarız.",
+  "create.finish.luxe_display": "Lüks Vitrin",
+  "create.finish.luxe_display.desc": "Premium kaide, hediye kutusu ve tam el boyaması.",
+  "create.finish.included": "Dahil",
 
   // Create — Style
   "create.styleSelection": "Stil Seçimi",

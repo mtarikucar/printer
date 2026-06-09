@@ -99,6 +99,7 @@ export async function promoteDraftToOrder(
         figurineSize: draft.figurineSize,
         style: draft.style,
         material: draft.material,
+        finish: draft.finish,
         modifiers: draft.modifiers,
         shippingAddress: draft.shippingAddress,
         status: "paid",

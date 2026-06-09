@@ -26,6 +26,7 @@ interface ManufacturerOrdersClientProps {
     customerName: string;
     figurineSize: string | null;
     style: string;
+    finish: string;
     modifiers: string[] | null;
     manufacturerStatus: string | null;
     assignedAt: string | null;
@@ -132,6 +133,10 @@ export function ManufacturerOrdersClient({
                   "Style"}
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                {(d["manufacturer.orders.table.finish" as keyof typeof d] as string) ||
+                  "Finish"}
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
                 {(d["manufacturer.orders.table.status" as keyof typeof d] as string) ||
                   "Status"}
               </th>
@@ -174,6 +179,13 @@ export function ManufacturerOrdersClient({
                     : (d[
                         `styles.${order.style}` as keyof typeof d
                       ] as string) || order.style}
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  {order.orderType === "marketplace"
+                    ? "—"
+                    : (d[
+                        `create.finish.${order.finish}` as keyof typeof d
+                      ] as string) || order.finish}
                 </td>
                 <td className="px-4 py-3">
                   <span

@@ -14,6 +14,7 @@ import {
   allocatePaytrBasket,
   calculateUpsellAmount,
   figurinePriceKurus,
+  finishSurchargeKurus,
 } from "@/lib/config/prices";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
@@ -209,7 +210,8 @@ export async function POST(request: NextRequest) {
     const itemAmountKurus =
       orderType === "marketplace"
         ? product!.priceKurus * quantity
-        : figurinePriceKurus(customInput!.figurineSize, customInput!.material);
+        : figurinePriceKurus(customInput!.figurineSize, customInput!.material) +
+          finishSurchargeKurus(customInput!.finish);
     const amountKurus = itemAmountKurus + upsellAmountKurus;
 
     let giftCardId: string | undefined;
@@ -344,6 +346,10 @@ export async function POST(request: NextRequest) {
             orderType === "marketplace"
               ? product!.material ?? "resin"
               : customInput!.material,
+          // Finish tier (custom only). Marketplace products have no finish
+          // choice, so they fall back to the column default.
+          finish:
+            orderType === "marketplace" ? "paintable_kit" : customInput!.finish,
           photoKey: customInput?.photoKey ?? null,
           // Marketplace item fields (null for custom).
           orderType,

@@ -29,6 +29,13 @@
       "when": 1780996814045,
       "tag": "0003_tidy_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780997384341,
+      "tag": "0004_steady_madrox",
+      "breakpoints": true
     }
   ]
 }

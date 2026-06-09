@@ -156,6 +156,18 @@ export const figurineStyleEnum = pgEnum("figurine_style", [
 // pricing and manufacturer routing. Default resin (historical behaviour).
 export const figurineMaterialEnum = pgEnum("figurine_material", ["resin", "filament"]);
 
+// Finish/package tier (Faz 1.1). paintable_kit = default DIY kit (mini paint
+// kit included); hand_painted = professional hand-finish upgrade; luxe_display
+// = premium base + box + full hand paint; collector_raw = unpainted raw print
+// (enum-only for now, not yet surfaced in the create UI). Surcharges are
+// additive — see FINISH_SURCHARGES_KURUS in src/lib/config/prices.ts.
+export const figurineFinishEnum = pgEnum("figurine_finish", [
+  "paintable_kit",
+  "hand_painted",
+  "collector_raw",
+  "luxe_display",
+]);
+
 export const previewStatusEnum = pgEnum("preview_status", [
   "generating",
   "ready",
@@ -312,6 +324,7 @@ export const orderDrafts = pgTable("order_drafts", {
   style: figurineStyleEnum("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
+  finish: figurineFinishEnum("finish").notNull().default("paintable_kit"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   photoKey: text("photo_key"),
   // Marketplace fields (null for custom drafts). See orderTypeEnum.
@@ -401,6 +414,7 @@ export const orders = pgTable("orders", {
   style: figurineStyleEnum("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
+  finish: figurineFinishEnum("finish").notNull().default("paintable_kit"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   // Marketplace fields (null for custom orders). Copied from the draft on
   // promotion. sellerManufacturerId snapshots the product owner at purchase.

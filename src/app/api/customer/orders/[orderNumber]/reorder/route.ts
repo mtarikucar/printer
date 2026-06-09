@@ -134,6 +134,7 @@ export async function POST(
         figurineSize: order.figurineSize,
         style: order.style,
         material: order.material,
+        finish: order.finish,
         modifiers: order.modifiers,
         shippingAddress: order.shippingAddress,
         photoKey,

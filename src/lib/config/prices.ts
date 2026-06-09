@@ -16,6 +16,31 @@ export function figurinePriceKurus(size: string, material: string): number {
   return FIGURINE_PRICES_KURUS[m][size] ?? FIGURINE_PRICES_KURUS.resin[size] ?? 0;
 }
 
+export type FigurineFinish =
+  | "paintable_kit"
+  | "hand_painted"
+  | "collector_raw"
+  | "luxe_display";
+
+/**
+ * Finish/package surcharge (kuruş), added on top of the (size, material) base.
+ * paintable_kit is the default (mini paint kit included, no surcharge).
+ * collector_raw is enum-only for now (not surfaced in the create UI). Additive
+ * so the base price table is untouched — tune freely.
+ */
+export const FINISH_SURCHARGES_KURUS: Record<FigurineFinish, number> = {
+  paintable_kit: 0,
+  collector_raw: 0,
+  hand_painted: 79900,
+  luxe_display: 149900,
+};
+
+// Surcharge for a finish key. Unknown finish → 0 (treated as the default kit).
+export function finishSurchargeKurus(finish: string | null | undefined): number {
+  if (!finish) return 0;
+  return FINISH_SURCHARGES_KURUS[finish as FigurineFinish] ?? 0;
+}
+
 /**
  * Checkout add-on SKUs (Q10). All prices in kuruş. Keys are stable identifiers
  * persisted on `orderDrafts.upsells` + `orders.upsells`, so do NOT rename

@@ -12,7 +12,7 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
-import { figurinePriceKurus } from "@/lib/config/prices";
+import { figurinePriceKurus, finishSurchargeKurus } from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
@@ -45,6 +45,7 @@ export default function CreatePage() {
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
   const [selectedMaterial, setSelectedMaterial] = useState<string>("resin");
+  const [selectedFinish, setSelectedFinish] = useState<string>("paintable_kit");
   const [selectedStyle, setSelectedStyle] = useState<string>("storybook");
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -164,6 +165,15 @@ export default function CreatePage() {
   // toggles; the server re-derives the trusted amount on submit.
   const priceLabel = (sizeKey: string, materialKey: string) =>
     Math.round(figurinePriceKurus(sizeKey, materialKey) / 100).toLocaleString("tr-TR");
+
+  // Finish/package tiers (Faz 1.1). surchargeKurus mirrors the server's
+  // FINISH_SURCHARGES_KURUS; the server re-derives the trusted amount on submit.
+  // collector_raw exists in the enum but isn't surfaced here yet.
+  const FINISHES = [
+    { key: "paintable_kit" as const, surchargeKurus: 0,      label: d["create.finish.paintable_kit"], desc: d["create.finish.paintable_kit.desc"] },
+    { key: "hand_painted" as const,  surchargeKurus: 79900,  label: d["create.finish.hand_painted"],  desc: d["create.finish.hand_painted.desc"] },
+    { key: "luxe_display" as const,  surchargeKurus: 149900, label: d["create.finish.luxe_display"],   desc: d["create.finish.luxe_display.desc"] },
+  ] as const;
 
   const STYLES = [
     { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
@@ -621,6 +631,7 @@ export default function CreatePage() {
           photoKey,
           figurineSize: selectedSize,
           material: selectedMaterial,
+          finish: selectedFinish,
           style: selectedStyle,
           modifiers: selectedModifiers,
           shippingAddress: submitForm,
@@ -675,6 +686,7 @@ export default function CreatePage() {
 
   const selectedSizeObj = SIZES.find((s) => s.key === selectedSize);
   const selectedMaterialObj = MATERIALS.find((m) => m.key === selectedMaterial);
+  const selectedFinishObj = FINISHES.find((f) => f.key === selectedFinish);
 
   // Order submitted — success screen
   if (orderSubmitted) {
@@ -845,6 +857,33 @@ export default function CreatePage() {
                         <span className={`text-base font-mono font-bold ${selectedMaterial === m.key ? "text-white" : "text-green-500"}`}>₺{priceLabel(selectedSize, m.key)}</span>
                       </div>
                       <p className={`text-xs mt-0.5 ${selectedMaterial === m.key ? "text-white/80" : "text-text-muted"}`}>{m.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Finish / Package Selection */}
+              <div className="animate-fade-in-up delay-250">
+                <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.finishSelection"]}</h2>
+                <div className="flex flex-col gap-2">
+                  {FINISHES.map((f) => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => setSelectedFinish(f.key)}
+                      className={`w-full py-3 px-4 text-left rounded-xl transition-all ${
+                        selectedFinish === f.key
+                          ? "bg-green-500 text-white"
+                          : "bg-bg-surface border border-bg-subtle hover:border-green-500/30"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-sm font-semibold ${selectedFinish === f.key ? "text-white" : "text-text-primary"}`}>{f.label}</span>
+                        <span className={`text-sm font-mono font-bold ${selectedFinish === f.key ? "text-white" : "text-green-500"}`}>
+                          {f.surchargeKurus > 0 ? `+₺${(f.surchargeKurus / 100).toLocaleString("tr-TR")}` : d["create.finish.included"]}
+                        </span>
+                      </div>
+                      <p className={`text-xs mt-0.5 ${selectedFinish === f.key ? "text-white/80" : "text-text-muted"}`}>{f.desc}</p>
                     </button>
                   ))}
                 </div>
@@ -1489,8 +1528,14 @@ export default function CreatePage() {
                     <span className="text-sm font-medium text-text-secondary">{selectedSizeObj?.label} ({selectedSizeObj?.height}) · {selectedMaterialObj?.label}</span>
                     <span className="font-mono font-bold text-text-primary">₺{priceLabel(selectedSize, selectedMaterial)}</span>
                   </div>
+                  {selectedFinishObj && selectedFinishObj.surchargeKurus > 0 && (
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-text-secondary">{selectedFinishObj.label}</span>
+                      <span className="font-mono font-bold text-text-primary">+₺{(selectedFinishObj.surchargeKurus / 100).toLocaleString("tr-TR")}</span>
+                    </div>
+                  )}
                   {(() => {
-                    const total = figurinePriceKurus(selectedSize, selectedMaterial);
+                    const total = figurinePriceKurus(selectedSize, selectedMaterial) + finishSurchargeKurus(selectedFinish);
                     const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                     const afterGc = total - gcDiscount;
                     const havaleDiscount =
@@ -1536,7 +1581,7 @@ export default function CreatePage() {
               )}
 
               {(() => {
-                const total = figurinePriceKurus(selectedSize, selectedMaterial);
+                const total = figurinePriceKurus(selectedSize, selectedMaterial) + finishSurchargeKurus(selectedFinish);
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
                 const showLock = !isFullyCovered;
                 return (

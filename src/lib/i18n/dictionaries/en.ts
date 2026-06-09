@@ -190,6 +190,7 @@ const en = {
   "manufacturer.orders.table.size": "Size",
   "manufacturer.orders.table.status": "Status",
   "manufacturer.orders.table.style": "Style",
+  "manufacturer.orders.table.finish": "Finish",
   "manufacturer.products.title": "My Products",
   "manufacturer.products.new": "New product",
   "manufacturer.products.edit": "Edit",
@@ -447,6 +448,16 @@ const en = {
 
   // Create — Material
   "create.materialSelection": "Material Selection",
+
+  // Create — Finish / package tier (Faz 1.1)
+  "create.finishSelection": "Finish",
+  "create.finish.paintable_kit": "Paintable Kit",
+  "create.finish.paintable_kit.desc": "Primed print + a mini paint kit — you paint it.",
+  "create.finish.hand_painted": "Hand-Painted",
+  "create.finish.hand_painted.desc": "We professionally hand-paint it for you before shipping.",
+  "create.finish.luxe_display": "Luxe Display",
+  "create.finish.luxe_display.desc": "Premium base, gift box, and full hand-painting.",
+  "create.finish.included": "Included",
 
   // Create — Style
   "create.styleSelection": "Style Selection",

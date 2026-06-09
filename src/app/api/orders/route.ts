@@ -112,11 +112,12 @@ export async function POST(request: NextRequest) {
         (await db.query.uploadedModels.findFirst({
           where: eq(uploadedModels.id, uploadInput!.uploadedModelId),
         })) ?? null;
-      if (
-        !uploadedModel ||
-        uploadedModel.status !== "ready" ||
-        uploadedModel.priceKurus == null
-      ) {
+      const autoReady =
+        uploadedModel?.status === "ready" && uploadedModel.priceKurus != null;
+      const quoteReady =
+        uploadedModel?.quoteStatus === "quoted" &&
+        uploadedModel.quotedPriceKurus != null;
+      if (!uploadedModel || (!autoReady && !quoteReady)) {
         return NextResponse.json(
           { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
           { status: 400 }
@@ -240,7 +241,10 @@ export async function POST(request: NextRequest) {
       orderType === "marketplace"
         ? product!.priceKurus * quantity
         : orderType === "upload"
-          ? uploadedModel!.priceKurus!
+          ? uploadedModel!.quoteStatus === "quoted" &&
+            uploadedModel!.quotedPriceKurus != null
+            ? uploadedModel!.quotedPriceKurus
+            : uploadedModel!.priceKurus!
           : itemPriceKurus({
               kind: customInput!.style === "object" ? "object" : "figure",
               size: customInput!.figurineSize,

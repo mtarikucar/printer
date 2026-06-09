@@ -50,6 +50,20 @@
       "when": 1781013626029,
       "tag": "0006_massive_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781014650396,
+      "tag": "0007_curvy_daredevil",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781014706431,
+      "tag": "0008_dry_hitman",
+      "breakpoints": true
     }
   ]
 }

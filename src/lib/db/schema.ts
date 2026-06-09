@@ -75,6 +75,15 @@ export const uploadModelStatusEnum = pgEnum("upload_model_status", [
   "failed", // unprocessable file
 ]);
 
+// Faz 3: admin quote lifecycle for an upload that couldn't be auto-priced.
+export const uploadQuoteStatusEnum = pgEnum("upload_quote_status", [
+  "none",
+  "quoted",
+  "accepted",
+  "expired",
+  "rejected",
+]);
+
 // orders only contain paid orders, so paymentStatus is succeeded or refunded.
 export const paymentStatusEnum = pgEnum("payment_status", [
   "succeeded",
@@ -1004,6 +1013,14 @@ export const uploadedModels = pgTable(
     // Auto price (kuruş) when geometry is clean; null + needsQuote otherwise.
     priceKurus: integer("price_kurus"),
     needsQuote: boolean("needs_quote").notNull().default(false),
+    // Faz 3 quote-bridge — set by admin when geometry can't be auto-priced.
+    quotedPriceKurus: integer("quoted_price_kurus"),
+    quoteStatus: uploadQuoteStatusEnum("quote_status").notNull().default("none"),
+    quotedByEmail: text("quoted_by_email"),
+    quotedAt: timestamp("quoted_at"),
+    quoteExpiresAt: timestamp("quote_expires_at"),
+    // Contact email for the quote (guest uploads carry no userId).
+    contactEmail: text("contact_email"),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),

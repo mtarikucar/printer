@@ -40,6 +40,8 @@ export function UploadModelFlow() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [quoteEmail, setQuoteEmail] = useState("");
+  const [requesting, setRequesting] = useState(false);
 
   const pickFile = (file: File) => {
     const ext = file.name.toLowerCase().split(".").pop();
@@ -84,6 +86,23 @@ export function UploadModelFlow() {
     setResult(null);
     setError(null);
     setCheckoutOpen(false);
+    setQuoteEmail("");
+  };
+
+  // needsQuote path: attach a contact email so an admin can price it + reply.
+  const submitQuoteRequest = async () => {
+    if (!result || !quoteEmail.includes("@")) return;
+    setRequesting(true);
+    try {
+      const res = await fetch(`/api/upload/model/${result.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: quoteEmail.trim() }),
+      });
+      if (res.ok) setStep(3);
+    } finally {
+      setRequesting(false);
+    }
   };
 
   return (
@@ -225,11 +244,19 @@ export function UploadModelFlow() {
                 <div className="text-center">
                   <p className="font-serif text-lg text-text-primary">{d["upload.needsQuote"]}</p>
                   <p className="mt-2 text-sm text-text-secondary">{d["upload.needsQuoteSub"]}</p>
+                  <input
+                    type="email"
+                    value={quoteEmail}
+                    onChange={(e) => setQuoteEmail(e.target.value)}
+                    placeholder={d["upload.emailPlaceholder"]}
+                    className="mt-4 w-full rounded-xl border border-border-default bg-bg-base px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20"
+                  />
                   <button
-                    onClick={() => setStep(3)}
-                    className="mt-6 w-full rounded-full bg-green-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
+                    onClick={submitQuoteRequest}
+                    disabled={!quoteEmail.includes("@") || requesting}
+                    className="mt-3 w-full rounded-full bg-green-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:opacity-50"
                   >
-                    {d["upload.requestCta"]}
+                    {requesting ? "…" : d["upload.requestCta"]}
                   </button>
                 </div>
               ) : checkoutOpen ? (

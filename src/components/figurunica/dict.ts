@@ -79,7 +79,7 @@ export const FIGURUNICA_KEYS = [
   "landing.fig.styles.realistic",
   "landing.fig.styles.chibi",
   "landing.fig.styles.anime",
-  "landing.fig.styles.disney",
+  "landing.fig.styles.storybook",
   "landing.fig.how.eyebrow",
   "landing.fig.how.titleLead",
   "landing.fig.how.titleItalic",

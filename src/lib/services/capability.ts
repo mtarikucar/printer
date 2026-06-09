@@ -10,8 +10,8 @@ export function orderRequirements(opts: {
 }): string[] {
   const reqs: string[] = [];
   if (opts.figurineSize === "buyuk") reqs.push("large_format");
-  // Stylized work (anime/disney/chibi) benefits from a manufacturer skilled in it.
-  if (opts.style && ["anime", "disney", "chibi"].includes(opts.style)) {
+  // Stylized work (anime/storybook/chibi) benefits from a manufacturer skilled in it.
+  if (opts.style && ["anime", "storybook", "chibi"].includes(opts.style)) {
     reqs.push(`style_${opts.style}`);
   }
   return reqs;

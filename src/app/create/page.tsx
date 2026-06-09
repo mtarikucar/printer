@@ -45,7 +45,7 @@ export default function CreatePage() {
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
   const [selectedMaterial, setSelectedMaterial] = useState<string>("resin");
-  const [selectedStyle, setSelectedStyle] = useState<string>("disney");
+  const [selectedStyle, setSelectedStyle] = useState<string>("storybook");
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -167,7 +167,7 @@ export default function CreatePage() {
 
   const STYLES = [
     { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
-    { key: "disney",    label: d["create.style.disney"],    desc: d["create.style.disney.desc"],    img: "/examples/disney.png" },
+    { key: "storybook",    label: d["create.style.storybook"],    desc: d["create.style.storybook.desc"],    img: "/examples/storybook.png" },
     { key: "anime",     label: d["create.style.anime"],     desc: d["create.style.anime.desc"],     img: "/examples/anime.png" },
     { key: "chibi",     label: d["create.style.chibi"],     desc: d["create.style.chibi.desc"],     img: "/examples/chibi.png" },
   ] as const;
@@ -223,7 +223,7 @@ export default function CreatePage() {
     if (styleQueryAppliedRef.current) return;
     const styleParam = searchParams.get("style");
     if (!styleParam) return;
-    if (["realistic", "disney", "anime", "chibi", "object"].includes(styleParam)) {
+    if (["realistic", "storybook", "anime", "chibi", "object"].includes(styleParam)) {
       setSelectedStyle(styleParam);
       styleQueryAppliedRef.current = true;
     }

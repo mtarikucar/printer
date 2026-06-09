@@ -18,14 +18,14 @@ export interface GalleryItem {
 }
 
 const STYLE_BADGE_COLORS: Record<string, string> = {
-  disney: "bg-purple-100 text-purple-700 border-purple-200",
+  storybook: "bg-purple-100 text-purple-700 border-purple-200",
   anime: "bg-pink-100 text-pink-700 border-pink-200",
   chibi: "bg-orange-100 text-orange-700 border-orange-200",
   realistic: "bg-gray-100 text-gray-600 border-gray-200",
 };
 
 const STYLE_LABELS: Record<string, string> = {
-  disney: "Storybook",
+  storybook: "Storybook",
   anime: "Anime",
   chibi: "Chibi",
   realistic: "Realistic",

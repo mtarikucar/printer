@@ -146,7 +146,7 @@ export const figurineSizeEnum = pgEnum("figurine_size", [
 
 export const figurineStyleEnum = pgEnum("figurine_style", [
   "realistic",
-  "disney",
+  "storybook",
   "anime",
   "chibi",
   "object",

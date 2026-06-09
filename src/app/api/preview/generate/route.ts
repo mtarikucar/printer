@@ -14,7 +14,7 @@ import { eq, count } from "drizzle-orm";
 const generateSchema = z.object({
   photoKey: z.string().min(1),
   figurineSize: z.enum(["kucuk", "orta", "buyuk"]),
-  style: z.enum(["realistic", "disney", "anime", "chibi", "object"]).default("disney"),
+  style: z.enum(["realistic", "storybook", "anime", "chibi", "object"]).default("storybook"),
   modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
 });
 

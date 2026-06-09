@@ -12,14 +12,14 @@ import type { Locale } from "@/lib/i18n/types";
 
 export type StyleSlug =
   | "realistic"
-  | "disney"
+  | "storybook"
   | "anime"
   | "chibi"
   | "object";
 
 export interface StyleLandingContent {
   slug: StyleSlug;
-  /** Filename under /public/examples (e.g. "disney.png"). */
+  /** Filename under /public/examples (e.g. "storybook.png"). */
   heroImage: string;
   /** Localized copy. Each locale has the same shape so the page component
    *  doesn't have to handle locale-specific structures. */
@@ -112,9 +112,9 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
     },
   },
 
-  disney: {
-    slug: "disney",
-    heroImage: "/examples/disney.png",
+  storybook: {
+    slug: "storybook",
+    heroImage: "/examples/storybook.png",
     copy: {
       tr: {
         pageTitle: "Masalsı Animasyon 3D Figürin — Sevimli Çizgi Film Karakterleri",

@@ -6,12 +6,12 @@ interface MeshyResult {
   durationMs: number;
 }
 
-// Pose mode hint sent to Meshy. Chibi/Disney get strict T-pose (matches their
+// Pose mode hint sent to Meshy. Chibi/Storybook get strict T-pose (matches their
 // upstream image guidance and prevents arm-fused-to-torso non-manifold issues);
 // other styles keep Meshy's default (empty string) to let the model honor the
 // existing image pose.
 export function poseModeForStyle(style: FigurineStyle): "t-pose" | "" {
-  if (style === "disney" || style === "chibi") return "t-pose";
+  if (style === "storybook" || style === "chibi") return "t-pose";
   return "";
 }
 

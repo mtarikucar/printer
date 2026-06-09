@@ -1,7 +1,7 @@
 import { buildPrompt, POSE_PHRASE, PRINT_READINESS_CLAUSE, type FigurineStyle, type StyleModifier } from "../src/lib/services/style-transfer";
 import { buildMeshyBody, poseModeForStyle } from "../src/lib/services/meshy";
 
-const STYLES: FigurineStyle[] = ["realistic", "disney", "anime", "chibi", "object"];
+const STYLES: FigurineStyle[] = ["realistic", "storybook", "anime", "chibi", "object"];
 const MODIFIER_SETS: StyleModifier[][] = [[], ["pixel_art"]];
 
 function divider(title: string) {

@@ -357,7 +357,7 @@ export function StyleGallery({ d }: { d: FigurunicaDict }) {
     { src: "/examples/realistic.png", name: d["landing.fig.styles.realistic"], tag: "R-01" },
     { src: "/examples/chibi.png", name: d["landing.fig.styles.chibi"], tag: "C-02" },
     { src: "/examples/anime.png", name: d["landing.fig.styles.anime"], tag: "A-03" },
-    { src: "/examples/disney.png", name: d["landing.fig.styles.disney"], tag: "D-04" },
+    { src: "/examples/storybook.png", name: d["landing.fig.styles.storybook"], tag: "S-04" },
   ];
 
   return (

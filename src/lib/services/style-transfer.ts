@@ -1,7 +1,7 @@
 import Replicate from "replicate";
 import { removeBackground } from "./background-removal";
 
-export type FigurineStyle = "realistic" | "disney" | "anime" | "chibi" | "object";
+export type FigurineStyle = "realistic" | "storybook" | "anime" | "chibi" | "object";
 export type StyleModifier = "pixel_art";
 
 // Critical: this clause is appended to every style prompt. It shapes the
@@ -20,15 +20,15 @@ const PRINT_READINESS_CLAUSE =
 // already lean toward static "toy" silhouettes); anime keeps a confident
 // standing pose but with arms separated for printability.
 const POSE_PHRASE: Record<Exclude<FigurineStyle, "realistic" | "object">, string> = {
-  disney: "in a clear T-pose with arms extended horizontally away from the body",
+  storybook: "in a clear T-pose with arms extended horizontally away from the body",
   chibi: "in a clear T-pose with arms extended horizontally away from the body",
   anime: "in a confident standing pose facing forward with arms clearly separated from the body",
 };
 
 const STYLE_PROMPTS: Record<Exclude<FigurineStyle, "realistic" | "object">, string> = {
-  disney:
+  storybook:
     "Reimagine this person as an adorable storybook-animation 3D collectible figurine character. Use their general appearance as loose inspiration but fully transform them into a charming stylized animated character with cute rounded proportions, big warm expressive eyes, a sweet friendly smile, smooth softly-shaded skin, and soft studio lighting. Show the full body " +
-    POSE_PHRASE.disney +
+    POSE_PHRASE.storybook +
     ", like a collectible toy figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects. " +
     PRINT_READINESS_CLAUSE,
   anime:

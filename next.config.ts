@@ -22,6 +22,12 @@ const nextConfig: NextConfig = {
         destination: "/admin/gallery?tab=queue",
         permanent: false,
       },
+      // Trademark cleanup: the "disney" style slug was renamed to "storybook".
+      {
+        source: "/styles/disney",
+        destination: "/styles/storybook",
+        permanent: true,
+      },
     ];
   },
   async headers() {

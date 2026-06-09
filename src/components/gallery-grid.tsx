@@ -9,7 +9,7 @@ import { Button, Card, Input } from "@/components/ui";
 const STYLE_FILTERS = [
   { key: "all", labelKey: "gallery.filter.all" },
   { key: "object", labelKey: "gallery.filter.object" },
-  { key: "disney", labelKey: "gallery.filter.disney" },
+  { key: "storybook", labelKey: "gallery.filter.storybook" },
   { key: "anime", labelKey: "gallery.filter.anime" },
   { key: "chibi", labelKey: "gallery.filter.chibi" },
 ] as const;

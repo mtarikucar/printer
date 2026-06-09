@@ -19,7 +19,7 @@ DO $$ BEGIN CREATE TYPE "public"."manufacturer_doc_type" AS ENUM('vergi_levhasi'
 DO $$ BEGIN CREATE TYPE "public"."earning_status" AS ENUM('pending', 'paid', 'reversed'); EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN CREATE TYPE "public"."figurine_material" AS ENUM('resin', 'filament'); EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN CREATE TYPE "public"."figurine_size" AS ENUM('kucuk', 'orta', 'buyuk'); EXCEPTION WHEN duplicate_object THEN null; END $$;
-DO $$ BEGIN CREATE TYPE "public"."figurine_style" AS ENUM('realistic', 'disney', 'anime', 'chibi', 'object'); EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN CREATE TYPE "public"."figurine_style" AS ENUM('realistic', 'storybook', 'anime', 'chibi', 'object'); EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN CREATE TYPE "public"."gallery_review_status" AS ENUM('none', 'pending', 'approved', 'rejected'); EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN CREATE TYPE "public"."generation_provider" AS ENUM('tripo3d', 'meshy'); EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN CREATE TYPE "public"."generation_status" AS ENUM('pending', 'running', 'succeeded', 'failed'); EXCEPTION WHEN duplicate_object THEN null; END $$;

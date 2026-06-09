@@ -7,9 +7,11 @@ import {
   giftCardRedemptions,
   users,
   products,
+  uploadedModels,
 } from "@/lib/db/schema";
 import { createOrderSchema } from "@/lib/validators/order";
 import { createMarketplaceOrderSchema } from "@/lib/validators/product";
+import { createUploadOrderSchema } from "@/lib/validators/upload";
 import {
   allocatePaytrBasket,
   calculateUpsellAmount,
@@ -51,8 +53,12 @@ export async function POST(request: NextRequest) {
     // Branch custom (photo→AI figurine) vs marketplace (buy a ready-made
     // product). Both share the address/payment/gift-card/guest fields, so we
     // parse into the matching schema and read shared fields via `common`.
-    const orderType: "custom" | "marketplace" =
-      body?.orderType === "marketplace" ? "marketplace" : "custom";
+    const orderType: "custom" | "marketplace" | "upload" =
+      body?.orderType === "marketplace"
+        ? "marketplace"
+        : body?.orderType === "upload"
+          ? "upload"
+          : "custom";
 
     const customInput =
       orderType === "custom" ? createOrderSchema(locale).parse(body) : null;
@@ -60,8 +66,10 @@ export async function POST(request: NextRequest) {
       orderType === "marketplace"
         ? createMarketplaceOrderSchema(locale).parse(body)
         : null;
-    // Common checkout fields present in both schemas.
-    const common = (customInput ?? mpInput)!;
+    const uploadInput =
+      orderType === "upload" ? createUploadOrderSchema(locale).parse(body) : null;
+    // Common checkout fields present in all schemas.
+    const common = (customInput ?? mpInput ?? uploadInput)!;
 
     // Marketplace: load + gate the product (only `active` listings are buyable).
     let product:
@@ -88,6 +96,26 @@ export async function POST(request: NextRequest) {
       if (
         product.ownerType === "seller" &&
         product.manufacturer?.status !== "active"
+      ) {
+        return NextResponse.json(
+          { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Upload: load + gate the customer's processed model — must be auto-priced
+    // and ready. Possession of the UUID is the capability (mirrors previewId).
+    let uploadedModel: typeof uploadedModels.$inferSelect | null = null;
+    if (orderType === "upload") {
+      uploadedModel =
+        (await db.query.uploadedModels.findFirst({
+          where: eq(uploadedModels.id, uploadInput!.uploadedModelId),
+        })) ?? null;
+      if (
+        !uploadedModel ||
+        uploadedModel.status !== "ready" ||
+        uploadedModel.priceKurus == null
       ) {
         return NextResponse.json(
           { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
@@ -211,12 +239,14 @@ export async function POST(request: NextRequest) {
     const itemAmountKurus =
       orderType === "marketplace"
         ? product!.priceKurus * quantity
-        : itemPriceKurus({
-            kind: customInput!.style === "object" ? "object" : "figure",
-            size: customInput!.figurineSize,
-            material: customInput!.material,
-            finish: customInput!.finish,
-          });
+        : orderType === "upload"
+          ? uploadedModel!.priceKurus!
+          : itemPriceKurus({
+              kind: customInput!.style === "object" ? "object" : "figure",
+              size: customInput!.figurineSize,
+              material: customInput!.material,
+              finish: customInput!.finish,
+            });
     const amountKurus = itemAmountKurus + upsellAmountKurus;
 
     let giftCardId: string | undefined;
@@ -335,6 +365,7 @@ export async function POST(request: NextRequest) {
           reference,
           userId: user.id,
           previewId: previewId || null,
+          uploadedModelId: orderType === "upload" ? uploadedModel!.id : null,
           email: user.email,
           customerName: user.fullName,
           phone: common.shippingAddress.telefon,
@@ -350,11 +381,17 @@ export async function POST(request: NextRequest) {
           material:
             orderType === "marketplace"
               ? product!.material ?? "resin"
-              : customInput!.material,
-          // Finish tier (custom only). Marketplace products have no finish
-          // choice, so they fall back to the column default.
+              : orderType === "upload"
+                ? uploadedModel!.material
+                : customInput!.material,
+          // Finish tier. Marketplace falls back to the default; upload prints
+          // ship raw by default; custom uses the buyer's selection.
           finish:
-            orderType === "marketplace" ? "paintable_kit" : customInput!.finish,
+            orderType === "marketplace"
+              ? "paintable_kit"
+              : orderType === "upload"
+                ? "raw"
+                : customInput!.finish,
           photoKey: customInput?.photoKey ?? null,
           // Marketplace item fields (null for custom).
           orderType,
@@ -477,6 +514,8 @@ export async function POST(request: NextRequest) {
     if (orderType === "marketplace") {
       figurineName =
         quantity > 1 ? `${product!.title} × ${quantity}` : product!.title;
+    } else if (orderType === "upload") {
+      figurineName = `3D Model — ${uploadedModel!.fileName.slice(0, 60)}`;
     } else {
       const sizeLabel =
         d[`sizes.${customInput!.figurineSize}` as keyof typeof d] ||

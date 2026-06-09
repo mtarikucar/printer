@@ -6,7 +6,9 @@ import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
-import { useDictionary } from "@/lib/i18n/locale-context";
+import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
+import { formatCurrency } from "@/lib/i18n/format";
+import { objectPriceKurus } from "@/lib/config/prices";
 import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 
 // Faz 2: 2D design/logo → 3D object. Reuses the existing "object" style engine
@@ -15,6 +17,7 @@ import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 // proven /create checkout via ?previewId= (no new schema / order path).
 export function DesignToProductFlow() {
   const d = useDictionary();
+  const locale = useLocale();
   const router = useRouter();
   const turnstileRef = useRef<TurnstileRef>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -242,6 +245,13 @@ export function DesignToProductFlow() {
             <div className="card mt-6 overflow-hidden">
               <ModelViewer url={glbUrl} previewMode />
             </div>
+            <p className="mt-4 text-center text-sm text-text-secondary">
+              {d["design.fromPrice"]}{" "}
+              <span className="font-semibold text-text-primary">
+                {formatCurrency(objectPriceKurus("orta", "resin"), locale)}
+              </span>
+              <span className="mt-1 block text-xs text-text-muted">{d["design.priceNote"]}</span>
+            </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={() => previewId && router.push(`/create?previewId=${previewId}`)}

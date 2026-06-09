@@ -92,6 +92,7 @@ export async function promoteDraftToOrder(
         orderNumber: draft.reference,
         userId: draft.userId,
         previewId: draft.previewId,
+        uploadedModelId: draft.uploadedModelId,
         draftId: draft.id,
         email: draft.email,
         customerName: draft.customerName,

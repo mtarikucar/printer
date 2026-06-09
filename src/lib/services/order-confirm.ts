@@ -42,6 +42,16 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
       return { order, action: "noop" as const };
     }
 
+    // Upload orders: the model is already a print-ready mesh — skip AI/mesh and
+    // go straight to review for manufacturer assignment.
+    if (order.uploadedModelId) {
+      await tx
+        .update(orders)
+        .set({ status: "review", updatedAt: new Date() })
+        .where(eq(orders.id, orderId));
+      return { order, action: "upload" as const };
+    }
+
     if (order.previewId) {
       const preview = await tx.query.previews.findFirst({
         where: eq(previews.id, order.previewId),
@@ -192,6 +202,16 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
       userId: result.order.userId,
       manufacturerId: result.order.manufacturerId,
       status: "failed_generation",
+    });
+  } else if (result.action === "upload") {
+    // Upload orders skip AI/mesh — the model is already print-ready. Emit the
+    // review transition; confirmation emails are sent below.
+    await emitOrderChanged({
+      orderId: result.order.id,
+      orderNumber: result.order.orderNumber,
+      userId: result.order.userId,
+      manufacturerId: result.order.manufacturerId,
+      status: "review",
     });
   }
 

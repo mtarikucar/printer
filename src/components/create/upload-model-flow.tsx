@@ -8,6 +8,7 @@ import { SiteHeader } from "@/components/site-header";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
 import { UPLOAD_MODEL_MAX_SIZE_BYTES } from "@/lib/config/upload";
+import { CheckoutForm } from "@/components/checkout/checkout-form";
 
 const HEIGHTS = [40, 60, 80, 120, 160];
 const MATERIALS = ["resin", "filament"] as const;
@@ -38,6 +39,7 @@ export function UploadModelFlow() {
   const [material, setMaterial] = useState<(typeof MATERIALS)[number]>("resin");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const pickFile = (file: File) => {
     const ext = file.name.toLowerCase().split(".").pop();
@@ -81,6 +83,7 @@ export function UploadModelFlow() {
     setFileName(null);
     setResult(null);
     setError(null);
+    setCheckoutOpen(false);
   };
 
   return (
@@ -217,26 +220,38 @@ export function UploadModelFlow() {
               </div>
             )}
 
-            <div className="card mt-6 p-6 text-center">
+            <div className="card mt-6 p-6">
               {result.needsQuote || result.priceKurus == null ? (
-                <>
+                <div className="text-center">
                   <p className="font-serif text-lg text-text-primary">{d["upload.needsQuote"]}</p>
                   <p className="mt-2 text-sm text-text-secondary">{d["upload.needsQuoteSub"]}</p>
-                </>
+                  <button
+                    onClick={() => setStep(3)}
+                    className="mt-6 w-full rounded-full bg-green-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
+                  >
+                    {d["upload.requestCta"]}
+                  </button>
+                </div>
+              ) : checkoutOpen ? (
+                <CheckoutForm
+                  orderPayload={{ orderType: "upload", uploadedModelId: result.id }}
+                  priceKurus={result.priceKurus}
+                  submitLabel={d["upload.placeOrder"]}
+                />
               ) : (
-                <>
+                <div className="text-center">
                   <p className="text-sm text-text-muted">{d["upload.price"]}</p>
                   <p className="mt-1 text-3xl font-semibold text-text-primary">
                     {formatCurrency(result.priceKurus, locale)}
                   </p>
-                </>
+                  <button
+                    onClick={() => setCheckoutOpen(true)}
+                    className="mt-6 w-full rounded-full bg-green-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
+                  >
+                    {d["upload.placeOrder"]}
+                  </button>
+                </div>
               )}
-              <button
-                onClick={() => setStep(3)}
-                className="mt-6 w-full rounded-full bg-green-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700"
-              >
-                {d["upload.requestCta"]}
-              </button>
             </div>
           </div>
         )}

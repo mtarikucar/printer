@@ -140,6 +140,7 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "gallery_unfeature",
   "qc_approve",
   "qc_reject",
+  "refund",
 ]);
 
 /**

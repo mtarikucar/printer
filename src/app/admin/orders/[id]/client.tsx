@@ -514,6 +514,11 @@ export function OrderDetailClient({ data, locale }: Props) {
                     {loading === "reject" ? d["admin.orderDetail.rejecting"] : d["admin.orderDetail.reject"]}
                   </button>
                 )}
+                {order.paymentStatus === "succeeded" && (
+                  <button onClick={() => { if (confirm("İade işlemini onayla? Ödeme iade edilir ve üretici kazancı geri alınır.")) performAction("refund", { reason: notes || "Admin iadesi" }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
+                    {loading === "refund" ? "İade ediliyor…" : "İade et"}
+                  </button>
+                )}
               </div>
             )}
           </div>

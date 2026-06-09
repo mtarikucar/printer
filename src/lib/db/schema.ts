@@ -247,6 +247,10 @@ export const users = pgTable("users", {
   // set a password. Flipped false once they claim the account via the
   // post-purchase email (which reuses the password-reset token flow).
   isGuest: boolean("is_guest").notNull().default(false),
+  // İYS / commercial-electronic-message consent (ETK, law 6563). Opt-in only;
+  // marketingConsentAt records WHEN consent was given (required for İYS records).
+  marketingConsent: boolean("marketing_consent").notNull().default(false),
+  marketingConsentAt: timestamp("marketing_consent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -615,6 +615,9 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
         <Link href="/terms" className={s("footer-link")}>
           {d["landing.fig.footer.legal.terms"]}
         </Link>
+        <Link href="/ticari-ileti" className={s("footer-link")}>
+          {d["landing.fig.footer.legal.commercial"]}
+        </Link>
       </div>
       <div className={s("footer-mfr")}>
         <span className={s("footer-mfr-prompt")}>

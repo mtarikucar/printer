@@ -21,6 +21,7 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -59,7 +60,7 @@ export default function RegisterPage() {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, email, phone: phoneE164, password }),
+        body: JSON.stringify({ fullName, email, phone: phoneE164, password, marketingConsent }),
       });
 
       const data = await res.json();
@@ -131,6 +132,20 @@ export default function RegisterPage() {
               <FormField label={d["register.passwordConfirm"]} required>
                 <Input type="password" required value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} />
               </FormField>
+              <label className="flex items-start gap-2.5 text-xs text-text-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={marketingConsent}
+                  onChange={(e) => setMarketingConsent(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-bg-subtle text-green-500 focus:ring-green-500"
+                />
+                <span>
+                  {d["register.marketingConsent"]}{" "}
+                  <Link href="/ticari-ileti" className="text-green-500 hover:text-green-400">
+                    {d["register.marketingConsentLink"]}
+                  </Link>
+                </span>
+              </label>
               {error && (
                 <div className="bg-error-50 text-error rounded-xl p-3 text-sm text-center flex items-center justify-center gap-2">
                   <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">

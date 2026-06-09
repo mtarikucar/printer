@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
     password: z.string().min(6, d["api.auth.passwordMin"]),
     fullName: z.string().min(1, d["api.auth.fullNameRequired"]).max(100),
     phone: phoneField(),
+    // İYS opt-in (commercial electronic messages). Defaults false — consent
+    // must be explicit. Recorded with a timestamp below.
+    marketingConsent: z.boolean().optional().default(false),
   });
 
   try {
@@ -60,6 +63,8 @@ export async function POST(request: NextRequest) {
         passwordHash,
         fullName: validated.fullName,
         phone: validated.phone,
+        marketingConsent: validated.marketingConsent,
+        marketingConsentAt: validated.marketingConsent ? new Date() : null,
       })
       .returning();
 

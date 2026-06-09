@@ -116,6 +116,7 @@ export const FIGURUNICA_KEYS = [
   "landing.fig.footer.legal.cookies",
   "landing.fig.footer.legal.privacy",
   "landing.fig.footer.legal.terms",
+  "landing.fig.footer.legal.commercial",
   "landing.fig.footer.mfrPrompt",
   "landing.fig.footer.mfrApply",
   "landing.fig.footer.mfrLogin",

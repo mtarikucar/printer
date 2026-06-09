@@ -118,6 +118,9 @@ const en = {
   "nav.shop": "Shop",
   "nav.group.custom": "Custom Figurine",
   "nav.group.shop": "3D Shop",
+  "nav.market": "Marketplace",
+  "nav.custom": "Custom",
+  "nav.howItWorks": "How it works",
 
   // ─── Marketplace / Shop ──────────────────────────────────────
   "shop.title": "Shop",

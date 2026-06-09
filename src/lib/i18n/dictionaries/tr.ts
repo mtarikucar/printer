@@ -119,6 +119,9 @@ const tr: Dictionary = {
   "nav.create": "Oluştur",
   "nav.group.custom": "Özel Figür",
   "nav.group.shop": "3D Shop",
+  "nav.market": "Pazaryeri",
+  "nav.custom": "Özel Üret",
+  "nav.howItWorks": "Nasıl Çalışır",
   "nav.shop": "Mağaza",
 
   // ─── Marketplace / Shop ──────────────────────────────────────

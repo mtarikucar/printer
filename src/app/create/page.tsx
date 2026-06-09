@@ -93,6 +93,8 @@ export default function CreatePage() {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
   const [previewGlbUrl, setPreviewGlbUrl] = useState<string | null>(null);
+  const [previewObjUrl, setPreviewObjUrl] = useState<string | null>(null);
+  const [previewStlUrl, setPreviewStlUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   // Revision state
@@ -292,6 +294,8 @@ export default function CreatePage() {
         if (data.photoKey) setPhotoKey(data.photoKey);
         if (data.status === "ready" || data.status === "approved") {
           setPreviewGlbUrl(data.glbUrl);
+          setPreviewObjUrl(data.objUrl ?? null);
+          setPreviewStlUrl(data.stlUrl ?? null);
           setStep(2);
         }
       })
@@ -366,6 +370,8 @@ export default function CreatePage() {
 
         if (data.status === "ready") {
           setPreviewGlbUrl(data.glbUrl);
+          setPreviewObjUrl(data.objUrl ?? null);
+          setPreviewStlUrl(data.stlUrl ?? null);
           setStep(2);
           if (pollRef.current) clearInterval(pollRef.current);
         } else if (data.status === "failed") {
@@ -1145,6 +1151,36 @@ export default function CreatePage() {
                 {d["create.preview.requestRevision"]}
               </Button>
             </div>
+
+            {(previewStlUrl || previewObjUrl) && (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm animate-fade-in-up delay-300">
+                <span className="text-text-muted">{d["create.preview.downloadLabel"]}</span>
+                {previewStlUrl && (
+                  <a
+                    href={previewStlUrl}
+                    download="figure.stl"
+                    className="inline-flex items-center gap-1.5 text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {d["create.preview.downloadStl"]}
+                  </a>
+                )}
+                {previewObjUrl && (
+                  <a
+                    href={previewObjUrl}
+                    download="figure.obj"
+                    className="inline-flex items-center gap-1.5 text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {d["create.preview.downloadObj"]}
+                  </a>
+                )}
+              </div>
+            )}
 
             {loggedIn === false && (
               <div className="mt-4 flex items-center gap-2 justify-center text-sm text-amber-400 animate-fade-in-up delay-400">

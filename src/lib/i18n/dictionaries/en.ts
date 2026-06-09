@@ -535,6 +535,9 @@ const en = {
   "create.preview.dragToRotate": "Drag to rotate, pinch to zoom",
   "create.preview.approve": "Approve & Continue",
   "create.preview.requestRevision": "Request Revision",
+  "create.preview.downloadLabel": "Download model:",
+  "create.preview.downloadStl": "STL",
+  "create.preview.downloadObj": "OBJ",
 
   // Revision
   "create.revision.title": "Request a Revision",
@@ -1522,6 +1525,7 @@ const en = {
   "manufacturer.orderDetail.model3d": "3D Model",
   "manufacturer.orderDetail.downloadGlb": "Download GLB",
   "manufacturer.orderDetail.downloadStl": "Download STL",
+  "manufacturer.orderDetail.downloadObj": "Download OBJ",
   "manufacturer.orderDetail.shippingAddress": "Shipping Address",
   "manufacturer.orderDetail.figurineSize": "Figurine Size",
   "manufacturer.orderDetail.material": "Material",

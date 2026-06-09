@@ -1,5 +1,5 @@
 {
-  "id": "1257d160-6ebe-4fd8-8273-5205f5dd8dc2",
+  "id": "fc29e716-c6f7-45d7-8c97-e183519bfa52",
   "prevId": "8b0708fe-dc83-4c71-83f8-d4c87fa1575c",
   "version": "7",
   "dialect": "postgresql",
@@ -409,6 +409,12 @@
         },
         "output_stl_url": {
           "name": "output_stl_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_obj_url": {
+          "name": "output_obj_url",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -2892,6 +2898,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "obj_url": {
+          "name": "obj_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "obj_key": {
+          "name": "obj_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stl_url": {
+          "name": "stl_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stl_key": {
+          "name": "stl_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "meshy_task_id": {
           "name": "meshy_task_id",
           "type": "text",
@@ -3724,7 +3754,7 @@
       "schema": "public",
       "values": [
         "realistic",
-        "storybook",
+        "disney",
         "anime",
         "chibi",
         "object"

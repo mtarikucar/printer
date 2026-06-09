@@ -131,10 +131,24 @@ async function processJob(job: Job<AiGenerationJobData>) {
     const glbKey = await saveFile(glbBuffer, `models/${orderId}`, glbFilename);
     const localGlbUrl = getPublicUrl(glbKey);
 
-    // Update generation attempt with local URL
+    // Best-effort: also persist Meshy's OBJ export so manufacturers can grab an
+    // editable mesh. OBJ is non-critical — the GLB drives the STL print
+    // pipeline — so a failure here must not fail the whole generation.
+    let localObjUrl: string | null = null;
+    if (result.objUrl) {
+      try {
+        const objBuffer = await downloadFile(result.objUrl);
+        const objKey = await saveFile(objBuffer, `models/${orderId}`, `${nanoid()}.obj`);
+        localObjUrl = getPublicUrl(objKey);
+      } catch (err) {
+        job.log(`OBJ download/save failed (non-fatal): ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
+
+    // Update generation attempt with local URL(s)
     await db
       .update(generationAttempts)
-      .set({ outputGlbUrl: localGlbUrl, updatedAt: new Date() })
+      .set({ outputGlbUrl: localGlbUrl, outputObjUrl: localObjUrl, updatedAt: new Date() })
       .where(eq(generationAttempts.id, attempt[0].id));
 
     // Enqueue mesh processing

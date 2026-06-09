@@ -1,6 +1,6 @@
 {
-  "id": "3d6baafc-139c-4b9c-b133-b6af955d33b3",
-  "prevId": "1257d160-6ebe-4fd8-8273-5205f5dd8dc2",
+  "id": "1e525b82-ed01-4668-92a5-c22cb5a95fe1",
+  "prevId": "fc29e716-c6f7-45d7-8c97-e183519bfa52",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -409,6 +409,12 @@
         },
         "output_stl_url": {
           "name": "output_stl_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_obj_url": {
+          "name": "output_obj_url",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -2908,6 +2914,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "obj_url": {
+          "name": "obj_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "obj_key": {
+          "name": "obj_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stl_url": {
+          "name": "stl_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stl_key": {
+          "name": "stl_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "meshy_task_id": {
           "name": "meshy_task_id",
           "type": "text",
@@ -3607,6 +3637,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "marketing_consent": {
+          "name": "marketing_consent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "marketing_consent_at": {
+          "name": "marketing_consent_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

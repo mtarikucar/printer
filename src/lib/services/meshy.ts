@@ -2,6 +2,12 @@ import type { FigurineStyle } from "./style-transfer";
 
 interface MeshyResult {
   glbUrl: string;
+  // Meshy returns several export formats in `model_urls`. We keep the GLB
+  // (used by the viewer and the STL print pipeline) and also surface OBJ/STL
+  // so callers can offer them as direct downloads without a conversion step.
+  // Either may be absent on older tasks / API changes, hence nullable.
+  objUrl: string | null;
+  stlUrl: string | null;
   taskId: string;
   durationMs: number;
 }
@@ -90,13 +96,20 @@ export async function generateWithMeshy(
 
     if (statusData.status === "SUCCEEDED") {
       const durationMs = Date.now() - startTime;
-      const glbUrl = statusData.model_urls?.glb;
+      const modelUrls = statusData.model_urls ?? {};
+      const glbUrl = modelUrls.glb;
 
       if (!glbUrl) {
         throw new Error("Meshy returned no GLB URL");
       }
 
-      return { glbUrl, taskId, durationMs };
+      return {
+        glbUrl,
+        objUrl: modelUrls.obj ?? null,
+        stlUrl: modelUrls.stl ?? null,
+        taskId,
+        durationMs,
+      };
     }
 
     if (statusData.status === "FAILED") {

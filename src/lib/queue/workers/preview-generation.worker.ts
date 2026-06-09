@@ -47,6 +47,28 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
     const glbKey = await saveFile(glbBuffer, `previews/${previewId}`, glbFilename);
     const localGlbUrl = getPublicUrl(glbKey);
 
+    // Best-effort: persist Meshy's OBJ + STL exports alongside the GLB so the
+    // customer can download the preview in a print/edit-friendly format. These
+    // are non-critical (the GLB is what the 3D viewer needs), so a download
+    // failure just leaves that format unavailable rather than failing the
+    // whole preview.
+    const persistOptional = async (
+      url: string | null,
+      ext: "obj" | "stl"
+    ): Promise<{ url: string; key: string } | null> => {
+      if (!url) return null;
+      try {
+        const buffer = await downloadFile(url);
+        const key = await saveFile(buffer, `previews/${previewId}`, `${nanoid()}.${ext}`);
+        return { url: getPublicUrl(key), key };
+      } catch (err) {
+        job.log(`${ext.toUpperCase()} download/save failed (non-fatal): ${err instanceof Error ? err.message : "unknown"}`);
+        return null;
+      }
+    };
+    const obj = await persistOptional(result.objUrl, "obj");
+    const stl = await persistOptional(result.stlUrl, "stl");
+
     // Guarded transition: only flip to "ready" when we still own the record
     // (status === "generating") AND we actually have a glbUrl. Without this
     // guard a worker crash mid-update could leave status="ready" but
@@ -57,6 +79,10 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
         status: "ready",
         glbUrl: localGlbUrl,
         glbKey,
+        objUrl: obj?.url ?? null,
+        objKey: obj?.key ?? null,
+        stlUrl: stl?.url ?? null,
+        stlKey: stl?.key ?? null,
         meshyTaskId: result.taskId,
         durationMs: result.durationMs,
         updatedAt: new Date(),

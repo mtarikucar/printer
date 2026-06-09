@@ -47,13 +47,27 @@ export function SiteHeader() {
     .slice(0, 2)
     .toUpperCase() || "?";
 
-  const navLinks = [
-    { href: "/shop", label: d["nav.shop" as keyof typeof d] || "Mağaza" },
-    { href: "/styles", label: d["nav.styles"] },
-    { href: "/gallery", label: d["nav.gallery"] },
-    { href: "/create", label: d["nav.create"] },
-    ...(user ? [{ href: "/account", label: d["nav.myOrders"] }] : []),
+  // Two primary sections (Faz 1.3): the custom-figurine journey vs the
+  // ready-made 3D shop. Account is user-specific and appended separately.
+  const navGroups = [
+    {
+      labelKey: "nav.group.custom" as const,
+      links: [
+        { href: "/create", label: d["nav.create"] },
+        { href: "/styles", label: d["nav.styles"] },
+        { href: "/gallery", label: d["nav.gallery"] },
+      ],
+    },
+    {
+      labelKey: "nav.group.shop" as const,
+      links: [
+        { href: "/shop", label: d["nav.shop" as keyof typeof d] || "Mağaza" },
+      ],
+    },
   ];
+  const accountLink = user
+    ? { href: "/account", label: d["nav.myOrders"] }
+    : null;
 
   return (
     <header className="sticky top-0 z-50 bg-bg-base/80 backdrop-blur-xl border-b border-bg-subtle/50">
@@ -65,22 +79,44 @@ export function SiteHeader() {
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
-          {navLinks.map((link) => (
+          {navGroups.map((group, gi) => (
+            <div key={group.labelKey} className="flex items-center gap-6">
+              {gi > 0 && (
+                <span className="w-px h-4 bg-bg-subtle/70" aria-hidden="true" />
+              )}
+              {group.links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`relative text-sm font-medium transition-colors py-1 ${
+                    pathname === link.href
+                      ? "text-green-500"
+                      : "text-text-muted hover:text-green-400"
+                  }`}
+                >
+                  {link.label}
+                  {pathname === link.href && (
+                    <span className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-green-500 rounded-full" />
+                  )}
+                </Link>
+              ))}
+            </div>
+          ))}
+          {accountLink && (
             <Link
-              key={link.href}
-              href={link.href}
+              href={accountLink.href}
               className={`relative text-sm font-medium transition-colors py-1 ${
-                pathname === link.href
+                pathname === accountLink.href
                   ? "text-green-500"
                   : "text-text-muted hover:text-green-400"
               }`}
             >
-              {link.label}
-              {pathname === link.href && (
+              {accountLink.label}
+              {pathname === accountLink.href && (
                 <span className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-green-500 rounded-full" />
               )}
             </Link>
-          ))}
+          )}
           <LanguageSwitcher />
           {authLoading ? (
             <div className="w-10 h-10 bg-bg-muted rounded-full animate-pulse" />
@@ -123,20 +159,40 @@ export function SiteHeader() {
       {menuOpen && (
         <nav className="md:hidden border-t border-bg-subtle bg-bg-base/95 backdrop-blur-xl animate-fade-in">
           <div className="max-w-6xl mx-auto px-4 py-3 space-y-1">
-            {navLinks.map((link) => (
+            {navGroups.map((group) => (
+              <div key={group.labelKey} className="space-y-1">
+                <p className="px-4 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  {d[group.labelKey]}
+                </p>
+                {group.links.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setMenuOpen(false)}
+                    className={`block py-3 px-4 rounded-xl text-sm font-medium transition-colors ${
+                      pathname === link.href
+                        ? "bg-bg-elevated text-green-500"
+                        : "text-text-secondary hover:bg-bg-elevated"
+                    }`}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            ))}
+            {accountLink && (
               <Link
-                key={link.href}
-                href={link.href}
+                href={accountLink.href}
                 onClick={() => setMenuOpen(false)}
                 className={`block py-3 px-4 rounded-xl text-sm font-medium transition-colors ${
-                  pathname === link.href
+                  pathname === accountLink.href
                     ? "bg-bg-elevated text-green-500"
                     : "text-text-secondary hover:bg-bg-elevated"
                 }`}
               >
-                {link.label}
+                {accountLink.label}
               </Link>
-            ))}
+            )}
 
             {/* Divider */}
             <div className="border-t border-bg-subtle my-2" />

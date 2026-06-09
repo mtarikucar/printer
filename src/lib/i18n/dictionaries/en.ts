@@ -116,6 +116,8 @@ const en = {
   "nav.gallery": "Gallery",
   "nav.create": "Create",
   "nav.shop": "Shop",
+  "nav.group.custom": "Custom Figurine",
+  "nav.group.shop": "3D Shop",
 
   // ─── Marketplace / Shop ──────────────────────────────────────
   "shop.title": "Shop",

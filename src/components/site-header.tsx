@@ -60,7 +60,7 @@ export function SiteHeader() {
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2 text-xl text-text-primary">
-          <span className="font-serif">Figurine Studio</span>
+          <span className="font-serif">Figurunica</span>
         </Link>
 
         {/* Desktop nav */}

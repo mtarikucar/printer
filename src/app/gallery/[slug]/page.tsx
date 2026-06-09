@@ -60,8 +60,8 @@ export async function generateMetadata({
   const styleLabel = d[`create.style.${order.style}` as keyof typeof d] || order.style;
   const title =
     locale === "tr"
-      ? `${name} — ${styleLabel} 3D Figürin | Figurine Studio Galeri`
-      : `${name} — ${styleLabel} 3D Figurine | Figurine Studio Gallery`;
+      ? `${name} — ${styleLabel} 3D Figürin | Figurunica Galeri`
+      : `${name} — ${styleLabel} 3D Figurine | Figurunica Gallery`;
   const description =
     locale === "tr"
       ? `Müşterimizin fotoğrafından ${styleLabel.toLowerCase()} stilinde ürettiğimiz 3D figürin. Galeriye göz atın, kendi figürinizi yaratın.`

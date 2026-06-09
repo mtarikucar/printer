@@ -2,7 +2,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
 
 export const metadata = {
-  title: "Privacy Policy — Figurine Studio",
+  title: "Privacy Policy — Figurunica",
 };
 
 export default async function PrivacyPage() {
@@ -25,14 +25,14 @@ export default async function PrivacyPage() {
           {isTr ? (
             <>
               <p>
-                Figurine Studio (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) olarak kisisel verilerinizin korunmasina buyuk onem veriyoruz.
+                Figurunica (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) olarak kisisel verilerinizin korunmasina buyuk onem veriyoruz.
                 Bu Gizlilik Politikasi, 6698 sayili Kisisel Verilerin Korunmasi Kanunu (&quot;KVKK&quot;) ve ilgili mevzuat kapsaminda
                 kisisel verilerinizin nasil toplandigi, islendigi, saklandigi ve korundugunun aciklanmaktadir.
               </p>
 
               <h2>1. Veri Sorumlusu</h2>
               <p>
-                Kisisel verileriniz bakimindan veri sorumlusu Figurine Studio&apos;dur. Bize asagidaki kanallardan ulasabilirsiniz:
+                Kisisel verileriniz bakimindan veri sorumlusu Figurunica&apos;dur. Bize asagidaki kanallardan ulasabilirsiniz:
               </p>
               <ul>
                 <li>E-posta: info@figurunica.com</li>
@@ -185,13 +185,13 @@ export default async function PrivacyPage() {
           ) : (
             <>
               <p>
-                At Figurine Studio (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;), we are committed to protecting your personal data.
+                At Figurunica (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;), we are committed to protecting your personal data.
                 This Privacy Policy explains how your personal information is collected, processed, stored, and protected
                 in accordance with applicable data protection laws, including Turkey&apos;s Personal Data Protection Law No. 6698 (&quot;KVKK&quot;).
               </p>
 
               <h2>1. Data Controller</h2>
-              <p>Figurine Studio is the data controller for your personal data. You can reach us through:</p>
+              <p>Figurunica is the data controller for your personal data. You can reach us through:</p>
               <ul>
                 <li>Email: info@figurunica.com</li>
                 <li>Website: figurunica.com</li>

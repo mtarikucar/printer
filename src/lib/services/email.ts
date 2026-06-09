@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
     : undefined,
 });
 
-const FROM_EMAIL = process.env.SMTP_FROM || "Figurine Studio <siparis@figurunica.com>";
+const FROM_EMAIL = process.env.SMTP_FROM || "Figurunica <siparis@figurunica.com>";
 
 function escHtml(str: string): string {
   return str
@@ -217,7 +217,7 @@ function getTemplates(locale: Locale) {
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
             <h1 style="color: #1a1a1a;">${d["email.giftCard.heading"].replace("{customerName}", escHtml(p.customerName))}</h1>
-            <p>${d["email.giftCard.body"].replace("{senderName}", escHtml(p.senderName || "Figurine Studio"))}</p>
+            <p>${d["email.giftCard.body"].replace("{senderName}", escHtml(p.senderName || "Figurunica"))}</p>
             ${p.giftCardMessage ? `<div style="margin: 16px 0; padding: 16px; background: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e;"><p style="margin: 0; font-style: italic;">"${escHtml(p.giftCardMessage)}"</p></div>` : ""}
             <div style="margin: 24px 0; padding: 24px; background: #f9fafb; border-radius: 12px; text-align: center;">
               <p style="margin: 0; font-size: 14px; color: #6b7280;">${d["email.giftCard.codeLabel"]}</p>
@@ -291,7 +291,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 16px;">
             ${d["email.adminCustom.trackButton"]}
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -307,7 +307,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.assigned.dashboardButton"]}
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -324,7 +324,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.adminCustom.trackButton"]}
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -339,7 +339,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.adminCustom.trackButton"]}
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -354,7 +354,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["admin.qcQueue.title"]}
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -371,7 +371,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             Siparişler
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -394,7 +394,7 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.bankTransfer.trackButton"]}
           </a>
-          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurine Studio</p>
+          <p style="margin-top: 24px; color: #999; font-size: 12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -475,7 +475,7 @@ function getTemplates(locale: Locale) {
     }),
 
     manufacturer_notification: (p) => ({
-      subject: p.notificationSubject || `Figurine Studio — ${escHtml(p.orderNumber || "")}`,
+      subject: p.notificationSubject || `Figurunica — ${escHtml(p.orderNumber || "")}`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #1a1a1a;">${escHtml(p.notificationSubject || "")}</h1>
@@ -487,8 +487,8 @@ function getTemplates(locale: Locale) {
 
     guest_account_claim: (p) => ({
       subject: locale === "tr"
-        ? "Figurine Studio — Hesabınızı koruyun"
-        : "Figurine Studio — Claim your account",
+        ? "Figurunica — Hesabınızı koruyun"
+        : "Figurunica — Claim your account",
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #1f2937;">
           <h1 style="color: #1a1a1a;">${
@@ -530,7 +530,7 @@ function getTemplates(locale: Locale) {
             </a>
           </p>
           <p style="font-size:13px;color:#6b7280;">${d["email.mfrWelcome.footer"]}</p>
-          <p style="margin-top:24px;color:#999;font-size:12px;">Figurine Studio</p>
+          <p style="margin-top:24px;color:#999;font-size:12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -547,7 +547,7 @@ function getTemplates(locale: Locale) {
               ${d["email.mfrApproved.button"]}
             </a>
           </p>
-          <p style="margin-top:24px;color:#999;font-size:12px;">Figurine Studio</p>
+          <p style="margin-top:24px;color:#999;font-size:12px;">Figurunica</p>
         </div>
       `,
     }),
@@ -559,7 +559,7 @@ function getTemplates(locale: Locale) {
           <h1 style="color:#1a1a1a;">${d["email.mfrRejected.heading"]}</h1>
           <p>${d["email.mfrRejected.body"]}</p>
           ${p.rejectionReason ? `<p style="color:#6b7280;"><strong>${d["email.mfrRejected.reasonLabel"]}:</strong> ${escHtml(p.rejectionReason)}</p>` : ""}
-          <p style="margin-top:24px;color:#999;font-size:12px;">Figurine Studio</p>
+          <p style="margin-top:24px;color:#999;font-size:12px;">Figurunica</p>
         </div>
       `,
     }),

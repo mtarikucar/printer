@@ -81,7 +81,7 @@ export async function createShipment(
       ttDocumentId: "",
       dcSelectedCredit: "",
       dcCreditRule: 0,
-      description: "Figurine Studio Siparis",
+      description: "Figurunica Siparis",
       orgGeoCode: "",
       arrivalTownName: "",
       arrivalCityName: "",

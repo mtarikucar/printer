@@ -95,7 +95,7 @@ export default function RegisterPage() {
       <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
         <div className="w-full max-w-sm px-4">
           <div className="text-center mb-6">
-            <span className="text-xl font-serif text-text-primary">Figurine Studio</span>
+            <span className="text-xl font-serif text-text-primary">Figurunica</span>
           </div>
           <Card padding="lg">
             <h1 className="text-2xl font-serif text-text-primary text-center">

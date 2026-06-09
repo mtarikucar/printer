@@ -16,7 +16,7 @@ const PRINT_READINESS_CLAUSE =
   "no swords, wands, staffs, or other thin handheld objects, " +
   "every part of the figure connected to the main body, designed as a sturdy collectible figurine ready for direct 3D printing.";
 
-// Pose phrasing per style. Chibi/Disney get a strict T-pose (their proportions
+// Pose phrasing per style. Chibi/Storybook get a strict T-pose (their proportions
 // already lean toward static "toy" silhouettes); anime keeps a confident
 // standing pose but with arms separated for printability.
 const POSE_PHRASE: Record<Exclude<FigurineStyle, "realistic" | "object">, string> = {
@@ -27,7 +27,7 @@ const POSE_PHRASE: Record<Exclude<FigurineStyle, "realistic" | "object">, string
 
 const STYLE_PROMPTS: Record<Exclude<FigurineStyle, "realistic" | "object">, string> = {
   disney:
-    "Reimagine this person as an adorable Disney Pixar 3D animated collectible figurine character. Use their general appearance as loose inspiration but fully transform them into a charming Pixar-style character with cute stylized proportions, big warm expressive eyes, a sweet friendly smile, smooth colorful skin, and soft studio lighting. Show the full body " +
+    "Reimagine this person as an adorable storybook-animation 3D collectible figurine character. Use their general appearance as loose inspiration but fully transform them into a charming stylized animated character with cute rounded proportions, big warm expressive eyes, a sweet friendly smile, smooth softly-shaded skin, and soft studio lighting. Show the full body " +
     POSE_PHRASE.disney +
     ", like a collectible toy figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects. " +
     PRINT_READINESS_CLAUSE,

@@ -2,12 +2,12 @@ import type { Dictionary } from "./en";
 
 const tr: Dictionary = {
   // Meta
-  "meta.title": "Figurine Studio — Fotoğrafın, Figürün",
+  "meta.title": "Figurunica — Fotoğrafın, Figürün",
   "meta.description":
     "Fotoğraf yükle, biz onu 3D baskılı figürine dönüştürelim. Boyama kiti ile birlikte kapına gelsin.",
 
   // Common
-  "common.figurineStudio": "Figurine Studio",
+  "common.figurineStudio": "Figurunica",
   "common.email": "E-posta",
   "common.password": "Şifre",
   "common.phone": "Telefon",
@@ -284,7 +284,7 @@ const tr: Dictionary = {
 
   // Gallery
   "gallery.title": "Topluluk Galerisi",
-  "gallery.subtitle": "Figurine Studio ile başkalarının neler yarattığını görün.",
+  "gallery.subtitle": "Figurunica ile başkalarının neler yarattığını görün.",
   "gallery.empty": "Henüz paylaşılan figürin yok. İlk siz olun!",
   "gallery.loadMore": "Daha Fazla Yükle",
   "gallery.loading": "Yükleniyor...",
@@ -299,7 +299,7 @@ const tr: Dictionary = {
   "gallery.filter.all": "Tümü",
   "gallery.filter.realistic": "Gerçekçi",
   "gallery.filter.object": "3D Obje",
-  "gallery.filter.disney": "Disney / Pixar",
+  "gallery.filter.disney": "Masalsı Animasyon",
   "gallery.filter.anime": "Anime",
   "gallery.filter.chibi": "Chibi",
   "gallery.category.character": "Karakter",
@@ -454,12 +454,12 @@ const tr: Dictionary = {
   "create.styleSelection": "Stil Seçimi",
   "create.style.realistic": "Gerçekçi",
   "create.style.object": "3D Obje",
-  "create.style.disney": "Disney / Pixar",
+  "create.style.disney": "Masalsı Animasyon",
   "create.style.anime": "Anime",
   "create.style.chibi": "Chibi",
   "create.style.realistic.desc": "Fotoğrafa sadık kalır",
   "create.style.object.desc": "Herhangi bir nesneyi veya eşyayı 3D baskıya dönüştür",
-  "create.style.disney.desc": "Disney animasyon stili",
+  "create.style.disney.desc": "Masalsı animasyon stili",
   "create.style.anime.desc": "Japon anime stili",
   "create.style.chibi.desc": "Sevimli, büyük başlı stil",
 
@@ -887,7 +887,7 @@ const tr: Dictionary = {
   "email.confirmation.trackPrompt":
     "Siparişinizi istediğiniz zaman takip edin:",
   "email.confirmation.trackButton": "Siparişi Takip Et",
-  "email.confirmation.estimate": "Tahmini teslimat: 5-10 iş günü",
+  "email.confirmation.estimate": "Tahmini teslimat: 7-10 iş günü",
 
   "email.generationFailed.subject":
     "Siparişiniz hakkında güncelleme #{orderNumber}",
@@ -971,8 +971,8 @@ const tr: Dictionary = {
   "landing.styles.object.desc": "Herhangi bir nesneyi, eşyayı veya konsepti 3D baskıya dönüştür.",
   "landing.styles.anime": "Anime",
   "landing.styles.anime.desc": "Belirgin çizgiler ve ifadeli gözler. Japon animasyon stili.",
-  "landing.styles.disney": "Disney / Pixar",
-  "landing.styles.disney.desc": "Sıcak ve sevimli. Beyaz perdeden fırlamış gibi.",
+  "landing.styles.disney": "Masalsı Animasyon",
+  "landing.styles.disney.desc": "Sıcak ve sevimli; iri, ifadeli gözler.",
   "landing.styles.chibi": "Chibi",
   "landing.styles.chibi.desc": "Minnoş ve kompakt. Büyük kafa, minik gövde, maksimum şirinlik.",
 
@@ -1030,10 +1030,10 @@ const tr: Dictionary = {
   // Trust signals (landing — testimonials + stats + badges)
   "landing.fig.trust.eyebrow": "GÜVEN",
   "landing.fig.trust.title": "Müşterilerimiz neler söylüyor?",
-  "landing.fig.trust.statOrders": "5.000+",
-  "landing.fig.trust.statOrdersLabel": "figürin üretildi",
-  "landing.fig.trust.statRating": "4.9 / 5",
-  "landing.fig.trust.statRatingLabel": "müşteri memnuniyeti",
+  "landing.fig.trust.statOrders": "Ankara",
+  "landing.fig.trust.statOrdersLabel": "Stüdyo & destek",
+  "landing.fig.trust.statRating": "Reçine",
+  "landing.fig.trust.statRatingLabel": "Dayanıklı SLA baskı",
   "landing.fig.trust.statShipping": "Ücretsiz",
   "landing.fig.trust.statShippingLabel": "kargo · Türkiye geneli",
   "landing.fig.trust.t1.quote":
@@ -1309,9 +1309,9 @@ const tr: Dictionary = {
   "api.giftCard.createFailed": "Hediye kartı oluşturma başarısız",
 
   // Email - Gift Card
-  "email.giftCard.subject": "Size {amount} Figurine Studio Hediye Kartı gönderildi!",
+  "email.giftCard.subject": "Size {amount} Figurunica Hediye Kartı gönderildi!",
   "email.giftCard.heading": "Merhaba {customerName}!",
-  "email.giftCard.body": "{senderName} size bir Figurine Studio hediye kartı gönderdi!",
+  "email.giftCard.body": "{senderName} size bir Figurunica hediye kartı gönderdi!",
   "email.giftCard.codeLabel": "Hediye Kartı Kodunuz",
   "email.giftCard.howToUse": "Siparişinizi verirken bu kodu kullanarak hediye kartı bakiyenizi uygulayın.",
   "email.giftCard.startButton": "Oluşturmaya Başla",
@@ -1621,7 +1621,7 @@ const tr: Dictionary = {
   "admin.manufacturingQueue.noOrders": "Bu kategoride sipariş yok",
 
   // Landing - Figurunica (premium scroll-journey tasarımı)
-  "landing.fig.hero.eyebrow": "Şu an basılıyor · parti 04·26",
+  "landing.fig.hero.eyebrow": "Fotoğrafından kişiye özel 3D figürin",
   "landing.fig.hero.titleLead": "Fotoğrafını",
   "landing.fig.hero.titleItalic": "bir",
   "landing.fig.hero.titleAccent": "figürine dönüştür.",
@@ -1632,20 +1632,20 @@ const tr: Dictionary = {
   "landing.fig.hero.stat1.v": "25",
   "landing.fig.hero.stat1.u": "µm",
   "landing.fig.hero.stat1.k": "Katman yüksekliği",
-  "landing.fig.hero.stat2.v": "7",
+  "landing.fig.hero.stat2.v": "5-7",
   "landing.fig.hero.stat2.u": "gün",
-  "landing.fig.hero.stat2.k": "Fotoğraftan kapına",
+  "landing.fig.hero.stat2.k": "Onaydan sonra üretim",
   "landing.fig.hero.stat3.v": "4",
   "landing.fig.hero.stat3.u": "stil",
-  "landing.fig.hero.stat3.k": "Gerçekçi · Chibi · Anime · Disney",
-  "landing.fig.hero.stat4.v": "12k+",
-  "landing.fig.hero.stat4.k": "Basılan figürin",
+  "landing.fig.hero.stat3.k": "Gerçekçi · Chibi · Anime · Masalsı",
+  "landing.fig.hero.stat4.v": "Önizleme",
+  "landing.fig.hero.stat4.k": "Baskıdan önce onay",
   "landing.fig.hero.chip.subject.k": "özne",
   "landing.fig.hero.chip.subject.v": "1 kişi · tanımlandı",
   "landing.fig.hero.chip.verts.k": "verts",
   "landing.fig.hero.chip.build.k": "ilerleme",
-  "landing.fig.hero.chip.queue.k": "sıra",
-  "landing.fig.hero.chip.queue.v": "412 şu an basılıyor",
+  "landing.fig.hero.chip.queue.k": "durum",
+  "landing.fig.hero.chip.queue.v": "siparişe özel",
 
   "landing.fig.journey.scene": "bölüm",
   "landing.fig.journey.of": "/ 07",
@@ -1655,7 +1655,7 @@ const tr: Dictionary = {
   "landing.fig.sta.01.desc": "Net bir kare yeterli. Önden, iyi ışıkta, tam boy ya da yarım — gerisini biz hallederiz.",
   "landing.fig.sta.01.caption": "IMG.jpeg · 1 yükleme",
   "landing.fig.sta.01.dropLabel": "Kendi fotoğrafını buraya bırak",
-  "landing.fig.sta.01.dropHint": "JPG veya PNG · 20MB'ye kadar · tek kişi, iyi ışık",
+  "landing.fig.sta.01.dropHint": "JPG veya PNG · 10MB'ye kadar · tek kişi, iyi ışık",
 
   "landing.fig.sta.02.titleLead": "Seni",
   "landing.fig.sta.02.titleItalic": "görüyoruz",
@@ -1684,7 +1684,7 @@ const tr: Dictionary = {
 
   "landing.fig.sta.05.titleLead": "El",
   "landing.fig.sta.05.titleItalic": "işçiliği.",
-  "landing.fig.sta.05.desc": "Destekler sökülür, yüzeyler zımparalanır, detaylar elle boyanır. Seri üretim değil — sana özel.",
+  "landing.fig.sta.05.desc": "Destekler sökülür, yüzeyler zımparalanır, elle primer'lanıp kontrol edilir — boyamaya hazır gelir. Seri üretim değil, sana özel.",
   "landing.fig.sta.05.caption": "qc · el işçiliği",
 
   "landing.fig.sta.06.titleLead": "Özenle",
@@ -1708,9 +1708,9 @@ const tr: Dictionary = {
   "landing.fig.styles.realistic": "Gerçekçi",
   "landing.fig.styles.chibi": "Chibi",
   "landing.fig.styles.anime": "Anime",
-  "landing.fig.styles.disney": "Disney",
+  "landing.fig.styles.disney": "Masalsı",
 
-  "landing.fig.how.eyebrow": "Süreç · dört adım, bir hafta",
+  "landing.fig.how.eyebrow": "Süreç · dört adım",
   "landing.fig.how.titleLead": "Fotoğraf girer.",
   "landing.fig.how.titleItalic": "Figürin çıkar.",
   "landing.fig.how.s1.title": "Yükle",
@@ -1729,13 +1729,13 @@ const tr: Dictionary = {
   "landing.fig.ctaBand.titleLead": "Fotoğrafını",
   "landing.fig.ctaBand.titleItalic": "bir",
   "landing.fig.ctaBand.titleAccent": "figürine dönüştür.",
-  "landing.fig.ctaBand.sub": "Piksellerden cebe sığan bir sen'e. Bir hafta içinde hediyeye hazır.",
+  "landing.fig.ctaBand.sub": "Piksellerden cebe sığan bir sen'e. Siparişe özel üretim, Türkiye geneli kargo.",
   "landing.fig.ctaBand.button": "Figürinini oluştur",
 
   "landing.fig.floating.text": "Hazırsan sen başla.",
   "landing.fig.floating.button": "Fotoğrafı figürine dönüştür",
 
-  "landing.fig.footer.copyright": "© 2026 Figurine Studio",
+  "landing.fig.footer.copyright": "© 2026 Figurunica",
   "landing.fig.footer.tagline": "Istanbul'da el yapımı · dünyaya kargo",
   "landing.fig.footer.phoneLabel": "Telefon",
   "landing.fig.footer.addressLabel": "Adres",
@@ -1748,7 +1748,7 @@ const tr: Dictionary = {
   "landing.fig.scroll.cue": "Yolculuğu izlemek için kaydır",
 
   // Contact page
-  "contact.meta.title": "İletişim — Figurine Studio",
+  "contact.meta.title": "İletişim — Figurunica",
   "contact.title": "Bize Ulaşın",
   "contact.subtitle":
     "Siparişinizle ilgili sorular, özel istekler ya da başka bir konu için aşağıdaki kanallardan bize ulaşabilirsiniz.",
@@ -1818,18 +1818,18 @@ const tr: Dictionary = {
   "email.newMessage.heading": "Yeni bir mesajınız var",
   "email.newMessage.body":
     "Ekibimiz {orderNumber} numaralı siparişiniz hakkında yanıt verdi. Okuyup yanıtlamak için siparişinizi açın.",
-  "email.mfrWelcome.subject": "Figurine Studio'ya hoş geldiniz — son bir adım",
+  "email.mfrWelcome.subject": "Figurunica'ya hoş geldiniz — son bir adım",
   "email.mfrWelcome.heading": "Tebrikler, {companyName}!",
   "email.mfrWelcome.body":
     "Üretici başvurunuz koşullu olarak onaylandı. Güven ve kalite programımız kapsamında üretim kapasitenizi daha yakından tanımak istiyoruz. Son adım olarak, hâlihazırda kullandığınız 3D yazıcı(lar)ın bir fotoğrafını yükleyin.",
   "email.mfrWelcome.button": "Yazıcı fotoğrafını yükle",
   "email.mfrWelcome.footer": "Yükledikten sonra hesabınız 24 saat içinde incelenecektir.",
-  "email.mfrApproved.subject": "Figurine Studio üretici hesabınız onaylandı",
+  "email.mfrApproved.subject": "Figurunica üretici hesabınız onaylandı",
   "email.mfrApproved.heading": "Onaylandınız, {companyName}!",
   "email.mfrApproved.body":
     "Hesabınız artık tamamen aktif. Giriş yapıp sipariş atamaları almaya başlayabilirsiniz.",
   "email.mfrApproved.button": "Üretici panelini aç",
-  "email.mfrRejected.subject": "Figurine Studio başvurunuz hakkında",
+  "email.mfrRejected.subject": "Figurunica başvurunuz hakkında",
   "email.mfrRejected.heading": "Başvurunuz hakkında",
   "email.mfrRejected.body":
     "İlginiz için teşekkür ederiz. Üretici başvurunuzu şu anda onaylayamıyoruz.",

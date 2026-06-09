@@ -81,7 +81,7 @@ export default function ManufacturerLoginPage() {
         <div className="w-full max-w-sm px-4">
           <div className="text-center mb-6">
             <span className="text-xl font-serif text-gray-900">
-              Figurine Studio
+              Figurunica
             </span>
             <p className="text-sm text-indigo-600 mt-1">
               {(d["manufacturer.nav.panel" as keyof typeof d] as string) ||

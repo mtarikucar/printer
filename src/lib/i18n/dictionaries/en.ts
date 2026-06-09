@@ -1,11 +1,11 @@
 const en = {
   // Meta
-  "meta.title": "Figurine Studio — Your Photo, Your Figurine",
+  "meta.title": "Figurunica — Your Photo, Your Figurine",
   "meta.description":
     "Upload a photo, we'll turn it into a 3D printed figurine. Delivered to your door with a paint kit.",
 
   // Common
-  "common.figurineStudio": "Figurine Studio",
+  "common.figurineStudio": "Figurunica",
   "common.email": "Email",
   "common.password": "Password",
   "common.phone": "Phone",
@@ -282,7 +282,7 @@ const en = {
 
   // Gallery
   "gallery.title": "Community Gallery",
-  "gallery.subtitle": "See what others have created with Figurine Studio.",
+  "gallery.subtitle": "See what others have created with Figurunica.",
   "gallery.empty": "No figurines shared yet. Be the first!",
   "gallery.loadMore": "Load More",
   "gallery.loading": "Loading...",
@@ -297,7 +297,7 @@ const en = {
   "gallery.filter.all": "All",
   "gallery.filter.realistic": "Realistic",
   "gallery.filter.object": "3D Object",
-  "gallery.filter.disney": "Disney / Pixar",
+  "gallery.filter.disney": "Storybook Animation",
   "gallery.filter.anime": "Anime",
   "gallery.filter.chibi": "Chibi",
   "gallery.category.character": "Character",
@@ -452,12 +452,12 @@ const en = {
   "create.styleSelection": "Style Selection",
   "create.style.realistic": "Realistic",
   "create.style.object": "3D Object",
-  "create.style.disney": "Disney / Pixar",
+  "create.style.disney": "Storybook Animation",
   "create.style.anime": "Anime",
   "create.style.chibi": "Chibi",
   "create.style.realistic.desc": "True to the photo",
   "create.style.object.desc": "Turn any object or item into a 3D print",
-  "create.style.disney.desc": "Disney animation style",
+  "create.style.disney.desc": "Storybook animation style",
   "create.style.anime.desc": "Japanese anime style",
   "create.style.chibi.desc": "Cute, big-headed style",
 
@@ -882,7 +882,7 @@ const en = {
     "It's shipped to you with the paint kit",
   "email.confirmation.trackPrompt": "Track your order anytime:",
   "email.confirmation.trackButton": "Track Order",
-  "email.confirmation.estimate": "Estimated delivery: 5-10 business days",
+  "email.confirmation.estimate": "Estimated delivery: 7-10 business days",
 
   "email.generationFailed.subject":
     "Update on your order #{orderNumber}",
@@ -965,8 +965,8 @@ const en = {
   "landing.styles.object.desc": "Turn any object, item, or concept into a 3D printed piece.",
   "landing.styles.anime": "Anime",
   "landing.styles.anime.desc": "Bold lines and expressive eyes. Japanese animation style.",
-  "landing.styles.disney": "Disney / Pixar",
-  "landing.styles.disney.desc": "Warm, friendly charm. Straight from the big screen.",
+  "landing.styles.disney": "Storybook Animation",
+  "landing.styles.disney.desc": "Warm, friendly charm with big, expressive eyes.",
   "landing.styles.chibi": "Chibi",
   "landing.styles.chibi.desc": "Adorably compact. Big head, tiny body, maximum cute.",
 
@@ -1024,10 +1024,10 @@ const en = {
   // Trust signals (landing — testimonials + stats + badges)
   "landing.fig.trust.eyebrow": "TRUST",
   "landing.fig.trust.title": "What our customers say",
-  "landing.fig.trust.statOrders": "5,000+",
-  "landing.fig.trust.statOrdersLabel": "figurines created",
-  "landing.fig.trust.statRating": "4.9 / 5",
-  "landing.fig.trust.statRatingLabel": "customer satisfaction",
+  "landing.fig.trust.statOrders": "Ankara",
+  "landing.fig.trust.statOrdersLabel": "Studio & support",
+  "landing.fig.trust.statRating": "Resin",
+  "landing.fig.trust.statRatingLabel": "Durable SLA prints",
   "landing.fig.trust.statShipping": "Free",
   "landing.fig.trust.statShippingLabel": "shipping · Turkey-wide",
   "landing.fig.trust.t1.quote":
@@ -1303,9 +1303,9 @@ const en = {
   "api.giftCard.createFailed": "Gift card creation failed",
 
   // Email - Gift Card
-  "email.giftCard.subject": "You received a {amount} Figurine Studio Gift Card!",
+  "email.giftCard.subject": "You received a {amount} Figurunica Gift Card!",
   "email.giftCard.heading": "Hello {customerName}!",
-  "email.giftCard.body": "{senderName} sent you a Figurine Studio gift card!",
+  "email.giftCard.body": "{senderName} sent you a Figurunica gift card!",
   "email.giftCard.codeLabel": "Your Gift Card Code",
   "email.giftCard.howToUse": "Use this code when placing your order to apply the gift card balance.",
   "email.giftCard.startButton": "Start Creating",
@@ -1615,7 +1615,7 @@ const en = {
   "admin.manufacturingQueue.noOrders": "No orders in this category",
 
   // Landing - Figurunica (premium scroll-journey design)
-  "landing.fig.hero.eyebrow": "Now printing · batch 04·26",
+  "landing.fig.hero.eyebrow": "Custom 3D figurines from your photo",
   "landing.fig.hero.titleLead": "Turn your photo",
   "landing.fig.hero.titleItalic": "into a",
   "landing.fig.hero.titleAccent": "figurine.",
@@ -1626,20 +1626,20 @@ const en = {
   "landing.fig.hero.stat1.v": "25",
   "landing.fig.hero.stat1.u": "µm",
   "landing.fig.hero.stat1.k": "Layer height",
-  "landing.fig.hero.stat2.v": "7",
+  "landing.fig.hero.stat2.v": "5-7",
   "landing.fig.hero.stat2.u": "days",
-  "landing.fig.hero.stat2.k": "Photo to doorstep",
+  "landing.fig.hero.stat2.k": "Production after approval",
   "landing.fig.hero.stat3.v": "4",
   "landing.fig.hero.stat3.u": "styles",
-  "landing.fig.hero.stat3.k": "Realistic · Chibi · Anime · Disney",
-  "landing.fig.hero.stat4.v": "12k+",
-  "landing.fig.hero.stat4.k": "Figurines printed",
+  "landing.fig.hero.stat3.k": "Realistic · Chibi · Anime · Storybook",
+  "landing.fig.hero.stat4.v": "Preview",
+  "landing.fig.hero.stat4.k": "Approve before we print",
   "landing.fig.hero.chip.subject.k": "subject",
   "landing.fig.hero.chip.subject.v": "1 person · identified",
   "landing.fig.hero.chip.verts.k": "verts",
   "landing.fig.hero.chip.build.k": "build",
-  "landing.fig.hero.chip.queue.k": "queue",
-  "landing.fig.hero.chip.queue.v": "412 printing now",
+  "landing.fig.hero.chip.queue.k": "status",
+  "landing.fig.hero.chip.queue.v": "made to order",
 
   "landing.fig.journey.scene": "chapter",
   "landing.fig.journey.of": "of 07",
@@ -1649,7 +1649,7 @@ const en = {
   "landing.fig.sta.01.desc": "One clear shot is all it takes. Front-facing, good light, full body or half — we handle the rest.",
   "landing.fig.sta.01.caption": "IMG.jpeg · 1 upload",
   "landing.fig.sta.01.dropLabel": "Drop a photo of yourself",
-  "landing.fig.sta.01.dropHint": "JPG or PNG · up to 20MB · one person, good lighting",
+  "landing.fig.sta.01.dropHint": "JPG or PNG · up to 10MB · one person, good lighting",
 
   "landing.fig.sta.02.titleLead": "We",
   "landing.fig.sta.02.titleItalic": "see",
@@ -1678,7 +1678,7 @@ const en = {
 
   "landing.fig.sta.05.titleLead": "Finished",
   "landing.fig.sta.05.titleItalic": "by hand.",
-  "landing.fig.sta.05.desc": "Supports removed, surfaces sanded, features hand-painted. Not mass-produced — made for you.",
+  "landing.fig.sta.05.desc": "Supports removed, surfaces sanded, primed and QC'd by hand — it arrives ready to paint. Not mass-produced, made for you.",
   "landing.fig.sta.05.caption": "qc · hand finish",
 
   "landing.fig.sta.06.titleLead": "Boxed with",
@@ -1702,9 +1702,9 @@ const en = {
   "landing.fig.styles.realistic": "Realistic",
   "landing.fig.styles.chibi": "Chibi",
   "landing.fig.styles.anime": "Anime",
-  "landing.fig.styles.disney": "Disney",
+  "landing.fig.styles.disney": "Storybook",
 
-  "landing.fig.how.eyebrow": "Process · four steps, one week",
+  "landing.fig.how.eyebrow": "The process · four steps",
   "landing.fig.how.titleLead": "A photo in.",
   "landing.fig.how.titleItalic": "A figurine out.",
   "landing.fig.how.s1.title": "Upload",
@@ -1723,13 +1723,13 @@ const en = {
   "landing.fig.ctaBand.titleLead": "Turn your photo",
   "landing.fig.ctaBand.titleItalic": "into a",
   "landing.fig.ctaBand.titleAccent": "figurine.",
-  "landing.fig.ctaBand.sub": "From pixels to a pocket-sized piece of you. Gift-ready in a week.",
+  "landing.fig.ctaBand.sub": "From pixels to a pocket-sized piece of you. Made to order, shipped across Türkiye.",
   "landing.fig.ctaBand.button": "Start your figurine",
 
   "landing.fig.floating.text": "Ready when you are.",
   "landing.fig.floating.button": "Turn photo into figurine",
 
-  "landing.fig.footer.copyright": "© 2026 Figurine Studio",
+  "landing.fig.footer.copyright": "© 2026 Figurunica",
   "landing.fig.footer.tagline": "Handmade in Istanbul · shipped worldwide",
   "landing.fig.footer.phoneLabel": "Phone",
   "landing.fig.footer.addressLabel": "Address",
@@ -1742,7 +1742,7 @@ const en = {
   "landing.fig.scroll.cue": "Scroll to follow the journey",
 
   // Contact page
-  "contact.meta.title": "Contact — Figurine Studio",
+  "contact.meta.title": "Contact — Figurunica",
   "contact.title": "Get in touch",
   "contact.subtitle":
     "Questions about your order, a custom request, or anything else — reach out via any of the channels below.",
@@ -1812,18 +1812,18 @@ const en = {
   "email.newMessage.heading": "You have a new message",
   "email.newMessage.body":
     "Our team replied about your order {orderNumber}. Open your order to read and reply.",
-  "email.mfrWelcome.subject": "Welcome to Figurine Studio — one last step",
+  "email.mfrWelcome.subject": "Welcome to Figurunica — one last step",
   "email.mfrWelcome.heading": "Congratulations, {companyName}!",
   "email.mfrWelcome.body":
     "Your manufacturer application has been conditionally approved. As part of our trust & quality program, we'd like to learn more about your production capabilities. As a last step, please upload a photo of the 3D printer(s) you currently use.",
   "email.mfrWelcome.button": "Upload printer photo",
   "email.mfrWelcome.footer": "After uploading, your account will be reviewed within 24 hours.",
-  "email.mfrApproved.subject": "Your Figurine Studio manufacturer account is approved",
+  "email.mfrApproved.subject": "Your Figurunica manufacturer account is approved",
   "email.mfrApproved.heading": "You're approved, {companyName}!",
   "email.mfrApproved.body":
     "Your account is now fully active. You can log in and start receiving order assignments.",
   "email.mfrApproved.button": "Open manufacturer panel",
-  "email.mfrRejected.subject": "Update on your Figurine Studio application",
+  "email.mfrRejected.subject": "Update on your Figurunica application",
   "email.mfrRejected.heading": "About your application",
   "email.mfrRejected.body":
     "Thank you for your interest. We're unable to approve your manufacturer application at this time.",

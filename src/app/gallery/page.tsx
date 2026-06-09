@@ -19,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
   const d = getDictionary(locale);
   return {
-    title: `${d["gallery.title"]} — Figurine Studio`,
+    title: `${d["gallery.title"]} — Figurunica`,
     description: d["gallery.subtitle"],
   };
 }

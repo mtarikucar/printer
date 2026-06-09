@@ -3,6 +3,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 
 interface UploadDropzoneProps {
   onUploadComplete: (key: string, previewUrl: string) => void;
@@ -37,7 +38,7 @@ export function UploadDropzone({
         return;
       }
 
-      if (file.size > 10 * 1024 * 1024) {
+      if (file.size > UPLOAD_MAX_SIZE_BYTES) {
         onError?.(d["upload.fileTooLarge"]);
         return;
       }

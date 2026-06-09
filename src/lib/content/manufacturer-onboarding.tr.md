@@ -1,6 +1,6 @@
 # Üretici Ortaklığı Bilgilendirmesi
 
-Figurine Studio üretici ağına başvuruyorsunuz. Aşağıdaki şartları okuduğunuzu ve
+Figurunica üretici ağına başvuruyorsunuz. Aşağıdaki şartları okuduğunuzu ve
 kabul ettiğinizi beyan etmeniz gerekmektedir. Hesabınız onaylandıktan sonra paneliniz
 aktifleşir ve size sipariş atanmaya başlar.
 

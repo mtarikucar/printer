@@ -40,7 +40,7 @@ export default function AdminLoginPage() {
             {d["admin.login.title"]}
           </h1>
           <p className="text-sm text-gray-500 text-center mt-1">
-            Figurine Studio
+            Figurunica
           </p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">

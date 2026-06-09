@@ -53,7 +53,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: d["meta.title"],
       description: d["meta.description"],
       url: appUrl,
-      siteName: "Figurine Studio",
+      siteName: "Figurunica",
       locale: locale === "tr" ? "tr_TR" : "en_US",
       type: "website",
     },

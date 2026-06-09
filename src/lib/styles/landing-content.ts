@@ -48,7 +48,7 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
       tr: {
         pageTitle: "Gerçekçi 3D Figürin — Fotoğraftan Birebir Heykel",
         metaDescription:
-          "Fotoğraflarınızdan gerçekçi tarzda 3D figürin yapın. Yüz hatları, kıyafet detayları ve doğal duruş — Figurine Studio'nun gerçekçi stiliyle hediyeniz birebir size benzesin.",
+          "Fotoğraflarınızdan gerçekçi tarzda 3D figürin yapın. Yüz hatları, kıyafet detayları ve doğal duruş — Figurunica'nun gerçekçi stiliyle hediyeniz birebir size benzesin.",
         heroTitle: "Gerçekçi 3D Figürin",
         heroSubtitle:
           "Fotoğrafınızdaki yüz hatları, ifade ve kıyafet detayları olabildiğince doğal aktarılır. Anneye, babaya, eşe verilecek hediyenin birebir benzemesini istediğinizde tercih edin.",
@@ -80,7 +80,7 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
       en: {
         pageTitle: "Realistic 3D Figurine — True-to-Life Sculpture From Your Photo",
         metaDescription:
-          "Create a realistic 3D figurine from your photos. Real facial features, clothing details, and natural posture — Figurine Studio's realistic style makes your gift look exactly like you.",
+          "Create a realistic 3D figurine from your photos. Real facial features, clothing details, and natural posture — Figurunica's realistic style makes your gift look exactly like you.",
         heroTitle: "Realistic 3D Figurines",
         heroSubtitle:
           "Facial features, expression, and clothing details from your photo are preserved as faithfully as possible. Pick this style when you want a gift that looks exactly like the recipient.",
@@ -117,13 +117,13 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
     heroImage: "/examples/disney.png",
     copy: {
       tr: {
-        pageTitle: "Disney Tarzı 3D Figürin — Sevimli Çizgi Film Karakterleri",
+        pageTitle: "Masalsı Animasyon 3D Figürin — Sevimli Çizgi Film Karakterleri",
         metaDescription:
-          "Fotoğraflarınızdan Disney tarzında, büyük gözlü, sevimli 3D figürin yapın. Çocuğunuzun, sevdiklerinizin animasyon karakterine dönüştüğü ve sonsuza dek hatıra kalacak hediyeler.",
-        heroTitle: "Disney Tarzı 3D Figürin",
+          "Fotoğraflarınızdan masalsı animasyon tarzında, büyük gözlü, sevimli 3D figürin yapın. Çocuğunuzun, sevdiklerinizin animasyon karakterine dönüştüğü ve sonsuza dek hatıra kalacak hediyeler.",
+        heroTitle: "Masalsı Animasyon 3D Figürin",
         heroSubtitle:
           "Büyük gözler, yumuşak hatlar, çizgi-film sıcaklığı. Çocuk doğum günleri, sevgiliye sürpriz ve genç çiftler için en popüler tarzımız.",
-        ctaPrimary: "Disney tarzı figürin oluştur",
+        ctaPrimary: "Masalsı animasyon figürin oluştur",
         ctaSecondary: "Örnekleri gör",
         featuresHeading: "Bu stil ne sağlar?",
         features: [
@@ -133,7 +133,7 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
           },
           {
             title: "Büyük, ifadeli gözler",
-            body: "Klasik Disney karakter estetiği — bakışlar parlak ve sıcak.",
+            body: "Klasik çizgi-film karakter estetiği — bakışlar parlak ve sıcak.",
           },
           {
             title: "Canlı renkler",
@@ -149,13 +149,13 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
         ],
       },
       en: {
-        pageTitle: "Disney-Style 3D Figurine — Cute Animated Character",
+        pageTitle: "Storybook Animation 3D Figurine — Cute Animated Character",
         metaDescription:
-          "Turn your photos into Disney-style 3D figurines with big eyes and soft, friendly features. The most popular style for kids, couples, and unforgettable gifts.",
-        heroTitle: "Disney-Style Figurines",
+          "Turn your photos into storybook-animation 3D figurines with big eyes and soft, friendly features. The most popular style for kids, couples, and unforgettable gifts.",
+        heroTitle: "Storybook Animation Figurines",
         heroSubtitle:
           "Big eyes, soft features, animated warmth. Our most popular style for kids' birthdays, romantic surprises, and young couples.",
-        ctaPrimary: "Create Disney-style figurine",
+        ctaPrimary: "Create storybook-animation figurine",
         ctaSecondary: "See examples",
         featuresHeading: "What this style gives you",
         features: [
@@ -165,7 +165,7 @@ export const STYLE_LANDING: Record<StyleSlug, StyleLandingContent> = {
           },
           {
             title: "Big, expressive eyes",
-            body: "Classic Disney character aesthetic — bright, warm gaze.",
+            body: "Classic animated character aesthetic — bright, warm gaze.",
           },
           {
             title: "Vivid colors",

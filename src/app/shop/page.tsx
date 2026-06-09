@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
   const d = getDictionary(locale);
   return {
-    title: `${d["shop.title" as keyof typeof d] || "Mağaza"} — Figurine Studio`,
+    title: `${d["shop.title" as keyof typeof d] || "Mağaza"} — Figurunica`,
     description:
       d["shop.subtitle" as keyof typeof d] ||
       "Üreticilerin hazır baskı ürünleri.",

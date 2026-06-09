@@ -147,7 +147,7 @@ export function AdminSidebar({
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-6 border-b border-gray-200">
-        <h1 className="text-lg font-bold text-gray-900">Figurine Studio</h1>
+        <h1 className="text-lg font-bold text-gray-900">Figurunica</h1>
         <p className="text-xs text-gray-500 mt-1">Admin Panel</p>
       </div>
       <nav className="flex-1 p-4 space-y-5 overflow-y-auto">

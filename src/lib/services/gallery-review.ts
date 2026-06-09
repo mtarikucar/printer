@@ -133,7 +133,7 @@ export async function approveGalleryItem(
         `Merhaba ${order.customerName},\n\n` +
         `Figüriniz ${order.orderNumber} galerimizde yayınlandı! ` +
         `Aşağıdaki bağlantıdan görebilir ve sosyal medyada paylaşabilirsiniz.\n\n` +
-        `Teşekkürler — Figurine Studio`,
+        `Teşekkürler — Figurunica`,
       locale: (order.locale === "en" ? "en" : "tr") as "en" | "tr",
     });
   } catch (err) {
@@ -193,7 +193,7 @@ export async function rejectGalleryItem(
         `${order.orderNumber} figüriniz için galeri başvurunuzu inceledik. ` +
         `Şu an galeride yayınlayamıyoruz — sebep: ${params.reason}\n\n` +
         `Sipariş ve figürinizle ilgili tüm haklarınız korunmaktadır.\n\n` +
-        `— Figurine Studio`,
+        `— Figurunica`,
       locale: (order.locale === "en" ? "en" : "tr") as "en" | "tr",
     });
   } catch (err) {
@@ -296,7 +296,7 @@ export async function rewardAndApproveGalleryItem(
         `size ${params.giftCardAmountKurus / 100} TL değerinde bir hediye çeki gönderiyoruz.\n\n` +
         `Hediye çeki kodu: ${card.code}\n` +
         `Bir sonraki siparişinizde uygulayabilirsiniz.\n\n` +
-        `Teşekkürler — Figurine Studio`,
+        `Teşekkürler — Figurunica`,
       locale: (order.locale === "en" ? "en" : "tr") as "en" | "tr",
     });
   } catch (err) {

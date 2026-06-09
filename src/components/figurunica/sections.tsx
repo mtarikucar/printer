@@ -341,7 +341,7 @@ export function HeroIntro({ d }: { d: FigurunicaDict }) {
               <span className={s("t-dot")} /> printing · ege, istanbul · chibi ·
               <span className={s("t-dot")} /> shipped · mei, singapore · realistic ·
               <span className={s("t-dot")} /> sculpting · juno, berlin · anime ·
-              <span className={s("t-dot")} /> packed · raúl, madrid · disney ·
+              <span className={s("t-dot")} /> packed · raúl, madrid · storybook ·
               <span className={s("t-dot")} /> printing · ana, lisbon · chibi ·
               <span className={s("t-dot")} /> printing · theo, paris · realistic ·
             </span>

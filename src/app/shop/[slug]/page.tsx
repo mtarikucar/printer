@@ -27,9 +27,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const product = await loadProduct(slug);
-  if (!product) return { title: "Figurine Studio" };
+  if (!product) return { title: "Figurunica" };
   return {
-    title: `${product.title} — Figurine Studio`,
+    title: `${product.title} — Figurunica`,
     description: product.description.slice(0, 160),
   };
 }

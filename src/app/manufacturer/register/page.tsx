@@ -10,7 +10,7 @@ import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 
 const ONBOARDING_TEXT = `# Üretici Ortaklığı Bilgilendirmesi
 
-Figurine Studio üretici ağına başvuruyorsunuz.
+Figurunica üretici ağına başvuruyorsunuz.
 
 **Çalışma Düzeni**
 - Müşterilerimiz figürin siparişlerini portalımızdan oluşturur ve ödemeyi tamamlar.
@@ -206,7 +206,7 @@ export default function ManufacturerRegisterPage() {
       <main className="min-h-screen bg-gray-50">
         <div className="max-w-2xl mx-auto px-4 py-12">
           <div className="text-center mb-6">
-            <span className="text-xl font-serif text-gray-900">Figurine Studio</span>
+            <span className="text-xl font-serif text-gray-900">Figurunica</span>
             <p className="text-sm text-indigo-600 mt-1">Üretici Paneli</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-8">
@@ -257,7 +257,7 @@ export default function ManufacturerRegisterPage() {
     <main className="min-h-screen bg-gray-50">
       <div className="max-w-2xl mx-auto px-4 py-12">
         <div className="text-center mb-6">
-          <span className="text-xl font-serif text-gray-900">Figurine Studio</span>
+          <span className="text-xl font-serif text-gray-900">Figurunica</span>
           <p className="text-sm text-indigo-600 mt-1">Üretici Paneli</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-8 space-y-6">

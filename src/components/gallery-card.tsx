@@ -25,7 +25,7 @@ const STYLE_BADGE_COLORS: Record<string, string> = {
 };
 
 const STYLE_LABELS: Record<string, string> = {
-  disney: "Disney",
+  disney: "Storybook",
   anime: "Anime",
   chibi: "Chibi",
   realistic: "Realistic",

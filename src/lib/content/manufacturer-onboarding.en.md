@@ -1,6 +1,6 @@
 # Manufacturer Partnership Overview
 
-You are applying to the Figurine Studio manufacturer network. Please confirm
+You are applying to the Figurunica manufacturer network. Please confirm
 you have read and accepted the terms below. Once your account is approved,
 your panel becomes active and orders will start being assigned to you.
 

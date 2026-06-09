@@ -2,7 +2,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
 
 export const metadata = {
-  title: "Terms of Service — Figurine Studio",
+  title: "Terms of Service — Figurunica",
 };
 
 export default async function TermsPage() {
@@ -25,13 +25,13 @@ export default async function TermsPage() {
           {isTr ? (
             <>
               <p>
-                Bu Kullanim Kosullari (&quot;Kosullar&quot;), Figurine Studio (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafindan
+                Bu Kullanim Kosullari (&quot;Kosullar&quot;), Figurunica (&quot;Sirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafindan
                 figurunica.com web sitesi ve iliskili hizmetler uzerinden sunulan hizmetlerin kullanimina
                 iliskin sartlari duzenlemektedir. Hizmetlerimizi kullanarak bu Kosullar&apos;i kabul etmis sayilirsiniz.
               </p>
 
               <h2>1. Hizmet Tanimi</h2>
-              <p>Figurine Studio asagidaki hizmetleri sunmaktadir:</p>
+              <p>Figurunica asagidaki hizmetleri sunmaktadir:</p>
               <ul>
                 <li>Kullanici tarafindan yuklenen fotograflardan yapay zeka destekli 3D model olusturma</li>
                 <li>Olusturulan 3D modellerin recine baski ile fiziksel figurin uretimi</li>
@@ -118,7 +118,7 @@ export default async function TermsPage() {
 
               <h3>5.1 Sirket Haklari</h3>
               <ul>
-                <li>Figurine Studio markasi, logosu, web sitesi tasarimi, yazilimi ve icerigi Sirket&apos;in fikri mulkiyetidir.</li>
+                <li>Figurunica markasi, logosu, web sitesi tasarimi, yazilimi ve icerigi Sirket&apos;in fikri mulkiyetidir.</li>
                 <li>Yapay zeka modelleri ve uretim surecleri Sirket&apos;e aittir.</li>
               </ul>
 
@@ -191,12 +191,12 @@ export default async function TermsPage() {
           ) : (
             <>
               <p>
-                These Terms of Service (&quot;Terms&quot;) govern the use of services provided by Figurine Studio (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;)
+                These Terms of Service (&quot;Terms&quot;) govern the use of services provided by Figurunica (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;)
                 through the figurunica.com website and related services. By using our services, you agree to these Terms.
               </p>
 
               <h2>1. Service Description</h2>
-              <p>Figurine Studio provides the following services:</p>
+              <p>Figurunica provides the following services:</p>
               <ul>
                 <li>AI-powered 3D model generation from user-uploaded photos</li>
                 <li>Physical figurine production from generated 3D models using resin printing</li>
@@ -283,7 +283,7 @@ export default async function TermsPage() {
 
               <h3>5.1 Company Rights</h3>
               <ul>
-                <li>The Figurine Studio brand, logo, website design, software, and content are the intellectual property of the Company.</li>
+                <li>The Figurunica brand, logo, website design, software, and content are the intellectual property of the Company.</li>
                 <li>AI models and production processes belong to the Company.</li>
               </ul>
 

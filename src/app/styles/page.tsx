@@ -18,12 +18,12 @@ export async function generateMetadata(): Promise<Metadata> {
     process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com";
   const title =
     locale === "tr"
-      ? "Figürin Stilleri — Disney, Anime, Chibi, Gerçekçi, Nesne | Figurine Studio"
-      : "Figurine Styles — Disney, Anime, Chibi, Realistic, Object | Figurine Studio";
+      ? "Figürin Stilleri — Masalsı Animasyon, Anime, Chibi, Gerçekçi, Nesne | Figurunica"
+      : "Figurine Styles — Storybook Animation, Anime, Chibi, Realistic, Object | Figurunica";
   const description =
     locale === "tr"
-      ? "5 farklı tarzda 3D figürin — Disney, anime, chibi, gerçekçi ve nesne. Her stilin detaylarını inceleyin ve sevdiklerinize en uygun olanı seçin."
-      : "5 different 3D figurine styles — Disney, anime, chibi, realistic, and object. Compare each style and pick the right one for your gift.";
+      ? "5 farklı tarzda 3D figürin — masalsı animasyon, anime, chibi, gerçekçi ve nesne. Her stilin detaylarını inceleyin ve sevdiklerinize en uygun olanı seçin."
+      : "5 different 3D figurine styles — storybook animation, anime, chibi, realistic, and object. Compare each style and pick the right one for your gift.";
   return {
     title,
     description,

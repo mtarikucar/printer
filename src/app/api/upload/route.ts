@@ -5,6 +5,7 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
+import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: d["api.upload.noFile"] }, { status: 400 });
     }
 
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > UPLOAD_MAX_SIZE_BYTES) {
       return NextResponse.json(
         { error: d["api.upload.tooLarge"] },
         { status: 400 }

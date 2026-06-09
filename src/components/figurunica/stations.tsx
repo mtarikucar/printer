@@ -26,7 +26,7 @@ export function StationUpload({ progress, d }: StationProps) {
         <div className={s("upload-dots")}>
           <span /><span /><span />
         </div>
-        <span>figurunica.app / upload</span>
+        <span>figurunica.com / upload</span>
       </div>
       <div className={cx("upload-dropzone", active && "active")}>
         <div className={s("upload-icon")}>

@@ -32,7 +32,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 const FROM_EMAIL =
-  process.env.SMTP_FROM ?? "Figurine Studio <siparis@figurunica.com>";
+  process.env.SMTP_FROM ?? "Figurunica <siparis@figurunica.com>";
 
 /**
  * Issue a password-reset token for the given email IF a user exists.
@@ -80,7 +80,7 @@ export async function issuePasswordResetToken(
     await transporter.sendMail({
       from: FROM_EMAIL,
       to: user.email,
-      subject: "Şifre sıfırlama bağlantınız — Figurine Studio",
+      subject: "Şifre sıfırlama bağlantınız — Figurunica",
       text: `Merhaba ${user.fullName},
 
 Şifrenizi sıfırlamak için aşağıdaki bağlantıyı tarayıcınıza yapıştırın. Bağlantı 1 saat içinde geçersiz olur:
@@ -89,7 +89,7 @@ ${resetUrl}
 
 Bu isteği siz yapmadıysanız, bu e-postayı yok sayabilirsiniz — hesabınızda hiçbir değişiklik yapılmadı.
 
-— Figurine Studio
+— Figurunica
 `,
       html: `<div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
         <h2 style="margin:0 0 16px;font-family:'Space Grotesk',serif">Şifre sıfırlama</h2>

@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import { eq, and, asc, desc, ilike } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { ProductGrid } from "@/components/product-grid";
-import type { ProductListItem } from "@/components/product-card";
-import { getPublicUrl } from "@/lib/services/storage";
 import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import { queryShopProducts } from "@/lib/services/shop-query";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -24,56 +23,42 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function ShopPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; sort?: string; q?: string }>;
+  searchParams: Promise<{
+    category?: string;
+    sort?: string;
+    q?: string;
+    material?: string;
+    priceMin?: string;
+    priceMax?: string;
+  }>;
 }) {
   const locale = await getLocale();
   const d = getDictionary(locale);
-  const { category, sort, q } = await searchParams;
-  const term = q?.trim() || null;
+  const sp = await searchParams;
 
-  // Only a known category narrows the query; anything else lists everything.
+  const term = sp.q?.trim() || null;
   const activeCategory =
-    category && (PRODUCT_CATEGORIES as readonly string[]).includes(category)
-      ? category
+    sp.category && (PRODUCT_CATEGORIES as readonly string[]).includes(sp.category)
+      ? sp.category
       : null;
+  const activeSort =
+    sp.sort === "price_asc" || sp.sort === "price_desc" ? sp.sort : "newest";
+  const material =
+    sp.material === "resin" || sp.material === "filament" ? sp.material : null;
+  const priceMin = sp.priceMin ? Number(sp.priceMin) : null;
+  const priceMax = sp.priceMax ? Number(sp.priceMax) : null;
 
-  const SORTS = ["newest", "price_asc", "price_desc"] as const;
-  const activeSort = SORTS.includes(sort as (typeof SORTS)[number])
-    ? (sort as (typeof SORTS)[number])
-    : "newest";
-  const orderBy =
-    activeSort === "price_asc"
-      ? [asc(products.priceKurus)]
-      : activeSort === "price_desc"
-        ? [desc(products.priceKurus)]
-        : [desc(products.createdAt)];
-
-  const conditions = [eq(products.status, "active")];
-  if (activeCategory) conditions.push(eq(products.category, activeCategory));
-  if (term) conditions.push(ilike(products.title, `%${term}%`));
-
-  const rows = await db.query.products.findMany({
-    where: and(...conditions),
-    orderBy,
-    with: {
-      manufacturer: { columns: { companyName: true } },
-    },
+  const { items, hasMore } = await queryShopProducts({
+    category: activeCategory,
+    sort: activeSort,
+    q: term,
+    material,
+    priceMin,
+    priceMax,
+    offset: 0,
   });
 
-  const items: ProductListItem[] = rows.map((p) => ({
-    id: p.id,
-    slug: p.slug,
-    title: p.title,
-    priceKurus: p.priceKurus,
-    material: p.material,
-    category: p.category,
-    leadTimeDays: p.leadTimeDays,
-    imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
-    sellerName: p.manufacturer?.companyName ?? null,
-  }));
-
-  // Categories that actually have active products — drives the filter tabs so
-  // empty categories don't advertise depth the catalog doesn't have yet.
+  // Categories that actually have active products — drives the filter tabs.
   const activeCatRows = await db
     .selectDistinct({ category: products.category })
     .from(products)
@@ -103,6 +88,10 @@ export default async function ShopPage({
           availableCategories={availableCategories}
           activeSort={activeSort}
           query={term}
+          material={material}
+          priceMin={priceMin}
+          priceMax={priceMax}
+          hasMore={hasMore}
         />
       </section>
     </main>

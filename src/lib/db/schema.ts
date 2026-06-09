@@ -1060,6 +1060,40 @@ export const orderItems = pgTable(
   })
 );
 
+// Faz 5: product reviews. A customer may review a product they received — one
+// review per (product, user, order). Auto-approved with admin takedown.
+export const productReviewStatusEnum = pgEnum("product_review_status", [
+  "approved",
+  "pending",
+  "rejected",
+]);
+export const productReviews = pgTable(
+  "product_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    orderId: uuid("order_id").references(() => orders.id),
+    rating: integer("rating").notNull(),
+    title: text("title"),
+    body: text("body"),
+    status: productReviewStatusEnum("status").notNull().default("approved"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_reviews_product_idx").on(t.productId, t.status),
+    uniqPerOrder: uniqueIndex("product_reviews_unique_idx").on(
+      t.productId,
+      t.userId,
+      t.orderId
+    ),
+  })
+);
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   orders: many(orders),

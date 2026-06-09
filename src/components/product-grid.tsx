@@ -8,14 +8,25 @@ import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
 export function ProductGrid({
   products,
   activeCategory,
+  availableCategories,
 }: {
   products: ProductListItem[];
   activeCategory?: string | null;
+  availableCategories?: string[];
 }) {
   const d = useDictionary();
 
   const categoryLabel = (cat: string) =>
     d[`product.category.${cat}` as keyof typeof d] || cat;
+
+  // Only surface categories that actually have active products (plus the one
+  // currently being viewed), so the tab bar doesn't advertise empty sections.
+  const visibleCategories = PRODUCT_CATEGORIES.filter(
+    (cat) =>
+      !availableCategories ||
+      availableCategories.includes(cat) ||
+      cat === activeCategory
+  );
 
   return (
     <div>
@@ -31,7 +42,7 @@ export function ProductGrid({
         >
           {d["shop.filter.all" as keyof typeof d] || "Tümü"}
         </Link>
-        {PRODUCT_CATEGORIES.map((cat) => (
+        {visibleCategories.map((cat) => (
           <Link
             key={cat}
             href={`/shop?category=${cat}`}

@@ -58,6 +58,16 @@ export default async function ShopPage({
     sellerName: p.manufacturer?.companyName ?? null,
   }));
 
+  // Categories that actually have active products — drives the filter tabs so
+  // empty categories don't advertise depth the catalog doesn't have yet.
+  const activeCatRows = await db
+    .selectDistinct({ category: products.category })
+    .from(products)
+    .where(eq(products.status, "active"));
+  const availableCategories = activeCatRows
+    .map((r) => r.category)
+    .filter((c): c is string => c !== null);
+
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
@@ -73,7 +83,11 @@ export default async function ShopPage({
       </section>
 
       <section className="max-w-6xl mx-auto px-4 py-8 pb-20">
-        <ProductGrid products={items} activeCategory={activeCategory} />
+        <ProductGrid
+          products={items}
+          activeCategory={activeCategory}
+          availableCategories={availableCategories}
+        />
       </section>
     </main>
   );

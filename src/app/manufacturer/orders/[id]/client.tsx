@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
 import { QcPhotoUploader } from "@/components/qc-photo-uploader";
+import { ProductionPanel } from "@/components/products/production-panel";
 import { OrderChat } from "@/components/order-chat";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDateTime } from "@/lib/i18n/format";
@@ -55,6 +56,23 @@ interface Props {
       title: string;
       description: string;
       images: string[];
+    } | null;
+    productSpec: {
+      files: {
+        id: string;
+        partName: string | null;
+        fileName: string;
+        sourceFormat: string;
+        quantity: number;
+        glbUrl: string | null;
+      }[];
+      components: {
+        name: string;
+        quantity: number;
+        unit: string | null;
+        notes: string | null;
+      }[];
+      steps: { instruction: string; imageUrl: string | null }[];
     } | null;
     glbUrl: string | null;
     stlUrl: string | null;
@@ -123,7 +141,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, glbUrl, stlUrl, objUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpec, glbUrl, stlUrl, objUrl, actions } = data;
   const isMarketplace = order.orderType === "marketplace";
   const router = useRouter();
   const d = useDictionary();
@@ -445,6 +463,16 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   "Listelediğiniz ürünü basıp kargolayın."}
               </p>
             </div>
+          )}
+
+          {/* ─── Production files + BOM + recipe ──────── */}
+          {isMarketplace && productSpec && (
+            <ProductionPanel
+              orderId={order.id}
+              files={productSpec.files}
+              components={productSpec.components}
+              steps={productSpec.steps}
+            />
           )}
 
           {/* ─── Photo + Model Hero Card (Tabbed) ──────── */}

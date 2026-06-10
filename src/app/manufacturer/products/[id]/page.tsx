@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { manufacturers, products } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getPublicUrl } from "@/lib/services/storage";
+import { getProductSpec } from "@/lib/services/product-spec";
 import { EditProductClient } from "./edit-client";
 
 export default async function EditProductPage({
@@ -40,6 +41,19 @@ export default async function EditProductPage({
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((img) => ({ id: img.id, url: getPublicUrl(img.storageKey) }));
 
+  const spec = await getProductSpec(product.id);
+  const initialComponents = spec.components.map((c) => ({
+    name: c.name,
+    quantity: c.quantity,
+    unit: c.unit ?? "",
+    notes: c.notes ?? "",
+  }));
+  const initialSteps = spec.steps.map((s) => ({
+    instruction: s.instruction,
+    imageKey: s.imageKey,
+    imageUrl: s.imageUrl,
+  }));
+
   const serialized = {
     id: product.id,
     title: product.title,
@@ -54,7 +68,13 @@ export default async function EditProductPage({
 
   return (
     <div className="p-8 max-w-2xl">
-      <EditProductClient product={serialized} initialImages={images} />
+      <EditProductClient
+        product={serialized}
+        initialImages={images}
+        initialFiles={spec.files}
+        initialComponents={initialComponents}
+        initialSteps={initialSteps}
+      />
     </div>
   );
 }

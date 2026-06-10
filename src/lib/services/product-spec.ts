@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
-import { eq, asc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   productFiles,
@@ -115,10 +115,13 @@ export async function saveProductFile(args: {
   return { ok: true, fileId: row.id, hasPreview: !!geometry?.glbKey };
 }
 
-// Remove a print file (row + STL + GLB preview). Caller checks ownership.
-export async function deleteProductFile(fileId: string): Promise<boolean> {
+// Remove a print file (row + STL + GLB preview), scoped to its product.
+export async function deleteProductFile(
+  fileId: string,
+  productId: string
+): Promise<boolean> {
   const row = await db.query.productFiles.findFirst({
-    where: eq(productFiles.id, fileId),
+    where: and(eq(productFiles.id, fileId), eq(productFiles.productId, productId)),
     columns: { id: true, storageKey: true, glbPreviewKey: true },
   });
   if (!row) return false;
@@ -189,6 +192,7 @@ export interface ProductSpecComponent {
 export interface ProductSpecStep {
   id: string;
   instruction: string;
+  imageKey: string | null;
   imageUrl: string | null;
 }
 export interface ProductSpec {
@@ -236,6 +240,7 @@ export async function getProductSpec(productId: string): Promise<ProductSpec> {
     steps: steps.map((s) => ({
       id: s.id,
       instruction: s.instruction,
+      imageKey: s.imageKey,
       imageUrl: s.imageKey ? getPublicUrl(s.imageKey) : null,
     })),
   };

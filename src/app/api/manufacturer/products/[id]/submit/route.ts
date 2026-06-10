@@ -3,6 +3,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
+import { countProductFiles } from "@/lib/services/product-spec";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
 
@@ -33,6 +34,13 @@ export async function POST(
   if (product.images.length === 0) {
     return NextResponse.json(
       { error: "Add at least one image before submitting", code: "no_images" },
+      { status: 400 }
+    );
+  }
+  // Every listing must carry the printable geometry the manufacturer needs.
+  if ((await countProductFiles(id)) === 0) {
+    return NextResponse.json(
+      { error: "Add at least one print file before submitting", code: "no_files" },
       { status: 400 }
     );
   }

@@ -6,6 +6,7 @@ import { products } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
 import { generateProductSlug } from "@/lib/services/slug";
+import { countProductFiles } from "@/lib/services/product-spec";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 // Approve a pending product: pending_review -> active. Mints the storefront slug
@@ -23,6 +24,14 @@ export async function POST(
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  // A product can only go live if it carries the printable geometry the
+  // fulfilling manufacturer needs.
+  if ((await countProductFiles(id)) === 0) {
+    return NextResponse.json(
+      { error: "Product has no print file (STL/OBJ)", code: "no_files" },
+      { status: 400 }
+    );
   }
 
   // Slug computed outside the guarded update so the uniqueness check runs

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions, manufacturers } from "@/lib/db/schema";
@@ -42,7 +42,16 @@ export async function POST(
       );
     }
 
-    // Atomic: assign manufacturer to order (only if approved and unassigned)
+    // Assignable states: custom/upload orders after admin approval, and
+    // marketplace orders straight from payment (platform-owned products are
+    // born status="paid" + unassigned — without this they could never be
+    // assigned to a manufacturer at all).
+    const statusOk = or(
+      eq(orders.status, "approved"),
+      and(eq(orders.status, "paid"), eq(orders.orderType, "marketplace"))
+    );
+
+    // Atomic: assign manufacturer to order (only while unassigned)
     const [order] = await db
       .update(orders)
       .set({
@@ -54,7 +63,7 @@ export async function POST(
       .where(
         and(
           eq(orders.id, id),
-          eq(orders.status, "approved"),
+          statusOk,
           isNull(orders.manufacturerStatus)
         )
       )
@@ -73,7 +82,7 @@ export async function POST(
         .where(
           and(
             eq(orders.id, id),
-            eq(orders.status, "approved"),
+            statusOk,
             eq(orders.manufacturerStatus, "unassigned")
           )
         )

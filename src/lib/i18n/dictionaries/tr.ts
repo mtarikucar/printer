@@ -1200,7 +1200,7 @@ const tr: Dictionary = {
 
   // Landing - Son CTA
   "landing.cta.title": "Fotoğrafını Figürine Dönüştür",
-  "landing.cta.subtitle": "₺999'dan başlayan fiyatlarla. Boyama kiti dahil.",
+  "landing.cta.subtitle": "₺899'dan başlayan fiyatlarla. Boyama kiti dahil.",
   "landing.cta.button": "Hemen Başla",
 
   // Gallery Modal - Before/After

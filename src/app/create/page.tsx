@@ -17,6 +17,7 @@ import {
   finishSurchargeKurus,
   objectPriceKurus,
   objectFinishSurchargeKurus,
+  UPSELL_PRICES_KURUS,
 } from "@/lib/config/prices";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
@@ -120,14 +121,13 @@ function CustomCreateFlow() {
   // Payment method state
   const [paymentMethod, setPaymentMethod] = useState<"card" | "bank_transfer">("card");
 
-  // Checkout upsells (Q10). Three optional add-ons with stable keys; pricing
-  // is duplicated here (in kuruş) to drive the live total without an extra
-  // round-trip. Server re-derives from `src/lib/config/prices.ts` so a
-  // tampered client never gets a discount.
+  // Checkout upsells (Q10). Three optional add-ons with stable keys; prices
+  // come from the single source (UPSELL_PRICES_KURUS) so the UI can never
+  // drift from what the server charges.
   const UPSELLS = [
-    { key: "extra_paint" as const, priceKurus: 4900 },
-    { key: "gift_wrap" as const, priceKurus: 2900 },
-    { key: "rush_shipping" as const, priceKurus: 7900 },
+    { key: "extra_paint" as const, priceKurus: UPSELL_PRICES_KURUS.extra_paint },
+    { key: "gift_wrap" as const, priceKurus: UPSELL_PRICES_KURUS.gift_wrap },
+    { key: "rush_shipping" as const, priceKurus: UPSELL_PRICES_KURUS.rush_shipping },
   ];
   const [selectedUpsells, setSelectedUpsells] = useState<string[]>([]);
   const toggleUpsell = (key: string) => {

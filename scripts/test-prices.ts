@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { figurinePriceKurus, FIGURINE_PRICES_KURUS, PRICES_KURUS } from "../src/lib/config/prices";
+import {
+  figurinePriceKurus,
+  finishSurchargeKurus,
+  FIGURINE_PRICES_KURUS,
+  PRICES_KURUS,
+} from "../src/lib/config/prices";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -13,16 +18,26 @@ test("resin base prices per size", () => {
   assert.equal(figurinePriceKurus("buyuk", "resin"), 179900);
 });
 
-test("filament = resin − ₺300 (30000 kuruş) per size", () => {
-  assert.equal(figurinePriceKurus("kucuk", "filament"), 69900);
-  assert.equal(figurinePriceKurus("orta", "filament"), 109900);
+test("filament base prices (₺899 floor, +₺300 steps)", () => {
+  assert.equal(figurinePriceKurus("kucuk", "filament"), 89900);
+  assert.equal(figurinePriceKurus("orta", "filament"), 119900);
   assert.equal(figurinePriceKurus("buyuk", "filament"), 149900);
-  for (const size of ["kucuk", "orta", "buyuk"]) {
-    assert.equal(
-      figurinePriceKurus(size, "resin") - figurinePriceKurus(size, "filament"),
-      30000
-    );
-  }
+  // Resin premium grows with size (resin material cost scales with volume).
+  assert.equal(figurinePriceKurus("kucuk", "resin") - figurinePriceKurus("kucuk", "filament"), 10000);
+  assert.equal(figurinePriceKurus("orta", "resin") - figurinePriceKurus("orta", "filament"), 20000);
+  assert.equal(figurinePriceKurus("buyuk", "resin") - figurinePriceKurus("buyuk", "filament"), 30000);
+});
+
+test("finish surcharges: paint +₺1.000, luxe +₺2.000, raw −₺100", () => {
+  assert.equal(finishSurchargeKurus("paintable_kit"), 0);
+  assert.equal(finishSurchargeKurus("hand_painted"), 100000);
+  assert.equal(finishSurchargeKurus("luxe_display"), 200000);
+  assert.equal(finishSurchargeKurus("collector_raw"), -10000);
+  // Ladder sanity: luxe is exactly hand-painted + display extras (+₺1.000).
+  assert.equal(
+    finishSurchargeKurus("luxe_display") - finishSurchargeKurus("hand_painted"),
+    100000
+  );
 });
 
 test("unknown material falls back to resin pricing", () => {

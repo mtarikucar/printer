@@ -1,10 +1,12 @@
 export type FigurineMaterial = "resin" | "filament";
 
-// Per-material price table (kuruş). Resin is the premium base; filament (FDM)
-// is ₺300 cheaper per size. Tune values freely — this is the single source.
+// Per-material price table (kuruş). Resin is the premium base (+₺400 per size
+// step); filament (FDM) starts at ₺899 and steps +₺300. The resin premium grows
+// with size (₺100/₺200/₺300) because resin material cost scales with volume.
+// Tune values freely — this is the single source.
 export const FIGURINE_PRICES_KURUS: Record<FigurineMaterial, Record<string, number>> = {
   resin: { kucuk: 99900, orta: 139900, buyuk: 179900 },
-  filament: { kucuk: 69900, orta: 109900, buyuk: 149900 },
+  filament: { kucuk: 89900, orta: 119900, buyuk: 149900 },
 };
 
 // Resin table kept as PRICES_KURUS for back-compat (existing size-only callers).
@@ -35,10 +37,11 @@ export const FINISH_SURCHARGES_KURUS: Record<FigurineFinish, number> = {
   // Collector Raw — unpainted high-detail resin print, no paint kit. For
   // collectors/DIY who use their own paints; ₺100 less than the kit.
   collector_raw: -10000,
-  // Hand-Painted — professional hand painting + QC photo + gift box.
-  hand_painted: 80000,
+  // Hand-Painted — professional hand painting + QC photo + gift box. +₺1.000.
+  hand_painted: 100000,
   // Luxe Display — premium base + name plate + hard case + full hand paint.
-  luxe_display: 150000,
+  // +₺1.000 over hand-painted for the display extras. +₺2.000 total.
+  luxe_display: 200000,
 };
 
 // Surcharge for a finish key. Unknown finish → 0 (treated as the default kit).
@@ -168,9 +171,11 @@ export const UPLOAD_MODEL_PER_CM3_KURUS: Record<FigurineMaterial, number> = {
   resin: 1500, // ₺15 / cm³
   filament: 900, // ₺9 / cm³
 };
+// Floors must at least cover packaging + free shipping (Yurtiçi ~₺100) on top
+// of the manufacturer's 70% share — a ₺99 print order would ship at a loss.
 export const UPLOAD_MODEL_MIN_KURUS: Record<FigurineMaterial, number> = {
-  resin: 14900, // ₺149 floor
-  filament: 9900, // ₺99 floor
+  resin: 19900, // ₺199 floor
+  filament: 14900, // ₺149 floor
 };
 // Above this auto price — or outside the print envelope — fall back to a manual
 // quote rather than charging automatically.

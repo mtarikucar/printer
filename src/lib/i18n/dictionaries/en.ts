@@ -1194,7 +1194,7 @@ const en = {
 
   // Landing - Final CTA
   "landing.cta.title": "Turn Your Photo Into a Figurine",
-  "landing.cta.subtitle": "Starting from ₺999. Paint kit included.",
+  "landing.cta.subtitle": "Starting from ₺899. Paint kit included.",
   "landing.cta.button": "Get Started Now",
 
   // Gallery Modal - Before/After

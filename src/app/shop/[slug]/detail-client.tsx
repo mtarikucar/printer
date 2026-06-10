@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
+import { ModelViewer } from "@/components/model-viewer";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import {
   PhoneInput,
@@ -21,6 +22,8 @@ interface ProductDetail {
   leadTimeDays: number | null;
   sellerName: string | null;
   images: string[];
+  model3dUrl: string | null;
+  boxContents: { name: string; quantity: number; unit: string | null }[];
 }
 
 export function ProductDetailClient({ product }: { product: ProductDetail }) {
@@ -179,6 +182,14 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
             ))}
           </div>
         )}
+        {product.model3dUrl && (
+          <div className="mt-3 rounded-2xl overflow-hidden border border-bg-subtle bg-bg-elevated">
+            <ModelViewer url={product.model3dUrl} className="h-72 w-full" />
+            <p className="text-xs text-text-muted text-center py-1.5">
+              {t("product.preview3d", "3B önizleme — döndürmek için sürükleyin")}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Info + checkout */}
@@ -209,6 +220,43 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
         <p className="mt-6 text-text-secondary whitespace-pre-line leading-relaxed">
           {product.description}
         </p>
+
+        {product.boxContents.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold text-text-primary mb-2">
+              {t("product.boxContents", "Kutu içeriği")}
+            </h3>
+            <ul className="space-y-1">
+              {product.boxContents.map((c, i) => (
+                <li
+                  key={i}
+                  className="flex items-center gap-2 text-sm text-text-secondary"
+                >
+                  <svg
+                    className="h-4 w-4 shrink-0 text-green-500"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  <span>
+                    {c.name}{" "}
+                    <span className="text-text-muted">
+                      × {c.quantity}
+                      {c.unit ? ` ${c.unit}` : ""}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {!checkoutOpen ? (
           <div className="mt-8 space-y-2">

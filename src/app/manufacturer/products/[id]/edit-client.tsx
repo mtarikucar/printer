@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import {
+  ProductSpecEditor,
+  type SpecFile,
+  type SpecComponentRow,
+  type SpecStepRow,
+} from "@/components/products/product-spec-editor";
 
 type ProductStatus =
   | "draft"
@@ -59,11 +65,17 @@ const CATEGORY_FALLBACK: Record<string, string> = {
 interface EditProductClientProps {
   product: EditProduct;
   initialImages: ProductImage[];
+  initialFiles: SpecFile[];
+  initialComponents: SpecComponentRow[];
+  initialSteps: SpecStepRow[];
 }
 
 export function EditProductClient({
   product,
   initialImages,
+  initialFiles,
+  initialComponents,
+  initialSteps,
 }: EditProductClientProps) {
   const d = useDictionary();
   const router = useRouter();
@@ -74,6 +86,7 @@ export function EditProductClient({
 
   const [status, setStatus] = useState<ProductStatus>(product.status);
   const [images, setImages] = useState<ProductImage[]>(initialImages);
+  const [fileCount, setFileCount] = useState(initialFiles.length);
 
   const [title, setTitle] = useState(product.title);
   const [description, setDescription] = useState(product.description);
@@ -201,6 +214,13 @@ export function EditProductClient({
               "İncelemeye göndermek için en az bir görsel ekleyin."
             )
           );
+        } else if (data?.code === "no_files") {
+          setError(
+            t(
+              "product.error.noFiles",
+              "İncelemeye göndermek için en az bir baskı dosyası (STL/OBJ) ekleyin."
+            )
+          );
         } else {
           setError(t("product.error.generic", "Bir hata oluştu, kontrol edin."));
         }
@@ -217,6 +237,7 @@ export function EditProductClient({
 
   const canSubmit = status === "draft" || status === "rejected";
   const hasImages = images.length > 0;
+  const hasFiles = fileCount > 0;
 
   return (
     <div className="space-y-4">
@@ -409,6 +430,16 @@ export function EditProductClient({
         </div>
       </div>
 
+      {/* Print files + bill of materials + assembly recipe */}
+      <ProductSpecEditor
+        apiBase="/api/manufacturer/products"
+        productId={product.id}
+        initialFiles={initialFiles}
+        initialComponents={initialComponents}
+        initialSteps={initialSteps}
+        onFilesChange={setFileCount}
+      />
+
       {/* Submit for review */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 flex items-center justify-between gap-4">
         <div>
@@ -416,27 +447,29 @@ export function EditProductClient({
             {t("product.submit.title", "İncelemeye gönder")}
           </p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {canSubmit
-              ? hasImages
-                ? t(
-                    "product.submit.ready",
-                    "Ürün onay için ekibimize gönderilecek."
-                  )
-                : t(
-                    "product.submit.needImages",
-                    "Önce en az bir görsel ekleyin."
-                  )
-              : t(
+            {!canSubmit
+              ? t(
                   "product.submit.notDraft",
                   "Yalnızca taslak veya reddedilen ürünler gönderilebilir."
-                )}
+                )
+              : !hasImages
+                ? t("product.submit.needImages", "Önce en az bir görsel ekleyin.")
+                : !hasFiles
+                  ? t(
+                      "product.submit.needFiles",
+                      "Önce en az bir baskı dosyası (STL/OBJ) ekleyin."
+                    )
+                  : t(
+                      "product.submit.ready",
+                      "Ürün onay için ekibimize gönderilecek."
+                    )}
           </p>
         </div>
         <Button
           type="button"
           variant="primary"
           loading={submitting}
-          disabled={!canSubmit || !hasImages}
+          disabled={!canSubmit || !hasImages || !hasFiles}
           onClick={handleSubmitForReview}
         >
           {t("manufacturer.products.submit", "İncelemeye gönder")}

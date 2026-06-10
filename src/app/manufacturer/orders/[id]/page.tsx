@@ -16,6 +16,7 @@ import type { TurkishAddress } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
+import { getProductSpec } from "@/lib/services/product-spec";
 import { ManufacturerOrderDetailClient } from "./client";
 
 export default async function ManufacturerOrderDetailPage({
@@ -107,6 +108,35 @@ export default async function ManufacturerOrderDetailPage({
         }
       : null;
 
+  // The product's manufacturable spec (print files + BOM + recipe) so the
+  // fulfilling manufacturer can actually produce it.
+  const spec =
+    order.orderType === "marketplace" && order.product
+      ? await getProductSpec(order.product.id)
+      : null;
+  const productSpec = spec
+    ? {
+        files: spec.files.map((f) => ({
+          id: f.id,
+          partName: f.partName,
+          fileName: f.fileName,
+          sourceFormat: f.sourceFormat,
+          quantity: f.quantity,
+          glbUrl: f.glbUrl,
+        })),
+        components: spec.components.map((c) => ({
+          name: c.name,
+          quantity: c.quantity,
+          unit: c.unit,
+          notes: c.notes,
+        })),
+        steps: spec.steps.map((s) => ({
+          instruction: s.instruction,
+          imageUrl: s.imageUrl,
+        })),
+      }
+    : null;
+
   const serialized = {
     order: {
       id: order.id,
@@ -142,6 +172,7 @@ export default async function ManufacturerOrderDetailPage({
     qcPhotos: currentRoundPhotos,
     qcRejectReason,
     marketplaceProduct,
+    productSpec,
     glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
     stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
     objUrl: normalizeFileUrl(latestGeneration?.outputObjUrl ?? null),

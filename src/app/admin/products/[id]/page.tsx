@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
+import { getProductSpec } from "@/lib/services/product-spec";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { EditProductClient, type EditableProduct } from "./edit-client";
 
@@ -21,6 +22,19 @@ export default async function AdminEditProductPage({
     with: { images: true, manufacturer: { columns: { companyName: true } } },
   });
   if (!product) notFound();
+
+  const spec = await getProductSpec(product.id);
+  const initialComponents = spec.components.map((c) => ({
+    name: c.name,
+    quantity: c.quantity,
+    unit: c.unit ?? "",
+    notes: c.notes ?? "",
+  }));
+  const initialSteps = spec.steps.map((s) => ({
+    instruction: s.instruction,
+    imageKey: s.imageKey,
+    imageUrl: s.imageUrl,
+  }));
 
   const serialized: EditableProduct = {
     id: product.id,
@@ -45,7 +59,13 @@ export default async function AdminEditProductPage({
 
   return (
     <div className="p-8 max-w-3xl">
-      <EditProductClient product={serialized} locale={locale} />
+      <EditProductClient
+        product={serialized}
+        locale={locale}
+        initialFiles={spec.files}
+        initialComponents={initialComponents}
+        initialSteps={initialSteps}
+      />
     </div>
   );
 }

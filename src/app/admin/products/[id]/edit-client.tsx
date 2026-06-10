@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import {
+  ProductSpecEditor,
+  type SpecFile,
+  type SpecComponentRow,
+  type SpecStepRow,
+} from "@/components/products/product-spec-editor";
 
 const CATEGORY_LABEL: Record<string, string> = {
   figurine: "Figür",
@@ -40,9 +46,15 @@ export interface EditableProduct {
 export function EditProductClient({
   product,
   locale: _locale,
+  initialFiles,
+  initialComponents,
+  initialSteps,
 }: {
   product: EditableProduct;
   locale: string;
+  initialFiles: SpecFile[];
+  initialComponents: SpecComponentRow[];
+  initialSteps: SpecStepRow[];
 }) {
   void _locale;
   const d = useDictionary();
@@ -401,6 +413,17 @@ export function EditProductClient({
           </Button>
         </div>
       </form>
+
+      {/* Print files + bill of materials + assembly recipe */}
+      <div className="mt-8">
+        <ProductSpecEditor
+          apiBase="/api/admin/products"
+          productId={product.id}
+          initialFiles={initialFiles}
+          initialComponents={initialComponents}
+          initialSteps={initialSteps}
+        />
+      </div>
     </div>
   );
 }

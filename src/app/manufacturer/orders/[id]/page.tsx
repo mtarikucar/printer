@@ -5,6 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   orders,
+  orderItems,
   orderPhotos,
   generationAttempts,
   manufacturerActions,
@@ -108,15 +109,44 @@ export default async function ManufacturerOrderDetailPage({
         }
       : null;
 
-  // The product's manufacturable spec (print files + BOM + recipe) so the
-  // fulfilling manufacturer can actually produce it.
-  const spec =
-    order.orderType === "marketplace" && order.product
-      ? await getProductSpec(order.product.id)
-      : null;
-  const productSpec = spec
-    ? {
-        files: spec.files.map((f) => ({
+  // Every product this marketplace order covers — single buy-now (order.product)
+  // OR a cart sub-order's line items — each with its manufacturable spec, so the
+  // fulfilling manufacturer can produce them all.
+  const orderProductRefs: { productId: string; title: string; quantity: number }[] = [];
+  if (order.orderType === "marketplace") {
+    if (order.productId && order.product) {
+      orderProductRefs.push({
+        productId: order.productId,
+        title: order.productTitleSnapshot ?? order.product.title,
+        quantity: order.quantity,
+      });
+    }
+    const itemRows = await db
+      .select({
+        productId: orderItems.productId,
+        title: orderItems.productTitleSnapshot,
+        quantity: orderItems.quantity,
+      })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id));
+    for (const it of itemRows) {
+      if (it.productId && !orderProductRefs.some((r) => r.productId === it.productId)) {
+        orderProductRefs.push({
+          productId: it.productId,
+          title: it.title,
+          quantity: it.quantity,
+        });
+      }
+    }
+  }
+  const productSpecs = await Promise.all(
+    orderProductRefs.map(async (ref) => {
+      const s = await getProductSpec(ref.productId);
+      return {
+        productId: ref.productId,
+        title: ref.title,
+        quantity: ref.quantity,
+        files: s.files.map((f) => ({
           id: f.id,
           partName: f.partName,
           fileName: f.fileName,
@@ -124,18 +154,19 @@ export default async function ManufacturerOrderDetailPage({
           quantity: f.quantity,
           glbUrl: f.glbUrl,
         })),
-        components: spec.components.map((c) => ({
+        components: s.components.map((c) => ({
           name: c.name,
           quantity: c.quantity,
           unit: c.unit,
           notes: c.notes,
         })),
-        steps: spec.steps.map((s) => ({
-          instruction: s.instruction,
-          imageUrl: s.imageUrl,
+        steps: s.steps.map((st) => ({
+          instruction: st.instruction,
+          imageUrl: st.imageUrl,
         })),
-      }
-    : null;
+      };
+    })
+  );
 
   const serialized = {
     order: {
@@ -172,7 +203,7 @@ export default async function ManufacturerOrderDetailPage({
     qcPhotos: currentRoundPhotos,
     qcRejectReason,
     marketplaceProduct,
-    productSpec,
+    productSpecs,
     glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
     stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
     objUrl: normalizeFileUrl(latestGeneration?.outputObjUrl ?? null),

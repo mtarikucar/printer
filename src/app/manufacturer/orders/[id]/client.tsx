@@ -57,7 +57,10 @@ interface Props {
       description: string;
       images: string[];
     } | null;
-    productSpec: {
+    productSpecs: {
+      productId: string;
+      title: string;
+      quantity: number;
       files: {
         id: string;
         partName: string | null;
@@ -73,7 +76,7 @@ interface Props {
         notes: string | null;
       }[];
       steps: { instruction: string; imageUrl: string | null }[];
-    } | null;
+    }[];
     glbUrl: string | null;
     stlUrl: string | null;
     objUrl: string | null;
@@ -141,7 +144,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpec, glbUrl, stlUrl, objUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, glbUrl, stlUrl, objUrl, actions } = data;
   const isMarketplace = order.orderType === "marketplace";
   const router = useRouter();
   const d = useDictionary();
@@ -465,15 +468,23 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
-          {/* ─── Production files + BOM + recipe ──────── */}
-          {isMarketplace && productSpec && (
-            <ProductionPanel
-              orderId={order.id}
-              files={productSpec.files}
-              components={productSpec.components}
-              steps={productSpec.steps}
-            />
-          )}
+          {/* ─── Production files + BOM + recipe (one panel per product) ── */}
+          {isMarketplace &&
+            productSpecs.map((ps) => (
+              <ProductionPanel
+                key={ps.productId}
+                orderId={order.id}
+                title={
+                  productSpecs.length > 1 || !marketplaceProduct
+                    ? ps.title
+                    : undefined
+                }
+                quantity={ps.quantity}
+                files={ps.files}
+                components={ps.components}
+                steps={ps.steps}
+              />
+            ))}
 
           {/* ─── Photo + Model Hero Card (Tabbed) ──────── */}
           {!isMarketplace && (photos.length > 0 || glbUrl) && (

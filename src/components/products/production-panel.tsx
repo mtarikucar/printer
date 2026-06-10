@@ -31,11 +31,16 @@ export function ProductionPanel({
   files,
   components,
   steps,
+  title,
+  quantity,
 }: {
   orderId: string;
   files: PanelFile[];
   components: PanelComponent[];
   steps: PanelStep[];
+  /** Product name — shown as a header for multi-product (cart) sub-orders. */
+  title?: string;
+  quantity?: number;
 }) {
   const d = useDictionary();
   const t = (key: string, fallback: string) =>
@@ -48,10 +53,22 @@ export function ProductionPanel({
 
   return (
     <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5 space-y-5">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-          {t("manufacturer.production.badge", "Üretim dosyaları")}
-        </span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0">
+            {t("manufacturer.production.badge", "Üretim dosyaları")}
+          </span>
+          {title && (
+            <span className="text-sm font-semibold text-gray-900 truncate">
+              {title}
+            </span>
+          )}
+        </div>
+        {quantity != null && quantity > 1 && (
+          <span className="text-xs font-medium text-gray-500 shrink-0">
+            × {quantity}
+          </span>
+        )}
       </div>
 
       {/* ── Printable parts ── */}

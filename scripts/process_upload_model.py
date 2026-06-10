@@ -32,7 +32,10 @@ def process(input_path: str, output_glb_path: str, report_path: str, target_heig
     mesh = load_mesh(input_path)  # trimesh.load handles .stl / .obj / .glb by ext
     mesh, dropped = keep_largest_component(mesh)
     mesh = decimate_if_needed(mesh, repairs=repairs)
-    mesh = scale_to_target(mesh, target_height_mm)
+    # target_height_mm <= 0 → keep the model's true size (product-spec mode):
+    # we only need a GLB preview + real volume/bbox, not a print-scaled mesh.
+    if target_height_mm and target_height_mm > 0:
+        mesh = scale_to_target(mesh, target_height_mm)
 
     # Try to close the mesh so volume is meaningful; tolerate failures.
     try:

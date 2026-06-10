@@ -994,6 +994,80 @@ export const productImages = pgTable(
   })
 );
 
+// ─── Manufacturable product spec: print files + BOM + assembly recipe ───────
+// A product is a recipe the fulfilling manufacturer must be able to PRODUCE:
+// one or more printable parts (STL/OBJ), the non-printed components needed
+// (LED, adapter, screws…), and ordered assembly steps. All cascade on product.
+
+// Printable parts. storageKey under product-files/; best-effort GLB preview +
+// geometry captured at upload time (process_upload_model.py, skip-scale).
+export const productFiles = pgTable(
+  "product_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    storageKey: text("storage_key").notNull(),
+    sourceFormat: text("source_format").notNull(), // 'stl' | 'obj'
+    fileName: text("file_name").notNull(),
+    fileSizeBytes: integer("file_size_bytes").notNull(),
+    partName: text("part_name"), // "Lamba gövdesi"; falls back to fileName
+    quantity: integer("quantity").notNull().default(1), // e.g. 4 identical legs
+    glbPreviewKey: text("glb_preview_key"),
+    volumeMm3: doublePrecision("volume_mm3"),
+    boundingBoxMm: jsonb("bounding_box_mm").$type<{ x: number; y: number; z: number }>(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_files_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
+// Bill of materials — free-form non-printed components per product. `notes`
+// (spec/supplier link) is manufacturer/admin-only; buyers see name+quantity.
+export const productComponents = pgTable(
+  "product_components",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    unit: text("unit"), // "adet" | "metre" | "cm" | …
+    notes: text("notes"), // internal: spec / supplier link
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_components_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
+// Assembly recipe — ordered steps with an optional photo (imageKey under
+// product-files/). Manufacturer/admin-only.
+export const productAssemblySteps = pgTable(
+  "product_assembly_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    instruction: text("instruction").notNull(),
+    imageKey: text("image_key"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_assembly_steps_product_idx").on(
+      t.productId,
+      t.sortOrder
+    ),
+  })
+);
+
 // ─── Faz 3: customer-uploaded models (STL/OBJ → print) ──────────────────────
 // One row per uploaded model (modeled on `previews`). The upload + server-side
 // geometry (volume / bbox / wall-thickness, via process_upload_model.py) drive
@@ -1316,6 +1390,9 @@ export const productsRelations = relations(products, ({ one, many }) => ({
     references: [manufacturers.id],
   }),
   images: many(productImages),
+  files: many(productFiles),
+  components: many(productComponents),
+  assemblySteps: many(productAssemblySteps),
   orders: many(orders),
 }));
 
@@ -1325,6 +1402,33 @@ export const productImagesRelations = relations(productImages, ({ one }) => ({
     references: [products.id],
   }),
 }));
+
+export const productFilesRelations = relations(productFiles, ({ one }) => ({
+  product: one(products, {
+    fields: [productFiles.productId],
+    references: [products.id],
+  }),
+}));
+
+export const productComponentsRelations = relations(
+  productComponents,
+  ({ one }) => ({
+    product: one(products, {
+      fields: [productComponents.productId],
+      references: [products.id],
+    }),
+  })
+);
+
+export const productAssemblyStepsRelations = relations(
+  productAssemblySteps,
+  ({ one }) => ({
+    product: one(products, {
+      fields: [productAssemblySteps.productId],
+      references: [products.id],
+    }),
+  })
+);
 
 export const manufacturerActionsRelations = relations(manufacturerActions, ({ one }) => ({
   order: one(orders, {

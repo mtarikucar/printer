@@ -42,6 +42,33 @@ export function createProductSchema(locale: Locale = defaultLocale) {
   });
 }
 
+// ─── Product spec: bill-of-materials + assembly recipe ──────────────────────
+// A free-form component line (LED, adapter, screw…). `notes` is internal
+// (manufacturer/admin only); buyers see name + quantity as "box contents".
+export const productComponentSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  quantity: z.number().int().min(1).max(9999).default(1),
+  unit: z.string().trim().max(20).optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+
+// One ordered assembly step. `imageKey` is a storage key from the step-image
+// upload route (kept under product-files/).
+export const productAssemblyStepSchema = z.object({
+  instruction: z.string().trim().min(1).max(1000),
+  imageKey: z.string().trim().max(300).optional(),
+});
+
+// Atomic replace of a product's BOM + recipe. Print files are managed
+// separately (uploaded one-by-one like images).
+export const updateProductSpecSchema = z.object({
+  components: z.array(productComponentSchema).max(30).default([]),
+  assemblySteps: z.array(productAssemblyStepSchema).max(30).default([]),
+});
+
+export type ProductComponentInput = z.infer<typeof productComponentSchema>;
+export type ProductAssemblyStepInput = z.infer<typeof productAssemblyStepSchema>;
+
 // Storefront checkout for a marketplace purchase. Shares the common checkout
 // fields with createOrderSchema (address/payment/gift-card/guest), but carries
 // a productId + quantity instead of photoKey/figurineSize/style.

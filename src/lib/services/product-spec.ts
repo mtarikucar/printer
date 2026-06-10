@@ -246,17 +246,34 @@ export async function getProductSpec(productId: string): Promise<ProductSpec> {
   };
 }
 
-// Buyer-facing "box contents": just component name + quantity + unit. No notes,
-// no recipe, no files.
-export async function getProductBoxContents(
-  productId: string
-): Promise<{ name: string; quantity: number; unit: string | null }[]> {
-  const rows = await db.query.productComponents.findMany({
-    where: eq(productComponents.productId, productId),
-    orderBy: [asc(productComponents.sortOrder)],
-    columns: { name: true, quantity: true, unit: true },
-  });
-  return rows;
+// Buyer-facing storefront spec: a single 3D preview URL + "box contents"
+// (component name+qty+unit only). Deliberately omits STL files, notes, and the
+// assembly recipe — those are manufacturer/admin-only.
+export async function getProductPublicSpec(productId: string): Promise<{
+  model3dUrl: string | null;
+  boxContents: { name: string; quantity: number; unit: string | null }[];
+}> {
+  const [files, components] = await Promise.all([
+    db.query.productFiles.findMany({
+      where: eq(productFiles.productId, productId),
+      orderBy: [asc(productFiles.sortOrder)],
+      columns: { glbPreviewKey: true },
+    }),
+    db.query.productComponents.findMany({
+      where: eq(productComponents.productId, productId),
+      orderBy: [asc(productComponents.sortOrder)],
+      columns: { name: true, quantity: true, unit: true },
+    }),
+  ]);
+  const firstGlb = files.find((f) => f.glbPreviewKey)?.glbPreviewKey ?? null;
+  return {
+    model3dUrl: firstGlb ? getPublicUrl(firstGlb) : null,
+    boxContents: components.map((c) => ({
+      name: c.name,
+      quantity: c.quantity,
+      unit: c.unit,
+    })),
+  };
 }
 
 // Count files for the ≥1-file publish gate + the MAX_PRODUCT_FILES cap.

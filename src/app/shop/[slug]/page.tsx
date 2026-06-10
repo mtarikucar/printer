@@ -8,6 +8,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { getPublicUrl } from "@/lib/services/storage";
+import { getProductPublicSpec } from "@/lib/services/product-spec";
 import { ProductDetailClient } from "./detail-client";
 import { ProductReviews } from "@/components/reviews/product-reviews";
 import { ProductRow } from "@/components/marketplace/product-row";
@@ -80,6 +81,9 @@ export default async function ProductDetailPage({
     ratingCount: p.ratingCount,
   }));
 
+  // Buyer-safe spec: a 3D preview + "box contents" (no STL, notes, or recipe).
+  const publicSpec = await getProductPublicSpec(product.id);
+
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
@@ -100,6 +104,8 @@ export default async function ProductDetailPage({
             leadTimeDays: product.leadTimeDays,
             sellerName: product.manufacturer?.companyName ?? null,
             images,
+            model3dUrl: publicSpec.model3dUrl,
+            boxContents: publicSpec.boxContents,
           }}
         />
         <ProductReviews productId={product.id} />

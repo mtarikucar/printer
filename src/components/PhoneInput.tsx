@@ -42,7 +42,7 @@ export function PhoneInput({
   return (
     <div className="flex gap-2">
       <select
-        aria-label="Country code"
+        aria-label="Ülke kodu"
         value={country}
         onChange={(e) => onCountryChange(e.target.value as CountryCode)}
         className="px-2 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shrink-0"

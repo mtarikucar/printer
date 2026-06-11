@@ -359,7 +359,7 @@ function PublishModal({
       if (res.ok) {
         onPublished();
       } else {
-        alert("Failed to publish. Please try again.");
+        alert(d["account.gallery.publishFailed"]);
       }
     } finally {
       setSaving(false);

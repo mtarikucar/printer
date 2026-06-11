@@ -832,8 +832,12 @@ function CustomCreateFlow() {
         {step === 0 && (
           <div className="animate-fade-in">
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-serif text-text-primary animate-fade-in-up">{d["create.title"]}</h1>
-              <p className="mt-2 text-text-secondary animate-fade-in-up delay-100">{d["create.subtitle"]}</p>
+              <h1 className="text-3xl font-serif text-text-primary animate-fade-in-up">
+                {isObjectStyle ? d["create.title.object"] : d["create.title"]}
+              </h1>
+              <p className="mt-2 text-text-secondary animate-fade-in-up delay-100">
+                {isObjectStyle ? d["create.subtitle.object"] : d["create.subtitle"]}
+              </p>
             </div>
 
             <div className="space-y-8">

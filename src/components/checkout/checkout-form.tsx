@@ -107,7 +107,7 @@ export function CheckoutForm({
       }
       router.push(`/track/${reference}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error");
+      setError(err instanceof Error ? err.message : d["common.error"]);
       setSubmitting(false);
     }
   }

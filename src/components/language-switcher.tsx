@@ -2,11 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/lib/i18n/locale-context";
-import { LOCALE_COOKIE } from "@/lib/i18n/types";
+import { enabledLocales, LOCALE_COOKIE } from "@/lib/i18n/types";
 
 export function LanguageSwitcher() {
   const router = useRouter();
   const locale = useLocale();
+
+  // Tek dil aktifken dil değiştirici gösterilmez (şimdilik yalnızca Türkçe).
+  if (enabledLocales.length < 2) return null;
 
   const toggle = () => {
     const next = locale === "en" ? "tr" : "en";

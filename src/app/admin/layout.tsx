@@ -1,9 +1,5 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { getLocale } from "@/lib/i18n/get-locale";
-import { getDictionary } from "@/lib/i18n/dictionaries";
-import { LanguageSwitcher } from "@/components/language-switcher";
 import { db } from "@/lib/db";
 import { orders, manufacturers, orderDrafts, products } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
@@ -37,9 +33,6 @@ export default async function AdminLayout({
   if ((session?.user as { role?: string } | undefined)?.role !== "admin") {
     redirect("/admin/login");
   }
-
-  const locale = await getLocale();
-  const d = getDictionary(locale);
 
   // Count orders needing review
   const [reviewCount] = await db

@@ -255,7 +255,7 @@ export function MeshSculptor({
       onSaved?.();
     } catch (err) {
       console.error("Failed to save sculpted mesh:", err);
-      alert(err instanceof Error ? err.message : "Failed to save");
+      alert(err instanceof Error ? err.message : "Kaydedilemedi");
     } finally {
       setSaving(false);
     }
@@ -300,7 +300,7 @@ export function MeshSculptor({
             <div className="absolute inset-0 flex items-center justify-center bg-white/90 backdrop-blur-sm">
               <div className="flex flex-col items-center gap-3">
                 <div className="w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-gray-500 text-sm">Loading mesh...</span>
+                <span className="text-gray-500 text-sm">Model yükleniyor...</span>
               </div>
             </div>
           )}

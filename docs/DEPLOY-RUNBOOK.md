@@ -39,6 +39,31 @@ This branch ships ~70 fixes covering admin auth, payment defense-in-depth, gift-
    ```
    Must report 4/4 passed. Covers the card-payment recovery flow + waiting-retry loop.
 
+## Reverse proxy — upload body size (one-time VPS setup, NOT in this repo)
+
+The host nginx in front of the app container (`127.0.0.1:3005`) is NOT managed
+by this repo or the deploy workflow. Its default `client_max_body_size` is
+**1 MB**, which rejects product print-file uploads (STL/OBJ, app cap 50 MB)
+with **HTTP 413 before the request reaches Next.js**. Symptom: a valid 25 MB
+STL fails with `Dosya yüklenemedi … [HTTP 413]` even though the app accepts it
+(verified: the route handler returns 200 for the same 25 MB file locally).
+
+**Fix on the VPS (one-time):**
+```bash
+# 1. Find the figurunica server block:
+grep -rl "figurunica\|3005" /etc/nginx/
+# 2. Inside that `server { … }` block (or globally in `http { … }`), add:
+#       client_max_body_size 60m;
+#    (60m = 50 MB app cap + multipart overhead; see
+#     docker/nginx/figurunica-upload-size.conf for a full reference block.)
+# 3. Validate and reload (no downtime):
+nginx -t && systemctl reload nginx
+```
+Keep `client_max_body_size` ≥ `UPLOAD_MODEL_MAX_SIZE_BYTES`
+(`src/lib/config/upload.ts`). If the app cap is ever raised, raise this too.
+If the site is also behind Cloudflare, its free-tier upload limit is 100 MB —
+not the gate here.
+
 ## PayTR merchant panel — webhook URL (one-time setup, NOT via env)
 
 The webhook URL is configured ONCE in the PayTR merchant panel — there's no

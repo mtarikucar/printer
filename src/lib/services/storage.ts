@@ -103,7 +103,17 @@ export function signFilePath(
   ttlSeconds: number = SIGNED_URL_DEFAULT_TTL_SECONDS
 ): { exp: number; sig: string } {
   const secret = getSignSecret();
-  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  // Quantize `exp` to the TTL boundary instead of `now + ttl`. A time-varying
+  // exp changes the `?exp=&sig=` query on every render, so the browser keys its
+  // cache on a different URL each page load and re-downloads every image —
+  // defeating the `immutable, max-age=1y` header on /api/files. Aligning exp to
+  // the window makes every render within the same window emit the SAME URL, so
+  // the cache actually hits. The verify path is unchanged. URL rotates at most
+  // once per window. The `+2` (not `+1`) guarantees the signature stays valid
+  // for at least one full ttl even for a render right before a window boundary,
+  // while keeping exp constant within each window (cache key stays stable).
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = (Math.floor(nowSec / ttlSeconds) + 2) * ttlSeconds;
   const sig = crypto
     .createHmac("sha256", secret)
     .update(`${relativePath}:${exp}`)

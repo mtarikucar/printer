@@ -6,6 +6,7 @@ const MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
+  ".webp": "image/webp",
   ".glb": "model/gltf-binary",
   ".stl": "application/octet-stream",
 };

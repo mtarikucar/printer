@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { products, productImages } from "@/lib/db/schema";
 import { saveFile, getPublicUrl, deleteFile } from "@/lib/services/storage";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
+import { optimizeDisplayImage } from "@/lib/services/image-optimize";
 
 const MAX_IMAGES = 8;
 
@@ -44,8 +45,17 @@ export async function POST(
     return NextResponse.json({ error: "Invalid image format" }, { status: 400 });
   }
 
-  const ext = detectedType === "image/png" ? "png" : "jpg";
-  const storageKey = await saveFile(buffer, "products", `${nanoid()}.${ext}`);
+  // Re-encode to a capped-size WebP (see seller route); fall back to original.
+  let storeBuffer: Buffer = buffer;
+  let ext = detectedType === "image/png" ? "png" : "jpg";
+  try {
+    const optimized = await optimizeDisplayImage(buffer);
+    storeBuffer = optimized.buffer;
+    ext = optimized.ext;
+  } catch {
+    /* keep original */
+  }
+  const storageKey = await saveFile(storeBuffer, "products", `${nanoid()}.${ext}`);
 
   const [image] = await db
     .insert(productImages)

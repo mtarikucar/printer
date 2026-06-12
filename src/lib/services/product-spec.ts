@@ -13,7 +13,7 @@ import {
 } from "@/lib/db/schema";
 import { saveFile, getPublicUrl, deleteFile } from "@/lib/services/storage";
 import { validateModelFile } from "@/lib/services/model-file-validation";
-import { UPLOAD_MODEL_MAX_SIZE_BYTES } from "@/lib/config/upload";
+import { UPLOAD_MODEL_MAX_SIZE_BYTES, MAX_PRODUCT_FILES } from "@/lib/config/upload";
 import type {
   ProductComponentInput,
   ProductAssemblyStepInput,
@@ -21,8 +21,10 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-// A lamp ≈ a handful of printed parts; 12 is a generous cap.
-export const MAX_PRODUCT_FILES = 12;
+// A lamp ≈ a handful of printed parts; 12 is a generous cap. Defined in
+// client-safe config/upload.ts so the spec editor shares the same limit;
+// re-exported here to keep existing server imports working.
+export { MAX_PRODUCT_FILES };
 
 // Best-effort: convert an STL/OBJ → GLB preview + capture true volume/bbox via
 // the existing geometry script (skip-scale mode). Returns null if Python /

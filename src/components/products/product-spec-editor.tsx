@@ -64,51 +64,168 @@ export function ProductSpecEditor({
   const [preview, setPreview] = useState<string | null>(null);
 
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [savingSpec, setSavingSpec] = useState(false);
   const [specMsg, setSpecMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // ─── Print files ──────────────────────────────────────────────────────────
-  const uploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError(null);
-    setUploading(true);
+  const ERROR_MESSAGES: Record<string, string> = {
+    too_large: "Dosya 50MB sınırını aşıyor.",
+    unsupported_format: "Sadece .stl veya .obj dosyası yükleyebilirsiniz.",
+    invalid_stl: "Dosya geçerli bir STL gibi görünmüyor (bozuk veya eksik olabilir).",
+    invalid_obj: "Dosya geçerli bir OBJ gibi görünmüyor.",
+    too_small: "Dosya boş veya çok küçük.",
+    too_many_files: "Bir ürüne en fazla 12 baskı dosyası eklenebilir.",
+  };
+
+  // POST one model file. Returns the created row, or an error string.
+  const postOne = async (
+    file: Blob,
+    fileName: string,
+    name: string | null,
+    quantity: number
+  ): Promise<{ ok: true; file: SpecFile } | { ok: false; message: string }> => {
     try {
       const form = new FormData();
-      form.append("file", file);
-      if (partName.trim()) form.append("partName", partName.trim());
-      form.append("quantity", String(Math.max(1, Number(partQty) || 1)));
+      form.append("file", file, fileName);
+      if (name && name.trim()) form.append("partName", name.trim());
+      form.append("quantity", String(Math.max(1, quantity || 1)));
       const res = await fetch(`${fileBase}/files`, { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const code = (data as { code?: string }).code;
-        const messages: Record<string, string> = {
-          too_large: "Dosya 50MB sınırını aşıyor.",
-          unsupported_format: "Sadece .stl veya .obj dosyası yükleyebilirsiniz.",
-          invalid_stl: "Dosya geçerli bir STL gibi görünmüyor (bozuk veya eksik olabilir).",
-          invalid_obj: "Dosya geçerli bir OBJ gibi görünmüyor.",
-          too_small: "Dosya boş veya çok küçük.",
-          too_many_files: "Bir ürüne en fazla 12 baskı dosyası eklenebilir.",
-        };
+        const message =
+          (code && ERROR_MESSAGES[code]) ||
+          t("product.files.error", "Dosya yüklenemedi (STL/OBJ, ≤50MB, geçerli geometri).") +
+            ` [HTTP ${res.status}]`;
+        return { ok: false, message };
+      }
+      return { ok: true, file: data.file as SpecFile };
+    } catch {
+      return {
+        ok: false,
+        message: t("product.files.error", "Dosya yüklenemedi (STL/OBJ, ≤50MB)."),
+      };
+    }
+  };
+
+  // Flatten the picked files (expanding any ZIP) into a list of model parts.
+  const flattenSelection = async (
+    picked: File[]
+  ): Promise<{ blob: Blob; fileName: string; partName: string }[]> => {
+    const { isZipFile, isModelFile, extractModelEntriesFromZip, partNameFromFileName } =
+      await import("@/lib/services/model-bundle");
+    const out: { blob: Blob; fileName: string; partName: string }[] = [];
+    for (const f of picked) {
+      if (isZipFile(f.name)) {
+        const buf = new Uint8Array(await f.arrayBuffer());
+        let entries: { name: string; bytes: Uint8Array }[] = [];
+        try {
+          entries = extractModelEntriesFromZip(buf);
+        } catch {
+          setError(t("product.files.zipError", "ZIP açılamadı veya bozuk."));
+          continue;
+        }
+        for (const e of entries) {
+          out.push({
+            blob: new Blob([e.bytes as BlobPart]),
+            fileName: e.name,
+            partName: partNameFromFileName(e.name),
+          });
+        }
+      } else if (isModelFile(f.name)) {
+        out.push({ blob: f, fileName: f.name, partName: partNameFromFileName(f.name) });
+      }
+      // silently ignore other file types (e.g. a stray .txt in a multi-select)
+    }
+    return out;
+  };
+
+  const uploadFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? []);
+    if (picked.length === 0) return;
+    setError(null);
+    setUploading(true);
+    setProgress(null);
+
+    try {
+      // Single non-zip file + a typed name/qty → preserve the precise path.
+      const single =
+        picked.length === 1 &&
+        !picked[0].name.toLowerCase().endsWith(".zip") &&
+        (partName.trim() !== "" || partQty.trim() !== "1");
+
+      const { MAX_PRODUCT_FILES } = await import("@/lib/config/upload");
+      const remaining = MAX_PRODUCT_FILES - files.length;
+      if (remaining <= 0) {
+        setError(ERROR_MESSAGES.too_many_files);
+        return;
+      }
+
+      let parts = await flattenSelection(picked);
+      if (parts.length === 0) {
         setError(
-          (code && messages[code]) ||
-            t(
-              "product.files.error",
-              "Dosya yüklenemedi (STL/OBJ, ≤50MB, geçerli geometri)."
-            ) + ` [HTTP ${res.status}]`
+          t("product.files.noModels", "Seçimde STL/OBJ dosyası bulunamadı.")
         );
         return;
       }
-      const next = [...files, data.file as SpecFile];
-      setFiles(next);
-      onFilesChange?.(next.length);
-      setPartName("");
-      setPartQty("1");
-    } catch {
-      setError(t("product.files.error", "Dosya yüklenemedi (STL/OBJ, ≤50MB)."));
+
+      let skipped = 0;
+      if (parts.length > remaining) {
+        skipped = parts.length - remaining;
+        parts = parts.slice(0, remaining);
+      }
+
+      const created: SpecFile[] = [];
+      const failures: string[] = [];
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        if (parts.length > 1) {
+          setProgress(
+            t("product.files.uploading", "Yükleniyor")
+              .concat(` ${i + 1}/${parts.length}…`)
+          );
+        }
+        const res = single
+          ? await postOne(
+              p.blob,
+              p.fileName,
+              partName.trim() || p.partName,
+              Math.max(1, Number(partQty) || 1)
+            )
+          : await postOne(p.blob, p.fileName, p.partName, 1);
+        if (res.ok) created.push(res.file);
+        else failures.push(`${p.fileName}: ${res.message}`);
+      }
+
+      if (created.length > 0) {
+        const next = [...files, ...created];
+        setFiles(next);
+        onFilesChange?.(next.length);
+        setPartName("");
+        setPartQty("1");
+      }
+
+      // Build a concise summary when more than one part was involved.
+      if (parts.length > 1 || skipped > 0 || failures.length > 0) {
+        const bits: string[] = [];
+        bits.push(
+          `${created.length}/${parts.length + skipped} ${t("product.files.added", "eklendi")}`
+        );
+        if (skipped > 0)
+          bits.push(`${skipped} ${t("product.files.skippedCap", "atlandı (sınır 12)")}`);
+        if (failures.length > 0)
+          bits.push(`${failures.length} ${t("product.files.failed", "başarısız")}: ${failures[0]}`);
+        const summary = bits.join(" · ");
+        if (failures.length > 0 || skipped > 0) setError(summary);
+        else setSpecMsg(summary);
+      } else if (failures.length === 1) {
+        setError(failures[0]);
+      }
     } finally {
       setUploading(false);
+      setProgress(null);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -294,14 +411,21 @@ export function ProductSpecEditor({
           <input
             ref={fileRef}
             type="file"
-            accept=".stl,.obj,model/stl,model/obj"
-            onChange={uploadFile}
+            multiple
+            accept=".stl,.obj,.zip,model/stl,model/obj,application/zip,application/x-zip-compressed"
+            onChange={uploadFiles}
             disabled={uploading}
             className="block text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 disabled:opacity-50"
           />
         </div>
+        {progress && (
+          <p className="text-xs font-medium text-indigo-600">{progress}</p>
+        )}
         <p className="text-xs text-gray-400">
-          {t("product.files.hint", "STL veya OBJ, en fazla 50MB. Her parça için bir dosya.")}
+          {t(
+            "product.files.hintBulk",
+            "STL veya OBJ (her biri ≤50MB). Birden fazla dosya veya bir ZIP seçebilirsiniz; toplu seçimde parça adı dosya adından alınır, adet 1 olur."
+          )}
         </p>
       </div>
 

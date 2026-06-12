@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useState } from "react";
@@ -12,7 +12,6 @@ export function ManufacturerSidebar({
   newAssignmentCount: number;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const d = useDictionary();
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -88,7 +87,9 @@ export function ManufacturerSidebar({
     setLoggingOut(true);
     try {
       await fetch("/api/manufacturer/auth/logout", { method: "POST" });
-      router.push("/manufacturer/login");
+      // Full navigation so the session-gated layout re-renders without the
+      // panel shell (client-side push would keep the sidebar mounted).
+      window.location.assign("/manufacturer/login");
     } catch {
       setLoggingOut(false);
     }
@@ -102,7 +103,7 @@ export function ManufacturerSidebar({
           {d["manufacturer.nav.panel" as keyof typeof d] || "Manufacturer Panel"}
         </p>
       </div>
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {links.map((link) => {
           const isActive = pathname.startsWith(link.href);
           return (

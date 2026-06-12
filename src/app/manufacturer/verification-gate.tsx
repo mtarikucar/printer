@@ -38,7 +38,7 @@ export function VerificationGate({
 
   return (
     <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="max-w-lg w-full bg-white rounded-2xl border border-gray-200 p-8 text-center">
+      <div className="max-w-lg w-full bg-white rounded-2xl border border-gray-200 p-6 sm:p-8 text-center">
         <div className="text-3xl mb-3">🖨️</div>
         <h1 className="text-2xl font-serif text-gray-900">
           Tebrikler, {companyName}!

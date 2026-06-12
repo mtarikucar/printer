@@ -197,7 +197,7 @@ export default async function AdminOrderDetailPage({
   };
 
   return (
-    <div className="p-8 max-w-7xl">
+    <div className="p-4 sm:p-8 max-w-7xl">
       {forceProfile && (
         <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
           <strong>Q7 escape hatch:</strong> ranking shown under forced

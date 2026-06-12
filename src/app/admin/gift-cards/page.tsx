@@ -35,7 +35,7 @@ export default async function AdminGiftCardsPage() {
     .orderBy(desc(giftCards.createdAt));
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900">{d["admin.giftCards.title"]}</h1>
       <p className="text-gray-500 mt-1">{d["admin.giftCards.subtitle"]}</p>
 
@@ -43,7 +43,7 @@ export default async function AdminGiftCardsPage() {
         <CreateGiftCardForm d={d} />
       </div>
 
-      <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">

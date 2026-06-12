@@ -260,7 +260,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             <span className="text-gray-600 font-medium">{order.orderNumber}</span>
           </div>
           {/* Order number + badge */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="text-3xl font-bold text-gray-900 font-mono tracking-tight">
               {order.orderNumber}
             </h1>
@@ -285,7 +285,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {glbUrl && (
             <a
               href={`/api/manufacturer/orders/${order.id}/download-glb`}

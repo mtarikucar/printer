@@ -122,7 +122,7 @@ export function ManufacturersClient({
       </p>
 
       {/* Filter tabs */}
-      <div className="mt-6 flex gap-2">
+      <div className="mt-6 flex flex-wrap gap-2">
         {tabs.map((tab) => {
           const count = manufacturers.filter((m) =>
             matchesFilter(m, tab.key)
@@ -149,7 +149,7 @@ export function ManufacturersClient({
           <p className="text-lg">{d["admin.manufacturers.empty"]}</p>
         </div>
       ) : (
-        <div className="mt-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="mt-6 bg-white rounded-xl border border-gray-200 overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>

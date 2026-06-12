@@ -19,7 +19,7 @@ export default async function NewProductPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-4 sm:p-8 max-w-2xl">
       <NewProductClient />
     </div>
   );

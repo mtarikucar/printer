@@ -47,7 +47,7 @@ export default async function AdminProductsPage() {
   });
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <ProductsClient
         pending={pending.map(serialize)}
         all={all.map(serialize)}

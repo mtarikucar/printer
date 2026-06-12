@@ -83,7 +83,7 @@ export default async function AdminOrdersPage({
   });
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900">
         {d["admin.orders.title"]}
       </h1>

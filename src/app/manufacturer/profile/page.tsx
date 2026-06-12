@@ -189,7 +189,7 @@ export default function ManufacturerProfilePage() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center min-h-[50vh]">
+      <div className="p-4 sm:p-8 flex items-center justify-center min-h-[50vh]">
         <div className="animate-spin w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full" />
       </div>
     );
@@ -197,7 +197,7 @@ export default function ManufacturerProfilePage() {
 
   if (error || !profile) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <div className="bg-red-50 text-red-700 rounded-xl p-4 text-sm">{error}</div>
       </div>
     );
@@ -214,8 +214,8 @@ export default function ManufacturerProfilePage() {
     "w-full px-3 py-2 border border-gray-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
   return (
-    <div className="p-8 max-w-3xl">
-      <div className="flex items-start justify-between mb-6">
+    <div className="p-4 sm:p-8 max-w-3xl">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Profil</h1>
           <p className="text-gray-500 mt-1 text-sm">Hesap bilgilerinizi güncelleyin.</p>

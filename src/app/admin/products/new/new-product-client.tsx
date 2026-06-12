@@ -145,7 +145,7 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
           />
         </FormField>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField
             label={
               d["admin.products.fieldMaterial" as keyof typeof d] || "Malzeme"

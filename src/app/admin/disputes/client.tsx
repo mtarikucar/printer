@@ -37,7 +37,7 @@ export function DisputesClient({ disputes }: { disputes: Dispute[] }) {
   };
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-4 sm:p-8 max-w-4xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Anlaşmazlıklar</h1>
       {disputes.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500">

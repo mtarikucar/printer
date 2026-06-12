@@ -211,7 +211,7 @@ export function EditProductClient({
       >
         ← {d["admin.products.backToList" as keyof typeof d] || "Ürünlere dön"}
       </Link>
-      <div className="flex items-start justify-between mt-2">
+      <div className="flex flex-wrap items-start justify-between gap-3 mt-2">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             {d["admin.products.editTitle" as keyof typeof d] || "Ürünü düzenle"}
@@ -350,7 +350,7 @@ export function EditProductClient({
           />
         </FormField>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField
             label={
               d["admin.products.fieldMaterial" as keyof typeof d] || "Malzeme"

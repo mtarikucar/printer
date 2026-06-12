@@ -5,6 +5,7 @@ import { orders, manufacturers, orderDrafts, products } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { AdminSidebar } from "./sidebar";
 import { AdminRealtimeShell } from "./realtime-shell";
+import { PanelShell } from "@/components/panel-shell";
 import { auth } from "@/lib/auth/config";
 
 export default async function AdminLayout({
@@ -66,16 +67,20 @@ export default async function AdminLayout({
 
   return (
     <AdminRealtimeShell>
-      <div className="min-h-screen bg-gray-50 flex">
-        <AdminSidebar
-          reviewCount={reviewCount.count}
-          pendingManufacturerCount={pendingMfgCount.count}
-          pendingProductCount={pendingProductCount.count}
-          draftReviewCount={draftReviewCount.count}
-          qcPendingCount={qcPendingCount.count}
-        />
-        <main className="flex-1 overflow-auto text-gray-900">{children}</main>
-      </div>
+      <PanelShell
+        title="Figurunica Admin"
+        sidebar={
+          <AdminSidebar
+            reviewCount={reviewCount.count}
+            pendingManufacturerCount={pendingMfgCount.count}
+            pendingProductCount={pendingProductCount.count}
+            draftReviewCount={draftReviewCount.count}
+            qcPendingCount={qcPendingCount.count}
+          />
+        }
+      >
+        {children}
+      </PanelShell>
     </AdminRealtimeShell>
   );
 }

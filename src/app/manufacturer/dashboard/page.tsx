@@ -29,7 +29,7 @@ export default async function ManufacturerDashboardPage() {
   // manufacturers, so it must be a terminal page (no redirect back to orders).
   if (manufacturer.status !== "active") {
     return (
-      <div className="p-8 max-w-2xl">
+      <div className="p-4 sm:p-8 max-w-2xl">
         <h1 className="text-2xl font-bold text-gray-900">
           {d["manufacturer.dashboard.title"]}
         </h1>
@@ -89,7 +89,7 @@ export default async function ManufacturerDashboardPage() {
   ];
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 sm:p-8 max-w-5xl">
       <h1 className="text-2xl font-bold text-gray-900">
         {d["manufacturer.dashboard.title"]}
       </h1>

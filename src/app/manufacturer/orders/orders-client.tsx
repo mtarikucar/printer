@@ -232,7 +232,7 @@ export function ManufacturerOrdersClient({
 
       {/* Pagination */}
       {total > 0 && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-gray-500">
             {((d["manufacturer.orders.showingRange" as keyof typeof d] as string) ||
               "Showing {start} to {end} of {total}")

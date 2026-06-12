@@ -1,12 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export default function ManufacturerLoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const d = useDictionary();
   const [email, setEmail] = useState("");
@@ -20,18 +19,20 @@ export default function ManufacturerLoginPage() {
   // letting them try (and fail) to log in.
   const justRegisteredPending = searchParams.get("pending") === "1";
 
-  // Redirect if already logged in
+  // Redirect if already logged in. Full navigation, not router.replace: the
+  // manufacturer layout renders without the sidebar shell for guest pages,
+  // and a client-side navigation would keep that bare layout mounted.
   useEffect(() => {
     fetch("/api/manufacturer/auth/me")
       .then((res) => {
         if (res.ok) {
-          router.replace("/manufacturer/dashboard");
+          window.location.replace("/manufacturer/dashboard");
         } else {
           setCheckingAuth(false);
         }
       })
       .catch(() => setCheckingAuth(false));
-  }, [router]);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +57,7 @@ export default function ManufacturerLoginPage() {
         return;
       }
 
-      router.push("/manufacturer/dashboard");
+      window.location.assign("/manufacturer/dashboard");
     } catch {
       setError(
         (d["common.error" as keyof typeof d] as string) ||
@@ -100,7 +101,7 @@ export default function ManufacturerLoginPage() {
               </p>
             </div>
           )}
-          <div className="bg-white rounded-xl border border-gray-200 p-8">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8">
             <h1 className="text-2xl font-serif text-gray-900 text-center">
               {(d["manufacturer.login.title" as keyof typeof d] as string) ||
                 "Manufacturer Login"}

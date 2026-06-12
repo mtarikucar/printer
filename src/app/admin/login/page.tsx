@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const d = useDictionary();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +26,11 @@ export default function AdminLoginPage() {
       setError(d["api.auth.invalidCredentials"]);
       setLoading(false);
     } else {
-      router.push("/admin/dashboard");
+      // Full navigation, not router.push: /admin/login and /admin/dashboard
+      // share the admin layout, which renders WITHOUT the sidebar shell for
+      // the login page. A client-side push would keep that bare layout
+      // mounted, so the dashboard would appear without any navigation.
+      window.location.assign("/admin/dashboard");
     }
   };
 

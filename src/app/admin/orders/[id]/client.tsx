@@ -318,13 +318,13 @@ export function OrderDetailClient({ data, locale }: Props) {
   return (
     <div>
       {/* ─── Header ─────────────────────────────────────── */}
-      <div className="flex items-start justify-between pb-5 mb-5 border-b border-gray-100 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between pb-5 mb-5 border-b border-gray-100 gap-3 sm:gap-4">
         <div className="flex items-start gap-4">
           <Link href="/admin/orders" className="mt-1.5 p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </Link>
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <h1 className="text-2xl font-bold text-gray-900 font-mono tracking-tight">
                 {order.orderNumber}
               </h1>
@@ -335,7 +335,7 @@ export function OrderDetailClient({ data, locale }: Props) {
             <p className="text-sm text-gray-500 mt-0.5">{order.customerName} &middot; {order.email}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {latestGeneration?.outputGlbUrl && (
             <a href={latestGeneration.outputGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -570,7 +570,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                             ))}
                           </div>
                         )}
-                        <div className="grid grid-cols-4 gap-2 mt-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
                           {(["distance", "load", "reliability", "compliance"] as const).map((k) => (
                             <div key={k} className="space-y-1">
                               <div className="flex justify-between text-[10px] text-gray-500">
@@ -940,7 +940,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                     <input type="text" value={editAddress?.ilce || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, ilce: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Ilce" />
                     <input type="text" value={editAddress?.il || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, il: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Il" />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input type="text" value={editAddress?.postaKodu || ""} onChange={(e) => setEditAddress(prev => prev ? { ...prev, postaKodu: e.target.value } : null)} className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 transition-shadow" placeholder="Posta Kodu" />
                     <PhoneInput
                       country={editTelefonCountry}

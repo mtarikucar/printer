@@ -37,7 +37,7 @@ export default async function AdminQcQueuePage() {
   });
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 sm:p-8 max-w-5xl">
       <div className="flex items-start justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{d["admin.qcQueue.title"]}</h1>
         <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">

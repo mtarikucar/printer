@@ -289,7 +289,7 @@ export function OrdersClient({
 
       {/* Bulk action toolbar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 bg-gray-900 text-white px-4 py-2.5 rounded-xl">
+        <div className="flex flex-wrap items-center gap-3 bg-gray-900 text-white px-4 py-2.5 rounded-xl">
           <span className="text-sm font-medium">
             {selectedIds.size} {d["admin.orders.selected"]}
           </span>
@@ -316,7 +316,7 @@ export function OrdersClient({
       )}
 
       {/* Orders table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
@@ -425,7 +425,7 @@ export function OrdersClient({
 
       {/* Pagination */}
       {total > 0 && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-gray-500">
             {(d["admin.orders.showingRange"] as string)
               .replace("{start}", String(rangeStart))

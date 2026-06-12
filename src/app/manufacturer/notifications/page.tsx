@@ -70,7 +70,7 @@ export default function ManufacturerNotificationsPage() {
 
   if (error) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <div className="bg-red-50 text-red-700 rounded-xl p-4 text-sm">{error}</div>
       </div>
     );
@@ -78,15 +78,15 @@ export default function ManufacturerNotificationsPage() {
 
   if (items === null) {
     return (
-      <div className="p-8 flex items-center justify-center min-h-[50vh]">
+      <div className="p-4 sm:p-8 flex items-center justify-center min-h-[50vh]">
         <div className="animate-spin w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full" />
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-3xl">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-8 max-w-3xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Bildirimler</h1>
           <p className="text-sm text-gray-500 mt-1">

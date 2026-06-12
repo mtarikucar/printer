@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { ManufacturerSidebar } from "./sidebar";
 import { ManufacturerRealtimeShell } from "./realtime-shell";
+import { PanelShell } from "@/components/panel-shell";
 import { VerificationGate } from "./verification-gate";
 
 export default async function ManufacturerLayout({
@@ -55,12 +56,12 @@ export default async function ManufacturerLayout({
     return (
       <LocaleProvider locale={locale}>
         <ManufacturerRealtimeShell>
-          <div className="min-h-screen bg-gray-50 flex">
-            <ManufacturerSidebar newAssignmentCount={0} />
-            <main className="flex-1 overflow-auto text-gray-900">
-              {children}
-            </main>
-          </div>
+          <PanelShell
+            title="Figurunica Üretici"
+            sidebar={<ManufacturerSidebar newAssignmentCount={0} />}
+          >
+            {children}
+          </PanelShell>
         </ManufacturerRealtimeShell>
       </LocaleProvider>
     );
@@ -77,14 +78,14 @@ export default async function ManufacturerLayout({
   return (
     <LocaleProvider locale={locale}>
       <ManufacturerRealtimeShell>
-        <div className="min-h-screen bg-gray-50 flex">
-          <ManufacturerSidebar
-            newAssignmentCount={assignedCount.count}
-          />
-          <main className="flex-1 overflow-auto text-gray-900">
-            {children}
-          </main>
-        </div>
+        <PanelShell
+          title="Figurunica Üretici"
+          sidebar={
+            <ManufacturerSidebar newAssignmentCount={assignedCount.count} />
+          }
+        >
+          {children}
+        </PanelShell>
       </ManufacturerRealtimeShell>
     </LocaleProvider>
   );

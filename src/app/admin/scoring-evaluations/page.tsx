@@ -65,7 +65,7 @@ export default async function ScoringEvaluationsPage() {
   const canaryPercent = getCanaryPercent();
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-4 sm:p-8 max-w-6xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Scoring v2 Evaluations</h1>
         <p className="text-sm text-gray-500 mt-1">
@@ -104,7 +104,7 @@ export default async function ScoringEvaluationsPage() {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs text-gray-600 uppercase">
               <tr>

@@ -59,7 +59,7 @@ export function KycQueueClient({
   };
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-4 sm:p-8 max-w-4xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">KYC & Belge Kuyruğu</h1>
 
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">

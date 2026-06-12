@@ -68,7 +68,7 @@ export function PayoutsClient({ owed, payouts }: { owed: Owed[]; payouts: Payout
   };
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 sm:p-8 max-w-5xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Ödemeler (Payout)</h1>
 
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">

@@ -209,7 +209,7 @@ export default function ManufacturerRegisterPage() {
             <span className="text-xl font-serif text-gray-900">Figurunica</span>
             <p className="text-sm text-indigo-600 mt-1">Üretici Paneli</p>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-8">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8">
             <h1 className="text-2xl font-serif text-gray-900 mb-4">
               Başvurudan önce lütfen okuyun
             </h1>
@@ -260,7 +260,7 @@ export default function ManufacturerRegisterPage() {
           <span className="text-xl font-serif text-gray-900">Figurunica</span>
           <p className="text-sm text-indigo-600 mt-1">Üretici Paneli</p>
         </div>
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-8 space-y-6">
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 space-y-6">
           <h1 className="text-2xl font-serif text-gray-900">Üretici Kaydı</h1>
 
           {/* Hesap */}

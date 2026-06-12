@@ -87,7 +87,7 @@ export default async function ManufacturerOrdersPage({
   const totalCount = countResult[0]?.total ?? 0;
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900">
         {/* Title rendered in client via i18n */}
       </h1>

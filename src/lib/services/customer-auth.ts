@@ -77,7 +77,10 @@ export async function getOrCreateAnonymousId(): Promise<string> {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60, // 7 days
+    // Long-lived: this doubles as the device id for the free-generation
+    // ceiling (see /api/preview/generate). A short TTL would let an abuser
+    // reset their device bucket by waiting a week.
+    maxAge: 180 * 24 * 60 * 60, // 180 days
     path: "/",
   });
   return id;

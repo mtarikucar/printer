@@ -4,8 +4,14 @@ import { db } from "@/lib/db";
 import { previews } from "@/lib/db/schema";
 import { getPreviewGenerationQueue } from "@/lib/queue/queues";
 import { getPublicUrl } from "@/lib/services/storage";
-import { getSessionUser } from "@/lib/services/customer-auth";
+import { getSessionUser, getOrCreateAnonymousId } from "@/lib/services/customer-auth";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
+import {
+  FREE_GENERATION_ACCOUNT_CAP,
+  DEVICE_FREE_CAP,
+  IP_FREE_CAP,
+  FREE_GENERATION_WINDOW_MS,
+} from "@/lib/config/generation";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
@@ -23,16 +29,22 @@ export async function POST(request: NextRequest) {
   const d = getDictionary(locale);
 
   try {
+    // Generation costs us money per call (Meshy/Tripo), so it now REQUIRES
+    // login. Guest checkout for the physical product is unaffected — only the
+    // generate step is gated, not ordering.
     const session = await getSessionUser();
+    if (!session) {
+      return NextResponse.json(
+        { error: d["api.auth.required"], code: "auth_required" },
+        { status: 401 }
+      );
+    }
 
     const body = await request.json();
 
     // Extract turnstileToken before Zod validation
     const { turnstileToken, ...rest } = body;
-    const ip =
-      request.headers.get("cf-connecting-ip") ??
-      request.headers.get("x-forwarded-for") ??
-      "unknown";
+    const ip = extractClientIp(request);
 
     if (!(await verifyTurnstileToken(turnstileToken ?? "", ip))) {
       return NextResponse.json(
@@ -53,36 +65,52 @@ export async function POST(request: NextRequest) {
 
     const photoUrl = getPublicUrl(validated.photoKey);
 
-    // Preview limit: 3 for users who haven't paid, also limit anonymous users
-    if (session) {
-      const hasPaidOrder = await db.query.orders.findFirst({
-        where: (o, { eq: eq2 }) => eq2(o.userId, session.userId),
-        columns: { id: true },
-      });
+    // Free-generation gate. A paying customer (any paid order) is never the
+    // abuse target, so they're exempt from every cap. Free-tier users are
+    // capped on three independent axes — per account, per device cookie, and
+    // per client IP — so re-signing up with a new email on the same
+    // device/network doesn't multiply the free Meshy budget.
+    const hasPaidOrder = await db.query.orders.findFirst({
+      where: (o, { eq: eq2 }) => eq2(o.userId, session.userId),
+      columns: { id: true },
+    });
 
-      if (!hasPaidOrder) {
-        const [{ value: previewCount }] = await db
-          .select({ value: count() })
-          .from(previews)
-          .where(eq(previews.userId, session.userId));
+    if (!hasPaidOrder) {
+      const [{ value: previewCount }] = await db
+        .select({ value: count() })
+        .from(previews)
+        .where(eq(previews.userId, session.userId));
 
-        if (previewCount >= 3) {
-          return NextResponse.json(
-            { error: d["api.preview.limitReached"] },
-            { status: 429 }
-          );
-        }
-      }
-    } else {
-      // Anonymous users: rate limit by IP to prevent abuse — Redis-backed
-      // so the limit is shared across instances. Meshy costs money per call,
-      // so an in-memory-only limit was a real exposure under multi-instance
-      // deploy.
-      const anonIp = extractClientIp(request);
-      const rl = await rateLimitAsync(`preview:${anonIp}`, 3, 60 * 60 * 1000); // 3 previews per hour
-      if (!rl.success) {
+      if (previewCount >= FREE_GENERATION_ACCOUNT_CAP) {
         return NextResponse.json(
-          { error: d["api.preview.limitReached"] },
+          { error: d["api.preview.limitReached"], code: "account_cap" },
+          { status: 429 }
+        );
+      }
+
+      // Cross-account device + IP ceilings (calendar-month buckets).
+      // rateLimitAsync is Redis-backed + atomic, so these hold across instances.
+      const deviceId = await getOrCreateAnonymousId();
+      const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const dev = await rateLimitAsync(
+        `freegen:dev:${deviceId}:${month}`,
+        DEVICE_FREE_CAP,
+        FREE_GENERATION_WINDOW_MS
+      );
+      if (!dev.success) {
+        return NextResponse.json(
+          { error: d["api.preview.limitReached"], code: "device_cap" },
+          { status: 429 }
+        );
+      }
+      const ipRl = await rateLimitAsync(
+        `freegen:ip:${ip}:${month}`,
+        IP_FREE_CAP,
+        FREE_GENERATION_WINDOW_MS
+      );
+      if (!ipRl.success) {
+        return NextResponse.json(
+          { error: d["api.preview.limitReached"], code: "ip_cap" },
           { status: 429 }
         );
       }
@@ -91,7 +119,7 @@ export async function POST(request: NextRequest) {
     const [preview] = await db
       .insert(previews)
       .values({
-        userId: session?.userId ?? null,
+        userId: session.userId,
         photoKey: validated.photoKey,
         photoUrl,
         figurineSize: validated.figurineSize,

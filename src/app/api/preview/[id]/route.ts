@@ -39,9 +39,11 @@ export async function GET(
 
       return NextResponse.json({
         status: "failed",
+        // Only the GLB (the 3D preview viewer) is exposed. The print-ready
+        // STL/OBJ are the PAID deliverable and must never be handed out here —
+        // they're sold via the `digital_files` add-on and served through the
+        // entitlement-gated /api/customer/orders/.../download endpoint.
         glbUrl: normalizeFileUrl(preview.glbUrl),
-        objUrl: normalizeFileUrl(preview.objUrl),
-        stlUrl: normalizeFileUrl(preview.stlUrl),
         errorMessage: timedOutMessage,
         createdAt: preview.createdAt,
         photoKey: preview.photoKey,
@@ -51,9 +53,8 @@ export async function GET(
 
   return NextResponse.json({
     status: preview.status,
+    // GLB only — see note above; STL/OBJ are gated behind a paid order.
     glbUrl: normalizeFileUrl(preview.glbUrl),
-    objUrl: normalizeFileUrl(preview.objUrl),
-    stlUrl: normalizeFileUrl(preview.stlUrl),
     errorMessage: preview.errorMessage,
     createdAt: preview.createdAt,
     photoKey: preview.photoKey,

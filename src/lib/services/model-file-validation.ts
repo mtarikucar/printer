@@ -8,9 +8,10 @@ export interface ModelValidationResult {
 
 /**
  * Validate an uploaded 3D model by CONTENT — never trust the client MIME/ext
- * alone. STL: binary (80-byte header + uint32 triangle count, file size must be
- * exactly 84 + 50*count) OR ascii ("solid" … "facet" … "endsolid"). OBJ: text
- * with at least one vertex (`v`) and one face (`f`) line.
+ * alone. STL: binary (80-byte header + uint32 triangle count, payload must fit
+ * the file with at most a small trailing-junk allowance) OR ascii ("solid" …
+ * "facet" … "endsolid"). OBJ: text with at least one vertex (`v`) and one
+ * face (`f`) line.
  */
 export function validateModelFile(buffer: Buffer, fileName: string): ModelValidationResult {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
@@ -32,10 +33,14 @@ function validateStl(buffer: Buffer): ModelValidationResult {
     }
     // "solid" prefix but no facets → likely a mislabeled binary; fall through.
   }
-  // Binary STL: header(80) + uint32 count(4) + 50 bytes/triangle.
+  // Binary STL: header(80) + uint32 count(4) + 50 bytes/triangle. Real-world
+  // exporters (and ascii→binary converters) often append a few trailing bytes
+  // (newline/EOF markers), so require the payload to FIT rather than match
+  // exactly — but cap the slack so unrelated binaries can't slip through.
   if (buffer.length >= 84) {
     const count = buffer.readUInt32LE(80);
-    if (count > 0 && buffer.length === 84 + count * 50) {
+    const expected = 84 + count * 50;
+    if (count > 0 && buffer.length >= expected && buffer.length - expected <= 1024) {
       return { ok: true, format: "stl" };
     }
   }

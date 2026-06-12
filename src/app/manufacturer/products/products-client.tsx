@@ -89,6 +89,25 @@ export function ProductsClient({ products, locale }: ProductsClientProps) {
     }
   };
 
+  const handleUnarchive = async (id: string) => {
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/manufacturer/products/${id}/unarchive`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        setError(t("product.error.generic", "Bir hata oluştu, kontrol edin."));
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError(t("product.error.generic", "Bir hata oluştu, kontrol edin."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleArchive = async (id: string) => {
     if (
       !window.confirm(
@@ -217,7 +236,7 @@ export function ProductsClient({ products, locale }: ProductsClientProps) {
                         {t("manufacturer.products.submit", "İncelemeye gönder")}
                       </button>
                     )}
-                    {p.status !== "archived" && (
+                    {p.status !== "archived" ? (
                       <button
                         type="button"
                         disabled={busyId === p.id}
@@ -225,6 +244,15 @@ export function ProductsClient({ products, locale }: ProductsClientProps) {
                         className="text-sm text-gray-500 hover:text-red-700 font-medium disabled:opacity-50"
                       >
                         {t("manufacturer.products.archive", "Arşivle")}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busyId === p.id}
+                        onClick={() => handleUnarchive(p.id)}
+                        className="text-sm text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-50"
+                      >
+                        {t("manufacturer.products.unarchive", "Arşivden çıkar")}
                       </button>
                     )}
                   </div>

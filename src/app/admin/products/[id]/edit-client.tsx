@@ -178,6 +178,23 @@ export function EditProductClient({
     router.refresh();
   };
 
+  const unarchive = async () => {
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/admin/products/${product.id}/unarchive`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Arşivden çıkarma başarısız");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   const archive = async () => {
     if (
       !window.confirm(
@@ -218,13 +235,22 @@ export function EditProductClient({
           </h1>
           <p className="text-gray-500 mt-1">{product.sellerName}</p>
         </div>
-        {product.status !== "archived" && (
+        {product.status !== "archived" ? (
           <button
             onClick={archive}
             disabled={archiving}
             className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 disabled:bg-gray-400"
           >
             {d["admin.products.archive" as keyof typeof d] || "Arşivle"}
+          </button>
+        ) : (
+          <button
+            onClick={unarchive}
+            disabled={archiving}
+            className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:bg-gray-400"
+          >
+            {d["admin.products.unarchive" as keyof typeof d] ||
+              "Arşivden çıkar"}
           </button>
         )}
       </div>

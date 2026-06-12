@@ -82,11 +82,21 @@ export function ProductSpecEditor({
       const res = await fetch(`${fileBase}/files`, { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const code = (data as { code?: string }).code;
+        const messages: Record<string, string> = {
+          too_large: "Dosya 50MB sınırını aşıyor.",
+          unsupported_format: "Sadece .stl veya .obj dosyası yükleyebilirsiniz.",
+          invalid_stl: "Dosya geçerli bir STL gibi görünmüyor (bozuk veya eksik olabilir).",
+          invalid_obj: "Dosya geçerli bir OBJ gibi görünmüyor.",
+          too_small: "Dosya boş veya çok küçük.",
+          too_many_files: "Bir ürüne en fazla 12 baskı dosyası eklenebilir.",
+        };
         setError(
-          t(
-            "product.files.error",
-            "Dosya yüklenemedi (STL/OBJ, ≤50MB, geçerli geometri)."
-          )
+          (code && messages[code]) ||
+            t(
+              "product.files.error",
+              "Dosya yüklenemedi (STL/OBJ, ≤50MB, geçerli geometri)."
+            ) + ` [HTTP ${res.status}]`
         );
         return;
       }

@@ -7,6 +7,7 @@ import { reverseEarning } from "@/lib/services/payouts";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { recordRefund } from "@/lib/analytics/server";
 
 // Faz 7: mark an order refunded. Flips paymentStatus, reverses any manufacturer
 // earning, records the admin action, and notifies the customer (in-app + email).
@@ -33,6 +34,11 @@ export async function POST(
       status: true,
       manufacturerId: true,
       locale: true,
+      amountKurus: true,
+      giftCardAmountKurus: true,
+      havaleDiscountKurus: true,
+      productId: true,
+      attribution: true,
     },
   });
   if (!order) return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -84,6 +90,16 @@ export async function POST(
     manufacturerId: order.manufacturerId,
     status: order.status,
   });
+
+  // Server-side refund conversion (keeps GA4 revenue/ROAS honest). Fire-and-forget.
+  void recordRefund({
+    orderNumber: order.orderNumber,
+    valueKurus:
+      order.amountKurus - order.giftCardAmountKurus - order.havaleDiscountKurus,
+    userId: order.userId,
+    productId: order.productId,
+    attribution: order.attribution,
+  }).catch(() => {});
 
   return NextResponse.json({ ok: true });
 }

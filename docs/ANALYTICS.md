@@ -57,6 +57,7 @@ attribution + the admin dashboard regardless of consent. The choice is stored in
 | `begin_checkout` | checkout form | CAPI mirror |
 | `add_payment_info` | checkout form (pixel) | `/api/orders` (GA4 MP + CAPI) |
 | `purchase` | track page (pixel) | PayTR webhook → `promoteDraftToOrder` (GA4 MP + CAPI) |
+| `refund` | — | admin refund route (GA4 MP `refund`) |
 
 **Dedup model.** Every event carries an `event_id`. The browser mirrors each
 event to `/api/analytics/collect`, which forwards to Meta/TikTok CAPI with the
@@ -92,3 +93,23 @@ authoritative type gate.
 `drizzle/0015_analytics_attribution.sql` adds the attribution columns to
 `order_drafts`/`orders` and the `analytics_events` table. Applied automatically
 by the deploy migrate step.
+
+## 9. Retention
+
+A daily BullMQ worker (`analytics-cleanup`) prunes `analytics_events` rows older
+than `ANALYTICS_RETENTION_DAYS` (default 180) so the funnel log doesn't grow
+unbounded. Registered in `workers/start.ts` alongside the other cleanup jobs.
+
+## 10. CSP
+
+`next.config.ts` ships a **report-only** Content-Security-Policy that allowlists
+every analytics/ad/error domain (GTM, GA, Meta, TikTok, Sentry, Turnstile,
+PayTR, Google Fonts). It does not block anything — watch the browser console /
+wire a `report-uri`, then promote `Content-Security-Policy-Report-Only` to an
+enforcing `Content-Security-Policy` once violations are clean.
+
+## 11. Content-Security-Policy promotion checklist
+
+Before flipping to enforce: load every key page (home, shop, create, checkout,
+PayTR redirect, track, admin) with the report-only header and confirm zero CSP
+violations in the console for the configured tags.

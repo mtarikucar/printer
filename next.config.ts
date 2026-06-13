@@ -1,6 +1,31 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
+// Report-only CSP source allowlist. Covers: self, inline scripts/styles (next +
+// our consent bootstrap), Google Fonts, Cloudflare Turnstile, GTM/GA4, Meta
+// pixel + CAPI, TikTok pixel + Events API, PayTR checkout iframe and Sentry.
+const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net https://analytics.tiktok.com https://challenges.cloudflare.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+  [
+    "connect-src 'self'",
+    "https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com",
+    "https://www.googletagmanager.com",
+    "https://graph.facebook.com https://connect.facebook.net",
+    "https://business-api.tiktok.com https://analytics.tiktok.com",
+    "https://*.ingest.sentry.io https://*.sentry.io",
+  ].join(" "),
+  "frame-src 'self' https://challenges.cloudflare.com https://www.googletagmanager.com https://www.paytr.com https://*.paytr.com",
+].join("; ");
+
 const nextConfig: NextConfig = {
   output: "standalone",
   images: {
@@ -47,6 +72,15 @@ const nextConfig: NextConfig = {
           {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=()",
+          },
+          // Content-Security-Policy in REPORT-ONLY mode: it allowlists every
+          // domain the analytics/ad/error stack talks to but does NOT block
+          // anything, so it can't break the site. Watch the browser console /
+          // wire a report-uri, then promote to an enforcing
+          // `Content-Security-Policy` header once violations are clean.
+          {
+            key: "Content-Security-Policy-Report-Only",
+            value: CSP_REPORT_ONLY,
           },
         ],
       },

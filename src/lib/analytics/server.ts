@@ -294,6 +294,32 @@ export async function recordPurchase(args: {
   });
 }
 
+/**
+ * Server-side refund event (GA4 `refund`). Deterministic id so a double-refund
+ * guard / retry collapses to one. Honours the consent captured at checkout.
+ */
+export async function recordRefund(args: {
+  orderNumber: string;
+  valueKurus: number;
+  userId?: string | null;
+  productId?: string | null;
+  attribution?: Attribution | null;
+}): Promise<void> {
+  await recordEvent({
+    name: "refund",
+    eventId: `refund:${args.orderNumber}`,
+    source: "server",
+    reference: args.orderNumber,
+    valueKurus: args.valueKurus,
+    userId: args.userId ?? null,
+    productId: args.productId ?? null,
+    attribution: args.attribution ?? null,
+    visitorId: args.attribution?.visitorId ?? null,
+    sessionId: args.attribution?.sessionId ?? null,
+    consent: readStoredConsent(args.attribution),
+  });
+}
+
 /** Consent snapshot persisted on the attribution object at checkout time. */
 export function readStoredConsent(
   a: Attribution | null | undefined

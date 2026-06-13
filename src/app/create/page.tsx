@@ -105,6 +105,15 @@ function CustomCreateFlow() {
   const [previewGlbUrl, setPreviewGlbUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  // Funnel: custom "product" viewed = the AI preview is ready (step 2).
+  const viewItemFired = useRef(false);
+  useEffect(() => {
+    if (step === 2 && !viewItemFired.current) {
+      viewItemFired.current = true;
+      track("view_item", { itemName: "custom-figurine" });
+    }
+  }, [step]);
+
   // Revision state
   const [revisionModalOpen, setRevisionModalOpen] = useState(false);
   const [revisionNote, setRevisionNote] = useState("");

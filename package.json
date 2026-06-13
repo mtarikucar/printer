@@ -31,7 +31,8 @@
     "test:capability": "tsx scripts/test-capability.ts",
     "test:prices": "tsx scripts/test-prices.ts",
     "test:phone": "tsx scripts/test-phone.ts",
-    "test:unit": "npx tsx scripts/test-tax-id.ts && npx tsx scripts/test-dekont-parsers.ts && npx tsx scripts/test-scoring-v2.ts && npx tsx scripts/test-upsells.ts && npx tsx scripts/test-slug.ts && npx tsx scripts/test-ocr-confidence.ts && npx tsx scripts/test-payment.ts && npx tsx scripts/test-fuzzy-match.ts && npx tsx scripts/test-qc.ts && npx tsx scripts/test-order-messages.ts && npx tsx scripts/test-finance.ts && npx tsx scripts/test-carriers.ts && npx tsx scripts/test-performance.ts && npx tsx scripts/test-capability.ts && npx tsx scripts/test-prices.ts && npx tsx scripts/test-phone.ts",
+    "test:analytics": "tsx scripts/test-analytics.ts",
+    "test:unit": "npx tsx scripts/test-tax-id.ts && npx tsx scripts/test-dekont-parsers.ts && npx tsx scripts/test-scoring-v2.ts && npx tsx scripts/test-upsells.ts && npx tsx scripts/test-slug.ts && npx tsx scripts/test-ocr-confidence.ts && npx tsx scripts/test-payment.ts && npx tsx scripts/test-fuzzy-match.ts && npx tsx scripts/test-qc.ts && npx tsx scripts/test-order-messages.ts && npx tsx scripts/test-finance.ts && npx tsx scripts/test-carriers.ts && npx tsx scripts/test-performance.ts && npx tsx scripts/test-capability.ts && npx tsx scripts/test-prices.ts && npx tsx scripts/test-phone.ts && npx tsx scripts/test-analytics.ts",
     "backfill:gallery-slugs": "tsx scripts/backfill-gallery-slugs.ts"
   },
   "dependencies": {

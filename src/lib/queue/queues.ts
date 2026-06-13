@@ -101,6 +101,7 @@ let paymentDeadlineQueue: Queue | null = null;
 let dekontOcrQueue: Queue | null = null;
 let scoringEvaluationsCleanupQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
+let analyticsCleanupQueue: Queue | null = null;
 
 export function getAiGenerationQueue(): Queue {
   if (!aiGenerationQueue) {
@@ -201,6 +202,19 @@ export function getScoringEvaluationsCleanupQueue(): Queue {
     });
   }
   return scoringEvaluationsCleanupQueue;
+}
+
+export function getAnalyticsCleanupQueue(): Queue {
+  if (!analyticsCleanupQueue) {
+    analyticsCleanupQueue = new Queue("analytics-cleanup", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        removeOnComplete: { count: 10 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return analyticsCleanupQueue;
 }
 
 export function getDekontOcrQueue(): Queue {

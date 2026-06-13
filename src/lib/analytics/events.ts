@@ -20,7 +20,8 @@ export type EventName =
   | "add_to_cart"
   | "begin_checkout"
   | "add_payment_info"
-  | "purchase";
+  | "purchase"
+  | "refund";
 
 interface VendorRoute {
   /** GA4 recommended event name (null = don't send to GA4). */
@@ -78,6 +79,13 @@ export const EVENTS: Record<EventName, EventDef> = {
     client: { ga4: null, meta: "Purchase", tiktok: "CompletePayment" },
     server: { ga4: "purchase", meta: "Purchase", tiktok: "CompletePayment" },
   },
+  // Refund = admin reversed a paid order. Server-only; GA4 has a standard
+  // `refund` event (keeps reported revenue/ROAS honest). Meta/TikTok have no
+  // standard refund pixel event, so we don't forward there.
+  refund: {
+    client: { ga4: null, meta: null, tiktok: null },
+    server: { ga4: "refund", meta: null, tiktok: null },
+  },
 };
 
 export function isEventName(v: unknown): v is EventName {
@@ -91,5 +99,5 @@ export function isEventName(v: unknown): v is EventName {
  * while page_view only needs analytics.
  */
 export function consentCategoryFor(name: EventName): "analytics" | "marketing" {
-  return name === "page_view" ? "analytics" : "marketing";
+  return name === "page_view" || name === "refund" ? "analytics" : "marketing";
 }

@@ -9,11 +9,15 @@
  *      Protocol, Meta Conversions API, TikTok Events API — honouring consent and
  *      reusing the client `event_id` so the platforms deduplicate browser+server.
  *
- * This module is server-only (imports the DB + node:crypto). Never throws into
- * business logic: all vendor I/O is wrapped and fire-and-forget-safe.
+ * Server-side only (imports the DB + node:crypto). NOTE: do NOT add
+ * `import "server-only"` here — this module is reached from the standalone
+ * BullMQ worker via order-draft.ts (promoteDraftToOrder → recordPurchase), and
+ * `server-only` is unresolvable outside Next's bundler, which crash-loops the
+ * worker. The DB import already prevents accidental client bundling.
+ * Never throws into business logic: all vendor I/O is wrapped and
+ * fire-and-forget-safe.
  */
 
-import "server-only";
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
 import { analyticsEvents } from "@/lib/db/schema";

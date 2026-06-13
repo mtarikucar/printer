@@ -98,6 +98,7 @@ interface OrderData {
   galleryReviewStatus?: "none" | "pending" | "approved" | "rejected";
   galleryReviewReason?: string | null;
   glbUrl: string | null;
+  digitalFiles?: { entitled: boolean; stlReady: boolean; objReady: boolean };
   paymentMethod: "card" | "bank_transfer" | "gift_card_full" | null;
   paymentStatus: "pending" | "awaiting_transfer" | "succeeded" | "failed" | "expired";
   failureReason: string | null;
@@ -673,6 +674,46 @@ function TrackPageInner({ orderNumber }: { orderNumber: string }) {
                   url={order.glbUrl}
                   className="w-full h-72 sm:h-96"
                 />
+              </Card>
+            )}
+
+            {/* Digital files (paid add-on): gated download of the print-ready
+                STL/OBJ. Only shown when the customer bought the add-on. */}
+            {order.digitalFiles?.entitled && (
+              <Card padding="md" className="space-y-3">
+                <h2 className="text-lg font-serif text-text-primary">
+                  {d["track.digitalFiles.title"]}
+                </h2>
+                {order.digitalFiles.stlReady || order.digitalFiles.objReady ? (
+                  <div className="flex flex-wrap gap-3">
+                    {order.digitalFiles.stlReady && (
+                      <a
+                        href={`/api/customer/orders/${encodeURIComponent(order.orderNumber)}/download/stl`}
+                        className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-400"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        STL
+                      </a>
+                    )}
+                    {order.digitalFiles.objReady && (
+                      <a
+                        href={`/api/customer/orders/${encodeURIComponent(order.orderNumber)}/download/obj`}
+                        className="inline-flex items-center gap-2 rounded-xl bg-slate-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-500"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        OBJ
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-text-secondary">
+                    {d["track.digitalFiles.preparing"]}
+                  </p>
+                )}
               </Card>
             )}
 

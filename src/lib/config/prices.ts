@@ -63,6 +63,10 @@ export const UPSELL_PRICES_KURUS: Record<string, number> = {
   extra_paint: 4900,
   gift_wrap: 2900,
   rush_shipping: 7900,
+  // Digital deliverable: the print-ready STL + OBJ files of the customer's
+  // design, downloadable after payment from their order page. The raw files
+  // are otherwise never exposed (the preview only shows the GLB).
+  digital_files: 9900,
 };
 
 export const VALID_UPSELLS = Object.keys(UPSELL_PRICES_KURUS) as Array<

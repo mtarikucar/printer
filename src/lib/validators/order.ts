@@ -49,7 +49,7 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     giftCardCode: z.string().optional(),
     paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
     upsells: z
-      .array(z.enum(["extra_paint", "gift_wrap", "rush_shipping"]))
+      .array(z.enum(["extra_paint", "gift_wrap", "rush_shipping", "digital_files"]))
       .optional()
       .default([]),
     // Guest-checkout fields (Q6). Server reads these only when there is no

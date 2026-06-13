@@ -21,7 +21,7 @@ export async function GET(
     with: {
       generationAttempts: {
         where: eq(generationAttempts.status, "succeeded"),
-        columns: { outputGlbUrl: true },
+        columns: { outputGlbUrl: true, outputStlUrl: true, outputObjUrl: true },
         orderBy: [desc(generationAttempts.createdAt)],
         limit: 1,
       },
@@ -63,6 +63,16 @@ export async function GET(
       galleryReviewStatus: order.galleryReviewStatus,
       galleryReviewReason: order.galleryReviewReason,
       glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+      // Digital-files add-on: whether the customer bought it and whether the
+      // print-ready files are downloadable yet. The bytes are served only via
+      // the entitlement-gated /api/customer/orders/.../download endpoint.
+      digitalFiles: {
+        entitled:
+          order.paymentStatus === "succeeded" &&
+          (order.upsells ?? []).includes("digital_files"),
+        stlReady: !!order.generationAttempts[0]?.outputStlUrl,
+        objReady: !!order.generationAttempts[0]?.outputObjUrl,
+      },
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
       amountKurus: order.amountKurus,

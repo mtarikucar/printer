@@ -126,6 +126,7 @@ function CustomCreateFlow() {
     { key: "extra_paint" as const, priceKurus: UPSELL_PRICES_KURUS.extra_paint },
     { key: "gift_wrap" as const, priceKurus: UPSELL_PRICES_KURUS.gift_wrap },
     { key: "rush_shipping" as const, priceKurus: UPSELL_PRICES_KURUS.rush_shipping },
+    { key: "digital_files" as const, priceKurus: UPSELL_PRICES_KURUS.digital_files },
   ];
   const [selectedUpsells, setSelectedUpsells] = useState<string[]>([]);
   const toggleUpsell = (key: string) => {

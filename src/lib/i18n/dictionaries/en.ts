@@ -660,6 +660,12 @@ const en = {
   "create.verifyEmailNotice": "You need to verify your email address before creating a design. We've sent you a verification link.",
   "create.verifyEmailResend": "Resend verification email",
   "create.verifyEmailResent": "Sent ✓ Check your inbox.",
+  "create.otp.notice": "Verify your phone number to create a design.",
+  "create.otp.send": "Send code",
+  "create.otp.verify": "Verify",
+  "create.otp.sent": "Code sent. Enter the 6-digit code from the SMS.",
+  "create.otp.sendFailed": "Couldn't send the code. Check the number and try again.",
+  "create.otp.invalid": "Invalid or expired code. Try again.",
   "create.loginRequired": "You need to log in to continue with your order.",
 
   // Preview generation

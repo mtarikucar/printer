@@ -12,6 +12,7 @@ import {
   IP_FREE_CAP,
   FREE_GENERATION_WINDOW_MS,
 } from "@/lib/config/generation";
+import { isPhoneVerificationRequired } from "@/lib/services/sms";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
     // users don't even consume a device/IP slot.
     const acct = await db.query.users.findFirst({
       where: (u, { eq: eq2 }) => eq2(u.id, session.userId),
-      columns: { emailVerified: true },
+      columns: { emailVerified: true, phoneVerified: true },
     });
     if (!acct?.emailVerified) {
       return NextResponse.json(
@@ -90,6 +91,15 @@ export async function POST(request: NextRequest) {
     });
 
     if (!hasPaidOrder) {
+      // Phone verification gate (anti-abuse, feature-flagged). Only enforced
+      // once an SMS provider is credentialed; paying customers are exempt.
+      if (isPhoneVerificationRequired() && !acct.phoneVerified) {
+        return NextResponse.json(
+          { error: d["api.preview.phoneNotVerified"], code: "phone_not_verified" },
+          { status: 403 }
+        );
+      }
+
       const [{ value: previewCount }] = await db
         .select({ value: count() })
         .from(previews)

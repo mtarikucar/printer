@@ -238,6 +238,14 @@ function CustomCreateFlow() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
+  // Phone verification (Phase 6 — only active when the flag is on server-side).
+  const [phoneVerified, setPhoneVerified] = useState<boolean | null>(null);
+  const [phoneVerifyRequired, setPhoneVerifyRequired] = useState(false);
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpStage, setOtpStage] = useState<"phone" | "code">("phone");
+  const [otpMsg, setOtpMsg] = useState<string | null>(null);
+  const [otpBusy, setOtpBusy] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -247,12 +255,60 @@ function CustomCreateFlow() {
           setLoggedIn(true);
           if (data?.user?.id) setCurrentUserId(data.user.id);
           setEmailVerified(data?.user?.emailVerified ?? null);
+          setPhoneVerified(data?.user?.phoneVerified ?? null);
+          setPhoneVerifyRequired(!!data?.user?.phoneVerificationRequired);
         } else {
           setLoggedIn(false);
         }
       })
       .catch(() => setLoggedIn(false));
   }, []);
+
+  const sendOtp = async () => {
+    setOtpBusy(true);
+    setOtpMsg(null);
+    try {
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: otpPhone }),
+      });
+      if (res.ok) {
+        setOtpStage("code");
+        setOtpMsg(d["create.otp.sent"]);
+      } else {
+        setOtpMsg(d["create.otp.sendFailed"]);
+      }
+    } catch {
+      setOtpMsg(d["create.otp.sendFailed"]);
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    setOtpBusy(true);
+    setOtpMsg(null);
+    try {
+      const res = await fetch("/api/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: otpCode }),
+      });
+      if (res.ok) {
+        setPhoneVerified(true);
+      } else {
+        setOtpMsg(d["create.otp.invalid"]);
+      }
+    } catch {
+      setOtpMsg(d["create.otp.invalid"]);
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const needsPhoneVerify =
+    loggedIn === true && phoneVerifyRequired && phoneVerified === false;
 
   const resendVerification = async () => {
     setResendState("sending");
@@ -1103,13 +1159,60 @@ function CustomCreateFlow() {
                 </div>
               )}
 
+              {needsPhoneVerify && (
+                <div className="mb-3 rounded-xl border border-indigo-300/40 bg-indigo-50/60 px-4 py-3 animate-fade-in-up">
+                  <p className="mb-2 text-sm text-indigo-900">{d["create.otp.notice"]}</p>
+                  {otpStage === "phone" ? (
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        value={otpPhone}
+                        onChange={(e) => setOtpPhone(e.target.value)}
+                        placeholder="05XX XXX XX XX"
+                        className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={sendOtp}
+                        disabled={otpBusy || otpPhone.trim().length < 5}
+                        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+                      >
+                        {d["create.otp.send"]}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        placeholder="••••••"
+                        className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm tracking-widest"
+                      />
+                      <button
+                        type="button"
+                        onClick={verifyOtp}
+                        disabled={otpBusy || otpCode.trim().length < 4}
+                        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+                      >
+                        {d["create.otp.verify"]}
+                      </button>
+                    </div>
+                  )}
+                  {otpMsg && <p className="mt-2 text-xs text-indigo-700">{otpMsg}</p>}
+                </div>
+              )}
+
               <Button
                 type="button"
                 onClick={handleGeneratePreview}
                 disabled={
                   (!photoKey && !selectedFile) ||
                   loggedIn === null ||
-                  (loggedIn === true && emailVerified === false)
+                  (loggedIn === true && emailVerified === false) ||
+                  needsPhoneVerify
                 }
                 loading={submitting}
                 size="lg"

@@ -662,6 +662,12 @@ const tr: Dictionary = {
   "create.verifyEmailNotice": "Tasarım oluşturmak için e-posta adresinizi doğrulamanız gerekiyor. Doğrulama bağlantısını e-postanıza gönderdik.",
   "create.verifyEmailResend": "Doğrulama e-postasını tekrar gönder",
   "create.verifyEmailResent": "Gönderildi ✓ Gelen kutunuzu kontrol edin.",
+  "create.otp.notice": "Tasarım oluşturmak için telefon numaranızı doğrulayın.",
+  "create.otp.send": "Kod gönder",
+  "create.otp.verify": "Doğrula",
+  "create.otp.sent": "Kod gönderildi. SMS ile gelen 6 haneli kodu girin.",
+  "create.otp.sendFailed": "Kod gönderilemedi. Numarayı kontrol edip tekrar deneyin.",
+  "create.otp.invalid": "Kod hatalı veya süresi dolmuş. Tekrar deneyin.",
   "create.loginRequired": "Siparişinize devam etmek için giriş yapmanız gerekiyor.",
 
   // Preview generation

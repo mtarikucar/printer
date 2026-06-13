@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { isPhoneVerificationRequired } from "@/lib/services/sms";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
       marketingConsent: user.marketingConsent,
       emailVerified: user.emailVerified,
       phoneVerified: user.phoneVerified,
+      phoneVerificationRequired: isPhoneVerificationRequired(),
       isAdmin: adminEmails.includes(user.email.toLowerCase()),
     },
   });

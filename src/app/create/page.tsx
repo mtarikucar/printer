@@ -9,6 +9,7 @@ import { ModelViewer } from "@/components/model-viewer";
 import { SiteHeader } from "@/components/site-header";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
+import { track } from "@/lib/analytics/client";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
@@ -597,6 +598,8 @@ function CustomCreateFlow() {
         const { key, previewUrl: signedPreviewUrl } = await res.json();
         setPhotoKey(key);
         if (signedPreviewUrl) setPhotoPreviewUrl(signedPreviewUrl);
+        // Funnel: strong intent signal — visitor uploaded a photo to generate from.
+        track("photo_upload", {});
         setIsEditing(false);
         setSelectedFile(null);
         currentPhotoKey = key;

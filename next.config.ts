@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -65,4 +66,22 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Wrap with the Sentry build plugin only when a DSN is configured, so builds
+// without Sentry (CI, local, pre-launch) are completely unaffected. Source-map
+// upload additionally requires SENTRY_AUTH_TOKEN + org/project.
+const sentryEnabled = Boolean(process.env.NEXT_PUBLIC_SENTRY_DSN?.trim());
+
+export default sentryEnabled
+  ? withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      silent: !process.env.CI,
+      // Upload source maps only when we have an auth token.
+      sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+      widenClientFileUpload: true,
+      disableLogger: true,
+      // Tunnel browser events through our own domain to dodge ad blockers.
+      tunnelRoute: "/monitoring",
+    })
+  : nextConfig;

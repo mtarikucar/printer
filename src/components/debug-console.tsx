@@ -9,6 +9,18 @@ import { useEffect } from "react";
  */
 export function DebugConsole() {
   useEffect(() => {
+    // Off in production. The on-screen console intercepts console.* + errors and
+    // is a debugging aid, not a production feature — keeping it out of prod
+    // avoids leaking internal logs to admins' browsers. Set
+    // NEXT_PUBLIC_DEBUG_CONSOLE=1 to force-enable (e.g. to diagnose a prod-only
+    // issue from an admin session).
+    if (
+      process.env.NODE_ENV === "production" &&
+      process.env.NEXT_PUBLIC_DEBUG_CONSOLE !== "1"
+    ) {
+      return;
+    }
+
     // Only init once
     if (document.getElementById("__debug_console")) return;
 

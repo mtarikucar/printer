@@ -1,0 +1,37 @@
+name: CI
+
+# Quality gate for pull requests and feature-branch pushes. Mirrors the gate in
+# deploy.yml so problems are caught before review/merge, not at deploy time.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint · Types · Build · Tests
+    runs-on: ubuntu-latest
+    env:
+      AUTH_SECRET: ci-build-only-secret-not-used-in-production-000
+      ADMIN_EMAIL: ci@example.com
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      NEXT_PUBLIC_APP_URL: https://figurunica.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Type-check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npm run test:unit

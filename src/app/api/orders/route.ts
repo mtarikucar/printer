@@ -41,6 +41,11 @@ import {
   havaleReminderJobId,
 } from "@/lib/queue/queues";
 import { getClientIp } from "@/lib/utils/request";
+import {
+  attributionFromRequest,
+  attributionColumns,
+} from "@/lib/analytics/attribution-server";
+import { recordEvent } from "@/lib/analytics/server";
 import { eq, and, or, isNull, count, inArray } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -53,6 +58,16 @@ export async function POST(request: NextRequest) {
     const session = await getSessionUser();
 
     const body = await request.json();
+
+    // Marketing attribution captured from first-party cookies (set by middleware)
+    // — persisted on the draft and copied to the order on promotion, so every
+    // paid order can be traced back to the campaign that drove it. The optional
+    // client-supplied event id lets the browser AddPaymentInfo pixel and the
+    // server-side event share a dedup id.
+    const attribution = attributionFromRequest(request);
+    const attrCols = attributionColumns(attribution);
+    const clientPayEventId =
+      typeof body?.analyticsEventId === "string" ? body.analyticsEventId : null;
 
     // Branch custom (photo→AI figurine) vs marketplace (buy a ready-made
     // product). Both share the address/payment/gift-card/guest fields, so we
@@ -478,6 +493,8 @@ export async function POST(request: NextRequest) {
           status: "pending",
           paytrMerchantOid,
           bankTransferDeadline,
+          // Marketing attribution snapshot (denormalised cols + full JSON).
+          ...attrCols,
         })
         .returning();
 
@@ -532,6 +549,26 @@ export async function POST(request: NextRequest) {
         });
       }
     }
+
+    // ─── Server-truth "payment initiated" event ──────────────────
+    // Fires for both card and havale (non-gift-card-covered) drafts. Uses the
+    // browser-supplied event id when present so the AddPaymentInfo pixel and
+    // this server event deduplicate at Meta/TikTok. Fire-and-forget: the
+    // subsequent PayTR/email work keeps the function alive long enough to flush.
+    void recordEvent({
+      name: "add_payment_info",
+      eventId: clientPayEventId ?? `payinit:${draft.reference}`,
+      source: "server",
+      reference: draft.reference,
+      valueKurus: amountKurus - giftCardAmountKurus,
+      userId: user.id,
+      productId: draft.productId ?? null,
+      attribution,
+      consent: attribution.consent ?? null,
+      visitorId: attribution.visitorId ?? null,
+      sessionId: attribution.sessionId ?? null,
+      user: { email: user.email, phone: common.shippingAddress.telefon },
+    }).catch(() => {});
 
     // ─── Bank transfer (havale/EFT) ──────────────────────────────
     if (draft.paymentMethod === "bank_transfer") {

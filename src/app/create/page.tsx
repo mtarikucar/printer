@@ -9,6 +9,7 @@ import { ModelViewer } from "@/components/model-viewer";
 import { SiteHeader } from "@/components/site-header";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
+import { track } from "@/lib/analytics/client";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { Button, Card, Input, Select, Textarea, FormField } from "@/components/ui";
@@ -103,6 +104,15 @@ function CustomCreateFlow() {
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
   const [previewGlbUrl, setPreviewGlbUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Funnel: custom "product" viewed = the AI preview is ready (step 2).
+  const viewItemFired = useRef(false);
+  useEffect(() => {
+    if (step === 2 && !viewItemFired.current) {
+      viewItemFired.current = true;
+      track("view_item", { itemName: "custom-figurine" });
+    }
+  }, [step]);
 
   // Revision state
   const [revisionModalOpen, setRevisionModalOpen] = useState(false);
@@ -597,6 +607,8 @@ function CustomCreateFlow() {
         const { key, previewUrl: signedPreviewUrl } = await res.json();
         setPhotoKey(key);
         if (signedPreviewUrl) setPhotoPreviewUrl(signedPreviewUrl);
+        // Funnel: strong intent signal — visitor uploaded a photo to generate from.
+        track("photo_upload", {});
         setIsEditing(false);
         setSelectedFile(null);
         currentPhotoKey = key;

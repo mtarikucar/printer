@@ -7,6 +7,7 @@ import { LocaleProvider } from "@/lib/i18n/locale-context";
 import { CartProvider } from "@/lib/cart/cart-context";
 import { GrainOverlay } from "@/components/grain-overlay";
 import { DebugConsole } from "@/components/debug-console";
+import { Analytics } from "@/components/analytics/analytics";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -83,6 +84,7 @@ export default async function RootLayout({
             {children}
             <GrainOverlay />
             <DebugConsole />
+            <Analytics />
           </CartProvider>
         </LocaleProvider>
       </body>

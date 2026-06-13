@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, use, useCallback } from "react";
+import { useEffect, useRef, useState, use, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { track } from "@/lib/analytics/client";
 import { RealtimeProvider } from "@/lib/realtime/provider";
 import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 import { OrderStatusTracker } from "@/components/order-status-tracker";
@@ -101,6 +102,9 @@ interface OrderData {
   digitalFiles?: { entitled: boolean; stlReady: boolean; objReady: boolean };
   paymentMethod: "card" | "bank_transfer" | "gift_card_full" | null;
   paymentStatus: "pending" | "awaiting_transfer" | "succeeded" | "failed" | "expired";
+  amountKurus?: number;
+  giftCardAmountKurus?: number;
+  havaleDiscountKurus?: number;
   failureReason: string | null;
   bankTransfer: BankTransferInfo | null;
   bankTransferHistory: BankTransferHistory | null;
@@ -161,6 +165,25 @@ function TrackPageInner({ orderNumber }: { orderNumber: string }) {
   useRealtimeEvent((e) => {
     if (e.kind === "order") refetchOrder();
   });
+
+  // Browser-side purchase pixel. The deterministic event id matches the
+  // authoritative server-side purchase event (fired from the PayTR webhook), so
+  // GA4/Meta/TikTok deduplicate and a page refresh can't inflate the conversion.
+  const purchaseFired = useRef(false);
+  useEffect(() => {
+    if (purchaseFired.current) return;
+    if (order?.paymentStatus !== "succeeded") return;
+    purchaseFired.current = true;
+    const paidKurus =
+      (order.amountKurus ?? 0) -
+      (order.giftCardAmountKurus ?? 0) -
+      (order.havaleDiscountKurus ?? 0);
+    track("purchase", {
+      eventId: `purchase:${order.orderNumber}`,
+      reference: order.orderNumber,
+      valueKurus: paidKurus > 0 ? paidKurus : order.amountKurus,
+    });
+  }, [order]);
 
   const handleRetryPayment = async () => {
     setRetrying(true);

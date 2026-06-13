@@ -12,6 +12,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
+import type { Attribution } from "../analytics/types";
 
 export const giftCardThemeEnum = pgEnum("gift_card_theme", [
   "ramazan",
@@ -444,6 +445,17 @@ export const orderDrafts = pgTable("order_drafts", {
   // Promotion
   promotedOrderId: uuid("promoted_order_id"),
   promotedAt: timestamp("promoted_at"),
+  // ─── Marketing attribution (captured at checkout from first-party cookies) ──
+  // Denormalised columns for fast channel/campaign reporting; `attribution`
+  // holds the full first-touch/last-touch snapshot + consent + visitor id.
+  utmSource: text("utm_source"),
+  utmMedium: text("utm_medium"),
+  utmCampaign: text("utm_campaign"),
+  utmContent: text("utm_content"),
+  utmTerm: text("utm_term"),
+  attributionChannel: text("attribution_channel"),
+  visitorId: text("visitor_id"),
+  attribution: jsonb("attribution").$type<Attribution>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -544,6 +556,15 @@ export const orders = pgTable("orders", {
   // in box"). Shown read-only to the manufacturer; editable by the customer
   // until the order ships.
   customerNote: text("customer_note"),
+  // ─── Marketing attribution (copied verbatim from the draft on promotion) ───
+  utmSource: text("utm_source"),
+  utmMedium: text("utm_medium"),
+  utmCampaign: text("utm_campaign"),
+  utmContent: text("utm_content"),
+  utmTerm: text("utm_term"),
+  attributionChannel: text("attribution_channel"),
+  visitorId: text("visitor_id"),
+  attribution: jsonb("attribution").$type<Attribution>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -1553,4 +1574,47 @@ export const giftCardRedemptionsRelations = relations(
       references: [users.id],
     }),
   })
+);
+
+// ─── Analytics: server-side funnel event log ────────────────────────────────
+// First-party event store powering the admin marketing dashboard. Written from
+// both the client mirror (/api/analytics/collect) and server-truth emitters
+// (payment initiated, purchase). `eventId` is unique so a client+server pair or
+// a retried webhook collapses to a single row.
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: text("event_id").notNull().unique(),
+    // Internal funnel name: page_view | view_item | photo_upload | add_to_cart |
+    // begin_checkout | add_payment_info | purchase.
+    name: text("name").notNull(),
+    source: text("source").notNull(), // "client" | "server"
+    visitorId: text("visitor_id"),
+    sessionId: text("session_id"),
+    userId: uuid("user_id").references(() => users.id),
+    // Funnel reference: draft reference / order number.
+    reference: text("reference"),
+    productId: uuid("product_id"),
+    valueKurus: integer("value_kurus"),
+    currency: text("currency").notNull().default("TRY"),
+    // Denormalised attribution for fast group-by in the dashboard.
+    utmSource: text("utm_source"),
+    utmMedium: text("utm_medium"),
+    utmCampaign: text("utm_campaign"),
+    channel: text("channel"),
+    pagePath: text("page_path"),
+    userAgent: text("user_agent"),
+    ip: text("ip"), // hashed, never raw
+    props: jsonb("props"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("analytics_events_name_created_idx").on(t.name, t.createdAt),
+    index("analytics_events_created_idx").on(t.createdAt),
+    index("analytics_events_session_idx").on(t.sessionId),
+    index("analytics_events_visitor_idx").on(t.visitorId),
+    index("analytics_events_channel_idx").on(t.channel),
+    index("analytics_events_product_idx").on(t.productId),
+  ]
 );

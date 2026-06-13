@@ -3,8 +3,57 @@ import { getToken } from "next-auth/jwt";
 // Side-effect import: triggers env.ts module-load validation at process start
 // so the server fails to boot on missing critical env in production.
 import "@/lib/env";
+import {
+  ATTR_COOKIE,
+  SESSION_MAX_AGE,
+  TOUCH_MAX_AGE,
+  VISITOR_ID_MAX_AGE,
+  buildTouch,
+  hasAttributionParams,
+  parseUtmParams,
+} from "@/lib/analytics/attribution";
 
 const AUTH_SECRET = process.env.AUTH_SECRET;
+
+/**
+ * Capture marketing attribution + visitor/session identity on every request
+ * into first-party, SameSite=Lax cookies. This is what lets a paid order be
+ * traced back to the campaign that drove it, fully server-side and independent
+ * of any third-party pixel or consent (these are necessary-tier measurement
+ * cookies carrying no PII). `fig_ft` is write-once (first touch); `fig_lt` is
+ * refreshed on each new touch (last touch).
+ */
+function applyAttribution(request: NextRequest, res: NextResponse): void {
+  const isProd = process.env.NODE_ENV === "production";
+  const base = { httpOnly: false, sameSite: "lax" as const, secure: isProd, path: "/" };
+
+  // Stable visitor id (write-once, long-lived).
+  if (!request.cookies.get(ATTR_COOKIE.visitorId)?.value) {
+    res.cookies.set(ATTR_COOKIE.visitorId, crypto.randomUUID(), {
+      ...base,
+      maxAge: VISITOR_ID_MAX_AGE,
+    });
+  }
+  // Session id: reuse if present, else mint. Always re-set to slide the window.
+  const sid = request.cookies.get(ATTR_COOKIE.sessionId)?.value || crypto.randomUUID();
+  res.cookies.set(ATTR_COOKIE.sessionId, sid, { ...base, maxAge: SESSION_MAX_AGE });
+
+  // Attribution touch: only when the URL actually carries utm/click params.
+  const params = parseUtmParams(request.nextUrl.searchParams);
+  if (hasAttributionParams(params)) {
+    const touch = buildTouch(params, {
+      landingPage: request.nextUrl.pathname + request.nextUrl.search,
+      referrer: request.headers.get("referer") ?? undefined,
+    });
+    if (touch) {
+      const value = JSON.stringify(touch);
+      if (!request.cookies.get(ATTR_COOKIE.firstTouch)?.value) {
+        res.cookies.set(ATTR_COOKIE.firstTouch, value, { ...base, maxAge: TOUCH_MAX_AGE });
+      }
+      res.cookies.set(ATTR_COOKIE.lastTouch, value, { ...base, maxAge: TOUCH_MAX_AGE });
+    }
+  }
+}
 
 /**
  * Edge-safe NextAuth JWT verification. Returns the decoded token if valid AND
@@ -90,9 +139,16 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  applyAttribution(request, res);
+  return res;
 }
 
 export const config = {
-  matcher: ["/admin/(.*)", "/manufacturer/((?!login|register).*)"],
+  // Run on everything except Next internals, static assets and API routes. The
+  // broad matcher is what lets us capture UTM/attribution on any landing page;
+  // the admin/manufacturer auth gates above are still keyed on the pathname.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|woff2?|ttf|map)$|api/).*)",
+  ],
 };

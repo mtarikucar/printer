@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
+import { track } from "@/lib/analytics/client";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
@@ -58,6 +59,17 @@ export function CheckoutForm({
       .catch(() => {});
   }, []);
 
+  // Funnel: checkout started (the form is on screen with an amount due).
+  const beganCheckout = useRef(false);
+  useEffect(() => {
+    if (beganCheckout.current || !priceKurus) return;
+    beganCheckout.current = true;
+    track("begin_checkout", {
+      valueKurus: priceKurus,
+      productId: typeof orderPayload.productId === "string" ? orderPayload.productId : undefined,
+    });
+  }, [priceKurus, orderPayload]);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -74,6 +86,12 @@ export function CheckoutForm({
     }
 
     setSubmitting(true);
+    // Funnel: payment initiated. The shared event id lets the browser pixel and
+    // the server-side AddPaymentInfo event deduplicate at Meta/TikTok.
+    const payEventId = track("add_payment_info", {
+      valueKurus: priceKurus,
+      productId: typeof orderPayload.productId === "string" ? orderPayload.productId : undefined,
+    });
     try {
       const res = await fetch("/api/orders", {
         method: "POST",
@@ -85,6 +103,7 @@ export function CheckoutForm({
           giftCardCode: giftCardCode.trim() || undefined,
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
+          analyticsEventId: payEventId,
         }),
       });
       const data = await res.json();

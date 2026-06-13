@@ -12,6 +12,7 @@ import {
 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { AddToCartButton } from "@/components/cart/add-to-cart-button";
+import { track } from "@/lib/analytics/client";
 
 interface ProductDetail {
   id: string;
@@ -67,6 +68,15 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
       })
       .catch(() => {});
   }, []);
+
+  // Funnel: product viewed.
+  useEffect(() => {
+    track("view_item", {
+      productId: product.id,
+      itemName: product.title,
+      valueKurus: product.priceKurus,
+    });
+  }, [product.id, product.title, product.priceKurus]);
 
   const t = (key: string, fallback: string) =>
     d[key as keyof typeof d] || fallback;

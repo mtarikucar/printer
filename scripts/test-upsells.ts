@@ -84,8 +84,8 @@ check(
 
 // ─── VALID_UPSELLS shape ─────────────────────────────────────────
 check(
-  "VALID_UPSELLS has 3 entries",
-  VALID_UPSELLS.length === 3,
+  "VALID_UPSELLS has 4 entries",
+  VALID_UPSELLS.length === 4,
   `actual: ${VALID_UPSELLS.length}`
 );
 check(
@@ -99,6 +99,10 @@ check(
 check(
   "VALID_UPSELLS includes rush_shipping",
   VALID_UPSELLS.includes("rush_shipping")
+);
+check(
+  "VALID_UPSELLS includes digital_files",
+  VALID_UPSELLS.includes("digital_files")
 );
 
 // ─── Price sanity (regression guard against accidental zero-out) ──

@@ -17,6 +17,7 @@ import {
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
+import { recordPurchase } from "@/lib/analytics/server";
 import {
   getPaymentDeadlineQueue,
   havaleExpireJobId,
@@ -87,6 +88,18 @@ export async function promoteDraftToOrder(
 
     const isMarketplace = draft.orderType === "marketplace";
 
+    // Marketing attribution copied verbatim from the draft onto the order(s).
+    const attrCopy = {
+      utmSource: draft.utmSource,
+      utmMedium: draft.utmMedium,
+      utmCampaign: draft.utmCampaign,
+      utmContent: draft.utmContent,
+      utmTerm: draft.utmTerm,
+      attributionChannel: draft.attributionChannel,
+      visitorId: draft.visitorId,
+      attribution: draft.attribution,
+    };
+
     // Cart promotion (Faz 4): fan a multi-seller cart draft out into one order
     // per seller, each re-pointing its own items and keeping the existing
     // single-manufacturer invariant. parentReference groups the siblings.
@@ -112,6 +125,7 @@ export async function promoteDraftToOrder(
         customerName: string;
         sellerManufacturerId: string | null;
         productTitleSnapshot: string | null;
+        amountKurus: number;
       }> = [];
       let idx = 0;
       for (const groupItems of groups.values()) {
@@ -147,6 +161,7 @@ export async function promoteDraftToOrder(
             manufacturerId: sellerId ?? null,
             manufacturerStatus: sellerId ? "assigned" : "unassigned",
             assignedToManufacturerAt: sellerId ? new Date() : null,
+            ...attrCopy,
           })
           .returning();
         await tx
@@ -168,6 +183,7 @@ export async function promoteDraftToOrder(
           customerName: order.customerName,
           sellerManufacturerId: order.sellerManufacturerId,
           productTitleSnapshot: order.productTitleSnapshot,
+          amountKurus: order.amountKurus,
         });
       }
       // Reassign any draft-scoped gift-card redemption to the first sub-order
@@ -189,6 +205,11 @@ export async function promoteDraftToOrder(
         cart: true as const,
         orders: createdOrders,
         locale: (draft.locale === "en" ? "en" : "tr") as Locale,
+        purchase: {
+          attribution: draft.attribution ?? null,
+          email: draft.email,
+          phone: draft.phone,
+        },
       };
     }
 
@@ -236,6 +257,7 @@ export async function promoteDraftToOrder(
           isMarketplace && draft.sellerManufacturerId ? "assigned" : "unassigned",
         assignedToManufacturerAt:
           isMarketplace && draft.sellerManufacturerId ? new Date() : null,
+        ...attrCopy,
       })
       .returning();
 
@@ -278,6 +300,13 @@ export async function promoteDraftToOrder(
       sellerManufacturerId: order.sellerManufacturerId,
       productTitleSnapshot: order.productTitleSnapshot,
       newOrder: true,
+      purchase: {
+        amountKurus: order.amountKurus,
+        productId: order.productId,
+        attribution: draft.attribution ?? null,
+        email: order.email,
+        phone: order.phone,
+      },
     };
   });
 
@@ -286,6 +315,18 @@ export async function promoteDraftToOrder(
   // first order via the alreadyPromoted path (handled below).
   if ("cart" in result && result.cart) {
     await cancelHavaleJobs(draftId);
+    // Authoritative server-side purchase conversion, one per seller sub-order.
+    // Deterministic event id (purchase:<orderNumber>) makes webhook retries and
+    // the thank-you-page pixel deduplicate at GA4/Meta/TikTok.
+    for (const o of result.orders) {
+      await recordPurchase({
+        orderNumber: o.orderNumber,
+        valueKurus: o.amountKurus,
+        userId: o.userId,
+        attribution: result.purchase.attribution,
+        user: { email: result.purchase.email, phone: result.purchase.phone },
+      }).catch(() => {});
+    }
     for (const o of result.orders) {
       await emitOrderChanged({
         orderId: o.id,
@@ -326,6 +367,16 @@ export async function promoteDraftToOrder(
       status: "paid",
       manufacturerStatus: result.manufacturerStatus ?? "unassigned",
     });
+    // Authoritative server-side purchase conversion (fires once, on first
+    // promotion; the idempotent re-entry path below doesn't reach here).
+    await recordPurchase({
+      orderNumber: result.orderNumber,
+      valueKurus: result.purchase.amountKurus,
+      userId: result.userId,
+      productId: result.purchase.productId,
+      attribution: result.purchase.attribution,
+      user: { email: result.purchase.email, phone: result.purchase.phone },
+    }).catch(() => {});
   }
 
   // Outside the transaction: cancel scheduled deadline jobs and kick off the

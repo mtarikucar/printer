@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
 } from "react";
+import { track } from "@/lib/analytics/client";
 
 interface CartState {
   count: number;
@@ -52,6 +53,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (r.ok) {
         const d = await r.json();
         setCount(d.count ?? 0);
+        // Funnel event — fired centrally so every add-to-cart entry point
+        // (product cards, grid, detail page) is covered.
+        track("add_to_cart", {
+          productId,
+          quantity,
+          valueKurus: typeof d.lineKurus === "number" ? d.lineKurus : undefined,
+        });
       }
     } catch {
       // ignore

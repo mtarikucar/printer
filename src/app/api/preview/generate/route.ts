@@ -65,6 +65,20 @@ export async function POST(request: NextRequest) {
 
     const photoUrl = getPublicUrl(validated.photoKey);
 
+    // Email verification gate (anti-abuse): an unverified email must never burn
+    // Meshy/Tripo budget. Checked BEFORE the free-tier counters so unverified
+    // users don't even consume a device/IP slot.
+    const acct = await db.query.users.findFirst({
+      where: (u, { eq: eq2 }) => eq2(u.id, session.userId),
+      columns: { emailVerified: true },
+    });
+    if (!acct?.emailVerified) {
+      return NextResponse.json(
+        { error: d["api.preview.emailNotVerified"], code: "email_not_verified" },
+        { status: 403 }
+      );
+    }
+
     // Free-generation gate. A paying customer (any paid order) is never the
     // abuse target, so they're exempt from every cap. Free-tier users are
     // capped on three independent axes — per account, per device cookie, and

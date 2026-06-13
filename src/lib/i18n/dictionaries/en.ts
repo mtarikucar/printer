@@ -655,6 +655,9 @@ const en = {
   "create.step4": "Payment",
   "create.photoTip": "For best results, use a clear, well-lit photo with the face visible. Full body shots work best.",
   "create.generatePreview": "Generate Preview",
+  "create.verifyEmailNotice": "You need to verify your email address before creating a design. We've sent you a verification link.",
+  "create.verifyEmailResend": "Resend verification email",
+  "create.verifyEmailResent": "Sent ✓ Check your inbox.",
   "create.loginRequired": "You need to log in to continue with your order.",
 
   // Preview generation
@@ -1021,6 +1024,8 @@ const en = {
   "api.auth.unauthorized": "Unauthorized",
   "api.turnstile.failed": "Verification failed. Please try again.",
   "api.preview.limitReached": "You've reached the free preview limit (3). Place an order to unlock unlimited previews.",
+  "api.preview.emailNotVerified": "Verify your email address before creating a design. We've sent you a verification link.",
+  "api.preview.phoneNotVerified": "Verify your phone number before creating a design.",
 
   // Section Badges
   "section.howItWorks": "HOW IT WORKS",

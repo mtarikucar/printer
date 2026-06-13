@@ -146,6 +146,9 @@ export async function GET(request: NextRequest) {
             email,
             fullName,
             googleId,
+            // Google already enforced email_verified above (line ~114), so a
+            // Google sign-up is verified without an extra email round-trip.
+            emailVerified: true,
           })
           .returning();
         user = newUser;

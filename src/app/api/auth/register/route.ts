@@ -12,6 +12,7 @@ import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { phoneField } from "@/lib/phone";
+import { issueEmailVerification } from "@/lib/services/email-verification";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -71,12 +72,23 @@ export async function POST(request: NextRequest) {
     const token = createSessionToken(user.id, user.email);
     await setSessionCookie(token);
 
+    // New email/password accounts start unverified (column defaults to false).
+    // Send the verification link; the customer can browse + checkout but cannot
+    // GENERATE until verified (see /api/preview/generate).
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ??
+      (process.env.NODE_ENV === "production"
+        ? "https://figurunica.com"
+        : "http://localhost:3000");
+    await issueEmailVerification(user.id, appUrl);
+
     return NextResponse.json({
       user: {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
         phone: user.phone,
+        emailVerified: false,
       },
     });
   } catch (error: unknown) {

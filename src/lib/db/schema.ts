@@ -266,6 +266,19 @@ export const users = pgTable("users", {
   // the DB so a leak of this table doesn't grant account access.
   passwordResetTokenHash: text("password_reset_token_hash"),
   passwordResetExpiresAt: timestamp("password_reset_expires_at"),
+  // Email verification (anti-abuse): a customer must verify their email before
+  // they can generate (each Meshy/Tripo call costs money, so unverified/fake
+  // emails must not burn budget). Token columns mirror the password-reset ones:
+  // the DB stores only the sha256 hash of the single-use raw token emailed out.
+  // Existing rows are backfilled to true so current customers aren't locked out.
+  emailVerified: boolean("email_verified").notNull().default(false),
+  emailVerificationTokenHash: text("email_verification_token_hash"),
+  emailVerificationExpiresAt: timestamp("email_verification_expires_at"),
+  // Phone verification (anti-abuse, Phase 6). Ties a person to a phone number
+  // so re-signing up with disposable emails is harder. The OTP itself lives in
+  // Redis (5-min TTL); only the verified flag is persisted. Gate is feature-
+  // flagged off until an SMS provider is credentialed.
+  phoneVerified: boolean("phone_verified").notNull().default(false),
   // Guest-checkout flag (Q6). True while the customer placed an order
   // without explicitly registering — they have a row in `users` but never
   // set a password. Flipped false once they claim the account via the

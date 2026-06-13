@@ -235,6 +235,8 @@ function CustomCreateFlow() {
   ];
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -243,12 +245,23 @@ function CustomCreateFlow() {
           const data = await res.json().catch(() => null);
           setLoggedIn(true);
           if (data?.user?.id) setCurrentUserId(data.user.id);
+          setEmailVerified(data?.user?.emailVerified ?? null);
         } else {
           setLoggedIn(false);
         }
       })
       .catch(() => setLoggedIn(false));
   }, []);
+
+  const resendVerification = async () => {
+    setResendState("sending");
+    try {
+      await fetch("/api/auth/resend-verification", { method: "POST" });
+      setResendState("sent");
+    } catch {
+      setResendState("idle");
+    }
+  };
 
   // Q2: `/styles/[slug]` landing pages link here with `?style=<slug>`.
   // Prefill the style selector when the slug is one we support. We only
@@ -1066,10 +1079,37 @@ function CustomCreateFlow() {
                 </div>
               )}
 
+              {loggedIn === true && emailVerified === false && (
+                <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-3 animate-fade-in-up">
+                  <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  <div className="text-sm text-amber-800">
+                    <p>{d["create.verifyEmailNotice"]}</p>
+                    <button
+                      type="button"
+                      onClick={resendVerification}
+                      disabled={resendState !== "idle"}
+                      className="mt-1 font-medium underline underline-offset-2 disabled:opacity-60"
+                    >
+                      {resendState === "sent"
+                        ? d["create.verifyEmailResent"]
+                        : resendState === "sending"
+                          ? d["common.loading"]
+                          : d["create.verifyEmailResend"]}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <Button
                 type="button"
                 onClick={handleGeneratePreview}
-                disabled={(!photoKey && !selectedFile) || loggedIn === null}
+                disabled={
+                  (!photoKey && !selectedFile) ||
+                  loggedIn === null ||
+                  (loggedIn === true && emailVerified === false)
+                }
                 loading={submitting}
                 size="lg"
                 fullWidth

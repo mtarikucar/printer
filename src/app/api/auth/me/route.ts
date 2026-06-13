@@ -33,6 +33,8 @@ export async function GET(request: NextRequest) {
       phone: user.phone,
       defaultAddress: user.defaultAddress,
       marketingConsent: user.marketingConsent,
+      emailVerified: user.emailVerified,
+      phoneVerified: user.phoneVerified,
       isAdmin: adminEmails.includes(user.email.toLowerCase()),
     },
   });

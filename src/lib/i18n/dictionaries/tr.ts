@@ -657,6 +657,9 @@ const tr: Dictionary = {
   "create.step4": "Ödeme",
   "create.photoTip": "En iyi sonuç için net, iyi aydınlatılmış ve yüzün görünür olduğu bir fotoğraf kullanın. Tam boy çekimler en iyi sonucu verir.",
   "create.generatePreview": "Önizleme Oluştur",
+  "create.verifyEmailNotice": "Tasarım oluşturmak için e-posta adresinizi doğrulamanız gerekiyor. Doğrulama bağlantısını e-postanıza gönderdik.",
+  "create.verifyEmailResend": "Doğrulama e-postasını tekrar gönder",
+  "create.verifyEmailResent": "Gönderildi ✓ Gelen kutunuzu kontrol edin.",
   "create.loginRequired": "Siparişinize devam etmek için giriş yapmanız gerekiyor.",
 
   // Preview generation
@@ -1024,6 +1027,8 @@ const tr: Dictionary = {
   "api.auth.unauthorized": "Yetkisiz erişim",
   "api.turnstile.failed": "Doğrulama başarısız. Lütfen tekrar deneyin.",
   "api.preview.limitReached": "Ücretsiz önizleme limitine ulaştınız (3). Sınırsız önizleme için sipariş verin.",
+  "api.preview.emailNotVerified": "Tasarım oluşturmadan önce e-posta adresinizi doğrulayın. Doğrulama bağlantısını e-postanıza gönderdik.",
+  "api.preview.phoneNotVerified": "Tasarım oluşturmadan önce telefon numaranızı doğrulayın.",
 
   // Section Badges
   "section.howItWorks": "NASIL ÇALIŞIR",

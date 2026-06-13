@@ -114,13 +114,19 @@ jobs:
           BANK_ACCOUNT_HOLDER: ${{ secrets.BANK_ACCOUNT_HOLDER }}
           BANK_IBAN: ${{ secrets.BANK_IBAN }}
           BANK_BRANCH: ${{ secrets.BANK_BRANCH }}
+          # Analytics & tracking (managed in GitHub → upserted into server .env)
+          NEXT_PUBLIC_GTM_ID: ${{ secrets.NEXT_PUBLIC_GTM_ID }}
+          NEXT_PUBLIC_GA4_ID: ${{ secrets.NEXT_PUBLIC_GA4_ID }}
+          META_PIXEL_ID: ${{ secrets.META_PIXEL_ID }}
+          TIKTOK_PIXEL_ID: ${{ secrets.TIKTOK_PIXEL_ID }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
           command_timeout: 10m
-          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH
+          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH,NEXT_PUBLIC_GTM_ID,NEXT_PUBLIC_GA4_ID,META_PIXEL_ID,TIKTOK_PIXEL_ID,NEXT_PUBLIC_SENTRY_DSN
           script: |
             set -euo pipefail
 
@@ -175,6 +181,12 @@ jobs:
             upsert_env BANK_ACCOUNT_HOLDER   "$BANK_ACCOUNT_HOLDER"
             upsert_env BANK_IBAN             "$BANK_IBAN"
             upsert_env BANK_BRANCH           "$BANK_BRANCH"
+            # Analytics & tracking
+            upsert_env NEXT_PUBLIC_GTM_ID    "$NEXT_PUBLIC_GTM_ID"
+            upsert_env NEXT_PUBLIC_GA4_ID    "$NEXT_PUBLIC_GA4_ID"
+            upsert_env META_PIXEL_ID         "$META_PIXEL_ID"
+            upsert_env TIKTOK_PIXEL_ID       "$TIKTOK_PIXEL_ID"
+            upsert_env NEXT_PUBLIC_SENTRY_DSN "$NEXT_PUBLIC_SENTRY_DSN"
             chmod 600 "$ENV_FILE"
             log ".env senkronize edildi (600 izinleri)."
 

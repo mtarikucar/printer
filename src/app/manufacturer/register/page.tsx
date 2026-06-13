@@ -3,35 +3,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
-
-const ONBOARDING_TEXT = `# Üretici Ortaklığı Bilgilendirmesi
-
-Figurunica üretici ağına başvuruyorsunuz.
-
-**Çalışma Düzeni**
-- Müşterilerimiz figürin siparişlerini portalımızdan oluşturur ve ödemeyi tamamlar.
-- Admin ekibimiz mevcut iş yükü, lokasyon ve performansa göre size sipariş atar. Atamayı 24 saat içinde kabul/reddetmeniz beklenir.
-- Ortalama üretim süresi: 5 iş günü. Kargolama Yurtiçi Kargo üzerinden tarafımızca açılır.
-
-**Kalite Beklentileri**
-- Reçine baskı katman yüksekliği 50 mikron veya altı.
-- Renklendirme ve son rötuş kontrol edilmeli; çatlak / destek izi reddedilme sebebidir.
-- Pakete standart fırça setimiz ve QR kart eklenir.
-
-**Ödeme**
-- Net üretici payı haftalık olarak (Cuma) IBAN'ınıza ödenir.
-- VKN/TCKN ve IBAN zorunludur.
-
-**Hesap Durumu**
-- Hesabınız ilk başta "Beklemede" olur; admin onayından sonra sipariş alırsınız.
-- "Sipariş Almıyorum" düğmesi ile dilediğiniz zaman atamaları durdurabilirsiniz.
-
-Sorularınız için admin@figurunica.com
-`;
+import { MANUFACTURER_ONBOARDING_TR } from "@/lib/content/manufacturer-onboarding";
 
 type Step = "onboarding" | "form";
 
@@ -213,8 +191,15 @@ export default function ManufacturerRegisterPage() {
             <h1 className="text-2xl font-serif text-gray-900 mb-4">
               Başvurudan önce lütfen okuyun
             </h1>
-            <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap leading-relaxed">
-              {ONBOARDING_TEXT}
+            {/* Scrollable so the long agreement doesn't push the accept box off
+                screen. Bold spans render bold + underlined ([&_strong]) so the
+                content's `**…**` doubles as the "important clause" marker. */}
+            <div
+              className="prose prose-sm max-w-none max-h-[60vh] overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/50 p-4 leading-relaxed text-gray-700 [&_a]:text-indigo-600 [&_blockquote]:border-l-indigo-300 [&_blockquote]:text-gray-500 [&_h1]:text-xl [&_h2]:mt-5 [&_h2]:text-base [&_strong]:font-semibold [&_strong]:text-gray-900 [&_strong]:underline [&_strong]:decoration-indigo-400 [&_strong]:decoration-2 [&_strong]:underline-offset-2"
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {MANUFACTURER_ONBOARDING_TR}
+              </ReactMarkdown>
             </div>
             <label className="mt-6 flex items-start gap-3 text-sm text-gray-800 select-none">
               <input

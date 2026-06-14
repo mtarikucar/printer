@@ -37,8 +37,11 @@ export default async function ManufacturerEarningsPage() {
     limit: 50,
   });
 
+  // "Owed" excludes earnings already batched into a (still-pending) payout —
+  // matching the admin queue's `status='pending' AND payoutId IS NULL` filter —
+  // so requested money isn't double-shown as still owed until it's marked paid.
   const owed = earnings
-    .filter((e) => e.status === "pending")
+    .filter((e) => e.status === "pending" && e.payoutId == null)
     .reduce((s, e) => s + e.netKurus, 0);
   const paidTotal = earnings
     .filter((e) => e.status === "paid")

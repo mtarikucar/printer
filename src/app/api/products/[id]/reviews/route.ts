@@ -26,9 +26,15 @@ export async function GET(
     .orderBy(desc(productReviews.createdAt))
     .limit(50);
 
-  const count = rows.length;
-  const avg =
-    count > 0 ? rows.reduce((s, r) => s + r.rating, 0) / count : 0;
+  // avg/count come from the denormalized product aggregate (maintained over ALL
+  // approved reviews on write), so they match the product cards instead of being
+  // computed from only the 50 newest reviews in the list above.
+  const product = await db.query.products.findFirst({
+    where: eq(products.id, id),
+    columns: { ratingAvgX100: true, ratingCount: true },
+  });
+  const count = product?.ratingCount ?? 0;
+  const avg = (product?.ratingAvgX100 ?? 0) / 100;
   return NextResponse.json({
     reviews: rows.map((r) => ({
       rating: r.rating,

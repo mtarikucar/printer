@@ -52,6 +52,13 @@ export async function POST(
   if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const session = await getSessionUser();
+  const isOwner = !!session?.userId && row.userId === session.userId;
+  // Don't let an unauthenticated holder of the model UUID overwrite a contact
+  // email that's already set (which would redirect the victim's quote link to
+  // an attacker inbox). Only the owning user may change an existing email.
+  if (row.contactEmail && !isOwner) {
+    return NextResponse.json({ error: "already_submitted" }, { status: 409 });
+  }
   await db
     .update(uploadedModels)
     .set({

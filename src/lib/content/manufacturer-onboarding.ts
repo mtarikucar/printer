@@ -59,13 +59,35 @@ askıya alınması veya feshi sebebidir.
 
 ## 4. Üretim Standartları ve Kalite Beklentileri
 
-- Baskı reçine (resin) ile yapılır ve **katman yüksekliği 50 mikron veya altı**
-  olmalıdır.
-- Model, müşteriye gönderilen önizleme ve sipariş özelliklerine (boyut, stil,
-  yüzey) **birebir uygun** olmalıdır.
-- Destek izleri temizlenmeli, yüzey rötuşu ve renklendirme tamamlanmalıdır.
-  **Çatlak, kırık, eksik/yanlış parça, görünür destek izi, beyazlama, eksik
-  boyama ve ölçü sapması reddedilme sebebidir.**
+Platform hem **reçine (SLA/DLP/resin)** hem de **filament (FDM/FFF)** üretimini
+destekler. **Her sipariş, üretilmesi gereken malzemeyi (reçine veya filament)
+belirtir ve siparişi tam olarak belirtilen malzeme ve yöntemle üretmeniz
+zorunludur.** Yalnızca elinizdeki ekipmanın karşılayabildiği malzemedeki
+siparişleri kabul edin; uygun değilse siparişi reddedebilirsiniz.
+
+**Reçine (resin) baskı:**
+- **Katman yüksekliği 50 mikron (0,05 mm) veya altı** olmalıdır.
+- Destekler dikkatlice sökülmeli, destek/izleme noktaları zımparalanıp
+  temizlenmeli, parça yıkanıp tam olarak kürlenmelidir (UV cure).
+- **Eksik kürlenme (yapışkan/yumuşak yüzey), beyazlama, görünür destek izi ve
+  kırılgan/çatlak yüzey reddedilme sebebidir.**
+
+**Filament (FDM) baskı:**
+- **Katman yüksekliği 200 mikron (0,20 mm) veya altı** olmalıdır; ince detaylı
+  modellerde daha düşük katman (0,10–0,12 mm) tercih edilmelidir.
+- Sipariş, dolum (infill) ve dayanım gereksinimini taşıyabilir; aksi
+  belirtilmedikçe **figürin bütünlüğünü koruyacak yeterli dolum ve duvar
+  kalınlığı** kullanılmalıdır.
+- Yüzeydeki **ipliklenme (stringing), sarkma, katman ayrışması/kabarma
+  (delaminasyon), çarpılma (warping), eksik ekstrüzyon (under-extrusion), fil
+  ayağı (elephant foot) ve belirgin dikiş/ek izleri reddedilme sebebidir.**
+  Destek/raft izleri temizlenmeli, gerekli yerlerde zımpara/rötuş yapılmalıdır.
+
+**Her iki yöntem için ortak:**
+- Üretilen model; müşteriye gönderilen önizlemeye ve sipariş özelliklerine
+  (boyut, stil, yüzey, malzeme) **birebir uygun** olmalıdır.
+- Renklendirme ve son rötuş tamamlanmalıdır. **Kırık, eksik/yanlış parça,
+  eksik boyama ve ölçü sapması her durumda reddedilme sebebidir.**
 - Sipariş "Hazır" işaretlenmeden önce, kalite kontrol (QC) için **net ve
   yeterli sayıda fotoğraf yüklemeniz zorunludur.** Admin QC onayı verilene
   kadar sipariş kargoya verilmez. **QC reddi hâlinde, kusurlu işi ek ücret

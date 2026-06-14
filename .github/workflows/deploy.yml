@@ -72,6 +72,11 @@ jobs:
           context: .
           file: docker/Dockerfile
           target: app
+          # NEXT_PUBLIC_* values are inlined into the client bundle at build time,
+          # so the GTM container id must reach `next build` inside the image. The
+          # runtime .env sync only covers server-side reads, not the browser bundle.
+          build-args: |
+            NEXT_PUBLIC_GTM_ID=${{ secrets.NEXT_PUBLIC_GTM_ID }}
           push: true
           tags: ${{ env.IMAGE_BASE }}/app:latest,${{ env.IMAGE_BASE }}/app:${{ github.sha }}
           cache-from: type=gha

@@ -47,6 +47,12 @@ RUN --mount=type=cache,target=/tmp/hf-cache \
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Public (NEXT_PUBLIC_*) tag IDs are inlined into the client bundle by Next.js at
+# build time, so they must be present during `npm run build` — the runtime .env is
+# too late for client-side code. Passed via --build-arg from CI (GitHub Secrets).
+# Defaults to "" so local/CI builds without the arg still work (GTM becomes a no-op).
+ARG NEXT_PUBLIC_GTM_ID=""
+ENV NEXT_PUBLIC_GTM_ID=${NEXT_PUBLIC_GTM_ID}
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # ── App target: Next.js standalone server ────────────────────────────

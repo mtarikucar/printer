@@ -53,6 +53,10 @@ COPY . .
 # Defaults to "" so local/CI builds without the arg still work (GTM becomes a no-op).
 ARG NEXT_PUBLIC_GTM_ID=""
 ENV NEXT_PUBLIC_GTM_ID=${NEXT_PUBLIC_GTM_ID}
+# GA4 measurement id — inlined client-side so the direct gtag('config','G-…')
+# bootstrap runs even when GTM isn't managing GA4.
+ARG NEXT_PUBLIC_GA4_ID=""
+ENV NEXT_PUBLIC_GA4_ID=${NEXT_PUBLIC_GA4_ID}
 # Sentry: the public DSN is inlined into the client bundle and also flips
 # `sentryEnabled` in next.config.ts (so withSentryConfig + source-map upload run).
 ARG NEXT_PUBLIC_SENTRY_DSN=""

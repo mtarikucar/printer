@@ -1,4 +1,4 @@
-import { buildPrompt, POSE_PHRASE, PRINT_READINESS_CLAUSE, type FigurineStyle, type StyleModifier } from "../src/lib/services/style-transfer";
+import { buildPrompt, PRINT_READINESS_CLAUSE, type FigurineStyle, type StyleModifier } from "../src/lib/services/style-transfer";
 import { buildMeshyBody, poseModeForStyle } from "../src/lib/services/meshy";
 
 const STYLES: FigurineStyle[] = ["realistic", "storybook", "anime", "chibi", "object"];
@@ -13,8 +13,10 @@ function divider(title: string) {
 divider("PRINT_READINESS_CLAUSE");
 console.log(PRINT_READINESS_CLAUSE);
 
-divider("POSE_PHRASE (per style)");
-console.log(POSE_PHRASE);
+divider("pose_mode (per style, from design-template registry)");
+for (const style of STYLES) {
+  console.log(`${style}: ${JSON.stringify(poseModeForStyle(style))}`);
+}
 
 divider("Style-transfer prompts (per style + modifier set)");
 for (const style of STYLES) {

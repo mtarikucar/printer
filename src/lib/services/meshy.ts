@@ -1,4 +1,8 @@
-import type { FigurineStyle } from "./style-transfer";
+import { poseModeForStyle, type FigurineStyle } from "../create/design-templates";
+
+// Pose-mode hint is derived from the design-template registry (T-pose for
+// templates whose proportions need arm separation). Re-exported for callers.
+export { poseModeForStyle };
 
 interface MeshyResult {
   glbUrl: string;
@@ -10,15 +14,6 @@ interface MeshyResult {
   stlUrl: string | null;
   taskId: string;
   durationMs: number;
-}
-
-// Pose mode hint sent to Meshy. Chibi/Storybook get strict T-pose (matches their
-// upstream image guidance and prevents arm-fused-to-torso non-manifold issues);
-// other styles keep Meshy's default (empty string) to let the model honor the
-// existing image pose.
-export function poseModeForStyle(style: FigurineStyle): "t-pose" | "" {
-  if (style === "storybook" || style === "chibi") return "t-pose";
-  return "";
 }
 
 export function buildMeshyBody(imageBase64: string, style: FigurineStyle) {

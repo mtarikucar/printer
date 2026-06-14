@@ -21,6 +21,7 @@ import {
   calculateUpsellAmount,
   itemPriceKurus,
 } from "@/lib/config/prices";
+import { priceKindForStyle } from "@/lib/create/design-templates";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
 import {
@@ -316,7 +317,7 @@ export async function POST(request: NextRequest) {
             ? uploadedModel!.quotedPriceKurus
             : uploadedModel!.priceKurus!
           : itemPriceKurus({
-              kind: customInput!.style === "object" ? "object" : "figure",
+              kind: priceKindForStyle(customInput!.style),
               size: customInput!.figurineSize,
               material: customInput!.material,
               finish: customInput!.finish,

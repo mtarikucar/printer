@@ -16,12 +16,18 @@ import { isPhoneVerificationRequired } from "@/lib/services/sms";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
+import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { eq, count } from "drizzle-orm";
 
 const generateSchema = z.object({
   photoKey: z.string().min(1),
   figurineSize: z.enum(["kucuk", "orta", "buyuk"]),
-  style: z.enum(["realistic", "storybook", "anime", "chibi", "object"]).default("storybook"),
+  // Design template (formerly "style"): validated against the registry, so a
+  // new template is a registry-only change — no enum edit here.
+  style: z
+    .string()
+    .refine(isValidTemplateSlug, "invalid template")
+    .default(DEFAULT_TEMPLATE_SLUG),
   modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
 });
 

@@ -165,13 +165,9 @@ export const figurineSizeEnum = pgEnum("figurine_size", [
   "buyuk",
 ]);
 
-export const figurineStyleEnum = pgEnum("figurine_style", [
-  "realistic",
-  "storybook",
-  "anime",
-  "chibi",
-  "object",
-]);
+// Design template ("style") is now free text validated against the
+// design-template registry (src/lib/create/design-templates.ts), so adding a
+// template needs no DB migration. The columns below use text() accordingly.
 
 // Print material — resin (premium) vs filament (FDM). Drives per-material
 // pricing and manufacturer routing. Default resin (historical behaviour).
@@ -335,7 +331,7 @@ export const previews = pgTable("previews", {
   photoKey: text("photo_key").notNull(),
   photoUrl: text("photo_url").notNull(),
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
-  style: figurineStyleEnum("style").notNull().default("realistic"),
+  style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   status: previewStatusEnum("status").notNull().default("generating"),
   glbUrl: text("glb_url"),
@@ -370,7 +366,7 @@ export const orderDrafts = pgTable("order_drafts", {
   // Custom-order fields. Nullable since marketplace drafts carry no uploaded
   // photo / size choice — the product defines what's printed.
   figurineSize: figurineSizeEnum("figurine_size"),
-  style: figurineStyleEnum("style").notNull().default("realistic"),
+  style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
   finish: figurineFinishEnum("finish").notNull().default("paintable_kit"),
@@ -476,7 +472,7 @@ export const orders = pgTable("orders", {
   phone: text("phone"),
   // Custom-order field. Nullable since marketplace orders carry no size choice.
   figurineSize: figurineSizeEnum("figurine_size"),
-  style: figurineStyleEnum("style").notNull().default("realistic"),
+  style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
   finish: figurineFinishEnum("finish").notNull().default("paintable_kit"),

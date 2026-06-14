@@ -3,6 +3,7 @@ import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { phoneField } from "@/lib/phone";
+import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 
 function defaultCountryForLocale(_locale: Locale) {
   // Shipping is Turkey-only today; default the parser to TR regardless of UI locale.
@@ -31,7 +32,10 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     figurineSize: z.enum(["kucuk", "orta", "buyuk"], {
       error: d["validator.size.invalid"],
     }),
-    style: z.enum(["realistic", "storybook", "anime", "chibi", "object"]).default("storybook"),
+    style: z
+      .string()
+      .refine(isValidTemplateSlug, "invalid template")
+      .default(DEFAULT_TEMPLATE_SLUG),
     material: z.enum(["resin", "filament"]).default("resin"),
     finish: z
       .enum([

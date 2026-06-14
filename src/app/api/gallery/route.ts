@@ -3,6 +3,7 @@ import { and, eq, inArray, desc, lt, sql, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, generationAttempts } from "@/lib/db/schema";
 import { normalizeFileUrl } from "@/lib/services/storage";
+import { isValidTemplateSlug } from "@/lib/create/design-templates";
 
 const GALLERY_STATUSES = [
   "approved",
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (styleFilter && ["realistic", "storybook", "anime", "chibi", "object"].includes(styleFilter)) {
+  if (styleFilter && isValidTemplateSlug(styleFilter)) {
     conditions.push(eq(orders.style, styleFilter as any));
   }
 

@@ -13,7 +13,7 @@ export type FigurineStyle = string;
 export interface DesignTemplate {
   /** Stable key persisted on previews/orders (text). Keep existing values stable. */
   slug: string;
-  /** i18n key for the picker label, e.g. "create.template.storybook". */
+  /** i18n key for the picker label, e.g. "create.style.storybook". */
   labelKey: string;
   /** i18n key for the short description. */
   descKey: string;
@@ -77,8 +77,8 @@ export const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
 export const DESIGN_TEMPLATES: DesignTemplate[] = [
   {
     slug: "realistic",
-    labelKey: "create.template.realistic",
-    descKey: "create.template.realistic.desc",
+    labelKey: "create.style.realistic",
+    descKey: "create.style.realistic.desc",
     preview: "/examples/realistic.png",
     stylize: false,
     subject: "person",
@@ -89,8 +89,8 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
   },
   {
     slug: "storybook",
-    labelKey: "create.template.storybook",
-    descKey: "create.template.storybook.desc",
+    labelKey: "create.style.storybook",
+    descKey: "create.style.storybook.desc",
     preview: "/examples/storybook.png",
     stylize: true,
     subject: "person",
@@ -102,8 +102,8 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
   },
   {
     slug: "anime",
-    labelKey: "create.template.anime",
-    descKey: "create.template.anime.desc",
+    labelKey: "create.style.anime",
+    descKey: "create.style.anime.desc",
     preview: "/examples/anime.png",
     stylize: true,
     subject: "person",
@@ -115,8 +115,8 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
   },
   {
     slug: "chibi",
-    labelKey: "create.template.chibi",
-    descKey: "create.template.chibi.desc",
+    labelKey: "create.style.chibi",
+    descKey: "create.style.chibi.desc",
     preview: "/examples/chibi.png",
     stylize: true,
     subject: "person",
@@ -128,8 +128,8 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
   },
   {
     slug: "object",
-    labelKey: "create.template.object",
-    descKey: "create.template.object.desc",
+    labelKey: "create.style.object",
+    descKey: "create.style.object.desc",
     preview: "/examples/object.png",
     stylize: false,
     subject: "object",

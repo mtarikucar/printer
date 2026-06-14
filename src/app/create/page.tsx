@@ -26,6 +26,7 @@ import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { CreatePathSelector } from "@/components/create/path-selector";
 import { UploadModelFlow } from "@/components/create/upload-model-flow";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
+import { DESIGN_TEMPLATES, priceKindForStyle } from "@/lib/create/design-templates";
 
 const PhotoEditor = dynamic(
   () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
@@ -183,7 +184,7 @@ function CustomCreateFlow() {
   // Object/design (style="object") and character figurines have separate price
   // tables + finish sets (Faz 1). These helpers pick the right one; the server
   // re-derives the trusted amount on submit via itemPriceKurus.
-  const isObjectStyle = selectedStyle === "object";
+  const isObjectStyle = priceKindForStyle(selectedStyle) === "object";
   const baseKurus = (sz: string, mat: string) =>
     isObjectStyle ? objectPriceKurus(sz, mat) : figurinePriceKurus(sz, mat);
   const finishKurus = (f: string) =>
@@ -212,12 +213,18 @@ function CustomCreateFlow() {
         ]
   ).map((f) => ({ ...f, surchargeKurus: finishKurus(f.key) }));
 
-  const STYLES = [
-    { key: "object",    label: d["create.style.object"],    desc: d["create.style.object.desc"],    img: "/examples/object.png" },
-    { key: "storybook",    label: d["create.style.storybook"],    desc: d["create.style.storybook.desc"],    img: "/examples/storybook.png" },
-    { key: "anime",     label: d["create.style.anime"],     desc: d["create.style.anime.desc"],     img: "/examples/anime.png" },
-    { key: "chibi",     label: d["create.style.chibi"],     desc: d["create.style.chibi.desc"],     img: "/examples/chibi.png" },
-  ] as const;
+  // Design templates ("Hazır Tasarım Desenleri") come from the single registry
+  // (src/lib/create/design-templates.ts) — add a template there + one preview
+  // image and it shows up here automatically, no edits needed in this file.
+  const STYLES = DESIGN_TEMPLATES.filter((t) => t.enabled)
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((t) => ({
+      key: t.slug,
+      label: d[t.labelKey as keyof typeof d],
+      desc: d[t.descKey as keyof typeof d],
+      img: t.preview,
+    }));
 
   const MODIFIERS = [
     { key: "pixel_art", label: d["create.modifier.pixel_art"], desc: d["create.modifier.pixel_art.desc"], img: "/examples/pixel-realistic.png" },

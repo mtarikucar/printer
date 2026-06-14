@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 /**
- * Storefront banner row: a primary shop-the-marketplace card + a secondary
- * make-your-own card, both starring the voxel mascot (/maskot.png). The
- * voxel language (pixel grid, floating cubes, stepped platform) is decorative
- * CSS — if the mascot file is absent the cards still read as finished.
+ * Storefront banner row: a primary shop-the-marketplace card (mascot
+ * presenting a 3D-printed figurine, /maskot-market.png) + a secondary
+ * make-your-own card (mascot turning a photo into a figure,
+ * /maskot-create.png). The voxel language (pixel grid, floating cubes,
+ * stepped platform) is decorative CSS — if a mascot file is absent the
+ * cards still read as finished.
  */
 
 // Small axis-aligned "voxel" square. Sizes/positions are passed per-instance;
@@ -76,10 +78,10 @@ export function PromoBanner() {
             <span className="absolute bottom-0 left-1/2 h-3 w-[88%] -translate-x-1/2 rounded-full bg-green-900/45 blur-md" />
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/maskot.png"
+              src="/maskot-market.png"
               alt=""
-              width={1024}
-              height={1536}
+              width={832}
+              height={1248}
               onError={hideOnError}
               className="animate-float relative drop-shadow-[0_14px_18px_rgba(6,38,47,0.45)] transition-transform duration-300 group-hover:-translate-y-1.5"
               style={{ animationDuration: "4.5s" }}
@@ -133,12 +135,12 @@ export function PromoBanner() {
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/maskot.png"
+              src="/maskot-create.png"
               alt=""
-              width={1024}
-              height={1536}
+              width={832}
+              height={1248}
               onError={hideOnError}
-              className="-scale-x-100 drop-shadow-[0_10px_14px_rgba(6,38,47,0.2)] transition-transform duration-300 group-hover:-translate-y-1"
+              className="drop-shadow-[0_10px_14px_rgba(6,38,47,0.2)] transition-transform duration-300 group-hover:-translate-y-1"
             />
           </div>
 

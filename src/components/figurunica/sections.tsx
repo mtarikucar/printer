@@ -300,7 +300,7 @@ export function HeroIntro({ d }: { d: FigurunicaDict }) {
             {d["landing.fig.hero.ctaPrimary"]}
             <ArrowIcon />
           </Link>
-          <Link href="/gallery" className={s("btn-ghost")}>
+          <Link href="/nasil-calisir" className={s("btn-ghost")}>
             {d["landing.fig.hero.ctaGhost"]}
           </Link>
         </div>

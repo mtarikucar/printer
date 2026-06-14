@@ -42,8 +42,8 @@ export default async function HowItWorksPage() {
           </h1>
           <p className="mt-4 text-lg leading-relaxed text-text-secondary">
             {isTr
-              ? "Hazır 3D ürünleri keşfedip satın alabilir ya da kendi ürününü ürettirebilirsin: fotoğraftan figür ve obje bugün çalışıyor; kendi 3D modelini yükleme ve 2D tasarımdan ürün akışları yolda."
-              : "Browse and buy ready-made 3D products, or have your own made: photo-to-figurine and photo-to-object are live today; uploading your own 3D model and turning a 2D design into a product are on the way."}
+              ? "Hazır 3D ürünleri keşfedip satın alabilir ya da kendi ürününü ürettirebilirsin: fotoğraftan üret (hazır tasarım deseni seç), 2D tasarımdan ürün ya da kendi 3D dosyanı yükle — üçü de aktif."
+              : "Browse and buy ready-made 3D products, or have your own made: create from a photo (pick a design template), turn a 2D design into a product, or upload your own 3D file — all three are live."}
           </p>
         </div>
       </section>
@@ -59,7 +59,7 @@ export default async function HowItWorksPage() {
                 üreticilerimizin ve satıcılarımızın hazırladığı 3D baskı ürünleri keşfeder,
                 beğendiğini sipariş edersin — her ürün siparişe özel üretilir.
                 <strong> Özel Üret</strong> tarafında ise tamamen sana ait bir ürünü, aşağıdaki
-                dört yoldan biriyle ürettirirsin.
+                üç yoldan biriyle ürettirirsin.
               </p>
 
               <h2>Pazaryeri: hazır ürünleri keşfet</h2>
@@ -70,34 +70,41 @@ export default async function HowItWorksPage() {
                 gönderilir. Kendi ürünlerini satmak isteyen üreticiler de başvurabilir.
               </p>
 
-              <h2>Özel Üret: dört üretim yolu</h2>
+              <h2>Özel Üret: üç üretim yolu</h2>
 
-              <h3>1. Fotoğraftan figür — bugün aktif</h3>
+              <h3>1. Fotoğraftan üret</h3>
               <p>
-                Bir kişinin (ya da evcil hayvanın) fotoğrafını yükle; yapay zeka destekli hattımız
-                bir 3D figür önizlemesi üretir. Onayladığında üretici partnerimiz reçineyle basar,
-                seçtiğin bitişe göre hazırlar ve boya kitiyle birlikte gönderir.
+                Bir kişinin, evcil hayvanın ya da bir nesnenin fotoğrafını yükle; yapay zeka destekli
+                hattımız bir 3D önizleme üretir. Bir <strong>tasarım deseni</strong> seçersin (Gerçekçi,
+                Masalsı, Anime, Chibi ya da Obje). Onayladığında üretici partnerimiz basar, seçtiğin
+                bitişe göre hazırlar ve boya kitiyle birlikte gönderir.
               </p>
 
-              <h3>2. Fotoğraftan obje/ürün — bugün aktif</h3>
+              <h3>2. 2D Tasarım/logo → ürün</h3>
               <p>
-                Figür dışındaki nesneler için &quot;obje&quot; modunu kullan: bir ürün, oyuncak,
-                heykelcik veya dekoratif parçanın fotoğrafından 3D baskıya uygun bir model çıkarırız.
-                Akış figürle aynıdır: önizleme → onay → üretim → kargo.
+                Bir logo, çizim veya düz görselden 3D baskıya uygun bir obje çıkarırız (anahtarlık,
+                rölyef plaka, altlık, masaüstü obje vb.). Akış aynıdır: önizleme → onay → üretim → kargo.
               </p>
 
-              <h3>3. Kendi 3D modelini yükle — yakında</h3>
+              <h3>3. Kendi 3D modelin (STL/OBJ)</h3>
               <p>
-                Hazır bir <strong>STL/OBJ</strong> dosyan varsa, doğrudan yükleyip bastırabileceksin.
-                Modeli sunucuda doğrular (kapalı hacim, duvar kalınlığı, baskı zarfı), hedef yüksekliğe
-                ölçekler ve geometriye göre fiyatlandırırız. Bu akış geliştirme aşamasında.
+                Zaten hazır bir <strong>STL/OBJ</strong> dosyan varsa doğrudan yükleyip bastırabilirsin.
+                Modeli doğrular, hedef yüksekliğe ölçekler ve geometriye göre fiyatlandırırız; otomatik
+                fiyatlandırmaya uygun olmayan karmaşık durumlarda sana özel teklif veririz.
               </p>
 
-              <h3>4. 2D tasarım/logo → 3D ürün — yakında</h3>
+              <h2>Hazır tasarım desenleri</h2>
               <p>
-                Bir logo, çizim veya düz görselden anahtarlık, rölyef plaka, altlık ya da masaüstü
-                obje gibi 3D ürünler üreteceğiz. Bu akış da yolda.
+                &quot;Fotoğraftan üret&quot; akışında bir tasarım deseni seçersin; her desen aynı
+                fotoğrafı farklı bir tarza dönüştürür:
               </p>
+              <ul>
+                <li><strong>Gerçekçi:</strong> fotoğrafa sadık, doğal yüz hatları ve ten tonu — anne/babaya ya da eşe birebir benzeyen hediyeler için.</li>
+                <li><strong>Masalsı Animasyon:</strong> büyük gözler, yumuşak hatlar, çizgi-film sıcaklığı — çocuk doğum günleri ve çiftler için en popüler.</li>
+                <li><strong>Anime:</strong> anime gözleri, keskin saç, karakter posu — anime/manga hayranlarına.</li>
+                <li><strong>Chibi:</strong> büyük kafa, küçük gövde, abartılı sevimli oranlar — mini hatıra ve çift figürini için.</li>
+                <li><strong>Obje:</strong> sadece insanlar değil; sevdiğin araba, oyuncak ya da koleksiyon parçanın 3D baskısı.</li>
+              </ul>
 
               <h2>Özel bir sipariş adım adım</h2>
               <ol>
@@ -146,7 +153,7 @@ export default async function HowItWorksPage() {
                 Figurunica works in two ways. On the <strong>Marketplace</strong> side, you browse
                 ready-made 3D-printed products from our makers and sellers and order what you like —
                 every product is made to order. On the <strong>Custom</strong> side, you have something
-                entirely your own produced through one of the four paths below.
+                entirely your own produced through one of the three paths below.
               </p>
 
               <h2>Marketplace: browse ready-made products</h2>
@@ -157,35 +164,42 @@ export default async function HowItWorksPage() {
                 sell their own products can apply too.
               </p>
 
-              <h2>Custom: four production paths</h2>
+              <h2>Custom: three production paths</h2>
 
-              <h3>1. Photo to figurine — live today</h3>
+              <h3>1. Create from a photo</h3>
               <p>
-                Upload a photo of a person (or pet) and our AI-assisted pipeline generates a 3D
-                figurine preview. Once you approve, our manufacturing partner prints it in resin,
-                prepares it to your chosen finish, and ships it with a paint kit.
+                Upload a photo of a person, pet, or object and our AI-assisted pipeline generates a 3D
+                preview. You pick a <strong>design template</strong> (Realistic, Storybook, Anime, Chibi,
+                or Object). Once you approve, our manufacturing partner prints it, prepares it to your
+                chosen finish, and ships it with a paint kit.
               </p>
 
-              <h3>2. Photo to object/product — live today</h3>
+              <h3>2. 2D design/logo → product</h3>
               <p>
-                For things other than figurines, use &quot;object&quot; mode: from a photo of a product,
-                toy, statuette, or decorative piece we derive a print-ready 3D model. The flow is the
-                same as figurines: preview → approve → production → shipping.
+                From a logo, drawing, or flat image we derive a print-ready 3D object (keychains, relief
+                plaques, coasters, desk objects, and more). The flow is the same: preview → approve →
+                production → shipping.
               </p>
 
-              <h3>3. Upload your own 3D model — coming soon</h3>
+              <h3>3. Your own 3D file (STL/OBJ)</h3>
               <p>
-                If you already have an <strong>STL/OBJ</strong> file, you&apos;ll be able to upload it and
-                print directly. We validate the model server-side (watertightness, wall thickness, print
-                envelope), scale it to your target height, and price it from the geometry. This flow is
-                in development.
+                If you already have an <strong>STL/OBJ</strong> file, upload it and print directly. We
+                validate the model, scale it to your target height, and price it from the geometry; for
+                complex cases that don&apos;t fit automatic pricing we send you a custom quote.
               </p>
 
-              <h3>4. 2D design/logo → 3D product — coming soon</h3>
+              <h2>Design templates</h2>
               <p>
-                From a logo, drawing, or flat image we&apos;ll produce 3D products like keychains, relief
-                plaques, coasters, or desk objects. This flow is on the way too.
+                In the &quot;create from a photo&quot; flow you pick a design template; each one turns the
+                same photo into a different style:
               </p>
+              <ul>
+                <li><strong>Realistic:</strong> true to the photo — natural facial features and skin tone, for gifts that look exactly like the recipient.</li>
+                <li><strong>Storybook:</strong> big eyes, soft features, animated warmth — our most popular for kids&apos; birthdays and couples.</li>
+                <li><strong>Anime:</strong> anime eyes, sharp hair, character pose — for anime/manga fans.</li>
+                <li><strong>Chibi:</strong> big head, tiny body, exaggerated cuteness — great for mini keepsakes and couple figurines.</li>
+                <li><strong>Object:</strong> not just people — a 3D print of your favorite car, toy, or collectible.</li>
+              </ul>
 
               <h2>A custom order, step by step</h2>
               <ol>

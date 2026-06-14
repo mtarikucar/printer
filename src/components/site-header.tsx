@@ -78,12 +78,9 @@ export function SiteHeader() {
       label: d["nav.custom"],
       href: "/create",
       items: [
-        { href: "/create?path=figure", label: d["landing.market.produce.figure.title"] },
-        { href: "/create?path=object", label: d["landing.market.produce.object.title"] },
-        { href: "/create?path=upload", label: d["landing.market.produce.upload.title"] },
-        { href: "/create?path=design", label: d["landing.market.produce.design.title"] },
-        { href: "/gallery", label: d["nav.gallery"] },
-        { href: "/figur", label: d["nav.styles"] },
+        { href: "/create?path=photo", label: d["create.path.photo.title"] },
+        { href: "/create?path=design", label: d["create.path.design.title"] },
+        { href: "/create?path=upload", label: d["create.path.upload.title"] },
       ],
     },
     {

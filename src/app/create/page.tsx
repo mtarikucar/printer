@@ -337,7 +337,7 @@ function CustomCreateFlow() {
     }
   };
 
-  // Q2: `/styles/[slug]` landing pages link here with `?style=<slug>`.
+  // `?style=<slug>` (or `?path=object`) prefills the design template.
   // Prefill the style selector when the slug is one we support. We only
   // apply the prefill on initial mount so a customer who lands here and
   // then changes the style isn't fighting the URL param.

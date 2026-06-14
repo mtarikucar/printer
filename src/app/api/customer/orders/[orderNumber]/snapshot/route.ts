@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { getPublicUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -68,6 +69,9 @@ export async function GET(
 
   return NextResponse.json({
     photoKey,
+    // Ready-signed preview URL so the reorder UI never has to build an unsigned
+    // /api/files URL (keeps it working once FILES_REQUIRE_SIGNATURE is on).
+    photoPreviewUrl: getPublicUrl(photoKey),
     figurineSize: order.figurineSize,
     material: order.material,
     style: order.style,

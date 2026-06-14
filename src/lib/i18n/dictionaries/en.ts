@@ -455,7 +455,6 @@ const en = {
   "publish.category.custom": "Other",
 
   // Landing - Gallery Section
-  "landing.gallery.viewAll": "View Gallery",
 
   // Publish
   "publish.title": "Share to Gallery",
@@ -583,9 +582,6 @@ const en = {
   "manufacturer.orderDetail.declineReasonPlaceholder": "Reason (optional)…",
   "manufacturer.orderDetail.confirmDecline": "Decline",
   "nav.styles": "Styles",
-  "styles.indexTitle": "Figurine Styles",
-  "styles.indexSubtitle": "Pick the style that suits your gift. Each style has its own dedicated page with examples and details.",
-  "styles.learnMore": "Learn more",
 
   // Create — Material
   "create.materialSelection": "Material Selection",
@@ -1138,16 +1134,6 @@ const en = {
   "landing.hero.trust4": "Preview before print",
 
   // Landing - Style Showcase
-  "landing.styles.title": "Choose Your Style",
-  "landing.styles.subtitle": "4 unique figurine styles from the same photo",
-  "landing.styles.object": "3D Object",
-  "landing.styles.object.desc": "Turn any object, item, or concept into a 3D printed piece.",
-  "landing.styles.anime": "Anime",
-  "landing.styles.anime.desc": "Bold lines and expressive eyes. Japanese animation style.",
-  "landing.styles.storybook": "Storybook Animation",
-  "landing.styles.storybook.desc": "Warm, friendly charm with big, expressive eyes.",
-  "landing.styles.chibi": "Chibi",
-  "landing.styles.chibi.desc": "Adorably compact. Big head, tiny body, maximum cute.",
 
   // Landing - What's in the Box
   "landing.box.title": "What's in the Box?",

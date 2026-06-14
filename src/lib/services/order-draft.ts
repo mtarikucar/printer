@@ -138,9 +138,9 @@ export async function promoteDraftToOrder(
       );
       const cartTotalAmount = groupAmounts.reduce((a, b) => a + b, 0) || 1;
       // Largest-remainder allocation: each group gets floor(total*share), then
-      // the leftover units (< group count) are handed out one each. Guarantees
-      // non-negative parts that sum EXACTLY to `total` (no negative remainder
-      // even with many tiny equal groups).
+      // the leftover units (< group count) are handed out one each to the first
+      // groups. Guarantees non-negative parts that sum EXACTLY to `total` (no
+      // negative remainder even with many tiny equal groups).
       const allocate = (total: number): number[] => {
         const shares = groupAmounts.map((a) =>
           Math.floor((total * a) / cartTotalAmount)

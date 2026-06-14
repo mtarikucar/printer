@@ -173,6 +173,9 @@ export async function POST(request: NextRequest) {
     // Upload: load + gate the customer's processed model — must be auto-priced
     // and ready. Possession of the UUID is the capability (mirrors previewId).
     let uploadedModel: typeof uploadedModels.$inferSelect | null = null;
+    // Hoisted so the price-selection branch below uses the SAME quote-readiness
+    // (incl. expiry) as the admission gate — never charging an expired quote.
+    let quoteReady = false;
     if (orderType === "upload") {
       uploadedModel =
         (await db.query.uploadedModels.findFirst({
@@ -183,7 +186,7 @@ export async function POST(request: NextRequest) {
       // A manual quote is only honored before it expires — the admin sets
       // quoteExpiresAt (and the email advertises it), so an old quote must not
       // bind the platform to a stale price.
-      const quoteReady =
+      quoteReady =
         uploadedModel?.quoteStatus === "quoted" &&
         uploadedModel.quotedPriceKurus != null &&
         (uploadedModel.quoteExpiresAt == null ||
@@ -317,9 +320,8 @@ export async function POST(request: NextRequest) {
       : orderType === "marketplace"
         ? product!.priceKurus * quantity
         : orderType === "upload"
-          ? uploadedModel!.quoteStatus === "quoted" &&
-            uploadedModel!.quotedPriceKurus != null
-            ? uploadedModel!.quotedPriceKurus
+          ? quoteReady
+            ? uploadedModel!.quotedPriceKurus!
             : uploadedModel!.priceKurus!
           : itemPriceKurus({
               kind: priceKindForStyle(customInput!.style),

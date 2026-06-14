@@ -199,6 +199,9 @@ jobs:
             upsert_env META_PIXEL_ID         "$META_PIXEL_ID"
             upsert_env TIKTOK_PIXEL_ID       "$TIKTOK_PIXEL_ID"
             upsert_env NEXT_PUBLIC_SENTRY_DSN "$NEXT_PUBLIC_SENTRY_DSN"
+            # Security: enforce signed /api/files access so stored files (PII
+            # photos, meshes) can't be fetched by anyone who learns the path.
+            upsert_env FILES_REQUIRE_SIGNATURE "1"
             chmod 600 "$ENV_FILE"
             log ".env senkronize edildi (600 izinleri)."
 

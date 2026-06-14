@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { previews, users } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { normalizeFileUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -57,8 +58,12 @@ export async function POST(
         orderNumber: "",
         customerName: user.fullName,
         adminEmail,
-        photoUrl: preview.photoUrl,
-        glbUrl: preview.glbUrl || undefined,
+        // Re-sign at send time: the stored URLs carry a fixed-TTL signature
+        // that can expire before the email is opened (and would 401 once
+        // FILES_REQUIRE_SIGNATURE is on). normalizeFileUrl re-derives the key
+        // and re-signs with a fresh exp.
+        photoUrl: normalizeFileUrl(preview.photoUrl) ?? preview.photoUrl,
+        glbUrl: normalizeFileUrl(preview.glbUrl) ?? undefined,
         revisionNote: validated.note,
         locale,
       });

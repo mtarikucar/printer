@@ -92,6 +92,24 @@ export async function POST(
     return NextResponse.json({ error: "not_eligible" }, { status: 403 });
   }
 
+  // One review per (product, user). The DB unique index is (product,user,order),
+  // so a buyer with multiple delivered orders for the same product could
+  // otherwise post one review per order and inflate the rating. Dedupe before
+  // insert; onConflictDoNothing stays as a same-order backstop.
+  const existing = await db
+    .select({ id: productReviews.id })
+    .from(productReviews)
+    .where(
+      and(
+        eq(productReviews.productId, id),
+        eq(productReviews.userId, session.userId)
+      )
+    )
+    .limit(1);
+  if (existing.length > 0) {
+    return NextResponse.json({ ok: true, alreadyReviewed: true });
+  }
+
   await db
     .insert(productReviews)
     .values({

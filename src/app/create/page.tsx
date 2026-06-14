@@ -436,6 +436,7 @@ function CustomCreateFlow() {
       .then((data) => {
         if (!data) return;
         if (data.photoKey) setPhotoKey(data.photoKey);
+        if (data.photoPreviewUrl) setPhotoPreviewUrl(data.photoPreviewUrl);
         if (data.figurineSize) setSelectedSize(data.figurineSize);
         if (data.material) setSelectedMaterial(data.material);
         if (data.style) setSelectedStyle(data.style);
@@ -1105,7 +1106,7 @@ function CustomCreateFlow() {
                   <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
                   <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
                     <img
-                      src={photoPreviewUrl ?? `/api/files/${photoKey}`}
+                      src={photoPreviewUrl ?? undefined}
                       alt="Uploaded photo"
                       className="w-full h-full object-contain"
                     />

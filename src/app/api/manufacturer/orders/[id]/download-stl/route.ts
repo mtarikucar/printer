@@ -60,7 +60,8 @@ export async function GET(
     );
   }
 
-  const fileKey = decodeURIComponent(fileKeyMatch[1]);
+  // Strip any ?exp=&sig= the signed URL carries before resolving the file key.
+  const fileKey = decodeURIComponent(fileKeyMatch[1].split("?")[0]);
 
   try {
     const buffer = await getFileBuffer(fileKey);

@@ -457,7 +457,6 @@ const tr: Dictionary = {
   "publish.category.custom": "Diğer",
 
   // Landing - Gallery Section
-  "landing.gallery.viewAll": "Galeriyi Görüntüle",
 
   // Publish
   "publish.title": "Galeriye Paylaş",
@@ -585,9 +584,6 @@ const tr: Dictionary = {
   "manufacturer.orderDetail.declineReasonPlaceholder": "Sebebiniz (opsiyonel)…",
   "manufacturer.orderDetail.confirmDecline": "Reddet",
   "nav.styles": "Stiller",
-  "styles.indexTitle": "Figürin Stilleri",
-  "styles.indexSubtitle": "5 farklı tarzdan kendinize en uygun olanı seçin. Her stilin detayını ve örneklerini inceleyebilirsiniz.",
-  "styles.learnMore": "Detayları gör",
 
   // Create — Material
   "create.materialSelection": "Malzeme Seçimi",
@@ -1144,16 +1140,6 @@ const tr: Dictionary = {
   "landing.hero.trust4": "Bask\u0131 \u00F6ncesi \u00F6nizleme",
 
   // Landing - Stil Vitrini
-  "landing.styles.title": "Tarz\u0131n\u0131 Se\u00E7",
-  "landing.styles.subtitle": "Ayn\u0131 foto\u011Fraftan 4 farkl\u0131 fig\u00FCrin stili",
-  "landing.styles.object": "3D Obje",
-  "landing.styles.object.desc": "Herhangi bir nesneyi, eşyayı veya konsepti 3D baskıya dönüştür.",
-  "landing.styles.anime": "Anime",
-  "landing.styles.anime.desc": "Belirgin çizgiler ve ifadeli gözler. Japon animasyon stili.",
-  "landing.styles.storybook": "Masalsı Animasyon",
-  "landing.styles.storybook.desc": "Sıcak ve sevimli; iri, ifadeli gözler.",
-  "landing.styles.chibi": "Chibi",
-  "landing.styles.chibi.desc": "Minnoş ve kompakt. Büyük kafa, minik gövde, maksimum şirinlik.",
 
   // Landing - Kutuda Neler Var
   "landing.box.title": "Kutuda Neler Var?",

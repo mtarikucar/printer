@@ -1716,7 +1716,7 @@ function CustomCreateFlow() {
 
               {/* Payment Method Selector */}
               {(() => {
-                const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish);
+                const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish) + upsellTotalKurus;
                 const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                 const remaining = total - gcDiscount;
                 const isFullyCovered = remaining <= 0;
@@ -1790,7 +1790,7 @@ function CustomCreateFlow() {
                     </div>
                   )}
                   {(() => {
-                    const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish);
+                    const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish) + upsellTotalKurus;
                     const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
                     const afterGc = total - gcDiscount;
                     const havaleDiscount =
@@ -1836,7 +1836,7 @@ function CustomCreateFlow() {
               )}
 
               {(() => {
-                const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish);
+                const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish) + upsellTotalKurus;
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
                 const showLock = !isFullyCovered;
                 return (

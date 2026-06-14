@@ -177,7 +177,7 @@ export function ManufacturerOrdersClient({
                   {order.orderType === "marketplace"
                     ? "—"
                     : (d[
-                        `styles.${order.style}` as keyof typeof d
+                        `create.style.${order.style}` as keyof typeof d
                       ] as string) || order.style}
                 </td>
                 <td className="px-4 py-3 text-sm">

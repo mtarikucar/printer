@@ -989,7 +989,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 </dt>
                 <dd className="text-sm text-gray-900 mt-0.5">
                   {(d[
-                    `styles.${order.style}` as keyof typeof d
+                    `create.style.${order.style}` as keyof typeof d
                   ] as string) || order.style}
                 </dd>
               </div>

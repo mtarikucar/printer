@@ -381,7 +381,7 @@ export function OrdersClient({
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {d[
-                    `styles.${order.style}` as keyof typeof d
+                    `create.style.${order.style}` as keyof typeof d
                   ] || order.style}
                 </td>
                 <td className="px-4 py-3">

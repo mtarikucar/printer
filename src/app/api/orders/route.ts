@@ -21,7 +21,7 @@ import {
   calculateUpsellAmount,
   itemPriceKurus,
 } from "@/lib/config/prices";
-import { priceKindForStyle } from "@/lib/create/design-templates";
+import { priceKindForStyle, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
 import {
@@ -180,9 +180,14 @@ export async function POST(request: NextRequest) {
         })) ?? null;
       const autoReady =
         uploadedModel?.status === "ready" && uploadedModel.priceKurus != null;
+      // A manual quote is only honored before it expires — the admin sets
+      // quoteExpiresAt (and the email advertises it), so an old quote must not
+      // bind the platform to a stale price.
       const quoteReady =
         uploadedModel?.quoteStatus === "quoted" &&
-        uploadedModel.quotedPriceKurus != null;
+        uploadedModel.quotedPriceKurus != null &&
+        (uploadedModel.quoteExpiresAt == null ||
+          uploadedModel.quoteExpiresAt > new Date());
       if (!uploadedModel || (!autoReady && !quoteReady)) {
         return NextResponse.json(
           { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
@@ -446,7 +451,7 @@ export async function POST(request: NextRequest) {
           phone: common.shippingAddress.telefon,
           // Custom item fields (null for marketplace).
           figurineSize: customInput?.figurineSize ?? null,
-          style: customInput?.style ?? "realistic",
+          style: customInput?.style ?? DEFAULT_TEMPLATE_SLUG,
           modifiers:
             customInput && customInput.modifiers.length > 0
               ? customInput.modifiers

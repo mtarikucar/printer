@@ -3,7 +3,14 @@ import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { phoneField } from "@/lib/phone";
-import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
+import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, priceKindForStyle } from "@/lib/create/design-templates";
+
+// Finish packages are split per price-kind: character figures vs geometry
+// objects. The server is the trust boundary — a finish must belong to the
+// kind implied by the chosen design template, else the price dispatcher would
+// silently apply a 0 surcharge to a mismatched (e.g. expensive) finish.
+const FIGURE_FINISHES = ["paintable_kit", "hand_painted", "collector_raw", "luxe_display"];
+const OBJECT_FINISHES = ["raw", "smoothed", "painted"];
 
 function defaultCountryForLocale(_locale: Locale) {
   // Shipping is Turkey-only today; default the parser to TR regardless of UI locale.
@@ -63,7 +70,13 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     // İYS opt-in captured at guest checkout (logged-in users manage it in
     // their account). Defaults false.
     marketingConsent: z.boolean().optional().default(false),
-  });
+  }).refine(
+    (v) => {
+      const allowed = priceKindForStyle(v.style) === "object" ? OBJECT_FINISHES : FIGURE_FINISHES;
+      return allowed.includes(v.finish);
+    },
+    { message: "Seçilen tasarım deseni için geçersiz bitiş seçimi", path: ["finish"] }
+  );
 }
 
 export function createShipOrderSchema(locale: Locale = defaultLocale) {

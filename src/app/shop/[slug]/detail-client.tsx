@@ -22,7 +22,6 @@ interface ProductDetail {
   leadTimeDays: number | null;
   sellerName: string | null;
   images: string[];
-  model3dUrl: string | null;
   boxContents: { name: string; quantity: number; unit: string | null }[];
 }
 

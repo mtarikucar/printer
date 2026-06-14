@@ -81,7 +81,9 @@ export default async function ProductDetailPage({
     ratingCount: p.ratingCount,
   }));
 
-  // Buyer-safe spec: a 3D preview + "box contents" (no STL, notes, or recipe).
+  // Buyer-safe spec: only "box contents" (no STL/3D mesh, notes, or recipe).
+  // The 3D preview was removed, so we intentionally do NOT pass model3dUrl —
+  // emitting the seller-derived GLB would leak printable geometry to buyers.
   const publicSpec = await getProductPublicSpec(product.id);
 
   return (
@@ -104,7 +106,6 @@ export default async function ProductDetailPage({
             leadTimeDays: product.leadTimeDays,
             sellerName: product.manufacturer?.companyName ?? null,
             images,
-            model3dUrl: publicSpec.model3dUrl,
             boxContents: publicSpec.boxContents,
           }}
         />

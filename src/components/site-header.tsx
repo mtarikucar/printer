@@ -100,9 +100,19 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 bg-bg-base/80 backdrop-blur-xl border-b border-bg-subtle/50">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        {/* Brand */}
-        <Link href="/" className="flex items-center gap-2 text-xl text-text-primary">
-          <span className="font-serif">Figurunica</span>
+        {/* Brand — voxel-mascot face badge + wordmark (same display serif) */}
+        <Link href="/" className="group flex items-center gap-2 text-xl text-text-primary">
+          <span className="relative inline-flex h-9 w-9 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-green-50 to-green-100 ring-1 ring-green-600/20 shadow-sm transition-transform duration-300 group-hover:-rotate-3 group-hover:scale-105">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/maskot-face.png"
+              alt=""
+              width={779}
+              height={779}
+              className="h-full w-full scale-[1.18] object-cover object-top"
+            />
+          </span>
+          <span className="font-serif tracking-tight">Figurunica</span>
         </Link>
 
         {/* Search (desktop) */}

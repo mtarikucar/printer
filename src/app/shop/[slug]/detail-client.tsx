@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
-import { ModelViewer } from "@/components/model-viewer";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import {
   PhoneInput,
@@ -190,14 +189,6 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
                 <img src={url} alt="" className="w-full h-full object-cover" />
               </button>
             ))}
-          </div>
-        )}
-        {product.model3dUrl && (
-          <div className="mt-3 rounded-2xl overflow-hidden border border-bg-subtle bg-bg-elevated">
-            <ModelViewer url={product.model3dUrl} className="h-72 w-full" />
-            <p className="text-xs text-text-muted text-center py-1.5">
-              {t("product.preview3d", "3B önizleme — döndürmek için sürükleyin")}
-            </p>
           </div>
         )}
       </div>

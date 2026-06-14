@@ -57,6 +57,10 @@ ENV NEXT_PUBLIC_GTM_ID=${NEXT_PUBLIC_GTM_ID}
 # bootstrap runs even when GTM isn't managing GA4.
 ARG NEXT_PUBLIC_GA4_ID=""
 ENV NEXT_PUBLIC_GA4_ID=${NEXT_PUBLIC_GA4_ID}
+# TikTok Pixel id — inlined client-side so `ttq.load('<id>')` fires the pixel.
+# The app loads TikTok directly (not via GTM), so it must be present at build.
+ARG NEXT_PUBLIC_TIKTOK_PIXEL_ID=""
+ENV NEXT_PUBLIC_TIKTOK_PIXEL_ID=${NEXT_PUBLIC_TIKTOK_PIXEL_ID}
 # Sentry: the public DSN is inlined into the client bundle and also flips
 # `sentryEnabled` in next.config.ts (so withSentryConfig + source-map upload run).
 ARG NEXT_PUBLIC_SENTRY_DSN=""

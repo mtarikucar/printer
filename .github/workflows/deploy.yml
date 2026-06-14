@@ -78,6 +78,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_GTM_ID=${{ secrets.NEXT_PUBLIC_GTM_ID }}
             NEXT_PUBLIC_GA4_ID=${{ secrets.NEXT_PUBLIC_GA4_ID }}
+            NEXT_PUBLIC_TIKTOK_PIXEL_ID=${{ secrets.NEXT_PUBLIC_TIKTOK_PIXEL_ID }}
             NEXT_PUBLIC_SENTRY_DSN=${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
             SENTRY_ORG=${{ secrets.SENTRY_ORG }}
             SENTRY_PROJECT=${{ secrets.SENTRY_PROJECT }}

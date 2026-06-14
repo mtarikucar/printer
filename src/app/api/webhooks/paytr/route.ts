@@ -135,6 +135,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Reconciliation (log-only): PayTR's hash-verified total_amount (kuruş)
+    // should equal what we asked it to charge = amountKurus - giftCardAmountKurus.
+    // A mismatch signals config/code drift (e.g. a stale merchant_oid mapping or
+    // a retry-payment basket diverging from the draft). Never block — PayTR has
+    // already collected, so refusing promotion would strand a paid order.
+    const expectedPaidKurus = draft.amountKurus - (draft.giftCardAmountKurus ?? 0);
+    if (Number(totalAmount) !== expectedPaidKurus) {
+      console.warn(
+        `[paytr.webhook] amount mismatch for ${draft.reference}: ` +
+          `paytr total_amount=${totalAmount} vs expected ${expectedPaidKurus} kuruş ` +
+          `(amount=${draft.amountKurus}, giftCard=${draft.giftCardAmountKurus ?? 0})`
+      );
+    }
+
     try {
       // promoteDraftToOrder is idempotent — returns the existing order if the draft was
       // already promoted by another caller (OCR worker / admin / earlier webhook retry).

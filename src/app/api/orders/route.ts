@@ -181,6 +181,15 @@ export async function POST(request: NextRequest) {
         (await db.query.uploadedModels.findFirst({
           where: eq(uploadedModels.id, uploadInput!.uploadedModelId),
         })) ?? null;
+      // A model claimed by a logged-in user may only be ordered by that user.
+      // Unclaimed (guest) models stay open — possession of the UUID is the
+      // capability, mirroring previewId.
+      if (uploadedModel?.userId && uploadedModel.userId !== session?.userId) {
+        return NextResponse.json(
+          { error: d["api.order.productUnavailable"] ?? d["api.order.createFailed"] },
+          { status: 403 }
+        );
+      }
       const autoReady =
         uploadedModel?.status === "ready" && uploadedModel.priceKurus != null;
       // A manual quote is only honored before it expires — the admin sets

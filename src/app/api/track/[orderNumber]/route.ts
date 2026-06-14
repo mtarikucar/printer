@@ -3,6 +3,7 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderDrafts, generationAttempts } from "@/lib/db/schema";
 import { normalizeFileUrl } from "@/lib/services/storage";
+import { getSessionUser } from "@/lib/services/customer-auth";
 import { getBankDetails } from "@/lib/config/payment";
 
 /**
@@ -15,6 +16,9 @@ export async function GET(
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
   const { orderNumber } = await params;
+  // The track page is reachable by order number alone (guest-friendly), so a
+  // few sensitive links are emitted only to the authenticated owner.
+  const session = await getSessionUser();
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.orderNumber, orderNumber),
@@ -41,11 +45,16 @@ export async function GET(
         })
       : null;
 
+    const isOwner = !!session?.userId && session.userId === order.userId;
     const finalAmountKurus =
       order.amountKurus - order.giftCardAmountKurus - order.havaleDiscountKurus;
-    const receiptUrl = draft?.bankTransferReceiptKey
-      ? `/api/customer/orders/${order.orderNumber}/receipt/view`
-      : null;
+    // The dekont (bank receipt) link is a session-gated route; only emit it to
+    // the owner so its existence/path isn't disclosed to a guest who merely
+    // knows the order number (the link 401s for them anyway).
+    const receiptUrl =
+      draft?.bankTransferReceiptKey && isOwner
+        ? `/api/customer/orders/${order.orderNumber}/receipt/view`
+        : null;
 
     return NextResponse.json({
       orderNumber: order.orderNumber,
@@ -99,11 +108,13 @@ export async function GET(
   const isAwaitingTransfer =
     draft.paymentMethod === "bank_transfer" &&
     (draft.status === "pending" || draft.status === "awaiting_review");
+  const draftIsOwner = !!session?.userId && session.userId === draft.userId;
   const finalAmountKurus =
     draft.amountKurus - draft.giftCardAmountKurus - draft.havaleDiscountKurus;
-  const receiptUrl = draft.bankTransferReceiptKey
-    ? `/api/customer/orders/${draft.reference}/receipt/view`
-    : null;
+  const receiptUrl =
+    draft.bankTransferReceiptKey && draftIsOwner
+      ? `/api/customer/orders/${draft.reference}/receipt/view`
+      : null;
 
   // Map draft status to a synthetic order status the client already understands.
   let syntheticStatus: string;

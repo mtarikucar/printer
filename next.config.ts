@@ -110,6 +110,9 @@ export default sentryEnabled
       org: process.env.SENTRY_ORG,
       project: process.env.SENTRY_PROJECT,
       authToken: process.env.SENTRY_AUTH_TOKEN,
+      // Org region for source-map upload (EU org → https://de.sentry.io/).
+      // Unset falls back to the US host; harmless when no auth token.
+      ...(process.env.SENTRY_URL ? { sentryUrl: process.env.SENTRY_URL } : {}),
       silent: !process.env.CI,
       // Upload source maps only when we have an auth token.
       sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },

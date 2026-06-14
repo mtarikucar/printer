@@ -77,6 +77,11 @@ jobs:
           # runtime .env sync only covers server-side reads, not the browser bundle.
           build-args: |
             NEXT_PUBLIC_GTM_ID=${{ secrets.NEXT_PUBLIC_GTM_ID }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
+            SENTRY_ORG=${{ secrets.SENTRY_ORG }}
+            SENTRY_PROJECT=${{ secrets.SENTRY_PROJECT }}
+            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+            SENTRY_URL=${{ secrets.SENTRY_URL }}
           push: true
           tags: ${{ env.IMAGE_BASE }}/app:latest,${{ env.IMAGE_BASE }}/app:${{ github.sha }}
           cache-from: type=gha

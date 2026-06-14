@@ -53,6 +53,21 @@ COPY . .
 # Defaults to "" so local/CI builds without the arg still work (GTM becomes a no-op).
 ARG NEXT_PUBLIC_GTM_ID=""
 ENV NEXT_PUBLIC_GTM_ID=${NEXT_PUBLIC_GTM_ID}
+# Sentry: the public DSN is inlined into the client bundle and also flips
+# `sentryEnabled` in next.config.ts (so withSentryConfig + source-map upload run).
+ARG NEXT_PUBLIC_SENTRY_DSN=""
+ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN}
+# Source maps upload to Sentry during the build; skipped unless SENTRY_AUTH_TOKEN
+# is present (see next.config.ts `sourcemaps.disable`). SENTRY_URL targets the org
+# region (EU = https://de.sentry.io/).
+ARG SENTRY_ORG=""
+ENV SENTRY_ORG=${SENTRY_ORG}
+ARG SENTRY_PROJECT=""
+ENV SENTRY_PROJECT=${SENTRY_PROJECT}
+ARG SENTRY_AUTH_TOKEN=""
+ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
+ARG SENTRY_URL=""
+ENV SENTRY_URL=${SENTRY_URL}
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # ── App target: Next.js standalone server ────────────────────────────

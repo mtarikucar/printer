@@ -981,6 +981,78 @@ function CustomCreateFlow() {
             </div>
 
             <div className="space-y-8">
+              {/* Step 1 — Photo first: the upload/crop card leads the flow; the
+                  detail fields below stay hidden until a photo is added. */}
+              {isEditing && selectedFile ? (
+                <div className="animate-fade-in-up delay-300">
+                  <PhotoEditor
+                    file={selectedFile}
+                    exportRef={editorExportRef}
+                    onCancel={() => {
+                      setIsEditing(false);
+                      setSelectedFile(null);
+                    }}
+                  />
+                </div>
+              ) : photoKey && !selectedFile ? (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                  <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
+                  <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
+                    <img
+                      src={photoPreviewUrl ?? undefined}
+                      alt="Uploaded photo"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div className="mt-4 flex justify-center">
+                    <Button
+                      type="button"
+                      onClick={() => { setPhotoKey(null); }}
+                      variant="secondary"
+                    >
+                      {d["create.changePhoto"]}
+                    </Button>
+                  </div>
+                </Card>
+              ) : (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                  <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
+                  <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
+                  <UploadDropzone
+                    objectMode={selectedStyle === "object"}
+                    onUploadComplete={(key, previewUrl) => {
+                      setPhotoKey(key);
+                      // `previewUrl` is the server-signed URL from /api/upload
+                      // (not a blob:). Persisting it lets the photo card
+                      // survive a login-redirect roundtrip AND a future
+                      // FILES_REQUIRE_SIGNATURE=1 flip in prod.
+                      setPhotoPreviewUrl(previewUrl ?? null);
+                      setError(null);
+                    }}
+                    onError={setError}
+                    onFileSelected={(file) => {
+                      setSelectedFile(file);
+                      setIsEditing(true);
+                      setPhotoKey(null);
+                      setError(null);
+                    }}
+                  />
+                </Card>
+              )}
+
+              {/* Upload errors surface next to the photo, before any detail. */}
+              {error && (
+                <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
+                  <svg className="w-5 h-5 text-error-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm text-error-700">{error}</p>
+                </div>
+              )}
+
+              {/* Step 2 — Details, revealed only after a photo is engaged. */}
+              {(photoKey || selectedFile) && (
+                <div className="space-y-8 animate-fade-in-up">
               {/* Size Selection */}
               <div className="animate-fade-in-up delay-200">
                 <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.sizeSelection"]}</h2>
@@ -1121,64 +1193,6 @@ function CustomCreateFlow() {
                 )}
               </div>
 
-              {/* Photo Upload / Editor Card */}
-              {isEditing && selectedFile ? (
-                <div className="animate-fade-in-up delay-300">
-                  <PhotoEditor
-                    file={selectedFile}
-                    exportRef={editorExportRef}
-                    onCancel={() => {
-                      setIsEditing(false);
-                      setSelectedFile(null);
-                    }}
-                  />
-                </div>
-              ) : photoKey && !selectedFile ? (
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
-                  <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.upload.title"]}</h2>
-                  <div className="relative aspect-square max-w-xs mx-auto rounded-lg overflow-hidden bg-bg-muted">
-                    <img
-                      src={photoPreviewUrl ?? undefined}
-                      alt="Uploaded photo"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                  <div className="mt-4 flex justify-center">
-                    <Button
-                      type="button"
-                      onClick={() => { setPhotoKey(null); }}
-                      variant="secondary"
-                    >
-                      {d["create.changePhoto"]}
-                    </Button>
-                  </div>
-                </Card>
-              ) : (
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
-                  <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.upload.title"]}</h2>
-                  <p className="text-sm text-text-muted mb-4">{d["create.upload.subtitle"]}</p>
-                  <UploadDropzone
-                    objectMode={selectedStyle === "object"}
-                    onUploadComplete={(key, previewUrl) => {
-                      setPhotoKey(key);
-                      // `previewUrl` is the server-signed URL from /api/upload
-                      // (not a blob:). Persisting it lets the photo card
-                      // survive a login-redirect roundtrip AND a future
-                      // FILES_REQUIRE_SIGNATURE=1 flip in prod.
-                      setPhotoPreviewUrl(previewUrl ?? null);
-                      setError(null);
-                    }}
-                    onError={setError}
-                    onFileSelected={(file) => {
-                      setSelectedFile(file);
-                      setIsEditing(true);
-                      setPhotoKey(null);
-                      setError(null);
-                    }}
-                  />
-                </Card>
-              )}
-
               {/* Extra reference photos (multi-image-to-3d) — object/realistic
                   only, shown once a primary photo is engaged. Optional. */}
               {isMultiCapable && (photoKey || selectedFile) && (
@@ -1217,15 +1231,6 @@ function CustomCreateFlow() {
                     </div>
                   )}
                 </Card>
-              )}
-
-              {error && (
-                <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
-                  <svg className="w-5 h-5 text-error-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-sm text-error-700">{error}</p>
-                </div>
               )}
 
               {loggedIn === true && emailVerified === false && (
@@ -1324,6 +1329,8 @@ function CustomCreateFlow() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   {d["create.loginRequired"]}
+                </div>
+              )}
                 </div>
               )}
             </div>

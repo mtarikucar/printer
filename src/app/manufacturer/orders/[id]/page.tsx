@@ -112,13 +112,23 @@ export default async function ManufacturerOrderDetailPage({
   // Every product this marketplace order covers — single buy-now (order.product)
   // OR a cart sub-order's line items — each with its manufacturable spec, so the
   // fulfilling manufacturer can produce them all.
-  const orderProductRefs: { productId: string; title: string; quantity: number }[] = [];
+  const orderProductRefs: {
+    productId: string;
+    title: string;
+    quantity: number;
+    selectedOptions: { groupName: string; choiceName: string }[];
+    selectedAddons: { name: string }[];
+    itemImageUrl: string | null;
+  }[] = [];
   if (order.orderType === "marketplace") {
     if (order.productId && order.product) {
       orderProductRefs.push({
         productId: order.productId,
         title: order.productTitleSnapshot ?? order.product.title,
         quantity: order.quantity,
+        selectedOptions: order.selectedOptions ?? [],
+        selectedAddons: order.selectedAddons ?? [],
+        itemImageUrl: order.itemImageKey ? getPublicUrl(order.itemImageKey) : null,
       });
     }
     const itemRows = await db
@@ -126,6 +136,9 @@ export default async function ManufacturerOrderDetailPage({
         productId: orderItems.productId,
         title: orderItems.productTitleSnapshot,
         quantity: orderItems.quantity,
+        selectedOptions: orderItems.selectedOptions,
+        selectedAddons: orderItems.selectedAddons,
+        itemImageKey: orderItems.itemImageKey,
       })
       .from(orderItems)
       .where(eq(orderItems.orderId, order.id));
@@ -135,6 +148,9 @@ export default async function ManufacturerOrderDetailPage({
           productId: it.productId,
           title: it.title,
           quantity: it.quantity,
+          selectedOptions: it.selectedOptions ?? [],
+          selectedAddons: it.selectedAddons ?? [],
+          itemImageUrl: it.itemImageKey ? getPublicUrl(it.itemImageKey) : null,
         });
       }
     }
@@ -146,6 +162,9 @@ export default async function ManufacturerOrderDetailPage({
         productId: ref.productId,
         title: ref.title,
         quantity: ref.quantity,
+        selectedOptions: ref.selectedOptions,
+        selectedAddons: ref.selectedAddons,
+        itemImageUrl: ref.itemImageUrl,
         files: s.files.map((f) => ({
           id: f.id,
           partName: f.partName,

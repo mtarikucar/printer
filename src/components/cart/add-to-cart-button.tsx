@@ -10,10 +10,14 @@ export function AddToCartButton({
   productId,
   className,
   label,
+  optionChoiceIds,
+  addonIds,
 }: {
   productId: string;
   className?: string;
   label?: string;
+  optionChoiceIds?: string[];
+  addonIds?: string[];
 }) {
   const { add } = useCart();
   const d = useDictionary();
@@ -24,7 +28,7 @@ export function AddToCartButton({
     e.preventDefault();
     e.stopPropagation();
     setAdding(true);
-    await add(productId);
+    await add(productId, { optionChoiceIds, addonIds });
     setAdding(false);
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);

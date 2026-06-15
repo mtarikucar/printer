@@ -278,6 +278,10 @@ export async function promoteDraftToOrder(
         sellerManufacturerId: draft.sellerManufacturerId,
         productTitleSnapshot: draft.productTitleSnapshot,
         quantity: draft.quantity,
+        // Single-product option/add-on selection + resolved image.
+        selectedOptions: draft.selectedOptions,
+        selectedAddons: draft.selectedAddons,
+        itemImageKey: draft.itemImageKey,
         // Marketplace: auto-assign the owning seller (no AI gen, no scoring).
         // A platform/admin product (no seller) stays unassigned for the admin
         // queue. Custom orders start unassigned and go through generation.

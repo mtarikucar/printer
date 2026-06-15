@@ -100,6 +100,9 @@ interface OrderData {
   galleryReviewReason?: string | null;
   glbUrl: string | null;
   digitalFiles?: { entitled: boolean; stlReady: boolean; objReady: boolean };
+  selectedOptions?: { groupName: string; choiceName: string }[];
+  selectedAddons?: { name: string }[];
+  itemImageUrl?: string | null;
   paymentMethod: "card" | "bank_transfer" | "gift_card_full" | null;
   paymentStatus: "pending" | "awaiting_transfer" | "succeeded" | "failed" | "expired";
   amountKurus?: number;
@@ -571,6 +574,35 @@ function TrackPageInner({ orderNumber }: { orderNumber: string }) {
                   {d["track.orderDate"]}{" "}
                   {formatDateLong(order.paidAt, locale)}
                 </p>
+              )}
+              {((order.selectedOptions?.length ?? 0) > 0 ||
+                (order.selectedAddons?.length ?? 0) > 0 ||
+                order.itemImageUrl) && (
+                <div className="mt-4 flex gap-4 rounded-xl border border-border-default bg-bg-elevated p-3">
+                  {order.itemImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={order.itemImageUrl}
+                      alt=""
+                      className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                    />
+                  )}
+                  <ul className="space-y-0.5 text-sm text-text-secondary">
+                    {order.selectedOptions?.map((o, i) => (
+                      <li key={`o${i}`}>
+                        <span className="text-text-muted">{o.groupName}:</span>{" "}
+                        <span className="font-medium text-text-primary">
+                          {o.choiceName}
+                        </span>
+                      </li>
+                    ))}
+                    {order.selectedAddons?.map((a, i) => (
+                      <li key={`a${i}`}>
+                        + <span className="font-medium text-text-primary">{a.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </Card>
 

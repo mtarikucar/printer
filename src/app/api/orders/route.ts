@@ -22,6 +22,7 @@ import {
   itemPriceKurus,
 } from "@/lib/config/prices";
 import { priceKindForStyle, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
+import { resolveOrderLines, type ResolvedOrderLine } from "@/lib/services/product-options";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { validateGiftCard } from "@/lib/services/gift-card";
 import {
@@ -127,6 +128,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Single-product marketplace: re-price with the chosen options/add-ons and
+    // resolve the painted/unpainted image — server-authoritative.
+    let mpLine: ResolvedOrderLine | null = null;
+    if (orderType === "marketplace" && !isCart) {
+      mpLine = (
+        await resolveOrderLines([
+          {
+            productId: product!.id,
+            basePriceKurus: product!.priceKurus,
+            optionChoiceIds: mpInput!.optionChoiceIds,
+            addonIds: mpInput!.addonIds,
+          },
+        ])
+      )[0];
+    }
+
     // Cart: load + gate every line's product; build the validated line list
     // (server-trusted prices). Same active-product + active-seller gates as the
     // single-product path.
@@ -137,6 +154,9 @@ export async function POST(request: NextRequest) {
       unitPriceKurus: number;
       quantity: number;
       lineTotalKurus: number;
+      selectedOptions: ResolvedOrderLine["selectedOptions"];
+      selectedAddons: ResolvedOrderLine["selectedAddons"];
+      itemImageKey: string | null;
     }> = [];
     if (isCart) {
       const rows = await db.query.products.findMany({
@@ -159,15 +179,32 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
+      }
+      // Server-authoritative re-pricing per line (base + option deltas + add-ons)
+      // with the resolved painted/unpainted image — never trust client prices.
+      const resolved = await resolveOrderLines(
+        cartInput!.items.map((item) => ({
+          productId: item.productId,
+          basePriceKurus: byId.get(item.productId)!.priceKurus,
+          optionChoiceIds: item.optionChoiceIds,
+          addonIds: item.addonIds,
+        }))
+      );
+      cartInput!.items.forEach((item, i) => {
+        const p = byId.get(item.productId)!;
+        const r = resolved[i];
         cartLines.push({
           productId: p.id,
           sellerManufacturerId: p.manufacturerId ?? null,
           titleSnapshot: p.title,
-          unitPriceKurus: p.priceKurus,
+          unitPriceKurus: r.unitPriceKurus,
           quantity: item.quantity,
-          lineTotalKurus: p.priceKurus * item.quantity,
+          lineTotalKurus: r.unitPriceKurus * item.quantity,
+          selectedOptions: r.selectedOptions,
+          selectedAddons: r.selectedAddons,
+          itemImageKey: r.itemImageKey,
         });
-      }
+      });
     }
 
     // Upload: load + gate the customer's processed model — must be auto-priced
@@ -327,7 +364,7 @@ export async function POST(request: NextRequest) {
     const itemAmountKurus = isCart
       ? cartLines.reduce((s, l) => s + l.lineTotalKurus, 0)
       : orderType === "marketplace"
-        ? product!.priceKurus * quantity
+        ? mpLine!.unitPriceKurus * quantity
         : orderType === "upload"
           ? quoteReady
             ? uploadedModel!.quotedPriceKurus!
@@ -496,6 +533,17 @@ export async function POST(request: NextRequest) {
             : orderType === "marketplace"
               ? product!.title
               : null,
+          // Single-product marketplace selection snapshot + resolved image
+          // (cart selections live per-line on order_items below).
+          selectedOptions:
+            mpLine && mpLine.selectedOptions.length > 0
+              ? mpLine.selectedOptions
+              : null,
+          selectedAddons:
+            mpLine && mpLine.selectedAddons.length > 0
+              ? mpLine.selectedAddons
+              : null,
+          itemImageKey: mpLine?.itemImageKey ?? null,
           parentReference: isCart ? reference : null,
           quantity,
           shippingAddress: common.shippingAddress,
@@ -534,6 +582,9 @@ export async function POST(request: NextRequest) {
             unitPriceKurus: l.unitPriceKurus,
             quantity: l.quantity,
             lineTotalKurus: l.lineTotalKurus,
+            selectedOptions: l.selectedOptions.length > 0 ? l.selectedOptions : null,
+            selectedAddons: l.selectedAddons.length > 0 ? l.selectedAddons : null,
+            itemImageKey: l.itemImageKey,
           }))
         );
       }

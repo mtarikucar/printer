@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { CategoryPicker } from "@/components/category-picker";
+import { ProductOptionsEditor } from "@/components/products/product-options-editor";
 import {
   ProductSpecEditor,
   type SpecFile,
@@ -422,6 +423,9 @@ export function EditProductClient({
         initialSteps={initialSteps}
         onFilesChange={setFileCount}
       />
+
+      {/* Options (variants) + add-ons + per-choice image tagging */}
+      <ProductOptionsEditor productId={product.id} />
 
       {/* Submit for review */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 flex items-center justify-between gap-4">

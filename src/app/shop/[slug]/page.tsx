@@ -9,6 +9,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductPublicSpec } from "@/lib/services/product-spec";
+import { getProductConfig } from "@/lib/services/product-options";
 import { ProductDetailClient } from "./detail-client";
 import { ProductReviews } from "@/components/reviews/product-reviews";
 import { ProductRow } from "@/components/marketplace/product-row";
@@ -51,9 +52,28 @@ export default async function ProductDetailPage({
   const product = await loadProduct(slug);
   if (!product) notFound();
 
-  const images = [...product.images]
-    .sort((a, b) => a.sortOrder - b.sortOrder)
+  // Default gallery = images with no option choice (the unpainted set). Images
+  // tagged to a choice (e.g. "El boyaması" painted set) are grouped separately
+  // so the buyer page can swap the gallery when that option is selected.
+  const sortedImages = [...product.images].sort(
+    (a, b) => a.sortOrder - b.sortOrder
+  );
+  const images = sortedImages
+    .filter((img) => !img.optionChoiceId)
     .map((img) => getPublicUrl(img.storageKey));
+  const choiceImages: Record<string, string[]> = {};
+  for (const img of sortedImages) {
+    if (!img.optionChoiceId) continue;
+    (choiceImages[img.optionChoiceId] ??= []).push(getPublicUrl(img.storageKey));
+  }
+  // Fallback: if every image was tagged to a choice (no default), still show
+  // something rather than an empty gallery.
+  const defaultImages =
+    images.length > 0
+      ? images
+      : sortedImages.map((img) => getPublicUrl(img.storageKey));
+
+  const optionConfig = await getProductConfig(product.id);
 
   // Cross-sell: a few more active products from the same category node.
   const relatedRows = product.categoryId
@@ -110,8 +130,11 @@ export default async function ProductDetailPage({
             material: product.material,
             leadTimeDays: product.leadTimeDays,
             sellerName: product.manufacturer?.companyName ?? null,
-            images,
+            images: defaultImages,
             boxContents: publicSpec.boxContents,
+            optionGroups: optionConfig.optionGroups,
+            addons: optionConfig.addons,
+            choiceImages,
           }}
         />
         <ProductReviews productId={product.id} />

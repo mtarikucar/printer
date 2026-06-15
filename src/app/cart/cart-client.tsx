@@ -7,6 +7,7 @@ import { formatCurrency } from "@/lib/i18n/format";
 import { useCart } from "@/lib/cart/cart-context";
 
 interface CartItem {
+  id: string;
   productId: string;
   slug: string | null;
   title: string;
@@ -15,6 +16,8 @@ interface CartItem {
   sellerName: string | null;
   quantity: number;
   lineTotalKurus: number;
+  selectedOptions: { groupName: string; choiceName: string }[];
+  selectedAddons: { name: string }[];
 }
 
 export function CartClient() {
@@ -39,11 +42,11 @@ export function CartClient() {
       .finally(() => setLoading(false));
   }, []);
 
-  const setQty = async (productId: string, quantity: number) => {
+  const setQty = async (id: string, quantity: number) => {
     const r = await fetch("/api/cart", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, quantity }),
+      body: JSON.stringify({ id, quantity }),
     });
     if (r.ok) {
       apply(await r.json());
@@ -74,7 +77,7 @@ export function CartClient() {
         <div className="grid gap-8 md:grid-cols-3">
           <div className="space-y-3 md:col-span-2">
             {items.map((it) => (
-              <div key={it.productId} className="card flex gap-4 p-3">
+              <div key={it.id} className="card flex gap-4 p-3">
                 <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-bg-elevated">
                   {it.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -91,27 +94,35 @@ export function CartClient() {
                   {it.sellerName && (
                     <p className="text-xs text-text-muted">{it.sellerName}</p>
                   )}
+                  {(it.selectedOptions.length > 0 || it.selectedAddons.length > 0) && (
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {[
+                        ...it.selectedOptions.map((o) => o.choiceName),
+                        ...it.selectedAddons.map((a) => a.name),
+                      ].join(" · ")}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm font-semibold text-text-primary">
                     {formatCurrency(it.priceKurus, locale)}
                   </p>
                 </div>
                 <div className="flex flex-col items-end justify-between">
                   <button
-                    onClick={() => setQty(it.productId, 0)}
+                    onClick={() => setQty(it.id, 0)}
                     className="text-xs text-text-muted transition-colors hover:text-error"
                   >
                     {d["cart.remove"]}
                   </button>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => setQty(it.productId, Math.max(1, it.quantity - 1))}
+                      onClick={() => setQty(it.id, Math.max(1, it.quantity - 1))}
                       className="flex h-7 w-7 items-center justify-center rounded-full border border-border-default text-text-secondary hover:bg-bg-elevated"
                     >
                       −
                     </button>
                     <span className="w-6 text-center text-sm">{it.quantity}</span>
                     <button
-                      onClick={() => setQty(it.productId, Math.min(20, it.quantity + 1))}
+                      onClick={() => setQty(it.id, Math.min(20, it.quantity + 1))}
                       className="flex h-7 w-7 items-center justify-center rounded-full border border-border-default text-text-secondary hover:bg-bg-elevated"
                     >
                       +

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { CategoryPicker } from "@/components/category-picker";
+import { ProductOptionsEditor } from "@/components/products/product-options-editor";
 import {
   ProductSpecEditor,
   type SpecFile,
@@ -432,6 +433,7 @@ export function EditProductClient({
           initialComponents={initialComponents}
           initialSteps={initialSteps}
         />
+        <ProductOptionsEditor productId={product.id} />
       </div>
     </div>
   );

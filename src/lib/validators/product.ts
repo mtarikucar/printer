@@ -79,6 +79,10 @@ export function createMarketplaceOrderSchema(locale: Locale = defaultLocale) {
   return z.object({
     productId: z.string().uuid(d["validator.product.id.invalid"]),
     quantity: z.number().int().min(1).max(20).optional().default(1),
+    // Per-product option choices (one per group) + add-ons. Validated +
+    // re-priced server-side; ids that don't belong to the product are ignored.
+    optionChoiceIds: z.array(z.string().uuid()).max(50).optional().default([]),
+    addonIds: z.array(z.string().uuid()).max(50).optional().default([]),
     shippingAddress: createTurkishAddressSchema(locale),
     giftCardCode: z.string().optional(),
     paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
@@ -105,6 +109,8 @@ export function createCartOrderSchema(_locale: Locale = defaultLocale) {
         z.object({
           productId: z.string().uuid(),
           quantity: z.number().int().min(1).max(20),
+          optionChoiceIds: z.array(z.string().uuid()).max(50).optional().default([]),
+          addonIds: z.array(z.string().uuid()).max(50).optional().default([]),
         })
       )
       .min(1)

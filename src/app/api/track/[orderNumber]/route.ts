@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderDrafts, generationAttempts } from "@/lib/db/schema";
-import { normalizeFileUrl } from "@/lib/services/storage";
+import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getBankDetails } from "@/lib/config/payment";
 
@@ -81,6 +81,11 @@ export async function GET(
       },
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
+      // Marketplace option/add-on selection + the resolved painted/unpainted
+      // image, so the confirmation reflects exactly what was ordered.
+      selectedOptions: order.selectedOptions ?? [],
+      selectedAddons: order.selectedAddons ?? [],
+      itemImageUrl: order.itemImageKey ? getPublicUrl(order.itemImageKey) : null,
       amountKurus: order.amountKurus,
       giftCardAmountKurus: order.giftCardAmountKurus,
       havaleDiscountKurus: order.havaleDiscountKurus,

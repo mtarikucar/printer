@@ -61,6 +61,9 @@ interface Props {
       productId: string;
       title: string;
       quantity: number;
+      selectedOptions: { groupName: string; choiceName: string }[];
+      selectedAddons: { name: string }[];
+      itemImageUrl: string | null;
       files: {
         id: string;
         partName: string | null;
@@ -471,19 +474,52 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           {/* ─── Production files + BOM + recipe (one panel per product) ── */}
           {isMarketplace &&
             productSpecs.map((ps) => (
-              <ProductionPanel
-                key={ps.productId}
-                orderId={order.id}
-                title={
-                  productSpecs.length > 1 || !marketplaceProduct
-                    ? ps.title
-                    : undefined
-                }
-                quantity={ps.quantity}
-                files={ps.files}
-                components={ps.components}
-                steps={ps.steps}
-              />
+              <div key={ps.productId} className="space-y-3">
+                {(ps.selectedOptions.length > 0 ||
+                  ps.selectedAddons.length > 0 ||
+                  ps.itemImageUrl) && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Müşteri seçimleri
+                    </p>
+                    <div className="mt-2 flex gap-4">
+                      {ps.itemImageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={ps.itemImageUrl}
+                          alt=""
+                          className="h-24 w-24 shrink-0 rounded-lg border border-amber-200 object-cover"
+                        />
+                      )}
+                      <ul className="space-y-1 text-sm text-amber-900">
+                        {ps.selectedOptions.map((o, i) => (
+                          <li key={`o${i}`}>
+                            <span className="text-amber-700">{o.groupName}:</span>{" "}
+                            <span className="font-medium">{o.choiceName}</span>
+                          </li>
+                        ))}
+                        {ps.selectedAddons.map((a, i) => (
+                          <li key={`a${i}`}>
+                            + <span className="font-medium">{a.name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+                <ProductionPanel
+                  orderId={order.id}
+                  title={
+                    productSpecs.length > 1 || !marketplaceProduct
+                      ? ps.title
+                      : undefined
+                  }
+                  quantity={ps.quantity}
+                  files={ps.files}
+                  components={ps.components}
+                  steps={ps.steps}
+                />
+              </div>
             ))}
 
           {/* ─── Photo + Model Hero Card (Tabbed) ──────── */}

@@ -9,10 +9,16 @@ import {
 } from "react";
 import { track } from "@/lib/analytics/client";
 
+interface AddOptions {
+  quantity?: number;
+  optionChoiceIds?: string[];
+  addonIds?: string[];
+}
+
 interface CartState {
   count: number;
   refresh: () => Promise<void>;
-  add: (productId: string, quantity?: number) => Promise<void>;
+  add: (productId: string, opts?: AddOptions) => Promise<void>;
 }
 
 const CartContext = createContext<CartState>({
@@ -43,12 +49,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, [refresh]);
 
-  const add = useCallback(async (productId: string, quantity = 1) => {
+  const add = useCallback(async (productId: string, opts: AddOptions = {}) => {
+    const { quantity = 1, optionChoiceIds, addonIds } = opts;
     try {
       const r = await fetch("/api/cart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, quantity }),
+        body: JSON.stringify({ productId, quantity, optionChoiceIds, addonIds }),
       });
       if (r.ok) {
         const d = await r.json();

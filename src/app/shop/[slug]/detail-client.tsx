@@ -12,6 +12,10 @@ import {
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { AddToCartButton } from "@/components/cart/add-to-cart-button";
 import { track } from "@/lib/analytics/client";
+import type {
+  AddonConfig,
+  OptionGroupConfig,
+} from "@/lib/services/product-options";
 
 interface ProductDetail {
   id: string;
@@ -23,6 +27,10 @@ interface ProductDetail {
   sellerName: string | null;
   images: string[];
   boxContents: { name: string; quantity: number; unit: string | null }[];
+  optionGroups: OptionGroupConfig[];
+  addons: AddonConfig[];
+  /** Painted-set images keyed by option choice id (swaps the gallery). */
+  choiceImages: Record<string, string[]>;
 }
 
 export function ProductDetailClient({ product }: { product: ProductDetail }) {
@@ -32,6 +40,51 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
 
   const [activeImage, setActiveImage] = useState(0);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+
+  // Option selection (one choice per group, defaulting to each group's default)
+  // + add-ons (multi-select).
+  const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>(
+    () => {
+      const init: Record<string, string> = {};
+      for (const g of product.optionGroups) {
+        const def = g.choices.find((c) => c.isDefault) ?? g.choices[0];
+        if (def) init[g.id] = def.id;
+      }
+      return init;
+    }
+  );
+  const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
+
+  const selectedChoiceIds = Object.values(selectedChoices);
+  const optionsDeltaKurus = product.optionGroups.reduce((sum, g) => {
+    const c = g.choices.find((x) => x.id === selectedChoices[g.id]);
+    return sum + (c?.priceDeltaKurus ?? 0);
+  }, 0);
+  const addonsDeltaKurus = product.addons.reduce(
+    (sum, a) => sum + (selectedAddons.has(a.id) ? a.priceKurus : 0),
+    0
+  );
+  const unitPriceKurus = product.priceKurus + optionsDeltaKurus + addonsDeltaKurus;
+
+  // Gallery swaps to a selected choice's image set (e.g. painted) when present.
+  const paintedChoiceId = selectedChoiceIds.find(
+    (cid) => (product.choiceImages[cid]?.length ?? 0) > 0
+  );
+  const galleryImages = paintedChoiceId
+    ? product.choiceImages[paintedChoiceId]
+    : product.images;
+  // Reset the active thumbnail when the gallery set changes.
+  useEffect(() => {
+    setActiveImage(0);
+  }, [paintedChoiceId]);
+
+  const toggleAddon = (id: string) =>
+    setSelectedAddons((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // Auth + identity prefill.
   const [loggedIn, setLoggedIn] = useState(false);
@@ -110,6 +163,8 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
           orderType: "marketplace",
           productId: product.id,
           quantity: 1,
+          optionChoiceIds: selectedChoiceIds,
+          addonIds: [...selectedAddons],
           shippingAddress: {
             adres,
             mahalle,
@@ -161,9 +216,9 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
       {/* Gallery */}
       <div>
         <div className="aspect-square bg-bg-elevated rounded-2xl overflow-hidden">
-          {product.images[activeImage] ? (
+          {galleryImages[activeImage] ? (
             <img
-              src={product.images[activeImage]}
+              src={galleryImages[activeImage]}
               alt={product.title}
               className="w-full h-full object-cover"
             />
@@ -175,9 +230,9 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
             </div>
           )}
         </div>
-        {product.images.length > 1 && (
+        {galleryImages.length > 1 && (
           <div className="flex gap-2 mt-3 flex-wrap">
-            {product.images.map((url, i) => (
+            {galleryImages.map((url, i) => (
               <button
                 key={url}
                 onClick={() => setActiveImage(i)}
@@ -201,8 +256,14 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
           </p>
         )}
         <p className="mt-4 text-3xl font-semibold text-text-primary">
-          {formatCurrency(product.priceKurus, locale)}
+          {formatCurrency(unitPriceKurus, locale)}
         </p>
+        {unitPriceKurus !== product.priceKurus && (
+          <p className="mt-0.5 text-sm text-text-muted">
+            {t("product.basePrice", "Taban fiyat")}:{" "}
+            {formatCurrency(product.priceKurus, locale)}
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2 text-sm">
           {materialLabel && (
             <span className="px-2 py-0.5 rounded-full bg-bg-elevated text-text-secondary border border-bg-subtle">
@@ -258,9 +319,87 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
           </div>
         )}
 
+        {/* Options (single-select groups) */}
+        {product.optionGroups.map((g) => (
+          <div key={g.id} className="mt-6">
+            <h3 className="text-sm font-semibold text-text-primary mb-2">
+              {g.name}
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {g.choices.map((c) => {
+                const active = selectedChoices[g.id] === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedChoices((p) => ({ ...p, [g.id]: c.id }))
+                    }
+                    className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
+                      active
+                        ? "border-green-500 bg-green-500/5 text-text-primary"
+                        : "border-bg-subtle text-text-secondary hover:bg-bg-elevated"
+                    }`}
+                  >
+                    {c.name}
+                    {c.priceDeltaKurus > 0 && (
+                      <span className="ml-1 text-text-muted">
+                        +{formatCurrency(c.priceDeltaKurus, locale)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {/* Add-ons (multi-select extras) */}
+        {product.addons.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold text-text-primary mb-2">
+              {t("product.addons", "Ek hizmetler")}
+            </h3>
+            <div className="space-y-2">
+              {product.addons.map((a) => (
+                <label
+                  key={a.id}
+                  className={`flex items-start gap-2 rounded-xl border px-3 py-2 cursor-pointer transition-colors ${
+                    selectedAddons.has(a.id)
+                      ? "border-green-500 bg-green-500/5"
+                      : "border-bg-subtle hover:bg-bg-elevated"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedAddons.has(a.id)}
+                    onChange={() => toggleAddon(a.id)}
+                    className="mt-1"
+                  />
+                  <span className="flex-1 text-sm">
+                    <span className="font-medium text-text-primary">{a.name}</span>
+                    {a.description && (
+                      <span className="block text-xs text-text-muted">
+                        {a.description}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-sm text-text-secondary">
+                    +{formatCurrency(a.priceKurus, locale)}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!checkoutOpen ? (
           <div className="mt-8 space-y-2">
-            <AddToCartButton productId={product.id} />
+            <AddToCartButton
+              productId={product.id}
+              optionChoiceIds={selectedChoiceIds}
+              addonIds={[...selectedAddons]}
+            />
             <button
               onClick={() => setCheckoutOpen(true)}
               className="w-full rounded-xl border border-bg-subtle bg-bg-base py-3 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
@@ -403,7 +542,7 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
               {submitting
                 ? t("shop.checkout.processing", "İşleniyor…")
                 : `${t("shop.checkout.pay", "Öde")} · ${formatCurrency(
-                    product.priceKurus,
+                    unitPriceKurus,
                     locale
                   )}`}
             </button>

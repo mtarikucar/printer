@@ -389,6 +389,16 @@ export const orderDrafts = pgTable("order_drafts", {
   // survive a later product edit or archive.
   productTitleSnapshot: text("product_title_snapshot"),
   quantity: integer("quantity").notNull().default(1),
+  // Single-product marketplace option/add-on selection snapshot + the resolved
+  // (painted/unpainted) primary image. amountKurus already reflects the deltas.
+  // Cart selections live per-line on order_items instead.
+  selectedOptions:
+    jsonb("selected_options").$type<
+      { groupName: string; choiceName: string; priceDeltaKurus: number }[]
+    >(),
+  selectedAddons:
+    jsonb("selected_addons").$type<{ name: string; priceKurus: number }[]>(),
+  itemImageKey: text("item_image_key"),
   locale: text("locale").notNull().default("tr"),
   amountKurus: integer("amount_kurus").notNull(),
   // The forward ref is safe — drizzle resolves the arrow lazily, and at runtime
@@ -493,6 +503,15 @@ export const orders = pgTable("orders", {
   ),
   productTitleSnapshot: text("product_title_snapshot"),
   quantity: integer("quantity").notNull().default(1),
+  // Copied from the draft on promotion (single-product marketplace). Cart
+  // selections live per-line on order_items.
+  selectedOptions:
+    jsonb("selected_options").$type<
+      { groupName: string; choiceName: string; priceDeltaKurus: number }[]
+    >(),
+  selectedAddons:
+    jsonb("selected_addons").$type<{ name: string; priceKurus: number }[]>(),
+  itemImageKey: text("item_image_key"),
   status: orderStatusEnum("status").notNull().default("paid"),
   locale: text("locale").notNull().default("tr"),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
@@ -1051,6 +1070,75 @@ export const products = pgTable(
   })
 );
 
+// ─── Product options (variants) + add-ons (marketplace) ─────────────────────
+// Options = single-select groups that change price and may swap the gallery
+// (e.g. "Boyama": Boyasız / El boyaması +1000₺ → painted image set). Add-ons =
+// multi-select flat extras (Hediye paketi +100₺, Ek garanti +60₺). Configured
+// per product by its owner (admin or seller). Prices are always recomputed
+// server-side from these rows — never trusted from the client.
+export const productOptionGroups = pgTable(
+  "product_option_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // When true the buyer must pick a choice (otherwise the default applies).
+    isRequired: boolean("is_required").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_option_groups_product_idx").on(
+      t.productId,
+      t.sortOrder
+    ),
+  })
+);
+
+export const productOptionChoices = pgTable(
+  "product_option_choices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => productOptionGroups.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // Added to the base unit price when this choice is selected (can be 0).
+    priceDeltaKurus: integer("price_delta_kurus").notNull().default(0),
+    // The pre-selected choice for the group (e.g. "Boyasız").
+    isDefault: boolean("is_default").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byGroup: index("product_option_choices_group_idx").on(
+      t.groupId,
+      t.sortOrder
+    ),
+  })
+);
+
+export const productAddons = pgTable(
+  "product_addons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    priceKurus: integer("price_kurus").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_addons_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
 // Product gallery images. storageKey is a relative key under products/,
 // re-signed on read via getPublicUrl (mirrors qcPhotos).
 export const productImages = pgTable(
@@ -1062,6 +1150,14 @@ export const productImages = pgTable(
       .references(() => products.id, { onDelete: "cascade" }),
     storageKey: text("storage_key").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
+    // When set, this image belongs to a specific option choice (e.g. the
+    // "El boyaması" painted set). Null = default gallery (shown unless an option
+    // with its own images is selected). ON DELETE SET NULL so removing a choice
+    // demotes its images back to the default gallery rather than deleting them.
+    optionChoiceId: uuid("option_choice_id").references(
+      () => productOptionChoices.id,
+      { onDelete: "set null" }
+    ),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => ({
@@ -1202,9 +1298,21 @@ export const orderItems = pgTable(
       () => manufacturers.id
     ),
     productTitleSnapshot: text("product_title_snapshot").notNull(),
+    // unitPriceKurus already includes the selected option deltas + add-ons
+    // (per unit); lineTotalKurus = unitPriceKurus * quantity. The selections
+    // are snapshotted by display name so the order/manufacturer view survives
+    // later edits to the product's option/add-on rows.
     unitPriceKurus: integer("unit_price_kurus").notNull(),
     quantity: integer("quantity").notNull().default(1),
     lineTotalKurus: integer("line_total_kurus").notNull(),
+    selectedOptions:
+      jsonb("selected_options").$type<
+        { groupName: string; choiceName: string; priceDeltaKurus: number }[]
+      >(),
+    selectedAddons:
+      jsonb("selected_addons").$type<{ name: string; priceKurus: number }[]>(),
+    // Resolved (painted/unpainted) image for this line, snapshotted at purchase.
+    itemImageKey: text("item_image_key"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => ({
@@ -1484,12 +1592,47 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   files: many(productFiles),
   components: many(productComponents),
   assemblySteps: many(productAssemblySteps),
+  optionGroups: many(productOptionGroups),
+  addons: many(productAddons),
   orders: many(orders),
 }));
 
 export const productImagesRelations = relations(productImages, ({ one }) => ({
   product: one(products, {
     fields: [productImages.productId],
+    references: [products.id],
+  }),
+  optionChoice: one(productOptionChoices, {
+    fields: [productImages.optionChoiceId],
+    references: [productOptionChoices.id],
+  }),
+}));
+
+export const productOptionGroupsRelations = relations(
+  productOptionGroups,
+  ({ one, many }) => ({
+    product: one(products, {
+      fields: [productOptionGroups.productId],
+      references: [products.id],
+    }),
+    choices: many(productOptionChoices),
+  })
+);
+
+export const productOptionChoicesRelations = relations(
+  productOptionChoices,
+  ({ one, many }) => ({
+    group: one(productOptionGroups, {
+      fields: [productOptionChoices.groupId],
+      references: [productOptionGroups.id],
+    }),
+    images: many(productImages),
+  })
+);
+
+export const productAddonsRelations = relations(productAddons, ({ one }) => ({
+  product: one(products, {
+    fields: [productAddons.productId],
     references: [products.id],
   }),
 }));

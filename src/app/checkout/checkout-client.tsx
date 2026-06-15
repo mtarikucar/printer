@@ -11,6 +11,10 @@ interface CartItem {
   title: string;
   quantity: number;
   lineTotalKurus: number;
+  optionChoiceIds: string[];
+  addonIds: string[];
+  selectedOptions: { choiceName: string }[];
+  selectedAddons: { name: string }[];
 }
 
 export function CheckoutClient() {
@@ -41,10 +45,18 @@ export function CheckoutClient() {
     <div className="grid gap-8 md:grid-cols-2">
       <div className="card h-fit p-5">
         <h2 className="mb-3 font-medium text-text-primary">{d["checkout.summary"]}</h2>
-        {items.map((it) => (
-          <div key={it.productId} className="flex justify-between py-1 text-sm text-text-secondary">
+        {items.map((it, idx) => (
+          <div key={idx} className="flex justify-between py-1 text-sm text-text-secondary">
             <span className="truncate pr-3">
               {it.title} × {it.quantity}
+              {(it.selectedOptions.length > 0 || it.selectedAddons.length > 0) && (
+                <span className="block text-xs text-text-muted">
+                  {[
+                    ...it.selectedOptions.map((o) => o.choiceName),
+                    ...it.selectedAddons.map((a) => a.name),
+                  ].join(" · ")}
+                </span>
+              )}
             </span>
             <span className="shrink-0">{formatCurrency(it.lineTotalKurus, locale)}</span>
           </div>
@@ -58,7 +70,12 @@ export function CheckoutClient() {
         <CheckoutForm
           orderPayload={{
             orderType: "marketplace",
-            items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+            items: items.map((i) => ({
+              productId: i.productId,
+              quantity: i.quantity,
+              optionChoiceIds: i.optionChoiceIds,
+              addonIds: i.addonIds,
+            })),
           }}
           priceKurus={total}
           submitLabel={d["cart.checkout"]}

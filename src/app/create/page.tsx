@@ -26,7 +26,8 @@ import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { CreatePathSelector } from "@/components/create/path-selector";
 import { UploadModelFlow } from "@/components/create/upload-model-flow";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
-import { DESIGN_TEMPLATES, priceKindForStyle } from "@/lib/create/design-templates";
+import { DESIGN_TEMPLATES, priceKindForStyle, getTemplate } from "@/lib/create/design-templates";
+import { ExtraPhotos, type ExtraPhoto } from "@/components/create/extra-photos";
 
 const PhotoEditor = dynamic(
   () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
@@ -54,6 +55,11 @@ function CustomCreateFlow() {
   // state (instead of building it inline as `/api/files/${photoKey}`) means
   // the preview image survives a future flip of FILES_REQUIRE_SIGNATURE=1.
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  // Extra reference photos for multi-image-to-3d (object/realistic only). The
+  // primary photo lives in photoKey; these are additional angles (max 3 → 4
+  // total). `multiAck` is the realistic-only compatibility acknowledgment.
+  const [extraPhotos, setExtraPhotos] = useState<ExtraPhoto[]>([]);
+  const [multiAck, setMultiAck] = useState(false);
   const [selectedSize, setSelectedSize] = useState<string>("orta");
   const [selectedMaterial, setSelectedMaterial] = useState<string>("resin");
   const [selectedFinish, setSelectedFinish] = useState<string>("paintable_kit");
@@ -185,6 +191,14 @@ function CustomCreateFlow() {
   // tables + finish sets (Faz 1). These helpers pick the right one; the server
   // re-derives the trusted amount on submit via itemPriceKurus.
   const isObjectStyle = priceKindForStyle(selectedStyle) === "object";
+  // Multi-image fusion is offered only for non-stylized templates (object +
+  // realistic). Stylized templates restyle each photo independently via FLUX,
+  // so extra angles add nothing — the multi-upload UI is hidden there.
+  const isMultiCapable = getTemplate(selectedStyle)?.stylize === false;
+  // The realistic template requires the customer to confirm photo compatibility
+  // before generating from multiple photos; object does not (geometry-only).
+  const needsCompatAck =
+    selectedStyle === "realistic" && extraPhotos.length > 0;
   const baseKurus = (sz: string, mat: string) =>
     isObjectStyle ? objectPriceKurus(sz, mat) : figurinePriceKurus(sz, mat);
   const finishKurus = (f: string) =>
@@ -368,6 +382,16 @@ function CustomCreateFlow() {
     }
   }, [selectedStyle, selectedFinish]);
 
+  // Drop any extra reference photos + the compatibility ack when switching to a
+  // stylized template (which doesn't support multi-image fusion). Switching
+  // between object↔realistic keeps them (both are multi-capable).
+  useEffect(() => {
+    if (!isMultiCapable) {
+      setExtraPhotos([]);
+      setMultiAck(false);
+    }
+  }, [isMultiCapable]);
+
   // Restore state from sessionStorage AFTER the auth check resolves. Gate on
   // `loggedIn` (tri-state: null while loading, then true/false). We must not
   // gate on `currentUserId` because anonymous flows never set it — that would
@@ -393,6 +417,7 @@ function CustomCreateFlow() {
       }
       if (state.photoKey) setPhotoKey(state.photoKey);
       if (state.photoPreviewUrl) setPhotoPreviewUrl(state.photoPreviewUrl);
+      if (Array.isArray(state.extraPhotos)) setExtraPhotos(state.extraPhotos);
       if (state.selectedSize) setSelectedSize(state.selectedSize);
       if (state.selectedMaterial) setSelectedMaterial(state.selectedMaterial);
       if (state.selectedStyle) setSelectedStyle(state.selectedStyle);
@@ -645,6 +670,7 @@ function CustomCreateFlow() {
             userId: null,
             photoKey: currentPhotoKey,
             photoPreviewUrl,
+            extraPhotos,
             selectedSize,
             selectedMaterial,
             selectedStyle,
@@ -664,11 +690,17 @@ function CustomCreateFlow() {
 
     try {
       const generateToken = await turnstileRef.current?.getToken() ?? "";
+      // Bundle extra reference photos into a multi-image fusion set (primary
+      // first). Only for multi-capable templates; undefined → single-image.
+      const extraKeys = isMultiCapable ? extraPhotos.map((p) => p.key) : [];
+      const photoKeys =
+        extraKeys.length > 0 ? [currentPhotoKey, ...extraKeys] : undefined;
       const res = await fetch("/api/preview/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           photoKey: currentPhotoKey,
+          photoKeys,
           figurineSize: selectedSize,
           style: selectedStyle,
           modifiers: selectedModifiers,
@@ -1147,6 +1179,46 @@ function CustomCreateFlow() {
                 </Card>
               )}
 
+              {/* Extra reference photos (multi-image-to-3d) — object/realistic
+                  only, shown once a primary photo is engaged. Optional. */}
+              {isMultiCapable && (photoKey || selectedFile) && (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                  <div className="flex items-baseline justify-between gap-2 mb-1">
+                    <h2 className="text-lg font-serif text-text-primary">{d["create.multiPhoto.title"]}</h2>
+                    <span className="text-xs uppercase tracking-wide text-text-muted">{d["create.multiPhoto.optional"]}</span>
+                  </div>
+                  <p className="text-sm text-text-muted mb-4">{d["create.multiPhoto.subtitle"]}</p>
+                  <ExtraPhotos
+                    photos={extraPhotos}
+                    onChange={setExtraPhotos}
+                    max={3}
+                    onError={setError}
+                  />
+                  {needsCompatAck && (
+                    <div className="mt-4 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.73 4a2 2 0 00-3.46 0L3.33 16a2 2 0 001.74 3z" />
+                        </svg>
+                        <div className="text-sm text-amber-800">
+                          <p className="font-semibold">{d["create.multiPhoto.compat.title"]}</p>
+                          <p className="mt-0.5">{d["create.multiPhoto.compat.body"]}</p>
+                        </div>
+                      </div>
+                      <label className="mt-3 flex items-start gap-2 text-sm text-amber-900 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={multiAck}
+                          onChange={(e) => setMultiAck(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-amber-400 text-green-600 focus:ring-green-500"
+                        />
+                        <span>{d["create.multiPhoto.compat.ack"]}</span>
+                      </label>
+                    </div>
+                  )}
+                </Card>
+              )}
+
               {error && (
                 <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
                   <svg className="w-5 h-5 text-error-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1232,7 +1304,8 @@ function CustomCreateFlow() {
                   (!photoKey && !selectedFile) ||
                   loggedIn === null ||
                   (loggedIn === true && emailVerified === false) ||
-                  needsPhoneVerify
+                  needsPhoneVerify ||
+                  (needsCompatAck && !multiAck)
                 }
                 loading={submitting}
                 size="lg"

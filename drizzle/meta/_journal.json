@@ -120,6 +120,13 @@
       "when": 1781454440541,
       "tag": "0016_wide_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781491635874,
+      "tag": "0017_plain_paladin",
+      "breakpoints": true
     }
   ]
 }

@@ -330,6 +330,10 @@ export const previews = pgTable("previews", {
   userId: uuid("user_id").references(() => users.id),
   photoKey: text("photo_key").notNull(),
   photoUrl: text("photo_url").notNull(),
+  // Full multi-image fusion set (1-4 keys; first element equals photoKey).
+  // Null for single-photo previews. Persisted so the cleanup worker can delete
+  // every uploaded reference photo, not just the primary one.
+  photoKeys: jsonb("photo_keys").$type<string[]>(),
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
   style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),

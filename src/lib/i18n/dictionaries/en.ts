@@ -695,6 +695,16 @@ const en = {
   "create.upload.subtitle": "A clear, well-lit photo gives the best results",
   "create.changePhoto": "Change Photo",
 
+  // Create — Multi-image (object/realistic only): extra reference photos
+  "create.multiPhoto.title": "Extra Reference Photos",
+  "create.multiPhoto.optional": "optional",
+  "create.multiPhoto.subtitle": "Add up to 3 more photos from different angles for a more detailed model. A single photo works too.",
+  "create.multiPhoto.add": "Add photo",
+  "create.multiPhoto.remove": "Remove",
+  "create.multiPhoto.compat.title": "Are your photos compatible?",
+  "create.multiPhoto.compat.body": "When using multiple photos they must all show the SAME subject from different angles. Different people, outfits, or inconsistent angles can produce a broken model.",
+  "create.multiPhoto.compat.ack": "I confirm my photos show the same subject from different angles.",
+
   // Create — Upload tips
   "upload.tipBullet1": "Face clearly visible",
   "upload.tipBullet2": "Good lighting",

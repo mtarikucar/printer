@@ -28,6 +28,7 @@ async function processJob(job: Job) {
       id: true,
       glbKey: true,
       photoKey: true,
+      photoKeys: true,
     },
     limit: BATCH_SIZE,
   });
@@ -43,8 +44,17 @@ async function processJob(job: Job) {
       if (preview.glbKey) {
         await deleteFile(preview.glbKey);
       }
-      if (preview.photoKey) {
-        await deleteFile(preview.photoKey);
+      // Delete every uploaded reference photo. photoKeys (when present) already
+      // includes the primary photoKey as its first element, so prefer it;
+      // otherwise fall back to the single photoKey.
+      const photoKeysToDelete =
+        preview.photoKeys && preview.photoKeys.length > 0
+          ? preview.photoKeys
+          : preview.photoKey
+            ? [preview.photoKey]
+            : [];
+      for (const key of photoKeysToDelete) {
+        await deleteFile(key);
       }
       await db.delete(previews).where(sql`${previews.id} = ${preview.id}`);
       deleted++;

@@ -16,9 +16,18 @@ interface MeshyResult {
   durationMs: number;
 }
 
-export function buildMeshyBody(imageBase64: string, style: FigurineStyle) {
-  return {
-    image_url: imageBase64,
+// Meshy exposes two image-to-3D endpoints with an identical body/response
+// contract; the only differences are the image field (`image_url` vs the
+// 1-4 element `image_urls`) and the path. Multi-image fusion produces a more
+// detailed mesh from several reference angles at the same credit cost.
+const SINGLE_IMAGE_ENDPOINT = "https://api.meshy.ai/openapi/v1/image-to-3d";
+const MULTI_IMAGE_ENDPOINT = "https://api.meshy.ai/openapi/v1/multi-image-to-3d";
+
+export function buildMeshyBody(
+  imageInput: string | string[],
+  style: FigurineStyle,
+) {
+  const base = {
     ai_model: "meshy-6",
     enable_pbr: false,
     should_remesh: true,
@@ -35,24 +44,31 @@ export function buildMeshyBody(imageBase64: string, style: FigurineStyle) {
     remove_lighting: true,
     moderation: true,
   };
+  // The multi-image endpoint takes an `image_urls` array (1-4); the single
+  // endpoint takes a scalar `image_url`. Same params otherwise.
+  return Array.isArray(imageInput)
+    ? { ...base, image_urls: imageInput }
+    : { ...base, image_url: imageInput };
 }
 
 export async function generateWithMeshy(
-  imageBase64: string,
+  imageInput: string | string[],
   style: FigurineStyle,
 ): Promise<MeshyResult> {
   const startTime = Date.now();
+  const isMulti = Array.isArray(imageInput);
+  const endpoint = isMulti ? MULTI_IMAGE_ENDPOINT : SINGLE_IMAGE_ENDPOINT;
 
-  // Create task — Meshy v1 API with Meshy-6 model (base64 image).
+  // Create task — Meshy v1 API with Meshy-6 model (base64 or URL image(s)).
   // The per-request timeout caps any hung-connection scenario; the outer
   // 180s loop budget is enforced by the iteration counter below.
-  const createRes = await fetch("https://api.meshy.ai/openapi/v1/image-to-3d", {
+  const createRes = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.MESHY_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(buildMeshyBody(imageBase64, style)),
+    body: JSON.stringify(buildMeshyBody(imageInput, style)),
     signal: AbortSignal.timeout(30_000),
   });
 
@@ -74,7 +90,7 @@ export async function generateWithMeshy(
     let statusRes: Response;
     try {
       statusRes = await fetch(
-        `https://api.meshy.ai/openapi/v1/image-to-3d/${taskId}`,
+        `${endpoint}/${taskId}`,
         {
           headers: { Authorization: `Bearer ${process.env.MESHY_API_KEY}` },
           signal: AbortSignal.timeout(10_000),

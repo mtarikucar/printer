@@ -19,26 +19,41 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
   const { previewId, photoKey } = job.data;
   const style = (job.data.style || "realistic") as FigurineStyle;
   const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
+  // Resolve the photo set: a multi-image fusion set (object/realistic with
+  // extra reference photos) or the single primary photo. The API already
+  // collapses this to one key for stylized templates, so this just mirrors it.
+  const photoKeys =
+    job.data.photoKeys && job.data.photoKeys.length > 0
+      ? job.data.photoKeys
+      : [photoKey];
 
   try {
-    console.log(`[preview ${previewId}] Style: ${style}, modifiers: ${JSON.stringify(modifiers)}, job data:`, JSON.stringify(job.data));
-    job.log(`Starting Meshy preview generation (style: ${style}, modifiers: ${modifiers.join(",") || "none"})...`);
+    console.log(`[preview ${previewId}] Style: ${style}, modifiers: ${JSON.stringify(modifiers)}, photos: ${photoKeys.length}, job data:`, JSON.stringify(job.data));
+    job.log(`Starting Meshy preview generation (style: ${style}, modifiers: ${modifiers.join(",") || "none"}, photos: ${photoKeys.length})...`);
 
-    // Read image from disk and apply style transfer
-    const imageBuffer = await getFileBuffer(photoKey);
-    const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
+    // Read + style-transfer each photo. For non-stylized templates with no
+    // modifiers applyStyleTransfer is a passthrough (raw buffer), so a
+    // multi-photo object/realistic request incurs no extra FLUX cost. The
+    // styled images are saved so Meshy can fetch them by URL in production.
+    const styled: { buffer: Buffer; url: string }[] = [];
+    for (let i = 0; i < photoKeys.length; i++) {
+      const imageBuffer = await getFileBuffer(photoKeys[i]);
+      const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
+      const styledFilename = `styled-${i}-${nanoid()}.png`;
+      const styledKey = await saveFile(styledBuffer, `previews/${previewId}`, styledFilename);
+      styled.push({ buffer: styledBuffer, url: getPublicUrl(styledKey) });
+    }
+    job.log(`Styled ${styled.length} image(s): ${styled.map((s) => s.url).join(", ")}`);
 
-    // Save styled image to disk so it's accessible via URL (and viewable)
-    const styledFilename = `styled-${nanoid()}.png`;
-    const styledKey = await saveFile(styledBuffer, `previews/${previewId}`, styledFilename);
-    const styledUrl = getPublicUrl(styledKey);
-    job.log(`Styled image saved: ${styledUrl}`);
-
-    // In production, send public URL to Meshy; locally use base64 (Meshy can't reach localhost)
-    const isLocal = styledUrl.includes("localhost") || styledUrl.includes("127.0.0.1");
-    const meshyInput = isLocal
-      ? `data:image/png;base64,${styledBuffer.toString("base64")}`
-      : styledUrl;
+    // In production, send public URLs to Meshy; locally use base64 (Meshy can't
+    // reach localhost). Multiple photos → image_urls[] (multi-image-to-3d);
+    // single photo → scalar image_url (image-to-3d).
+    const toMeshyInput = (s: { buffer: Buffer; url: string }) =>
+      s.url.includes("localhost") || s.url.includes("127.0.0.1")
+        ? `data:image/png;base64,${s.buffer.toString("base64")}`
+        : s.url;
+    const meshyInput =
+      styled.length > 1 ? styled.map(toMeshyInput) : toMeshyInput(styled[0]);
     const result = await generateWithMeshy(meshyInput, style);
 
     // Download GLB and save to local storage

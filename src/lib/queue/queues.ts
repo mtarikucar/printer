@@ -19,6 +19,10 @@ export interface PreviewGenerationJobData {
   previewId: string;
   imageUrl: string;
   photoKey: string;
+  // Optional multi-image fusion set (1-4 keys, includes the primary photoKey
+  // as the first element). Present only for object/realistic templates when the
+  // customer added extra reference photos; absent → single-image generation.
+  photoKeys?: string[];
   style: string;
   modifiers?: string[];
 }

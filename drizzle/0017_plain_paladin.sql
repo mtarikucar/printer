@@ -1,0 +1,1 @@
+ALTER TABLE "previews" ADD COLUMN "photo_keys" jsonb;

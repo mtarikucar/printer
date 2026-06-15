@@ -16,11 +16,15 @@ import { isPhoneVerificationRequired } from "@/lib/services/sms";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
-import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
+import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, getTemplate } from "@/lib/create/design-templates";
 import { eq, count } from "drizzle-orm";
 
 const generateSchema = z.object({
   photoKey: z.string().min(1),
+  // Optional multi-image fusion set (Meshy multi-image-to-3d accepts 1-4
+  // images). When present, generation fuses several reference angles into a
+  // more detailed mesh. Only honored for non-stylized templates (see below).
+  photoKeys: z.array(z.string().min(1)).max(4).optional(),
   figurineSize: z.enum(["kucuk", "orta", "buyuk"]),
   // Design template (formerly "style"): validated against the registry, so a
   // new template is a registry-only change — no enum edit here.
@@ -62,12 +66,31 @@ export async function POST(request: NextRequest) {
 
     const validated = generateSchema.parse(rest);
 
-    // Validate photoKey is under the photos/ directory
-    if (!validated.photoKey.startsWith("photos/") || validated.photoKey.includes("..")) {
-      return NextResponse.json(
-        { error: d["api.order.createFailed"] },
-        { status: 400 }
-      );
+    // Resolve the full photo set. Multi-image fusion is only meaningful for
+    // non-stylized templates (object/realistic) — for stylized templates the
+    // FLUX restyle reinterprets each photo independently, so extra angles add
+    // nothing. Collapse to the single primary photo there (defense-in-depth;
+    // the UI already hides multi-upload for stylized templates). The primary
+    // photoKey is always element 0 so downstream (display/order) is unchanged.
+    const tpl = getTemplate(validated.style);
+    const requestedKeys =
+      validated.photoKeys && validated.photoKeys.length > 0
+        ? validated.photoKeys
+        : [validated.photoKey];
+    const allowMulti = !!tpl && !tpl.stylize;
+    // De-dupe + cap at 4, primary first.
+    const photoKeys = allowMulti
+      ? Array.from(new Set([validated.photoKey, ...requestedKeys])).slice(0, 4)
+      : [validated.photoKey];
+
+    // Validate every key is under the photos/ directory (no traversal).
+    for (const key of photoKeys) {
+      if (!key.startsWith("photos/") || key.includes("..")) {
+        return NextResponse.json(
+          { error: d["api.order.createFailed"] },
+          { status: 400 }
+        );
+      }
     }
 
     const photoUrl = getPublicUrl(validated.photoKey);
@@ -152,6 +175,10 @@ export async function POST(request: NextRequest) {
         userId: session.userId,
         photoKey: validated.photoKey,
         photoUrl,
+        // Persist the multi-image set only when there's more than one photo, so
+        // single-photo previews keep a null column (and the cleanup worker falls
+        // back to photoKey).
+        photoKeys: photoKeys.length > 1 ? photoKeys : null,
         figurineSize: validated.figurineSize,
         style: validated.style,
         modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
@@ -163,6 +190,7 @@ export async function POST(request: NextRequest) {
       previewId: preview.id,
       imageUrl: photoUrl,
       photoKey: validated.photoKey,
+      photoKeys: photoKeys.length > 1 ? photoKeys : undefined,
       style: validated.style,
       modifiers: validated.modifiers,
     });

@@ -697,6 +697,16 @@ const tr: Dictionary = {
   "create.upload.subtitle": "Net ve iyi aydınlatılmış bir fotoğraf en iyi sonucu verir",
   "create.changePhoto": "Fotoğrafı Değiştir",
 
+  // Create — Multi-image (object/realistic only): extra reference photos
+  "create.multiPhoto.title": "Ek Referans Fotoğrafları",
+  "create.multiPhoto.optional": "opsiyonel",
+  "create.multiPhoto.subtitle": "Farklı açılardan 3 fotoğrafa kadar ekleyerek daha detaylı bir model elde edin. Tek fotoğrafla da çalışır.",
+  "create.multiPhoto.add": "Fotoğraf ekle",
+  "create.multiPhoto.remove": "Kaldır",
+  "create.multiPhoto.compat.title": "Fotoğraflar uyumlu mu?",
+  "create.multiPhoto.compat.body": "Birden çok fotoğraf kullanırken hepsinin AYNI kişiyi farklı açılardan göstermesi gerekir. Farklı kişiler, kıyafetler ya da tutarsız açılar bozuk bir modele yol açabilir.",
+  "create.multiPhoto.compat.ack": "Fotoğraflarımın aynı kişiyi farklı açılardan gösterdiğini onaylıyorum.",
+
   // Create — Upload tips
   "upload.tipBullet1": "Yüz net görünür olsun",
   "upload.tipBullet2": "İyi aydınlatma",

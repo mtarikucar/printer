@@ -127,6 +127,12 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
       itemName: product.title,
       valueKurus: product.priceKurus,
     });
+    // Record into the server-side "recently viewed" list (fire-and-forget).
+    fetch("/api/recently-viewed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: product.id }),
+    }).catch(() => {});
   }, [product.id, product.title, product.priceKurus]);
 
   const t = (key: string, fallback: string) =>

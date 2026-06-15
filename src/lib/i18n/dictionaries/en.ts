@@ -158,6 +158,7 @@ const en = {
   "store.search.placeholder": "Search products, categories…",
   "store.search.aria": "Search",
   "store.row.new": "New Arrivals",
+  "store.row.recent": "Recently Viewed",
   "store.promo.title": "From design to print — a 3D marketplace",
   "store.promo.sub": "Shop ready-made 3D-printed products from our makers, made to order.",
   "store.promo.cta": "Start shopping",

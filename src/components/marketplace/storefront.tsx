@@ -7,6 +7,7 @@ import type { ProductListItem } from "@/components/product-card";
 import { CategoryRibbon } from "./category-ribbon";
 import { PromoBanner } from "./promo-banner";
 import { ProductRow } from "./product-row";
+import { RecentlyViewed } from "./recently-viewed";
 import { CustomStrip } from "./custom-strip";
 
 export interface RootCategory {
@@ -48,6 +49,7 @@ export function StorefrontHome({
         products={newest}
         viewAllHref="/shop?sort=newest"
       />
+      <RecentlyViewed />
       {populatedRoots.map((r) => (
         <ProductRow
           key={r.path}

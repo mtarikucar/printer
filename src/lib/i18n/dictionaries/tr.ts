@@ -160,6 +160,7 @@ const tr: Dictionary = {
   "store.search.placeholder": "Ürün, kategori ara…",
   "store.search.aria": "Ara",
   "store.row.new": "Yeni Gelenler",
+  "store.row.recent": "Son Gezdikleriniz",
   "store.promo.title": "Tasarımdan baskıya — 3D pazaryeri",
   "store.promo.sub": "Üreticilerimizin hazır 3D baskı ürünlerini keşfet; hepsi siparişe özel üretilir.",
   "store.promo.cta": "Alışverişe başla",

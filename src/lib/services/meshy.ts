@@ -30,16 +30,25 @@ export function buildMeshyBody(
   const base = {
     ai_model: "meshy-6",
     enable_pbr: false,
+    // We KEEP remesh on (not Meshy's meshy-6 default of false) because our print
+    // pipeline's keep_largest_component (process_mesh.py) would drop the raw
+    // mesh's separate detail shells (a bell, a bow); remesh fuses them into one
+    // watertight piece. The detail-loss culprit was the polycount BUDGET, not
+    // remesh itself — see target_polycount below.
     should_remesh: true,
     // triangle topology: slicers consume triangles directly; quad meshes are
     // intended for animation rigs and add ambiguity for our STL pipeline.
     topology: "triangle",
-    target_polycount: 50000,
+    // Remesh decimates toward this budget; 50k smoothed facial features flat.
+    // Raised to the meshy-6 max (300k) so fine detail (eyes, seams, accessories)
+    // survives the retopology — close to Meshy's web-UI (remesh-off) detail while
+    // staying single-piece + watertight. Trade-off: larger STL / slower slicing.
+    target_polycount: 300000,
     should_texture: false,
     pose_mode: poseModeForStyle(style),
-    // Keep the style-transferred image verbatim; Meshy's "enhance" pass can
-    // re-interpret the silhouette and reintroduce thin or floating details.
-    image_enhancement: false,
+    // Enhance the input image (Meshy/web-UI default) — improves detail capture.
+    // Re-evaluate if it reintroduces thin/fragile details that hurt printability.
+    image_enhancement: true,
     // Strip baked lighting so geometry inference focuses on form, not shadow.
     remove_lighting: true,
     moderation: true,

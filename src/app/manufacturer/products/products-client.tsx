@@ -133,6 +133,41 @@ export function ProductsClient({ products, locale }: ProductsClientProps) {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    if (
+      !window.confirm(
+        t(
+          "product.delete.confirm",
+          "Bu ürün KALICI olarak silinecek (geri alınamaz). Yalnızca hiçbir sipariş ilişkisi yoksa silinir. Emin misiniz?"
+        )
+      )
+    )
+      return;
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/manufacturer/products/${id}?hard=1`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        setError(
+          res.status === 409
+            ? t(
+                "product.delete.blocked",
+                "Bu üründe sipariş geçmişi var, kalıcı silinemez. Bunun yerine arşivleyin."
+              )
+            : t("product.error.generic", "Bir hata oluştu, kontrol edin.")
+        );
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError(t("product.error.generic", "Bir hata oluştu, kontrol edin."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -255,6 +290,18 @@ export function ProductsClient({ products, locale }: ProductsClientProps) {
                         {t("manufacturer.products.unarchive", "Arşivden çıkar")}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      disabled={busyId === p.id}
+                      onClick={() => handleDelete(p.id)}
+                      title={t(
+                        "manufacturer.products.deleteHint",
+                        "Kalıcı sil (ürünün hiçbir ilişkisi yoksa)"
+                      )}
+                      className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {t("manufacturer.products.delete", "Sil")}
+                    </button>
                   </div>
                 </td>
               </tr>

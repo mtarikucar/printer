@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { createProductSchema } from "@/lib/validators/product";
 import { resolveProductCategoryId } from "@/lib/services/categories";
+import { hardDeleteProduct } from "@/lib/services/product-delete";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 
 export async function GET(
@@ -66,14 +67,25 @@ export async function PATCH(
   }
 }
 
-// Admin archive (force unlist).
+// DELETE archives by default (force unlist). With ?hard=1 it PERMANENTLY
+// deletes — only allowed when the product has no order/draft/review history.
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const a = await requireAdmin();
   if ("response" in a) return a.response;
   const { id } = await params;
+
+  if (request.nextUrl.searchParams.get("hard") === "1") {
+    const res = await hardDeleteProduct(id);
+    if (!res.ok) {
+      const status = res.reason === "not_found" ? 404 : 409;
+      return NextResponse.json({ error: res.reason }, { status });
+    }
+    return NextResponse.json({ success: true, deleted: true });
+  }
+
   const [archived] = await db
     .update(products)
     .set({ status: "archived", updatedAt: new Date() })

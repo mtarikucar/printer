@@ -164,6 +164,37 @@ export function ProductsClient({
     }
   };
 
+  const hardDelete = async (id: string) => {
+    if (
+      !window.confirm(
+        d["admin.products.confirmDelete" as keyof typeof d] ||
+          "Bu ürün KALICI olarak silinecek (geri alınamaz). Yalnızca hiçbir sipariş/yorum ilişkisi yoksa silinir. Emin misiniz?"
+      )
+    )
+      return;
+    setLoading(`delete-${id}`);
+    try {
+      const res = await fetch(`/api/admin/products/${id}?hard=1`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        if (res.status === 409) {
+          alert(
+            d["admin.products.deleteBlocked" as keyof typeof d] ||
+              "Bu üründe sipariş/yorum geçmişi var, kalıcı silinemez. Bunun yerine arşivleyin."
+          );
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || "Silme başarısız");
+        }
+        return;
+      }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const q = query.trim().toLowerCase();
   const filtered = q
     ? all.filter(
@@ -445,6 +476,14 @@ export function ProductsClient({
                               "Arşivden çıkar"}
                           </button>
                         )}
+                        <button
+                          onClick={() => hardDelete(p.id)}
+                          disabled={loading === `delete-${p.id}`}
+                          title="Kalıcı sil (ürünün hiçbir ilişkisi yoksa)"
+                          className="px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-400"
+                        >
+                          {d["admin.products.delete" as keyof typeof d] || "Sil"}
+                        </button>
                       </div>
                     </td>
                   </tr>

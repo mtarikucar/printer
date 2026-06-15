@@ -5,6 +5,7 @@ import { products } from "@/lib/db/schema";
 import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { createProductSchema } from "@/lib/validators/product";
 import { resolveProductCategoryId } from "@/lib/services/categories";
+import { hardDeleteOwnedProduct } from "@/lib/services/product-delete";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
@@ -106,9 +107,11 @@ export async function PATCH(
   }
 }
 
-// Archive (soft delete) — hides the listing from the storefront.
+// DELETE archives by default (hides the listing). With ?hard=1 it PERMANENTLY
+// deletes the seller's own product — only when it has no order/draft/review
+// history; otherwise refuses (the seller must archive it).
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const guard = await requireActiveSeller();
@@ -116,6 +119,15 @@ export async function DELETE(
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
   const { id } = await params;
+
+  if (request.nextUrl.searchParams.get("hard") === "1") {
+    const res = await hardDeleteOwnedProduct(id, guard.manufacturerId);
+    if (!res.ok) {
+      const status = res.reason === "not_found" ? 404 : 409;
+      return NextResponse.json({ error: res.reason }, { status });
+    }
+    return NextResponse.json({ success: true, deleted: true });
+  }
 
   const [archived] = await db
     .update(products)

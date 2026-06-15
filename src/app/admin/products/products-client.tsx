@@ -55,6 +55,10 @@ export function ProductsClient({
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  // Client-side search + pagination over the loaded product list.
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
 
   const statusLabel = (status: string): string => {
     const key = `admin.products.status.${status}` as keyof typeof d;
@@ -159,6 +163,22 @@ export function ProductsClient({
       setLoading(null);
     }
   };
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? all.filter(
+        (p) =>
+          p.title.toLowerCase().includes(q) ||
+          p.sellerName.toLowerCase().includes(q) ||
+          statusLabel(p.status).toLowerCase().includes(q)
+      )
+    : all;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageItems = filtered.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
 
   return (
     <div>
@@ -292,17 +312,45 @@ export function ProductsClient({
 
       {/* All products */}
       <section className="mt-10">
-        <h2 className="text-lg font-semibold text-gray-900">
-          {d["admin.products.allTitle" as keyof typeof d] || "Tüm ürünler"} (
-          {all.length})
-        </h2>
-        {all.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {d["admin.products.allTitle" as keyof typeof d] || "Tüm ürünler"} (
+            {filtered.length})
+          </h2>
+          <div className="relative w-full sm:w-72">
+            <svg
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
+              placeholder={
+                d["admin.products.search" as keyof typeof d] ||
+                "Ürün, satıcı veya durum ara…"
+              }
+              className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+            />
+          </div>
+        </div>
+        {filtered.length === 0 ? (
           <p className="mt-3 text-sm text-gray-500">
-            {d["admin.products.allEmpty" as keyof typeof d] || "Henüz ürün yok."}
+            {q
+              ? d["admin.products.searchEmpty" as keyof typeof d] ||
+                "Aramayla eşleşen ürün yok."
+              : d["admin.products.allEmpty" as keyof typeof d] ||
+                "Henüz ürün yok."}
           </p>
         ) : (
-          <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full">
+          <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-x-auto">
+            <table className="w-full min-w-[760px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
@@ -324,7 +372,7 @@ export function ProductsClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {all.map((p) => (
+                {pageItems.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -403,6 +451,37 @@ export function ProductsClient({
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {pageCount > 1 && (
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">
+              {`${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(
+                safePage * PAGE_SIZE,
+                filtered.length
+              )} / ${filtered.length}`}
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+              >
+                ‹
+              </button>
+              <span className="px-2 text-sm text-gray-600">
+                {safePage} / {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={safePage >= pageCount}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+              >
+                ›
+              </button>
+            </div>
           </div>
         )}
       </section>

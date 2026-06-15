@@ -95,8 +95,8 @@ export default async function ManufacturerEarningsPage() {
           {d["manufacturer.earnings.empty"]}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8">
-          <table className="w-full text-sm">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mb-8">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
                 <th className="text-left py-2.5 px-4 font-medium">#</th>

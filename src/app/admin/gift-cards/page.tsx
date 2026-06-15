@@ -44,7 +44,7 @@ export default async function AdminGiftCardsPage() {
       </div>
 
       <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="text-left px-4 py-3 font-medium text-gray-500">{d["admin.giftCards.table.code"]}</th>

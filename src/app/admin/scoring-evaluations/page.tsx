@@ -105,7 +105,7 @@ export default async function ScoringEvaluationsPage() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-gray-50 text-xs text-gray-600 uppercase">
               <tr>
                 <th className="text-left py-2 px-3">Order</th>

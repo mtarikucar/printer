@@ -37,7 +37,9 @@ export function createProductSchema(locale: Locale = defaultLocale) {
       .min(100, d["validator.product.price.tooLow"])
       .max(100_000_000, d["validator.product.price.tooHigh"]),
     material: z.enum(["resin", "filament"]).optional(),
-    category: z.enum(PRODUCT_CATEGORIES).optional(),
+    // Nested-taxonomy category node id. Existence is validated in the API route
+    // (DB lookup); a product may attach to any node (root or leaf).
+    categoryId: z.string().uuid().optional(),
     leadTimeDays: z.number().int().min(1).max(90).optional().default(7),
   });
 }

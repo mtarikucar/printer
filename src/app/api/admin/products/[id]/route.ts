@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { createProductSchema } from "@/lib/validators/product";
+import { resolveProductCategoryId } from "@/lib/services/categories";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 
 export async function GET(
@@ -34,6 +35,12 @@ export async function PATCH(
   try {
     const body = await request.json();
     const input = createProductSchema(locale).parse(body);
+    let categoryId: string | null;
+    try {
+      categoryId = await resolveProductCategoryId(input.categoryId);
+    } catch {
+      return NextResponse.json({ error: "invalid category" }, { status: 400 });
+    }
     const [updated] = await db
       .update(products)
       .set({
@@ -41,7 +48,7 @@ export async function PATCH(
         description: input.description,
         priceKurus: input.priceKurus,
         material: input.material ?? null,
-        category: input.category ?? null,
+        categoryId,
         leadTimeDays: input.leadTimeDays,
         updatedAt: new Date(),
       })

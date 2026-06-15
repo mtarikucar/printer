@@ -7,7 +7,6 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { UserDropdown } from "@/components/user-dropdown";
 import { Button } from "@/components/ui";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
 import { CartBadge } from "@/components/cart/cart-badge";
 
 interface AuthUser {
@@ -24,6 +23,7 @@ export function SiteHeader() {
   const [searchQuery, setSearchQuery] = useState("");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [rootCats, setRootCats] = useState<{ path: string; name: string }[]>([]);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -35,6 +35,17 @@ export function SiteHeader() {
       })
       .catch(() => {})
       .finally(() => setAuthLoading(false));
+  }, []);
+
+  // Top-level categories for the "Pazaryeri" dropdown — data-driven from the
+  // admin-managed tree (deeper levels are browsed on /shop).
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((r) => (r.ok ? r.json() : { tree: [] }))
+      .then(({ tree }: { tree: { path: string; name: string }[] }) =>
+        setRootCats((tree ?? []).map((c) => ({ path: c.path, name: c.name })))
+      )
+      .catch(() => {});
   }, []);
 
   const handleLogout = async () => {
@@ -67,9 +78,9 @@ export function SiteHeader() {
       href: "/shop",
       items: [
         { href: "/shop", label: d["landing.market.cats.all"] },
-        ...PRODUCT_CATEGORIES.map((c) => ({
-          href: `/shop?category=${c}`,
-          label: d[`product.category.${c}` as keyof typeof d],
+        ...rootCats.map((c) => ({
+          href: `/shop?category=${encodeURIComponent(c.path)}`,
+          label: c.name,
         })),
       ],
     },

@@ -962,6 +962,40 @@ export const manufacturerNotifications = pgTable("manufacturer_notifications", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Product categories (nested, unlimited depth) ───────────────────────────
+// Admin-curated taxonomy. Adjacency list (parentId) gives arbitrary depth; a
+// materialized `path` of ancestor slugs (e.g. "figurine/marvel") makes subtree
+// queries and breadcrumbs cheap (no recursive CTE). Products attach via
+// categoryId to ANY node — root or leaf.
+export const categories = pgTable(
+  "categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Self-reference for the tree. ON DELETE CASCADE so removing a node removes
+    // its whole subtree (products are detached, not deleted — see categoryId FK).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parentId: uuid("parent_id").references((): any => categories.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    // URL-safe segment, unique among siblings (enforced in the service layer).
+    slug: text("slug").notNull(),
+    // Slash-joined slugs from root to self. Globally unique → the canonical
+    // filter/URL key (?category=figurine/marvel). Root path === slug, so the
+    // legacy flat ?category=figurine links keep resolving after migration.
+    path: text("path").notNull(),
+    depth: integer("depth").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byParent: index("categories_parent_idx").on(t.parentId, t.sortOrder),
+    pathUnique: uniqueIndex("categories_path_unique").on(t.path),
+  })
+);
+
 // ─── Marketplace products ───────────────────────────────────────────────────
 // A ready-made product a seller lists for sale. Made-to-order: no stock/quantity
 // tracking — when bought, the owning manufacturer is auto-assigned to print &
@@ -982,7 +1016,14 @@ export const products = pgTable(
     // Seller-set, KDV-inclusive (same convention as figurine prices).
     priceKurus: integer("price_kurus").notNull(),
     material: figurineMaterialEnum("material"),
+    // Legacy flat category slug (pre-nesting). Superseded by categoryId; kept
+    // nullable for backfill provenance, no longer written by new code.
     category: text("category"),
+    // Nested-taxonomy link. ON DELETE SET NULL: deleting a category detaches its
+    // products (they become uncategorised) rather than cascading the delete.
+    categoryId: uuid("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
     leadTimeDays: integer("lead_time_days").default(7),
     // Denormalized cover image key for list cards (avoids a join on /shop).
     primaryImageKey: text("primary_image_key"),
@@ -1418,10 +1459,26 @@ export const manufacturersRelations = relations(manufacturers, ({ many }) => ({
   products: many(products),
 }));
 
+export const categoriesRelations = relations(categories, ({ one, many }) => ({
+  parent: one(categories, {
+    fields: [categories.parentId],
+    references: [categories.id],
+    relationName: "categoryParent",
+  }),
+  children: many(categories, { relationName: "categoryParent" }),
+  products: many(products),
+}));
+
 export const productsRelations = relations(products, ({ one, many }) => ({
   manufacturer: one(manufacturers, {
     fields: [products.manufacturerId],
     references: [manufacturers.id],
+  }),
+  // Named categoryNode (not `category`) to avoid colliding with the legacy
+  // `products.category` text column in relational-query result shapes.
+  categoryNode: one(categories, {
+    fields: [products.categoryId],
+    references: [categories.id],
   }),
   images: many(productImages),
   files: many(productFiles),

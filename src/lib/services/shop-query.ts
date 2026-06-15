@@ -1,9 +1,9 @@
-import { and, asc, desc, eq, ilike, gte, lte, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, gte, lte, inArray, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import type { ProductListItem } from "@/components/product-card";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import { getCategoryByPath, getSubtreeIds } from "@/lib/services/categories";
 
 export const SHOP_PAGE_SIZE = 24;
 
@@ -23,10 +23,6 @@ export interface ShopFilters {
 export async function queryShopProducts(
   f: ShopFilters
 ): Promise<{ items: ProductListItem[]; hasMore: boolean }> {
-  const activeCategory =
-    f.category && (PRODUCT_CATEGORIES as readonly string[]).includes(f.category)
-      ? f.category
-      : null;
   const sort =
     f.sort === "price_asc" || f.sort === "price_desc" ? f.sort : "newest";
   const orderBy =
@@ -37,7 +33,18 @@ export async function queryShopProducts(
         : [desc(products.createdAt)];
 
   const conds: SQL[] = [eq(products.status, "active")];
-  if (activeCategory) conds.push(eq(products.category, activeCategory));
+  // Category filter is now a node PATH; match the node + its whole subtree, so
+  // selecting "figurine" also returns "figurine/marvel" products. An unknown
+  // path yields an impossible filter (no products) rather than ignoring it.
+  if (f.category) {
+    const node = await getCategoryByPath(f.category);
+    const subtreeIds = node ? await getSubtreeIds(node.path) : [];
+    conds.push(
+      subtreeIds.length
+        ? inArray(products.categoryId, subtreeIds)
+        : eq(products.id, "00000000-0000-0000-0000-000000000000")
+    );
+  }
   if (f.q?.trim()) conds.push(ilike(products.title, `%${f.q.trim()}%`));
   if (f.material === "resin" || f.material === "filament") {
     conds.push(eq(products.material, f.material));
@@ -57,7 +64,10 @@ export async function queryShopProducts(
     orderBy,
     limit: limit + 1,
     offset,
-    with: { manufacturer: { columns: { companyName: true } } },
+    with: {
+      manufacturer: { columns: { companyName: true } },
+      categoryNode: { columns: { path: true, name: true } },
+    },
   });
 
   const hasMore = rows.length > limit;
@@ -67,7 +77,8 @@ export async function queryShopProducts(
     title: p.title,
     priceKurus: p.priceKurus,
     material: p.material,
-    category: p.category,
+    categoryPath: p.categoryNode?.path ?? null,
+    categoryName: p.categoryNode?.name ?? null,
     leadTimeDays: p.leadTimeDays,
     imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
     sellerName: p.manufacturer?.companyName ?? null,

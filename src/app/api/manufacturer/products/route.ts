@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { createProductSchema } from "@/lib/validators/product";
+import { resolveProductCategoryId } from "@/lib/services/categories";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 
 /**
@@ -37,6 +38,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const input = createProductSchema(locale).parse(body);
 
+    let categoryId: string | null;
+    try {
+      categoryId = await resolveProductCategoryId(input.categoryId);
+    } catch {
+      return NextResponse.json({ error: "invalid category" }, { status: 400 });
+    }
+
     const [created] = await db
       .insert(products)
       .values({
@@ -46,7 +54,7 @@ export async function POST(request: NextRequest) {
         description: input.description,
         priceKurus: input.priceKurus,
         material: input.material ?? null,
-        category: input.category ?? null,
+        categoryId,
         leadTimeDays: input.leadTimeDays,
         status: "draft",
       })

@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { products } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { ProductGrid } from "@/components/product-grid";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
 import { queryShopProducts } from "@/lib/services/shop-query";
+import {
+  getBreadcrumb,
+  getCategoryByPath,
+  getChildCategories,
+} from "@/lib/services/categories";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -37,10 +38,10 @@ export default async function ShopPage({
   const sp = await searchParams;
 
   const term = sp.q?.trim() || null;
-  const activeCategory =
-    sp.category && (PRODUCT_CATEGORIES as readonly string[]).includes(sp.category)
-      ? sp.category
-      : null;
+  // Category param is a node path; resolve it so an invalid path falls back to
+  // "all" rather than an empty grid.
+  const activeNode = sp.category ? await getCategoryByPath(sp.category) : null;
+  const activeCategory = activeNode?.path ?? null;
   const activeSort =
     sp.sort === "price_asc" || sp.sort === "price_desc" ? sp.sort : "newest";
   const material =
@@ -58,14 +59,17 @@ export default async function ShopPage({
     offset: 0,
   });
 
-  // Categories that actually have active products — drives the filter tabs.
-  const activeCatRows = await db
-    .selectDistinct({ category: products.category })
-    .from(products)
-    .where(eq(products.status, "active"));
-  const availableCategories = activeCatRows
-    .map((r) => r.category)
-    .filter((c): c is string => c !== null);
+  // Hierarchical browse: breadcrumb trail (root→…→current) + the current
+  // node's children to drill deeper (roots when nothing is selected).
+  const breadcrumb = activeNode
+    ? (await getBreadcrumb(activeNode.path)).map((c) => ({
+        path: c.path,
+        name: c.name,
+      }))
+    : [];
+  const categoryChips = (await getChildCategories(activeNode?.id ?? null)).map(
+    (c) => ({ path: c.path, name: c.name })
+  );
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -85,7 +89,8 @@ export default async function ShopPage({
         <ProductGrid
           products={items}
           activeCategory={activeCategory}
-          availableCategories={availableCategories}
+          categoryChips={categoryChips}
+          breadcrumb={breadcrumb}
           activeSort={activeSort}
           query={term}
           material={material}

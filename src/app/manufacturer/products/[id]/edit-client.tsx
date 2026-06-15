@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import { CategoryPicker } from "@/components/category-picker";
 import {
   ProductSpecEditor,
   type SpecFile,
@@ -26,7 +26,7 @@ interface EditProduct {
   description: string;
   priceKurus: number;
   material: string | null;
-  category: string | null;
+  categoryId: string | null;
   leadTimeDays: number | null;
   status: ProductStatus;
   rejectionReason: string | null;
@@ -51,15 +51,6 @@ const STATUS_FALLBACK: Record<ProductStatus, string> = {
   active: "Yayında",
   rejected: "Reddedildi",
   archived: "Arşivlendi",
-};
-
-const CATEGORY_FALLBACK: Record<string, string> = {
-  figurine: "Figürin",
-  home_decor: "Ev Dekorasyonu",
-  toy: "Oyuncak",
-  jewelry: "Takı",
-  gadget: "Aksesuar",
-  other: "Diğer",
 };
 
 interface EditProductClientProps {
@@ -94,7 +85,7 @@ export function EditProductClient({
     (product.priceKurus / 100).toString()
   );
   const [material, setMaterial] = useState(product.material ?? "");
-  const [category, setCategory] = useState(product.category ?? "");
+  const [categoryId, setCategoryId] = useState<string | null>(product.categoryId);
   const [leadTimeDays, setLeadTimeDays] = useState(
     String(product.leadTimeDays ?? 7)
   );
@@ -131,7 +122,7 @@ export function EditProductClient({
           description,
           priceKurus,
           material: material || undefined,
-          category: category || undefined,
+          categoryId: categoryId || undefined,
           leadTimeDays: leadNum,
         }),
       });
@@ -344,19 +335,11 @@ export function EditProductClient({
           </FormField>
 
           <FormField label={t("product.field.category", "Kategori")}>
-            <Select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              <option value="">
-                {t("product.category.none", "Belirtilmedi")}
-              </option>
-              {PRODUCT_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {t(`product.category.${c}`, CATEGORY_FALLBACK[c] ?? c)}
-                </option>
-              ))}
-            </Select>
+            <CategoryPicker
+              value={categoryId}
+              onChange={setCategoryId}
+              placeholder={t("product.category.none", "Belirtilmedi")}
+            />
           </FormField>
         </div>
 

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { createProductSchema } from "@/lib/validators/product";
+import { resolveProductCategoryId } from "@/lib/services/categories";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
@@ -60,6 +61,13 @@ export async function PATCH(
     const body = await request.json();
     const input = createProductSchema(locale).parse(body);
 
+    let categoryId: string | null;
+    try {
+      categoryId = await resolveProductCategoryId(input.categoryId);
+    } catch {
+      return NextResponse.json({ error: "invalid category" }, { status: 400 });
+    }
+
     // Editing an already-published (active) product sends it back to review so
     // an admin re-checks the change before it goes live again. Draft/rejected
     // products stay in their current state.
@@ -74,7 +82,7 @@ export async function PATCH(
         description: input.description,
         priceKurus: input.priceKurus,
         material: input.material ?? null,
-        category: input.category ?? null,
+        categoryId,
         leadTimeDays: input.leadTimeDays,
         status: nextStatus,
         submittedAt: reEnteredReview ? new Date() : existing.submittedAt,

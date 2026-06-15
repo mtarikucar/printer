@@ -5,22 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
+import { CategoryPicker } from "@/components/category-picker";
 import {
   ProductSpecEditor,
   type SpecFile,
   type SpecComponentRow,
   type SpecStepRow,
 } from "@/components/products/product-spec-editor";
-
-const CATEGORY_LABEL: Record<string, string> = {
-  figurine: "Figür",
-  home_decor: "Ev dekorasyonu",
-  toy: "Oyuncak",
-  jewelry: "Takı",
-  gadget: "Gadget",
-  other: "Diğer",
-};
 
 export interface EditableImage {
   id: string;
@@ -35,7 +26,7 @@ export interface EditableProduct {
   description: string;
   priceKurus: number;
   material: "resin" | "filament" | null;
-  category: string | null;
+  categoryId: string | null;
   leadTimeDays: number | null;
   status: "draft" | "pending_review" | "active" | "rejected" | "archived";
   rejectionReason: string | null;
@@ -65,7 +56,7 @@ export function EditProductClient({
   const [description, setDescription] = useState(product.description);
   const [priceTry, setPriceTry] = useState((product.priceKurus / 100).toString());
   const [material, setMaterial] = useState(product.material ?? "");
-  const [category, setCategory] = useState(product.category ?? "");
+  const [categoryId, setCategoryId] = useState<string | null>(product.categoryId);
   const [leadTimeDays, setLeadTimeDays] = useState(
     (product.leadTimeDays ?? 7).toString()
   );
@@ -99,7 +90,7 @@ export function EditProductClient({
       priceKurus,
     };
     if (material) body.material = material;
-    if (category) body.category = category;
+    if (categoryId) body.categoryId = categoryId;
     if (Number.isFinite(lead)) body.leadTimeDays = lead;
 
     setSaving(true);
@@ -399,19 +390,11 @@ export function EditProductClient({
               d["admin.products.fieldCategory" as keyof typeof d] || "Kategori"
             }
           >
-            <Select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              <option value="">
-                {d["admin.products.optionNone" as keyof typeof d] || "—"}
-              </option>
-              {PRODUCT_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORY_LABEL[c] || c}
-                </option>
-              ))}
-            </Select>
+            <CategoryPicker
+              value={categoryId}
+              onChange={setCategoryId}
+              placeholder={d["admin.products.optionNone" as keyof typeof d] || "—"}
+            />
           </FormField>
         </div>
 

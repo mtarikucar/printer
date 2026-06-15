@@ -11,7 +11,10 @@ export interface ProductListItem {
   title: string;
   priceKurus: number;
   material: string | null;
-  category: string | null;
+  // Assigned category node (nested taxonomy). Path drives root-shelf grouping +
+  // links; name is the display label. Null when uncategorised.
+  categoryPath: string | null;
+  categoryName: string | null;
   leadTimeDays: number | null;
   imageUrl: string | null;
   /** Seller company name, or null for platform-owned products. */

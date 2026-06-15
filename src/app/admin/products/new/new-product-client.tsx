@@ -5,16 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
-
-const CATEGORY_LABEL: Record<string, string> = {
-  figurine: "Figür",
-  home_decor: "Ev dekorasyonu",
-  toy: "Oyuncak",
-  jewelry: "Takı",
-  gadget: "Gadget",
-  other: "Diğer",
-};
+import { CategoryPicker } from "@/components/category-picker";
 
 export function NewProductClient({ locale: _locale }: { locale: string }) {
   void _locale;
@@ -25,7 +16,7 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
   const [description, setDescription] = useState("");
   const [priceTry, setPriceTry] = useState("");
   const [material, setMaterial] = useState("");
-  const [category, setCategory] = useState("");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [leadTimeDays, setLeadTimeDays] = useState("7");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +42,7 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
       priceKurus,
     };
     if (material) body.material = material;
-    if (category) body.category = category;
+    if (categoryId) body.categoryId = categoryId;
     if (Number.isFinite(lead)) body.leadTimeDays = lead;
 
     setSubmitting(true);
@@ -168,19 +159,11 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
               d["admin.products.fieldCategory" as keyof typeof d] || "Kategori"
             }
           >
-            <Select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              <option value="">
-                {d["admin.products.optionNone" as keyof typeof d] || "—"}
-              </option>
-              {PRODUCT_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORY_LABEL[c] || c}
-                </option>
-              ))}
-            </Select>
+            <CategoryPicker
+              value={categoryId}
+              onChange={setCategoryId}
+              placeholder={d["admin.products.optionNone" as keyof typeof d] || "—"}
+            />
           </FormField>
         </div>
 

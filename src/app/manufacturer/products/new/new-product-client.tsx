@@ -5,16 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
-
-const CATEGORY_FALLBACK: Record<string, string> = {
-  figurine: "Figürin",
-  home_decor: "Ev Dekorasyonu",
-  toy: "Oyuncak",
-  jewelry: "Takı",
-  gadget: "Aksesuar",
-  other: "Diğer",
-};
+import { CategoryPicker } from "@/components/category-picker";
 
 export function NewProductClient() {
   const d = useDictionary();
@@ -27,7 +18,7 @@ export function NewProductClient() {
   const [description, setDescription] = useState("");
   const [priceTry, setPriceTry] = useState("");
   const [material, setMaterial] = useState("");
-  const [category, setCategory] = useState("");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [leadTimeDays, setLeadTimeDays] = useState("7");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +45,7 @@ export function NewProductClient() {
           description,
           priceKurus,
           material: material || undefined,
-          category: category || undefined,
+          categoryId: categoryId || undefined,
           leadTimeDays: leadNum,
         }),
       });
@@ -164,19 +155,11 @@ export function NewProductClient() {
           </FormField>
 
           <FormField label={t("product.field.category", "Kategori")}>
-            <Select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              <option value="">
-                {t("product.category.none", "Belirtilmedi")}
-              </option>
-              {PRODUCT_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {t(`product.category.${c}`, CATEGORY_FALLBACK[c] ?? c)}
-                </option>
-              ))}
-            </Select>
+            <CategoryPicker
+              value={categoryId}
+              onChange={setCategoryId}
+              placeholder={t("product.category.none", "Belirtilmedi")}
+            />
           </FormField>
         </div>
 

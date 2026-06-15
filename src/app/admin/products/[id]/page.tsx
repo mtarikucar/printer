@@ -43,7 +43,7 @@ export default async function AdminEditProductPage({
     description: product.description,
     priceKurus: product.priceKurus,
     material: product.material,
-    category: product.category,
+    categoryId: product.categoryId,
     leadTimeDays: product.leadTimeDays,
     status: product.status,
     rejectionReason: product.rejectionReason,

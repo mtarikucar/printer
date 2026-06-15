@@ -5,15 +5,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { ProductCard, type ProductListItem } from "@/components/product-card";
-import { PRODUCT_CATEGORIES } from "@/lib/validators/product";
 
 const SORT_OPTIONS = ["newest", "price_asc", "price_desc"] as const;
 type SortKey = (typeof SORT_OPTIONS)[number];
 
+interface CategoryChip {
+  path: string;
+  name: string;
+}
+
 export function ProductGrid({
   products,
   activeCategory,
-  availableCategories,
+  categoryChips = [],
+  breadcrumb = [],
   activeSort = "newest",
   query,
   material = null,
@@ -23,7 +28,10 @@ export function ProductGrid({
 }: {
   products: ProductListItem[];
   activeCategory?: string | null;
-  availableCategories?: string[];
+  /** Children of the current node — chips to drill deeper (roots at top level). */
+  categoryChips?: CategoryChip[];
+  /** Ancestors root→…→current, for the breadcrumb trail. */
+  breadcrumb?: CategoryChip[];
   activeSort?: SortKey;
   query?: string | null;
   material?: string | null;
@@ -42,13 +50,6 @@ export function ProductGrid({
   const [maxInput, setMaxInput] = useState(priceMax != null ? String(Math.round(priceMax / 100)) : "");
 
   const all = [...products, ...extra];
-
-  const categoryLabel = (cat: string) =>
-    d[`product.category.${cat}` as keyof typeof d] || cat;
-
-  const visibleCategories = PRODUCT_CATEGORIES.filter(
-    (cat) => !availableCategories || availableCategories.includes(cat) || cat === activeCategory
-  );
 
   // URL builder preserving every active axis; `changes` override (null clears).
   const buildUrl = (changes: Record<string, string | null>) => {
@@ -113,31 +114,48 @@ export function ProductGrid({
 
   return (
     <div>
-      {/* Category filter */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <Link
-          href={buildUrl({ category: null })}
-          className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
-            !activeCategory
-              ? "bg-text-primary text-bg-base border-text-primary"
-              : "border-bg-subtle text-text-secondary hover:bg-bg-elevated"
-          }`}
-        >
-          {d["shop.filter.all" as keyof typeof d] || "Tümü"}
-        </Link>
-        {visibleCategories.map((cat) => (
+      {/* Category breadcrumb + drill-down */}
+      <div className="mb-4">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-sm">
           <Link
-            key={cat}
-            href={buildUrl({ category: cat })}
-            className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
-              activeCategory === cat
-                ? "bg-text-primary text-bg-base border-text-primary"
-                : "border-bg-subtle text-text-secondary hover:bg-bg-elevated"
-            }`}
+            href={buildUrl({ category: null })}
+            className={
+              !activeCategory
+                ? "font-semibold text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }
           >
-            {categoryLabel(cat)}
+            {d["shop.filter.all" as keyof typeof d] || "Tümü"}
           </Link>
-        ))}
+          {breadcrumb.map((b, i) => (
+            <span key={b.path} className="flex items-center gap-1.5">
+              <span className="text-text-muted">/</span>
+              {i === breadcrumb.length - 1 ? (
+                <span className="font-semibold text-text-primary">{b.name}</span>
+              ) : (
+                <Link
+                  href={buildUrl({ category: b.path })}
+                  className="text-text-muted hover:text-text-primary"
+                >
+                  {b.name}
+                </Link>
+              )}
+            </span>
+          ))}
+        </div>
+        {categoryChips.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {categoryChips.map((c) => (
+              <Link
+                key={c.path}
+                href={buildUrl({ category: c.path })}
+                className="rounded-full border border-bg-subtle px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+              >
+                {c.name}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Material + price filters */}

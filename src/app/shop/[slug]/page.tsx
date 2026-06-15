@@ -20,6 +20,7 @@ async function loadProduct(slug: string) {
     with: {
       images: true,
       manufacturer: { columns: { companyName: true } },
+      categoryNode: { columns: { path: true, name: true } },
     },
   });
 }
@@ -54,17 +55,20 @@ export default async function ProductDetailPage({
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((img) => getPublicUrl(img.storageKey));
 
-  // Cross-sell: a few more active products from the same category.
-  const relatedRows = product.category
+  // Cross-sell: a few more active products from the same category node.
+  const relatedRows = product.categoryId
     ? await db.query.products.findMany({
         where: and(
           eq(products.status, "active"),
-          eq(products.category, product.category),
+          eq(products.categoryId, product.categoryId),
           ne(products.id, product.id)
         ),
         orderBy: [desc(products.createdAt)],
         limit: 6,
-        with: { manufacturer: { columns: { companyName: true } } },
+        with: {
+          manufacturer: { columns: { companyName: true } },
+          categoryNode: { columns: { path: true, name: true } },
+        },
       })
     : [];
   const related: ProductListItem[] = relatedRows.map((p) => ({
@@ -73,7 +77,8 @@ export default async function ProductDetailPage({
     title: p.title,
     priceKurus: p.priceKurus,
     material: p.material,
-    category: p.category,
+    categoryPath: p.categoryNode?.path ?? null,
+    categoryName: p.categoryNode?.name ?? null,
     leadTimeDays: p.leadTimeDays,
     imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
     sellerName: p.manufacturer?.companyName ?? null,
@@ -113,7 +118,11 @@ export default async function ProductDetailPage({
         <ProductRow
           title={d["related.title" as keyof typeof d] || "Benzer ürünler"}
           products={related}
-          viewAllHref={`/shop?category=${product.category}`}
+          viewAllHref={
+            product.categoryNode
+              ? `/shop?category=${encodeURIComponent(product.categoryNode.path)}`
+              : "/shop"
+          }
         />
       </div>
     </main>

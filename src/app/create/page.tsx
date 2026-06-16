@@ -681,7 +681,11 @@ function CustomCreateFlow() {
       } catch {
         // sessionStorage unavailable — proceed to login anyway.
       }
-      router.push("/login?redirect=/create");
+      // Carry the flow's path in the redirect so the visitor returns to THIS
+      // flow (not the bare path-selector) after login — `CreateRouter` routes
+      // by `?path=`, and only then does this component re-mount and run the
+      // `createFlowState` restore effect above.
+      router.push(`/login?redirect=${encodeURIComponent("/create?path=photo")}`);
       return;
     }
 
@@ -1578,7 +1582,12 @@ function CustomCreateFlow() {
                     </span>
                   </label>
                   <p className="text-xs text-text-muted mt-3">
-                    <Link href="/login?redirect=/create" className="underline">
+                    <Link
+                      href={`/login?redirect=${encodeURIComponent(
+                        previewId ? `/create?previewId=${previewId}` : "/create?path=photo"
+                      )}`}
+                      className="underline"
+                    >
                       {d["create.guest.alreadyHaveAccount"]}
                     </Link>
                   </p>

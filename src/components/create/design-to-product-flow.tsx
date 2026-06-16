@@ -31,12 +31,56 @@ export function DesignToProductFlow() {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Tri-state: null while the auth check is in flight, then true/false.
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  // Generation requires login (each Meshy/Tripo call costs money). Resolve auth
+  // up front so handleGenerate can gate guests into the login round-trip instead
+  // of letting them hit a bare 401.
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          setLoggedIn(true);
+          if (data?.user?.id) setCurrentUserId(data.user.id);
+        } else {
+          setLoggedIn(false);
+        }
+      })
+      .catch(() => setLoggedIn(false));
+  }, []);
+
+  // Restore an in-progress design after the login round-trip. Gated on the auth
+  // check resolving (loggedIn !== null). Cross-user safety: an anonymous save
+  // (userId:null) is accepted by any viewer; a save tagged with a user id is
+  // only accepted by that same user.
+  useEffect(() => {
+    if (loggedIn === null) return;
+    try {
+      const saved = sessionStorage.getItem("designFlowState");
+      if (!saved) return;
+      const state = JSON.parse(saved);
+      const savedFor = state.userId ?? null;
+      const currentFor = currentUserId ?? null;
+      if (savedFor !== null && savedFor !== currentFor) {
+        sessionStorage.removeItem("designFlowState");
+        return;
+      }
+      if (state.photoKey) setPhotoKey(state.photoKey);
+      if (state.photoPreview) setPhotoPreview(state.photoPreview);
+      sessionStorage.removeItem("designFlowState");
+    } catch {
+      // Ignore parse errors
+    }
+  }, [loggedIn, currentUserId]);
 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith("image/") || file.size > UPLOAD_MAX_SIZE_BYTES) {
@@ -99,6 +143,22 @@ export function DesignToProductFlow() {
 
   const handleGenerate = async () => {
     if (!photoKey) return;
+    // Stash the uploaded design so it survives the login round-trip (the restore
+    // effect reads `designFlowState`), then send the guest to /login with a
+    // path-carrying redirect so they return to THIS flow — not the bare
+    // path-selector — and can continue with one click.
+    if (loggedIn === false) {
+      try {
+        sessionStorage.setItem(
+          "designFlowState",
+          JSON.stringify({ userId: null, photoKey, photoPreview })
+        );
+      } catch {
+        // sessionStorage unavailable — proceed to login anyway.
+      }
+      router.push(`/login?redirect=${encodeURIComponent("/create?path=design")}`);
+      return;
+    }
     setGenerating(true);
     setError(null);
     try {
@@ -217,7 +277,7 @@ export function DesignToProductFlow() {
 
             <button
               onClick={handleGenerate}
-              disabled={!photoKey || uploading || generating}
+              disabled={!photoKey || uploading || generating || loggedIn === null}
               className="mt-6 w-full rounded-full bg-green-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {generating ? "…" : d["design.generate"]}

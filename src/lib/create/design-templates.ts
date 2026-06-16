@@ -23,9 +23,7 @@ export interface DesignTemplate {
   stylize: boolean;
   /** Noun used in modifier-only prompts ("the person" / "the object"). */
   subject: "person" | "object";
-  /** Meshy pose hint. */
-  poseMode: "" | "t-pose";
-  /** Full FLUX-Kontext stylization prompt (only when stylize=true). */
+  /** Style "look" prompt (composition-agnostic; only when stylize=true). */
   prompt?: string;
   /** Selects the price table + finish set. */
   priceKind: "figure" | "object";
@@ -45,28 +43,27 @@ export const PRINT_READINESS_CLAUSE =
   "no swords, wands, staffs, or other thin handheld objects, " +
   "every part of the figure connected to the main body, designed as a sturdy collectible figurine ready for direct 3D printing.";
 
-const POSE_TPOSE =
-  "in a clear T-pose with arms extended horizontally away from the body";
-const POSE_ANIME =
-  "in a confident standing pose facing forward with arms clearly separated from the body";
+// Pose is NEVER forced to a T-pose. The figure must take the subjects' actual
+// pose, gesture and expression from the uploaded photo; the print-readiness
+// clause that follows is a soft constraint, so sturdiness is reconciled against
+// the original pose on a best-effort basis. This sentence is shared by every
+// stylized prompt and composed in buildTemplatePrompt.
+export const POSE_FROM_PHOTO =
+  "Preserve each subject's original pose, gesture, stance and facial expression " +
+  "from the photo, adapting them faithfully onto the figurine; never use a generic T-pose.";
 
+// Style "look" prompts describe ONLY the visual transformation. Who is in the
+// figure, how they're arranged, the pose, background removal and print-readiness
+// are appended by buildTemplatePrompt (scene axis + POSE_FROM_PHOTO + clause), so
+// these stay composition-agnostic and work for one person or a group alike.
 const STORYBOOK_PROMPT =
-  "Reimagine this person as an adorable storybook-animation 3D collectible figurine character. Use their general appearance as loose inspiration but fully transform them into a charming stylized animated character with cute rounded proportions, big warm expressive eyes, a sweet friendly smile, smooth softly-shaded skin, and soft studio lighting. Show the full body " +
-  POSE_TPOSE +
-  ", like a collectible toy figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects. " +
-  PRINT_READINESS_CLAUSE;
+  "Reimagine the subject(s) in this photo as adorable storybook-animation 3D collectible figurine characters. Use their general appearance as loose inspiration but fully transform them into charming stylized animated characters with cute rounded proportions, big warm expressive eyes, sweet friendly smiles, smooth softly-shaded skin, and soft studio lighting, like collectible toy figures.";
 
 const ANIME_PROMPT =
-  "Reimagine this person as a beautiful Japanese anime character figurine. Use their general appearance as loose inspiration but fully transform them into an authentic anime character with large detailed anime eyes, stylized colorful anime hair, clean bold cel-shading lines, vibrant colors, and manga-inspired proportions. Show the full body " +
-  POSE_ANIME +
-  ", like an anime figure collectible. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects. " +
-  PRINT_READINESS_CLAUSE;
+  "Reimagine the subject(s) in this photo as beautiful Japanese anime character figurines. Use their general appearance as loose inspiration but fully transform them into authentic anime characters with large detailed anime eyes, stylized colorful anime hair, clean bold cel-shading lines, vibrant colors, and manga-inspired proportions, like anime figure collectibles.";
 
 const CHIBI_PROMPT =
-  "Reimagine this person as an extremely cute chibi figurine character. Use their general appearance as loose inspiration but prioritize maximum cuteness — an oversized round head taking up nearly half the body, a tiny adorable body, big sparkling kawaii eyes, a sweet little smile, and irresistibly charming proportions. Show the full body " +
-  POSE_TPOSE +
-  ", like a chibi collectible figure. Remove the background completely and replace it with a plain white background. Only include the single character, no other objects. " +
-  PRINT_READINESS_CLAUSE;
+  "Reimagine the subject(s) in this photo as extremely cute chibi figurine characters. Use their general appearance as loose inspiration but prioritize maximum cuteness — oversized round heads taking up nearly half the body, tiny adorable bodies, big sparkling kawaii eyes, sweet little smiles, and irresistibly charming proportions, like chibi collectible figures.";
 
 export const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
   pixel_art:
@@ -81,9 +78,7 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     descKey: "create.style.realistic.desc",
     preview: "/examples/realistic.png",
     stylize: false,
-    subject: "person",
-    poseMode: "",
-    priceKind: "figure",
+    subject: "person",    priceKind: "figure",
     enabled: true,
     order: 0,
   },
@@ -93,9 +88,7 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     descKey: "create.style.storybook.desc",
     preview: "/examples/storybook.png",
     stylize: true,
-    subject: "person",
-    poseMode: "t-pose",
-    prompt: STORYBOOK_PROMPT,
+    subject: "person",    prompt: STORYBOOK_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 1,
@@ -106,9 +99,7 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     descKey: "create.style.anime.desc",
     preview: "/examples/anime.png",
     stylize: true,
-    subject: "person",
-    poseMode: "",
-    prompt: ANIME_PROMPT,
+    subject: "person",    prompt: ANIME_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 2,
@@ -119,9 +110,7 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     descKey: "create.style.chibi.desc",
     preview: "/examples/chibi.png",
     stylize: true,
-    subject: "person",
-    poseMode: "t-pose",
-    prompt: CHIBI_PROMPT,
+    subject: "person",    prompt: CHIBI_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 3,
@@ -132,9 +121,7 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     descKey: "create.style.object.desc",
     preview: "/examples/object.png",
     stylize: false,
-    subject: "object",
-    poseMode: "",
-    priceKind: "object",
+    subject: "object",    priceKind: "object",
     enabled: true,
     order: 4,
   },
@@ -156,19 +143,34 @@ export function priceKindForStyle(slug: string): "figure" | "object" {
   return getTemplate(slug)?.priceKind ?? "figure";
 }
 
-/** Meshy pose hint for a slug. */
-export function poseModeForStyle(slug: string): "" | "t-pose" {
-  return getTemplate(slug)?.poseMode ?? "";
+/**
+ * Meshy pose hint. Always "" now: the figure must take the photo's pose, and an
+ * empty pose_mode tells Meshy to keep the input image's pose rather than forcing
+ * a canned T-pose. Kept as a function so meshy.ts needs no change.
+ */
+export function poseModeForStyle(_slug: string): "" | "t-pose" {
+  return "";
+}
+
+/** Optional scene-axis inputs composed into a stylized prompt. */
+export interface ScenePromptOptions {
+  /** Stored composition fragment from the selected scene preset. */
+  sceneFragment?: string | null;
+  /** Free-text scene description; overrides sceneFragment when present. */
+  customText?: string | null;
 }
 
 /**
- * Registry-driven replacement for the old style-transfer buildPrompt. Returns
- * null when no FLUX restyle is needed (raw photo → Meshy). Output is identical
- * to the previous per-style implementation.
+ * Builds the FLUX-Kontext stylization prompt by composing the style "look" with
+ * the scene axis: [look] + [scene fragment / custom text] + POSE_FROM_PHOTO +
+ * background removal + PRINT_READINESS_CLAUSE. Returns null when no FLUX restyle
+ * is needed (raw photo → Meshy). The scene axis only applies to stylized
+ * templates; non-stylized ones (realistic/object) send the raw photo to Meshy.
  */
 export function buildTemplatePrompt(
   slug: FigurineStyle,
-  modifiers: StyleModifier[]
+  modifiers: StyleModifier[],
+  scene: ScenePromptOptions = {}
 ): string | null {
   const tpl = getTemplate(slug);
   const hasModifiers = modifiers.length > 0;
@@ -176,20 +178,26 @@ export function buildTemplatePrompt(
 
   // Non-stylized templates (realistic/object, or unknown): skip FLUX unless a
   // modifier is requested, in which case apply only the modifier to the photo.
+  // Scene is not injected here (the raw photo already carries pose + people).
   if (!tpl || !tpl.stylize) {
     if (!hasModifiers) return null;
     const subject = tpl?.subject === "object" ? "the object" : "the person";
     return `Transform this photo: ${modifierSuffix} Remove the background completely and replace it with a plain white background. Only include ${subject}, no other elements. ${PRINT_READINESS_CLAUSE}`;
   }
 
-  const basePrompt = tpl.prompt!;
-  if (!hasModifiers) return basePrompt;
+  // Scene composition: free text overrides the stored fragment. POSE_FROM_PHOTO
+  // is always present so the figure adopts the photo's pose, never a T-pose.
+  const custom = scene.customText?.trim();
+  const fragment = scene.sceneFragment?.trim();
+  const sceneClause = custom || fragment || "";
+  const modifierClause = hasModifiers ? `${modifierSuffix} ` : "";
 
-  // Insert the modifier instruction just before the background-removal sentence.
-  const bgSentence = "Remove the background completely";
-  const idx = basePrompt.indexOf(bgSentence);
-  if (idx !== -1) {
-    return basePrompt.slice(0, idx) + modifierSuffix + " " + basePrompt.slice(idx);
-  }
-  return basePrompt + " " + modifierSuffix;
+  return (
+    `${tpl.prompt!} ` +
+    `${sceneClause ? sceneClause + " " : ""}` +
+    `${modifierClause}` +
+    `${POSE_FROM_PHOTO} ` +
+    "Remove the background completely and replace it with a plain white background. " +
+    PRINT_READINESS_CLAUSE
+  );
 }

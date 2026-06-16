@@ -5,6 +5,7 @@ import {
   PRINT_READINESS_CLAUSE,
   type FigurineStyle,
   type StyleModifier,
+  type ScenePromptOptions,
 } from "../create/design-templates";
 
 // Style/template definitions now live in the design-template registry
@@ -16,9 +17,10 @@ export { buildTemplatePrompt as buildPrompt, PRINT_READINESS_CLAUSE };
 export async function applyStyleTransfer(
   imageBuffer: Buffer,
   style: FigurineStyle,
-  modifiers: StyleModifier[] = []
+  modifiers: StyleModifier[] = [],
+  scene: ScenePromptOptions = {}
 ): Promise<Buffer> {
-  const prompt = buildTemplatePrompt(style, modifiers);
+  const prompt = buildTemplatePrompt(style, modifiers, scene);
 
   if (!prompt) {
     return imageBuffer;

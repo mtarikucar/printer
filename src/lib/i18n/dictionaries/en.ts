@@ -591,6 +591,11 @@ const en = {
 
   // Create — Style
   "create.styleSelection": "Design Template",
+  "create.sceneSelection": "Scene",
+  "create.sceneSelection.hint":
+    "Who's in the figure and how they're arranged — the pose always follows your photo.",
+  "create.sceneSelection.customPlaceholder":
+    "Describe your scene, e.g. 'the three of us dancing together'",
   "create.style.realistic": "Realistic",
   "create.style.object": "3D Object",
   "create.style.storybook": "Storybook Animation",

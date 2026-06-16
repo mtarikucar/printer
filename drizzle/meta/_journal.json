@@ -148,6 +148,20 @@
       "when": 1781519768198,
       "tag": "0020_pretty_mindworm",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781634459470,
+      "tag": "0021_scene_presets",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781634472453,
+      "tag": "0022_seed_scene_presets",
+      "breakpoints": true
     }
   ]
 }

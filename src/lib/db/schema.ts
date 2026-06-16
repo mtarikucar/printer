@@ -337,6 +337,10 @@ export const previews = pgTable("previews", {
   figurineSize: figurineSizeEnum("figurine_size").notNull(),
   style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
+  // Scene preset slug (from scene_presets) + optional free-text composition.
+  // Drives the FLUX prompt's who/arrangement; never affects price or size.
+  scene: text("scene"),
+  sceneCustomText: text("scene_custom_text"),
   status: previewStatusEnum("status").notNull().default("generating"),
   glbUrl: text("glb_url"),
   glbKey: text("glb_key"),
@@ -348,6 +352,30 @@ export const previews = pgTable("previews", {
   revisionNote: text("revision_note"),
   errorMessage: text("error_message"),
   durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Admin-managed "scene" axis for the photo→3D flow. Orthogonal to the code-based
+// style/design templates: style = look (storybook/anime/chibi), scene = who is in
+// the figure and how they're arranged on the single shared base. The
+// `promptFragment` is injected into the FLUX stylization prompt; admins can add,
+// edit, reorder, enable/disable scenes without a deploy. Never affects price/size.
+export const scenePresets = pgTable("scene_presets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Stable key persisted on previews.scene; immutable once created.
+  slug: text("slug").notNull().unique(),
+  // Plain Turkish display text (the site is TR-only; matches categories/products).
+  label: text("label").notNull(),
+  description: text("description"),
+  // English composition text injected into the FLUX prompt — the variable admins
+  // tune. Empty for the free-text scene (customer text is used instead).
+  promptFragment: text("prompt_fragment").notNull().default(""),
+  // "single" | "multiple" | "any" — used by Phase 2 person-count detection to
+  // suggest/validate; ignored by Phase 1 generation.
+  peopleHint: text("people_hint").notNull().default("any"),
+  enabled: boolean("enabled").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

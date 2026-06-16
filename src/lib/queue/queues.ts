@@ -25,6 +25,11 @@ export interface PreviewGenerationJobData {
   photoKeys?: string[];
   style: string;
   modifiers?: string[];
+  // Scene axis (Phase 1). sceneFragment is the selected preset's stored
+  // composition text; sceneCustomText is the free-text scene. Both optional —
+  // absent → single-subject default behavior. Only applied to stylized styles.
+  sceneFragment?: string;
+  sceneCustomText?: string;
 }
 
 export interface EmailJobData {

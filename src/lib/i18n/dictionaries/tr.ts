@@ -593,6 +593,11 @@ const tr: Dictionary = {
 
   // Create — Style
   "create.styleSelection": "Tasarım Deseni",
+  "create.sceneSelection": "Sahne",
+  "create.sceneSelection.hint":
+    "Figürde kimler var ve nasıl dizilmiş — poz her zaman fotoğrafınızdaki gibi olur.",
+  "create.sceneSelection.customPlaceholder":
+    "Sahneyi tarif edin, örn. 'üçümüz birlikte dans ederken'",
   "create.style.realistic": "Gerçekçi",
   "create.style.object": "3D Obje",
   "create.style.storybook": "Masalsı Animasyon",

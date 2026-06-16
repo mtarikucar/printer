@@ -19,6 +19,12 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
   const { previewId, photoKey } = job.data;
   const style = (job.data.style || "realistic") as FigurineStyle;
   const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
+  // Scene axis: composition fragment + optional free text. Applied only to
+  // stylized styles inside applyStyleTransfer (passthrough for realistic/object).
+  const scene = {
+    sceneFragment: job.data.sceneFragment ?? null,
+    customText: job.data.sceneCustomText ?? null,
+  };
   // Resolve the photo set: a multi-image fusion set (object/realistic with
   // extra reference photos) or the single primary photo. The API already
   // collapses this to one key for stylized templates, so this just mirrors it.
@@ -38,7 +44,7 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
     const styled: { buffer: Buffer; url: string }[] = [];
     for (let i = 0; i < photoKeys.length; i++) {
       const imageBuffer = await getFileBuffer(photoKeys[i]);
-      const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
+      const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers, scene);
       const styledFilename = `styled-${i}-${nanoid()}.png`;
       const styledKey = await saveFile(styledBuffer, `previews/${previewId}`, styledFilename);
       styled.push({ buffer: styledBuffer, url: getPublicUrl(styledKey) });

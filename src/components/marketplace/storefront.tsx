@@ -4,8 +4,8 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { pickFigurunicaDict } from "@/components/figurunica/dict";
 import { FigFooter } from "@/components/figurunica/sections";
 import type { ProductListItem } from "@/components/product-card";
+import { HeroCreate } from "./hero-create";
 import { CategoryRibbon } from "./category-ribbon";
-import { PromoBanner } from "./promo-banner";
 import { ProductRow } from "./product-row";
 import { RecentlyViewed } from "./recently-viewed";
 import { CustomStrip } from "./custom-strip";
@@ -42,8 +42,10 @@ export function StorefrontHome({
 
   return (
     <>
+      {/* Production-led: the photo→figurine hero leads; the marketplace
+          (ribbon + shelves) follows below. */}
+      <HeroCreate />
       <CategoryRibbon categories={roots} />
-      <PromoBanner />
       <ProductRow
         title={d["store.row.new"]}
         products={newest}

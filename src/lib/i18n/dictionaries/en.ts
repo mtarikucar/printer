@@ -596,6 +596,10 @@ const en = {
     "Who's in the figure and how they're arranged — the pose always follows your photo.",
   "create.sceneSelection.customPlaceholder":
     "Describe your scene, e.g. 'the three of us dancing together'",
+  "create.scene.suggestGroup": "{count} people detected — want a group scene?",
+  "create.scene.suggestGroupCta": "Use {scene}",
+  "create.scene.warnSingle":
+    "Only one person detected, but a group scene is selected.",
   "create.style.realistic": "Realistic",
   "create.style.object": "3D Object",
   "create.style.storybook": "Storybook Animation",

@@ -598,6 +598,9 @@ const tr: Dictionary = {
     "Figürde kimler var ve nasıl dizilmiş — poz her zaman fotoğrafınızdaki gibi olur.",
   "create.sceneSelection.customPlaceholder":
     "Sahneyi tarif edin, örn. 'üçümüz birlikte dans ederken'",
+  "create.scene.suggestGroup": "{count} kişi algılandı — grup sahnesi seçmek ister misin?",
+  "create.scene.suggestGroupCta": "{scene} olarak ayarla",
+  "create.scene.warnSingle": "Tek kişi algılandı, ama bir grup sahnesi seçili.",
   "create.style.realistic": "Gerçekçi",
   "create.style.object": "3D Obje",
   "create.style.storybook": "Masalsı Animasyon",

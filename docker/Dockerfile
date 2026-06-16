@@ -43,6 +43,19 @@ RUN --mount=type=cache,target=/tmp/hf-cache \
     done; \
     cp -a /app/.cache/huggingface/. /tmp/hf-cache/ || true
 
+# ── Model: pre-download DETR (person counter for scene suggestion). Non-fatal:
+#    if the download hiccups the build still succeeds and the app downloads it
+#    on first use (containers have network); the feature is best-effort anyway. ─
+RUN --mount=type=cache,target=/tmp/hf-cache \
+    cp -a /tmp/hf-cache/. /app/.cache/huggingface/ 2>/dev/null || true && \
+    node --input-type=module -e " \
+      import { env, pipeline } from '@huggingface/transformers'; \
+      env.cacheDir = '/app/.cache/huggingface'; \
+      await pipeline('object-detection', 'Xenova/detr-resnet-50'); \
+      console.log('DETR cached'); \
+    " || echo "DETR pre-download failed (non-fatal, will fetch at runtime)"; \
+    cp -a /app/.cache/huggingface/. /tmp/hf-cache/ || true
+
 # ── Builder: build Next.js standalone output ─────────────────────────
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules

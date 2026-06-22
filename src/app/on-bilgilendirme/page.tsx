@@ -37,7 +37,7 @@ export default async function OnBilgilendirmePage() {
                 <li><strong>Unvan:</strong> Figurunica</li>
                 <li><strong>Web sitesi:</strong> figurunica.com</li>
                 <li><strong>E-posta:</strong> info@figurunica.com</li>
-                <li><strong>Telefon:</strong> +90 546 678 04 95</li>
+                <li><strong>Telefon:</strong> +90 850 840 73 03</li>
                 <li><strong>Adres:</strong> Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 
@@ -145,7 +145,7 @@ export default async function OnBilgilendirmePage() {
                 <li><strong>Name:</strong> Figurunica</li>
                 <li><strong>Website:</strong> figurunica.com</li>
                 <li><strong>Email:</strong> info@figurunica.com</li>
-                <li><strong>Phone:</strong> +90 546 678 04 95</li>
+                <li><strong>Phone:</strong> +90 850 840 73 03</li>
                 <li><strong>Address:</strong> Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 

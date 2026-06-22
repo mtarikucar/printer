@@ -126,7 +126,7 @@ export default async function IadePage() {
               <p>İade, değişim veya hasar konusundaki her türlü soru ve talebiniz için bize ulaşın:</p>
               <ul>
                 <li>E-posta: info@figurunica.com (lütfen sipariş numaranızı belirtin)</li>
-                <li>Telefon: +90 546 678 04 95</li>
+                <li>Telefon: +90 850 840 73 03</li>
               </ul>
             </>
           ) : (
@@ -235,7 +235,7 @@ export default async function IadePage() {
               <p>For any questions or requests regarding returns, exchanges, or damage, please reach out to us:</p>
               <ul>
                 <li>Email: info@figurunica.com (please include your order number)</li>
-                <li>Phone: +90 546 678 04 95</li>
+                <li>Phone: +90 850 840 73 03</li>
               </ul>
             </>
           )}

@@ -27,7 +27,7 @@ export default async function KargoPage() {
               <p>
                 Bu Kargo ve Teslimat Politikası, Figurunica (&quot;Şirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafından
                 hazırlanan kişiye özel figürinlerin üretim ve teslimat sürecini açıklamaktadır. Sorularınız için
-                info@figurunica.com adresinden veya +90 546 678 04 95 numaralı telefondan bize ulaşabilirsiniz.
+                info@figurunica.com adresinden veya +90 850 840 73 03 numaralı telefondan bize ulaşabilirsiniz.
               </p>
 
               <h2>1. Kargo Firması ve Ücret</h2>
@@ -95,7 +95,7 @@ export default async function KargoPage() {
               <p>
                 This Shipping & Delivery Policy explains the production and delivery process for custom figurines
                 prepared by Figurunica (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;). For any questions, you can reach us at
-                info@figurunica.com or by phone at +90 546 678 04 95.
+                info@figurunica.com or by phone at +90 850 840 73 03.
               </p>
 
               <h2>1. Carrier and Shipping Cost</h2>

@@ -44,7 +44,7 @@ export default async function CommercialMessageConsentPage() {
               <ul>
                 <li>Unvan: Figurunica</li>
                 <li>E-posta: info@figurunica.com</li>
-                <li>Telefon: +90 546 678 04 95</li>
+                <li>Telefon: +90 850 840 73 03</li>
                 <li>Adres: Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 
@@ -99,7 +99,7 @@ export default async function CommercialMessageConsentPage() {
               <ul>
                 <li>Name: Figurunica</li>
                 <li>Email: info@figurunica.com</li>
-                <li>Phone: +90 546 678 04 95</li>
+                <li>Phone: +90 850 840 73 03</li>
                 <li>Address: Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
               </ul>
 

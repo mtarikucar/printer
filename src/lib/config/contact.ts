@@ -1,5 +1,5 @@
-export const CONTACT_PHONE_DISPLAY = "+90 546 678 04 95";
-export const CONTACT_PHONE_HREF = "tel:+905466780495";
+export const CONTACT_PHONE_DISPLAY = "+90 850 840 73 03";
+export const CONTACT_PHONE_HREF = "tel:+908508407303";
 
 export const CONTACT_EMAIL = "info@figurunica.com";
 export const CONTACT_EMAIL_HREF = `mailto:${CONTACT_EMAIL}`;
@@ -22,8 +22,8 @@ export const CONTACT_MAPS_URL =
 // WhatsApp (customer support + click-to-order). Digits only, E.164 without the
 // leading "+", as wa.me expects. Single source of truth — change it here. Plain
 // constants (no env) so this module stays usable from client components.
-export const WHATSAPP_NUMBER = "905466780495";
-export const WHATSAPP_DISPLAY = "+90 546 678 04 95";
+export const WHATSAPP_NUMBER = "908508407303";
+export const WHATSAPP_DISPLAY = "+90 850 840 73 03";
 
 /**
  * Build a click-to-chat WhatsApp deep link. Works in app + browser. Pass an

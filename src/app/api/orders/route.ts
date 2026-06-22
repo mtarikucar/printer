@@ -24,6 +24,7 @@ import {
 import { priceKindForStyle, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { resolveOrderLines, type ResolvedOrderLine } from "@/lib/services/product-options";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { resolveOrCreateGuestUser } from "@/lib/services/guest-user";
 import { validateGiftCard } from "@/lib/services/gift-card";
 import {
   buildDraftReference,
@@ -268,73 +269,27 @@ export async function POST(request: NextRequest) {
           { status: 401 }
         );
       }
-      const email = common.guestEmail.trim().toLowerCase();
-      // Security (review C1): refuse to attach a guest order to an
-      // existing user that has a real password OR is no longer flagged
-      // as a guest. Otherwise an attacker who knows a victim's email
-      // can mutate the victim's order history AND trigger the post-
-      // purchase "claim your account" email, which contains a working
-      // password-reset link to a real account.
-      //
-      // For existing GUEST rows (passwordHash=null, isGuest=true) we
-      // do still attach — that's a returning guest placing a second
-      // order before claiming. Their claim token rotates per order;
-      // we accept the trade-off that the latest order's link is the
-      // valid one (this is also the natural mental model for the
-      // recipient).
-      const existing = await db.query.users.findFirst({
-        where: eq(users.email, email),
+      // Guest identity resolution (returning-guest attach + new-guest create +
+      // the email_registered security guard + race handling) lives in one place
+      // so the admin "create order on behalf of a customer" path reuses it.
+      const guest = await resolveOrCreateGuestUser({
+        email: common.guestEmail,
+        name: common.guestName,
+        phone: common.shippingAddress.telefon,
+        marketingConsent: common.marketingConsent ?? false,
       });
-      if (existing && (existing.passwordHash || !existing.isGuest)) {
+      if (!guest.ok) {
         return NextResponse.json(
           {
-            error: d["api.auth.emailRegistered"] ?? "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
+            error:
+              d["api.auth.emailRegistered"] ??
+              "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
             code: "email_registered",
           },
           { status: 409 }
         );
       }
-      if (existing) {
-        user = existing;
-      } else {
-        // ON CONFLICT (email) DO NOTHING handles the race between two
-        // simultaneous guest checkouts with the same email (review C2):
-        // both miss findFirst, both attempt insert; the loser gets back
-        // an empty array and we re-select.
-        const inserted = await db
-          .insert(users)
-          .values({
-            email,
-            fullName: common.guestName,
-            phone: common.shippingAddress.telefon,
-            passwordHash: null,
-            isGuest: true,
-            marketingConsent: common.marketingConsent ?? false,
-            marketingConsentAt: common.marketingConsent ? new Date() : null,
-          })
-          .onConflictDoNothing({ target: users.email })
-          .returning();
-        if (inserted[0]) {
-          user = inserted[0];
-        } else {
-          // Concurrent insert won the race. Re-fetch and re-validate
-          // (the row we now see might be a password-holding user if a
-          // legitimate registration completed in between).
-          const raced = await db.query.users.findFirst({
-            where: eq(users.email, email),
-          });
-          if (!raced || raced.passwordHash || !raced.isGuest) {
-            return NextResponse.json(
-              {
-                error: d["api.auth.emailRegistered"] ?? "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
-                code: "email_registered",
-              },
-              { status: 409 }
-            );
-          }
-          user = raced;
-        }
-      }
+      user = guest.user;
     }
 
     if (previewId && typeof previewId !== "string") {

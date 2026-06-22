@@ -8,6 +8,7 @@ import { CartProvider } from "@/lib/cart/cart-context";
 import { GrainOverlay } from "@/components/grain-overlay";
 import { DebugConsole } from "@/components/debug-console";
 import { Analytics } from "@/components/analytics/analytics";
+import { WhatsAppFab } from "@/components/whatsapp/whatsapp-fab";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -82,6 +83,7 @@ export default async function RootLayout({
         <LocaleProvider locale={locale}>
           <CartProvider>
             {children}
+            <WhatsAppFab />
             <GrainOverlay />
             <DebugConsole />
             <Analytics />

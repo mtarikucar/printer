@@ -18,3 +18,32 @@ export const CONTACT_MAPS_URL =
   encodeURIComponent(
     "Şehit Osman Avcı Mahallesi Akın 688 Sitesi B32 Etimesgut Ankara"
   );
+
+// WhatsApp (customer support + click-to-order). Digits only, E.164 without the
+// leading "+", as wa.me expects. Single source of truth — change it here. Plain
+// constants (no env) so this module stays usable from client components.
+export const WHATSAPP_NUMBER = "905466780495";
+export const WHATSAPP_DISPLAY = "+90 546 678 04 95";
+
+/**
+ * Build a click-to-chat WhatsApp deep link. Works in app + browser. Pass an
+ * optional prefilled message (it is URL-encoded for you).
+ */
+export function buildWhatsAppUrl(message?: string): string {
+  const base = `https://wa.me/${WHATSAPP_NUMBER}`;
+  return message ? `${base}?text=${encodeURIComponent(message)}` : base;
+}
+
+/**
+ * Normalize a free-text Turkish phone number into wa.me digits (E.164 without
+ * the leading "+"): strips non-digits, drops a leading domestic 0, and ensures
+ * the 90 country code. Used to build a click-to-chat link to a CUSTOMER's number
+ * (e.g. admin sending a payment link).
+ */
+export function toWhatsAppDigits(phone: string): string {
+  let dd = phone.replace(/\D/g, "");
+  if (dd.startsWith("00")) dd = dd.slice(2); // international "00" call prefix
+  if (dd.startsWith("0")) dd = dd.slice(1); // domestic trunk 0
+  if (!dd.startsWith("90")) dd = "90" + dd;
+  return dd;
+}

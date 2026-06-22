@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { desc, eq, sql, and, count, inArray } from "drizzle-orm";
@@ -84,9 +85,17 @@ export default async function AdminOrdersPage({
 
   return (
     <div className="p-4 sm:p-8">
-      <h1 className="text-2xl font-bold text-gray-900">
-        {d["admin.orders.title"]}
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-gray-900">
+          {d["admin.orders.title"]}
+        </h1>
+        <Link
+          href="/admin/orders/new"
+          className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1ebe5d]"
+        >
+          + WhatsApp siparişi oluştur
+        </Link>
+      </div>
 
       <OrdersClient
         orders={allOrders.map((o) => ({

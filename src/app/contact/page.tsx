@@ -9,7 +9,10 @@ import {
   CONTACT_EMAIL_HREF,
   CONTACT_ADDRESS_LINES,
   CONTACT_MAPS_URL,
+  WHATSAPP_DISPLAY,
+  buildWhatsAppUrl,
 } from "@/lib/config/contact";
+import { WhatsAppIcon } from "@/components/whatsapp/whatsapp-button";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -96,6 +99,32 @@ export default async function ContactPage() {
             </a>
             <p className="text-sm text-text-muted mt-2">
               {d["contact.email.note"]}
+            </p>
+          </div>
+
+          {/* WhatsApp */}
+          <div className="rounded-2xl border border-bg-subtle bg-bg-elevated/40 p-6 md:p-7 transition-colors hover:border-[#25D366]/50 md:col-span-2">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="inline-flex w-10 h-10 rounded-xl bg-[#25D366]/10 items-center justify-center text-[#25D366]">
+                <WhatsAppIcon className="w-5 h-5" />
+              </span>
+              <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+                WhatsApp
+              </span>
+            </div>
+            <a
+              href={buildWhatsAppUrl(
+                "Merhaba! Figürünica hakkında bilgi almak / sipariş vermek istiyorum."
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1ebe5d]"
+            >
+              <WhatsAppIcon className="w-5 h-5" />
+              {`WhatsApp'tan yazın`} · {WHATSAPP_DISPLAY}
+            </a>
+            <p className="text-sm text-text-muted mt-3">
+              {`Hızlıca yazın, sipariş verin veya sorularınızı sorun.`}
             </p>
           </div>
 

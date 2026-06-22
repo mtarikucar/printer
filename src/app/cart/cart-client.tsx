@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
 import { useCart } from "@/lib/cart/cart-context";
+import { WhatsAppButton } from "@/components/whatsapp/whatsapp-button";
 
 interface CartItem {
   id: string;
@@ -145,6 +146,14 @@ export function CartClient() {
             >
               {d["cart.checkout"]}
             </Link>
+            <WhatsAppButton
+              message={`Merhaba! Sepetimdeki ürünleri WhatsApp'tan sipariş etmek istiyorum:\n${items
+                .map((it) => `• ${it.title} × ${it.quantity}`)
+                .join("\n")}\n\nToplam: ${formatCurrency(total, locale)}`}
+              label="WhatsApp'tan Sipariş Ver"
+              variant="outline"
+              className="mt-3 w-full"
+            />
           </div>
         </div>
       )}

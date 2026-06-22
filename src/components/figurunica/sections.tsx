@@ -11,6 +11,8 @@ import {
   CONTACT_EMAIL_HREF,
   CONTACT_ADDRESS_FULL,
   CONTACT_MAPS_URL,
+  WHATSAPP_DISPLAY,
+  buildWhatsAppUrl,
 } from "@/lib/config/contact";
 
 const s = (key: string) => (styles as Record<string, string>)[key] ?? "";
@@ -588,6 +590,17 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
             {d["landing.fig.footer.emailLabel"]}
           </span>
           {CONTACT_EMAIL}
+        </a>
+        <a
+          href={buildWhatsAppUrl(
+            "Merhaba! Figürünica hakkında bilgi almak / sipariş vermek istiyorum."
+          )}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={s("footer-link")}
+        >
+          <span className={s("footer-label")}>WhatsApp</span>
+          {WHATSAPP_DISPLAY}
         </a>
         <Link href="/contact" className={s("footer-link")}>
           {d["landing.fig.footer.contactLink"]}

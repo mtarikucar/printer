@@ -11,6 +11,7 @@ import {
 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { AddToCartButton } from "@/components/cart/add-to-cart-button";
+import { WhatsAppButton } from "@/components/whatsapp/whatsapp-button";
 import { track } from "@/lib/analytics/client";
 import type {
   AddonConfig,
@@ -40,6 +41,10 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
 
   const [activeImage, setActiveImage] = useState(0);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  // Captured after mount so the WhatsApp prefill can include the product's URL
+  // (window is unavailable during SSR — the message degrades to title-only).
+  const [pageUrl, setPageUrl] = useState("");
+  useEffect(() => setPageUrl(window.location.href), []);
 
   // Option selection (one choice per group, defaulting to each group's default)
   // + add-ons (multi-select).
@@ -412,6 +417,14 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
             >
               {t("shop.buy", "Satın Al")}
             </button>
+            <WhatsAppButton
+              message={`Merhaba! Şu ürünü WhatsApp'tan sipariş etmek istiyorum: ${product.title}${
+                pageUrl ? ` — ${pageUrl}` : ""
+              }`}
+              label={t("shop.whatsappOrder", "WhatsApp'tan Sipariş Ver")}
+              variant="outline"
+              className="w-full"
+            />
           </div>
         ) : (
           <form onSubmit={handleBuy} className="mt-8 space-y-4">

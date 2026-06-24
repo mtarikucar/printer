@@ -4,7 +4,8 @@ import { getRedisConnection } from "../connection";
 import { getMeshProcessingQueue, type AiGenerationJobData } from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
 import { saveFile, getPublicUrl, fileExists } from "../../services/storage";
-import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../../services/style-transfer";
+import { meshyImageToImage, DEFAULT_IMAGE_MODEL } from "../../services/meshy-image";
+import { buildTemplatePrompt, getTemplate, type FigurineStyle, type StyleModifier } from "../../create/design-templates";
 import { db } from "../../db";
 import { orders, generationAttempts } from "../../db/schema";
 import { getEmailQueue } from "../queues";
@@ -107,12 +108,20 @@ async function processJob(job: Job<AiGenerationJobData>) {
     .returning();
 
   try {
-    job.log(`Starting Meshy generation (style: ${style}, modifiers: ${modifiers.join(",") || "none"})...`);
-    // Apply style transfer before sending to Meshy
-    const imageBuffer = await downloadFile(imageUrl);
-    const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers);
-    const styledBase64 = `data:image/png;base64,${styledBuffer.toString("base64")}`;
-    const result = await generateWithMeshy(styledBase64, style);
+    job.log(`Starting Meshy generation (style: ${style})...`);
+    // Stylized templates: restyle the photo via Meshy image-to-image (nano-banana)
+    // first; non-stylized go straight to 3D. (Order-time path with no preview —
+    // the /create flow uses the richer 2-variation Stage A/B pipeline instead.)
+    const tpl = getTemplate(style);
+    let meshyInput: string;
+    if (tpl?.stylize) {
+      const prompt = buildTemplatePrompt(style, modifiers, {})!;
+      const styled = await meshyImageToImage([imageUrl], prompt, DEFAULT_IMAGE_MODEL);
+      meshyInput = styled.imageUrl;
+    } else {
+      meshyInput = imageUrl;
+    }
+    const result = await generateWithMeshy(meshyInput, style);
 
     await db
       .update(generationAttempts)

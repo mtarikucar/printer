@@ -218,7 +218,7 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    await getPreviewGenerationQueue().add("generate-preview", {
+    await getPreviewGenerationQueue().add("generate-variations", {
       previewId: preview.id,
       imageUrl: photoUrl,
       photoKey: validated.photoKey,

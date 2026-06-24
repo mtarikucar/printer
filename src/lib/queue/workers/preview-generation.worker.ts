@@ -1,13 +1,31 @@
 import { Worker, Job } from "bullmq";
 import { and, eq } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
-import type { PreviewGenerationJobData } from "../queues";
+import {
+  getPreviewGenerationQueue,
+  type PreviewGenerationJobData,
+  type PreviewBuildJobData,
+} from "../queues";
 import { generateWithMeshy } from "../../services/meshy";
+import {
+  meshyImageToImage,
+  backViewPrompt,
+  VARIATION_NUDGES,
+  DEFAULT_IMAGE_MODEL,
+} from "../../services/meshy-image";
 import { saveFile, getPublicUrl, getFileBuffer } from "../../services/storage";
-import { applyStyleTransfer, type FigurineStyle, type StyleModifier } from "../../services/style-transfer";
+import {
+  buildTemplatePrompt,
+  getTemplate,
+  type FigurineStyle,
+  type StyleModifier,
+} from "../../create/design-templates";
 import { db } from "../../db";
 import { previews } from "../../db/schema";
 import { nanoid } from "nanoid";
+
+// Number of 2D variations to generate in Stage A.
+const VARIATION_COUNT = 2;
 
 async function downloadFile(url: string): Promise<Buffer> {
   const res = await fetch(url);
@@ -15,67 +33,132 @@ async function downloadFile(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function processJob(job: Job<PreviewGenerationJobData>) {
+// Meshy fetches public URLs in production; locally it can't reach localhost, so
+// send the bytes as a base64 data URI instead.
+function toMeshyInput(buffer: Buffer, url: string): string {
+  return url.includes("localhost") || url.includes("127.0.0.1")
+    ? `data:image/png;base64,${buffer.toString("base64")}`
+    : url;
+}
+
+// ── Stage A: generate 2 stylized 2D variations (or, for non-stylized templates,
+// skip straight to the 3D build with the raw photo). ──────────────────────────
+async function generateVariations(job: Job<PreviewGenerationJobData>) {
   const { previewId, photoKey } = job.data;
   const style = (job.data.style || "realistic") as FigurineStyle;
   const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
-  // Scene axis: composition fragment + optional free text. Applied only to
-  // stylized styles inside applyStyleTransfer (passthrough for realistic/object).
   const scene = {
     sceneFragment: job.data.sceneFragment ?? null,
     customText: job.data.sceneCustomText ?? null,
   };
-  // Resolve the photo set: a multi-image fusion set (object/realistic with
-  // extra reference photos) or the single primary photo. The API already
-  // collapses this to one key for stylized templates, so this just mirrors it.
   const photoKeys =
     job.data.photoKeys && job.data.photoKeys.length > 0
       ? job.data.photoKeys
       : [photoKey];
+  const tpl = getTemplate(style);
 
   try {
-    console.log(`[preview ${previewId}] Style: ${style}, modifiers: ${JSON.stringify(modifiers)}, photos: ${photoKeys.length}, job data:`, JSON.stringify(job.data));
-    job.log(`Starting Meshy preview generation (style: ${style}, modifiers: ${modifiers.join(",") || "none"}, photos: ${photoKeys.length})...`);
+    job.log(`Stage A (style: ${style}, stylize: ${!!tpl?.stylize})`);
 
-    // Read + style-transfer each photo. For non-stylized templates with no
-    // modifiers applyStyleTransfer is a passthrough (raw buffer), so a
-    // multi-photo object/realistic request incurs no extra FLUX cost. The
-    // styled images are saved so Meshy can fetch them by URL in production.
-    const styled: { buffer: Buffer; url: string }[] = [];
-    for (let i = 0; i < photoKeys.length; i++) {
-      const imageBuffer = await getFileBuffer(photoKeys[i]);
-      const styledBuffer = await applyStyleTransfer(imageBuffer, style, modifiers, scene);
-      const styledFilename = `styled-${i}-${nanoid()}.png`;
-      const styledKey = await saveFile(styledBuffer, `previews/${previewId}`, styledFilename);
-      styled.push({ buffer: styledBuffer, url: getPublicUrl(styledKey) });
+    // Non-stylized (realistic/object/unknown): no restyle, so there is nothing to
+    // choose between — go straight to Stage B with the raw photo(s).
+    if (!tpl || !tpl.stylize) {
+      await db
+        .update(previews)
+        .set({ status: "building", updatedAt: new Date() })
+        .where(and(eq(previews.id, previewId), eq(previews.status, "generating")));
+      await getPreviewGenerationQueue().add("build-from-selection", {
+        previewId,
+        style,
+        rawPhotoKeys: photoKeys,
+        modifiers,
+      } satisfies PreviewBuildJobData);
+      return;
     }
-    job.log(`Styled ${styled.length} image(s): ${styled.map((s) => s.url).join(", ")}`);
 
-    // In production, send public URLs to Meshy; locally use base64 (Meshy can't
-    // reach localhost). Multiple photos → image_urls[] (multi-image-to-3d);
-    // single photo → scalar image_url (image-to-3d).
-    const toMeshyInput = (s: { buffer: Buffer; url: string }) =>
-      s.url.includes("localhost") || s.url.includes("127.0.0.1")
-        ? `data:image/png;base64,${s.buffer.toString("base64")}`
-        : s.url;
-    const meshyInput =
-      styled.length > 1 ? styled.map(toMeshyInput) : toMeshyInput(styled[0]);
-    const result = await generateWithMeshy(meshyInput, style);
+    // Stylized: run the PRIMARY photo through image-to-image N times, nudging the
+    // prompt each time so the variations differ (the API has no seed/n param).
+    const basePrompt = buildTemplatePrompt(style, modifiers, scene)!;
+    const photoBuf = await getFileBuffer(photoKey);
+    const ref = toMeshyInput(photoBuf, getPublicUrl(photoKey));
 
-    // Download GLB and save to local storage
+    const urls: string[] = [];
+    for (let i = 0; i < VARIATION_COUNT; i++) {
+      const nudge = VARIATION_NUDGES[i % VARIATION_NUDGES.length];
+      const r = await meshyImageToImage([ref], `${basePrompt} ${nudge}`, DEFAULT_IMAGE_MODEL);
+      const buf = await downloadFile(r.imageUrl);
+      const key = await saveFile(buf, `previews/${previewId}`, `var-${i}-${nanoid()}.png`);
+      urls.push(getPublicUrl(key));
+      job.log(`variation ${i} ok (credits ${r.consumedCredits})`);
+    }
+
+    const [flipped] = await db
+      .update(previews)
+      .set({ status: "styled", styledImageUrls: urls, updatedAt: new Date() })
+      .where(and(eq(previews.id, previewId), eq(previews.status, "generating")))
+      .returning({ id: previews.id });
+    if (!flipped) job.log("preview no longer 'generating' — skipping update");
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "unknown";
+    job.log(`Stage A failed: ${msg}`);
+    await db
+      .update(previews)
+      .set({ status: "failed", errorMessage: msg, updatedAt: new Date() })
+      .where(eq(previews.id, previewId));
+    throw new Error(`Stage A failed: ${msg}`);
+  }
+}
+
+// ── Stage B: back-view (stylized only) + multi-image-to-3d → ready. ───────────
+async function buildFromSelection(job: Job<PreviewBuildJobData>) {
+  const { previewId, selectedUrl, rawPhotoKeys } = job.data;
+  const style = (job.data.style || "realistic") as FigurineStyle;
+
+  try {
+    let meshyInputs: string | string[];
+
+    if (selectedUrl) {
+      // Stylized path: generate the back view of the SELECTED character, then
+      // feed [front, back] to multi-image-to-3d for real rear coverage.
+      const frontBuf = await downloadFile(selectedUrl);
+      const frontInput = toMeshyInput(frontBuf, selectedUrl);
+
+      let backInput: string | null = null;
+      try {
+        const back = await meshyImageToImage([frontInput], backViewPrompt(), DEFAULT_IMAGE_MODEL);
+        const backBuf = await downloadFile(back.imageUrl);
+        const backKey = await saveFile(backBuf, `previews/${previewId}`, `back-${nanoid()}.png`);
+        const backUrl = getPublicUrl(backKey);
+        backInput = toMeshyInput(backBuf, backUrl);
+        await db.update(previews).set({ backImageUrl: backUrl }).where(eq(previews.id, previewId));
+        job.log(`back-view ok (credits ${back.consumedCredits})`);
+      } catch (e) {
+        job.log(
+          `back-view failed (non-fatal, falling back to single image): ${e instanceof Error ? e.message : "?"}`,
+        );
+      }
+
+      meshyInputs = backInput ? [frontInput, backInput] : frontInput;
+    } else {
+      // Non-stylized path: raw photo(s) straight to 3D (multi-image fusion when
+      // the customer added extra reference angles).
+      const keys = rawPhotoKeys && rawPhotoKeys.length > 0 ? rawPhotoKeys : [];
+      const inputs = await Promise.all(
+        keys.map(async (k) => toMeshyInput(await getFileBuffer(k), getPublicUrl(k))),
+      );
+      meshyInputs = inputs.length > 1 ? inputs : inputs[0];
+    }
+
+    const result = await generateWithMeshy(meshyInputs, style);
+
     const glbBuffer = await downloadFile(result.glbUrl);
-    const glbFilename = `${nanoid()}.glb`;
-    const glbKey = await saveFile(glbBuffer, `previews/${previewId}`, glbFilename);
+    const glbKey = await saveFile(glbBuffer, `previews/${previewId}`, `${nanoid()}.glb`);
     const localGlbUrl = getPublicUrl(glbKey);
 
-    // Best-effort: persist Meshy's OBJ + STL exports alongside the GLB so the
-    // customer can download the preview in a print/edit-friendly format. These
-    // are non-critical (the GLB is what the 3D viewer needs), so a download
-    // failure just leaves that format unavailable rather than failing the
-    // whole preview.
+    // Best-effort OBJ/STL persistence (non-critical — the GLB drives the viewer).
     const persistOptional = async (
       url: string | null,
-      ext: "obj" | "stl"
+      ext: "obj" | "stl",
     ): Promise<{ url: string; key: string } | null> => {
       if (!url) return null;
       try {
@@ -83,17 +166,13 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
         const key = await saveFile(buffer, `previews/${previewId}`, `${nanoid()}.${ext}`);
         return { url: getPublicUrl(key), key };
       } catch (err) {
-        job.log(`${ext.toUpperCase()} download/save failed (non-fatal): ${err instanceof Error ? err.message : "unknown"}`);
+        job.log(`${ext.toUpperCase()} save failed (non-fatal): ${err instanceof Error ? err.message : "?"}`);
         return null;
       }
     };
     const obj = await persistOptional(result.objUrl, "obj");
     const stl = await persistOptional(result.stlUrl, "stl");
 
-    // Guarded transition: only flip to "ready" when we still own the record
-    // (status === "generating") AND we actually have a glbUrl. Without this
-    // guard a worker crash mid-update could leave status="ready" but
-    // glbUrl=null, which the 3D viewer can't handle.
     const [flipped] = await db
       .update(previews)
       .set({
@@ -108,53 +187,42 @@ async function processJob(job: Job<PreviewGenerationJobData>) {
         durationMs: result.durationMs,
         updatedAt: new Date(),
       })
-      .where(
-        and(eq(previews.id, previewId), eq(previews.status, "generating"))
-      )
+      .where(and(eq(previews.id, previewId), eq(previews.status, "building")))
       .returning({ id: previews.id });
-
-    if (!flipped) {
-      job.log(
-        "Preview status was already terminal (canceled/failed/ready) — skipping update"
-      );
-      return;
-    }
-
-    job.log("Preview generation completed successfully");
+    if (!flipped) job.log("preview no longer 'building' — skipping update");
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "unknown";
-    job.log(`Preview generation failed: ${msg}`);
-
+    job.log(`Stage B failed: ${msg}`);
     await db
       .update(previews)
-      .set({
-        status: "failed",
-        errorMessage: msg,
-        updatedAt: new Date(),
-      })
+      .set({ status: "failed", errorMessage: msg, updatedAt: new Date() })
       .where(eq(previews.id, previewId));
-
-    throw new Error(`Preview generation failed: ${msg}`);
+    throw new Error(`Stage B failed: ${msg}`);
   }
 }
 
 export function startPreviewGenerationWorker() {
-  const worker = new Worker<PreviewGenerationJobData>(
+  const worker = new Worker<PreviewGenerationJobData | PreviewBuildJobData>(
     "preview-generation",
-    processJob,
+    async (job) => {
+      if (job.name === "build-from-selection") {
+        return buildFromSelection(job as Job<PreviewBuildJobData>);
+      }
+      return generateVariations(job as Job<PreviewGenerationJobData>);
+    },
     {
       connection: getRedisConnection(),
       concurrency: 3,
       limiter: { max: 5, duration: 60000 },
-    }
+    },
   );
 
   worker.on("completed", (job) => {
-    console.info(`Preview generation completed for preview ${job.data.previewId}`);
+    console.info(`Preview job '${job.name}' completed for preview ${job.data.previewId}`);
   });
 
   worker.on("failed", (job, error) => {
-    console.error(`Preview generation failed for preview ${job?.data.previewId}:`, error.message);
+    console.error(`Preview job failed for preview ${job?.data.previewId}:`, error.message);
   });
 
   return worker;

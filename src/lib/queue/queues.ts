@@ -32,6 +32,19 @@ export interface PreviewGenerationJobData {
   sceneCustomText?: string;
 }
 
+// Stage B — 3D build after the customer picks a variation. Stylized: selectedUrl
+// (worker generates a back view, then multi-image-to-3d on [front, back]).
+// Non-stylized (realistic/object): rawPhotoKeys (raw photos straight to 3D, no
+// back-view). Both run on the same "preview-generation" queue, job name
+// "build-from-selection".
+export interface PreviewBuildJobData {
+  previewId: string;
+  style: string;
+  selectedUrl?: string;
+  rawPhotoKeys?: string[];
+  modifiers?: string[];
+}
+
 export interface EmailJobData {
   type:
     | "order_confirmation"

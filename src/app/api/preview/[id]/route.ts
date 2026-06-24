@@ -55,6 +55,11 @@ export async function GET(
     status: preview.status,
     // GLB only — see note above; STL/OBJ are gated behind a paid order.
     glbUrl: normalizeFileUrl(preview.glbUrl),
+    // Image-first flow: the 2D variations to choose from (status="styled") and
+    // the chosen one. Normalized so the host is correct behind the proxy.
+    styledImageUrls: (preview.styledImageUrls ?? []).map((u) => normalizeFileUrl(u)),
+    selectedStyledImageUrl: normalizeFileUrl(preview.selectedStyledImageUrl),
+    variationRounds: preview.variationRounds ?? 1,
     errorMessage: preview.errorMessage,
     createdAt: preview.createdAt,
     photoKey: preview.photoKey,

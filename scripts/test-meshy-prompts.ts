@@ -1,4 +1,4 @@
-import { buildPrompt, PRINT_READINESS_CLAUSE, type FigurineStyle, type StyleModifier } from "../src/lib/services/style-transfer";
+import { buildTemplatePrompt as buildPrompt, PRINT_READINESS_CLAUSE, type FigurineStyle, type StyleModifier } from "../src/lib/create/design-templates";
 import { buildMeshyBody, poseModeForStyle } from "../src/lib/services/meshy";
 
 const STYLES: FigurineStyle[] = ["realistic", "storybook", "anime", "chibi", "object"];

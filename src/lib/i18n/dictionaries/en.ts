@@ -610,6 +610,10 @@ const en = {
   "create.style.storybook.desc": "Storybook animation style",
   "create.style.anime.desc": "Japanese anime style",
   "create.style.chibi.desc": "Cute, big-headed style",
+  "create.style.vinyl": "Vinyl Figure",
+  "create.style.vinyl.desc": "Funko-style collectible vinyl figure",
+  "create.style.claymation": "Claymation",
+  "create.style.claymation.desc": "Handmade stop-motion clay figure",
 
   // Create — Modifiers
   "create.modifiers": "Style Effects",

@@ -65,6 +65,12 @@ const ANIME_PROMPT =
 const CHIBI_PROMPT =
   "Reimagine the subject(s) in this photo as extremely cute chibi figurine characters. Use their general appearance as loose inspiration but prioritize maximum cuteness — oversized round heads taking up nearly half the body, tiny adorable bodies, big sparkling kawaii eyes, sweet little smiles, and irresistibly charming proportions, like chibi collectible figures.";
 
+const VINYL_PROMPT =
+  "Reimagine the subject(s) in this photo as designer vinyl collectible figures (Funko-pop style). Use their general appearance as loose inspiration but transform them into stylized vinyl toys: an oversized rounded head on a small simplified body, smooth matte vinyl surface, minimal facial detail with large solid dark eyes, and simplified clothing in flat bold colors, like boxed collectible vinyl figures.";
+
+const CLAYMATION_PROMPT =
+  "Reimagine the subject(s) in this photo as handmade claymation stop-motion characters. Use their general appearance as loose inspiration but transform them into charming clay figures with a soft matte modeling-clay surface, gentle fingerprint texture, slightly imperfect handcrafted proportions, warm rounded features and chunky simple shapes, like stop-motion animation puppets.";
+
 export const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
   pixel_art:
     "Render in retro 16-bit pixel art style with visible blocky pixels, limited color palette, and nostalgic video game aesthetic. Keep the form blocky but solid with thick voxel-style limbs and no thin pixel-wide details.",
@@ -116,6 +122,28 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     order: 3,
   },
   {
+    slug: "vinyl",
+    labelKey: "create.style.vinyl",
+    descKey: "create.style.vinyl.desc",
+    preview: "/examples/vinyl.png",
+    stylize: true,
+    subject: "person",    prompt: VINYL_PROMPT,
+    priceKind: "figure",
+    enabled: true,
+    order: 4,
+  },
+  {
+    slug: "claymation",
+    labelKey: "create.style.claymation",
+    descKey: "create.style.claymation.desc",
+    preview: "/examples/claymation.png",
+    stylize: true,
+    subject: "person",    prompt: CLAYMATION_PROMPT,
+    priceKind: "figure",
+    enabled: true,
+    order: 5,
+  },
+  {
     slug: "object",
     labelKey: "create.style.object",
     descKey: "create.style.object.desc",
@@ -123,7 +151,7 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     stylize: false,
     subject: "object",    priceKind: "object",
     enabled: true,
-    order: 4,
+    order: 6,
   },
 ];
 

@@ -611,6 +611,10 @@ const tr: Dictionary = {
   "create.style.storybook.desc": "Masalsı animasyon stili",
   "create.style.anime.desc": "Japon anime stili",
   "create.style.chibi.desc": "Sevimli, büyük başlı stil",
+  "create.style.vinyl": "Vinil Figür",
+  "create.style.vinyl.desc": "Funko tarzı koleksiyon vinil figür",
+  "create.style.claymation": "Kil Animasyon",
+  "create.style.claymation.desc": "El yapımı stop-motion kil figür",
 
   // Create — Modifiers
   "create.modifiers": "Stil Efektleri",

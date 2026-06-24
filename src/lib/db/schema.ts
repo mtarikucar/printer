@@ -191,6 +191,8 @@ export const figurineFinishEnum = pgEnum("figurine_finish", [
 
 export const previewStatusEnum = pgEnum("preview_status", [
   "generating",
+  "styled", // 2D variations ready, awaiting customer selection
+  "building", // selection made, generating back-view + 3D
   "ready",
   "failed",
   "approved",
@@ -349,6 +351,14 @@ export const previews = pgTable("previews", {
   stlUrl: text("stl_url"),
   stlKey: text("stl_key"),
   meshyTaskId: text("meshy_task_id"),
+  // Image-first flow: 2D variation URLs (Meshy image-to-image outputs, persisted
+  // to ./uploads), the customer's chosen front image, and the auto-generated
+  // back view fed into multi-image-to-3d alongside it.
+  styledImageUrls: jsonb("styled_image_urls").$type<string[]>(),
+  selectedStyledImageUrl: text("selected_styled_image_url"),
+  backImageUrl: text("back_image_url"),
+  // How many times Stage A (variation generation) ran — bounds regenerate cost.
+  variationRounds: integer("variation_rounds").notNull().default(1),
   revisionNote: text("revision_note"),
   errorMessage: text("error_message"),
   durationMs: integer("duration_ms"),

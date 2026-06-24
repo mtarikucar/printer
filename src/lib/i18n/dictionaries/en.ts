@@ -737,6 +737,12 @@ const en = {
   // Create — Preview wow
   "create.preview.wow": "Your figurine is ready!",
   "create.preview.wow.sub": "Inspect it from every angle before approving.",
+  // Create — 2D variation selection (image-first flow)
+  "create.preview.chooseVariation": "Choose the look you like",
+  "create.preview.chooseVariationSub": "Pick one of the two — your figurine will be built from it.",
+  "create.preview.building": "Building your model…",
+  "create.preview.regenerate": "Generate new options",
+  "create.preview.regenerateCap": "You've reached the regenerate limit.",
   "create.preview.sizeLabel": "Size",
   "create.preview.priceLabel": "Price",
 

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { ModelViewer } from "@/components/model-viewer";
+import { VariationPicker } from "@/components/create/variation-picker";
 import { SiteHeader } from "@/components/site-header";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
@@ -125,6 +126,11 @@ function CustomCreateFlow() {
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
   const [previewGlbUrl, setPreviewGlbUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Image-first flow: the 2D variations to choose from, how many rounds we've
+  // run (regenerate cap), and a busy flag while selecting/regenerating.
+  const [styledImageUrls, setStyledImageUrls] = useState<string[]>([]);
+  const [variationRounds, setVariationRounds] = useState(1);
+  const [selecting, setSelecting] = useState(false);
 
   // Funnel: custom "product" viewed = the AI preview is ready (step 2).
   const viewItemFired = useRef(false);
@@ -588,7 +594,12 @@ function CustomCreateFlow() {
         const data = await res.json();
         setPreviewStatus(data.status);
 
-        if (data.status === "ready") {
+        if (data.status === "styled") {
+          setStyledImageUrls(data.styledImageUrls || []);
+          setVariationRounds(data.variationRounds || 1);
+          // Pause polling while the customer chooses — no 5-min timeout pressure.
+          if (pollRef.current) clearInterval(pollRef.current);
+        } else if (data.status === "ready") {
           setPreviewGlbUrl(data.glbUrl);
           setStep(2);
           if (pollRef.current) clearInterval(pollRef.current);
@@ -819,8 +830,50 @@ function CustomCreateFlow() {
     setPhotoKey(null);
     setSelectedFile(null);
     setIsEditing(false);
+    setStyledImageUrls([]);
+    setSelecting(false);
     // Clear previewId from URL to prevent useEffect from restoring stale preview
     router.replace("/create");
+  };
+
+  // Image-first flow: customer picked a 2D variation → kick off Stage B (back
+  // view + 3D) and resume polling for the building → ready transition. On
+  // failure we keep the picker so they can retry (non-destructive).
+  const handleSelectVariation = async (url: string) => {
+    if (!previewId || selecting) return;
+    setSelecting(true);
+    try {
+      const res = await fetch(`/api/preview/${previewId}/select`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) return;
+      setPreviewStatus("building");
+      startPolling(previewId);
+    } catch {
+      // network blip — keep the picker
+    } finally {
+      setSelecting(false);
+    }
+  };
+
+  // Customer disliked both options → re-run Stage A. On 429 (cap) or error we
+  // keep the current variations (the button is already disabled at the cap).
+  const handleRegenerate = async () => {
+    if (!previewId || selecting) return;
+    setSelecting(true);
+    try {
+      const res = await fetch(`/api/preview/${previewId}/regenerate`, { method: "POST" });
+      if (!res.ok) return;
+      setStyledImageUrls([]);
+      setPreviewStatus("generating");
+      startPolling(previewId);
+    } catch {
+      // keep current variations
+    } finally {
+      setSelecting(false);
+    }
   };
 
   const handleApprove = () => {
@@ -1488,7 +1541,22 @@ function CustomCreateFlow() {
         )}
 
         {/* Step 1: Generating (Loading) */}
-        {step === 1 && (
+        {step === 1 && previewStatus === "styled" && !previewError && (
+          <div className="animate-fade-in flex flex-col items-center justify-center py-8">
+            <VariationPicker
+              urls={styledImageUrls}
+              onSelect={handleSelectVariation}
+              onRegenerate={handleRegenerate}
+              canRegenerate={variationRounds < 4}
+              busy={selecting}
+              title={d["create.preview.chooseVariation"]}
+              subtitle={d["create.preview.chooseVariationSub"]}
+              regenerateLabel={d["create.preview.regenerate"]}
+            />
+          </div>
+        )}
+
+        {step === 1 && !(previewStatus === "styled" && !previewError) && (
           <div className="animate-fade-in flex flex-col items-center justify-center py-8">
             <Card elevated className="overflow-hidden max-w-md mx-auto w-full">
               {previewError ? (

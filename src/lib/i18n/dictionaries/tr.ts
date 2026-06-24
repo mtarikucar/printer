@@ -738,6 +738,12 @@ const tr: Dictionary = {
   // Create — Preview wow
   "create.preview.wow": "Figürününüz hazır!",
   "create.preview.wow.sub": "Onaylamadan önce her açıdan inceleyin.",
+  // Create — 2D varyasyon seçimi (önce-2D akışı)
+  "create.preview.chooseVariation": "Beğendiğin görünümü seç",
+  "create.preview.chooseVariationSub": "İki seçenekten birini seç — figürün buna göre üretilecek.",
+  "create.preview.building": "Modelin hazırlanıyor…",
+  "create.preview.regenerate": "Yeni seçenekler üret",
+  "create.preview.regenerateCap": "Yeniden üretme sınırına ulaştın.",
   "create.preview.sizeLabel": "Boyut",
   "create.preview.priceLabel": "Fiyat",
 

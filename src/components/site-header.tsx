@@ -95,6 +95,12 @@ export function SiteHeader() {
       ],
     },
     {
+      key: "products",
+      label: d["nav.products"],
+      href: "/urunler",
+      items: [] as { href: string; label: string }[],
+    },
+    {
       key: "how",
       label: d["nav.howItWorks"],
       href: "/nasil-calisir",

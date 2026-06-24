@@ -169,6 +169,13 @@
       "when": 1782311802369,
       "tag": "0023_image_first_variations",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1782315068966,
+      "tag": "0024_creative_lab",
+      "breakpoints": true
     }
   ]
 }

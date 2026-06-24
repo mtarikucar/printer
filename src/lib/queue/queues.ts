@@ -45,6 +45,13 @@ export interface PreviewBuildJobData {
   modifiers?: string[];
 }
 
+export interface CreativeLabJobData {
+  jobId: string;
+  product: "keychain" | "fridge_magnet" | "lamp";
+  photoKey: string;
+  imageUrl: string;
+}
+
 export interface EmailJobData {
   type:
     | "order_confirmation"
@@ -119,6 +126,7 @@ let meshProcessingQueue: Queue | null = null;
 let emailQueue: Queue | null = null;
 let previewGenerationQueue: Queue | null = null;
 let previewCleanupQueue: Queue | null = null;
+let creativeLabQueue: Queue | null = null;
 let paymentDeadlineQueue: Queue | null = null;
 let dekontOcrQueue: Queue | null = null;
 let scoringEvaluationsCleanupQueue: Queue | null = null;
@@ -181,6 +189,21 @@ export function getPreviewCleanupQueue(): Queue {
     });
   }
   return previewCleanupQueue;
+}
+
+export function getCreativeLabQueue(): Queue {
+  if (!creativeLabQueue) {
+    creativeLabQueue = new Queue("creative-lab", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 30000 },
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return creativeLabQueue;
 }
 
 export function getEmailQueue(): Queue {

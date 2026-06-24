@@ -121,6 +121,7 @@ const tr: Dictionary = {
   "nav.group.shop": "3D Shop",
   "nav.market": "Pazaryeri",
   "nav.custom": "Özel Üret",
+  "nav.products": "Ürünler",
   "nav.howItWorks": "Nasıl Çalışır",
   "nav.shop": "Mağaza",
 

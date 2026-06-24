@@ -120,6 +120,7 @@ const en = {
   "nav.group.shop": "3D Shop",
   "nav.market": "Marketplace",
   "nav.custom": "Custom",
+  "nav.products": "Products",
   "nav.howItWorks": "How it works",
 
   // ─── Marketplace / Shop ──────────────────────────────────────

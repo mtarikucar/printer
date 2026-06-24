@@ -51,7 +51,6 @@ export async function POST(
     photoKeys: preview.photoKeys ?? undefined,
     style: preview.style,
     modifiers: preview.modifiers ?? [],
-    sceneCustomText: preview.sceneCustomText ?? undefined,
   } satisfies PreviewGenerationJobData);
 
   return NextResponse.json({ status: "generating" });

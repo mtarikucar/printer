@@ -16,7 +16,7 @@ const photoPath = process.argv[2] ?? "public/maskot-face.png";
 const dataUri = `data:image/png;base64,${readFileSync(photoPath).toString("base64")}`;
 
 async function main() {
-  const basePrompt = buildTemplatePrompt("storybook", [], {})!;
+  const basePrompt = buildTemplatePrompt("storybook", [])!;
   console.log("photo:", photoPath, "model:", DEFAULT_IMAGE_MODEL);
 
   // Stage A — 2 stylized variations

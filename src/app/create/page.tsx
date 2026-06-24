@@ -66,20 +66,6 @@ function CustomCreateFlow() {
   const [selectedFinish, setSelectedFinish] = useState<string>("paintable_kit");
   const [selectedStyle, setSelectedStyle] = useState<string>("storybook");
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
-  // Scene axis (admin-managed). Default "single" reproduces the historical
-  // single-person behavior. The "custom" scene reveals a free-text field.
-  type ScenePresetOption = {
-    slug: string;
-    label: string;
-    description: string | null;
-    peopleHint: string;
-  };
-  const [scenePresets, setScenePresets] = useState<ScenePresetOption[]>([]);
-  const [selectedScene, setSelectedScene] = useState<string>("single");
-  const [sceneCustomText, setSceneCustomText] = useState<string>("");
-  // Best-effort person count (Phase 2). null = unknown/not run; drives the
-  // scene suggestion + mismatch warning, never blocks generation.
-  const [detectedPersonCount, setDetectedPersonCount] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,26 +197,6 @@ function CustomCreateFlow() {
   // tables + finish sets (Faz 1). These helpers pick the right one; the server
   // re-derives the trusted amount on submit via itemPriceKurus.
   const isObjectStyle = priceKindForStyle(selectedStyle) === "object";
-  // Scene only affects the FLUX restyle, so the picker is shown only for stylized
-  // templates (storybook/anime/chibi); realistic/object send the raw photo.
-  const styleIsStylized =
-    DESIGN_TEMPLATES.find((t) => t.slug === selectedStyle)?.stylize ?? false;
-  // Scene suggestion (Phase 2). Suggest a group scene when ≥2 people are detected
-  // but a single-person scene is selected; warn when 1 person is detected against
-  // a group scene. Prefer "family" as the suggested group, else any multi scene.
-  const selectedScenePeopleHint = scenePresets.find(
-    (s) => s.slug === selectedScene
-  )?.peopleHint;
-  const suggestedGroupScene =
-    scenePresets.find((s) => s.slug === "family") ??
-    scenePresets.find((s) => s.peopleHint === "multiple");
-  const showGroupSuggestion =
-    detectedPersonCount !== null &&
-    detectedPersonCount >= 2 &&
-    selectedScenePeopleHint === "single" &&
-    !!suggestedGroupScene;
-  const showSingleWarning =
-    detectedPersonCount === 1 && selectedScenePeopleHint === "multiple";
   // Multi-image fusion is offered only for non-stylized templates (object +
   // realistic). Stylized templates restyle each photo independently via FLUX,
   // so extra angles add nothing — the multi-upload UI is hidden there.
@@ -334,42 +300,6 @@ function CustomCreateFlow() {
       })
       .catch(() => setLoggedIn(false));
   }, []);
-
-  // Scene presets (admin-managed). Failure leaves the list empty → the picker
-  // hides and generation falls back to the default single-subject behavior.
-  useEffect(() => {
-    fetch("/api/scene-presets")
-      .then((res) => (res.ok ? res.json() : { scenePresets: [] }))
-      .then((data) => setScenePresets(data.scenePresets ?? []))
-      .catch(() => setScenePresets([]));
-  }, []);
-
-  // Person-count detection (Phase 2): once a photo is uploaded, count people so
-  // we can SUGGEST a matching scene. Best-effort — any failure leaves the count
-  // null and the suggestion simply doesn't appear. Re-runs when the photo key
-  // changes; cleared when the photo is removed.
-  useEffect(() => {
-    if (!photoKey) {
-      setDetectedPersonCount(null);
-      return;
-    }
-    let cancelled = false;
-    fetch("/api/photos/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ photoKey }),
-    })
-      .then((res) => (res.ok ? res.json() : { personCount: null }))
-      .then((data) => {
-        if (!cancelled) setDetectedPersonCount(data.personCount ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setDetectedPersonCount(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [photoKey]);
 
   const sendOtp = async () => {
     setOtpBusy(true);
@@ -498,8 +428,6 @@ function CustomCreateFlow() {
       if (state.selectedMaterial) setSelectedMaterial(state.selectedMaterial);
       if (state.selectedStyle) setSelectedStyle(state.selectedStyle);
       if (state.selectedModifiers) setSelectedModifiers(state.selectedModifiers);
-      if (state.selectedScene) setSelectedScene(state.selectedScene);
-      if (typeof state.sceneCustomText === "string") setSceneCustomText(state.sceneCustomText);
       if (state.previewId) setPreviewId(state.previewId);
       if (state.previewGlbUrl) setPreviewGlbUrl(state.previewGlbUrl);
       if (state.step !== undefined) setStep(state.step as Step);
@@ -758,8 +686,6 @@ function CustomCreateFlow() {
             selectedMaterial,
             selectedStyle,
             selectedModifiers,
-            selectedScene,
-            sceneCustomText,
             step: 0,
           })
         );
@@ -793,9 +719,6 @@ function CustomCreateFlow() {
           figurineSize: selectedSize,
           style: selectedStyle,
           modifiers: selectedModifiers,
-          scene: selectedScene,
-          sceneCustomText:
-            selectedScene === "custom" ? sceneCustomText.trim() : undefined,
           turnstileToken: generateToken,
         }),
       });
@@ -1236,74 +1159,6 @@ function CustomCreateFlow() {
                 </div>
               </div>
 
-              {/* Scene Selection (admin-managed). Only meaningful for stylized
-                  templates, where the FLUX restyle composes who is in the figure
-                  and how they're arranged on the single shared base. */}
-              {styleIsStylized && scenePresets.length > 0 && (
-                <div className="animate-fade-in-up delay-250">
-                  <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.sceneSelection"]}</h2>
-                  <p className="text-sm text-text-muted mb-4">{d["create.sceneSelection.hint"]}</p>
-
-                  {showGroupSuggestion && suggestedGroupScene && (
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-green-300/50 bg-green-50/60 px-4 py-3">
-                      <span className="text-sm text-green-800">
-                        {d["create.scene.suggestGroup"].replace(
-                          "{count}",
-                          String(detectedPersonCount)
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedScene(suggestedGroupScene.slug)}
-                        className="shrink-0 rounded-full bg-green-600 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-700"
-                      >
-                        {d["create.scene.suggestGroupCta"].replace(
-                          "{scene}",
-                          suggestedGroupScene.label
-                        )}
-                      </button>
-                    </div>
-                  )}
-                  {showSingleWarning && (
-                    <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
-                      <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      {d["create.scene.warnSingle"]}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {scenePresets.map((sc) => (
-                      <button
-                        key={sc.slug}
-                        type="button"
-                        onClick={() => setSelectedScene(sc.slug)}
-                        className={`text-left rounded-xl px-4 py-3 transition-all ${
-                          selectedScene === sc.slug
-                            ? "bg-green-500 text-white"
-                            : "bg-bg-surface border border-bg-subtle hover:border-green-500/30"
-                        }`}
-                      >
-                        <span className={`text-sm font-semibold ${selectedScene === sc.slug ? "text-white" : "text-text-primary"}`}>{sc.label}</span>
-                        {sc.description && (
-                          <span className={`block text-xs mt-0.5 ${selectedScene === sc.slug ? "text-white/80" : "text-text-muted"}`}>{sc.description}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  {selectedScene === "custom" && (
-                    <textarea
-                      value={sceneCustomText}
-                      onChange={(e) => setSceneCustomText(e.target.value)}
-                      maxLength={500}
-                      placeholder={d["create.sceneSelection.customPlaceholder"]}
-                      className="mt-3 w-full rounded-xl border border-bg-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20"
-                      rows={3}
-                    />
-                  )}
-                </div>
-              )}
 
               {/* Material Selection */}
               <div className="animate-fade-in-up delay-250">

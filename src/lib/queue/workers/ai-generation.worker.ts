@@ -115,7 +115,7 @@ async function processJob(job: Job<AiGenerationJobData>) {
     const tpl = getTemplate(style);
     let meshyInput: string;
     if (tpl?.stylize) {
-      const prompt = buildTemplatePrompt(style, modifiers, {})!;
+      const prompt = buildTemplatePrompt(style, modifiers)!;
       const styled = await meshyImageToImage([imageUrl], prompt, DEFAULT_IMAGE_MODEL);
       meshyInput = styled.imageUrl;
     } else {

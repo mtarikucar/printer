@@ -54,7 +54,7 @@ export const POSE_FROM_PHOTO =
 
 // Style "look" prompts describe ONLY the visual transformation. Who is in the
 // figure, how they're arranged, the pose, background removal and print-readiness
-// are appended by buildTemplatePrompt (scene axis + POSE_FROM_PHOTO + clause), so
+// are appended by buildTemplatePrompt (POSE_FROM_PHOTO + print-readiness clause), so
 // these stay composition-agnostic and work for one person or a group alike.
 const STORYBOOK_PROMPT =
   "Reimagine the subject(s) in this photo as adorable storybook-animation 3D collectible figurine characters. Use their general appearance as loose inspiration but fully transform them into charming stylized animated characters with cute rounded proportions, big warm expressive eyes, sweet friendly smiles, smooth softly-shaded skin, and soft studio lighting, like collectible toy figures.";
@@ -180,49 +180,33 @@ export function poseModeForStyle(_slug: string): "" | "t-pose" {
   return "";
 }
 
-/** Optional scene-axis inputs composed into a stylized prompt. */
-export interface ScenePromptOptions {
-  /** Stored composition fragment from the selected scene preset. */
-  sceneFragment?: string | null;
-  /** Free-text scene description; overrides sceneFragment when present. */
-  customText?: string | null;
-}
-
 /**
- * Builds the FLUX-Kontext stylization prompt by composing the style "look" with
- * the scene axis: [look] + [scene fragment / custom text] + POSE_FROM_PHOTO +
- * background removal + PRINT_READINESS_CLAUSE. Returns null when no FLUX restyle
- * is needed (raw photo → Meshy). The scene axis only applies to stylized
- * templates; non-stylized ones (realistic/object) send the raw photo to Meshy.
+ * Builds the stylization prompt: [look] + [modifier] + POSE_FROM_PHOTO +
+ * background removal + PRINT_READINESS_CLAUSE. Returns null when no restyle is
+ * needed (raw photo → Meshy). The composition (who is in the figure, how they're
+ * arranged) comes straight from the customer's photo via Meshy image-to-image,
+ * so there is no separate "scene" axis.
  */
 export function buildTemplatePrompt(
   slug: FigurineStyle,
   modifiers: StyleModifier[],
-  scene: ScenePromptOptions = {}
 ): string | null {
   const tpl = getTemplate(slug);
   const hasModifiers = modifiers.length > 0;
   const modifierSuffix = modifiers.map((m) => MODIFIER_PROMPTS[m]).join(" ");
 
-  // Non-stylized templates (realistic/object, or unknown): skip FLUX unless a
+  // Non-stylized templates (realistic/object, or unknown): skip restyle unless a
   // modifier is requested, in which case apply only the modifier to the photo.
-  // Scene is not injected here (the raw photo already carries pose + people).
   if (!tpl || !tpl.stylize) {
     if (!hasModifiers) return null;
     const subject = tpl?.subject === "object" ? "the object" : "the person";
     return `Transform this photo: ${modifierSuffix} Remove the background completely and replace it with a plain white background. Only include ${subject}, no other elements. ${PRINT_READINESS_CLAUSE}`;
   }
 
-  // Scene composition: free text overrides the stored fragment. POSE_FROM_PHOTO
-  // is always present so the figure adopts the photo's pose, never a T-pose.
-  const custom = scene.customText?.trim();
-  const fragment = scene.sceneFragment?.trim();
-  const sceneClause = custom || fragment || "";
   const modifierClause = hasModifiers ? `${modifierSuffix} ` : "";
 
   return (
     `${tpl.prompt!} ` +
-    `${sceneClause ? sceneClause + " " : ""}` +
     `${modifierClause}` +
     `${POSE_FROM_PHOTO} ` +
     "Remove the background completely and replace it with a plain white background. " +

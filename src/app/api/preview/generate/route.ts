@@ -17,11 +17,6 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, getTemplate } from "@/lib/create/design-templates";
-import {
-  getScenePreset,
-  DEFAULT_SCENE_SLUG,
-  CUSTOM_SCENE_SLUG,
-} from "@/lib/services/scene-presets";
 import { eq, count } from "drizzle-orm";
 
 const generateSchema = z.object({
@@ -38,10 +33,6 @@ const generateSchema = z.object({
     .refine(isValidTemplateSlug, "invalid template")
     .default(DEFAULT_TEMPLATE_SLUG),
   modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
-  // Scene axis (admin-managed). Slug validated against the DB below; free-text
-  // composition only used when the selected scene is the "custom" preset.
-  scene: z.string().min(1).optional(),
-  sceneCustomText: z.string().trim().max(500).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -101,27 +92,6 @@ export async function POST(request: NextRequest) {
         );
       }
     }
-
-    // Resolve the scene axis (DB-backed, admin-managed). An explicitly requested
-    // slug must exist and be enabled; an absent scene falls back to the default
-    // and, if that row isn't seeded yet, simply yields no scene clause (the old
-    // single-subject behavior). The free-text composition is only honored for
-    // the "custom" preset. Scene drives the FLUX prompt only — never price/size.
-    const sceneSlug = validated.scene?.trim() || DEFAULT_SCENE_SLUG;
-    const preset = await getScenePreset(sceneSlug);
-    if (validated.scene && (!preset || !preset.enabled)) {
-      return NextResponse.json(
-        { error: d["api.order.createFailed"], code: "invalid_scene" },
-        { status: 400 }
-      );
-    }
-    const isCustomScene = preset?.slug === CUSTOM_SCENE_SLUG;
-    const sceneCustomText = isCustomScene
-      ? validated.sceneCustomText?.trim() || undefined
-      : undefined;
-    const sceneFragment = !isCustomScene
-      ? preset?.promptFragment?.trim() || undefined
-      : undefined;
 
     const photoUrl = getPublicUrl(validated.photoKey);
 
@@ -212,8 +182,6 @@ export async function POST(request: NextRequest) {
         figurineSize: validated.figurineSize,
         style: validated.style,
         modifiers: validated.modifiers.length > 0 ? validated.modifiers : null,
-        scene: preset?.slug ?? null,
-        sceneCustomText: sceneCustomText ?? null,
         status: "generating",
       })
       .returning();
@@ -225,8 +193,6 @@ export async function POST(request: NextRequest) {
       photoKeys: photoKeys.length > 1 ? photoKeys : undefined,
       style: validated.style,
       modifiers: validated.modifiers,
-      sceneFragment,
-      sceneCustomText,
     });
 
     return NextResponse.json({ previewId: preview.id });

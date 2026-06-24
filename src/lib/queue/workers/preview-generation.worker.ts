@@ -47,10 +47,6 @@ async function generateVariations(job: Job<PreviewGenerationJobData>) {
   const { previewId, photoKey } = job.data;
   const style = (job.data.style || "realistic") as FigurineStyle;
   const modifiers = (job.data.modifiers ?? []) as StyleModifier[];
-  const scene = {
-    sceneFragment: job.data.sceneFragment ?? null,
-    customText: job.data.sceneCustomText ?? null,
-  };
   const photoKeys =
     job.data.photoKeys && job.data.photoKeys.length > 0
       ? job.data.photoKeys
@@ -78,7 +74,7 @@ async function generateVariations(job: Job<PreviewGenerationJobData>) {
 
     // Stylized: run the PRIMARY photo through image-to-image N times, nudging the
     // prompt each time so the variations differ (the API has no seed/n param).
-    const basePrompt = buildTemplatePrompt(style, modifiers, scene)!;
+    const basePrompt = buildTemplatePrompt(style, modifiers)!;
     const photoBuf = await getFileBuffer(photoKey);
     const ref = toMeshyInput(photoBuf, getPublicUrl(photoKey));
 

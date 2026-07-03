@@ -41,6 +41,15 @@ const nextConfig: NextConfig = {
   turbopack: {},
   async redirects() {
     return [
+      // Canonical host: 301 www → apex so the two hostnames don't split into
+      // duplicate URLs in search. Belt-and-suspenders with the self-referencing
+      // canonical tag (which already points every page at the apex domain).
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.figurunica.com" }],
+        destination: "https://figurunica.com/:path*",
+        permanent: true,
+      },
       // Gallery queue list folded into /admin/gallery?tab=queue (the [id] detail
       // route is unaffected — this exact source does not match nested paths).
       {

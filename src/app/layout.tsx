@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Inter, Inter_Tight, Space_Grotesk, JetBrains_Mono, DM_Serif_Display, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { getLocale } from "@/lib/i18n/get-locale";
+import { isNoindexPath } from "@/lib/seo";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
 import { CartProvider } from "@/lib/cart/cart-context";
@@ -48,14 +50,28 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
   const d = getDictionary(locale);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://figurunica.com";
+
+  // The middleware forwards the request path as `x-pathname`. We derive a
+  // self-referencing canonical from it (query string dropped, resolved against
+  // the apex `metadataBase`) so faceted `/shop?category=…` and `?utm=…`
+  // tracking variants — and any `www.` host — all consolidate onto one
+  // indexable URL. Private/transactional routes flip to `noindex` here too, so
+  // even the client-component pages (login, account, …) that can't export their
+  // own metadata are covered from this single place. Child pages don't set
+  // `alternates`/`robots`, so they inherit both.
+  const pathname = (await headers()).get("x-pathname") || "/";
+  const noindex = isNoindexPath(pathname);
+
   return {
     metadataBase: new URL(appUrl),
     title: d["meta.title"],
     description: d["meta.description"],
+    alternates: { canonical: pathname },
+    robots: noindex ? { index: false, follow: false } : undefined,
     openGraph: {
       title: d["meta.title"],
       description: d["meta.description"],
-      url: appUrl,
+      url: `${appUrl}${pathname}`,
       siteName: "Figurunica",
       locale: locale === "tr" ? "tr_TR" : "en_US",
       type: "website",

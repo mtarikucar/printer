@@ -1,6 +1,4 @@
 import "dotenv/config";
-import { startAiGenerationWorker } from "../src/lib/queue/workers/ai-generation.worker";
-import { startMeshProcessingWorker } from "../src/lib/queue/workers/mesh-processing.worker";
 import { startEmailWorker } from "../src/lib/queue/workers/email.worker";
 import { startPreviewGenerationWorker } from "../src/lib/queue/workers/preview-generation.worker";
 import { startPreviewCleanupWorker } from "../src/lib/queue/workers/preview-cleanup.worker";
@@ -18,8 +16,6 @@ import {
 
 console.log("Starting BullMQ workers...");
 
-const aiWorker = startAiGenerationWorker();
-const meshWorker = startMeshProcessingWorker();
 const emailWorker = startEmailWorker();
 const previewWorker = startPreviewGenerationWorker();
 const cleanupWorker = startPreviewCleanupWorker();
@@ -53,8 +49,6 @@ getAnalyticsCleanupQueue().upsertJobScheduler(
 );
 
 console.log("All workers started:");
-console.log("  - ai-generation (concurrency: 3)");
-console.log("  - mesh-processing (concurrency: 2)");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
 console.log("  - preview-cleanup (repeatable: every 1h)");
@@ -68,8 +62,6 @@ console.log("  - analytics-cleanup (repeatable: every 24h)");
 async function shutdown() {
   console.log("Shutting down workers...");
   await Promise.all([
-    aiWorker.close(),
-    meshWorker.close(),
     emailWorker.close(),
     previewWorker.close(),
     cleanupWorker.close(),

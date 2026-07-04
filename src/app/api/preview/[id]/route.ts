@@ -39,11 +39,6 @@ export async function GET(
 
       return NextResponse.json({
         status: "failed",
-        // Only the GLB (the 3D preview viewer) is exposed. The print-ready
-        // STL/OBJ are the PAID deliverable and must never be handed out here —
-        // they're sold via the `digital_files` add-on and served through the
-        // entitlement-gated /api/customer/orders/.../download endpoint.
-        glbUrl: normalizeFileUrl(preview.glbUrl),
         errorMessage: timedOutMessage,
         createdAt: preview.createdAt,
         photoKey: preview.photoKey,
@@ -53,10 +48,10 @@ export async function GET(
 
   return NextResponse.json({
     status: preview.status,
-    // GLB only — see note above; STL/OBJ are gated behind a paid order.
-    glbUrl: normalizeFileUrl(preview.glbUrl),
-    // Image-first flow: the 2D variations to choose from (status="styled") and
-    // the chosen one. Normalized so the host is correct behind the proxy.
+    // Image-first flow: the fal.ai variations to choose from (status="styled")
+    // and the approved one (status="approved"). Normalized so the host is
+    // correct behind the proxy. There is no 3D artifact in the customer flow —
+    // the admin produces + uploads the model after payment.
     styledImageUrls: (preview.styledImageUrls ?? []).map((u) => normalizeFileUrl(u)),
     selectedStyledImageUrl: normalizeFileUrl(preview.selectedStyledImageUrl),
     variationRounds: preview.variationRounds ?? 1,

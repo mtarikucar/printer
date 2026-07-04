@@ -3,15 +3,13 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { previews } from "@/lib/db/schema";
-import {
-  getPreviewGenerationQueue,
-  type PreviewBuildJobData,
-} from "@/lib/queue/queues";
 
 const bodySchema = z.object({ url: z.string().min(1) });
 
-// Customer picked one of the 2D variations → kick off Stage B (back-view + 3D).
-// The preview id is an unguessable UUID, so no extra auth (matches the poll GET).
+// Customer picked + APPROVED one of the fal.ai image variations. This is the
+// image the order is placed against; there is no automatic 3D — the admin
+// sculpts and uploads the model after payment. The preview id is an unguessable
+// UUID, so no extra auth (matches the poll GET).
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -36,17 +34,10 @@ export async function POST(
     .update(previews)
     .set({
       selectedStyledImageUrl: url,
-      status: "building",
+      status: "approved",
       updatedAt: new Date(),
     })
     .where(eq(previews.id, id));
 
-  await getPreviewGenerationQueue().add("build-from-selection", {
-    previewId: id,
-    style: preview.style,
-    selectedUrl: url,
-    modifiers: preview.modifiers ?? [],
-  } satisfies PreviewBuildJobData);
-
-  return NextResponse.json({ status: "building" });
+  return NextResponse.json({ status: "approved", selectedStyledImageUrl: url });
 }

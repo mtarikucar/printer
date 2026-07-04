@@ -198,9 +198,9 @@ function CustomCreateFlow() {
   // re-derives the trusted amount on submit via itemPriceKurus.
   const isObjectStyle = priceKindForStyle(selectedStyle) === "object";
   // Multi-image fusion is offered only for non-stylized templates (object +
-  // realistic). Stylized templates restyle each photo independently via FLUX,
-  // so extra angles add nothing — the multi-upload UI is hidden there.
-  const isMultiCapable = getTemplate(selectedStyle)?.stylize === false;
+  // realistic). Single-subject stylized looks restyle one photo, so extra
+  // angles add nothing — the multi-upload UI is hidden there.
+  const isMultiCapable = getTemplate(selectedStyle)?.allowMultiPhoto === true;
   // The realistic template requires the customer to confirm photo compatibility
   // before generating from multiple photos; object does not (geometry-only).
   const needsCompatAck =

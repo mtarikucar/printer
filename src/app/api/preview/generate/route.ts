@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       validated.photoKeys && validated.photoKeys.length > 0
         ? validated.photoKeys
         : [validated.photoKey];
-    const allowMulti = !!tpl && !tpl.stylize;
+    const allowMulti = !!tpl && tpl.allowMultiPhoto;
     // De-dupe + cap at 4, primary first.
     const photoKeys = allowMulti
       ? Array.from(new Set([validated.photoKey, ...requestedKeys])).slice(0, 4)

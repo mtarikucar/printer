@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { UploadDropzone } from "@/components/upload-dropzone";
-import { ModelViewer } from "@/components/model-viewer";
 import { VariationPicker } from "@/components/create/variation-picker";
 import { SiteHeader } from "@/components/site-header";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -110,7 +109,9 @@ function CustomCreateFlow() {
   // Preview state
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
-  const [previewGlbUrl, setPreviewGlbUrl] = useState<string | null>(null);
+  // Image-first flow: the fal.ai variation the customer picked + approved. This
+  // is what they review at step 2 (no 3D — the admin sculpts the model later).
+  const [approvedImageUrl, setApprovedImageUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   // Image-first flow: the 2D variations to choose from, how many rounds we've
   // run (regenerate cap), and a busy flag while selecting/regenerating.
@@ -429,7 +430,7 @@ function CustomCreateFlow() {
       if (state.selectedStyle) setSelectedStyle(state.selectedStyle);
       if (state.selectedModifiers) setSelectedModifiers(state.selectedModifiers);
       if (state.previewId) setPreviewId(state.previewId);
-      if (state.previewGlbUrl) setPreviewGlbUrl(state.previewGlbUrl);
+      if (state.approvedImageUrl) setApprovedImageUrl(state.approvedImageUrl);
       if (state.step !== undefined) setStep(state.step as Step);
       sessionStorage.removeItem("createFlowState");
     } catch {
@@ -447,8 +448,8 @@ function CustomCreateFlow() {
         if (!data) return;
         setPreviewId(qPreviewId);
         if (data.photoKey) setPhotoKey(data.photoKey);
-        if (data.status === "ready" || data.status === "approved") {
-          setPreviewGlbUrl(data.glbUrl);
+        if (data.status === "approved") {
+          setApprovedImageUrl(data.selectedStyledImageUrl);
           setStep(2);
         }
       })
@@ -527,8 +528,8 @@ function CustomCreateFlow() {
           setVariationRounds(data.variationRounds || 1);
           // Pause polling while the customer chooses — no 5-min timeout pressure.
           if (pollRef.current) clearInterval(pollRef.current);
-        } else if (data.status === "ready") {
-          setPreviewGlbUrl(data.glbUrl);
+        } else if (data.status === "approved") {
+          setApprovedImageUrl(data.selectedStyledImageUrl);
           setStep(2);
           if (pollRef.current) clearInterval(pollRef.current);
         } else if (data.status === "failed") {
@@ -748,7 +749,7 @@ function CustomCreateFlow() {
     setStep(0);
     setPreviewId(null);
     setPreviewStatus(null);
-    setPreviewGlbUrl(null);
+    setApprovedImageUrl(null);
     setPreviewError(null);
     setPhotoKey(null);
     setSelectedFile(null);
@@ -759,9 +760,9 @@ function CustomCreateFlow() {
     router.replace("/create");
   };
 
-  // Image-first flow: customer picked a 2D variation → kick off Stage B (back
-  // view + 3D) and resume polling for the building → ready transition. On
-  // failure we keep the picker so they can retry (non-destructive).
+  // Image-first flow: picking a variation IS the approval. The chosen image
+  // becomes the design the order is placed against; there is no 3D build (the
+  // admin sculpts the model after payment). On failure we keep the picker.
   const handleSelectVariation = async (url: string) => {
     if (!previewId || selecting) return;
     setSelecting(true);
@@ -772,8 +773,9 @@ function CustomCreateFlow() {
         body: JSON.stringify({ url }),
       });
       if (!res.ok) return;
-      setPreviewStatus("building");
-      startPolling(previewId);
+      setApprovedImageUrl(url);
+      setPreviewStatus("approved");
+      setStep(2);
     } catch {
       // network blip — keep the picker
     } finally {
@@ -1484,7 +1486,7 @@ function CustomCreateFlow() {
         )}
 
         {/* Step 2: 3D Preview */}
-        {step === 2 && previewGlbUrl && (
+        {step === 2 && approvedImageUrl && (
           <div className="animate-fade-in pb-6">
             <div className="text-center mb-4 sm:mb-6">
               <h2 className="text-xl sm:text-2xl font-serif text-text-primary animate-fade-in-up">{d["create.preview.wow"]}</h2>
@@ -1503,7 +1505,12 @@ function CustomCreateFlow() {
             </div>
 
             <Card elevated className="overflow-hidden animate-fade-in-up delay-200">
-              <ModelViewer url={previewGlbUrl} previewMode />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={approvedImageUrl}
+                alt={d["create.preview.wow"]}
+                className="w-full h-auto object-contain bg-white"
+              />
             </Card>
 
             <div className="mt-4 sm:mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4 animate-fade-in-up delay-300">

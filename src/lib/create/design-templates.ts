@@ -32,9 +32,13 @@ export interface DesignTemplate {
   subject: "person" | "object";
   /** Style "look" prompt (composition-agnostic). */
   prompt: string;
-  /** Selects the price table + finish set. */
-  priceKind: "figure" | "object";
-  /** Show in the picker. */
+  /**
+   * Selects the price table + finish set. `figure`/`object` are the main /create
+   * kinds; `keychain`/`fridge_magnet`/`lamp` are the flat-priced Creative Lab
+   * products (used via /urunler, hidden from the main style grid).
+   */
+  priceKind: "figure" | "object" | "keychain" | "fridge_magnet" | "lamp";
+  /** Show in the main /create picker (Creative Lab products are false). */
   enabled: boolean;
   /** Sort order in the grid. */
   order: number;
@@ -79,6 +83,17 @@ const CLAYMATION_PROMPT =
 
 const OBJECT_PROMPT =
   "Reimagine the object in this photo as a clean, well-lit 3D collectible model render of the same object: accurate shape, colors and proportions, presented as a solid decorative display piece.";
+
+// Creative Lab products (photo → keychain / fridge magnet / lamp). Each turns
+// the subject into a small stylized 3D-printed product.
+const KEYCHAIN_PROMPT =
+  "Turn the subject(s) in this photo into an adorable 3D-printed keychain charm: a small cute stylized figurine of them with rounded chunky proportions and a smooth glossy finish, attached at the top to a small metal keyring loop.";
+
+const FRIDGE_MAGNET_PROMPT =
+  "Turn the subject(s) in this photo into a cute 3D-printed fridge magnet: a stylized rounded relief figurine of them with a smooth glossy finish, presented as a small flat-backed magnet.";
+
+const LAMP_PROMPT =
+  "Turn the subject(s) in this photo into a charming 3D-printed LED night lamp: a stylized figurine of them rendered in soft translucent material that glows warmly from within, sitting on a small round light base.";
 
 export const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
   pixel_art:
@@ -171,6 +186,43 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     enabled: true,
     order: 6,
   },
+  // ─── Creative Lab products (/urunler) — hidden from the main /create grid ───
+  {
+    slug: "keychain",
+    labelKey: "create.style.keychain",
+    descKey: "create.style.keychain.desc",
+    preview: "/examples/realistic.png",
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: KEYCHAIN_PROMPT,
+    priceKind: "keychain",
+    enabled: false,
+    order: 10,
+  },
+  {
+    slug: "fridge_magnet",
+    labelKey: "create.style.fridge_magnet",
+    descKey: "create.style.fridge_magnet.desc",
+    preview: "/examples/realistic.png",
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: FRIDGE_MAGNET_PROMPT,
+    priceKind: "fridge_magnet",
+    enabled: false,
+    order: 11,
+  },
+  {
+    slug: "lamp",
+    labelKey: "create.style.lamp",
+    descKey: "create.style.lamp.desc",
+    preview: "/examples/realistic.png",
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: LAMP_PROMPT,
+    priceKind: "lamp",
+    enabled: false,
+    order: 12,
+  },
 ];
 
 export const TEMPLATE_SLUGS: string[] = DESIGN_TEMPLATES.map((t) => t.slug);
@@ -185,7 +237,9 @@ export function isValidTemplateSlug(slug: string): boolean {
 }
 
 /** Price kind for a slug (defaults to "figure" for unknown slugs). */
-export function priceKindForStyle(slug: string): "figure" | "object" {
+export function priceKindForStyle(
+  slug: string,
+): DesignTemplate["priceKind"] {
   return getTemplate(slug)?.priceKind ?? "figure";
 }
 

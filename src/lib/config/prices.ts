@@ -257,8 +257,28 @@ export function designPriceKurus(size: string, material: string): number {
   return objectPriceKurus(size, material);
 }
 
+// ─── Creative Lab products (photo → keychain / fridge magnet / lamp) ──────────
+// Flat-priced small physical products (no size/material/finish axis). The
+// customer approves a fal.ai image, then the admin sculpts + prints the item.
+// Tune values freely — this is the single source. (₺: keychain 149, magnet 129,
+// lamp 399.)
+export type CreativeLabKind = "keychain" | "fridge_magnet" | "lamp";
+export const CREATIVE_LAB_PRICES_KURUS: Record<CreativeLabKind, number> = {
+  keychain: 14900,
+  fridge_magnet: 12900,
+  lamp: 39900,
+};
+export function creativeLabPriceKurus(kind: string): number {
+  return CREATIVE_LAB_PRICES_KURUS[kind as CreativeLabKind] ?? 0;
+}
+
 // ─── Dispatcher: one trusted entry point for a bespoke item's base+finish ────
-export type ItemKind = "figure" | "object" | "design" | "upload";
+export type ItemKind =
+  | "figure"
+  | "object"
+  | "design"
+  | "upload"
+  | CreativeLabKind;
 export function itemPriceKurus(args: {
   kind: ItemKind;
   size?: string; // figure / object / design
@@ -267,6 +287,10 @@ export function itemPriceKurus(args: {
   volumeMm3?: number; // upload (scaled volume)
 }): number {
   const { kind, size = "orta", material, finish, volumeMm3 } = args;
+  if (kind === "keychain" || kind === "fridge_magnet" || kind === "lamp") {
+    // Flat price — size/material/finish do not apply to these products.
+    return creativeLabPriceKurus(kind);
+  }
   if (kind === "upload") {
     return uploadModelPriceKurus(volumeMm3 ?? 0, material) + objectFinishSurchargeKurus(finish);
   }

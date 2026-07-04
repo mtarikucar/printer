@@ -12,8 +12,10 @@ import { getFileBuffer, normalizeFileUrl } from "@/lib/services/storage";
  *   1. logged-in customer (401)
  *   2. owns the order by orderNumber (404)
  *   3. payment succeeded AND order carries the `digital_files` upsell (403)
- * The bytes stream from the succeeded generation attempt (same source the
- * manufacturer uses), never via a public URL.
+ * The bytes stream from the ADMIN-uploaded model (orders.model*), falling back
+ * to a legacy succeeded generation attempt for historical orders, never via a
+ * public URL. Note: the image-first flow produces STL only (no OBJ) — OBJ is
+ * legacy-attempt-only.
  */
 export async function GET(
   _request: NextRequest,
@@ -39,6 +41,7 @@ export async function GET(
       orderNumber: true,
       paymentStatus: true,
       upsells: true,
+      modelStlUrl: true,
     },
     with: {
       generationAttempts: {
@@ -67,7 +70,9 @@ export async function GET(
 
   const attempt = order.generationAttempts[0];
   const rawUrl =
-    format === "stl" ? attempt?.outputStlUrl : attempt?.outputObjUrl;
+    format === "stl"
+      ? (order.modelStlUrl ?? attempt?.outputStlUrl)
+      : attempt?.outputObjUrl;
   const fileUrl = normalizeFileUrl(rawUrl ?? null);
   if (!fileUrl) {
     // Paid but the final file isn't ready yet (generation still running) or

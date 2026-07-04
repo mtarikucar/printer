@@ -13,7 +13,7 @@ const PAGE_SIZE = 25;
 // Map a coarse "bucket" filter to the set of order statuses it covers. Buckets
 // replace the old wall of 13 status chips; the exact-status dropdown still wins.
 const BUCKETS: Record<string, string[]> = {
-  needsAction: ["review"],
+  needsAction: ["awaiting_model"],
   inProgress: ["paid", "generating", "processing_mesh", "approved", "printing", "shipped"],
   completed: ["delivered"],
   problems: ["failed_generation", "failed_mesh", "rejected"],

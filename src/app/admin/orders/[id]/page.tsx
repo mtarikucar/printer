@@ -53,6 +53,7 @@ export default async function AdminOrderDetailPage({
       qcReviews: {
         orderBy: [desc(qcReviews.createdAt)],
       },
+      preview: true,
     },
   });
 
@@ -107,7 +108,15 @@ export default async function AdminOrderDetailPage({
         ? `/api/admin/orders/${order.id}/receipt`
         : null,
       customerNote: order.customerNote,
+      modelGlbKey: order.modelGlbKey,
+      modelGlbUrl: normalizeFileUrl(order.modelGlbUrl),
+      modelStlKey: order.modelStlKey,
+      modelStlUrl: normalizeFileUrl(order.modelStlUrl),
+      modelUploadedAt: order.modelUploadedAt?.toISOString() ?? null,
     },
+    approvedImageUrl: order.preview
+      ? normalizeFileUrl(order.preview.selectedStyledImageUrl)
+      : null,
     photos: order.photos.map(p => ({
       id: p.id,
       originalUrl: normalizeFileUrl(p.originalUrl) ?? p.originalUrl,

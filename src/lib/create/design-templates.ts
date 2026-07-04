@@ -1,8 +1,11 @@
 // Single source of truth for "Hazır Tasarım Desenleri" (design templates) — the
 // set formerly known as "styles". Adding a template is a one-entry change here
 // (+ one /examples/<slug>.png preview); the DB `style` column is plain text, so
-// no migration is needed. Zod validation, the prompt/pose used at generation,
-// the price table + finish set, and the UI grid all derive from this registry.
+// no migration is needed. Zod validation, the prompt used at generation, the
+// price table + finish set, and the UI grid all derive from this registry.
+//
+// Image-first flow: every template now produces a stylized figure IMAGE via
+// fal.ai (there is no automatic 3D). buildTemplatePrompt always returns a prompt.
 
 export type StyleModifier = "pixel_art";
 // `style` is stored as free text (validated against TEMPLATE_SLUGS at the edges),
@@ -19,12 +22,16 @@ export interface DesignTemplate {
   descKey: string;
   /** Preview image under /examples/. */
   preview: string;
-  /** false = skip the FLUX restyle, send the raw photo straight to Meshy. */
-  stylize: boolean;
+  /**
+   * Whether the customer may attach multiple reference photos for this template.
+   * fal.ai `image_urls` fuses them (e.g. a couple, or multiple angles). Enabled
+   * for realistic + object; the single-subject stylized looks use one photo.
+   */
+  allowMultiPhoto: boolean;
   /** Noun used in modifier-only prompts ("the person" / "the object"). */
   subject: "person" | "object";
-  /** Style "look" prompt (composition-agnostic; only when stylize=true). */
-  prompt?: string;
+  /** Style "look" prompt (composition-agnostic). */
+  prompt: string;
   /** Selects the price table + finish set. */
   priceKind: "figure" | "object";
   /** Show in the picker. */
@@ -33,29 +40,28 @@ export interface DesignTemplate {
   order: number;
 }
 
-// Appended to every stylization prompt so Meshy's image-to-3d yields a
-// slicer-friendly mesh. (Moved verbatim from style-transfer.ts.)
-export const PRINT_READINESS_CLAUSE =
-  "Critical requirements for 3D printing: clean unambiguous silhouette, thick solid limbs, " +
-  "a single connected piece with no separate floating accessories, no thin protrusions or fragile details, " +
-  "feet firmly planted flat on the ground, arms clearly separated from the body with visible gaps between arm and torso, " +
-  "no transparent or glass elements, no hair strands or jewelry floating away from the head, " +
-  "no swords, wands, staffs, or other thin handheld objects, " +
-  "every part of the figure connected to the main body, designed as a sturdy collectible figurine ready for direct 3D printing.";
+// Appended to every prompt so the generated IMAGE reads as a solid, printable
+// collectible figurine (which also helps the admin who later sculpts the 3D).
+// Softer than the old auto-3D print-readiness clause — the admin handles true
+// printability now, so we no longer strip swords/thin details from the artwork.
+export const FIGURINE_PRESENTATION =
+  "Present it as a single solid collectible figurine with a clean, clear " +
+  "silhouette standing on a small simple base, centered on a plain solid white " +
+  "background with soft even studio lighting. No text, no watermark, and no " +
+  "extra props beyond what the subject already has.";
 
 // Pose is NEVER forced to a T-pose. The figure must take the subjects' actual
-// pose, gesture and expression from the uploaded photo; the print-readiness
-// clause that follows is a soft constraint, so sturdiness is reconciled against
-// the original pose on a best-effort basis. This sentence is shared by every
-// stylized prompt and composed in buildTemplatePrompt.
+// pose, gesture and expression from the uploaded photo. Shared by every prompt.
 export const POSE_FROM_PHOTO =
   "Preserve each subject's original pose, gesture, stance and facial expression " +
   "from the photo, adapting them faithfully onto the figurine; never use a generic T-pose.";
 
-// Style "look" prompts describe ONLY the visual transformation. Who is in the
-// figure, how they're arranged, the pose, background removal and print-readiness
-// are appended by buildTemplatePrompt (POSE_FROM_PHOTO + print-readiness clause), so
-// these stay composition-agnostic and work for one person or a group alike.
+// Style "look" prompts describe ONLY the visual transformation. Pose, background
+// removal and figurine presentation are appended by buildTemplatePrompt, so these
+// stay composition-agnostic and work for one person or a group alike.
+const REALISTIC_PROMPT =
+  "Reimagine the subject(s) in this photo as a high-quality realistic collectible figurine: a finely sculpted, realistically shaded and painted miniature statue that faithfully preserves their real facial features, hairstyle, outfit, colors and proportions, with lifelike detail, like a premium display figurine.";
+
 const STORYBOOK_PROMPT =
   "Reimagine the subject(s) in this photo as adorable storybook-animation 3D collectible figurine characters. Use their general appearance as loose inspiration but fully transform them into charming stylized animated characters with cute rounded proportions, big warm expressive eyes, sweet friendly smiles, smooth softly-shaded skin, and soft studio lighting, like collectible toy figures.";
 
@@ -71,6 +77,9 @@ const VINYL_PROMPT =
 const CLAYMATION_PROMPT =
   "Reimagine the subject(s) in this photo as handmade claymation stop-motion characters. Use their general appearance as loose inspiration but transform them into charming clay figures with a soft matte modeling-clay surface, gentle fingerprint texture, slightly imperfect handcrafted proportions, warm rounded features and chunky simple shapes, like stop-motion animation puppets.";
 
+const OBJECT_PROMPT =
+  "Reimagine the object in this photo as a clean, well-lit 3D collectible model render of the same object: accurate shape, colors and proportions, presented as a solid decorative display piece.";
+
 export const MODIFIER_PROMPTS: Record<StyleModifier, string> = {
   pixel_art:
     "Render in retro 16-bit pixel art style with visible blocky pixels, limited color palette, and nostalgic video game aesthetic. Keep the form blocky but solid with thick voxel-style limbs and no thin pixel-wide details.",
@@ -83,8 +92,10 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.realistic",
     descKey: "create.style.realistic.desc",
     preview: "/examples/realistic.png",
-    stylize: false,
-    subject: "person",    priceKind: "figure",
+    allowMultiPhoto: true,
+    subject: "person",
+    prompt: REALISTIC_PROMPT,
+    priceKind: "figure",
     enabled: true,
     order: 0,
   },
@@ -93,8 +104,9 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.storybook",
     descKey: "create.style.storybook.desc",
     preview: "/examples/storybook.png",
-    stylize: true,
-    subject: "person",    prompt: STORYBOOK_PROMPT,
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: STORYBOOK_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 1,
@@ -104,8 +116,9 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.anime",
     descKey: "create.style.anime.desc",
     preview: "/examples/anime.png",
-    stylize: true,
-    subject: "person",    prompt: ANIME_PROMPT,
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: ANIME_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 2,
@@ -115,8 +128,9 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.chibi",
     descKey: "create.style.chibi.desc",
     preview: "/examples/chibi.png",
-    stylize: true,
-    subject: "person",    prompt: CHIBI_PROMPT,
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: CHIBI_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 3,
@@ -126,8 +140,9 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.vinyl",
     descKey: "create.style.vinyl.desc",
     preview: "/examples/vinyl.png",
-    stylize: true,
-    subject: "person",    prompt: VINYL_PROMPT,
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: VINYL_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 4,
@@ -137,8 +152,9 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.claymation",
     descKey: "create.style.claymation.desc",
     preview: "/examples/claymation.png",
-    stylize: true,
-    subject: "person",    prompt: CLAYMATION_PROMPT,
+    allowMultiPhoto: false,
+    subject: "person",
+    prompt: CLAYMATION_PROMPT,
     priceKind: "figure",
     enabled: true,
     order: 5,
@@ -148,8 +164,10 @@ export const DESIGN_TEMPLATES: DesignTemplate[] = [
     labelKey: "create.style.object",
     descKey: "create.style.object.desc",
     preview: "/examples/object.png",
-    stylize: false,
-    subject: "object",    priceKind: "object",
+    allowMultiPhoto: true,
+    subject: "object",
+    prompt: OBJECT_PROMPT,
+    priceKind: "object",
     enabled: true,
     order: 6,
   },
@@ -172,44 +190,19 @@ export function priceKindForStyle(slug: string): "figure" | "object" {
 }
 
 /**
- * Meshy pose hint. Always "" now: the figure must take the photo's pose, and an
- * empty pose_mode tells Meshy to keep the input image's pose rather than forcing
- * a canned T-pose. Kept as a function so meshy.ts needs no change.
- */
-export function poseModeForStyle(_slug: string): "" | "t-pose" {
-  return "";
-}
-
-/**
- * Builds the stylization prompt: [look] + [modifier] + POSE_FROM_PHOTO +
- * background removal + PRINT_READINESS_CLAUSE. Returns null when no restyle is
- * needed (raw photo → Meshy). The composition (who is in the figure, how they're
- * arranged) comes straight from the customer's photo via Meshy image-to-image,
- * so there is no separate "scene" axis.
+ * Builds the fal.ai image prompt: [look] + [modifier] + POSE_FROM_PHOTO +
+ * FIGURINE_PRESENTATION. Always returns a prompt (unknown slug → realistic look).
+ * The composition (who is in the figure, how they're arranged) comes straight
+ * from the customer's photo, so there is no separate "scene" axis.
  */
 export function buildTemplatePrompt(
   slug: FigurineStyle,
   modifiers: StyleModifier[],
-): string | null {
-  const tpl = getTemplate(slug);
-  const hasModifiers = modifiers.length > 0;
-  const modifierSuffix = modifiers.map((m) => MODIFIER_PROMPTS[m]).join(" ");
-
-  // Non-stylized templates (realistic/object, or unknown): skip restyle unless a
-  // modifier is requested, in which case apply only the modifier to the photo.
-  if (!tpl || !tpl.stylize) {
-    if (!hasModifiers) return null;
-    const subject = tpl?.subject === "object" ? "the object" : "the person";
-    return `Transform this photo: ${modifierSuffix} Remove the background completely and replace it with a plain white background. Only include ${subject}, no other elements. ${PRINT_READINESS_CLAUSE}`;
-  }
-
-  const modifierClause = hasModifiers ? `${modifierSuffix} ` : "";
-
-  return (
-    `${tpl.prompt!} ` +
-    `${modifierClause}` +
-    `${POSE_FROM_PHOTO} ` +
-    "Remove the background completely and replace it with a plain white background. " +
-    PRINT_READINESS_CLAUSE
-  );
+): string {
+  const look = getTemplate(slug)?.prompt ?? REALISTIC_PROMPT;
+  const modifierClause =
+    modifiers.length > 0
+      ? modifiers.map((m) => MODIFIER_PROMPTS[m]).join(" ") + " "
+      : "";
+  return `${look} ${modifierClause}${POSE_FROM_PHOTO} ${FIGURINE_PRESENTATION}`;
 }

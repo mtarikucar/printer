@@ -3,7 +3,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ModelViewer } from "@/components/model-viewer";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
@@ -11,10 +10,11 @@ import { formatCurrency } from "@/lib/i18n/format";
 import { objectPriceKurus } from "@/lib/config/prices";
 import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 
-// Faz 2: 2D design/logo → 3D object. Reuses the existing "object" style engine
-// (photo → Meshy, skips Replicate) end-to-end: upload → /api/preview/generate
-// (style="object") → poll → ModelViewer, then hands the ready preview off to the
-// proven /create checkout via ?previewId= (no new schema / order path).
+// Faz 2: 2D design/logo → stylized object IMAGE. Reuses the "object" style
+// engine end-to-end: upload → /api/preview/generate (style="object") → poll →
+// auto-approve the first fal.ai variation → show the image, then hand the
+// approved preview off to the proven /create checkout via ?previewId= (no new
+// schema / order path). The admin sculpts the 3D after payment.
 export function DesignToProductFlow() {
   const d = useDictionary();
   const locale = useLocale();
@@ -29,7 +29,7 @@ export function DesignToProductFlow() {
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const [glbUrl, setGlbUrl] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Tri-state: null while the auth check is in flight, then true/false.
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -124,8 +124,29 @@ export function DesignToProductFlow() {
           const res = await fetch(`/api/preview/${id}`);
           if (!res.ok) return;
           const data = await res.json();
-          if (data.status === "ready") {
-            setGlbUrl(data.glbUrl);
+          if (data.status === "styled") {
+            // This simplified flow has no variation picker — auto-approve the
+            // first fal.ai image and show it.
+            if (pollRef.current) clearInterval(pollRef.current);
+            const first = data.styledImageUrls?.[0];
+            if (!first) {
+              setError(d["design.errGeneric"]);
+              setStep(0);
+              return;
+            }
+            try {
+              await fetch(`/api/preview/${id}/select`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: first }),
+              });
+            } catch {
+              // non-fatal — the image still shows; select can be retried at checkout
+            }
+            setImageUrl(first);
+            setStep(2);
+          } else if (data.status === "approved") {
+            setImageUrl(data.selectedStyledImageUrl);
             setStep(2);
             if (pollRef.current) clearInterval(pollRef.current);
           } else if (data.status === "failed") {
@@ -199,7 +220,7 @@ export function DesignToProductFlow() {
     setPhotoKey(null);
     setPhotoPreview(null);
     setPreviewId(null);
-    setGlbUrl(null);
+    setImageUrl(null);
     setError(null);
   };
 
@@ -294,7 +315,7 @@ export function DesignToProductFlow() {
         )}
 
         {/* Step 2 — preview + checkout */}
-        {step === 2 && glbUrl && (
+        {step === 2 && imageUrl && (
           <div className="mt-8">
             <h2 className="text-center font-serif text-2xl text-text-primary">
               {d["design.previewTitle"]}
@@ -303,7 +324,12 @@ export function DesignToProductFlow() {
               {d["design.previewSub"]}
             </p>
             <div className="card mt-6 overflow-hidden">
-              <ModelViewer url={glbUrl} previewMode />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt={d["design.previewTitle"]}
+                className="w-full h-auto object-contain bg-white"
+              />
             </div>
             <p className="mt-4 text-center text-sm text-text-secondary">
               {d["design.fromPrice"]}{" "}

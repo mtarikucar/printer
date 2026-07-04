@@ -35,11 +35,11 @@ export default async function AdminLayout({
     redirect("/admin/login");
   }
 
-  // Count orders needing review
+  // Count orders awaiting the admin to upload a 3D model
   const [reviewCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
-    .where(sql`${orders.status} = 'review'`);
+    .where(sql`${orders.status} = 'awaiting_model'`);
 
   // Count pending manufacturer approvals
   const [pendingMfgCount] = await db

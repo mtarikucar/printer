@@ -42,6 +42,12 @@ export interface TurkishAddress {
 // orders table now contains only paid, real orders. Pre-payment state lives in order_drafts.
 export const orderStatusEnum = pgEnum("order_status", [
   "paid",
+  // Image-first flow: the customer approved a fal.ai image before paying, so a
+  // paid custom order waits here for the ADMIN to manually produce + upload the
+  // 3D model (there is no automatic 3D generation anymore).
+  "awaiting_model",
+  // Legacy auto-3D lifecycle states — no longer written by the app, kept so
+  // historical rows still validate against the enum.
   "generating",
   "processing_mesh",
   "review",
@@ -142,6 +148,8 @@ export const adminActionTypeEnum = pgEnum("admin_action_type", [
   "qc_approve",
   "qc_reject",
   "refund",
+  // Admin uploaded the manually-produced 3D model for a paid order.
+  "upload_model",
 ]);
 
 /**
@@ -578,6 +586,19 @@ export const orders = pgTable("orders", {
   adminNotes: text("admin_notes"),
   failureReason: text("failure_reason"),
   retryCount: integer("retry_count").notNull().default(0),
+  // ─── Admin-produced 3D model (image-first flow) ───
+  // The customer approved a fal.ai IMAGE before paying — there is no automatic
+  // 3D generation. After payment the order sits in `awaiting_model`; the admin
+  // manually produces the print model and uploads it here via
+  // /api/admin/orders/[id]/upload-model, which advances `awaiting_model` →
+  // `approved`. GLB drives the in-app 3D viewer; STL is the print + digital-files
+  // deliverable. (orders had no 3D column before — the mesh used to live only on
+  // generation_attempts, which the auto-3D pipeline wrote.)
+  modelGlbKey: text("model_glb_key"),
+  modelGlbUrl: text("model_glb_url"),
+  modelStlKey: text("model_stl_key"),
+  modelStlUrl: text("model_stl_url"),
+  modelUploadedAt: timestamp("model_uploaded_at"),
   isPublic: boolean("is_public").notNull().default(false),
   publicDisplayName: text("public_display_name"),
   publishedAt: timestamp("published_at"),

@@ -1,42 +1,15 @@
 import { Queue } from "bullmq";
 import { getRedisConnection } from "./connection";
 
-export interface AiGenerationJobData {
-  orderId: string;
-  imageUrl: string;
-  style: string;
-  modifiers?: string[];
-}
-
-export interface MeshProcessingJobData {
-  orderId: string;
-  generationId: string;
-  glbUrl: string;
-  glbKey: string;
-}
-
 export interface PreviewGenerationJobData {
   previewId: string;
   imageUrl: string;
   photoKey: string;
   // Optional multi-image fusion set (1-4 keys, includes the primary photoKey
-  // as the first element). Present only for object/realistic templates when the
-  // customer added extra reference photos; absent → single-image generation.
+  // as the first element). Present only for templates that allow multiple
+  // reference photos; absent → single-image generation.
   photoKeys?: string[];
   style: string;
-  modifiers?: string[];
-}
-
-// Stage B — 3D build after the customer picks a variation. Stylized: selectedUrl
-// (worker generates a back view, then multi-image-to-3d on [front, back]).
-// Non-stylized (realistic/object): rawPhotoKeys (raw photos straight to 3D, no
-// back-view). Both run on the same "preview-generation" queue, job name
-// "build-from-selection".
-export interface PreviewBuildJobData {
-  previewId: string;
-  style: string;
-  selectedUrl?: string;
-  rawPhotoKeys?: string[];
   modifiers?: string[];
 }
 
@@ -116,8 +89,6 @@ export interface DekontOcrJobData {
   receiptKey: string;
 }
 
-let aiGenerationQueue: Queue | null = null;
-let meshProcessingQueue: Queue | null = null;
 let emailQueue: Queue | null = null;
 let previewGenerationQueue: Queue | null = null;
 let previewCleanupQueue: Queue | null = null;
@@ -127,36 +98,6 @@ let dekontOcrQueue: Queue | null = null;
 let scoringEvaluationsCleanupQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let analyticsCleanupQueue: Queue | null = null;
-
-export function getAiGenerationQueue(): Queue {
-  if (!aiGenerationQueue) {
-    aiGenerationQueue = new Queue("ai-generation", {
-      connection: getRedisConnection(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 30000 },
-        removeOnComplete: { count: 100 },
-        removeOnFail: { count: 500 },
-      },
-    });
-  }
-  return aiGenerationQueue;
-}
-
-export function getMeshProcessingQueue(): Queue {
-  if (!meshProcessingQueue) {
-    meshProcessingQueue = new Queue("mesh-processing", {
-      connection: getRedisConnection(),
-      defaultJobOptions: {
-        attempts: 2,
-        backoff: { type: "exponential", delay: 15000 },
-        removeOnComplete: { count: 100 },
-        removeOnFail: { count: 500 },
-      },
-    });
-  }
-  return meshProcessingQueue;
-}
 
 export function getPreviewGenerationQueue(): Queue {
   if (!previewGenerationQueue) {

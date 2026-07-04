@@ -47,11 +47,17 @@ interface OrderData {
   havaleDiscountKurus: number;
   bankTransferReceiptUrl: string | null;
   customerNote: string | null;
+  modelGlbKey: string | null;
+  modelGlbUrl: string | null;
+  modelStlKey: string | null;
+  modelStlUrl: string | null;
+  modelUploadedAt: string | null;
 }
 
 interface Props {
   data: {
     order: OrderData;
+    approvedImageUrl?: string | null;
     photos: { id: string; originalUrl: string; thumbnailUrl: string | null }[];
     latestGeneration: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; costCents: number | null; durationMs: number | null; createdAt: string } | null;
     latestReport: { isWatertight: boolean; isVolume: boolean; vertexCount: number; faceCount: number; componentCount: number; boundingBox: any; baseAdded: boolean; repairsApplied: string[] | null } | null;
@@ -89,6 +95,7 @@ interface Props {
 
 const STATUS_COLORS: Record<string, string> = {
   paid: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+  awaiting_model: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   generating: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   processing_mesh: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   review: "bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200",
@@ -102,7 +109,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const TIMELINE_STEPS = [
-  "paid", "generating", "processing_mesh", "review", "approved", "printing", "shipped", "delivered",
+  "paid", "awaiting_model", "approved", "printing", "shipped", "delivered",
 ];
 
 // ─── Step Icons ──────────────────────────────────────────────
@@ -131,7 +138,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, activeManufacturers, candidates } = data;
+  const { order, approvedImageUrl, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -142,6 +149,12 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [selectedManufacturerId, setSelectedManufacturerId] = useState("");
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
+
+  // 3D model upload (awaiting_model → approved)
+  const [modelGlbFile, setModelGlbFile] = useState<File | null>(null);
+  const [modelStlFile, setModelStlFile] = useState<File | null>(null);
+  const [uploadingModel, setUploadingModel] = useState(false);
+  const [uploadModelError, setUploadModelError] = useState<string | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -182,6 +195,31 @@ export function OrderDetailClient({ data, locale }: Props) {
       router.refresh();
     } finally {
       setLoading(null);
+    }
+  };
+
+  const uploadModel = async () => {
+    if (!modelGlbFile) return;
+    setUploadingModel(true);
+    setUploadModelError(null);
+    try {
+      const fd = new FormData();
+      fd.append("glb", modelGlbFile);
+      if (modelStlFile) fd.append("stl", modelStlFile);
+      const res = await fetch(`/api/admin/orders/${order.id}/upload-model`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setUploadModelError(data.error || d["admin.orderDetail.actionFailed"]);
+        return;
+      }
+      router.refresh();
+    } catch {
+      setUploadModelError(d["admin.orderDetail.actionFailed"]);
+    } finally {
+      setUploadingModel(false);
     }
   };
 
@@ -257,10 +295,14 @@ export function OrderDetailClient({ data, locale }: Props) {
     }
   };
 
+  // Prefer the admin-uploaded 3D model; fall back to the legacy generation
+  // output so historical orders still show their mesh + download links.
+  const displayGlbUrl = order.modelGlbUrl ?? latestGeneration?.outputGlbUrl ?? null;
+  const displayStlUrl = order.modelStlUrl ?? latestGeneration?.outputStlUrl ?? null;
+
   const hasManufacturer = !!manufacturer;
   const canApprove = order.status === "review";
-  const canReject = ["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid"].includes(order.status);
-  const canRegenerate = ["review", "failed_generation", "failed_mesh", "paid", "generating", "processing_mesh"].includes(order.status);
+  const canReject = ["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid", "awaiting_model"].includes(order.status);
   const canForceReview = ["paid", "generating", "processing_mesh"].includes(order.status);
   const canStartPrinting = order.status === "approved" && !hasManufacturer;
   const canShip = order.status === "printing" && !hasManufacturer;
@@ -294,14 +336,21 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   // ─── Timeline ────────────────────────────────────────────
   const isFailed = order.status.startsWith("failed") || order.status === "rejected";
-  // For failed states, map to the step where it failed
-  const FAILED_STEP_MAP: Record<string, string> = {
-    failed_generation: "generating",
-    failed_mesh: "processing_mesh",
-    rejected: "review",
+  // Map legacy / non-timeline statuses to the closest current timeline step so
+  // historical orders still render on the new stepper without crashing.
+  const LEGACY_STEP_MAP: Record<string, string> = {
+    generating: "awaiting_model",
+    processing_mesh: "awaiting_model",
+    review: "awaiting_model",
+    failed_generation: "awaiting_model",
+    failed_mesh: "awaiting_model",
+    rejected: "approved",
   };
-  const effectiveStatus = isFailed ? (FAILED_STEP_MAP[order.status] || order.status) : order.status;
-  const currentStepIndex = TIMELINE_STEPS.indexOf(effectiveStatus);
+  const effectiveStatus = LEGACY_STEP_MAP[order.status] || order.status;
+  const rawStepIndex = TIMELINE_STEPS.indexOf(effectiveStatus);
+  // Guard: any unmapped/unknown status returns -1 — fall back to the first step
+  // so the stepper never crashes.
+  const currentStepIndex = rawStepIndex === -1 ? 0 : rawStepIndex;
 
   // Determine primary action
   const primaryAction = canApprove ? "approve"
@@ -310,7 +359,7 @@ export function OrderDetailClient({ data, locale }: Props) {
     : canDeliver ? "deliver"
     : null;
 
-  const hasAnyAction = canApprove || canReject || canRegenerate || canForceReview || canStartPrinting || canShip || canDeliver;
+  const hasAnyAction = canApprove || canReject || canForceReview || canStartPrinting || canShip || canDeliver;
 
   // Customer initials
   const initials = order.customerName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
@@ -336,14 +385,14 @@ export function OrderDetailClient({ data, locale }: Props) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {latestGeneration?.outputGlbUrl && (
-            <a href={latestGeneration.outputGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
+          {displayGlbUrl && (
+            <a href={displayGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               {d["admin.orderDetail.downloadGlb"]}
             </a>
           )}
-          {latestGeneration?.outputStlUrl && (
-            <a href={latestGeneration.outputStlUrl} download className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
+          {displayStlUrl && (
+            <a href={displayStlUrl} download className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               {d["admin.orderDetail.downloadStl"]}
             </a>
@@ -399,6 +448,51 @@ export function OrderDetailClient({ data, locale }: Props) {
       {/* ═══ Persistent Action Zone (what do I do now) ═══════════ */}
       {/* Blocks below are mutually exclusive by order state, so at most one shows. */}
       <div className="space-y-3 mb-6">
+
+        {/* ─── 3D Model Upload (awaiting_model) ─────── */}
+        {order.status === "awaiting_model" && (
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl border border-indigo-200 p-5">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500 text-white flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-semibold text-indigo-900">3D Modeli Yükle</h3>
+                <p className="text-sm text-indigo-700 mt-0.5">Müşterinin onayladığı görselden 3D modeli üretip yükleyin.</p>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-indigo-800 mb-1">GLB modeli (zorunlu)</label>
+                    <input
+                      type="file"
+                      accept=".glb"
+                      onChange={(e) => setModelGlbFile(e.target.files?.[0] ?? null)}
+                      className="w-full text-sm text-indigo-900 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-indigo-800 mb-1">STL modeli (opsiyonel)</label>
+                    <input
+                      type="file"
+                      accept=".stl"
+                      onChange={(e) => setModelStlFile(e.target.files?.[0] ?? null)}
+                      className="w-full text-sm text-indigo-900 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-200"
+                    />
+                  </div>
+                </div>
+                {uploadModelError && (
+                  <p className="mt-3 text-sm text-red-600">{uploadModelError}</p>
+                )}
+                <button
+                  onClick={uploadModel}
+                  disabled={!modelGlbFile || uploadingModel}
+                  className="mt-3 px-6 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:bg-gray-400 transition-colors shadow-sm"
+                >
+                  {uploadingModel ? "Yükleniyor…" : "Yükle"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ─── Primary Action Panel ─────────────────── */}
         {hasAnyAction && (
@@ -497,13 +591,8 @@ export function OrderDetailClient({ data, locale }: Props) {
             )}
 
             {/* Secondary actions */}
-            {(canRegenerate || canReject || canForceReview) && (
+            {(canReject || canForceReview) && (
               <div className="flex items-center gap-3 flex-wrap px-1">
-                {canRegenerate && (
-                  <button onClick={() => performAction("regenerate")} disabled={!!loading} className="text-sm text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors disabled:text-gray-400">
-                    {loading === "regenerate" ? d["admin.orderDetail.regenerating"] : d["admin.orderDetail.regenerate"]}
-                  </button>
-                )}
                 {canForceReview && (
                   <button onClick={() => performAction("force-review")} disabled={!!loading} className="text-sm text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors disabled:text-gray-400">
                     {loading === "force-review" ? d["admin.orderDetail.forcingReview"] : d["admin.orderDetail.forceReview"]}
@@ -736,23 +825,34 @@ export function OrderDetailClient({ data, locale }: Props) {
           <div className="lg:col-span-2 space-y-5">
 
             {/* ─── Photo + Model Card ───────────────────── */}
-            {(photos[0] || latestGeneration?.outputGlbUrl) && (
+            {(photos[0] || displayGlbUrl) && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className={`flex flex-col ${photos[0] && latestGeneration?.outputGlbUrl ? "sm:flex-row" : ""}`}>
+                <div className={`flex flex-col ${photos[0] && displayGlbUrl ? "sm:flex-row" : ""}`}>
                   {photos[0] && (
-                    <div className={`p-5 ${latestGeneration?.outputGlbUrl ? "sm:w-1/2 sm:border-r sm:border-gray-100" : "w-full"}`}>
+                    <div className={`p-5 ${displayGlbUrl ? "sm:w-1/2 sm:border-r sm:border-gray-100" : "w-full"}`}>
                       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.originalPhoto"]}</h3>
                       <div className="bg-gray-50 rounded-xl overflow-hidden">
                         <img src={photos[0].originalUrl} alt={d["admin.orderDetail.customerPhoto"]} className="w-full max-h-72 object-contain" />
                       </div>
                     </div>
                   )}
-                  {latestGeneration?.outputGlbUrl && (
+                  {displayGlbUrl && (
                     <div className={`p-5 ${photos[0] ? "sm:w-1/2" : "w-full"}`}>
                       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.modelPreview"]}</h3>
-                      <ModelViewer url={latestGeneration.outputGlbUrl} className="w-full h-72 rounded-xl" />
+                      <ModelViewer url={displayGlbUrl} className="w-full h-72 rounded-xl" />
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ─── Customer-approved design image ───────── */}
+            {approvedImageUrl && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Onaylanan tasarım (müşteri)</h3>
+                <div className="bg-gray-50 rounded-xl overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={approvedImageUrl} alt="Onaylanan tasarım" className="w-full max-h-72 object-contain" />
                 </div>
               </div>
             )}

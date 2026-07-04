@@ -107,7 +107,7 @@ export default async function PrivacyPage() {
                 <li><strong>Ödeme işleme:</strong> PayTR (PCI DSS uyumlu ödeme altyapısı)</li>
                 <li><strong>Bulut depolama:</strong> Amazon Web Services (AWS S3 — fotoğraf ve 3D model depolama)</li>
                 <li><strong>E-posta hizmeti:</strong> Resend (sipariş bildirimleri)</li>
-                <li><strong>Yapay zeka hizmeti:</strong> fal.ai ve Meshy.ai (fotoğraftan görsel/model oluşturma — yalnızca fotoğraflar işlenir)</li>
+                <li><strong>Yapay zeka hizmeti:</strong> fal.ai (fotoğraftan görsel oluşturma — yalnızca fotoğraflar işlenir)</li>
                 <li><strong>Kargo şirketleri:</strong> Teslimat için gerekli adres ve iletişim bilgileri</li>
                 <li><strong>Üretici firmalar:</strong> Üretim için gerekli sipariş detayları</li>
                 <li><strong>Yasal makamlar:</strong> Kanuni zorunluluk halinde yetkili kurumlara</li>
@@ -265,7 +265,7 @@ export default async function PrivacyPage() {
                 <li><strong>Payment processing:</strong> PayTR (PCI DSS compliant payment infrastructure)</li>
                 <li><strong>Cloud storage:</strong> Amazon Web Services (AWS S3 — photo and 3D model storage)</li>
                 <li><strong>Email service:</strong> Resend (order notifications)</li>
-                <li><strong>AI service:</strong> fal.ai and Meshy.ai (image/model generation from photos — only photos are processed)</li>
+                <li><strong>AI service:</strong> fal.ai (image generation from photos — only photos are processed)</li>
                 <li><strong>Shipping companies:</strong> Address and contact details required for delivery</li>
                 <li><strong>Manufacturers:</strong> Order details necessary for production</li>
                 <li><strong>Legal authorities:</strong> When required by law</li>

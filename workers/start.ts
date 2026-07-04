@@ -2,7 +2,6 @@ import "dotenv/config";
 import { startEmailWorker } from "../src/lib/queue/workers/email.worker";
 import { startPreviewGenerationWorker } from "../src/lib/queue/workers/preview-generation.worker";
 import { startPreviewCleanupWorker } from "../src/lib/queue/workers/preview-cleanup.worker";
-import { startCreativeLabWorker } from "../src/lib/queue/workers/creative-lab.worker";
 import { startPaymentDeadlineWorker } from "../src/lib/queue/workers/payment-deadline.worker";
 import { startDekontOcrWorker } from "../src/lib/queue/workers/dekont-ocr.worker";
 import { startScoringEvaluationsCleanupWorker } from "../src/lib/queue/workers/scoring-evaluations-cleanup.worker";
@@ -19,7 +18,6 @@ console.log("Starting BullMQ workers...");
 const emailWorker = startEmailWorker();
 const previewWorker = startPreviewGenerationWorker();
 const cleanupWorker = startPreviewCleanupWorker();
-const creativeLabWorker = startCreativeLabWorker();
 const paymentDeadlineWorker = startPaymentDeadlineWorker();
 const dekontOcrWorker = startDekontOcrWorker();
 const scoringEvalCleanupWorker = startScoringEvaluationsCleanupWorker();
@@ -52,7 +50,6 @@ console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
 console.log("  - preview-cleanup (repeatable: every 1h)");
-console.log("  - creative-lab (concurrency: 2)");
 console.log("  - payment-deadline (concurrency: 2)");
 console.log("  - dekont-ocr (concurrency: 2)");
 console.log("  - scoring-evaluations-cleanup (repeatable: every 24h)");
@@ -65,7 +62,6 @@ async function shutdown() {
     emailWorker.close(),
     previewWorker.close(),
     cleanupWorker.close(),
-    creativeLabWorker.close(),
     paymentDeadlineWorker.close(),
     dekontOcrWorker.close(),
     scoringEvalCleanupWorker.close(),

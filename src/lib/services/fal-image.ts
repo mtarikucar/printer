@@ -55,11 +55,20 @@ export async function falNanoBananaEdit(
     );
   }
 
-  const { request_id: requestId } = await createRes.json();
+  const createJson = await createRes.json();
+  const requestId = createJson.request_id;
   if (!requestId) throw new Error("fal nano-banana returned no request id");
 
-  const statusUrl = `${NANO_BANANA_EDIT_ENDPOINT}/requests/${requestId}/status`;
-  const resultUrl = `${NANO_BANANA_EDIT_ENDPOINT}/requests/${requestId}`;
+  // fal's queue API polls the MODEL path (fal-ai/nano-banana), NOT the submit
+  // sub-path (.../edit): building ".../edit/requests/{id}/status" 405s, so the
+  // poll never sees COMPLETED and the worker always times out. Prefer the
+  // canonical status_url/response_url fal returns in the submit response; fall
+  // back to the correctly-constructed model-path URLs (no "/edit").
+  const NANO_BANANA_MODEL = "https://queue.fal.run/fal-ai/nano-banana";
+  const statusUrl =
+    createJson.status_url ?? `${NANO_BANANA_MODEL}/requests/${requestId}/status`;
+  const resultUrl =
+    createJson.response_url ?? `${NANO_BANANA_MODEL}/requests/${requestId}`;
 
   // Image edits are fast (~10-20s). A 120s budget is generous.
   const WALL_BUDGET_MS = 120_000;

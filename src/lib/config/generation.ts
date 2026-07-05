@@ -1,4 +1,4 @@
-// Free AI-generation caps. Each Meshy/Tripo call costs money, so the free tier
+// Free AI-generation caps. Each fal.ai call costs money, so the free tier
 // is bounded on three independent axes; a paid order exempts the account from
 // all of them (paying customers are not the abuse target). Re-signing up with a
 // fresh email on the same device/network is caught by the device + IP ceilings.

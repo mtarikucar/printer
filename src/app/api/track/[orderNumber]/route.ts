@@ -69,7 +69,7 @@ export async function GET(
       galleryReviewStatus: order.galleryReviewStatus,
       galleryReviewReason: order.galleryReviewReason,
       // Prefer the admin-uploaded model (image-first fal.ai flow), falling back
-      // to a legacy succeeded generation attempt for historical Meshy orders.
+      // to a legacy succeeded generation attempt for historical orders.
       glbUrl: normalizeFileUrl(
         order.modelGlbUrl ?? order.generationAttempts[0]?.outputGlbUrl ?? null
       ),

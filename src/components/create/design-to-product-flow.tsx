@@ -41,7 +41,7 @@ export function DesignToProductFlow() {
     };
   }, []);
 
-  // Generation requires login (each Meshy/Tripo call costs money). Resolve auth
+  // Generation requires login (each fal.ai call costs money). Resolve auth
   // up front so handleGenerate can gate guests into the login round-trip instead
   // of letting them hit a bare 401.
   useEffect(() => {

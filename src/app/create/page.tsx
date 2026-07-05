@@ -673,7 +673,7 @@ function CustomCreateFlow() {
       return;
     }
 
-    // Generation now REQUIRES login (each Meshy/Tripo call costs money). If the
+    // Generation now REQUIRES login (each fal.ai call costs money). If the
     // visitor isn't logged in, stash the in-progress selection so it survives
     // the login round-trip (the restore effect reads `createFlowState`), then
     // send them to /login. Ordering the physical product still allows guests —

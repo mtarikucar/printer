@@ -1,5 +1,5 @@
 // fal.ai nano-banana (Google Gemini image edit) — turns a customer photo into a
-// stylized figure IMAGE. This REPLACES the old Meshy image-to-image step; there
+// stylized figure IMAGE via fal.ai; there
 // is no automatic 3D anymore. Standard fal.ai queue-API shape (POST →
 // poll /requests/{id}/status → GET /requests/{id}), authed with FAL_API_KEY.
 //
@@ -20,7 +20,7 @@ export interface FalImageResult {
 
 // Per-variation prompt nudges. fal exposes no seed/n param, so we vary the
 // prompt slightly per call to get DISTINCT variations rather than near-dupes.
-// (Moved here from the deleted meshy-image.ts.)
+// Image generation service for fal.ai
 export const VARIATION_NUDGES: string[] = [
   "Three-quarter front angle, warm soft studio lighting, gentle friendly smile.",
   "Straight-on front angle, brighter even lighting, slightly more playful expression.",

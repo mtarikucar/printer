@@ -274,7 +274,7 @@ export const users = pgTable("users", {
   passwordResetTokenHash: text("password_reset_token_hash"),
   passwordResetExpiresAt: timestamp("password_reset_expires_at"),
   // Email verification (anti-abuse): a customer must verify their email before
-  // they can generate (each Meshy/Tripo call costs money, so unverified/fake
+  // they can generate (each fal.ai call costs money, so unverified/fake
   // emails must not burn budget). Token columns mirror the password-reset ones:
   // the DB stores only the sha256 hash of the single-use raw token emailed out.
   // Existing rows are backfilled to true so current customers aren't locked out.
@@ -355,7 +355,7 @@ export const previews = pgTable("previews", {
   stlUrl: text("stl_url"),
   stlKey: text("stl_key"),
   meshyTaskId: text("meshy_task_id"),
-  // Image-first flow: 2D variation URLs (Meshy image-to-image outputs, persisted
+  // Image-first flow: 2D variation URLs (fal.ai outputs, persisted
   // to ./uploads), the customer's chosen front image, and the auto-generated
   // back view fed into multi-image-to-3d alongside it.
   styledImageUrls: jsonb("styled_image_urls").$type<string[]>(),

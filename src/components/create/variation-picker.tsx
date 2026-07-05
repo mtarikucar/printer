@@ -4,7 +4,7 @@ import { useState } from "react";
 
 /**
  * 2D variation chooser (image-first create flow). Shows the stylized 2D
- * variations Meshy generated; the customer picks one before we spend a 3D build
+ * * variations generated; the customer picks one before we spend a 3D build
  * credit. Presentational — labels are passed in so it stays i18n-agnostic.
  */
 export function VariationPicker({

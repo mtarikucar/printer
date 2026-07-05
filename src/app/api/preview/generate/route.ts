@@ -21,7 +21,7 @@ import { eq, count } from "drizzle-orm";
 
 const generateSchema = z.object({
   photoKey: z.string().min(1),
-  // Optional multi-image fusion set (Meshy multi-image-to-3d accepts 1-4
+  // Optional multi-image fusion set (accepts 1-4
   // images). When present, generation fuses several reference angles into a
   // more detailed mesh. Only honored for non-stylized templates (see below).
   photoKeys: z.array(z.string().min(1)).max(4).optional(),
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   const d = getDictionary(locale);
 
   try {
-    // Generation costs us money per call (Meshy/Tripo), so it now REQUIRES
+    // Generation costs us money per call (fal.ai), so it now REQUIRES
     // login. Guest checkout for the physical product is unaffected — only the
     // generate step is gated, not ordering.
     const session = await getSessionUser();
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     const photoUrl = getPublicUrl(validated.photoKey);
 
     // Email verification gate (anti-abuse): an unverified email must never burn
-    // Meshy/Tripo budget. Checked BEFORE the free-tier counters so unverified
+    // fal.ai budget. Checked BEFORE the free-tier counters so unverified
     // users don't even consume a device/IP slot.
     const acct = await db.query.users.findFirst({
       where: (u, { eq: eq2 }) => eq2(u.id, session.userId),
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     // abuse target, so they're exempt from every cap. Free-tier users are
     // capped on three independent axes — per account, per device cookie, and
     // per client IP — so re-signing up with a new email on the same
-    // device/network doesn't multiply the free Meshy budget.
+    // device/network doesn't multiply the free generation budget.
     const hasPaidOrder = await db.query.orders.findFirst({
       where: (o, { eq: eq2 }) => eq2(o.userId, session.userId),
       columns: { id: true },

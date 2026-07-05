@@ -18,7 +18,7 @@ function getSteps(d: Dictionary) {
   ] as const;
 }
 
-// Meshy-era order states the fal.ai image-first flow no longer produces
+// Legacy order states the fal.ai image-first flow no longer produces
 // (auto-3D generation ran server-side before the admin-upload model). Historical
 // orders still carrying them collapse onto the awaiting_model step so the
 // tracker resolves to a sensible active step instead of rendering all-grey.

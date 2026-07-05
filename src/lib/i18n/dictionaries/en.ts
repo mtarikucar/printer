@@ -668,8 +668,8 @@ const en = {
   "create.loginRequired": "You need to log in to continue with your order.",
 
   // Preview generation
-  "create.preview.generating": "Creating your 3D figurine...",
-  "create.preview.estimatedTime": "This usually takes 2-3 minutes",
+  "create.preview.generating": "Creating your images...",
+  "create.preview.estimatedTime": "This usually takes under a minute",
   "create.preview.almostReady": "Almost ready — just a few more seconds",
   "create.preview.crafting": "AI is sculpting your figurine...",
   "create.preview.almostDone": "Almost done! Adding final details...",
@@ -754,8 +754,8 @@ const en = {
 
   // Create — Loading stages
   "create.loading.stage1": "Analyzing your photo...",
-  "create.loading.stage2": "Building 3D structure...",
-  "create.loading.stage3": "Adding surface details...",
+  "create.loading.stage2": "Generating your stylized image...",
+  "create.loading.stage3": "Refining colors and details...",
   "create.loading.stage4": "Final polish...",
 
   // Create — Order submitted

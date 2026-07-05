@@ -670,8 +670,8 @@ const tr: Dictionary = {
   "create.loginRequired": "Siparişinize devam etmek için giriş yapmanız gerekiyor.",
 
   // Preview generation
-  "create.preview.generating": "3D figurine'iniz oluşturuluyor...",
-  "create.preview.estimatedTime": "Bu işlem genellikle 2-3 dakika sürer",
+  "create.preview.generating": "Görselleriniz oluşturuluyor...",
+  "create.preview.estimatedTime": "Bu işlem genellikle bir dakikadan kısa sürer",
   "create.preview.almostReady": "Neredeyse hazır… birkaç saniye daha",
   "create.preview.crafting": "Yapay zeka figurine'inizi şekillendiriyor...",
   "create.preview.almostDone": "Neredeyse bitti! Son detaylar ekleniyor...",
@@ -756,8 +756,8 @@ const tr: Dictionary = {
 
   // Create — Loading stages
   "create.loading.stage1": "Fotoğrafınız analiz ediliyor...",
-  "create.loading.stage2": "3D yapı oluşturuluyor...",
-  "create.loading.stage3": "Yüzey detayları ekleniyor...",
+  "create.loading.stage2": "Stilize görseliniz oluşturuluyor...",
+  "create.loading.stage3": "Renkler ve detaylar işleniyor...",
   "create.loading.stage4": "Son rötuşlar yapılıyor...",
 
   // Create — Order submitted

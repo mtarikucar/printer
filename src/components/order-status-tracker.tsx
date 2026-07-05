@@ -8,8 +8,7 @@ import { trackingUrl } from "@/lib/services/carriers";
 function getSteps(d: Dictionary) {
   return [
     { key: "paid", label: d["tracker.paid.label"], description: d["tracker.paid.description"] },
-    { key: "generating", label: d["tracker.generating.label"], description: d["tracker.generating.description"] },
-    { key: "processing_mesh", label: d["tracker.processing_mesh.label"], description: d["tracker.processing_mesh.description"] },
+    { key: "awaiting_model", label: d["tracker.awaiting_model.label"], description: d["tracker.awaiting_model.description"] },
     { key: "review", label: d["tracker.review.label"], description: d["tracker.review.description"] },
     { key: "approved", label: d["tracker.approved.label"], description: d["tracker.approved.description"] },
     { key: "printing", label: d["tracker.printing.label"], description: d["tracker.printing.description"] },
@@ -18,6 +17,15 @@ function getSteps(d: Dictionary) {
     { key: "delivered", label: d["tracker.delivered.label"], description: d["tracker.delivered.description"] },
   ] as const;
 }
+
+// Meshy-era order states the fal.ai image-first flow no longer produces
+// (auto-3D generation ran server-side before the admin-upload model). Historical
+// orders still carrying them collapse onto the awaiting_model step so the
+// tracker resolves to a sensible active step instead of rendering all-grey.
+const LEGACY_STEP_MAP: Record<string, string> = {
+  generating: "awaiting_model",
+  processing_mesh: "awaiting_model",
+};
 
 const FAILED_STATUSES = [
   "failed_generation",
@@ -37,7 +45,8 @@ export function OrderStatusTracker({
   const d = useDictionary();
   const STEPS = getSteps(d);
   const isFailed = (FAILED_STATUSES as readonly string[]).includes(status);
-  const currentIndex = STEPS.findIndex((s) => s.key === status);
+  const effectiveStatus = LEGACY_STEP_MAP[status] ?? status;
+  const currentIndex = STEPS.findIndex((s) => s.key === effectiveStatus);
 
   if (status === "pending_payment") {
     return (

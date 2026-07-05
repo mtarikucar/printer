@@ -48,6 +48,10 @@ export async function GET(
 
   return NextResponse.json({
     status: preview.status,
+    // The style this preview was generated with (e.g. "object" for the 2D
+    // design flow) so the /create checkout re-prices/persists the right product
+    // instead of falling back to the default figure style.
+    style: preview.style,
     // Image-first flow: the fal.ai variations to choose from (status="styled")
     // and the approved one (status="approved"). Normalized so the host is
     // correct behind the proxy. There is no 3D artifact in the customer flow —

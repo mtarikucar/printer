@@ -68,7 +68,11 @@ export async function GET(
       publicDisplayName: order.publicDisplayName,
       galleryReviewStatus: order.galleryReviewStatus,
       galleryReviewReason: order.galleryReviewReason,
-      glbUrl: normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null),
+      // Prefer the admin-uploaded model (image-first fal.ai flow), falling back
+      // to a legacy succeeded generation attempt for historical Meshy orders.
+      glbUrl: normalizeFileUrl(
+        order.modelGlbUrl ?? order.generationAttempts[0]?.outputGlbUrl ?? null
+      ),
       // Digital-files add-on: whether the customer bought it and whether the
       // print-ready files are downloadable yet. The bytes are served only via
       // the entitlement-gated /api/customer/orders/.../download endpoint.
@@ -76,7 +80,9 @@ export async function GET(
         entitled:
           order.paymentStatus === "succeeded" &&
           (order.upsells ?? []).includes("digital_files"),
-        stlReady: !!order.generationAttempts[0]?.outputStlUrl,
+        // STL comes from the admin upload (orders.model_stl_url) or a legacy
+        // attempt; OBJ is legacy-attempt-only (image-first flow produces no OBJ).
+        stlReady: !!(order.modelStlUrl || order.generationAttempts[0]?.outputStlUrl),
         objReady: !!order.generationAttempts[0]?.outputObjUrl,
       },
       paymentMethod: order.paymentMethod,

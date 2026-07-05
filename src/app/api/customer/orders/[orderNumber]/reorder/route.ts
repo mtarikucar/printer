@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, orderDrafts } from "@/lib/db/schema";
-import { figurinePriceKurus } from "@/lib/config/prices";
+import { itemPriceKurus } from "@/lib/config/prices";
+import { priceKindForStyle } from "@/lib/create/design-templates";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { buildDraftReference } from "@/lib/services/order-draft";
 import { createPaytrToken, buildMerchantOid } from "@/lib/services/paytr";
@@ -88,7 +89,17 @@ export async function POST(
   }
 
   const reference = buildDraftReference();
-  const amountKurus = figurinePriceKurus(order.figurineSize, order.material);
+  // Price by the order's actual product kind — figure, object, or a Creative Lab
+  // product (keychain/magnet/lamp are flat-priced). Mirrors /api/orders so a
+  // re-buy costs exactly what a fresh order of the same config would; the old
+  // figurinePriceKurus() charged every reorder as a figurine (up to ~9x on a
+  // keychain, whose figurineSize was stored as a neutral "orta").
+  const amountKurus = itemPriceKurus({
+    kind: priceKindForStyle(order.style),
+    size: order.figurineSize,
+    material: order.material,
+    finish: order.finish,
+  });
 
   const havaleDiscountKurus =
     paymentMethod === "bank_transfer" ? calculateHavaleDiscount(amountKurus) : 0;

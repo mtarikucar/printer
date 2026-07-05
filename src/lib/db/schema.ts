@@ -208,19 +208,6 @@ export const previewStatusEnum = pgEnum("preview_status", [
   "expired",
 ]);
 
-// Creative Lab physical products (photo → keychain / fridge magnet / lamp).
-export const creativeLabProductEnum = pgEnum("creative_lab_product", [
-  "keychain",
-  "fridge_magnet",
-  "lamp",
-]);
-
-export const creativeLabJobStatusEnum = pgEnum("creative_lab_job_status", [
-  "generating",
-  "ready",
-  "failed",
-]);
-
 export const manufacturerStatusEnum = pgEnum("manufacturer_status", [
   "pending_approval",
   "conditionally_approved",
@@ -379,29 +366,6 @@ export const previews = pgTable("previews", {
   revisionNote: text("revision_note"),
   errorMessage: text("error_message"),
   durationMs: integer("duration_ms"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
-
-// Creative Lab jobs: photo → physical product (keychain/fridge_magnet/lamp) via
-// Meshy's prototype→build flow. Isolated from the figurine pipeline; ordering is
-// handled via WhatsApp click-to-chat (admin payment-link), so no figurine
-// size/material/order coupling here.
-export const creativeLabJobs = pgTable("creative_lab_jobs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id),
-  product: creativeLabProductEnum("product").notNull(),
-  photoKey: text("photo_key").notNull(),
-  photoUrl: text("photo_url").notNull(),
-  status: creativeLabJobStatusEnum("status").notNull().default("generating"),
-  // keychain/magnet → GLB (previewable); lamp → STL (not previewable in viewer).
-  glbUrl: text("glb_url"),
-  glbKey: text("glb_key"),
-  stlUrl: text("stl_url"),
-  stlKey: text("stl_key"),
-  prototypeTaskId: text("prototype_task_id"),
-  buildTaskId: text("build_task_id"),
-  errorMessage: text("error_message"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

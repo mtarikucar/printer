@@ -448,6 +448,10 @@ function CustomCreateFlow() {
         if (!data) return;
         setPreviewId(qPreviewId);
         if (data.photoKey) setPhotoKey(data.photoKey);
+        // Restore the preview's style (e.g. "object" from the 2D design flow) so
+        // pricing + the persisted order match the product the customer designed,
+        // instead of defaulting to a figure style.
+        if (data.style) setSelectedStyle(data.style);
         if (data.status === "approved") {
           setApprovedImageUrl(data.selectedStyledImageUrl);
           setStep(2);

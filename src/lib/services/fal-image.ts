@@ -1,6 +1,6 @@
 // fal.ai nano-banana (Google Gemini image edit) — turns a customer photo into a
 // stylized figure IMAGE. This REPLACES the old Meshy image-to-image step; there
-// is no automatic 3D anymore. Same fal queue-API shape as tripo.ts (POST →
+// is no automatic 3D anymore. Standard fal.ai queue-API shape (POST →
 // poll /requests/{id}/status → GET /requests/{id}), authed with FAL_API_KEY.
 //
 // The endpoint accepts `image_urls` (multiple reference photos → multi-photo

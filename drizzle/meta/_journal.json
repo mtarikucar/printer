@@ -190,6 +190,13 @@
       "when": 1783159871916,
       "tag": "0026_cold_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1783263484889,
+      "tag": "0027_drop_creative_lab_jobs",
+      "breakpoints": true
     }
   ]
 }

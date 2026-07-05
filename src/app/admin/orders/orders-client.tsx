@@ -10,6 +10,7 @@ import type { Locale } from "@/lib/i18n/types";
 const STATUS_COLORS: Record<string, string> = {
   pending_payment: "bg-amber-100 text-amber-700",
   paid: "bg-blue-100 text-blue-700",
+  awaiting_model: "bg-indigo-50 text-indigo-700",
   generating: "bg-indigo-100 text-indigo-700",
   processing_mesh: "bg-indigo-100 text-indigo-700",
   review: "bg-yellow-100 text-yellow-700",
@@ -28,6 +29,7 @@ const BUCKET_ORDER = ["all", "needsAction", "inProgress", "completed", "problems
 const EXACT_STATUSES = [
   "pending_payment",
   "paid",
+  "awaiting_model",
   "generating",
   "processing_mesh",
   "review",

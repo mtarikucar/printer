@@ -15,6 +15,8 @@ import { Button, Card } from "@/components/ui";
 import type { AccountPreview } from "@/components/account-gallery-card";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-context";
+import { priceKindForStyle, getTemplate } from "@/lib/create/design-templates";
+import type { Dictionary } from "@/lib/i18n/dictionaries";
 
 interface User {
   id: string;
@@ -29,12 +31,28 @@ interface CustomerOrder {
   orderNumber: string;
   status: string;
   figurineSize: string;
+  style: string;
   amountKurus: number;
   createdAt: string;
   trackingNumber: string | null;
   thumbnailUrl: string | null;
   isPublic: boolean;
   glbUrl: string | null;
+}
+
+// The order-row secondary label. Creative Lab products (keychain/magnet/lamp)
+// carry a neutral "orta" figurineSize placeholder, so show their real product
+// name instead of a misleading size; everything else shows the size.
+function orderItemLabel(order: CustomerOrder, d: Dictionary): string {
+  const kind = priceKindForStyle(order.style);
+  if (kind === "keychain" || kind === "fridge_magnet" || kind === "lamp") {
+    const tpl = getTemplate(order.style);
+    return (tpl && (d[tpl.labelKey as keyof typeof d] as string)) || order.style;
+  }
+  return (
+    (d[`sizes.${order.figurineSize}` as keyof typeof d] as string) ||
+    order.figurineSize
+  );
 }
 
 export default function AccountPage() {
@@ -341,13 +359,12 @@ function AccountPageInner() {
                     <tbody className="divide-y divide-bg-subtle">
                       {customerOrders.map((order) => {
                         const statusKey = `status.${order.status}` as keyof typeof d;
-                        const sizeKey = `sizes.${order.figurineSize}` as keyof typeof d;
                         return (
                           <tr key={order.id} className="hover:bg-bg-elevated/50 transition-colors">
                             <td className="py-3 px-4">
                               <span className="font-mono font-medium text-text-primary">{order.orderNumber}</span>
                             </td>
-                            <td className="py-3 px-4 text-text-muted">{d[sizeKey] || order.figurineSize}</td>
+                            <td className="py-3 px-4 text-text-muted">{orderItemLabel(order, d)}</td>
                             <td className="py-3 px-4">
                               <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
                                 order.status === "delivered" ? "bg-green-500/15 text-green-400" :
@@ -383,7 +400,6 @@ function AccountPageInner() {
                 <div className="sm:hidden divide-y divide-bg-subtle">
                   {customerOrders.map((order) => {
                     const statusKey = `status.${order.status}` as keyof typeof d;
-                    const sizeKey = `sizes.${order.figurineSize}` as keyof typeof d;
                     return (
                       <div key={order.id} className="p-4">
                         <div className="flex items-center justify-between mb-2">
@@ -399,7 +415,7 @@ function AccountPageInner() {
                           </span>
                         </div>
                         <div className="flex items-center justify-between text-xs text-text-muted">
-                          <span>{d[sizeKey] || order.figurineSize} &middot; {formatCurrency(order.amountKurus, locale)}</span>
+                          <span>{orderItemLabel(order, d)} &middot; {formatCurrency(order.amountKurus, locale)}</span>
                           <span>{formatDate(order.createdAt, locale)}</span>
                         </div>
                         <div className="flex items-center gap-3 mt-2">

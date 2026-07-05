@@ -57,6 +57,7 @@ const tr: Dictionary = {
   // Status labels
   "status.pending_payment": "Onay Bekleniyor",
   "status.paid": "Ödeme Alındı",
+  "status.awaiting_model": "Modeliniz Hazırlanıyor",
   "status.generating": "Model Oluşturuluyor",
   "status.processing_mesh": "İşleniyor",
   "status.review": "Kalite Kontrolü",
@@ -202,7 +203,7 @@ const tr: Dictionary = {
   "design.change": "Başka bir görsel seç",
   "design.generate": "3D önizleme oluştur",
   "design.generating": "Modelin oluşturuluyor… bu birkaç dakika sürebilir.",
-  "design.previewTitle": "İşte 3D modelin",
+  "design.previewTitle": "İşte tasarımın",
   "design.previewSub": "Beğendin mi? Boyut, malzeme ve ödeme için devam et.",
   "design.fromPrice": "Başlangıç fiyatı",
   "design.priceNote": "Son fiyat ödeme adımında boyut ve malzemeye göre belirlenir.",
@@ -608,6 +609,12 @@ const tr: Dictionary = {
   "create.style.vinyl.desc": "Funko tarzı koleksiyon vinil figür",
   "create.style.claymation": "Kil Animasyon",
   "create.style.claymation.desc": "El yapımı stop-motion kil figür",
+  "create.style.keychain": "Anahtarlık",
+  "create.style.keychain.desc": "Fotoğrafınızdan sevimli 3D baskı anahtarlık",
+  "create.style.fridge_magnet": "Buzdolabı Magneti",
+  "create.style.fridge_magnet.desc": "Fotoğrafınızdan 3D baskı buzdolabı magneti",
+  "create.style.lamp": "Gece Lambası",
+  "create.style.lamp.desc": "Fotoğrafınızdan içten ışıyan 3D baskı gece lambası",
 
   // Create — Modifiers
   "create.modifiers": "Stil Efektleri",
@@ -820,6 +827,9 @@ const tr: Dictionary = {
   "tracker.shipped.description": "Yolda, size geliyor!",
   "tracker.delivered.label": "Teslim Edildi",
   "tracker.delivered.description": "Figürününüzün tadını çıkarın!",
+  "tracker.awaiting_model.label": "Modeliniz Hazırlanıyor",
+  "tracker.awaiting_model.description":
+    "Ekibimiz onayladığınız tasarımdan 3D modelinizi hazırlıyor",
   "tracker.pendingPayment.title": "Ödeme Bekleniyor",
   "tracker.pendingPayment.message":
     "Siparişiniz ödeme onayı bekliyor. Devam etmek için lütfen ödemeyi tamamlayın.",
@@ -896,6 +906,7 @@ const tr: Dictionary = {
   "admin.status.rejected": "Reddedildi",
   "admin.status.pending_payment": "Onay Bekleniyor",
   "admin.status.paid": "Ödeme Alındı",
+  "admin.status.awaiting_model": "Model Bekleniyor",
   "admin.status.generating": "Model Oluşturuluyor",
   "admin.status.processing_mesh": "İşleniyor",
   "admin.status.delivered": "Teslim Edildi",
@@ -1417,6 +1428,7 @@ const tr: Dictionary = {
   // Admin - Zaman çizelgesi
   "admin.timeline.created": "Sipariş oluşturuldu",
   "admin.timeline.paid": "Ödeme alındı",
+  "admin.timeline.upload_model": "3D model yüklendi",
   "admin.timeline.generating": "AI oluşturma başladı",
   "admin.timeline.generationDone": "AI oluşturma tamamlandı",
   "admin.timeline.meshProcessing": "Mesh işleme başladı",

@@ -55,6 +55,7 @@ const en = {
   // Status labels
   "status.pending_payment": "Awaiting Confirmation",
   "status.paid": "Payment Received",
+  "status.awaiting_model": "Preparing Your Model",
   "status.generating": "Generating Model",
   "status.processing_mesh": "Processing",
   "status.review": "Quality Review",
@@ -200,7 +201,7 @@ const en = {
   "design.change": "Choose a different image",
   "design.generate": "Generate 3D preview",
   "design.generating": "Building your model… this can take a couple of minutes.",
-  "design.previewTitle": "Here's your 3D model",
+  "design.previewTitle": "Here's your design",
   "design.previewSub": "Happy with it? Continue to pick size, material, and checkout.",
   "design.fromPrice": "Starting from",
   "design.priceNote": "Final price is set by size & material at checkout.",
@@ -606,6 +607,12 @@ const en = {
   "create.style.vinyl.desc": "Funko-style collectible vinyl figure",
   "create.style.claymation": "Claymation",
   "create.style.claymation.desc": "Handmade stop-motion clay figure",
+  "create.style.keychain": "Keychain",
+  "create.style.keychain.desc": "A cute 3D-printed keychain from your photo",
+  "create.style.fridge_magnet": "Fridge Magnet",
+  "create.style.fridge_magnet.desc": "A 3D-printed fridge magnet from your photo",
+  "create.style.lamp": "Night Lamp",
+  "create.style.lamp.desc": "A softly glowing 3D-printed night lamp from your photo",
 
   // Create — Modifiers
   "create.modifiers": "Style Effects",
@@ -818,6 +825,9 @@ const en = {
   "tracker.shipped.description": "On its way to you!",
   "tracker.delivered.label": "Delivered",
   "tracker.delivered.description": "Enjoy your figurine!",
+  "tracker.awaiting_model.label": "Preparing Your Model",
+  "tracker.awaiting_model.description":
+    "Our team is preparing your 3D model from your approved design",
   "tracker.pendingPayment.title": "Awaiting Payment",
   "tracker.pendingPayment.message":
     "Your order is waiting for payment confirmation. Please complete the payment to proceed.",
@@ -894,6 +904,7 @@ const en = {
   "admin.status.rejected": "Rejected",
   "admin.status.pending_payment": "Awaiting Confirmation",
   "admin.status.paid": "Payment Received",
+  "admin.status.awaiting_model": "Awaiting Model",
   "admin.status.generating": "Generating",
   "admin.status.processing_mesh": "Processing",
   "admin.status.delivered": "Delivered",
@@ -1411,6 +1422,7 @@ const en = {
   // Admin - Timeline events
   "admin.timeline.created": "Order created",
   "admin.timeline.paid": "Payment received",
+  "admin.timeline.upload_model": "3D model uploaded",
   "admin.timeline.generating": "AI generation started",
   "admin.timeline.generationDone": "AI generation completed",
   "admin.timeline.meshProcessing": "Mesh processing started",

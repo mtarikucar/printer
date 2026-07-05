@@ -21,7 +21,7 @@ import {
   calculateUpsellAmount,
   itemPriceKurus,
 } from "@/lib/config/prices";
-import { priceKindForStyle, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
+import { priceKindForStyle, getTemplate, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { resolveOrderLines, type ResolvedOrderLine } from "@/lib/services/product-options";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { resolveOrCreateGuestUser } from "@/lib/services/guest-user";
@@ -657,6 +657,18 @@ export async function POST(request: NextRequest) {
         quantity > 1 ? `${product!.title} × ${quantity}` : product!.title;
     } else if (orderType === "upload") {
       figurineName = `3D Model — ${uploadedModel!.fileName.slice(0, 60)}`;
+    } else if (
+      priceKindForStyle(customInput!.style) === "keychain" ||
+      priceKindForStyle(customInput!.style) === "fridge_magnet" ||
+      priceKindForStyle(customInput!.style) === "lamp"
+    ) {
+      // Creative Lab product (/urunler keychain/magnet/lamp): flat-priced with a
+      // real product identity. size/material are neutral placeholders for these,
+      // so bill/label by the product name instead of "Figurin (size · material)".
+      const tpl = getTemplate(customInput!.style);
+      figurineName =
+        (tpl && (d[tpl.labelKey as keyof typeof d] as string)) ||
+        customInput!.style;
     } else {
       const sizeLabel =
         d[`sizes.${customInput!.figurineSize}` as keyof typeof d] ||

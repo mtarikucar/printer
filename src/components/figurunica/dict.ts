@@ -109,6 +109,7 @@ export const FIGURUNICA_KEYS = [
   "landing.fig.footer.addressLabel",
   "landing.fig.footer.emailLabel",
   "landing.fig.footer.contactLink",
+  "landing.fig.footer.workshopLink",
   "landing.fig.footer.legal.distance",
   "landing.fig.footer.legal.preinfo",
   "landing.fig.footer.legal.returns",

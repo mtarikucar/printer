@@ -1911,6 +1911,7 @@ const en = {
   "landing.fig.footer.addressLabel": "Address",
   "landing.fig.footer.emailLabel": "Email",
   "landing.fig.footer.contactLink": "Contact",
+  "landing.fig.footer.workshopLink": "Workshop at your venue",
   "landing.fig.footer.legal.distance": "Distance Sales",
   "landing.fig.footer.legal.preinfo": "Preliminary Info",
   "landing.fig.footer.legal.returns": "Returns & Damage",
@@ -1936,6 +1937,19 @@ const en = {
   "contact.email.note": "We typically reply within one business day.",
   "contact.address.label": "Address",
   "contact.address.mapsCta": "Open in Maps",
+  "contact.workshop.title": "Want a workshop at your venue?",
+  "contact.workshop.body":
+    "We bring a hands-on figurine painting & design workshop to your café, school, office or event.",
+  "contact.workshop.cta": "Request a workshop",
+
+  // Workshop request page
+  "workshop.meta.title": "Workshop at Your Venue — Figurunica",
+  "workshop.meta.description":
+    "Request a Figurunica figurine workshop at your own venue — café, school, office, birthday or private group.",
+  "workshop.eyebrow": "Workshop at your venue",
+  "workshop.title": "Host a workshop at your venue",
+  "workshop.subtitle":
+    "Bring a fun figurine painting & design experience to your space. Tell us about your event and we'll get back to you with a tailored plan and quote.",
 
   // ─── QC (quality control) + order messaging (Faz 1) ───────────
   "status.quality_check": "Quality Check",

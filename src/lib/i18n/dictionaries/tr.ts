@@ -1917,6 +1917,7 @@ const tr: Dictionary = {
   "landing.fig.footer.addressLabel": "Adres",
   "landing.fig.footer.emailLabel": "E-posta",
   "landing.fig.footer.contactLink": "İletişim",
+  "landing.fig.footer.workshopLink": "Mekânınızda Atölye",
   "landing.fig.footer.legal.distance": "Mesafeli Satış",
   "landing.fig.footer.legal.preinfo": "Ön Bilgilendirme",
   "landing.fig.footer.legal.returns": "İade & Hasar",
@@ -1942,6 +1943,19 @@ const tr: Dictionary = {
   "contact.email.note": "Genellikle bir iş günü içinde yanıt veriyoruz.",
   "contact.address.label": "Adres",
   "contact.address.mapsCta": "Haritada Aç",
+  "contact.workshop.title": "Mekânınızda atölye ister misiniz?",
+  "contact.workshop.body":
+    "Kafe, okul, ofis ya da etkinliğinize; uygulamalı figür boyama & tasarım atölyesini biz getiriyoruz.",
+  "contact.workshop.cta": "Atölye talebi oluştur",
+
+  // Atölye talebi sayfası
+  "workshop.meta.title": "Mekânınızda Atölye — Figurunica",
+  "workshop.meta.description":
+    "Kendi mekânınızda Figurunica figür atölyesi için talep oluşturun — kafe, okul, ofis, doğum günü veya özel grup.",
+  "workshop.eyebrow": "Mekânınızda atölye",
+  "workshop.title": "Mekânınızda atölye düzenleyin",
+  "workshop.subtitle":
+    "Keyifli bir figür boyama & tasarım deneyimini mekânınıza taşıyalım. Etkinliğinizi anlatın, size özel bir program ve teklifle dönelim.",
 
   // ─── QC (kalite kontrol) + sipariş mesajlaşma (Faz 1) ──────────
   "status.quality_check": "Kalite Kontrol",

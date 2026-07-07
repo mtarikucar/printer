@@ -601,3 +601,30 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     html: template.html,
   });
 }
+
+/**
+ * Generic, template-free sender for flows that don't fit the order-centric
+ * `sendEmail` union (which requires an `orderNumber`). The caller composes the
+ * subject + HTML itself. Reuses the same nodemailer transport and FROM address.
+ * `replyTo` is handy for lead notifications so staff can reply straight to the
+ * requester. No-ops the same way `sendEmail` does when SMTP is unconfigured
+ * (nodemailer just fails to connect — callers wrap this in `.catch()`).
+ */
+export async function sendRawEmail(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  replyTo?: string;
+}): Promise<void> {
+  await transporter.sendMail({
+    from: FROM_EMAIL,
+    to: opts.to,
+    subject: opts.subject,
+    html: opts.html,
+    replyTo: opts.replyTo,
+  });
+}
+
+// Re-exported for callers that compose their own HTML and need the same
+// escaping the built-in templates use.
+export { escHtml };

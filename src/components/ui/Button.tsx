@@ -129,10 +129,23 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       );
     }
 
-    const { href: _href, ...buttonProps } = props as ButtonAsButton & {
-      href?: undefined;
-    };
-    void _href;
+    // Strip component-only props (variant/size/fullWidth/loading/icon/children/
+    // className + href) so they don't leak onto the DOM <button> as invalid
+    // attributes (React warns: "Received `false` for a non-boolean attribute
+    // `loading`", "React does not recognize the `fullWidth` prop"). Only the
+    // real native attributes in `buttonProps` are spread.
+    const {
+      href: _href,
+      variant: _variant,
+      size: _size,
+      fullWidth: _fullWidth,
+      loading: _loading,
+      icon: _icon,
+      children: _children,
+      className: _className,
+      ...buttonProps
+    } = props as ButtonAsButton & { href?: undefined };
+    void [_href, _variant, _size, _fullWidth, _loading, _icon, _children, _className];
     return (
       <button
         ref={ref}

@@ -833,6 +833,69 @@ export const disputes = pgTable("disputes", {
   resolvedAt: timestamp("resolved_at"),
 });
 
+// ─── Atölye Talebi (Workshop Request) ───────────────────────────────────────
+// A venue owner / organization requests a Figurunica workshop event AT THEIR
+// OWN location. Standalone lead: not tied to an order/payment. Admin processes
+// it through a status lifecycle (new → reviewing → scheduled → completed, or
+// rejected/cancelled). venueType/ageGroup/workshopType are `text` validated
+// against src/lib/workshop/constants.ts (product-defined, likely to evolve);
+// only `status` is a stable pg enum.
+export const workshopRequestStatusEnum = pgEnum("workshop_request_status", [
+  "new",
+  "reviewing",
+  "scheduled",
+  "completed",
+  "rejected",
+  "cancelled",
+]);
+
+export const workshopRequests = pgTable(
+  "workshop_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Human-friendly support/tracking reference, e.g. "WS-3F7K2Q".
+    reference: text("reference").notNull().unique(),
+    // Attached when the requester is logged in; null for guests.
+    userId: uuid("user_id").references(() => users.id),
+    // Contact
+    contactName: text("contact_name").notNull(),
+    contactEmail: text("contact_email").notNull(),
+    contactPhone: text("contact_phone").notNull(), // E.164
+    organizationName: text("organization_name"),
+    // Venue
+    venueType: text("venue_type").notNull(),
+    city: text("city").notNull(), // il
+    district: text("district").notNull(), // ilçe
+    addressLine: text("address_line").notNull(),
+    // Event
+    participantCount: integer("participant_count").notNull(),
+    ageGroup: text("age_group").notNull(),
+    workshopType: text("workshop_type").notNull(),
+    preferredDate: text("preferred_date"), // YYYY-MM-DD or free text
+    alternativeDate: text("alternative_date"),
+    budgetRange: text("budget_range"),
+    message: text("message"),
+    howHeard: text("how_heard"),
+    source: text("source").notNull().default("web"),
+    // KVKK: the form requires explicit consent to submit; record WHEN it was
+    // given (submission time) as an auditable consent trail.
+    kvkkConsentAt: timestamp("kvkk_consent_at").notNull().defaultNow(),
+    // Lifecycle + admin processing (nullable until acted on)
+    status: workshopRequestStatusEnum("status").notNull().default("new"),
+    adminNotes: text("admin_notes"),
+    rejectionReason: text("rejection_reason"),
+    quotedPriceKurus: integer("quoted_price_kurus"),
+    scheduledAt: timestamp("scheduled_at"),
+    adminEmail: text("admin_email"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byStatus: index("workshop_requests_status_idx").on(t.status, t.createdAt),
+    byUser: index("workshop_requests_user_idx").on(t.userId, t.createdAt),
+  })
+);
+
 // ─── Faz 4: customer in-app notification center ─────────────────────────────
 export const customerNotifications = pgTable(
   "customer_notifications",
@@ -1541,6 +1604,13 @@ export const disputesRelations = relations(disputes, ({ one }) => ({
   }),
   user: one(users, {
     fields: [disputes.userId],
+    references: [users.id],
+  }),
+}));
+
+export const workshopRequestsRelations = relations(workshopRequests, ({ one }) => ({
+  user: one(users, {
+    fields: [workshopRequests.userId],
     references: [users.id],
   }),
 }));

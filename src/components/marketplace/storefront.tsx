@@ -42,10 +42,10 @@ export function StorefrontHome({
 
   return (
     <>
-      {/* Production-led: the photo→figurine hero leads; the marketplace
-          (ribbon + shelves) follows below. */}
-      <HeroCreate />
+      {/* Category ribbon sits up top (right under the nav), then the
+          photo→figurine hero, then the marketplace shelves. */}
       <CategoryRibbon categories={roots} />
+      <HeroCreate />
       <ProductRow
         title={d["store.row.new"]}
         products={newest}

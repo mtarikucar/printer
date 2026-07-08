@@ -37,9 +37,12 @@ export default function PainterRegisterPage() {
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
 
-  // Address (location-based job routing).
+  // Address (location-based job routing + shipping the finished work).
   const [il, setIl] = useState("");
   const [ilce, setIlce] = useState("");
+  const [mahalle, setMahalle] = useState("");
+  const [adres, setAdres] = useState("");
+  const [postaKodu, setPostaKodu] = useState("");
 
   // Painting techniques (capabilities). Optional.
   const [capabilities, setCapabilities] = useState<string[]>([]);
@@ -92,11 +95,16 @@ export default function PainterRegisterPage() {
           phone: phoneE164,
           password,
           address: {
+            adres,
+            mahalle: mahalle || undefined,
             il,
             ilce,
+            postaKodu,
             telefon: phoneE164,
           },
-          capabilities,
+          // Optional in the UI; omit when empty so the API defaults to ["hand"]
+          // (an empty array would fail the schema's min(1) instead).
+          capabilities: capabilities.length ? capabilities : undefined,
           onboardingAccepted: true,
         }),
       });
@@ -319,6 +327,43 @@ export default function PainterRegisterPage() {
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Mahalle
+                </label>
+                <input
+                  className={inputCls}
+                  value={mahalle}
+                  onChange={(e) => setMahalle(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Posta Kodu *
+                </label>
+                <input
+                  className={inputCls}
+                  required
+                  inputMode="numeric"
+                  value={postaKodu}
+                  onChange={(e) => setPostaKodu(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Açık Adres *
+              </label>
+              <textarea
+                className={inputCls}
+                required
+                rows={2}
+                value={adres}
+                onChange={(e) => setAdres(e.target.value)}
+                placeholder="Cadde, sokak, bina/daire no"
+              />
             </div>
           </fieldset>
 

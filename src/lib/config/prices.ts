@@ -156,8 +156,10 @@ export function allocatePaytrBasket(args: {
 
 // ─── Finance (Faz 2) ────────────────────────────────────────────────────────
 // Platform commission: the share of each paid order the platform keeps; the
-// manufacturer is paid the remainder. Basis points (3000 = 30%). Tune freely.
-export const PLATFORM_COMMISSION_RATE_BPS = 3000;
+// manufacturer/painter is paid the remainder. Basis points (3500 = 35%). Tune
+// freely — but keep the manufacturer + painter onboarding agreements in sync
+// (they state the rate explicitly).
+export const PLATFORM_COMMISSION_RATE_BPS = 3500;
 
 // Turkish VAT (KDV) applied to customer invoices. Catalogue prices are
 // KDV-inclusive, so the invoice breaks the paid total into base + KDV.

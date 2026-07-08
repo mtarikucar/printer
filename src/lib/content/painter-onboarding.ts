@@ -106,8 +106,9 @@ edersiniz; yanlış/yanıltıcı beyan, hesabın askıya alınması veya feshi s
 - Boyacının hak edişi, siparişteki **boyama bedeli (profesyonel boyama payı)**
   üzerinden hesaplanır; baskı payı üreticiye, boyama payı ise Boyacıya aittir.
 - Her tamamlanan iş için, boyama bedelinden **Platform hizmet bedeli (komisyon)**
-  düşülerek **net boyacı payı** ödenir; **güncel komisyon oranı ve her işin net
-  payı panelde şeffaf biçimde gösterilir.**
+  düşülerek **net boyacı payı** ödenir. **Güncel Platform komisyonu %35, boyacının
+  net payı ise %65'tir.** Komisyon oranı ve her işin net payı panelde şeffaf
+  biçimde gösterilir; oran değişirse önceden bildirilir.
 - Net payınız, işi **QC onayından geçirip müşteriye kargoladığınızda** tahakkuk
   eder. Ödemeler, **tanımlı IBAN'ınıza toplu** yapılır ve ödeme raporunuzu
   panelden indirebilirsiniz.

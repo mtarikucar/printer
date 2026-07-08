@@ -129,8 +129,9 @@ iletmektir. Boyacıya devredilen işteki baskı kusurları (kırık, eksik parç
 
 - Her tamamlanan ve teslim edilen sipariş için Üreticiye **net üretici payı**
   ödenir. Net pay, sipariş tutarından **Platform hizmet bedeli (komisyon)**
-  düşülerek hesaplanır; **güncel komisyon oranı ve her siparişin net payı
-  panelde şeffaf biçimde gösterilir.**
+  düşülerek hesaplanır. **Güncel Platform komisyonu %35, üreticinin net payı
+  ise %65'tir.** Komisyon oranı ve her siparişin net payı panelde şeffaf biçimde
+  gösterilir; oran değişirse önceden bildirilir.
 - **Profesyonel boyama içeren siparişlerde** net üretici payınız, sipariş
   tutarından **boyama bedeli düşülerek (yalnızca baskı payı) üzerinden**
   hesaplanır; boyama bedelinin payı ilgili **boyacıya** ödenir. Bu siparişlerde

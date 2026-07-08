@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
@@ -9,10 +8,6 @@ import { OrderChat } from "@/components/order-chat";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
-const MeshSculptor = dynamic(
-  () => import("@/components/mesh-sculptor/MeshSculptor").then((m) => m.MeshSculptor),
-  { ssr: false }
-);
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatCurrency, formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
@@ -59,6 +54,7 @@ interface Props {
     order: OrderData;
     approvedImageUrl?: string | null;
     photos: { id: string; originalUrl: string; thumbnailUrl: string | null }[];
+    modelRevisions: { id: string; revision: number; glbUrl: string | null; stlUrl: string | null; uploadedByEmail: string | null; note: string | null; createdAt: string }[];
     latestGeneration: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; costCents: number | null; durationMs: number | null; createdAt: string } | null;
     latestReport: { isWatertight: boolean; isVolume: boolean; vertexCount: number; faceCount: number; componentCount: number; boundingBox: any; baseAdded: boolean; repairsApplied: string[] | null } | null;
     generationAttempts: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; errorMessage: string | null; costCents: number | null; durationMs: number | null; createdAt: string }[];
@@ -138,7 +134,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, approvedImageUrl, photos, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, activeManufacturers, candidates } = data;
+  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -158,7 +154,6 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   // Edit state
   const [editing, setEditing] = useState(false);
-  const [sculptorOpen, setSculptorOpen] = useState(false);
   const [editNotes, setEditNotes] = useState(order.adminNotes || "");
   const [editAddress, setEditAddress] = useState(order.shippingAddress);
   const [editTelefonCountry, setEditTelefonCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
@@ -1096,22 +1091,83 @@ export function OrderDetailClient({ data, locale }: Props) {
       {tab === "production" && (
         <div className="space-y-5 max-w-3xl">
 
-          {/* ─── Mesh Edit Button (review only) ─────── */}
-          {order.status === "review" && latestGeneration?.outputGlbUrl && (
-            <button
-              onClick={() => setSculptorOpen(true)}
-              className="w-full flex items-center gap-4 bg-white rounded-2xl shadow-sm border border-indigo-200 p-4 hover:bg-indigo-50 transition-colors group"
-            >
-              <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-200 transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+          {/* ─── Model dosyaları ve sürümler ─────── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">3D Model dosyaları</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              STL/GLB indirin, düzeltip yeni sürüm olarak yükleyin. Her yükleme
+              sürüm olarak saklanır; eski dosyalar silinmez.
+            </p>
+
+            {modelRevisions.length === 0 ? (
+              <p className="text-sm text-gray-400 mb-4">Henüz model yüklenmedi.</p>
+            ) : (
+              <div className="space-y-2 mb-4">
+                {modelRevisions.map((r, idx) => (
+                  <div
+                    key={r.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-gray-100 p-3"
+                  >
+                    <span className="text-sm font-medium text-gray-900">
+                      Sürüm {r.revision}
+                      {idx === 0 && (
+                        <span className="ml-1.5 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                          GÜNCEL
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-xs text-gray-400">{formatDateTime(r.createdAt, loc)}</span>
+                    {r.uploadedByEmail && (
+                      <span className="text-xs text-gray-400">· {r.uploadedByEmail}</span>
+                    )}
+                    {r.note && <span className="text-xs text-gray-400 italic">· {r.note}</span>}
+                    <div className="flex gap-2 ml-auto">
+                      {r.glbUrl && (
+                        <a href={r.glbUrl} download className="px-3 py-1 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800">
+                          GLB indir
+                        </a>
+                      )}
+                      {r.stlUrl && (
+                        <a href={r.stlUrl} download className="px-3 py-1 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
+                          STL indir
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="text-left">
-                <p className="text-sm font-semibold text-indigo-900">{d["admin.orderDetail.editMesh"] ?? "Mesh Duzenle"}</p>
-                <p className="text-xs text-indigo-600 mt-0.5">3D modeli duzenlemek icin sculpt editorunu acin</p>
+            )}
+
+            {["approved", "review"].includes(order.status) && (
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs font-medium text-gray-700 mb-2">
+                  Yeni sürüm yükle (düzeltilmiş modeli buradan yükleyin)
+                </p>
+                <div className="space-y-2">
+                  <input
+                    type="file"
+                    accept=".glb"
+                    onChange={(e) => setModelGlbFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-gray-900 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-700"
+                  />
+                  <input
+                    type="file"
+                    accept=".stl"
+                    onChange={(e) => setModelStlFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-gray-900 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-gray-700 hover:file:bg-gray-200"
+                  />
+                </div>
+                {uploadModelError && <p className="mt-2 text-sm text-red-600">{uploadModelError}</p>}
+                <button
+                  onClick={uploadModel}
+                  disabled={!modelGlbFile || uploadingModel}
+                  className="mt-3 px-5 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:bg-gray-400 transition-colors"
+                >
+                  {uploadingModel ? "Yükleniyor…" : "Yeni sürümü yükle"}
+                </button>
               </div>
-              <svg className="w-5 h-5 text-indigo-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-            </button>
-          )}
+            )}
+          </div>
 
           {/* ─── Manufacturer Section ─────────────────── */}
           {hasManufacturer && (
@@ -1438,20 +1494,6 @@ export function OrderDetailClient({ data, locale }: Props) {
             </div>
           )}
         </div>
-      )}
-
-      {/* Mesh Sculptor Overlay */}
-      {sculptorOpen && latestGeneration?.outputGlbUrl && (
-        <MeshSculptor
-          glbUrl={latestGeneration.outputGlbUrl}
-          orderId={order.id}
-          generationId={latestGeneration.id}
-          onClose={() => setSculptorOpen(false)}
-          onSaved={() => {
-            setSculptorOpen(false);
-            router.refresh();
-          }}
-        />
       )}
     </div>
   );

@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews } from "@/lib/db/schema";
+import { orders, orderPhotos, orderModelRevisions, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
@@ -31,6 +31,9 @@ export default async function AdminOrderDetailPage({
     where: eq(orders.id, id),
     with: {
       photos: true,
+      modelRevisions: {
+        orderBy: [desc(orderModelRevisions.revision)],
+      },
       generationAttempts: {
         orderBy: [desc(generationAttempts.createdAt)],
         with: {
@@ -121,6 +124,15 @@ export default async function AdminOrderDetailPage({
       id: p.id,
       originalUrl: normalizeFileUrl(p.originalUrl) ?? p.originalUrl,
       thumbnailUrl: normalizeFileUrl(p.thumbnailUrl),
+    })),
+    modelRevisions: order.modelRevisions.map((r) => ({
+      id: r.id,
+      revision: r.revision,
+      glbUrl: normalizeFileUrl(r.glbUrl),
+      stlUrl: normalizeFileUrl(r.stlUrl),
+      uploadedByEmail: r.uploadedByEmail,
+      note: r.note,
+      createdAt: r.createdAt.toISOString(),
     })),
     latestGeneration: latestGeneration ? {
       id: latestGeneration.id,

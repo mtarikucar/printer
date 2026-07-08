@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { orders, adminActions } from "@/lib/db/schema";
+import { orders, adminActions, orderModelRevisions } from "@/lib/db/schema";
 import { saveFile, getPublicUrl } from "@/lib/services/storage";
 import { nanoid } from "nanoid";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
@@ -81,6 +81,40 @@ export async function POST(
     stlKey = await saveFile(stlBuffer, `models/${orderId}`, `model-${nanoid()}.stl`);
     stlUrl = getPublicUrl(stlKey);
   }
+
+  // Preserve every uploaded model as a revision — old files are NEVER deleted,
+  // so the admin can always download an earlier STL. The order's live
+  // modelGlb*/modelStl* columns always point at the latest revision.
+  const [{ maxRev }] = await db
+    .select({ maxRev: sql<number>`coalesce(max(${orderModelRevisions.revision}), 0)::int` })
+    .from(orderModelRevisions)
+    .where(eq(orderModelRevisions.orderId, orderId));
+  let nextRev = (maxRev ?? 0) + 1;
+  // Backfill: an order that already had a model but no revision rows yet (uploaded
+  // before this feature) gets its existing model archived as revision 1 so it
+  // isn't lost when the new one lands.
+  if ((maxRev ?? 0) === 0 && order.modelGlbKey && order.modelGlbUrl) {
+    await db.insert(orderModelRevisions).values({
+      orderId,
+      revision: 1,
+      glbKey: order.modelGlbKey,
+      glbUrl: order.modelGlbUrl,
+      stlKey: order.modelStlKey,
+      stlUrl: order.modelStlUrl,
+      note: "Önceki model (otomatik arşivlendi)",
+      createdAt: order.modelUploadedAt ?? new Date(),
+    });
+    nextRev = 2;
+  }
+  await db.insert(orderModelRevisions).values({
+    orderId,
+    revision: nextRev,
+    glbKey,
+    glbUrl,
+    stlKey,
+    stlUrl,
+    uploadedByEmail: a.session.user.email,
+  });
 
   // Advance awaiting_model → approved (only from awaiting_model, so re-uploads
   // on an already-fulfilling order keep its current status).

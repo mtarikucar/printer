@@ -1925,6 +1925,9 @@ const en = {
   "landing.fig.footer.mfrPrompt": "Want to become a manufacturer?",
   "landing.fig.footer.mfrApply": "Apply",
   "landing.fig.footer.mfrLogin": "Manufacturer login",
+  "landing.fig.footer.painterPrompt": "Are you a painting studio?",
+  "landing.fig.footer.painterApply": "Apply as a painter",
+  "landing.fig.footer.painterLogin": "Painter login",
 
   "landing.fig.scroll.cue": "Scroll to follow the journey",
 

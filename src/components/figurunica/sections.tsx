@@ -651,6 +651,19 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
           </Link>
         </div>
       </div>
+      <div className={s("footer-mfr")}>
+        <span className={s("footer-mfr-prompt")}>
+          {d["landing.fig.footer.painterPrompt"]}
+        </span>
+        <div className={s("footer-mfr-actions")}>
+          <Link href="/painter/register" className={s("footer-mfr-apply")}>
+            {d["landing.fig.footer.painterApply"]} →
+          </Link>
+          <Link href="/painter/login" className={s("footer-link")}>
+            {d["landing.fig.footer.painterLogin"]}
+          </Link>
+        </div>
+      </div>
     </footer>
   );
 }

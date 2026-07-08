@@ -676,6 +676,33 @@ export const orderPhotos = pgTable("order_photos", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Version history of the admin-uploaded 3D print model. Every upload adds a new
+// revision (old files are preserved, never deleted); the order's live
+// modelGlb*/modelStl* columns always point at the latest revision.
+export const orderModelRevisions = pgTable(
+  "order_model_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id),
+    revision: integer("revision").notNull(),
+    glbKey: text("glb_key").notNull(),
+    glbUrl: text("glb_url").notNull(),
+    stlKey: text("stl_key"),
+    stlUrl: text("stl_url"),
+    uploadedByEmail: text("uploaded_by_email"),
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    orderRevUnique: uniqueIndex("order_model_revisions_order_rev_idx").on(
+      t.orderId,
+      t.revision
+    ),
+  })
+);
+
 // ─── QC (quality control): finished-product photos + admin reviews ──────────
 export const qcPhotoReviewStatusEnum = pgEnum("qc_photo_review_status", [
   "pending",
@@ -1675,6 +1702,7 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     references: [orderDrafts.id],
   }),
   photos: many(orderPhotos),
+  modelRevisions: many(orderModelRevisions),
   generationAttempts: many(generationAttempts),
   adminActions: many(adminActions),
   messages: many(adminMessages),
@@ -1701,6 +1729,13 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   sellerManufacturer: one(manufacturers, {
     fields: [orders.sellerManufacturerId],
     references: [manufacturers.id],
+  }),
+}));
+
+export const orderModelRevisionsRelations = relations(orderModelRevisions, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderModelRevisions.orderId],
+    references: [orders.id],
   }),
 }));
 

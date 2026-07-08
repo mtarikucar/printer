@@ -1931,6 +1931,9 @@ const tr: Dictionary = {
   "landing.fig.footer.mfrPrompt": "Üretici olmak ister misiniz?",
   "landing.fig.footer.mfrApply": "Başvur",
   "landing.fig.footer.mfrLogin": "Üretici girişi",
+  "landing.fig.footer.painterPrompt": "Boyacı / atölye misiniz?",
+  "landing.fig.footer.painterApply": "Boyacı olarak başvur",
+  "landing.fig.footer.painterLogin": "Boyacı girişi",
 
   "landing.fig.scroll.cue": "Yolculuğu izlemek için kaydır",
 

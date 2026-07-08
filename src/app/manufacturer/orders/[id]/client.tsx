@@ -7,6 +7,7 @@ import { ModelViewer } from "@/components/model-viewer";
 import { QcPhotoUploader } from "@/components/qc-photo-uploader";
 import { ProductionPanel } from "@/components/products/production-panel";
 import { OrderChat } from "@/components/order-chat";
+import { SendToPainterPanel } from "@/components/manufacturer/send-to-painter-panel";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
@@ -26,6 +27,8 @@ interface OrderData {
   modifiers: string[] | null;
   status: string;
   manufacturerStatus: string | null;
+  needsPainting: boolean;
+  painterStatus: string | null;
   qcRound: number;
   quantity: number;
   productTitleSnapshot: string | null;
@@ -825,7 +828,24 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
-          {canShip && (
+          {/* Painting orders: hand off to a painter instead of shipping. */}
+          {canShip &&
+            order.needsPainting &&
+            (!order.painterStatus || order.painterStatus === "unassigned") && (
+              <SendToPainterPanel orderId={order.id} />
+            )}
+
+          {order.needsPainting &&
+            order.painterStatus &&
+            order.painterStatus !== "unassigned" && (
+              <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-5 text-sm text-purple-900">
+                Bu sipariş boyacıya gönderildi (durum:{" "}
+                <span className="font-medium">{order.painterStatus}</span>). Boyacı
+                boyayıp müşteriye kargolayacak.
+              </div>
+            )}
+
+          {canShip && !order.needsPainting && (
             <div className="rounded-2xl shadow-sm border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-5">
               <div className="flex flex-col items-center text-center py-4">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center mb-4">

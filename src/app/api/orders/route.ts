@@ -20,6 +20,7 @@ import {
   allocatePaytrBasket,
   calculateUpsellAmount,
   itemPriceKurus,
+  finishSurchargeKurus,
 } from "@/lib/config/prices";
 import { priceKindForStyle, getTemplate, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { resolveOrderLines, type ResolvedOrderLine } from "@/lib/services/product-options";
@@ -330,6 +331,16 @@ export async function POST(request: NextRequest) {
               material: customInput!.material,
               finish: customInput!.finish,
             });
+    // Professional painting: the "hand_painted" figurine finish is fulfilled by
+    // a PAINTER partner, not the manufacturer. Its surcharge is ALREADY part of
+    // itemAmountKurus (finishSurchargeKurus), so we do NOT add it again — we only
+    // flag the order and record the portion that becomes the painter's earning
+    // base (the manufacturer's earning is amountKurus − paintingPriceKurus).
+    const needsPainting =
+      orderType === "custom" && customInput?.finish === "hand_painted";
+    const paintingPriceKurus = needsPainting
+      ? finishSurchargeKurus("hand_painted")
+      : 0;
     const amountKurus = itemAmountKurus + upsellAmountKurus;
 
     let giftCardId: string | undefined;
@@ -509,6 +520,8 @@ export async function POST(request: NextRequest) {
           havaleDiscountKurus,
           upsells: upsellKeys.length > 0 ? upsellKeys : null,
           upsellAmountKurus,
+          needsPainting,
+          paintingPriceKurus,
           paymentMethod: finalPaymentMethod,
           status: "pending",
           paytrMerchantOid,

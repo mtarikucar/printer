@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { disputes } from "@/lib/db/schema";
 import { reverseEarning } from "@/lib/services/payouts";
+import { reversePainterEarning } from "@/lib/services/painter-payouts";
 import { applyStrike } from "@/lib/services/strikes";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
@@ -53,6 +54,10 @@ export async function POST(
 
   if (parsed.data.action === "resolve" && parsed.data.clawback) {
     await reverseEarning(dispute.order.id);
+    // Also claw back the painter's earning for a painting order.
+    await reversePainterEarning(dispute.order.id).catch((e) =>
+      console.error("reversePainterEarning failed", e)
+    );
     if (dispute.order.manufacturerId) {
       await notifyManufacturer({
         manufacturerId: dispute.order.manufacturerId,

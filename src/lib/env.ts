@@ -59,6 +59,7 @@ function optional(name: string, fallback: string): string {
 const AUTH_SECRET = required("AUTH_SECRET", { minLength: 32 });
 const CUSTOMER_JWT_SECRET = optional("CUSTOMER_JWT_SECRET", AUTH_SECRET);
 const MANUFACTURER_JWT_SECRET = optional("MANUFACTURER_JWT_SECRET", AUTH_SECRET);
+const PAINTER_JWT_SECRET = optional("PAINTER_JWT_SECRET", AUTH_SECRET);
 
 // Warn whenever any pair of secrets is identical — not only the fall-back case.
 // An operator who set CUSTOMER_JWT_SECRET to the same value as AUTH_SECRET
@@ -88,6 +89,7 @@ export const env = {
   AUTH_SECRET,
   CUSTOMER_JWT_SECRET,
   MANUFACTURER_JWT_SECRET,
+  PAINTER_JWT_SECRET,
 
   ADMIN_EMAIL: required("ADMIN_EMAIL"),
 
@@ -116,5 +118,9 @@ export const JWT_CLAIMS = {
   manufacturer: {
     iss: "figurunica.manufacturer",
     aud: "figurunica.manufacturer-api",
+  },
+  painter: {
+    iss: "figurunica.painter",
+    aud: "figurunica.painter-api",
   },
 } as const;

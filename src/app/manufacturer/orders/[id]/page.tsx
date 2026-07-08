@@ -200,6 +200,8 @@ export default async function ManufacturerOrderDetailPage({
       modifiers: order.modifiers as string[] | null,
       status: order.status,
       manufacturerStatus: order.manufacturerStatus,
+      needsPainting: order.needsPainting,
+      painterStatus: order.painterStatus,
       qcRound: order.qcRound,
       quantity: order.quantity,
       productTitleSnapshot: order.productTitleSnapshot,

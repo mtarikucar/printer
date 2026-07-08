@@ -53,7 +53,12 @@ export async function POST(
           eq(orders.id, id),
           eq(orders.manufacturerId, session.manufacturerId),
           // Ship gate: only orders that passed admin QC approval may ship.
-          eq(orders.manufacturerStatus, "qc_approved")
+          eq(orders.manufacturerStatus, "qc_approved"),
+          // Painting orders are shipped by the PAINTER, never the manufacturer —
+          // even though manufacturerStatus stays 'qc_approved' after hand-off.
+          // This prevents force-shipping (and double-charging/mis-notifying) an
+          // order already in the painter pipeline.
+          eq(orders.needsPainting, false)
         )
       )
       .returning();

@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { reverseEarning } from "@/lib/services/payouts";
+import { reversePainterEarning } from "@/lib/services/painter-payouts";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
@@ -56,6 +57,10 @@ export async function POST(
     .where(eq(orders.id, id));
 
   await reverseEarning(id).catch((e) => console.error("reverseEarning failed", e));
+  // Also claw back the painter's earning for a refunded painting order.
+  await reversePainterEarning(id).catch((e) =>
+    console.error("reversePainterEarning failed", e)
+  );
 
   await db.insert(adminActions).values({
     orderId: id,

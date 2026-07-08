@@ -271,6 +271,10 @@ export async function promoteDraftToOrder(
         giftCardAmountKurus: draft.giftCardAmountKurus,
         upsells: draft.upsells,
         upsellAmountKurus: draft.upsellAmountKurus,
+        // Professional-painting add-on (custom orders) carried to the order so
+        // the manufacturer knows to hand off to a painter after QC.
+        needsPainting: draft.needsPainting,
+        paintingPriceKurus: draft.paintingPriceKurus,
         paidAt: new Date(),
         // Marketplace fields copied from the draft.
         orderType: draft.orderType,

@@ -54,6 +54,9 @@ export const orderStatusEnum = pgEnum("order_status", [
   "approved",
   "printing",
   "quality_check",
+  // Custom orders with the professional-painting add-on: after QC the
+  // manufacturer hands the figurine off to a painter; it is being painted.
+  "painting",
   "shipped",
   "delivered",
   "failed_generation",
@@ -225,6 +228,27 @@ export const manufacturerOrderStatusEnum = pgEnum("manufacturer_order_status", [
   "qc_pending",
   "qc_rejected",
   "qc_approved",
+  "shipped",
+]);
+
+// Painter partner account lifecycle — mirrors manufacturerStatusEnum.
+export const painterStatusEnum = pgEnum("painter_status", [
+  "pending_approval",
+  "conditionally_approved",
+  "active",
+  "suspended",
+  "rejected",
+]);
+
+// Per-order painting sub-lifecycle (on orders.painterStatus). Only meaningful
+// when orders.needsPainting = true. The manufacturer hands off (assigned), the
+// painter accepts, paints, then ships directly to the customer.
+export const painterOrderStatusEnum = pgEnum("painter_order_status", [
+  "unassigned",
+  "assigned",
+  "accepted",
+  "painting",
+  "painted",
   "shipped",
 ]);
 
@@ -434,6 +458,9 @@ export const orderDrafts = pgTable("order_drafts", {
   // re-derive it from the keys.
   upsells: jsonb("upsells").$type<string[]>(),
   upsellAmountKurus: integer("upsell_amount_kurus").notNull().default(0),
+  // Professional-painting add-on selection (carried to the promoted order).
+  needsPainting: boolean("needs_painting").notNull().default(false),
+  paintingPriceKurus: integer("painting_price_kurus").notNull().default(0),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
   status: orderDraftStatusEnum("status").notNull().default("pending"),
   // PayTR
@@ -597,6 +624,18 @@ export const orders = pgTable("orders", {
   // reassignment service to skip them on retry and to cap the reassign
   // count (3 declines → admin manual queue).
   declinedManufacturerIds: jsonb("declined_manufacturer_ids").$type<string[]>(),
+  // ─── Professional painting (optional paid add-on) ──────────────────────────
+  // needsPainting is set when the customer buys the painting add-on at checkout;
+  // paintingPriceKurus is the add-on price (part of orders.amountKurus). After
+  // QC the manufacturer hands the figurine to a painter, who paints + ships.
+  needsPainting: boolean("needs_painting").notNull().default(false),
+  paintingPriceKurus: integer("painting_price_kurus").notNull().default(0),
+  painterId: uuid("painter_id").references(() => painters.id),
+  painterStatus: painterOrderStatusEnum("painter_status"),
+  assignedToPainterAt: timestamp("assigned_to_painter_at"),
+  sentToPainterAt: timestamp("sent_to_painter_at"),
+  paintedAt: timestamp("painted_at"),
+  declinedPainterIds: jsonb("declined_painter_ids").$type<string[]>(),
   // QC reprint loop: qcRound bumps on each admin rejection (so the manufacturer
   // page shows only the current round); qcRejectionCount is a lifetime counter
   // for escalation/metrics.
@@ -1075,6 +1114,105 @@ export const manufacturerNotifications = pgTable("manufacturer_notifications", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Painters (boyacılar) — professional painting partner, mirrors manufacturers ─
+// A painter is an approved partner who paints figurines the customer opted to
+// have professionally painted, then ships directly to the customer. Same
+// account lifecycle, capacity/accepting controls, IBAN/payout and strike model
+// as manufacturers; `workSamplePhotoUploadedAt` is the conditional-approval gate
+// (mirrors the manufacturer printer-photo gate).
+export const painters = pgTable("painters", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  companyName: text("company_name").notNull(),
+  contactPerson: text("contact_person").notNull(),
+  phone: text("phone").notNull(),
+  whatsappPhone: text("whatsapp_phone"),
+  address: jsonb("address").$type<TurkishAddress>(),
+  // Painting techniques / capability tags (e.g. "airbrush", "hand", "resin").
+  capabilities: jsonb("capabilities").$type<string[]>(),
+  taxId: text("tax_id"),
+  taxIdType: text("tax_id_type"),
+  requiresManualTaxReview: boolean("requires_manual_tax_review").notNull().default(false),
+  iban: text("iban"),
+  bankAccountHolder: text("bank_account_holder"),
+  bankName: text("bank_name"),
+  maxConcurrentOrders: integer("max_concurrent_orders").notNull().default(5),
+  acceptingOrders: boolean("accepting_orders").notNull().default(true),
+  onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
+  status: painterStatusEnum("status").notNull().default("pending_approval"),
+  rejectionReason: text("rejection_reason"),
+  // Conditional-approval gate: the painter uploads a sample of prior work; the
+  // admin can only fully approve once this is set.
+  workSamplePhotoUploadedAt: timestamp("work_sample_photo_uploaded_at"),
+  notes: text("notes"),
+  strikeCount: integer("strike_count").notNull().default(0),
+  pendingIban: text("pending_iban"),
+  ibanReviewStatus: ibanReviewStatusEnum("iban_review_status").notNull().default("none"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// One earning row per order (painting portion), accrued when the painter ships.
+// net = gross(paintingPriceKurus) − platform commission. Mirrors manufacturerEarnings.
+export const painterEarnings = pgTable("painter_earnings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id)
+    .unique(),
+  painterId: uuid("painter_id")
+    .notNull()
+    .references(() => painters.id),
+  grossKurus: integer("gross_kurus").notNull(),
+  commissionKurus: integer("commission_kurus").notNull(),
+  netKurus: integer("net_kurus").notNull(),
+  commissionRateBps: integer("commission_rate_bps").notNull(),
+  status: earningStatusEnum("status").notNull().default("pending"),
+  payoutId: uuid("payout_id").references((): any => painterPayouts.id), // eslint-disable-line @typescript-eslint/no-explicit-any
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// A payout batch aggregates a painter's pending earnings into one transfer.
+export const painterPayouts = pgTable("painter_payouts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  painterId: uuid("painter_id")
+    .notNull()
+    .references(() => painters.id),
+  totalKurus: integer("total_kurus").notNull(),
+  earningCount: integer("earning_count").notNull(),
+  status: payoutStatusEnum("status").notNull().default("pending"),
+  reference: text("reference"),
+  adminEmail: text("admin_email").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  paidAt: timestamp("paid_at"),
+});
+
+// Per-order painter action audit trail (mirrors manufacturerActions).
+export const painterActions = pgTable("painter_actions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  painterId: uuid("painter_id").notNull().references(() => painters.id),
+  action: text("action").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Admin/system → painter notifications (durable inbox + email record).
+export const painterNotifications = pgTable("painter_notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  painterId: uuid("painter_id").notNull().references(() => painters.id),
+  orderId: uuid("order_id").references(() => orders.id),
+  type: text("type").notNull(), // 'order_assigned' | 'admin_message' | 'system_announcement' | 'payout'
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  emailSentAt: timestamp("email_sent_at"),
+  emailFailedReason: text("email_failed_reason"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // ─── Product categories (nested, unlimited depth) ───────────────────────────
 // Admin-curated taxonomy. Adjacency list (parentId) gives arbitrary depth; a
 // materialized `path` of ancestor slugs (e.g. "figurine/marvel") makes subtree
@@ -1516,6 +1654,11 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   qcReviews: many(qcReviews),
   orderMessages: many(messages),
   earning: one(manufacturerEarnings),
+  painter: one(painters, {
+    fields: [orders.painterId],
+    references: [painters.id],
+  }),
+  painterEarning: one(painterEarnings),
   invoice: one(invoices),
   disputes: many(disputes),
   product: one(products, {
@@ -1581,6 +1724,48 @@ export const payoutsRelations = relations(payouts, ({ one, many }) => ({
     references: [manufacturers.id],
   }),
   earnings: many(manufacturerEarnings),
+}));
+
+export const paintersRelations = relations(painters, ({ many }) => ({
+  orders: many(orders),
+  actions: many(painterActions),
+  notifications: many(painterNotifications),
+  earnings: many(painterEarnings),
+  payouts: many(painterPayouts),
+}));
+
+export const painterEarningsRelations = relations(painterEarnings, ({ one }) => ({
+  order: one(orders, {
+    fields: [painterEarnings.orderId],
+    references: [orders.id],
+  }),
+  painter: one(painters, {
+    fields: [painterEarnings.painterId],
+    references: [painters.id],
+  }),
+  payout: one(painterPayouts, {
+    fields: [painterEarnings.payoutId],
+    references: [painterPayouts.id],
+  }),
+}));
+
+export const painterPayoutsRelations = relations(painterPayouts, ({ one, many }) => ({
+  painter: one(painters, {
+    fields: [painterPayouts.painterId],
+    references: [painters.id],
+  }),
+  earnings: many(painterEarnings),
+}));
+
+export const painterActionsRelations = relations(painterActions, ({ one }) => ({
+  order: one(orders, {
+    fields: [painterActions.orderId],
+    references: [orders.id],
+  }),
+  painter: one(painters, {
+    fields: [painterActions.painterId],
+    references: [painters.id],
+  }),
 }));
 
 export const invoicesRelations = relations(invoices, ({ one }) => ({

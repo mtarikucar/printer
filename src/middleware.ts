@@ -139,6 +139,36 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // Painter routes: check session cookie exists and JWT is not expired
+  // (mirrors the manufacturer gate above).
+  if (
+    pathname.startsWith("/painter") &&
+    pathname !== "/painter/login" &&
+    pathname !== "/painter/register"
+  ) {
+    const session = request.cookies.get("painter_session");
+    if (!session?.value) {
+      return NextResponse.redirect(new URL("/painter/login", request.url));
+    }
+
+    try {
+      const parts = session.value.split(".");
+      if (parts.length !== 3) throw new Error("bad jwt");
+      let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      b64 += "=".repeat((4 - (b64.length % 4)) % 4);
+      const payload = JSON.parse(atob(b64));
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        const res = NextResponse.redirect(new URL("/painter/login", request.url));
+        res.cookies.delete("painter_session");
+        return res;
+      }
+    } catch {
+      const res = NextResponse.redirect(new URL("/painter/login", request.url));
+      res.cookies.delete("painter_session");
+      return res;
+    }
+  }
+
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   applyAttribution(request, res);
   return res;

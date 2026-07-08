@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
-import { orders, manufacturers, orderDrafts, products, workshopRequests } from "@/lib/db/schema";
+import { orders, manufacturers, orderDrafts, products, workshopRequests, painters } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { AdminSidebar } from "./sidebar";
 import { AdminRealtimeShell } from "./realtime-shell";
@@ -71,6 +71,12 @@ export default async function AdminLayout({
     .from(workshopRequests)
     .where(sql`${workshopRequests.status} = 'new'`);
 
+  // Count painters awaiting approval.
+  const [pendingPainterCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(painters)
+    .where(sql`${painters.status} = 'pending_approval'`);
+
   return (
     <AdminRealtimeShell>
       <PanelShell
@@ -83,6 +89,7 @@ export default async function AdminLayout({
             draftReviewCount={draftReviewCount.count}
             qcPendingCount={qcPendingCount.count}
             workshopPendingCount={workshopPendingCount.count}
+            pendingPainterCount={pendingPainterCount.count}
           />
         }
       >

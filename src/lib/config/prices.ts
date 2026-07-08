@@ -163,6 +163,11 @@ export const PLATFORM_COMMISSION_RATE_BPS = 3000;
 // KDV-inclusive, so the invoice breaks the paid total into base + KDV.
 export const KDV_RATE_BPS = 2000; // 20%
 
+// Professional painting is NOT a separate add-on price: it is the existing
+// "hand_painted" figurine finish (see FINISH_SURCHARGES_KURUS.hand_painted).
+// Orders with that finish are routed to a painter partner, and its surcharge
+// becomes the painter's earning base — see src/app/api/orders/route.ts.
+
 // ─── Faz 3: customer-uploaded model pricing (geometry-based) ─────────────────
 // Price is driven by the *scaled* print volume — the model-prep worker scales
 // the mesh to the customer's target height, then measures volume. Resin is the

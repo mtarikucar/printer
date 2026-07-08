@@ -204,6 +204,13 @@
       "when": 1783421315586,
       "tag": "0028_workshop_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1783439136595,
+      "tag": "0029_painters",
+      "breakpoints": true
     }
   ]
 }

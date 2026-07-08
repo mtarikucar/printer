@@ -3,9 +3,12 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { PAINTER_ONBOARDING_TR } from "@/lib/content/painter-onboarding";
 
 type Step = "onboarding" | "form";
 
@@ -133,37 +136,13 @@ export default function PainterRegisterPage() {
             <h1 className="text-2xl font-serif text-gray-900 mb-4">
               Başvurudan önce lütfen okuyun
             </h1>
-            <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/50 p-4 leading-relaxed text-sm text-gray-700 space-y-4">
-              <p>
-                Figurunica boyama ortağı olarak, üreticiden gelen baskıları
-                boyar ve tamamlanan figürü doğrudan müşteriye kargolarsınız. İş
-                akışı: <strong className="font-semibold text-gray-900">atandı → kabul → boyama → boyandı → kargo</strong>.
-              </p>
-              <ul className="list-disc pl-5 space-y-2">
-                <li>
-                  Size atanan işleri panelinizden kabul eder, boyar ve
-                  müşteriye gönderirsiniz. Kabul ettiğiniz işi zamanında
-                  tamamlamak sizin sorumluluğunuzdadır.
-                </li>
-                <li>
-                  Boyama ücreti sipariş başına belirlenir ve iş tamamlanıp
-                  kargolandığında hak edişinize eklenir; ödemeler kayıtlı
-                  IBAN&apos;ınıza yapılır.
-                </li>
-                <li>
-                  Referans görselinden belirgin sapma, gecikme veya kalite
-                  sorunları uyarı (strike) doğurabilir; tekrarı hesabın askıya
-                  alınmasına yol açabilir.
-                </li>
-                <li>
-                  Hesabınız, başvurunuz admin tarafından onaylanana kadar iş
-                  alamaz. Onay için geçmiş çalışma örneği istenebilir.
-                </li>
-              </ul>
-              <p>
-                Devam ederek bu şartlar altında Figurunica boyama ortaklığını
-                kabul etmiş olursunuz.
-              </p>
+            {/* Scrollable agreement — mirrors the manufacturer register. Bold
+                spans render bold + underlined so the content's `**…**` doubles
+                as the "important clause" marker. */}
+            <div className="prose prose-sm max-w-none max-h-[60vh] overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/50 p-4 leading-relaxed text-gray-700 [&_a]:text-indigo-600 [&_blockquote]:border-l-indigo-300 [&_blockquote]:text-gray-500 [&_h1]:text-xl [&_h2]:mt-5 [&_h2]:text-base [&_h3]:mt-4 [&_h3]:text-sm [&_strong]:font-semibold [&_strong]:text-gray-900 [&_strong]:underline [&_strong]:decoration-indigo-400 [&_strong]:decoration-2 [&_strong]:underline-offset-2">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {PAINTER_ONBOARDING_TR}
+              </ReactMarkdown>
             </div>
             <label className="mt-6 flex items-start gap-3 text-sm text-gray-800 select-none">
               <input

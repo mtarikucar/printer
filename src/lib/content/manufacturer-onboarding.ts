@@ -105,6 +105,17 @@ siparişleri kabul edin; uygun değilse siparişi reddedebilirsiniz.
   "Hazır" işaretlediğinizde kargo etiketi panelinize düşer. Etiketi basıp
   paketin üzerine yapıştırır ve gönderiyi teslim edersiniz.
 
+**Profesyonel boyama siparişleri (boyacıya devir):** Bazı siparişlerde müşteri
+**profesyonel el boyama** seçeneğini satın alır. Bu siparişlerde figürini **siz
+boyamaz ve müşteriye kargolamazsınız.** Baskıyı üretip QC onayından geçirdikten
+sonra, figürini panelinizdeki **"Boyacıya Gönder"** adımıyla, Platformun boyacı
+ağındaki bir **boyacı ortağa** devredersiniz. Bu andan itibaren boyama, kendi
+kalite kontrolü, paketleme ve müşteriye kargo **boyacı tarafından** yürütülür.
+Sizin sorumluluğunuz, siparişin özelliklerine birebir uygun, kusursuz ve
+QC-onaylı **boyasız/baz baskıyı** zamanında ve eksiksiz biçimde boyacıya
+iletmektir. Boyacıya devredilen işteki baskı kusurları (kırık, eksik parça,
+ölçü sapması, temizlenmemiş destek izi vb.) sizin sorumluluğunuzdadır.
+
 ## 6. Süreler ve Gecikme
 
 - Kabul edilen bir sipariş için **ortalama üretim süresi 5 iş günüdür.** Bu
@@ -120,6 +131,10 @@ siparişleri kabul edin; uygun değilse siparişi reddedebilirsiniz.
   ödenir. Net pay, sipariş tutarından **Platform hizmet bedeli (komisyon)**
   düşülerek hesaplanır; **güncel komisyon oranı ve her siparişin net payı
   panelde şeffaf biçimde gösterilir.**
+- **Profesyonel boyama içeren siparişlerde** net üretici payınız, sipariş
+  tutarından **boyama bedeli düşülerek (yalnızca baskı payı) üzerinden**
+  hesaplanır; boyama bedelinin payı ilgili **boyacıya** ödenir. Bu siparişlerde
+  üretici hak edişiniz, işi boyacıya devrettiğinizde tahakkuk eder.
 - Ödemeler, **tanımlı IBAN'ınıza haftalık olarak (Cuma günleri) toplu** yapılır.
   Hesap kesim/ödeme raporunuzu panelden indirebilirsiniz.
 - Ödemenin yapılabilmesi için **VKN/TCKN ve IBAN bilgilerinizin eksiksiz ve

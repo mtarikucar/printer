@@ -7,7 +7,8 @@ export type PainterNotificationType =
   | "order_assigned"
   | "admin_message"
   | "system_announcement"
-  | "payout";
+  | "payout"
+  | "qc_result";
 
 interface NotifyArgs {
   painterId: string;

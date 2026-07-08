@@ -77,6 +77,12 @@ export default async function AdminLayout({
     .from(painters)
     .where(sql`${painters.status} = 'pending_approval'`);
 
+  // Count painting jobs awaiting painter-QC review.
+  const [painterQcPendingCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(sql`${orders.painterStatus} = 'qc_pending'`);
+
   return (
     <AdminRealtimeShell>
       <PanelShell
@@ -90,6 +96,7 @@ export default async function AdminLayout({
             qcPendingCount={qcPendingCount.count}
             workshopPendingCount={workshopPendingCount.count}
             pendingPainterCount={pendingPainterCount.count}
+            painterQcPendingCount={painterQcPendingCount.count}
           />
         }
       >

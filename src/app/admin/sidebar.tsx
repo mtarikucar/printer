@@ -15,6 +15,7 @@ export function AdminSidebar({
   qcPendingCount,
   workshopPendingCount,
   pendingPainterCount,
+  painterQcPendingCount,
 }: {
   reviewCount: number;
   pendingManufacturerCount: number;
@@ -23,6 +24,7 @@ export function AdminSidebar({
   qcPendingCount: number;
   workshopPendingCount: number;
   pendingPainterCount: number;
+  painterQcPendingCount: number;
 }) {
   const pathname = usePathname();
   const d = useDictionary();
@@ -74,6 +76,12 @@ export function AdminSidebar({
           label: d["admin.nav.qcQueue"],
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />,
           badge: qcPendingCount,
+        },
+        {
+          href: "/admin/painter-qc-queue",
+          label: "Boyacı QC",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />,
+          badge: painterQcPendingCount,
         },
         {
           href: "/admin/upload-quotes",

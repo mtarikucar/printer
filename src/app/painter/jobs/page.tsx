@@ -15,6 +15,9 @@ type PainterJobStatus =
   | "accepted"
   | "painting"
   | "painted"
+  | "qc_pending"
+  | "qc_rejected"
+  | "qc_approved"
   | "shipped";
 
 const FILTERABLE: PainterJobStatus[] = [
@@ -22,6 +25,9 @@ const FILTERABLE: PainterJobStatus[] = [
   "accepted",
   "painting",
   "painted",
+  "qc_pending",
+  "qc_rejected",
+  "qc_approved",
   "shipped",
 ];
 

@@ -249,6 +249,11 @@ export const painterOrderStatusEnum = pgEnum("painter_order_status", [
   "accepted",
   "painting",
   "painted",
+  // Painter-side QC: after painting the painter submits photos for admin review;
+  // shipping is gated behind qc_approved (mirrors the manufacturer QC gate).
+  "qc_pending",
+  "qc_rejected",
+  "qc_approved",
   "shipped",
 ]);
 
@@ -636,6 +641,9 @@ export const orders = pgTable("orders", {
   sentToPainterAt: timestamp("sent_to_painter_at"),
   paintedAt: timestamp("painted_at"),
   declinedPainterIds: jsonb("declined_painter_ids").$type<string[]>(),
+  // Painter QC reprint loop: bumps on each admin rejection so the painter's page
+  // shows only the current round's photos.
+  painterQcRound: integer("painter_qc_round").notNull().default(1),
   // QC reprint loop: qcRound bumps on each admin rejection (so the manufacturer
   // page shows only the current round); qcRejectionCount is a lifetime counter
   // for escalation/metrics.
@@ -1204,12 +1212,37 @@ export const painterNotifications = pgTable("painter_notifications", {
   id: uuid("id").primaryKey().defaultRandom(),
   painterId: uuid("painter_id").notNull().references(() => painters.id),
   orderId: uuid("order_id").references(() => orders.id),
-  type: text("type").notNull(), // 'order_assigned' | 'admin_message' | 'system_announcement' | 'payout'
+  type: text("type").notNull(), // 'order_assigned' | 'admin_message' | 'system_announcement' | 'payout' | 'qc_result'
   subject: text("subject").notNull(),
   body: text("body").notNull(),
   emailSentAt: timestamp("email_sent_at"),
   emailFailedReason: text("email_failed_reason"),
   readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Painter-side QC: photos of the finished paint job the painter submits for
+// admin review before shipping. Mirrors qcPhotos (manufacturer) but keyed on
+// the painter so the two QC stages stay isolated.
+export const painterQcPhotos = pgTable("painter_qc_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  painterId: uuid("painter_id").notNull().references(() => painters.id),
+  round: integer("round").notNull().default(1),
+  storageKey: text("storage_key").notNull(),
+  thumbnailKey: text("thumbnail_key"),
+  reviewStatus: qcPhotoReviewStatusEnum("review_status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Admin decision on a painter QC round (mirrors qcReviews).
+export const painterQcReviews = pgTable("painter_qc_reviews", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id),
+  round: integer("round").notNull(),
+  decision: text("decision").notNull(), // 'approved' | 'rejected'
+  reason: text("reason"),
+  adminEmail: text("admin_email").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

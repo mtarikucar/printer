@@ -40,13 +40,14 @@ export async function POST(
         and(
           eq(orders.id, id),
           eq(orders.painterId, g.painterId),
-          eq(orders.painterStatus, "painted")
+          // Ship gate: only jobs that passed admin painter-QC approval may ship.
+          eq(orders.painterStatus, "qc_approved")
         )
       )
       .returning();
     if (!order) {
       return NextResponse.json(
-        { error: "İş bulunamadı veya kargolanabilir durumda değil (önce 'boyandı')" },
+        { error: "İş bulunamadı veya kargolanabilir durumda değil (önce QC onayı gerekir)" },
         { status: 400 }
       );
     }

@@ -25,6 +25,9 @@ const STATUS_BADGE: Record<string, string> = {
   accepted: "bg-blue-100 text-blue-700",
   painting: "bg-indigo-100 text-indigo-700",
   painted: "bg-green-100 text-green-700",
+  qc_pending: "bg-purple-100 text-purple-700",
+  qc_rejected: "bg-red-100 text-red-700",
+  qc_approved: "bg-emerald-100 text-emerald-700",
   shipped: "bg-emerald-100 text-emerald-700",
 };
 const STATUS_LABEL: Record<string, string> = {
@@ -32,6 +35,9 @@ const STATUS_LABEL: Record<string, string> = {
   accepted: "Kabul edildi",
   painting: "Boyanıyor",
   painted: "Boyandı",
+  qc_pending: "QC onayında",
+  qc_rejected: "QC reddedildi",
+  qc_approved: "QC onaylandı",
   shipped: "Kargolandı",
 };
 
@@ -39,8 +45,9 @@ const TABS: { value: string | null; label: string }[] = [
   { value: null, label: "Tümü" },
   { value: "assigned", label: "Atandı" },
   { value: "accepted", label: "Kabul edildi" },
-  { value: "painting", label: "Boyanıyor" },
-  { value: "painted", label: "Boyandı" },
+  { value: "qc_pending", label: "QC onayında" },
+  { value: "qc_rejected", label: "QC reddedildi" },
+  { value: "qc_approved", label: "QC onaylandı" },
   { value: "shipped", label: "Kargolandı" },
 ];
 
@@ -71,6 +78,7 @@ export function PainterJobsClient({
   const [busy, setBusy] = useState<string | null>(null);
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [carrier, setCarrier] = useState<Record<string, string>>({});
+  const [qcUploaded, setQcUploaded] = useState<Record<string, number>>({});
 
   const call = async (id: string, action: string, payload?: Record<string, unknown>) => {
     setBusy(`${action}-${id}`);
@@ -94,6 +102,31 @@ export function PainterJobsClient({
   const decline = (id: string) => {
     const reason = prompt("Reddetme sebebi (opsiyonel):") ?? undefined;
     call(id, "decline", { reason });
+  };
+
+  const uploadQcPhoto = async (id: string, file: File) => {
+    setBusy(`qc-upload-${id}`);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/painter/orders/${id}/qc-photos`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        alert(e.error || "Fotoğraf yüklenemedi");
+        return;
+      }
+      setQcUploaded((s) => ({ ...s, [id]: (s[id] ?? 0) + 1 }));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitQc = (id: string) => {
+    if ((qcUploaded[id] ?? 0) < 1) {
+      alert("Önce en az bir QC fotoğrafı yükleyin");
+      return;
+    }
+    call(id, "submit-qc");
   };
 
   const ship = (id: string) => {
@@ -187,16 +220,51 @@ export function PainterJobsClient({
                     </button>
                   </>
                 )}
-                {(j.painterStatus === "accepted" || j.painterStatus === "painting") && (
-                  <button
-                    onClick={() => call(j.id, "painted")}
-                    disabled={busy !== null}
-                    className="px-4 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
-                  >
-                    Boyandı olarak işaretle
-                  </button>
+                {/* Paint done → submit QC photos for admin review. Also the
+                    re-submit path after a QC rejection. */}
+                {["accepted", "painting", "painted", "qc_rejected"].includes(
+                  j.painterStatus ?? ""
+                ) && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {j.painterStatus === "qc_rejected" && (
+                      <span className="w-full text-xs text-red-600">
+                        QC reddedildi — düzeltip yeni fotoğraflarla tekrar gönderin.
+                      </span>
+                    )}
+                    <label className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg cursor-pointer hover:bg-gray-200">
+                      QC fotoğrafı ekle
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={busy !== null}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void uploadQcPhoto(j.id, f);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {(qcUploaded[j.id] ?? 0) > 0 && (
+                      <span className="text-xs text-green-600">
+                        {qcUploaded[j.id]} fotoğraf eklendi
+                      </span>
+                    )}
+                    <button
+                      onClick={() => submitQc(j.id)}
+                      disabled={busy !== null || (qcUploaded[j.id] ?? 0) < 1}
+                      className="px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                    >
+                      QC&apos;ye gönder
+                    </button>
+                  </div>
                 )}
-                {j.painterStatus === "painted" && (
+                {j.painterStatus === "qc_pending" && (
+                  <span className="text-sm text-purple-700">
+                    QC onayında — admin incelemesi bekleniyor.
+                  </span>
+                )}
+                {j.painterStatus === "qc_approved" && (
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       value={tracking[j.id] ?? ""}

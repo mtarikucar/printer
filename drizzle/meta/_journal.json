@@ -225,6 +225,13 @@
       "when": 1783506095789,
       "tag": "0031_order_model_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1783606188591,
+      "tag": "0032_manufacturer_paints_in_house",
+      "breakpoints": true
     }
   ]
 }

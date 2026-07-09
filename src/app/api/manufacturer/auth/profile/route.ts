@@ -32,6 +32,7 @@ const profileSchema = z.object({
   bankName: z.string().min(2).max(80).optional(),
   maxConcurrentOrders: z.number().int().min(1).max(50).optional(),
   acceptingOrders: z.boolean().optional(),
+  paintsInHouse: z.boolean().optional(),
   // Production materials this manufacturer prints (at least one). Persisted as
   // `material_<m>` capability tags that drive material-based order routing.
   materials: z.array(z.enum(["resin", "filament"])).min(1).optional(),
@@ -45,6 +46,7 @@ const SENSITIVE_FIELDS = [
   "bankName",
   "maxConcurrentOrders",
   "acceptingOrders",
+  "paintsInHouse",
 ] as const;
 
 export async function PATCH(request: NextRequest) {
@@ -131,6 +133,7 @@ export async function PATCH(request: NextRequest) {
   if (validated.bankName !== undefined) update.bankName = validated.bankName;
   if (validated.maxConcurrentOrders !== undefined) update.maxConcurrentOrders = validated.maxConcurrentOrders;
   if (validated.acceptingOrders !== undefined) update.acceptingOrders = validated.acceptingOrders;
+  if (validated.paintsInHouse !== undefined) update.paintsInHouse = validated.paintsInHouse;
   if (validated.materials !== undefined) {
     update.capabilities = validated.materials.map((m) => `material_${m}`);
   }

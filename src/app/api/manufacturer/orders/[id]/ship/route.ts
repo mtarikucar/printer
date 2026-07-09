@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { createShipOrderSchema } from "@/lib/validators/order";
@@ -54,11 +54,16 @@ export async function POST(
           eq(orders.manufacturerId, session.manufacturerId),
           // Ship gate: only orders that passed admin QC approval may ship.
           eq(orders.manufacturerStatus, "qc_approved"),
-          // Painting orders are shipped by the PAINTER, never the manufacturer —
-          // even though manufacturerStatus stays 'qc_approved' after hand-off.
-          // This prevents force-shipping (and double-charging/mis-notifying) an
-          // order already in the painter pipeline.
-          eq(orders.needsPainting, false)
+          // Painting orders: a manufacturer that paints in-house may ship one it
+          // did NOT hand off (earning the full amount); everyone else must hand
+          // off to a painter. `isNull(painterId)` blocks shipping any order
+          // already in the painter pipeline — the invariant that keeps the
+          // in-house-ship and send-to-painter earnings mutually exclusive
+          // (manufacturer_earnings.order_id is UNIQUE + onConflictDoNothing, so
+          // a double accrual would be silently mis-amounted, not errored).
+          manufacturer.paintsInHouse
+            ? or(eq(orders.needsPainting, false), isNull(orders.painterId))
+            : eq(orders.needsPainting, false)
         )
       )
       .returning();

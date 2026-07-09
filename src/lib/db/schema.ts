@@ -1074,6 +1074,9 @@ export const manufacturers = pgTable("manufacturers", {
   // Capacity
   maxConcurrentOrders: integer("max_concurrent_orders").notNull().default(5),
   acceptingOrders: boolean("accepting_orders").notNull().default(true),
+  // Does its own hand-painting: may print AND paint a professional-painting
+  // order itself (earning the full amount) instead of handing off to a painter.
+  paintsInHouse: boolean("paints_in_house").notNull().default(false),
   // Onboarding
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
   status: manufacturerStatusEnum("status").notNull().default("pending_approval"),

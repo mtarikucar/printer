@@ -1,0 +1,1 @@
+ALTER TABLE "manufacturers" ADD COLUMN "paints_in_house" boolean DEFAULT false NOT NULL;

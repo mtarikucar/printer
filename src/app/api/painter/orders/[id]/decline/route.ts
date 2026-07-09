@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, painterActions } from "@/lib/db/schema";
+import { orders, painterActions, manufacturerEarnings } from "@/lib/db/schema";
 import { requireActivePainter } from "@/lib/services/painter-guard";
+import { reverseEarning } from "@/lib/services/payouts";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 
 // Painter declines an assigned job: the order reverts to the manufacturer's
@@ -56,6 +57,28 @@ export async function POST(
   if (!order) {
     return NextResponse.json({ error: "İşlem başarısız" }, { status: 400 });
   }
+
+  // The manufacturer's PRINT-portion earning was accrued at hand-off
+  // (send-to-painter). The hand-off just bounced, so back it out and clear the
+  // row: otherwise the stale row would block a differently-amounted re-accrual —
+  // a later in-house ship (full amount) or a re-hand-off (print portion) is
+  // silently dropped by accrueEarning's onConflictDoNothing, underpaying the
+  // manufacturer. reverseEarning detaches it from any pending payout + marks
+  // non-paid rows 'reversed'; deleting those reversed rows lets the next
+  // completing action accrue the correct amount cleanly. An already-'paid' row
+  // is left untouched (a transfer can't be undone — a rare edge, logged).
+  await reverseEarning(id).catch((e) =>
+    console.error("reverseEarning (painter decline) failed", e)
+  );
+  await db
+    .delete(manufacturerEarnings)
+    .where(
+      and(
+        eq(manufacturerEarnings.orderId, id),
+        eq(manufacturerEarnings.status, "reversed")
+      )
+    )
+    .catch((e) => console.error("clear reversed earning (painter decline) failed", e));
 
   await db
     .insert(painterActions)

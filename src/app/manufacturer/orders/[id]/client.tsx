@@ -29,6 +29,7 @@ interface OrderData {
   manufacturerStatus: string | null;
   needsPainting: boolean;
   painterStatus: string | null;
+  paintsInHouse: boolean;
   qcRound: number;
   quantity: number;
   productTitleSnapshot: string | null;
@@ -210,6 +211,12 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
     order.manufacturerStatus === "qc_rejected";
   const isQcPending = order.manufacturerStatus === "qc_pending";
   const canShip = order.manufacturerStatus === "qc_approved";
+  // A manufacturer that paints in-house may paint + ship a painting order it has
+  // NOT handed off to a painter (mirrors the server ship gate). Once a painter is
+  // assigned, only the hand-off pipeline applies.
+  const notHandedOff = !order.painterStatus || order.painterStatus === "unassigned";
+  const inHousePaint = order.needsPainting && order.paintsInHouse && notHandedOff;
+  const canShipDirect = canShip && (!order.needsPainting || inHousePaint);
   const isShipped = order.manufacturerStatus === "shipped";
   const canCancel = [
     "accepted",
@@ -845,7 +852,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
               </div>
             )}
 
-          {canShip && !order.needsPainting && (
+          {canShipDirect && (
             <div className="rounded-2xl shadow-sm border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-5">
               <div className="flex flex-col items-center text-center py-4">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center mb-4">
@@ -854,12 +861,16 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   </svg>
                 </div>
                 <h3 className="text-lg font-bold text-emerald-900 mb-1">
-                  {(d["manufacturer.orderDetail.readyToShip" as keyof typeof d] as string) ||
-                    "Ready to Ship"}
+                  {inHousePaint
+                    ? "Boyayıp Kargola"
+                    : (d["manufacturer.orderDetail.readyToShip" as keyof typeof d] as string) ||
+                      "Ready to Ship"}
                 </h3>
                 <p className="text-sm text-emerald-700/70 mb-5 max-w-sm">
-                  {(d["manufacturer.orderDetail.shipDescription" as keyof typeof d] as string) ||
-                    "Enter the tracking number and ship to customer."}
+                  {inHousePaint
+                    ? "Bu sipariş profesyonel boyama içeriyor. Kendiniz boyayıp kargolarsanız boyacıya göndermenize gerek yok; tam tutarı kazanırsınız. Boyamayı istemiyorsanız \"Boyacıya Gönder\"i kullanın."
+                    : (d["manufacturer.orderDetail.shipDescription" as keyof typeof d] as string) ||
+                      "Enter the tracking number and ship to customer."}
                 </p>
                 {error && (
                   <div className="mb-4 w-full bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm flex items-center gap-2">

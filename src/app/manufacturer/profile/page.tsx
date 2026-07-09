@@ -31,6 +31,7 @@ interface ManufacturerProfile {
   bankName: string | null;
   maxConcurrentOrders: number;
   acceptingOrders: boolean;
+  paintsInHouse: boolean;
   capabilities: string[] | null;
   status: string;
   createdAt: string;
@@ -81,6 +82,7 @@ export default function ManufacturerProfilePage() {
   const [bankName, setBankName] = useState("");
   const [maxConcurrent, setMaxConcurrent] = useState(5);
   const [acceptingOrders, setAcceptingOrders] = useState(true);
+  const [paintsInHouse, setPaintsInHouse] = useState(false);
   const [materials, setMaterials] = useState<string[]>([]);
   const toggleMaterial = (key: string) =>
     setMaterials((prev) =>
@@ -116,6 +118,7 @@ export default function ManufacturerProfilePage() {
       setBankName(p.bankName ?? "");
       setMaxConcurrent(p.maxConcurrentOrders);
       setAcceptingOrders(p.acceptingOrders);
+      setPaintsInHouse(p.paintsInHouse);
       // Derive declared materials from capability tags. A legacy manufacturer
       // with none declared accepts all — pre-check both so editing preserves
       // that (saving an empty set would fail the server's min-1 rule).
@@ -170,6 +173,7 @@ export default function ManufacturerProfilePage() {
           bankName,
           maxConcurrentOrders: Number(maxConcurrent),
           acceptingOrders,
+          paintsInHouse,
           materials,
         }),
       });
@@ -420,6 +424,19 @@ export default function ManufacturerProfilePage() {
             ) : (
               <p className={`text-sm font-medium ${profile.acceptingOrders ? "text-emerald-700" : "text-red-700"}`}>
                 {profile.acceptingOrders ? "Evet" : "Hayır (atamalar durduruldu)"}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Kendi Boyama</label>
+            {editing ? (
+              <label className="inline-flex items-center gap-2 mt-1 text-sm text-gray-700">
+                <input type="checkbox" checked={paintsInHouse} onChange={(e) => setPaintsInHouse(e.target.checked)} className="h-4 w-4 rounded" />
+                Boyamalı siparişleri kendim boyayıp kargolarım
+              </label>
+            ) : (
+              <p className={`text-sm font-medium ${profile.paintsInHouse ? "text-emerald-700" : "text-gray-600"}`}>
+                {profile.paintsInHouse ? "Evet (boyayıp kargolarım)" : "Hayır (boyacıya gönderilir)"}
               </p>
             )}
           </div>

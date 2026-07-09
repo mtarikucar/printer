@@ -41,6 +41,7 @@ export async function GET() {
       bankName: manufacturer.bankName,
       maxConcurrentOrders: manufacturer.maxConcurrentOrders,
       acceptingOrders: manufacturer.acceptingOrders,
+      paintsInHouse: manufacturer.paintsInHouse,
       capabilities: manufacturer.capabilities,
       onboardingAcceptedAt: manufacturer.onboardingAcceptedAt,
       status: manufacturer.status,

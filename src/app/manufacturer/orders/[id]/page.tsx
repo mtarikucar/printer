@@ -202,6 +202,9 @@ export default async function ManufacturerOrderDetailPage({
       manufacturerStatus: order.manufacturerStatus,
       needsPainting: order.needsPainting,
       painterStatus: order.painterStatus,
+      // Manufacturer-level flag surfaced on the order so the client can offer
+      // the in-house "paint + ship" path instead of a forced painter hand-off.
+      paintsInHouse: manufacturer.paintsInHouse,
       qcRound: order.qcRound,
       quantity: order.quantity,
       productTitleSnapshot: order.productTitleSnapshot,

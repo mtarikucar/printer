@@ -11,8 +11,8 @@ import { topics } from "@/lib/realtime/events";
 
 // Conditional-approval gate: the painter uploads a sample of prior work; the
 // admin can only fully approve once `workSamplePhotoUploadedAt` is set. Mirrors
-// the manufacturer printer-photo upload (validation + storage.ts usage), but
-// there is no painterDocuments table, so only the timestamp is persisted.
+// the manufacturer printer-photo upload (validation + storage.ts usage); the
+// storage key is persisted on the painter row so the admin can view the photo.
 export async function POST(request: NextRequest) {
   const session = await getPainterSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -44,11 +44,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Only JPEG or PNG" }, { status: 400 });
   }
   const ext = img === "image/png" ? "png" : "jpg";
-  await saveFile(buffer, "work-sample-photos", `${nanoid()}.${ext}`);
+  const storageKey = await saveFile(buffer, "work-sample-photos", `${nanoid()}.${ext}`);
 
   await db
     .update(painters)
-    .set({ workSamplePhotoUploadedAt: new Date(), updatedAt: new Date() })
+    .set({
+      workSamplePhotoUploadedAt: new Date(),
+      workSamplePhotoKey: storageKey,
+      updatedAt: new Date(),
+    })
     .where(eq(painters.id, session.painterId));
 
   await publishRealtime([topics.admin()], { kind: "badge" });

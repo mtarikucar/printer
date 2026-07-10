@@ -2,9 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
+import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import {
+  PartnerApplicationDetails,
+  BoolChip,
+} from "@/components/admin/partner-application-details";
+
+interface TurkishAddress {
+  adres: string;
+  mahalle?: string;
+  ilce: string;
+  il: string;
+  postaKodu: string;
+  telefon: string;
+}
 
 interface Manufacturer {
   id: string;
@@ -21,7 +34,23 @@ interface Manufacturer {
   rejectionReason: string | null;
   printerPhotoUploadedAt: string | null;
   printerPhotoUrl: string | null;
+  whatsappPhone: string | null;
+  address: TurkishAddress | null;
+  iban: string | null;
+  bankAccountHolder: string | null;
+  bankName: string | null;
+  maxConcurrentOrders: number;
+  acceptingOrders: boolean;
+  capabilities: string[];
+  paintsInHouse: boolean;
+  onboardingAcceptedAt: string | null;
 }
+
+// material_* capability tags chosen at registration → admin-readable labels.
+const MATERIAL_LABELS: Record<string, string> = {
+  material_resin: "Reçine (SLA/DLP)",
+  material_filament: "Filament (FDM)",
+};
 
 const STATUS_BADGE: Record<string, string> = {
   pending_approval: "bg-amber-100 text-amber-700",
@@ -68,6 +97,7 @@ export function ManufacturersClient({
   const router = useRouter();
   const [filter, setFilter] = useState<FilterTab>("all");
   const [loading, setLoading] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const filtered = manufacturers.filter((m) => matchesFilter(m, filter));
 
@@ -179,7 +209,48 @@ export function ManufacturersClient({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map((m) => (
-                <tr key={m.id} className="hover:bg-gray-50">
+                <MfrRow
+                  key={m.id}
+                  m={m}
+                  d={d}
+                  loc={loc}
+                  loading={loading}
+                  expanded={expandedId === m.id}
+                  onToggle={() => setExpandedId(expandedId === m.id ? null : m.id)}
+                  performAction={performAction}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MfrRow({
+  m,
+  d,
+  loc,
+  loading,
+  expanded,
+  onToggle,
+  performAction,
+}: {
+  m: Manufacturer;
+  d: ReturnType<typeof useDictionary>;
+  loc: Locale;
+  loading: string | null;
+  expanded: boolean;
+  onToggle: () => void;
+  performAction: (
+    id: string,
+    action: "activate" | "suspend" | "conditionally-approve" | "approve" | "reject"
+  ) => void;
+}) {
+  return (
+    <>
+                <tr className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">
                     {m.companyName}
                   </td>
@@ -220,6 +291,16 @@ export function ManufacturersClient({
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2 justify-end items-center">
+                      <button
+                        onClick={onToggle}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                          expanded
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {expanded ? "Kapat" : "Detay"}
+                      </button>
                       {m.status === "pending_approval" && (
                         <>
                           <button
@@ -289,11 +370,93 @@ export function ManufacturersClient({
                     </div>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+                {expanded && (
+                  <tr className="bg-gray-50/60">
+                    <td colSpan={8} className="px-4 py-4">
+                      <PartnerApplicationDetails
+                        sections={[
+                          {
+                            title: "İletişim",
+                            items: [
+                              { k: "Telefon", v: m.phone },
+                              { k: "WhatsApp", v: m.whatsappPhone },
+                              { k: "E-posta", v: m.email },
+                            ],
+                          },
+                          {
+                            title: "Adres",
+                            items: m.address
+                              ? [
+                                  { k: "İl / İlçe", v: `${m.address.il} / ${m.address.ilce}` },
+                                  { k: "Mahalle", v: m.address.mahalle || null },
+                                  { k: "Açık adres", v: m.address.adres },
+                                  { k: "Posta kodu", v: m.address.postaKodu },
+                                ]
+                              : [{ k: "Adres", v: null }],
+                          },
+                          {
+                            title: "Banka / Ödeme",
+                            items: [
+                              { k: "IBAN", v: m.iban ? <span className="font-mono text-xs">{m.iban}</span> : null },
+                              { k: "Hesap sahibi", v: m.bankAccountHolder },
+                              { k: "Banka", v: m.bankName },
+                              {
+                                k: "Vergi",
+                                v: m.taxId && m.taxIdType ? `${m.taxIdType.toUpperCase()}: ${m.taxId}` : "Beyan edilmedi",
+                              },
+                            ],
+                          },
+                          {
+                            title: "Üretim Seçimleri",
+                            items: [
+                              {
+                                k: "Malzemeler",
+                                v:
+                                  m.capabilities.filter((c) => c.startsWith("material_")).length > 0
+                                    ? m.capabilities
+                                        .filter((c) => c.startsWith("material_"))
+                                        .map((c) => MATERIAL_LABELS[c] ?? c.replace("material_", ""))
+                                        .join(", ")
+                                    : null,
+                              },
+                              { k: "Eş zamanlı iş limiti", v: m.maxConcurrentOrders },
+                              { k: "Sipariş alıyor", v: <BoolChip value={m.acceptingOrders} /> },
+                              {
+                                k: "Kendi boyama",
+                                v: <BoolChip value={m.paintsInHouse} yes="Evet (boyayıp kargolar)" no="Hayır (boyacıya gönderir)" />,
+                              },
+                            ],
+                          },
+                          {
+                            title: "Belgeler & Sözleşme",
+                            items: [
+                              {
+                                k: "Yazıcı fotoğrafı",
+                                v: m.printerPhotoUrl ? (
+                                  <a
+                                    href={m.printerPhotoUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-indigo-600 hover:underline"
+                                  >
+                                    Görüntüle
+                                  </a>
+                                ) : (
+                                  "Yüklenmedi"
+                                ),
+                              },
+                              {
+                                k: "Sözleşme kabulü",
+                                v: m.onboardingAcceptedAt ? formatDate(m.onboardingAcceptedAt, loc) : null,
+                              },
+                              { k: "Başvuru tarihi", v: formatDate(m.createdAt, loc) },
+                            ],
+                          },
+                        ]}
+                      />
+                    </td>
+                  </tr>
+                )}
+    </>
   );
 }

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { db } from "@/lib/db";
 import { painters, orders } from "@/lib/db/schema";
 import { desc, sql, and, inArray } from "drizzle-orm";
+import { getPublicUrl } from "@/lib/services/storage";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { PaintersClient } from "./painters-client";
 
@@ -55,6 +56,18 @@ export default async function AdminPaintersPage() {
     workSamplePhotoUploadedAt: p.workSamplePhotoUploadedAt
       ? p.workSamplePhotoUploadedAt.toISOString()
       : null,
+    workSamplePhotoUrl: p.workSamplePhotoKey ? getPublicUrl(p.workSamplePhotoKey) : null,
+    // Full application details (what the applicant chose at registration).
+    whatsappPhone: p.whatsappPhone,
+    address: p.address,
+    iban: p.iban,
+    bankAccountHolder: p.bankAccountHolder,
+    bankName: p.bankName,
+    maxConcurrentOrders: p.maxConcurrentOrders,
+    acceptingOrders: p.acceptingOrders,
+    capabilities: p.capabilities ?? [],
+    onboardingAcceptedAt: p.onboardingAcceptedAt ? p.onboardingAcceptedAt.toISOString() : null,
+    strikeCount: p.strikeCount,
   }));
 
   return (

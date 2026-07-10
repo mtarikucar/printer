@@ -1183,6 +1183,9 @@ export const painters = pgTable("painters", {
   // Conditional-approval gate: the painter uploads a sample of prior work; the
   // admin can only fully approve once this is set.
   workSamplePhotoUploadedAt: timestamp("work_sample_photo_uploaded_at"),
+  // Storage key of the uploaded work sample, so the admin can actually VIEW the
+  // photo before approving (early uploads only persisted the timestamp).
+  workSamplePhotoKey: text("work_sample_photo_key"),
   notes: text("notes"),
   strikeCount: integer("strike_count").notNull().default(0),
   pendingIban: text("pending_iban"),

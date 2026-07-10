@@ -232,6 +232,13 @@
       "when": 1783606188591,
       "tag": "0032_manufacturer_paints_in_house",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1783683504903,
+      "tag": "0033_painter_work_sample_key",
+      "breakpoints": true
     }
   ]
 }

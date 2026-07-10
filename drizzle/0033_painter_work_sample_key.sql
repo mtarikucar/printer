@@ -1,0 +1,1 @@
+ALTER TABLE "painters" ADD COLUMN "work_sample_photo_key" text;

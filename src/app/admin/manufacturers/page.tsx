@@ -57,6 +57,17 @@ export default async function AdminManufacturersPage() {
     rejectionReason: m.rejectionReason,
     printerPhotoUploadedAt: m.printerPhotoUploadedAt ? m.printerPhotoUploadedAt.toISOString() : null,
     printerPhotoUrl: photoMap.get(m.id) ?? null,
+    // Full application details (what the applicant chose at registration).
+    whatsappPhone: m.whatsappPhone,
+    address: m.address,
+    iban: m.iban,
+    bankAccountHolder: m.bankAccountHolder,
+    bankName: m.bankName,
+    maxConcurrentOrders: m.maxConcurrentOrders,
+    acceptingOrders: m.acceptingOrders,
+    capabilities: m.capabilities ?? [],
+    paintsInHouse: m.paintsInHouse,
+    onboardingAcceptedAt: m.onboardingAcceptedAt ? m.onboardingAcceptedAt.toISOString() : null,
   }));
 
   return (

@@ -33,13 +33,17 @@ export default async function AdminManufacturersPage() {
     activeOrderCounts.map((r) => [r.manufacturerId, r.count])
   );
 
+  // ALL printer photos per manufacturer (newest first) — a manufacturer may run
+  // several printers and uploads one photo per printer.
   const photos = await db.query.manufacturerDocuments.findMany({
     where: eq(manufacturerDocuments.type, "printer_photo"),
     orderBy: [desc(manufacturerDocuments.createdAt)],
   });
-  const photoMap = new Map<string, string>();
+  const photoMap = new Map<string, string[]>();
   for (const p of photos) {
-    if (!photoMap.has(p.manufacturerId)) photoMap.set(p.manufacturerId, getPublicUrl(p.storageKey));
+    const list = photoMap.get(p.manufacturerId) ?? [];
+    list.push(getPublicUrl(p.storageKey));
+    photoMap.set(p.manufacturerId, list);
   }
 
   const serialized = allManufacturers.map((m) => ({
@@ -56,7 +60,7 @@ export default async function AdminManufacturersPage() {
     createdAt: m.createdAt.toISOString(),
     rejectionReason: m.rejectionReason,
     printerPhotoUploadedAt: m.printerPhotoUploadedAt ? m.printerPhotoUploadedAt.toISOString() : null,
-    printerPhotoUrl: photoMap.get(m.id) ?? null,
+    printerPhotoUrls: photoMap.get(m.id) ?? [],
     // Full application details (what the applicant chose at registration).
     whatsappPhone: m.whatsappPhone,
     address: m.address,

@@ -33,7 +33,7 @@ interface Manufacturer {
   createdAt: string;
   rejectionReason: string | null;
   printerPhotoUploadedAt: string | null;
-  printerPhotoUrl: string | null;
+  printerPhotoUrls: string[];
   whatsappPhone: string | null;
   address: TurkishAddress | null;
   iban: string | null;
@@ -321,14 +321,15 @@ function MfrRow({
                       )}
                       {m.status === "conditionally_approved" && (
                         <>
-                          {m.printerPhotoUrl ? (
+                          {m.printerPhotoUrls.length > 0 ? (
                             <a
-                              href={m.printerPhotoUrl}
+                              href={m.printerPhotoUrls[0]}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="px-3 py-1.5 border border-gray-300 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-50"
                             >
                               {d["admin.manufacturers.viewPrinterPhoto"]}
+                              {m.printerPhotoUrls.length > 1 ? ` (${m.printerPhotoUrls.length})` : ""}
                             </a>
                           ) : (
                             <span className="text-xs text-gray-400">{d["admin.manufacturers.awaitingPhoto"]}</span>
@@ -431,19 +432,25 @@ function MfrRow({
                             title: "Belgeler & Sözleşme",
                             items: [
                               {
-                                k: "Yazıcı fotoğrafı",
-                                v: m.printerPhotoUrl ? (
-                                  <a
-                                    href={m.printerPhotoUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-indigo-600 hover:underline"
-                                  >
-                                    Görüntüle
-                                  </a>
-                                ) : (
-                                  "Yüklenmedi"
-                                ),
+                                k: `Yazıcı fotoğrafları${m.printerPhotoUrls.length > 0 ? ` (${m.printerPhotoUrls.length})` : ""}`,
+                                v:
+                                  m.printerPhotoUrls.length > 0 ? (
+                                    <span className="inline-flex flex-wrap gap-x-2 justify-end">
+                                      {m.printerPhotoUrls.map((url, i) => (
+                                        <a
+                                          key={url}
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-indigo-600 hover:underline"
+                                        >
+                                          {i + 1}. fotoğraf
+                                        </a>
+                                      ))}
+                                    </span>
+                                  ) : (
+                                    "Yüklenmedi"
+                                  ),
                               },
                               {
                                 k: "Sözleşme kabulü",

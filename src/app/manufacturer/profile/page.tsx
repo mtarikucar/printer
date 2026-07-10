@@ -477,7 +477,106 @@ export default function ManufacturerProfilePage() {
         </div>
       </div>
 
+      <PrinterPhotosSection />
+
       <ManufacturerKyc />
+    </div>
+  );
+}
+
+// Printer photos: a manufacturer may run several printers, so multiple photos
+// are supported — this section lists the verification photos on file and lets
+// an approved manufacturer add more (photos are verification documents, so
+// there is no delete).
+function PrinterPhotosSection() {
+  const [photos, setPhotos] = useState<{ id: string; url: string; createdAt: string }[]>([]);
+  const [photosLoading, setPhotosLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const loadPhotos = async () => {
+    try {
+      const res = await fetch("/api/manufacturer/printer-photo");
+      if (res.ok) {
+        const data = await res.json();
+        setPhotos(data.photos ?? []);
+      }
+    } finally {
+      setPhotosLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPhotos();
+  }, []);
+
+  const handleUpload = async (files: FileList) => {
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      for (const file of Array.from(files)) fd.append("file", file);
+      const res = await fetch("/api/manufacturer/printer-photo", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setUploadError(data.error || "Yükleme başarısız");
+        return;
+      }
+      await loadPhotos();
+    } catch {
+      setUploadError("Bir hata oluştu");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+            Yazıcı Fotoğrafları
+          </h3>
+          <p className="mt-1 text-xs text-gray-500">
+            Birden çok yazıcınız varsa her biri için ayrı fotoğraf ekleyebilirsiniz.
+            Fotoğraflar doğrulama belgesidir; silinemez.
+          </p>
+        </div>
+        <label className="inline-block px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium cursor-pointer hover:bg-indigo-700">
+          {uploading ? "Yükleniyor..." : "Fotoğraf ekle"}
+          <input
+            type="file"
+            accept="image/jpeg,image/png"
+            multiple
+            className="hidden"
+            disabled={uploading}
+            onChange={(e) => e.target.files?.length && handleUpload(e.target.files)}
+          />
+        </label>
+      </div>
+      {uploadError && (
+        <p className="mt-3 text-sm text-red-600">{uploadError}</p>
+      )}
+      {photosLoading ? (
+        <p className="mt-4 text-sm text-gray-400">Yükleniyor…</p>
+      ) : photos.length === 0 ? (
+        <p className="mt-4 text-sm text-gray-400">Henüz yazıcı fotoğrafı yüklenmedi.</p>
+      ) : (
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          {photos.map((p) => (
+            <a
+              key={p.id}
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block aspect-square overflow-hidden rounded-xl border border-gray-200 hover:ring-2 hover:ring-indigo-300"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.url} alt="Yazıcı fotoğrafı" className="h-full w-full object-cover" />
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

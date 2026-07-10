@@ -15,12 +15,12 @@ export function VerificationGate({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(alreadyUploaded);
 
-  const handleFile = async (file: File) => {
+  const handleFiles = async (files: FileList) => {
     setError(null);
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      for (const file of Array.from(files)) fd.append("file", file);
       const res = await fetch("/api/manufacturer/printer-photo", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -53,13 +53,14 @@ export function VerificationGate({
               İnceleme bekleniyor
             </span>
             <label className="mt-6 block text-sm text-indigo-600 cursor-pointer hover:text-indigo-500">
-              Fotoğrafı değiştir
+              {uploading ? "Yükleniyor..." : "Başka yazıcı fotoğrafı ekle"}
               <input
                 type="file"
                 accept="image/jpeg,image/png"
+                multiple
                 className="hidden"
                 disabled={uploading}
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                onChange={(e) => e.target.files?.length && handleFiles(e.target.files)}
               />
             </label>
           </>
@@ -67,20 +68,24 @@ export function VerificationGate({
           <>
             <p className="mt-3 text-gray-600">
               Başvurunuz koşullu olarak onaylandı. Son adım olarak, üretimde
-              kullandığınız 3D yazıcı(lar)ın net bir fotoğrafını yükleyin. Bu,
-              topluluk içinde güven oluşturmamıza yardımcı olur.
+              kullandığınız 3D yazıcıların net fotoğraflarını yükleyin — birden
+              çok yazıcınız varsa her biri için ayrı fotoğraf ekleyebilirsiniz.
+              Bu, topluluk içinde güven oluşturmamıza yardımcı olur.
             </p>
             <label className="mt-6 inline-block px-6 py-3 bg-indigo-600 text-white rounded-xl font-medium cursor-pointer hover:bg-indigo-700">
-              {uploading ? "Yükleniyor..." : "Yazıcı fotoğrafını yükle"}
+              {uploading ? "Yükleniyor..." : "Yazıcı fotoğraflarını yükle"}
               <input
                 type="file"
                 accept="image/jpeg,image/png"
+                multiple
                 className="hidden"
                 disabled={uploading}
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                onChange={(e) => e.target.files?.length && handleFiles(e.target.files)}
               />
             </label>
-            <p className="mt-3 text-xs text-gray-400">JPEG veya PNG, en fazla 10MB</p>
+            <p className="mt-3 text-xs text-gray-400">
+              JPEG veya PNG, dosya başına en fazla 10MB — birden çok dosya seçebilirsiniz
+            </p>
           </>
         )}
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}

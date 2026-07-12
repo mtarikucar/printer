@@ -263,9 +263,11 @@ export function SiteHeader() {
         </form>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile menu. The header is sticky, so the menu never scrolls with the
+          page — it MUST scroll internally or items below the fold (login!) are
+          unreachable on short screens. 8rem ≈ header row (4rem) + search row. */}
       {menuOpen && (
-        <nav className="md:hidden border-t border-bg-subtle bg-bg-base/95 backdrop-blur-xl animate-fade-in">
+        <nav className="md:hidden border-t border-bg-subtle bg-bg-base/95 backdrop-blur-xl animate-fade-in max-h-[calc(100dvh-8rem)] overflow-y-auto overscroll-contain">
           <div className="max-w-6xl mx-auto px-4 py-3 space-y-1">
             {nav.map((item) => (
               <div key={item.key} className="space-y-0.5">

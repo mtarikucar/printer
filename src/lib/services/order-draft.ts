@@ -222,12 +222,49 @@ export async function promoteDraftToOrder(
           amountKurus: order.amountKurus,
         });
       }
-      // Reassign any draft-scoped gift-card redemption to the first sub-order
-      // (so a later refund can restore the balance against a real order).
-      await tx
-        .update(giftCardRedemptions)
-        .set({ orderId: createdOrders[0].id })
-        .where(eq(giftCardRedemptions.draftId, draft.id));
+      // Split the single draft-scoped gift-card redemption into one row per
+      // sub-order, each carrying that sub-order's PRORATED giftCardAmountKurus
+      // (gcShares). Without this the whole redemption would sit on sub-order[0]
+      // at full value, so a partial refund of one sub-order would restore the
+      // ENTIRE card (over-credit) while refunding a sibling would restore nothing.
+      // The shares sum to the original redemption amount, so the split is exact.
+      const [redemption] = await tx
+        .select({
+          id: giftCardRedemptions.id,
+          giftCardId: giftCardRedemptions.giftCardId,
+          redeemedByUserId: giftCardRedemptions.redeemedByUserId,
+        })
+        .from(giftCardRedemptions)
+        .where(
+          and(
+            eq(giftCardRedemptions.draftId, draft.id),
+            isNull(giftCardRedemptions.refundedAt)
+          )
+        )
+        .limit(1);
+      if (redemption) {
+        const funded = createdOrders
+          .map((o, gi) => ({ orderId: o.id, share: gcShares[gi] }))
+          .filter((x) => x.share > 0);
+        if (funded.length > 0) {
+          // First funded sub-order keeps the original row (re-pointed + re-amounted).
+          await tx
+            .update(giftCardRedemptions)
+            .set({ orderId: funded[0].orderId, amountKurus: funded[0].share })
+            .where(eq(giftCardRedemptions.id, redemption.id));
+          // Remaining funded sub-orders get their own redemption rows. draftId is
+          // null so they stay outside the one-active-row-per-draft unique index.
+          for (const f of funded.slice(1)) {
+            await tx.insert(giftCardRedemptions).values({
+              giftCardId: redemption.giftCardId,
+              orderId: f.orderId,
+              draftId: null,
+              amountKurus: f.share,
+              redeemedByUserId: redemption.redeemedByUserId,
+            });
+          }
+        }
+      }
       await tx
         .update(orderDrafts)
         .set({

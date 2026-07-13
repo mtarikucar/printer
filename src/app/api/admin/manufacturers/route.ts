@@ -3,7 +3,10 @@ import { eq, and, inArray, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { manufacturers, orders } from "@/lib/db/schema";
-import { ACTIVE_MFG_STATUSES } from "@/lib/services/manufacturer-assignment";
+import {
+  ACTIVE_MFG_STATUSES,
+  orderStillOnManufacturerBench,
+} from "@/lib/services/manufacturer-assignment";
 
 export async function GET(_request: NextRequest) {
   const a = await requireAdmin();
@@ -23,7 +26,8 @@ export async function GET(_request: NextRequest) {
     .where(
       and(
         sql`${orders.manufacturerId} IS NOT NULL`,
-        inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES])
+        inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
+        orderStillOnManufacturerBench()
       )
     )
     .groupBy(orders.manufacturerId);

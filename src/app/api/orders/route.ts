@@ -420,7 +420,13 @@ export async function POST(request: NextRequest) {
           const [{ value: redemptionCount }] = await tx
             .select({ value: count() })
             .from(giftCardRedemptions)
-            .where(eq(giftCardRedemptions.giftCardId, card.id));
+            // Only live (non-refunded) redemptions count against the cap.
+            .where(
+              and(
+                eq(giftCardRedemptions.giftCardId, card.id),
+                isNull(giftCardRedemptions.refundedAt)
+              )
+            );
           if (redemptionCount >= card.maxRedemptions) {
             throw new Error("LIMIT_REACHED");
           }
@@ -733,18 +739,22 @@ export async function POST(request: NextRequest) {
         })
         .where(eq(orderDrafts.id, draft.id));
 
-      // Backstop expiry: if the customer abandons the PayTR payment (no callback,
-      // no retry), release any reserved gift-card balance after the deadline
-      // instead of holding it forever. Cancelled on promotion/fail via
-      // cancelHavaleJobs. No-op for drafts without a gift card (nothing to free).
-      await getPaymentDeadlineQueue().add(
-        "card-expire",
-        { draftId: draft.id, reference: draft.reference, type: "card_expire" },
-        {
-          jobId: cardExpireJobId(draft.id),
-          delay: CARD_DEADLINE_HOURS * 3600 * 1000,
-        }
-      );
+      // Backstop expiry — ONLY when the draft actually reserved gift-card balance.
+      // Such a reservation must not be held forever if the customer abandons the
+      // PayTR payment, so we expire the draft after the deadline to release it.
+      // A plain card draft with no reservation is left alone so its unlimited
+      // retry-from-track-page window is preserved (nothing is locked up).
+      // Cancelled on promotion/fail via cancelHavaleJobs.
+      if (giftCardAmountKurus > 0) {
+        await getPaymentDeadlineQueue().add(
+          "card-expire",
+          { draftId: draft.id, reference: draft.reference, type: "card_expire" },
+          {
+            jobId: cardExpireJobId(draft.id),
+            delay: CARD_DEADLINE_HOURS * 3600 * 1000,
+          }
+        );
+      }
 
       return NextResponse.json({
         reference: draft.reference,

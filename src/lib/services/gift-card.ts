@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { eq, count } from "drizzle-orm";
+import { and, eq, count, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { giftCards, giftCardRedemptions } from "@/lib/db/schema";
 
@@ -64,7 +64,15 @@ export async function validateGiftCard(code: string) {
     const [result] = await db
       .select({ value: count() })
       .from(giftCardRedemptions)
-      .where(eq(giftCardRedemptions.giftCardId, card.id));
+      // Only LIVE (non-refunded) redemptions count against the cap — a refunded
+      // or expired-draft reservation must not permanently lock a card that still
+      // has full balance.
+      .where(
+        and(
+          eq(giftCardRedemptions.giftCardId, card.id),
+          isNull(giftCardRedemptions.refundedAt)
+        )
+      );
     if (result.value >= card.maxRedemptions) {
       return { valid: false, error: "limit_reached" as const };
     }

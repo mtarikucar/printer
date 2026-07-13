@@ -149,16 +149,19 @@ export async function POST(
   // closes the bypass where a seller inflated the real price of an approved
   // product while the /shop shelf still showed the stale base price. Admin edits
   // stay exempt (admin is the approver).
-  const MONEY_ACTIONS = new Set([
-    "addChoice",
-    "updateChoice",
-    "deleteChoice",
-    "deleteGroup",
-    "createAddon",
-    "updateAddon",
-    "deleteAddon",
-  ]);
-  if (access.actor === "seller" && MONEY_ACTIONS.has(action)) {
+  // Only an ACTUAL price change re-triggers review — a name-only or isDefault-only
+  // edit must not de-list a live product. Structural adds/deletes always change
+  // the effective price; updateChoice/updateAddon only when a price field is
+  // actually supplied in the body.
+  const priceChanged =
+    action === "addChoice" ||
+    action === "deleteChoice" ||
+    action === "deleteGroup" ||
+    action === "createAddon" ||
+    action === "deleteAddon" ||
+    (action === "updateChoice" && body.priceDeltaKurus !== undefined) ||
+    (action === "updateAddon" && body.priceKurus !== undefined);
+  if (access.actor === "seller" && priceChanged) {
     const flipped = await db
       .update(products)
       .set({

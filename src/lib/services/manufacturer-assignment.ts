@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers, orders, manufacturerActions } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
@@ -25,6 +25,20 @@ export const ACTIVE_MFG_STATUSES = [
   "qc_rejected",
   "qc_approved",
 ] as const;
+
+// An order handed off to a painter (painterStatus assigned+) is no longer on the
+// MANUFACTURER's bench: the print is done, their earning already accrued, and
+// they take no further action on it. Crucially, for painting orders the
+// manufacturerStatus stays 'qc_approved' forever (send-to-painter/painter-ship
+// never advance it), so without this the completed painting jobs would count
+// against the shop's capacity permanently and lock it out of new assignments.
+// A NULL/'unassigned' painterStatus means it's still the manufacturer's job.
+export function orderStillOnManufacturerBench() {
+  return or(
+    isNull(orders.painterStatus),
+    eq(orders.painterStatus, "unassigned")
+  )!;
+}
 
 // Human labels for the material a manufacturer can't print (ineligibleReason).
 const MATERIAL_LABEL_TR: Record<string, string> = {
@@ -209,6 +223,7 @@ export async function rankManufacturersForOrder(
     .where(
       and(
         inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
+        orderStillOnManufacturerBench(),
         sql`${orders.manufacturerId} IS NOT NULL`
       )
     )

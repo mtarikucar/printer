@@ -561,26 +561,15 @@ export async function failDraft(
  * and is a no-op — so even without the partial unique index (defense in
  * depth) we cannot double-refund.
  */
-async function refundGiftCardForDraft(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  draftId: string
-): Promise<void> {
-  const claimed = await tx
-    .update(giftCardRedemptions)
-    .set({ refundedAt: new Date() })
-    .where(
-      and(
-        eq(giftCardRedemptions.draftId, draftId),
-        isNull(giftCardRedemptions.refundedAt)
-      )
-    )
-    .returning({
-      giftCardId: giftCardRedemptions.giftCardId,
-      amountKurus: giftCardRedemptions.amountKurus,
-    });
+type GiftTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-  // Restore the credit on each gift card we just claimed. Lock per row to
-  // prevent a concurrent redemption attempt from stomping the balance.
+// Restore credit for each just-claimed redemption row. Locks per gift card to
+// prevent a concurrent redemption from stomping the balance. Shared by the
+// draft-expiry and order-refund paths.
+async function restoreClaimedRedemptions(
+  tx: GiftTx,
+  claimed: { giftCardId: string; amountKurus: number }[]
+): Promise<void> {
   for (const r of claimed) {
     const [card] = await tx
       .select()
@@ -609,6 +598,51 @@ async function refundGiftCardForDraft(
       })
       .where(eq(giftCards.id, card.id));
   }
+}
+
+async function refundGiftCardForDraft(
+  tx: GiftTx,
+  draftId: string
+): Promise<void> {
+  const claimed = await tx
+    .update(giftCardRedemptions)
+    .set({ refundedAt: new Date() })
+    .where(
+      and(
+        eq(giftCardRedemptions.draftId, draftId),
+        isNull(giftCardRedemptions.refundedAt)
+      )
+    )
+    .returning({
+      giftCardId: giftCardRedemptions.giftCardId,
+      amountKurus: giftCardRedemptions.amountKurus,
+    });
+  await restoreClaimedRedemptions(tx, claimed);
+}
+
+/**
+ * Refund any active (refundedAt IS NULL) gift-card redemption tied to an ORDER.
+ * After a draft is promoted its redemption row carries `orderId`, so the admin
+ * refund flow claws the spent credit back onto the card here. Idempotent via the
+ * `refundedAt IS NULL` guard — a second refund of the same order is a no-op.
+ */
+export async function refundGiftCardForOrder(orderId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .update(giftCardRedemptions)
+      .set({ refundedAt: new Date() })
+      .where(
+        and(
+          eq(giftCardRedemptions.orderId, orderId),
+          isNull(giftCardRedemptions.refundedAt)
+        )
+      )
+      .returning({
+        giftCardId: giftCardRedemptions.giftCardId,
+        amountKurus: giftCardRedemptions.amountKurus,
+      });
+    await restoreClaimedRedemptions(tx, claimed);
+  });
 }
 
 export async function findDraftByReference(reference: string) {

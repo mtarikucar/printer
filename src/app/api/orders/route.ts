@@ -337,7 +337,12 @@ export async function POST(request: NextRequest) {
     // flag the order and record the portion that becomes the painter's earning
     // base (the manufacturer's earning is amountKurus − paintingPriceKurus).
     const needsPainting =
-      orderType === "custom" && customInput?.finish === "hand_painted";
+      orderType === "custom" &&
+      customInput?.finish === "hand_painted" &&
+      // hand_painted is only a real, priced finish for character figures; on any
+      // other price kind (object / Creative Lab flat items) the surcharge is not
+      // collected, so the order must NOT be flagged for paid painting.
+      priceKindForStyle(customInput.style) === "figure";
     const paintingPriceKurus = needsPainting
       ? finishSurchargeKurus("hand_painted")
       : 0;

@@ -541,11 +541,16 @@ export function scoreOcr(
   // signal even when amount or reference parsing has minor errors.
   const ibanOk = result.ibanMatchesExpected === true;
 
+  // Auto-promotion (high) ALWAYS requires the transferred amount to match the
+  // order total within tolerance. A correct IBAN and reference on an UNDERPAID
+  // (or amount-unparseable) receipt must never confirm a full-price order — the
+  // amount is the one signal that proves the customer actually paid what they
+  // owe, so no other signal may substitute for it.
   if (amountOk && refOk && keywordsOk) return "high";
-  // Treat an IBAN-confirmed transfer with EITHER amount OR reference as high
-  // confidence: the IBAN match is itself a very strong signal that we have
-  // the right receipt.
-  if (ibanOk && (amountOk || refOk)) return "high";
+  // IBAN-confirmed transfer: a matching merchant IBAN is a strong "right
+  // receipt" signal, but it only lifts an already amount-correct receipt to
+  // high — it cannot stand in for the amount check.
+  if (amountOk && ibanOk) return "high";
   if (amountOk || refOk) return "medium";
   return "low";
 }

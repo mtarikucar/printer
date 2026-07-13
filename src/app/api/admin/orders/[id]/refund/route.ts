@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { reverseEarning } from "@/lib/services/payouts";
 import { reversePainterEarning } from "@/lib/services/painter-payouts";
+import { refundGiftCardForOrder } from "@/lib/services/order-draft";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
@@ -52,6 +53,16 @@ export async function POST(
     .set({
       paymentStatus: "refunded",
       adminNotes: reason ?? undefined,
+      // Halt fulfillment: detach the partners so a refunded order can no longer
+      // be shipped for a fresh earning. The manufacturer/painter ship routes gate
+      // on manufacturerId/painterId matching the session, so clearing them (and
+      // resetting the sub-statuses) removes the order from every partner queue and
+      // makes any further ship attempt a no-op. reverseEarning below backs out
+      // anything already accrued; detaching stops it re-accruing.
+      manufacturerId: null,
+      manufacturerStatus: "unassigned",
+      painterId: null,
+      painterStatus: "unassigned",
       updatedAt: new Date(),
     })
     .where(eq(orders.id, id));
@@ -60,6 +71,11 @@ export async function POST(
   // Also claw back the painter's earning for a refunded painting order.
   await reversePainterEarning(id).catch((e) =>
     console.error("reversePainterEarning failed", e)
+  );
+  // Restore any gift-card credit the order consumed — the spent balance must go
+  // back on the card when the order is refunded (idempotent; no-op if none).
+  await refundGiftCardForOrder(id).catch((e) =>
+    console.error("refundGiftCardForOrder failed", e)
   );
 
   await db.insert(adminActions).values({

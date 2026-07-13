@@ -11,6 +11,18 @@ import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, priceKindForStyle } from "@
 // silently apply a 0 surcharge to a mismatched (e.g. expensive) finish.
 const FIGURE_FINISHES = ["paintable_kit", "hand_painted", "collector_raw", "luxe_display"];
 const OBJECT_FINISHES = ["raw", "smoothed", "painted"];
+// Creative Lab items (keychain/magnet/lamp) are flat-priced with no finish axis,
+// so only the neutral default is valid — otherwise a mismatched finish like
+// "hand_painted" would validate, add 0 to the flat price, yet flag the order for
+// paid professional painting (needsPainting) the customer never paid for.
+const FLAT_FINISHES = ["paintable_kit"];
+const FINISHES_BY_KIND: Record<string, string[]> = {
+  figure: FIGURE_FINISHES,
+  object: OBJECT_FINISHES,
+  keychain: FLAT_FINISHES,
+  fridge_magnet: FLAT_FINISHES,
+  lamp: FLAT_FINISHES,
+};
 
 function defaultCountryForLocale(_locale: Locale) {
   // Shipping is Turkey-only today; default the parser to TR regardless of UI locale.
@@ -72,7 +84,7 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     marketingConsent: z.boolean().optional().default(false),
   }).refine(
     (v) => {
-      const allowed = priceKindForStyle(v.style) === "object" ? OBJECT_FINISHES : FIGURE_FINISHES;
+      const allowed = FINISHES_BY_KIND[priceKindForStyle(v.style)] ?? FIGURE_FINISHES;
       return allowed.includes(v.finish);
     },
     { message: "Seçilen tasarım deseni için geçersiz bitiş seçimi", path: ["finish"] }

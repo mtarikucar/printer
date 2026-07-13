@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, orderDrafts } from "@/lib/db/schema";
-import { itemPriceKurus } from "@/lib/config/prices";
+import { itemPriceKurus, finishSurchargeKurus } from "@/lib/config/prices";
 import { priceKindForStyle } from "@/lib/create/design-templates";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { buildDraftReference } from "@/lib/services/order-draft";
@@ -101,6 +101,16 @@ export async function POST(
     finish: order.finish,
   });
 
+  // The hand_painted surcharge is part of amountKurus above (via itemPriceKurus),
+  // so the draft MUST also carry needsPainting/paintingPriceKurus — otherwise the
+  // promoted order keeps needsPainting=false, ships unpainted, and the painting
+  // money is wrongly credited to the manufacturer. Mirror /api/orders exactly.
+  const needsPainting =
+    priceKindForStyle(order.style) === "figure" && order.finish === "hand_painted";
+  const paintingPriceKurus = needsPainting
+    ? finishSurchargeKurus("hand_painted")
+    : 0;
+
   const havaleDiscountKurus =
     paymentMethod === "bank_transfer" ? calculateHavaleDiscount(amountKurus) : 0;
   const bankTransferDeadline =
@@ -151,6 +161,8 @@ export async function POST(
         photoKey,
         locale,
         amountKurus,
+        needsPainting,
+        paintingPriceKurus,
         havaleDiscountKurus,
         paymentMethod,
         status: "pending",

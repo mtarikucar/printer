@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
@@ -45,9 +45,25 @@ export async function POST(
 
   const order = await db.query.orders.findFirst({
     where: and(eq(orders.id, id), eq(orders.manufacturerId, session.manufacturerId)),
-    columns: { declinedManufacturerIds: true },
+    columns: { declinedManufacturerIds: true, painterStatus: true },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+
+  // Once the order has been handed off to a painter, the manufacturer's print +
+  // QC work is already done and their print-portion earning has accrued. Letting
+  // them "cancel" now would fork the order (the painter still holds it while it
+  // re-enters the admin queue) AND strand a payable earning on the abandoning
+  // manufacturer while the UNIQUE(orderId) constraint zeroes out the replacement
+  // manufacturer's accrual. So cancel is only valid before hand-off — a bounced
+  // painting job comes back through the painter's own decline flow instead.
+  const handedToPainter =
+    order.painterStatus != null && order.painterStatus !== "unassigned";
+  if (handedToPainter) {
+    return NextResponse.json(
+      { error: "Bu sipariş boyacıya devredildi; artık iptal edilemez." },
+      { status: 400 }
+    );
+  }
 
   const declined = Array.isArray(order.declinedManufacturerIds)
     ? (order.declinedManufacturerIds as string[])
@@ -74,7 +90,10 @@ export async function POST(
       and(
         eq(orders.id, id),
         eq(orders.manufacturerId, session.manufacturerId),
-        inArray(orders.manufacturerStatus, [...CANCELLABLE])
+        inArray(orders.manufacturerStatus, [...CANCELLABLE]),
+        // Race-safe mirror of the hand-off guard above: never cancel an order a
+        // painter is (or was) actively holding.
+        or(isNull(orders.painterStatus), eq(orders.painterStatus, "unassigned"))
       )
     )
     .returning();

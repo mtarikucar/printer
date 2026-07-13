@@ -105,8 +105,9 @@ check(
 );
 
 // ─── IBAN boost path ─────────────────────────────────────────────
-// Even with weaker signals (only amount OR only ref), IBAN match
-// alone elevates to high.
+// A matching IBAN elevates an already amount-correct receipt to high even when
+// reference/keywords are weak — but it can NEVER substitute for the amount
+// check, so auto-promotion always requires amountOk.
 check(
   "iban match + amount only (no ref, no keywords) → high",
   scoreOcr(
@@ -120,8 +121,11 @@ check(
   ) === "high"
 );
 
+// Security invariant: a correct IBAN + reference on a receipt whose amount could
+// NOT be confirmed must NOT auto-promote — an underpaid or amount-unparseable
+// receipt goes to admin review (medium), never straight to paid.
 check(
-  "iban match + ref only (amount missing) → high",
+  "iban match + ref only (amount missing) → NOT high (amount is mandatory for auto-approve)",
   scoreOcr(
     base({
       amountKurus: undefined,
@@ -130,7 +134,7 @@ check(
       ibanMatchesExpected: true,
     }),
     EXPECTED
-  ) === "high"
+  ) !== "high"
 );
 
 check(
@@ -237,6 +241,23 @@ check(
     }),
     EXPECTED
   ) === "medium"
+);
+
+// ─── Underpayment fraud vector ───────────────────────────────────
+// A grossly underpaid receipt (₺100 transferred for a ~₺1.000 order) with a
+// perfectly matching IBAN AND reference must go to admin review, not confirm the
+// full-price order. This is the exact scenario the amount-mandatory gate closes.
+check(
+  "severe underpayment + iban + ref + keywords → NOT high (admin review)",
+  scoreOcr(
+    base({
+      amountKurus: Math.round(EXPECTED / 10),
+      referenceFound: true,
+      keywordMatches: 3,
+      ibanMatchesExpected: true,
+    }),
+    EXPECTED
+  ) !== "high"
 );
 
 console.log(`\n${pass}/${pass + fail} ocr-confidence checks passed`);

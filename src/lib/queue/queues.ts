@@ -74,7 +74,7 @@ export interface EmailJobData {
 export interface PaymentDeadlineJobData {
   draftId: string;
   reference: string;
-  type: "havale_reminder" | "havale_expire";
+  type: "havale_reminder" | "havale_expire" | "card_expire";
 }
 
 export interface DekontOcrJobData {
@@ -220,6 +220,12 @@ export function havaleReminderJobId(draftId: string): string {
 
 export function havaleExpireJobId(draftId: string): string {
   return `havale-expire-${draftId}`;
+}
+
+// Backstop expiry for an abandoned CARD draft: releases any reserved gift-card
+// balance if the customer never completes (or retries) the PayTR payment.
+export function cardExpireJobId(draftId: string): string {
+  return `card-expire-${draftId}`;
 }
 
 // Keyed by order id: one pending unread-message email per order at a time.

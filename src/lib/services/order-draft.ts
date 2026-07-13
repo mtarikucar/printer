@@ -22,6 +22,7 @@ import {
   getPaymentDeadlineQueue,
   havaleExpireJobId,
   havaleReminderJobId,
+  cardExpireJobId,
   getEmailQueue,
 } from "@/lib/queue/queues";
 import type { Locale } from "@/lib/i18n/types";
@@ -30,6 +31,9 @@ async function cancelHavaleJobs(draftId: string): Promise<void> {
   const q = getPaymentDeadlineQueue();
   await q.remove(havaleReminderJobId(draftId)).catch(() => {});
   await q.remove(havaleExpireJobId(draftId)).catch(() => {});
+  // Card drafts schedule a backstop expiry too; clear it on promotion/fail/expire
+  // so a completed card payment doesn't get expired out from under the order.
+  await q.remove(cardExpireJobId(draftId)).catch(() => {});
 }
 
 /**
@@ -480,7 +484,10 @@ export async function expireDraft(draftId: string): Promise<void> {
       .set({
         status: "expired",
         paytrFailureReason:
-          draft.paytrFailureReason ?? "Havale ödeme süresi doldu (72 saat)",
+          draft.paytrFailureReason ??
+          (draft.paymentMethod === "card"
+            ? "Kart ödeme süresi doldu"
+            : "Havale ödeme süresi doldu (72 saat)"),
         updatedAt: new Date(),
       })
       .where(eq(orderDrafts.id, draftId));

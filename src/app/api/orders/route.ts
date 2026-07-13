@@ -36,6 +36,7 @@ import {
   calculateHavaleDiscount,
   HAVALE_DEADLINE_HOURS,
   HAVALE_REMINDER_HOURS,
+  CARD_DEADLINE_HOURS,
   getBankDetails,
 } from "@/lib/config/payment";
 import {
@@ -43,6 +44,7 @@ import {
   getPaymentDeadlineQueue,
   havaleExpireJobId,
   havaleReminderJobId,
+  cardExpireJobId,
 } from "@/lib/queue/queues";
 import { getClientIp } from "@/lib/utils/request";
 import {
@@ -730,6 +732,19 @@ export async function POST(request: NextRequest) {
           updatedAt: new Date(),
         })
         .where(eq(orderDrafts.id, draft.id));
+
+      // Backstop expiry: if the customer abandons the PayTR payment (no callback,
+      // no retry), release any reserved gift-card balance after the deadline
+      // instead of holding it forever. Cancelled on promotion/fail via
+      // cancelHavaleJobs. No-op for drafts without a gift card (nothing to free).
+      await getPaymentDeadlineQueue().add(
+        "card-expire",
+        { draftId: draft.id, reference: draft.reference, type: "card_expire" },
+        {
+          jobId: cardExpireJobId(draft.id),
+          delay: CARD_DEADLINE_HOURS * 3600 * 1000,
+        }
+      );
 
       return NextResponse.json({
         reference: draft.reference,

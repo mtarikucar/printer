@@ -73,7 +73,12 @@ async function processJob(job: Job<PaymentDeadlineJobData>) {
     return;
   }
 
-  if (type === "havale_expire") {
+  // Both havale and card use the same terminal expiry: release any reserved
+  // gift-card balance and move the draft to `expired`. For card this is the
+  // backstop that stops an abandoned checkout from holding the credit forever.
+  // expireDraft is idempotent and only acts on still-pending/awaiting_review
+  // drafts, so a promoted (paid) card draft is unaffected.
+  if (type === "havale_expire" || type === "card_expire") {
     await expireDraft(draftId);
     job.log(`Draft ${reference} expired and refunded`);
   }

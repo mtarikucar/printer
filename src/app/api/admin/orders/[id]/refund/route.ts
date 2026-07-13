@@ -113,10 +113,13 @@ export async function POST(
   });
 
   // Server-side refund conversion (keeps GA4 revenue/ROAS honest). Fire-and-forget.
+  // Value MUST match the purchase event's basis (gross order.amountKurus, recorded
+  // in promoteDraftToOrder) so a full refund nets the reported revenue to exactly
+  // zero — recording the net cash here would leave the gift-card/havale portion as
+  // phantom residual revenue in GA4/Meta.
   void recordRefund({
     orderNumber: order.orderNumber,
-    valueKurus:
-      order.amountKurus - order.giftCardAmountKurus - order.havaleDiscountKurus,
+    valueKurus: order.amountKurus,
     userId: order.userId,
     productId: order.productId,
     attribution: order.attribution,

@@ -87,12 +87,11 @@ export async function POST(
     await refundGiftCardForOrder(id).catch((e) =>
       console.error("refundGiftCardForOrder (reject) failed", e)
     );
+    // Gross basis to match the purchase event (see refund route) so a full
+    // refund nets reported revenue to zero.
     void recordRefund({
       orderNumber: order.orderNumber,
-      valueKurus:
-        order.amountKurus -
-        order.giftCardAmountKurus -
-        order.havaleDiscountKurus,
+      valueKurus: order.amountKurus,
       userId: order.userId,
       productId: order.productId,
       attribution: order.attribution,

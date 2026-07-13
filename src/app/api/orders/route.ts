@@ -52,7 +52,7 @@ import {
   attributionColumns,
 } from "@/lib/analytics/attribution-server";
 import { recordEvent } from "@/lib/analytics/server";
-import { eq, and, or, isNull, count, inArray } from "drizzle-orm";
+import { eq, and, or, isNull, isNotNull, count, inArray } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 
@@ -420,11 +420,14 @@ export async function POST(request: NextRequest) {
           const [{ value: redemptionCount }] = await tx
             .select({ value: count() })
             .from(giftCardRedemptions)
-            // Only live (non-refunded) redemptions count against the cap.
+            // One checkout = one redemption use: live rows only, and only the
+            // draft-anchored primary row (multi-seller cart split extras carry
+            // draftId=null — see gift-card.ts validateGiftCard).
             .where(
               and(
                 eq(giftCardRedemptions.giftCardId, card.id),
-                isNull(giftCardRedemptions.refundedAt)
+                isNull(giftCardRedemptions.refundedAt),
+                isNotNull(giftCardRedemptions.draftId)
               )
             );
           if (redemptionCount >= card.maxRedemptions) {

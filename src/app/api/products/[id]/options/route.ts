@@ -159,7 +159,11 @@ export async function POST(
     action === "deleteGroup" ||
     action === "createAddon" ||
     action === "deleteAddon" ||
-    (action === "updateChoice" && body.priceDeltaKurus !== undefined) ||
+    // A default-choice flip changes the AUTO-APPLIED effective price (the group's
+    // default is charged when the buyer picks nothing), so it must re-trigger
+    // review just like a priceDelta edit — a name-only edit still does not.
+    (action === "updateChoice" &&
+      (body.priceDeltaKurus !== undefined || body.isDefault !== undefined)) ||
     (action === "updateAddon" && body.priceKurus !== undefined);
   if (access.actor === "seller" && priceChanged) {
     const flipped = await db

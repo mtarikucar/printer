@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { and, eq, count, isNull } from "drizzle-orm";
+import { and, eq, count, isNull, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { giftCards, giftCardRedemptions } from "@/lib/db/schema";
 
@@ -64,13 +64,16 @@ export async function validateGiftCard(code: string) {
     const [result] = await db
       .select({ value: count() })
       .from(giftCardRedemptions)
-      // Only LIVE (non-refunded) redemptions count against the cap — a refunded
-      // or expired-draft reservation must not permanently lock a card that still
-      // has full balance.
+      // One checkout = one redemption use. Count only LIVE (non-refunded) rows,
+      // and only the ONE draft-anchored primary row per checkout: a multi-seller
+      // cart fans a single redemption into N per-sub-order rows for refund
+      // proration, but the split extras carry draftId=null — counting them would
+      // burn N of a card's maxRedemptions on one checkout and lock residual balance.
       .where(
         and(
           eq(giftCardRedemptions.giftCardId, card.id),
-          isNull(giftCardRedemptions.refundedAt)
+          isNull(giftCardRedemptions.refundedAt),
+          isNotNull(giftCardRedemptions.draftId)
         )
       );
     if (result.value >= card.maxRedemptions) {

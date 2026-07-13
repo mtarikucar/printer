@@ -10,6 +10,7 @@ import { SiteHeader } from "@/components/site-header";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductPublicSpec } from "@/lib/services/product-spec";
 import { getProductConfig } from "@/lib/services/product-options";
+import { sellerNotSuspended } from "@/lib/services/shop-query";
 import { ProductDetailClient } from "./detail-client";
 import { ProductReviews } from "@/components/reviews/product-reviews";
 import { ProductRow } from "@/components/marketplace/product-row";
@@ -17,7 +18,11 @@ import { type ProductListItem } from "@/components/product-card";
 
 async function loadProduct(slug: string) {
   return db.query.products.findFirst({
-    where: and(eq(products.slug, slug), eq(products.status, "active")),
+    where: and(
+      eq(products.slug, slug),
+      eq(products.status, "active"),
+      sellerNotSuspended()
+    ),
     with: {
       images: true,
       manufacturer: { columns: { companyName: true } },
@@ -81,7 +86,8 @@ export default async function ProductDetailPage({
         where: and(
           eq(products.status, "active"),
           eq(products.categoryId, product.categoryId),
-          ne(products.id, product.id)
+          ne(products.id, product.id),
+          sellerNotSuspended()
         ),
         orderBy: [desc(products.createdAt)],
         limit: 6,

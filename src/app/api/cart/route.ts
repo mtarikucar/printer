@@ -76,14 +76,30 @@ async function setLines(key: string, lines: Line[]): Promise<void> {
   await getRedisConnection().set(key, JSON.stringify(lines), "EX", TTL_SECONDS);
 }
 
+// Returns the client-facing view PLUS the subset of raw lines that are still
+// purchasable (validLines), so the caller can persist the pruned cart — a line
+// whose product was unpublished or whose seller was suspended must silently drop
+// out of the cart, otherwise checkout (which rejects the whole cart on one dead
+// line) would be permanently blocked for the healthy items too.
 async function hydrate(lines: Line[]) {
-  if (lines.length === 0) return { items: [], totalKurus: 0, count: 0 };
+  if (lines.length === 0)
+    return { items: [], totalKurus: 0, count: 0, validLines: [] as Line[] };
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const rows = await db.query.products.findMany({
     where: inArray(products.id, productIds),
-    with: { manufacturer: { columns: { companyName: true } } },
+    with: { manufacturer: { columns: { companyName: true, status: true } } },
   });
   const byId = new Map(rows.map((r) => [r.id, r]));
+  const isPurchasable = (l: Line) => {
+    const p = byId.get(l.productId);
+    return (
+      !!p &&
+      p.status === "active" &&
+      // A suspended seller's listing must not survive in the cart.
+      !(p.ownerType === "seller" && p.manufacturer?.status !== "active")
+    );
+  };
+  const validLines = lines.filter(isPurchasable);
 
   // Server-authoritative price + selection snapshot + painted/unpainted image.
   const resolved = await resolveOrderLines(
@@ -98,7 +114,7 @@ async function hydrate(lines: Line[]) {
   const items = lines
     .map((l, i) => {
       const p = byId.get(l.productId);
-      if (!p || p.status !== "active") return null;
+      if (!p || !isPurchasable(l)) return null;
       const r = resolved[i];
       const imageKey = r.itemImageKey ?? p.primaryImageKey;
       return {
@@ -123,6 +139,7 @@ async function hydrate(lines: Line[]) {
     items,
     totalKurus: items.reduce((s, i) => s + i.lineTotalKurus, 0),
     count: items.reduce((s, i) => s + i.quantity, 0),
+    validLines,
   };
 }
 
@@ -144,9 +161,19 @@ const clampQty = (n: unknown) =>
 const idArray = (v: unknown) =>
   Array.isArray(v) ? v.map((x) => String(x)).slice(0, 50) : [];
 
+// Hydrate, and if any dead lines (unpublished product / suspended seller) were
+// pruned, persist the cleaned cart so the drop is permanent.
+async function hydrateAndPersist(key: string, lines: Line[]) {
+  const { validLines, ...view } = await hydrate(lines);
+  if (validLines.length !== lines.length) {
+    await setLines(key, validLines);
+  }
+  return view;
+}
+
 export async function GET(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
-  return respond(await hydrate(await getLines(key)), newCookie);
+  return respond(await hydrateAndPersist(key, await getLines(key)), newCookie);
 }
 
 // Add (merges into the existing line with the SAME product + selection).
@@ -165,7 +192,7 @@ export async function POST(req: NextRequest) {
   if (existing) existing.quantity = Math.min(20, existing.quantity + qty);
   else lines.push({ id, productId, quantity: qty, optionChoiceIds, addonIds });
   await setLines(key, lines);
-  return respond(await hydrate(lines), newCookie);
+  return respond(await hydrateAndPersist(key, lines), newCookie);
 }
 
 // Set an exact quantity for a line (0 removes it). Keyed by line id.
@@ -182,7 +209,7 @@ export async function PATCH(req: NextRequest) {
     if (existing) existing.quantity = qty;
   }
   await setLines(key, lines);
-  return respond(await hydrate(lines), newCookie);
+  return respond(await hydrateAndPersist(key, lines), newCookie);
 }
 
 export async function DELETE(req: NextRequest) {

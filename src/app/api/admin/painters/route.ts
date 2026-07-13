@@ -3,6 +3,7 @@ import { and, inArray, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { painters, orders } from "@/lib/db/schema";
+import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 
 export async function GET(_request: NextRequest) {
   const a = await requireAdmin();
@@ -22,12 +23,7 @@ export async function GET(_request: NextRequest) {
     .where(
       and(
         sql`${orders.painterId} IS NOT NULL`,
-        inArray(orders.painterStatus, [
-          "assigned",
-          "accepted",
-          "painting",
-          "painted",
-        ])
+        inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
       )
     )
     .groupBy(orders.painterId);

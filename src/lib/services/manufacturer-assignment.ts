@@ -9,7 +9,22 @@ import {
 } from "@/lib/config/manufacturer-scoring";
 import { manufacturerSupportsMaterial } from "@/lib/services/capability";
 
-const ACTIVE_MFG_STATUSES = ["assigned", "accepted", "printing"] as const;
+// Every manufacturerStatus where the order is still on the manufacturer's bench
+// (i.e. counts against their capacity) — everything except 'unassigned' and the
+// terminal 'shipped'. Post-print states (printed, qc_*) MUST be included: a shop
+// that finished printing but hasn't shipped is still occupied, so omitting them
+// let a fully-loaded shop score as idle and pick up more work past its cap.
+// Exported so the admin activeOrderCount and the scoring currentLoad share one
+// source and can never drift.
+export const ACTIVE_MFG_STATUSES = [
+  "assigned",
+  "accepted",
+  "printing",
+  "printed",
+  "qc_pending",
+  "qc_rejected",
+  "qc_approved",
+] as const;
 
 // Human labels for the material a manufacturer can't print (ineligibleReason).
 const MATERIAL_LABEL_TR: Record<string, string> = {

@@ -14,6 +14,22 @@ export type PainterOrderStatus =
 
 export type PainterQcAction = "submit" | "approve" | "reject";
 
+// Every painterStatus where the order still occupies the painter's bench (counts
+// against their maxConcurrentOrders) — everything except 'unassigned'/NULL and
+// the terminal 'shipped'. The post-paint QC states (qc_pending/qc_rejected/
+// qc_approved) MUST be included: a painted-but-unshipped job is still WIP, so
+// omitting them let a painter be assigned unboundedly many jobs. Single source
+// shared by the capacity gate and the admin active-job counts so they can't drift.
+export const ACTIVE_PAINTER_ORDER_STATUSES = [
+  "assigned",
+  "accepted",
+  "painting",
+  "painted",
+  "qc_pending",
+  "qc_rejected",
+  "qc_approved",
+] as const;
+
 /** Max finished paint-job photos a painter may upload per QC round. */
 export const MAX_PAINTER_QC_PHOTOS_PER_ROUND = 6;
 

@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
 import { painters, orders } from "@/lib/db/schema";
+import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { desc, sql, and, inArray } from "drizzle-orm";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getLocale } from "@/lib/i18n/get-locale";
@@ -26,12 +27,7 @@ export default async function AdminPaintersPage() {
     .where(
       and(
         sql`${orders.painterId} IS NOT NULL`,
-        inArray(orders.painterStatus, [
-          "assigned",
-          "accepted",
-          "painting",
-          "painted",
-        ])
+        inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
       )
     )
     .groupBy(orders.painterId);

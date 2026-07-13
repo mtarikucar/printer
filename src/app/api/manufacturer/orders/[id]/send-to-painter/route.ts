@@ -6,6 +6,7 @@ import { orders, manufacturers, painters, manufacturerActions } from "@/lib/db/s
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { accrueEarning } from "@/lib/services/payouts";
 import { notifyPainter } from "@/lib/services/painter-notifications";
+import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
 const schema = z.object({ painterId: z.string().uuid("Boyacı seçin") });
@@ -75,7 +76,7 @@ export async function POST(
     .where(
       and(
         eq(orders.painterId, painter.id),
-        inArray(orders.painterStatus, ["assigned", "accepted", "painting", "painted"])
+        inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
       )
     );
   if (activeCount >= painter.maxConcurrentOrders) {

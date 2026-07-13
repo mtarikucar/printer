@@ -1,11 +1,30 @@
-import { and, asc, desc, eq, ilike, gte, lte, inArray, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, gte, lte, inArray, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { products } from "@/lib/db/schema";
+import { products, manufacturers } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import type { ProductListItem } from "@/components/product-card";
 import { getCategoryByPath, getSubtreeIds } from "@/lib/services/categories";
 
 export const SHOP_PAGE_SIZE = 24;
+
+// A product is publicly sellable only while its owner is an active manufacturer.
+// Suspending a seller does NOT flip their products off 'active', so every public
+// read surface (shop list, product detail, related, cart) must AND this in to
+// keep a suspended seller's listings out. Admin-owned products (manufacturerId
+// NULL) are always sellable. Reversible by construction: reactivating the seller
+// restores visibility, no data migration.
+export function sellerNotSuspended(): SQL {
+  return or(
+    eq(products.ownerType, "admin"),
+    inArray(
+      products.manufacturerId,
+      db
+        .select({ id: manufacturers.id })
+        .from(manufacturers)
+        .where(eq(manufacturers.status, "active"))
+    )
+  )!;
+}
 
 export interface ShopFilters {
   category?: string | null;
@@ -32,7 +51,7 @@ export async function queryShopProducts(
         ? [desc(products.priceKurus)]
         : [desc(products.createdAt)];
 
-  const conds: SQL[] = [eq(products.status, "active")];
+  const conds: SQL[] = [eq(products.status, "active"), sellerNotSuspended()];
   // Category filter is now a node PATH; match the node + its whole subtree, so
   // selecting "figurine" also returns "figurine/marvel" products. An unknown
   // path yields an impossible filter (no products) rather than ignoring it.

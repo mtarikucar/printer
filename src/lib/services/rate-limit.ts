@@ -64,22 +64,26 @@ export function extractClientIp(request: IpRequest): string {
   // No trusted proxy configured → returning a single shared string would
   // collapse the whole world into one bucket and one attacker could DoS all
   // legitimate users by burning the global limit. Fall back to "weak" IP
-  // extraction (XFF first hop) — this is still spoofable but no worse than
-  // the historical behavior, and at least segregates buckets. Log loudly once
-  // per process so ops set TRUSTED_PROXY_IPS in production.
+  // extraction, but prefer x-real-ip over x-forwarded-for: in the real prod
+  // topology nginx overwrites x-real-ip with $remote_addr (the socket peer),
+  // which a client CANNOT forge, whereas the leftmost x-forwarded-for hop is a
+  // raw client-controlled header. Reading x-real-ip first therefore uses the
+  // unspoofable value whenever it is present and only degrades to the spoofable
+  // XFF when it is absent. Log loudly once per process so ops set
+  // TRUSTED_PROXY_IPS in production (which enables the fully-trusted block above).
   if (!warnedAboutMissingProxy) {
     warnedAboutMissingProxy = true;
     console.warn(
-      "[rate-limit] TRUSTED_PROXY_IPS is not configured. Using untrusted XFF/x-real-ip for bucketing — vulnerable to spoofing. Set TRUSTED_PROXY_IPS to your upstream proxy's address(es) in production."
+      "[rate-limit] TRUSTED_PROXY_IPS is not configured. Using untrusted x-real-ip/XFF for bucketing — vulnerable to spoofing. Set TRUSTED_PROXY_IPS to your upstream proxy's address(es) in production."
     );
   }
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) return realIp.trim();
   const xff = request.headers.get("x-forwarded-for");
   if (xff) {
     const first = xff.split(",")[0]?.trim();
     if (first) return first;
   }
-  const realIp = request.headers.get("x-real-ip");
-  if (realIp) return realIp.trim();
   return "unknown";
 }
 

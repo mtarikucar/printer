@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productImages } from "@/lib/db/schema";
+import { productImages, products } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { canEditProduct } from "@/lib/services/product-guard";
+import { publishRealtime } from "@/lib/realtime/bus";
+import { topics } from "@/lib/realtime/events";
 import {
   addOptionChoice,
   createAddon,
@@ -139,6 +141,36 @@ export async function POST(
       { error: msg },
       { status: msg === "EMPTY_NAME" ? 400 : 500 }
     );
+  }
+
+  // A seller editing the priced options/add-ons of an ALREADY-PUBLISHED listing
+  // changes its effective checkout price, so it must go back through admin review
+  // — exactly like a base-price edit (see manufacturer/products/[id] PATCH). This
+  // closes the bypass where a seller inflated the real price of an approved
+  // product while the /shop shelf still showed the stale base price. Admin edits
+  // stay exempt (admin is the approver).
+  const MONEY_ACTIONS = new Set([
+    "addChoice",
+    "updateChoice",
+    "deleteChoice",
+    "deleteGroup",
+    "createAddon",
+    "updateAddon",
+    "deleteAddon",
+  ]);
+  if (access.actor === "seller" && MONEY_ACTIONS.has(action)) {
+    const flipped = await db
+      .update(products)
+      .set({
+        status: "pending_review",
+        submittedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(products.id, id), eq(products.status, "active")))
+      .returning({ id: products.id });
+    if (flipped.length) {
+      await publishRealtime([topics.admin()], { kind: "badge" }).catch(() => {});
+    }
   }
 
   // Return the fresh config so the editor re-renders from server truth.

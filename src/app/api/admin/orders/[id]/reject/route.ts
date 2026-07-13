@@ -8,6 +8,10 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { reverseEarning } from "@/lib/services/payouts";
+import { reversePainterEarning } from "@/lib/services/painter-payouts";
+import { refundGiftCardForOrder } from "@/lib/services/order-draft";
+import { recordRefund } from "@/lib/analytics/server";
 
 export async function POST(
   request: NextRequest,
@@ -54,6 +58,46 @@ export async function POST(
     adminEmail: session.user.email,
     notes: body.notes,
   });
+
+  // Rejecting a PAID order (rejectableStatuses includes "paid") is a refund: the
+  // customer is emailed "refunded" below, so the money side-effects MUST actually
+  // run, exactly as the dedicated refund route does — otherwise the gift-card
+  // credit is lost, partner earnings stay payable, paymentStatus stays succeeded,
+  // and reported revenue is never backed out. Skip for a never-paid order.
+  if (order.paymentStatus === "succeeded") {
+    await db
+      .update(orders)
+      .set({
+        paymentStatus: "refunded",
+        // Halt fulfillment: detach partners so a rejected order can't be shipped
+        // for a fresh earning.
+        manufacturerId: null,
+        manufacturerStatus: "unassigned",
+        painterId: null,
+        painterStatus: "unassigned",
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, id));
+    await reverseEarning(id).catch((e) =>
+      console.error("reverseEarning (reject) failed", e)
+    );
+    await reversePainterEarning(id).catch((e) =>
+      console.error("reversePainterEarning (reject) failed", e)
+    );
+    await refundGiftCardForOrder(id).catch((e) =>
+      console.error("refundGiftCardForOrder (reject) failed", e)
+    );
+    void recordRefund({
+      orderNumber: order.orderNumber,
+      valueKurus:
+        order.amountKurus -
+        order.giftCardAmountKurus -
+        order.havaleDiscountKurus,
+      userId: order.userId,
+      productId: order.productId,
+      attribution: order.attribution,
+    }).catch(() => {});
+  }
 
   // Email customer about refund
   await getEmailQueue().add("refund", {

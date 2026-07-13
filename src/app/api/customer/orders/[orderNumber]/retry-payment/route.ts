@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
-import { createPaytrToken } from "@/lib/services/paytr";
+import { createPaytrToken, queryPaytrTransactionStatus } from "@/lib/services/paytr";
+import { promoteDraftToOrder } from "@/lib/services/order-draft";
 import { getClientIp } from "@/lib/utils/request";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -52,6 +53,36 @@ export async function POST(
       { error: "Only card payments can be retried" },
       { status: 400 }
     );
+  }
+
+  // Before minting ANOTHER PayTR charge, ask PayTR the canonical fate of the
+  // prior attempt's oid (still on the draft — retry hasn't overwritten it yet).
+  // Without this, a first attempt that actually SUCCEEDED but whose webhook was
+  // lost/delayed would be orphaned (we overwrite its oid, so the late webhook
+  // can't map back) and the customer could be charged a second time.
+  if (draft.paytrMerchantOid) {
+    const sq = await queryPaytrTransactionStatus(draft.paytrMerchantOid);
+    if (sq.status === "success") {
+      // The earlier payment went through — reconcile (idempotent) instead of
+      // re-charging, and tell the client the order is already paid.
+      await promoteDraftToOrder(draft.id).catch((e) =>
+        console.error("retry-payment reconcile promote failed", draft.reference, e)
+      );
+      return NextResponse.json({ reference: draft.reference, alreadyPaid: true });
+    }
+    if (sq.status === "waiting" || sq.status === "error") {
+      // waiting: an authorized attempt is still in flight — a retry would
+      // double-charge. error: we could not verify, so fail safe rather than risk
+      // a duplicate charge. Either way ask the customer to try again shortly.
+      return NextResponse.json(
+        {
+          error:
+            "Önceki ödemeniz kontrol ediliyor, lütfen birazdan tekrar deneyin.",
+        },
+        { status: 409 }
+      );
+    }
+    // sq.status === "failed" → the prior attempt truly failed; safe to retry.
   }
 
   const addr = draft.shippingAddress;

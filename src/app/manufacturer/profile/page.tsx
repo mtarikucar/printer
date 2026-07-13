@@ -80,7 +80,10 @@ export default function ManufacturerProfilePage() {
   const [iban, setIban] = useState("");
   const [bankAccountHolder, setBankAccountHolder] = useState("");
   const [bankName, setBankName] = useState("");
-  const [maxConcurrent, setMaxConcurrent] = useState(5);
+  // String-backed so the box can be cleared and re-typed (see register page).
+  const [maxConcurrent, setMaxConcurrent] = useState("5");
+  const clampCapacity = (v: string) =>
+    Math.min(50, Math.max(1, Math.floor(Number(v) || 1)));
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [paintsInHouse, setPaintsInHouse] = useState(false);
   const [materials, setMaterials] = useState<string[]>([]);
@@ -116,7 +119,7 @@ export default function ManufacturerProfilePage() {
       setIban(p.iban ?? "");
       setBankAccountHolder(p.bankAccountHolder ?? "");
       setBankName(p.bankName ?? "");
-      setMaxConcurrent(p.maxConcurrentOrders);
+      setMaxConcurrent(String(p.maxConcurrentOrders));
       setAcceptingOrders(p.acceptingOrders);
       setPaintsInHouse(p.paintsInHouse);
       // Derive declared materials from capability tags. A legacy manufacturer
@@ -171,7 +174,7 @@ export default function ManufacturerProfilePage() {
           iban: ibanClean,
           bankAccountHolder,
           bankName,
-          maxConcurrentOrders: Number(maxConcurrent),
+          maxConcurrentOrders: clampCapacity(maxConcurrent),
           acceptingOrders,
           paintsInHouse,
           materials,
@@ -409,7 +412,7 @@ export default function ManufacturerProfilePage() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Maksimum eş zamanlı sipariş</label>
             {editing ? (
-              <input type="number" min={1} max={50} className={`${inputCls} max-w-[140px]`} value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value) || 1)} />
+              <input type="number" min={1} max={50} className={`${inputCls} max-w-[140px]`} value={maxConcurrent} onChange={(e) => setMaxConcurrent(e.target.value)} onBlur={() => setMaxConcurrent((v) => String(clampCapacity(v)))} />
             ) : (
               <p className="text-gray-900 text-sm">{profile.maxConcurrentOrders}</p>
             )}

@@ -47,8 +47,13 @@ export default function ManufacturerRegisterPage() {
   const [bankAccountHolder, setBankAccountHolder] = useState("");
   const [bankName, setBankName] = useState("");
 
-  // Capacity
-  const [maxConcurrentOrders, setMaxConcurrentOrders] = useState(5);
+  // Capacity — held as a string so the field can be cleared and re-typed freely
+  // (a controlled number that coerced every keystroke to `Number(v) || 1` snapped
+  // back to 1 the moment the box was emptied, so it felt un-editable). Clamped to
+  // 1–50 on blur and again on submit.
+  const [maxConcurrentOrders, setMaxConcurrentOrders] = useState("5");
+  const clampCapacity = (v: string) =>
+    Math.min(50, Math.max(1, Math.floor(Number(v) || 1)));
 
   // Production materials (capabilities). At least one required; drives which
   // orders (resin vs filament) get routed to this manufacturer.
@@ -145,7 +150,7 @@ export default function ManufacturerRegisterPage() {
           iban: ibanClean,
           bankAccountHolder,
           bankName,
-          maxConcurrentOrders: Number(maxConcurrentOrders),
+          maxConcurrentOrders: clampCapacity(maxConcurrentOrders),
           materials,
           onboardingAccepted: true,
         }),
@@ -366,7 +371,8 @@ export default function ManufacturerRegisterPage() {
               max={50}
               className={`${inputCls} max-w-[140px]`}
               value={maxConcurrentOrders}
-              onChange={(e) => setMaxConcurrentOrders(Number(e.target.value) || 1)}
+              onChange={(e) => setMaxConcurrentOrders(e.target.value)}
+              onBlur={() => setMaxConcurrentOrders((v) => String(clampCapacity(v)))}
             />
           </fieldset>
 

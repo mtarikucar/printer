@@ -774,6 +774,8 @@ const en = {
 
   // Model viewer
   "model.viewer.resetView": "Reset View",
+  "model.viewer.webglUnavailable":
+    "3D preview isn't available in this browser (WebGL disabled).",
 
   // Payment Success
   "payment.success.title": "Order Confirmed!",

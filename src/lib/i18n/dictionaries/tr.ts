@@ -776,6 +776,8 @@ const tr: Dictionary = {
 
   // Model viewer
   "model.viewer.resetView": "Görünümü Sıfırla",
+  "model.viewer.webglUnavailable":
+    "3D önizleme bu tarayıcıda görüntülenemiyor (WebGL devre dışı).",
 
   // Payment Success
   "payment.success.title": "Sipariş Onaylandı!",

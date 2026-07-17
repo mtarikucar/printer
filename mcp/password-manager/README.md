@@ -2,7 +2,8 @@
 
 A small, local **MCP server** that lets Claude Code use *your own* credentials in
 a controlled, auditable way — the same idea as pointing Claude at a password
-manager instead of leaving secrets lying in plaintext files.
+manager instead of leaving secrets lying in plaintext files. Runs on **Linux,
+macOS and Windows**.
 
 Nothing here bypasses a safety boundary: MCP is exactly the supported extension
 mechanism for giving an agent access to a resource you own. The value this adds
@@ -20,90 +21,104 @@ logged**:
 - **You stay in control** — Claude Code still prompts you to approve each tool
   call, and `CCPM_READONLY=1` disables all mutations.
 
-## How it works
+Each user's vault lives on **their own machine**; this package is just the code.
+Sharing the package with other people does **not** share your passwords.
 
-```
-┌────────────┐   MCP (stdio/JSON-RPC)   ┌────────────────────┐   AES-256-GCM   ┌───────────┐
-│ Claude Code │ ───────────────────────▶ │ password-manager    │ ──────────────▶ │ vault.json │
-│  (client)   │ ◀─────────────────────── │ MCP server          │ ◀────────────── │ (encrypted)│
-└────────────┘   tool calls / results   └────────────────────┘                 └───────────┘
-                                                  │ appends
-                                                  ▼
-                                              audit.log
-```
+---
 
-## Install
+## For users — install & use (any OS)
 
-```bash
-cd mcp/password-manager
-npm install
-npm run build      # compiles to dist/
-npm test           # optional: runs the vault test suite
-```
+> Requires [Node.js](https://nodejs.org) 18+. Once the package is published to
+> npm (see the maintainer section below), no cloning or building is needed — `npx`
+> fetches and runs it.
 
-## 1. Create your vault and add credentials
+### 1. Create your vault and add credentials
 
 Do this yourself in a terminal — Claude never needs your master password, only
-the vault it unlocks. Pick a strong master password and store it in your OS
-keychain / a password manager; **if you lose it, the vault cannot be recovered.**
+the vault it unlocks. **If you lose the master password, the vault cannot be
+recovered.**
 
 ```bash
 # You'll be prompted for the master password (never echoed).
-node dist/cli.js init
+npx -y -p @mtarikucar/claude-password-manager pm-cli init
 
 # Add credentials. Omit --pass to auto-generate a strong one.
-node dist/cli.js add GitHub --user your-handle --url https://github.com --tags dev --pass 'your-token'
-node dist/cli.js add Gmail  --user you@gmail.com --gen
+npx -y -p @mtarikucar/claude-password-manager pm-cli add GitHub --user you --url https://github.com --pass 'your-token'
+npx -y -p @mtarikucar/claude-password-manager pm-cli add Gmail  --user you@gmail.com --gen
 
-node dist/cli.js list        # names only, no passwords
-node dist/cli.js path        # where the vault + audit log live
+npx -y -p @mtarikucar/claude-password-manager pm-cli list   # names only, no passwords
+npx -y -p @mtarikucar/claude-password-manager pm-cli path   # where the vault + audit log live
 ```
 
-By default the vault lives at
-`~/.config/claude-password-manager/vault.json` (override with
-`CCPM_VAULT_PATH`). It is created with `0600` permissions.
+The vault is created with `0600` permissions at:
 
-## 2. Register the server with Claude Code
+| OS | Default vault path |
+|----|--------------------|
+| Linux | `~/.config/claude-password-manager/vault.json` |
+| macOS | `~/.config/claude-password-manager/vault.json` |
+| Windows | `%APPDATA%\claude-password-manager\vault.json` |
 
-Add it to your Claude Code MCP config (`~/.claude.json`, or a project
-`.mcp.json`). Put the master password in the server's `env` block so the running
-server can decrypt the vault — it stays on your machine and is not sent anywhere:
+Override with the `CCPM_VAULT_PATH` env var.
+
+### 2. Register the server with Claude Code
+
+The master password is read from the server's own environment
+(`CCPM_MASTER_PASSWORD`) — so the recommended, config-free approach is to export
+it in the shell you launch Claude from and leave it out of any file:
+
+```bash
+# macOS / Linux
+export CCPM_MASTER_PASSWORD='your-master-password'
+claude mcp add passwords -- npx -y -p @mtarikucar/claude-password-manager claude-password-manager
+claude   # launch from this same shell so the server inherits the variable
+```
+
+```powershell
+# Windows (PowerShell)
+$env:CCPM_MASTER_PASSWORD = 'your-master-password'
+claude mcp add passwords -- npx -y -p @mtarikucar/claude-password-manager claude-password-manager
+claude
+```
+
+Prefer not to type the password each time? Pull it from your OS keychain:
+
+```bash
+# macOS
+security add-generic-password -a "$USER" -s ccpm-master -w 'your-master-password'   # once
+export CCPM_MASTER_PASSWORD="$(security find-generic-password -a "$USER" -s ccpm-master -w)"
+
+# Linux (libsecret)
+secret-tool store --label='ccpm-master' service ccpm-master                          # once
+export CCPM_MASTER_PASSWORD="$(secret-tool lookup service ccpm-master)"
+```
+
+If you'd rather store the password in the MCP config instead of the shell, add it
+to the server's `env` block in `~/.claude.json` (or a project `.mcp.json`) and
+`chmod 600` that file:
 
 ```jsonc
 {
   "mcpServers": {
     "passwords": {
-      "command": "node",
-      "args": ["/absolute/path/to/printer/mcp/password-manager/dist/server.js"],
+      "command": "npx",
+      "args": ["-y", "-p", "@mtarikucar/claude-password-manager", "claude-password-manager"],
       "env": {
         "CCPM_MASTER_PASSWORD": "your-master-password"
-        // optional:
-        // "CCPM_VAULT_PATH": "/custom/path/vault.json",
-        // "CCPM_READONLY": "1"
+        // optional: "CCPM_VAULT_PATH": "...", "CCPM_READONLY": "1"
       }
     }
   }
 }
 ```
 
-Or register it with the CLI:
+### 3. Verify & use
 
-```bash
-claude mcp add passwords \
-  --env CCPM_MASTER_PASSWORD=your-master-password \
-  -- node /absolute/path/to/printer/mcp/password-manager/dist/server.js
-```
+Restart Claude Code, then ask it to call `vault_status` — you should see
+`state: unlocked`. Now prompts like *"get my GitHub token from the password
+manager and set the git remote"* will trigger a `get_credential` call (which you
+approve). Review `audit.log` any time to see what was accessed.
 
-Restart Claude Code. Now you can ask things like *"get my GitHub token from the
-password manager and configure the git remote"* and Claude will call
-`get_credential` (and you'll approve it).
-
-### Keeping the master password out of config
-
-If you'd rather not store the master password in the MCP config file, launch the
-client from a shell that already has `CCPM_MASTER_PASSWORD` exported (e.g. pulled
-from your OS keychain), and drop the `env` block. The server reads the variable
-from its own environment either way.
+---
 
 ## Tools exposed
 
@@ -117,23 +132,62 @@ from its own environment either way.
 | `delete_credential` | no | yes | Remove an entry |
 | `generate_password` | n/a | no | Strong password, not stored |
 
-## Managing the vault later (`pm-cli`)
+`pm-cli` mirrors these for terminal use: `init`, `add`, `list`, `get`,
+`update`, `rm`, `passwd` (change master password), `gen`, `path`.
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `CCPM_MASTER_PASSWORD` | Unlocks the vault. Required for all secret access. |
+| `CCPM_VAULT_PATH` | Override the vault file location. |
+| `CCPM_READONLY=1` | Disable all mutating tools (read-only server). |
+
+---
+
+## For the maintainer — publishing so anyone can install it
+
+The package is configured for a public, scoped npm release. To publish it so
+every Claude user can `npx` it:
 
 ```bash
-node dist/cli.js list [query]
-node dist/cli.js get <name|id>
-node dist/cli.js update <name|id> --pass 'new-value'
-node dist/cli.js rm <name|id>
-node dist/cli.js passwd            # change master password (re-encrypts)
-node dist/cli.js gen 32            # print a strong password
+cd mcp/password-manager
+npm install
+npm login                 # your npm account; scope @mtarikucar must be yours
+npm publish               # runs build + tests first (prepublishOnly), then publishes
 ```
+
+Notes:
+
+- The name is `@mtarikucar/claude-password-manager`. Change the `@mtarikucar`
+  scope in `package.json` to your own npm username/org if different. A scoped
+  name guarantees availability and is published publicly via
+  `publishConfig.access: "public"`.
+- Publishing is **public and effectively permanent** — anyone can install and
+  read the source. It contains no secrets (vaults never leave users' machines),
+  but treat the version/name as a long-lived public identifier.
+- Bump `version` on every change; users get updates automatically because the
+  install commands use `npx -y` (always the latest published version).
+
+### Running from source instead of npm
+
+If you don't want to publish, users can clone and build, then point Claude at the
+local file:
+
+```bash
+git clone https://github.com/mtarikucar/printer.git
+cd printer/mcp/password-manager && npm install && npm run build
+claude mcp add passwords -- node "$(pwd)/dist/server.js"
+```
+
+---
 
 ## Security notes & limitations
 
 - The master password gates decryption. Anyone who can read both `vault.json`
   **and** the running server's environment (or your MCP config file) can read
-  your secrets — protect that config file (`chmod 600`) and prefer the
-  keychain-exported-env approach for shared machines.
+  your secrets — protect that config file and prefer the keychain-exported-env
+  approach on shared machines.
 - Secrets are decrypted in the server process's memory while it runs; this is a
   convenience tool, not a hardware security module.
 - `audit.log` is your record of what the agent accessed — review it periodically.

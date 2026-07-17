@@ -47,11 +47,20 @@ const KDF_PARAMS = { N: 1 << 15, r: 8, p: 1, keylen: 32 } as const;
 // scrypt with N=2^15 needs a higher maxmem than the default 32 MB.
 const SCRYPT_MAXMEM = 128 * 1024 * 1024;
 
+/** Per-user config directory, resolved per platform. */
+export function configDir(): string {
+  // Windows: %APPDATA%\claude-password-manager
+  if (process.platform === "win32" && process.env.APPDATA) {
+    return join(process.env.APPDATA, "claude-password-manager");
+  }
+  // macOS / Linux: $XDG_CONFIG_HOME or ~/.config
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return join(base, "claude-password-manager");
+}
+
 export function defaultVaultPath(): string {
   if (process.env.CCPM_VAULT_PATH) return process.env.CCPM_VAULT_PATH;
-  const base =
-    process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(base, "claude-password-manager", "vault.json");
+  return join(configDir(), "vault.json");
 }
 
 export function auditLogPath(vaultPath: string): string {

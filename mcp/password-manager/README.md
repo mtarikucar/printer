@@ -157,6 +157,20 @@ npm login                 # your npm account; scope @mtarikucar must be yours
 npm publish               # runs build + tests first (prepublishOnly), then publishes
 ```
 
+### Automated publish from GitHub (no local machine needed)
+
+A workflow at `.github/workflows/publish-password-manager.yml` can publish for
+you — handy when you're away from a dev machine:
+
+1. On npmjs.com, create an **Automation** access token for the account that owns
+   the `@mtarikucar` scope.
+2. In the GitHub repo: **Settings → Secrets and variables → Actions → New
+   repository secret**, named `NPM_TOKEN`, value = that token.
+3. Trigger it: **Actions → "Publish password-manager MCP" → Run workflow**
+   (or push a tag like `pm-v1.0.1`). Steps 1–3 are all doable from a phone.
+
+The workflow runs build + tests, then `npm publish`.
+
 Notes:
 
 - The name is `@mtarikucar/claude-password-manager`. Change the `@mtarikucar`

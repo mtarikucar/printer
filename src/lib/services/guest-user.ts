@@ -31,6 +31,17 @@ export async function resolveOrCreateGuestUser(input: {
   name: string;
   phone?: string | null;
   marketingConsent?: boolean;
+  /**
+   * Admin "create order on behalf of a customer" (WhatsApp orders). The caller
+   * is an authenticated admin, so attaching the order to an EXISTING registered
+   * account is legitimate and expected — the customer already has an account and
+   * the admin is taking the order for them over WhatsApp.
+   *
+   * Public guest checkout must NEVER set this: there, refusing is exactly what
+   * stops a stranger who knows an email from attaching orders to someone else's
+   * account (and triggering its "claim your account" reset link).
+   */
+  allowExistingAccount?: boolean;
 }): Promise<ResolveGuestResult> {
   const email = input.email.trim().toLowerCase();
 
@@ -38,6 +49,9 @@ export async function resolveOrCreateGuestUser(input: {
     where: eq(users.email, email),
   });
   if (existing && (existing.passwordHash || !existing.isGuest)) {
+    if (input.allowExistingAccount) {
+      return { ok: true, user: existing };
+    }
     return { ok: false, code: "email_registered" };
   }
   if (existing) {
@@ -66,7 +80,10 @@ export async function resolveOrCreateGuestUser(input: {
   const raced = await db.query.users.findFirst({
     where: eq(users.email, email),
   });
-  if (!raced || raced.passwordHash || !raced.isGuest) {
+  if (!raced) {
+    return { ok: false, code: "email_registered" };
+  }
+  if ((raced.passwordHash || !raced.isGuest) && !input.allowExistingAccount) {
     return { ok: false, code: "email_registered" };
   }
   return { ok: true, user: raced };

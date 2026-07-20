@@ -54,18 +54,22 @@ export async function POST(request: NextRequest) {
   const input = parsed.data;
 
   // Resolve the buyer the same way guest checkout does (returning-guest attach,
-  // new-guest create, refuse to attach to a real/registered account).
+  // new-guest create) — but as an ADMIN taking the order on the customer's
+  // behalf (WhatsApp), attaching to an EXISTING registered account is legitimate
+  // and expected, so we opt out of the guest-checkout "email_registered" refusal.
+  // That refusal exists to stop a stranger on the public checkout from attaching
+  // orders to someone else's account; an authenticated admin is not that threat.
   const guest = await resolveOrCreateGuestUser({
     email: input.email,
     name: input.customerName,
     phone: input.shippingAddress.telefon,
+    allowExistingAccount: true,
   });
   if (!guest.ok) {
     return NextResponse.json(
       {
-        error:
-          "Bu e-posta kayıtlı bir hesaba ait. Müşteri kendi hesabından sipariş vermeli.",
-        code: "email_registered",
+        error: "Müşteri hesabı çözümlenemedi. Lütfen tekrar deneyin.",
+        code: "user_resolve_failed",
       },
       { status: 409 }
     );

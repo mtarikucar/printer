@@ -47,6 +47,7 @@ import {
   cardExpireJobId,
 } from "@/lib/queue/queues";
 import { getClientIp } from "@/lib/utils/request";
+import { CONTENT_CONSENT_VERSION } from "@/lib/config/content-consent";
 import {
   attributionFromRequest,
   attributionColumns,
@@ -98,6 +99,25 @@ export async function POST(request: NextRequest) {
     const cartInput = isCart ? createCartOrderSchema(locale).parse(body) : null;
     // Common checkout fields present in all schemas.
     const common = (customInput ?? mpInput ?? uploadInput ?? cartInput)!;
+
+    // Görsel/kişilik hakları onayı — foto/model içeren siparişlerde (custom +
+    // upload) müşteri, iki onay kutusunu da (Kullanım Koşulları + fotoğraf
+    // taahhütleri VE KVKK açık rıza) işaretlemeden sipariş oluşturamaz. İki kutu
+    // da işaretliyse istemci `contentConsent: true` gönderir. Marketplace'te
+    // müşteri görsel yüklemediği için bu onay istenmez. (Onayın kaydı aşağıda.)
+    if (
+      (orderType === "custom" || orderType === "upload") &&
+      body?.contentConsent !== true
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            d["api.order.consentRequired"] ??
+            "Devam etmek için görsel kullanım ve KVKK onaylarını işaretlemelisiniz.",
+        },
+        { status: 400 }
+      );
+    }
 
     // Marketplace: load + gate the product (only `active` listings are buyable).
     let product:
@@ -507,6 +527,14 @@ export async function POST(request: NextRequest) {
           photoKey: customInput?.photoKey ?? null,
           // Marketplace item fields (null for custom).
           orderType,
+          // Görsel/kişilik hakları + KVKK onayı damgası (gate yukarıda). Yalnızca
+          // foto/model içeren siparişlerde alınır; marketplace'te null kalır.
+          contentConsentAt:
+            orderType === "custom" || orderType === "upload" ? new Date() : null,
+          contentConsentVersion:
+            orderType === "custom" || orderType === "upload"
+              ? CONTENT_CONSENT_VERSION
+              : null,
           productId: orderType === "marketplace" && !isCart ? product!.id : null,
           sellerManufacturerId:
             orderType === "marketplace" && !isCart ? product!.manufacturerId : null,

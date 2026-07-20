@@ -25,6 +25,7 @@ import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/Pho
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { CreatePathSelector } from "@/components/create/path-selector";
 import { UploadModelFlow } from "@/components/create/upload-model-flow";
+import { ContentConsent } from "@/components/content-consent";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
 import { DESIGN_TEMPLATES, priceKindForStyle, getTemplate } from "@/lib/create/design-templates";
 import { ExtraPhotos, type ExtraPhoto } from "@/components/create/extra-photos";
@@ -169,6 +170,8 @@ function CustomCreateFlow() {
   const [guestEmail, setGuestEmail] = useState("");
   const [guestName, setGuestName] = useState("");
   const [marketingConsent, setMarketingConsent] = useState(false);
+  // Görsel/kişilik hakları + KVKK onayı — iki kutu da işaretlenmeden sipariş yok.
+  const [contentConsentOk, setContentConsentOk] = useState(false);
 
   // Loading stage rotation
   const [loadingStage, setLoadingStage] = useState(0);
@@ -871,6 +874,14 @@ function CustomCreateFlow() {
     }
     const submitForm = { ...form, telefon: telefonE164 };
 
+    if (!contentConsentOk) {
+      setError(
+        d["consent.content.required"] ||
+          "Devam etmek için görsel kullanım ve KVKK onaylarını işaretleyin."
+      );
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -893,6 +904,7 @@ function CustomCreateFlow() {
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
           marketingConsent: !loggedIn ? marketingConsent : undefined,
+          contentConsent: contentConsentOk,
         }),
       });
 
@@ -2005,6 +2017,11 @@ function CustomCreateFlow() {
                 </div>
               )}
 
+              <ContentConsent
+                onChange={setContentConsentOk}
+                className="mb-4 space-y-2 text-left"
+              />
+
               {(() => {
                 const total = baseKurus(selectedSize, selectedMaterial) + finishKurus(selectedFinish) + upsellTotalKurus;
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
@@ -2013,6 +2030,7 @@ function CustomCreateFlow() {
                   <Button
                     type="submit"
                     loading={submitting}
+                    disabled={!contentConsentOk}
                     size="lg"
                     fullWidth
                     className="inline-flex items-center justify-center gap-2"

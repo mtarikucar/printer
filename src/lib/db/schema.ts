@@ -516,6 +516,11 @@ export const orderDrafts = pgTable("order_drafts", {
   attributionChannel: text("attribution_channel"),
   visitorId: text("visitor_id"),
   attribution: jsonb("attribution").$type<Attribution>(),
+  // Görsel/kişilik hakları + KVKK onayı — foto/model içeren siparişlerde sipariş
+  // anında (on-site) burada, WhatsApp'ta /pay onayında alınır; terfide orders'a
+  // kopyalanır. İki kutu da işaretliyse damgalanır (denetim izi).
+  contentConsentAt: timestamp("content_consent_at"),
+  contentConsentVersion: text("content_consent_version"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -662,6 +667,14 @@ export const orders = pgTable("orders", {
   attributionChannel: text("attribution_channel"),
   visitorId: text("visitor_id"),
   attribution: jsonb("attribution").$type<Attribution>(),
+  // ─── Görsel/kişilik hakları onayı (KVKK + FSEK m.86 + TMK m.24-25) ───
+  // Foto/model içeren siparişlerde (custom / upload / WhatsApp pay) sipariş
+  // anında alınır. Müşteri, yüklediği görsel üzerinde hak sahibi olduğunu ve
+  // tasvir edilen kişinin açık rızasını aldığını (Kutu 1) ve KVKK aydınlatma +
+  // yurt dışı AI aktarımına açık rızayı (Kutu 2) ayrı ayrı onaylar; ikisi de
+  // zorunludur. Version, kabul edilen sözleşme metnini sabitler (denetim izi).
+  contentConsentAt: timestamp("content_consent_at"),
+  contentConsentVersion: text("content_consent_version"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -779,6 +779,21 @@ const tr: Dictionary = {
   "model.viewer.webglUnavailable":
     "3D önizleme bu tarayıcıda görüntülenemiyor (WebGL devre dışı).",
 
+  // Görsel/kişilik hakları + KVKK onayı (sipariş oluşturma)
+  "consent.content.required":
+    "Devam etmek için görsel kullanım ve KVKK onaylarını işaretleyin.",
+  "api.order.consentRequired":
+    "Devam etmek için görsel kullanım ve KVKK onaylarını işaretlemelisiniz.",
+  "consent.content.box1":
+    "Yüklediğim fotoğrafı kullanma hakkına sahip olduğumu; fotoğraftaki kişi(ler)in (çocuksa velisinin) açık rızasını aldığımı; görselin ünlü/üçüncü kişi, telifli/markalı, müstehcen, nefret söylemi veya yasa dışı içerik taşımadığını, aksi hâlde tüm hukuki sorumluluğun bana ait olduğunu ve ",
+  "consent.content.termsLink": "Kullanım Koşulları'nı",
+  "consent.content.box1b": " okuyup kabul ettiğimi beyan ederim.",
+  "consent.content.box2":
+    "Fotoğrafımın stilize görsel üretimi için yurt dışındaki yapay zeka sağlayıcılarına aktarılabileceğini; ",
+  "consent.content.kvkkLink": "KVKK Aydınlatma Metni'ni",
+  "consent.content.box2b":
+    " okuduğumu ve bu işleme/aktarıma açık rıza verdiğimi beyan ederim.",
+
   // Payment Success
   "payment.success.title": "Sipariş Onaylandı!",
   "payment.success.message":

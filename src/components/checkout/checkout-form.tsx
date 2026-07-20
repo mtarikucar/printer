@@ -8,6 +8,7 @@ import { track } from "@/lib/analytics/client";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
+import { ContentConsent } from "@/components/content-consent";
 
 // Reusable single-payment checkout. Collects guest identity (when logged out),
 // a Turkish shipping address, and a payment method, then POSTs `orderPayload`
@@ -45,6 +46,12 @@ export function CheckoutForm({
   const [giftCardCode, setGiftCardCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Foto/model içeren siparişlerde (upload = STL/OBJ, custom = Creative Lab /urunler)
+  // görsel/kişilik hakları + KVKK onayı istenir; saf marketplace alışverişinde
+  // müşteri görsel yüklemediği için istenmez. (API gate ile birebir aynı koşul.)
+  const needsConsent =
+    orderPayload.orderType === "upload" || orderPayload.orderType === "custom";
+  const [contentConsentOk, setContentConsentOk] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -84,6 +91,15 @@ export function CheckoutForm({
       setError(t("shop.checkout.guestRequired", "Ad ve e-posta zorunludur"));
       return;
     }
+    if (needsConsent && !contentConsentOk) {
+      setError(
+        t(
+          "consent.content.required",
+          "Devam etmek için görsel kullanım ve KVKK onaylarını işaretleyin."
+        )
+      );
+      return;
+    }
 
     setSubmitting(true);
     // Funnel: payment initiated. The shared event id lets the browser pixel and
@@ -103,6 +119,7 @@ export function CheckoutForm({
           giftCardCode: giftCardCode.trim() || undefined,
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
+          contentConsent: needsConsent ? contentConsentOk : undefined,
           analyticsEventId: payEventId,
         }),
       });
@@ -252,11 +269,18 @@ export function CheckoutForm({
         ))}
       </div>
 
+      {needsConsent && (
+        <ContentConsent
+          onChange={setContentConsentOk}
+          className="space-y-2 text-left"
+        />
+      )}
+
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       <button
         type="submit"
-        disabled={submitting}
+        disabled={submitting || (needsConsent && !contentConsentOk)}
         className="w-full btn-primary py-3 rounded-xl font-medium disabled:opacity-60"
       >
         {submitting

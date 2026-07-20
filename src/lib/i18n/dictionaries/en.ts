@@ -777,6 +777,21 @@ const en = {
   "model.viewer.webglUnavailable":
     "3D preview isn't available in this browser (WebGL disabled).",
 
+  // Image/likeness rights + KVKK consent (order creation)
+  "consent.content.required":
+    "Please tick the image-use and KVKK consent boxes to continue.",
+  "api.order.consentRequired":
+    "You must tick the image-use and KVKK consent boxes to continue.",
+  "consent.content.box1":
+    "I confirm that I have the right to use the photo I uploaded; that I have obtained the explicit consent of the depicted person(s) (or their guardian if a child); that the image contains no celebrity/third-party, copyrighted/trademarked, obscene, hateful or unlawful content; that all legal responsibility otherwise rests with me; and that I have read and accepted the ",
+  "consent.content.termsLink": "Terms of Service",
+  "consent.content.box1b": ".",
+  "consent.content.box2":
+    "I acknowledge that my photo may be transferred to AI providers located abroad to produce the stylized image; ",
+  "consent.content.kvkkLink": "KVKK Privacy Notice",
+  "consent.content.box2b":
+    ", which I have read, and I give my explicit consent to this processing/transfer.",
+
   // Payment Success
   "payment.success.title": "Order Confirmed!",
   "payment.success.message":

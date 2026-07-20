@@ -11,6 +11,7 @@ import {
 } from "@/lib/config/contact";
 import { WhatsAppIcon } from "@/components/whatsapp/whatsapp-button";
 import { PayCardButton } from "./pay-card-button";
+import { PayConsentGate } from "./pay-consent-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -135,6 +136,7 @@ export default async function PayPage({
           </div>
         </Card>
 
+        <PayConsentGate reference={draft.reference}>
         {draft.paymentMethod === "card" && draft.status === "pending" ? (
           <Card className="p-6 sm:p-8 space-y-3">
             <h2 className="text-lg font-serif text-text-primary">Kart ile öde</h2>
@@ -188,6 +190,7 @@ export default async function PayPage({
             </p>
           </Card>
         )}
+        </PayConsentGate>
 
         <p className="text-center text-xs text-text-muted">
           Soru mu var? WhatsApp: {WHATSAPP_DISPLAY}

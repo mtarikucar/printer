@@ -102,6 +102,10 @@ export async function promoteDraftToOrder(
       attributionChannel: draft.attributionChannel,
       visitorId: draft.visitorId,
       attribution: draft.attribution,
+      // Görsel/kişilik hakları + KVKK onayı — draft'ta yakalanan onay damgası
+      // terfide orders'a birebir taşınır (denetim izi).
+      contentConsentAt: draft.contentConsentAt,
+      contentConsentVersion: draft.contentConsentVersion,
     };
 
     // Cart promotion (Faz 4): fan a multi-seller cart draft out into one order

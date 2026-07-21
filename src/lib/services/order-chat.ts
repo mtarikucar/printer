@@ -27,7 +27,7 @@ export interface SerializedMessage {
 export async function saveChatAttachment(
   file: File
 ): Promise<{ attachmentKey: string; attachmentThumbnailKey: string | null }> {
-  if (file.size > 10 * 1024 * 1024) throw new Error("ATTACHMENT_TOO_LARGE");
+  if (file.size > 20 * 1024 * 1024) throw new Error("ATTACHMENT_TOO_LARGE");
   const buffer = Buffer.from(await file.arrayBuffer());
   const detected = validateImageMagicBytes(buffer);
   if (!detected || !["image/jpeg", "image/png"].includes(detected)) {

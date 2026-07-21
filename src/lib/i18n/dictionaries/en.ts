@@ -198,7 +198,7 @@ const en = {
   "design.title": "2D design → 3D object",
   "design.sub": "Upload a logo, drawing, or flat image and we'll turn it into a 3D-printable object.",
   "design.upload": "Upload your design",
-  "design.uploadHint": "PNG or JPG · up to 10MB",
+  "design.uploadHint": "PNG or JPG · up to 20MB",
   "design.change": "Choose a different image",
   "design.generate": "Generate 3D preview",
   "design.generating": "Building your model… this can take a couple of minutes.",
@@ -368,11 +368,11 @@ const en = {
   "product.category.none": "Not specified",
   "product.images.title": "Images",
   "product.images.delete": "Delete image",
-  "product.images.hint": "JPEG or PNG, max 10MB.",
+  "product.images.hint": "JPEG or PNG, max 20MB.",
   "product.archive.confirm": "Are you sure you want to archive this product?",
   "product.error.generic": "Please check the details.",
   "product.error.price": "Enter a valid price.",
-  "product.error.upload": "Could not upload image (JPEG/PNG, ≤10MB).",
+  "product.error.upload": "Could not upload image (JPEG/PNG, ≤20MB).",
 
   // ─── Admin product moderation ────────────────────────────────
   "admin.products.title": "Products",
@@ -818,13 +818,13 @@ const en = {
 
   // Upload Dropzone
   "upload.invalidFormat": "Please upload a JPG or PNG image",
-  "upload.fileTooLarge": "File size must be 10MB or less",
+  "upload.fileTooLarge": "File size must be 20MB or less",
   "upload.failed": "Upload failed",
   "upload.preview": "Upload preview",
   "upload.uploading": "Uploading...",
   "upload.dropHere": "Drop your photo here",
   "upload.dragOrClick": "Drag and drop your photo",
-  "upload.hint": "or click to select. JPG or PNG, max 10MB",
+  "upload.hint": "or click to select. JPG or PNG, max 20MB",
 
   // Order Status Tracker
   "tracker.paid.label": "Order Received",
@@ -1046,7 +1046,7 @@ const en = {
   "api.auth.notLoggedIn": "Not logged in",
   "api.upload.noFile": "No file found",
   "api.upload.invalidFormat": "Only JPG and PNG files are accepted",
-  "api.upload.tooLarge": "File size must be 10MB or less",
+  "api.upload.tooLarge": "File size must be 20MB or less",
   "api.upload.failed": "File upload failed",
   "api.order.notFound": "Order not found",
   "api.receipt.crossOrigin": "Cross-origin upload not allowed",
@@ -1844,7 +1844,7 @@ const en = {
   "landing.fig.sta.01.desc": "One clear shot is all it takes. Front-facing, good light, full body or half — we handle the rest.",
   "landing.fig.sta.01.caption": "IMG.jpeg · 1 upload",
   "landing.fig.sta.01.dropLabel": "Drop a photo of yourself",
-  "landing.fig.sta.01.dropHint": "JPG or PNG · up to 10MB · one person, good lighting",
+  "landing.fig.sta.01.dropHint": "JPG or PNG · up to 20MB · one person, good lighting",
 
   "landing.fig.sta.02.titleLead": "We",
   "landing.fig.sta.02.titleItalic": "see",
@@ -2057,7 +2057,7 @@ const en = {
   "chat.you": "You",
   "chat.admin": "Support",
   "chat.attach": "Attach photo",
-  "chat.attachTooLarge": "Attachment too large (max 10MB).",
+  "chat.attachTooLarge": "Attachment too large (max 20MB).",
   "chat.loginToSend": "Log in to send a message.",
   "chat.unread": "new",
   "track.note.title": "Order notes / special instructions",

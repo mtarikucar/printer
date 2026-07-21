@@ -124,7 +124,7 @@ export async function handleStepImagePost(request: NextRequest) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file" }, { status: 400 });
   }
-  if (file.size > 10 * 1024 * 1024) {
+  if (file.size > 20 * 1024 * 1024) {
     return NextResponse.json({ error: "too_large" }, { status: 400 });
   }
   const buffer = Buffer.from(await file.arrayBuffer());

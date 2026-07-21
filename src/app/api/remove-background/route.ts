@@ -7,7 +7,7 @@ import { validateImageMagicBytes } from "@/lib/services/file-validation";
 // Allow up to 5 minutes for model loading + inference on CPU
 export const maxDuration = 300;
 
-const MAX_SIZE = 15 * 1024 * 1024; // 15MB
+const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 
 export async function POST(request: NextRequest) {
   try {

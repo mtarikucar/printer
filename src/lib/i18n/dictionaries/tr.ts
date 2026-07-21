@@ -200,7 +200,7 @@ const tr: Dictionary = {
   "design.title": "2D tasarım → 3D obje",
   "design.sub": "Logonu, çizimini ya da düz bir görseli yükle; onu 3D baskıya hazır bir objeye dönüştürelim.",
   "design.upload": "Tasarımını yükle",
-  "design.uploadHint": "PNG veya JPG · en fazla 10MB",
+  "design.uploadHint": "PNG veya JPG · en fazla 20MB",
   "design.change": "Başka bir görsel seç",
   "design.generate": "3D önizleme oluştur",
   "design.generating": "Modelin oluşturuluyor… bu birkaç dakika sürebilir.",
@@ -370,11 +370,11 @@ const tr: Dictionary = {
   "product.category.none": "Belirtilmedi",
   "product.images.title": "Görseller",
   "product.images.delete": "Görseli sil",
-  "product.images.hint": "JPEG veya PNG, en fazla 10MB.",
+  "product.images.hint": "JPEG veya PNG, en fazla 20MB.",
   "product.archive.confirm": "Bu ürünü arşivlemek istediğinize emin misiniz?",
   "product.error.generic": "Bilgileri kontrol edin.",
   "product.error.price": "Geçerli bir fiyat girin.",
-  "product.error.upload": "Görsel yüklenemedi (JPEG/PNG, ≤10MB).",
+  "product.error.upload": "Görsel yüklenemedi (JPEG/PNG, ≤20MB).",
 
   // ─── Admin ürün moderasyonu ──────────────────────────────────
   "admin.products.title": "Ürünler",
@@ -820,13 +820,13 @@ const tr: Dictionary = {
 
   // Upload Dropzone
   "upload.invalidFormat": "Lütfen JPG veya PNG formatında bir görsel yükleyin",
-  "upload.fileTooLarge": "Dosya boyutu en fazla 10MB olmalıdır",
+  "upload.fileTooLarge": "Dosya boyutu en fazla 20MB olmalıdır",
   "upload.failed": "Yükleme başarısız",
   "upload.preview": "Yükleme önizleme",
   "upload.uploading": "Yükleniyor...",
   "upload.dropHere": "Fotoğrafınızı buraya bırakın",
   "upload.dragOrClick": "Fotoğrafınızı sürükleyip bırakın",
-  "upload.hint": "veya tıklayarak seçin. JPG veya PNG, maks 10MB",
+  "upload.hint": "veya tıklayarak seçin. JPG veya PNG, maks 20MB",
 
   // Order Status Tracker
   "tracker.paid.label": "Sipariş Alındı",
@@ -1049,7 +1049,7 @@ const tr: Dictionary = {
   "api.auth.notLoggedIn": "Giriş yapılmamış",
   "api.upload.noFile": "Dosya bulunamadı",
   "api.upload.invalidFormat": "Sadece JPG ve PNG dosyaları kabul edilir",
-  "api.upload.tooLarge": "Dosya boyutu en fazla 10MB olmalıdır",
+  "api.upload.tooLarge": "Dosya boyutu en fazla 20MB olmalıdır",
   "api.upload.failed": "Dosya yükleme başarısız",
   "api.order.notFound": "Sipariş bulunamadı",
   "api.receipt.crossOrigin": "Çapraz kaynak yüklemesine izin verilmiyor",
@@ -1850,7 +1850,7 @@ const tr: Dictionary = {
   "landing.fig.sta.01.desc": "Net bir kare yeterli. Önden, iyi ışıkta, tam boy ya da yarım — gerisini biz hallederiz.",
   "landing.fig.sta.01.caption": "IMG.jpeg · 1 yükleme",
   "landing.fig.sta.01.dropLabel": "Kendi fotoğrafını buraya bırak",
-  "landing.fig.sta.01.dropHint": "JPG veya PNG · 10MB'ye kadar · tek kişi, iyi ışık",
+  "landing.fig.sta.01.dropHint": "JPG veya PNG · 20MB'ye kadar · tek kişi, iyi ışık",
 
   "landing.fig.sta.02.titleLead": "Seni",
   "landing.fig.sta.02.titleItalic": "görüyoruz",
@@ -2063,7 +2063,7 @@ const tr: Dictionary = {
   "chat.you": "Siz",
   "chat.admin": "Destek",
   "chat.attach": "Fotoğraf ekle",
-  "chat.attachTooLarge": "Ek dosya çok büyük (en fazla 10MB).",
+  "chat.attachTooLarge": "Ek dosya çok büyük (en fazla 20MB).",
   "chat.loginToSend": "Mesaj göndermek için giriş yapın.",
   "chat.unread": "yeni",
   "track.note.title": "Sipariş notları / özel talimatlar",

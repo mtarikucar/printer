@@ -423,6 +423,11 @@ export const orderDrafts = pgTable("order_drafts", {
   finish: figurineFinishEnum("finish").notNull().default("paintable_kit"),
   shippingAddress: jsonb("shipping_address").notNull().$type<TurkishAddress>(),
   photoKey: text("photo_key"),
+  // Admin WhatsApp orders: the customer sends reference photos over WhatsApp and
+  // the admin attaches them here (storage keys). At draft→order promotion these
+  // become order_photos rows so production/manufacturer + the /pay page see them.
+  // Distinct from the single custom-flow photoKey above.
+  photoKeys: jsonb("photo_keys").$type<string[]>(),
   // Marketplace fields (null for custom drafts). See orderTypeEnum.
   orderType: orderTypeEnum("order_type").notNull().default("custom"),
   // Faz 4: groups sibling sub-orders from one cart checkout (one order/seller).

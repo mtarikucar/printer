@@ -32,6 +32,45 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   const [postaKodu, setPostaKodu] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLine()]);
   const [paymentMethod, setPaymentMethod] = useState<"card" | "bank_transfer">("card");
+  // Reference photos the customer sent over WhatsApp (max 4).
+  const [photos, setPhotos] = useState<{ key: string; previewUrl: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const MAX_PHOTOS = 4;
+
+  const uploadPhotos = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setError(null);
+    const room = MAX_PHOTOS - photos.length;
+    if (room <= 0) {
+      setError(`En fazla ${MAX_PHOTOS} fotoğraf ekleyebilirsiniz.`);
+      return;
+    }
+    setUploading(true);
+    try {
+      for (const file of Array.from(files).slice(0, room)) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/admin/orders/upload-photo", {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data.error || "Fotoğraf yüklenemedi.");
+          continue;
+        }
+        setPhotos((prev) =>
+          prev.length < MAX_PHOTOS
+            ? [...prev, { key: data.key, previewUrl: data.previewUrl }]
+            : prev
+        );
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removePhoto = (key: string) =>
+    setPhotos((prev) => prev.filter((p) => p.key !== key));
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +127,7 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           shippingAddress: { adres, mahalle, ilce, il, postaKodu, telefon: phone },
           lineItems: parsedLines,
           paymentMethod,
+          photoKeys: photos.map((p) => p.key),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -146,6 +186,7 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
             onClick={() => {
               setResult(null);
               setLineItems([emptyLine()]);
+              setPhotos([]);
               setCustomerName("");
               setEmail("");
               setPhone("");
@@ -269,6 +310,55 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           <p className="mt-2 text-right text-sm font-semibold text-gray-900">
             Toplam: ₺{totalTry.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
           </p>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="text-sm font-medium text-gray-700">
+              Fotoğraflar{" "}
+              <span className="text-gray-400">(opsiyonel · en fazla {MAX_PHOTOS})</span>
+            </label>
+            {photos.length < MAX_PHOTOS && (
+              <label className="cursor-pointer rounded-full bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800">
+                {uploading ? "Yükleniyor…" : "+ Fotoğraf ekle"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  multiple
+                  className="hidden"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    void uploadPhotos(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            )}
+          </div>
+          <p className="mb-2 text-xs text-gray-500">
+            Müşterinin WhatsApp&apos;tan gönderdiği görseller. JPG/PNG, her biri en fazla 20MB.
+          </p>
+          {photos.length > 0 && (
+            <div className="flex flex-wrap gap-3">
+              {photos.map((p) => (
+                <div
+                  key={p.key}
+                  className="relative h-24 w-24 overflow-hidden rounded-lg border border-gray-200"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.previewUrl} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(p.key)}
+                    className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs leading-none text-white hover:bg-black/80"
+                    aria-label="Fotoğrafı kaldır"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <FormField label="Ödeme yöntemi" required>

@@ -355,6 +355,18 @@ export async function promoteDraftToOrder(
       });
     }
 
+    // Admin WhatsApp orders (marketplace-type) carry reference photos the customer
+    // sent over WhatsApp; surface them on the order so production/manufacturer and
+    // the /pay page can see them.
+    if (draft.photoKeys && draft.photoKeys.length > 0) {
+      await tx.insert(orderPhotos).values(
+        draft.photoKeys.map((key) => ({
+          orderId: order.id,
+          originalUrl: getPublicUrl(key),
+        }))
+      );
+    }
+
     // Reassign any draft-scoped gift-card redemption to the new order.
     await tx
       .update(giftCardRedemptions)

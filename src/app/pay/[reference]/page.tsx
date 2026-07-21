@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { findDraftByReference } from "@/lib/services/order-draft";
 import { getBankDetails } from "@/lib/config/payment";
+import { getPublicUrl } from "@/lib/services/storage";
 import { SiteHeader } from "@/components/site-header";
 import { Card } from "@/components/ui";
 import { getLocale } from "@/lib/i18n/get-locale";
@@ -135,6 +136,36 @@ export default async function PayPage({
             </span>
           </div>
         </Card>
+
+        {draft.photoKeys && draft.photoKeys.length > 0 && (
+          <Card className="p-6 sm:p-8">
+            <h2 className="text-lg font-serif text-text-primary">
+              Sipariş fotoğrafları
+            </h2>
+            <p className="text-sm text-text-secondary mt-1">
+              Siparişiniz için ilettiğiniz görseller. Yanlış bir görsel varsa
+              ödeme öncesi bizimle iletişime geçin.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              {draft.photoKeys.map((key, i) => (
+                <a
+                  key={i}
+                  href={getPublicUrl(key)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block h-28 w-28 overflow-hidden rounded-xl border border-bg-subtle"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getPublicUrl(key)}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                </a>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <PayConsentGate reference={draft.reference}>
         {draft.paymentMethod === "card" && draft.status === "pending" ? (

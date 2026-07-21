@@ -37,6 +37,9 @@ const schema = z.object({
   shippingAddress: addressSchema,
   lineItems: z.array(lineItemSchema).min(1).max(20),
   paymentMethod: z.enum(["card", "bank_transfer"]),
+  // Reference photos the customer sent over WhatsApp (storage keys from
+  // /api/admin/orders/upload-photo). Max 4; become order_photos at promotion.
+  photoKeys: z.array(z.string().trim().min(1).max(300)).max(4).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -122,6 +125,7 @@ export async function POST(request: NextRequest) {
     orderType: "marketplace",
     productTitleSnapshot,
     selectedAddons: lineItems,
+    photoKeys: input.photoKeys && input.photoKeys.length > 0 ? input.photoKeys : null,
     shippingAddress: input.shippingAddress,
     amountKurus,
     paymentMethod: input.paymentMethod,

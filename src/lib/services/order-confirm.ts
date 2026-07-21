@@ -166,6 +166,21 @@ export async function kickOffMarketplaceOrder(
         err
       );
     }
+  } else {
+    // Admin-fulfilled order (WhatsApp / platform product with no seller): move it
+    // to awaiting_model so the admin can upload the 3D model, then approve and
+    // assign a manufacturer. Without this the order sits at "paid" with no
+    // forward action available in the admin UI.
+    await db
+      .update(orders)
+      .set({ status: "awaiting_model", updatedAt: new Date() })
+      .where(eq(orders.id, order.id));
+    await emitOrderChanged({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      userId: order.userId,
+      status: "awaiting_model",
+    });
   }
 
   await sendOrderConfirmationEmails(order, locale);

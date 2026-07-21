@@ -218,6 +218,49 @@ export function OrderDetailClient({ data, locale }: Props) {
     }
   };
 
+  // ─── Reference photo management (admin-fulfilled / WhatsApp orders) ───
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const addOrderPhotos = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setPhotoBusy(true);
+    try {
+      const keys: string[] = [];
+      for (const file of Array.from(files)) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`/api/admin/orders/upload-photo`, {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.key) keys.push(data.key);
+      }
+      if (keys.length > 0) {
+        await fetch(`/api/admin/orders/${order.id}/photos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ photoKeys: keys }),
+        });
+        router.refresh();
+      }
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+  const removeOrderPhoto = async (photoId: string) => {
+    setPhotoBusy(true);
+    try {
+      await fetch(`/api/admin/orders/${order.id}/photos`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoId }),
+      });
+      router.refresh();
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   const saveEdit = async () => {
     const telefonE164 = phoneInputToE164(editTelefonCountry, editTelefonNational);
     if (editTelefonNational.trim() !== "" && telefonE164 === null) {
@@ -303,6 +346,12 @@ export function OrderDetailClient({ data, locale }: Props) {
   const canShip = order.status === "printing" && !hasManufacturer;
   const canDeliver = order.status === "shipped";
   const canAssignManufacturer = order.status === "approved" && (!manufacturerStatus || manufacturerStatus === "unassigned");
+  // Model upload shows for awaiting_model, and also for admin-fulfilled WhatsApp
+  // orders (marketplace, no seller) still sitting at "paid" — so the admin can
+  // attach a model, reach "approved", and assign a manufacturer.
+  const canUploadModel =
+    order.status === "awaiting_model" ||
+    (order.status === "paid" && order.orderType === "marketplace" && !hasManufacturer);
   const addr = order.shippingAddress;
 
   const assignManufacturer = async (manufacturerId?: string) => {
@@ -444,8 +493,8 @@ export function OrderDetailClient({ data, locale }: Props) {
       {/* Blocks below are mutually exclusive by order state, so at most one shows. */}
       <div className="space-y-3 mb-6">
 
-        {/* ─── 3D Model Upload (awaiting_model) ─────── */}
-        {order.status === "awaiting_model" && (
+        {/* ─── 3D Model Upload (awaiting_model + admin-fulfilled paid) ─────── */}
+        {canUploadModel && (
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl border border-indigo-200 p-5">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 rounded-xl bg-indigo-500 text-white flex items-center justify-center flex-shrink-0">
@@ -818,6 +867,57 @@ export function OrderDetailClient({ data, locale }: Props) {
         <div className="grid lg:grid-cols-3 gap-5">
           {/* Left column (2/3) */}
           <div className="lg:col-span-2 space-y-5">
+
+            {/* ─── Referans Fotoğraflar (ekle / kaldır) ───────────────────── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  Referans Fotoğraflar
+                </h3>
+                <label
+                  className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold text-white ${
+                    photoBusy ? "bg-gray-400" : "bg-gray-900 hover:bg-gray-800"
+                  }`}
+                >
+                  {photoBusy ? "Yükleniyor…" : "+ Fotoğraf ekle"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    multiple
+                    className="hidden"
+                    disabled={photoBusy}
+                    onChange={(e) => {
+                      void addOrderPhotos(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              {photos.length === 0 ? (
+                <p className="text-sm text-gray-400">Henüz fotoğraf yok.</p>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  {photos.map((p) => (
+                    <div
+                      key={p.id}
+                      className="relative h-28 w-28 overflow-hidden rounded-xl border border-gray-200"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.originalUrl} alt="" className="h-full w-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeOrderPhoto(p.id)}
+                        disabled={photoBusy}
+                        className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs leading-none text-white hover:bg-black/80 disabled:opacity-50"
+                        aria-label="Fotoğrafı kaldır"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* ─── Photo + Model Card ───────────────────── */}
             {(photos[0] || displayGlbUrl) && (

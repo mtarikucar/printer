@@ -46,7 +46,10 @@ export async function POST(
   if (!order) {
     return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
   }
-  const uploadable = ["awaiting_model", "approved", "review"];
+  // "paid" covers admin-fulfilled WhatsApp orders (marketplace, no seller) that
+  // were created before they auto-advanced to awaiting_model — the admin can
+  // still attach a model, which moves them to approved for assignment.
+  const uploadable = ["awaiting_model", "approved", "review", "paid"];
   if (!uploadable.includes(order.status)) {
     return NextResponse.json(
       { error: "Order is not awaiting a model" },

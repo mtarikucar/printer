@@ -33,6 +33,8 @@ interface OrderData {
   qcRound: number;
   quantity: number;
   productTitleSnapshot: string | null;
+  // Manual/WhatsApp orders have no product row — this is what was ordered.
+  selectedAddons: { name: string; priceKurus: number }[];
   customerNote: string | null;
   shippingAddress: {
     adres: string;
@@ -84,6 +86,7 @@ interface Props {
       }[];
       steps: { instruction: string; imageUrl: string | null }[];
     }[];
+    approvedImageUrl: string | null;
     glbUrl: string | null;
     stlUrl: string | null;
     objUrl: string | null;
@@ -151,8 +154,16 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, glbUrl, stlUrl, objUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, actions } = data;
   const isMarketplace = order.orderType === "marketplace";
+  // A manual/WhatsApp order is a "marketplace" order with no product behind it:
+  // no product card, no production spec. Its contents are the line items.
+  const hasProductContext = !!marketplaceProduct || productSpecs.length > 0;
+  const lineItems = !hasProductContext ? order.selectedAddons : [];
+  // Size/material/style are only ever chosen on custom orders; marketplace and
+  // upload orders fall back to schema defaults ("resin"/"realistic"), which
+  // would read as a real spec the customer never picked.
+  const hasCustomSpec = order.orderType === "custom";
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -160,7 +171,11 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"photo" | "model">("photo");
+  // Open on whichever reference actually exists — defaulting to "photo" left the
+  // card empty for orders that only have a model.
+  const [activeTab, setActiveTab] = useState<"approved" | "photo" | "model">(
+    approvedImageUrl ? "approved" : photos.length > 0 ? "photo" : "model"
+  );
   const [addressCopied, setAddressCopied] = useState(false);
   const [qcPhotoCount, setQcPhotoCount] = useState(qcPhotos.length);
   const [shipCarrier, setShipCarrier] = useState("yurtici");
@@ -297,6 +312,15 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 "-"}
             </span>
           </div>
+          {/* What was ordered — the snapshot was serialized but never shown. */}
+          {order.productTitleSnapshot && (
+            <p className="text-sm font-medium text-gray-700">
+              {order.productTitleSnapshot}
+              {order.quantity > 1 && (
+                <span className="ml-2 text-gray-500">× {order.quantity}</span>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {glbUrl && (
@@ -442,6 +466,34 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left column (2/3) */}
         <div className="lg:col-span-2 space-y-5">
+          {/* ─── Line items (manual / WhatsApp orders) ─── */}
+          {lineItems.length > 0 && (
+            <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                  {(d["manufacturer.orderDetail.lineItems" as keyof typeof d] as string) ||
+                    "Sipariş kalemleri"}
+                </span>
+              </div>
+              <ul className="space-y-2">
+                {lineItems.map((li, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-sm text-gray-900"
+                  >
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400" />
+                    <span>{li.name}</span>
+                  </li>
+                ))}
+              </ul>
+              {order.customerNote && (
+                <p className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900 whitespace-pre-line">
+                  {order.customerNote}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* ─── Marketplace product card ──────────────── */}
           {isMarketplace && marketplaceProduct && (
             <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
@@ -532,11 +584,32 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
               </div>
             ))}
 
-          {/* ─── Photo + Model Hero Card (Tabbed) ──────── */}
-          {!isMarketplace && (photos.length > 0 || glbUrl) && (
+          {/* ─── Reference + Model Hero Card (Tabbed) ──── */}
+          {/* NOT gated on order type: manual/WhatsApp orders are "marketplace"
+              and carry the customer's reference photos + the admin-uploaded
+              model — exactly what the manufacturer needs to print. */}
+          {(approvedImageUrl || photos.length > 0 || glbUrl) && (
             <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
               {/* Tab pills */}
               <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
+                {approvedImageUrl && (
+                  <button
+                    onClick={() => setActiveTab("approved")}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                      activeTab === "approved"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {(d["manufacturer.orderDetail.approvedImage" as keyof typeof d] as string) ||
+                        "Onaylı görsel"}
+                    </span>
+                  </button>
+                )}
                 {photos.length > 0 && (
                   <button
                     onClick={() => setActiveTab("photo")}
@@ -572,6 +645,15 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   </button>
                 )}
               </div>
+
+              {/* Approved styled image — what the customer signed off on */}
+              {activeTab === "approved" && approvedImageUrl && (
+                <img
+                  src={approvedImageUrl}
+                  alt="Onaylı görsel"
+                  className="w-full max-h-96 object-contain rounded-xl border border-gray-100 bg-gray-50"
+                />
+              )}
 
               {/* Photo tab content */}
               {activeTab === "photo" && photos.length > 0 && (
@@ -1023,43 +1105,53 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   {order.orderNumber}
                 </dd>
               </div>
-              <div>
-                <dt className="text-xs font-medium text-gray-400">
-                  {(d["manufacturer.orderDetail.figurineSize" as keyof typeof d] as string) ||
-                    "Figurine Size"}
-                </dt>
-                <dd className="text-sm text-gray-900 mt-0.5 flex items-center gap-1.5">
-                  <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                  </svg>
-                  {(d[
-                    `sizes.${order.figurineSize}` as keyof typeof d
-                  ] as string) || order.figurineSize}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-gray-400">
-                  {(d["manufacturer.orderDetail.material" as keyof typeof d] as string) ||
-                    "Malzeme"}
-                </dt>
-                <dd className="text-sm font-semibold text-gray-900 mt-0.5 flex items-center gap-1.5">
-                  <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
-                  {(d[`material.${order.material}` as keyof typeof d] as string) || order.material}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-gray-400">
-                  {(d["manufacturer.orderDetail.style" as keyof typeof d] as string) ||
-                    "Style"}
-                </dt>
-                <dd className="text-sm text-gray-900 mt-0.5">
-                  {(d[
-                    `create.style.${order.style}` as keyof typeof d
-                  ] as string) || order.style}
-                </dd>
-              </div>
+              {/* Size/material/style exist only on custom orders; on marketplace
+                  and upload orders these columns hold schema defaults nobody
+                  chose ("resin"/"realistic") and reading them as a spec would
+                  send the manufacturer to the wrong material. */}
+              {hasCustomSpec && order.figurineSize && (
+                <div>
+                  <dt className="text-xs font-medium text-gray-400">
+                    {(d["manufacturer.orderDetail.figurineSize" as keyof typeof d] as string) ||
+                      "Figurine Size"}
+                  </dt>
+                  <dd className="text-sm text-gray-900 mt-0.5 flex items-center gap-1.5">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    </svg>
+                    {(d[
+                      `sizes.${order.figurineSize}` as keyof typeof d
+                    ] as string) || order.figurineSize}
+                  </dd>
+                </div>
+              )}
+              {hasCustomSpec && (
+                <div>
+                  <dt className="text-xs font-medium text-gray-400">
+                    {(d["manufacturer.orderDetail.material" as keyof typeof d] as string) ||
+                      "Malzeme"}
+                  </dt>
+                  <dd className="text-sm font-semibold text-gray-900 mt-0.5 flex items-center gap-1.5">
+                    <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                    </svg>
+                    {(d[`material.${order.material}` as keyof typeof d] as string) || order.material}
+                  </dd>
+                </div>
+              )}
+              {hasCustomSpec && (
+                <div>
+                  <dt className="text-xs font-medium text-gray-400">
+                    {(d["manufacturer.orderDetail.style" as keyof typeof d] as string) ||
+                      "Style"}
+                  </dt>
+                  <dd className="text-sm text-gray-900 mt-0.5">
+                    {(d[
+                      `create.style.${order.style}` as keyof typeof d
+                    ] as string) || order.style}
+                  </dd>
+                </div>
+              )}
               {order.modifiers && order.modifiers.length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-gray-400 mb-1.5">

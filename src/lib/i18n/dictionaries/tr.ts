@@ -1708,6 +1708,8 @@ const tr: Dictionary = {
   // Üretici - Sipariş Detayı
   "manufacturer.orderDetail.title": "Sipariş Detayı",
   "manufacturer.orderDetail.customerPhoto": "Müşteri Fotoğrafı",
+  "manufacturer.orderDetail.approvedImage": "Onaylı Görsel",
+  "manufacturer.orderDetail.lineItems": "Sipariş Kalemleri",
   "manufacturer.orderDetail.model3d": "3D Model",
   "manufacturer.orderDetail.downloadGlb": "GLB İndir",
   "manufacturer.orderDetail.downloadStl": "STL İndir",

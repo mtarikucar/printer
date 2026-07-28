@@ -31,7 +31,7 @@ export async function GET(
       eq(orders.id, id),
       eq(orders.manufacturerId, session.manufacturerId)
     ),
-    columns: { id: true, orderNumber: true },
+    columns: { id: true, orderNumber: true, modelStlUrl: true },
     with: {
       generationAttempts: {
         where: eq(generationAttempts.status, "succeeded"),
@@ -46,7 +46,11 @@ export async function GET(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const stlUrl = normalizeFileUrl(order.generationAttempts[0]?.outputStlUrl ?? null);
+  // Admin-uploaded model first (orders.model_stl_url); generationAttempts is the
+  // legacy auto-3D source, kept for historical orders.
+  const stlUrl = normalizeFileUrl(
+    order.modelStlUrl ?? order.generationAttempts[0]?.outputStlUrl ?? null
+  );
   if (!stlUrl) {
     return NextResponse.json({ error: "No STL file available" }, { status: 404 });
   }

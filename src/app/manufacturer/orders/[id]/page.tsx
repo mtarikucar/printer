@@ -78,6 +78,12 @@ export default async function ManufacturerOrderDetailPage({
         columns: { id: true, title: true, description: true, leadTimeDays: true },
         with: { images: { columns: { storageKey: true, sortOrder: true } } },
       },
+      // Image-first flow: the styled image the customer approved IS the brief
+      // for what gets printed. The admin panel already surfaces it; the
+      // manufacturer needs it just as much.
+      preview: {
+        columns: { selectedStyledImageUrl: true },
+      },
     },
   });
 
@@ -208,6 +214,10 @@ export default async function ManufacturerOrderDetailPage({
       qcRound: order.qcRound,
       quantity: order.quantity,
       productTitleSnapshot: order.productTitleSnapshot,
+      // Manual/WhatsApp orders carry no product row — their contents live here
+      // as {name, priceKurus} line items. Without this the manufacturer has no
+      // idea what was ordered.
+      selectedAddons: order.selectedAddons ?? [],
       customerNote: order.customerNote,
       shippingAddress: order.shippingAddress as TurkishAddress | null,
       assignedToManufacturerAt:
@@ -228,8 +238,13 @@ export default async function ManufacturerOrderDetailPage({
     qcRejectReason,
     marketplaceProduct,
     productSpecs,
-    glbUrl: normalizeFileUrl(latestGeneration?.outputGlbUrl ?? null),
-    stlUrl: normalizeFileUrl(latestGeneration?.outputStlUrl ?? null),
+    approvedImageUrl: normalizeFileUrl(order.preview?.selectedStyledImageUrl ?? null),
+    // The printable model comes from the ADMIN upload (orders.model_*) since the
+    // auto-3D pipeline was removed; generationAttempts is the legacy fallback for
+    // historical orders. Reading only the latter left every recent order with no
+    // downloadable file at all.
+    glbUrl: normalizeFileUrl(order.modelGlbUrl ?? latestGeneration?.outputGlbUrl ?? null),
+    stlUrl: normalizeFileUrl(order.modelStlUrl ?? latestGeneration?.outputStlUrl ?? null),
     objUrl: normalizeFileUrl(latestGeneration?.outputObjUrl ?? null),
     actions: order.manufacturerActions.map((a) => ({
       id: a.id,

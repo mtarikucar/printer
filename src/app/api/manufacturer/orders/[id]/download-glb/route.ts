@@ -31,7 +31,7 @@ export async function GET(
       eq(orders.id, id),
       eq(orders.manufacturerId, session.manufacturerId)
     ),
-    columns: { id: true, orderNumber: true },
+    columns: { id: true, orderNumber: true, modelGlbUrl: true },
     with: {
       generationAttempts: {
         where: eq(generationAttempts.status, "succeeded"),
@@ -46,7 +46,11 @@ export async function GET(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const glbUrl = normalizeFileUrl(order.generationAttempts[0]?.outputGlbUrl ?? null);
+  // Admin-uploaded model first (orders.model_glb_url); generationAttempts is the
+  // legacy auto-3D source, kept for historical orders.
+  const glbUrl = normalizeFileUrl(
+    order.modelGlbUrl ?? order.generationAttempts[0]?.outputGlbUrl ?? null
+  );
   if (!glbUrl) {
     return NextResponse.json({ error: "No GLB file available" }, { status: 404 });
   }

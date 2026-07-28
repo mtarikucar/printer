@@ -1702,6 +1702,8 @@ const en = {
   // Manufacturer - Order Detail
   "manufacturer.orderDetail.title": "Order Details",
   "manufacturer.orderDetail.customerPhoto": "Customer Photo",
+  "manufacturer.orderDetail.approvedImage": "Approved Image",
+  "manufacturer.orderDetail.lineItems": "Order Items",
   "manufacturer.orderDetail.model3d": "3D Model",
   "manufacturer.orderDetail.downloadGlb": "Download GLB",
   "manufacturer.orderDetail.downloadStl": "Download STL",

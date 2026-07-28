@@ -4,33 +4,51 @@ import {
   Component,
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, useGLTF, Center, Stage } from "@react-three/drei";
+import { OrbitControls, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { isWebGLAvailable } from "./webgl-support";
 
+// Camera framing is fixed because every model is normalized to a unit bounding
+// sphere below — so these numbers hold for a 15 mm keychain and a 300 mm
+// figurine alike. Previously the camera sat at a hard-coded distance with hard
+// -coded min/max clamps while <Stage> tried to fit the camera to the raw model:
+// for anything not authored at ~1 unit, drei wanted a distance far outside the
+// clamps and OrbitControls yanked it back every frame — the "zooms in then
+// moves around weirdly" symptom.
+const CAM_POS: [number, number, number] = [0, 0.55, 3.1];
+const MIN_DISTANCE = 1.35;
+const MAX_DISTANCE = 8;
+
+/**
+ * Loads the GLB and normalizes it: re-centered on its bounding-sphere centre
+ * and scaled to radius 1. The scene is cloned because useGLTF caches one
+ * object3d per URL — mutating it directly would corrupt every other viewer
+ * showing the same model (and re-apply the scaling on each mount).
+ */
 function Model({ url }: { url: string }) {
   const { scene } = useGLTF(url);
-  const ref = useRef<THREE.Group>(null);
 
-  useFrame((_, delta) => {
-    if (ref.current) {
-      ref.current.rotation.y += delta * 0.3;
-    }
-  });
+  const object = useMemo(() => {
+    const clone = scene.clone(true);
+    const sphere = new THREE.Box3()
+      .setFromObject(clone)
+      .getBoundingSphere(new THREE.Sphere());
+    const radius = sphere.radius > 0 ? sphere.radius : 1;
+    clone.position.sub(sphere.center);
+    const holder = new THREE.Group();
+    holder.add(clone);
+    holder.scale.setScalar(1 / radius);
+    return holder;
+  }, [scene]);
 
-  return (
-    <Center>
-      <group ref={ref}>
-        <primitive object={scene} />
-      </group>
-    </Center>
-  );
+  return <primitive object={object} />;
 }
 
 function LoadingSpinner() {
@@ -83,7 +101,7 @@ class WebGLBoundary extends Component<
 export function ModelViewer({
   url,
   className,
-  autoRotate = true,
+  autoRotate,
   previewMode = false,
 }: {
   url: string;
@@ -94,6 +112,10 @@ export function ModelViewer({
   const d = useDictionary();
   const controlsRef = useRef<any>(null);
   const [, setKey] = useState(0);
+  // Auto-rotation is a marketing flourish. On the inspection surfaces
+  // (manufacturer, admin, /track) it fights whoever is trying to look at a
+  // detail, so it is opt-in there and on by default only for previews.
+  const rotate = autoRotate ?? previewMode;
 
   // Probe WebGL after mount only — running it during render would return
   // false on the server and mismatch hydration. `null` = not yet probed.
@@ -132,7 +154,9 @@ export function ModelViewer({
           <div className="h-full w-full bg-[#F3F2EC]" />
         ) : webgl ? (
           <WebGLBoundary fallback={fallback}>
-            <Canvas camera={{ position: [0, 2, 5], fov: 45 }}>
+            <Canvas
+              camera={{ position: CAM_POS, fov: 45, near: 0.05, far: 100 }}
+            >
               {/* Warm dark background */}
               <color attach="background" args={["#F3F2EC"]} />
               <ambientLight intensity={previewMode ? 0.4 : 0.3} />
@@ -143,18 +167,21 @@ export function ModelViewer({
               {previewMode && (
                 <directionalLight position={[0, -3, 5]} intensity={0.3} color="#0A0A0B" />
               )}
+              {/* No <Stage>: it fitted the camera on its own (fighting
+                  OrbitControls' distance clamps) and its environment map is a
+                  cross-origin HDR that this app's CSP blocks, so it only ever
+                  contributed the camera fight. The lights above are the ones
+                  that were actually lighting the scene. */}
               <Suspense fallback={<LoadingSpinner />}>
-                <Stage environment="city" intensity={0.5}>
-                  <Model url={url} />
-                </Stage>
+                <Model url={url} />
               </Suspense>
               <OrbitControls
                 ref={controlsRef}
-                autoRotate={autoRotate}
-                autoRotateSpeed={2}
+                autoRotate={rotate}
+                autoRotateSpeed={1.2}
                 enablePan={false}
-                minDistance={2}
-                maxDistance={10}
+                minDistance={MIN_DISTANCE}
+                maxDistance={MAX_DISTANCE}
               />
             </Canvas>
           </WebGLBoundary>
@@ -162,6 +189,17 @@ export function ModelViewer({
           fallback
         )}
       </div>
+      {!previewMode && webgl && (
+        // Inspection surfaces get a reset affordance too — after zooming into a
+        // detail there was previously no way back to the framed view.
+        <button
+          type="button"
+          onClick={resetView}
+          className="absolute bottom-3 right-3 rounded-lg bg-black/50 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/70"
+        >
+          {d["model.viewer.resetView"]}
+        </button>
+      )}
       {previewMode && webgl && (
         <>
           {/* Hint overlay */}

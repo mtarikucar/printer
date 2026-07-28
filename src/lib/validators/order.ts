@@ -3,6 +3,7 @@ import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { phoneField } from "@/lib/phone";
+import { SIZE_PRESET_KEYS } from "@/lib/config/sizes";
 import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, priceKindForStyle } from "@/lib/create/design-templates";
 
 // Finish packages are split per price-kind: character figures vs geometry
@@ -48,7 +49,9 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
   return z.object({
     photoKey: z.string().min(1, d["validator.photo.required"]),
-    figurineSize: z.enum(["kucuk", "orta", "buyuk"], {
+    // The public flow still sells the three catalogue tiers — their prices come
+    // from the tier table. Bespoke sizes are taken over WhatsApp instead.
+    figurineSize: z.enum(SIZE_PRESET_KEYS, {
       error: d["validator.size.invalid"],
     }),
     style: z

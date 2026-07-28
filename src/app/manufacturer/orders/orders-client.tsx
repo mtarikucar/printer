@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 const MFR_STATUS_COLORS: Record<string, string> = {
   assigned: "bg-blue-100 text-blue-700",
@@ -168,9 +169,7 @@ export function ManufacturerOrdersClient({
                       </span>
                     </span>
                   ) : (
-                    (d[
-                      `sizes.${order.figurineSize}` as keyof typeof d
-                    ] as string) || order.figurineSize
+                    sizeDisplay(order.figurineSize, d, { short: true }) || "—"
                   )}
                 </td>
                 <td className="px-4 py-3 text-sm">

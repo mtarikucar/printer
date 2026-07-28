@@ -17,6 +17,7 @@ import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-context";
 import { priceKindForStyle, getTemplate } from "@/lib/create/design-templates";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 interface User {
   id: string;
@@ -50,8 +51,7 @@ function orderItemLabel(order: CustomerOrder, d: Dictionary): string {
     return (tpl && (d[tpl.labelKey as keyof typeof d] as string)) || order.style;
   }
   return (
-    (d[`sizes.${order.figurineSize}` as keyof typeof d] as string) ||
-    order.figurineSize
+    sizeDisplay(order.figurineSize, d, { short: true }) || order.figurineSize || ""
   );
 }
 

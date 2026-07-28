@@ -253,6 +253,13 @@
       "when": 1784614751182,
       "tag": "0035_draft_photo_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785269328065,
+      "tag": "0036_figurine_size_text",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { sizeDisplayTr } from "@/lib/config/sizes";
 
 export interface AdminGalleryItem {
   id: string;
@@ -157,7 +158,7 @@ export function AdminGalleryClient({
                     <p className="font-mono text-[11px] text-gray-400 mt-0.5">{it.orderNumber}</p>
                     <div className="flex flex-wrap gap-1 mt-2">
                       <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                        {it.figurineSize}
+                        {sizeDisplayTr(it.figurineSize, { short: true })}
                       </span>
                       {it.category && (
                         <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
@@ -206,7 +207,7 @@ export function AdminGalleryClient({
                   <p className="text-sm text-gray-900 mb-2">{it.name}</p>
                   <div className="flex flex-wrap gap-1.5">
                     <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                      {it.figurineSize}
+                      {sizeDisplayTr(it.figurineSize, { short: true })}
                     </span>
                     <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
                       {it.style}

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { sizeDisplayTr } from "@/lib/config/sizes";
 
 /**
  * Admin QC queue — orders whose manufacturer has uploaded finished-product
@@ -73,7 +74,7 @@ export default async function AdminQcQueuePage() {
                 )}
                 <div className="flex flex-wrap gap-1.5 items-center">
                   <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                    {it.figurineSize}
+                    {sizeDisplayTr(it.figurineSize, { short: true })}
                   </span>
                   <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
                     {it.style}

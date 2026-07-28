@@ -5,6 +5,7 @@ import { previews } from "@/lib/db/schema";
 import { getPreviewGenerationQueue } from "@/lib/queue/queues";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser, getOrCreateAnonymousId } from "@/lib/services/customer-auth";
+import { SIZE_PRESET_KEYS } from "@/lib/config/sizes";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import {
   FREE_GENERATION_ACCOUNT_CAP,
@@ -25,7 +26,8 @@ const generateSchema = z.object({
   // images). When present, generation fuses several reference angles into a
   // more detailed mesh. Only honored for non-stylized templates (see below).
   photoKeys: z.array(z.string().min(1)).max(4).optional(),
-  figurineSize: z.enum(["kucuk", "orta", "buyuk"]),
+  // Preview generation is part of the public catalogue flow — presets only.
+  figurineSize: z.enum(SIZE_PRESET_KEYS),
   // Design template (formerly "style"): validated against the registry, so a
   // new template is a registry-only change — no enum edit here.
   style: z

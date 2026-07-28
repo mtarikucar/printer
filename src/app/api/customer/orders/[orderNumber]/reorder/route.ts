@@ -3,7 +3,11 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, orderDrafts } from "@/lib/db/schema";
-import { itemPriceKurus, finishSurchargeKurus } from "@/lib/config/prices";
+import {
+  itemPriceKurus,
+  finishSurchargeKurus,
+  isPriceableSize,
+} from "@/lib/config/prices";
 import { priceKindForStyle } from "@/lib/create/design-templates";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { buildDraftReference } from "@/lib/services/order-draft";
@@ -23,6 +27,7 @@ import {
 import { getClientIp } from "@/lib/utils/request";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 const reorderSchema = z.object({
   paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
@@ -81,7 +86,14 @@ export async function POST(
 
   // This route reconstructs a CUSTOM figurine draft. Marketplace orders have no
   // figurineSize/photo — to re-buy, the customer goes back to the product page.
-  if (order.orderType === "marketplace" || !order.figurineSize) {
+  // A bespoke size ("17,5 cm") has no catalogue price — itemPriceKurus would
+  // throw, and before the guard existed it silently priced the reorder at ₺0.
+  // Those orders are re-quoted by hand, so they are not self-service reorderable.
+  if (
+    order.orderType === "marketplace" ||
+    !order.figurineSize ||
+    !isPriceableSize(order.figurineSize)
+  ) {
     return NextResponse.json(
       { error: d["api.order.notReorderable"] },
       { status: 400 }
@@ -226,7 +238,7 @@ export async function POST(
   // Card flow
   const addr = order.shippingAddress;
   const userIp = await getClientIp();
-  const sizeLabel = d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize;
+  const sizeLabel = sizeDisplay(order.figurineSize, d, { short: true });
   const materialLabel = d[`material.${order.material}` as keyof typeof d] || order.material;
 
   try {

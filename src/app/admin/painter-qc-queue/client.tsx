@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { sizeDisplayTr } from "@/lib/config/sizes";
 
 interface QcPhoto {
   id: string;
@@ -70,7 +71,8 @@ export function PainterQcQueueClient({ jobs }: { jobs: QcJob[] }) {
                   <span className="font-mono text-sm text-indigo-600">{j.orderNumber}</span>
                   <span className="text-sm text-gray-700 ml-3">
                     {j.style || "Özel figür"}
-                    {j.figurineSize && ` · ${j.figurineSize}`}
+                    {j.figurineSize &&
+                      ` · ${sizeDisplayTr(j.figurineSize, { short: true })}`}
                     {j.finish && ` · ${j.finish}`}
                   </span>
                 </div>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Locale } from "@/lib/i18n/types";
+import { sizeDisplayTr } from "@/lib/config/sizes";
 
 interface Job {
   id: string;
@@ -194,7 +195,8 @@ export function PainterJobsClient({
               </div>
               <div className="text-sm text-gray-700 mb-1">
                 {j.productTitleSnapshot || j.style || "Özel figür"}
-                {j.figurineSize && ` · ${j.figurineSize}`}
+                {j.figurineSize &&
+                  ` · ${sizeDisplayTr(j.figurineSize, { short: true })}`}
                 {j.finish && ` · ${j.finish}`}
               </div>
               {j.customerName && (

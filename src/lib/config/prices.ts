@@ -1,4 +1,23 @@
+import { isSizePreset, type SizePresetKey } from "./sizes";
+
 export type FigurineMaterial = "resin" | "filament";
+
+/**
+ * Only the catalogue tiers have a price. A bespoke size ("17,5 cm") is quoted
+ * by hand — the admin types the line-item price on the manual order.
+ */
+export function isPriceableSize(
+  size: string | null | undefined
+): size is SizePresetKey {
+  return isSizePreset(size);
+}
+
+export class UnpricedSizeError extends Error {
+  constructor(public readonly size: string | null | undefined) {
+    super(`Fiyatlanamayan boyut: ${size ?? "(boş)"}`);
+    this.name = "UnpricedSizeError";
+  }
+}
 
 // Per-material price table (kuruş). Resin is the premium base (+₺400 per size
 // step); filament (FDM) starts at ₺899 and steps +₺300. The resin premium grows
@@ -293,7 +312,7 @@ export function itemPriceKurus(args: {
   finish?: string | null;
   volumeMm3?: number; // upload (scaled volume)
 }): number {
-  const { kind, size = "orta", material, finish, volumeMm3 } = args;
+  const { kind, size, material, finish, volumeMm3 } = args;
   if (kind === "keychain" || kind === "fridge_magnet" || kind === "lamp") {
     // Flat price — size/material/finish do not apply to these products.
     return creativeLabPriceKurus(kind);
@@ -301,6 +320,11 @@ export function itemPriceKurus(args: {
   if (kind === "upload") {
     return uploadModelPriceKurus(volumeMm3 ?? 0, material) + objectFinishSurchargeKurus(finish);
   }
+  // Sizes are free text since migration 0036, but the price tables only know
+  // the three catalogue tiers. Anything else (a bespoke "17,5 cm") has no
+  // catalogue price and MUST NOT fall through to `?? 0` — that silently
+  // produced a ₺0 (or, with collector_raw, a negative) order.
+  if (!isPriceableSize(size)) throw new UnpricedSizeError(size);
   if (kind === "object" || kind === "design") {
     return objectPriceKurus(size, material) + objectFinishSurchargeKurus(finish);
   }

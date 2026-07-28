@@ -9,6 +9,13 @@ import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/Pho
 import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
 import { useDictionary } from "@/lib/i18n/locale-context";
+import {
+  SIZE_PRESETS_CM,
+  SIZE_TEXT_MAX,
+  normalizeSizeInput,
+  sizeDisplay,
+  sizeDisplayTr,
+} from "@/lib/config/sizes";
 import { formatCurrency, formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
@@ -160,12 +167,20 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [editAddress, setEditAddress] = useState(order.shippingAddress);
   // Technical spec (size / material / finish + free-form rows like colour).
   const [specSize, setSpecSize] = useState(order.figurineSize || "");
+  const [specSizeError, setSpecSizeError] = useState<string | null>(null);
+  const [specSizePreview, setSpecSizePreview] = useState<string | null>(null);
   const [specMaterial, setSpecMaterial] = useState(order.material || "");
   const [specFinish, setSpecFinish] = useState(order.finish || "");
+  // The typed fields above own Boyut/Malzeme/Boyama — seeding them as editable
+  // rows too would write duplicate, contradictory spec lines on every save.
   const [specAttrs, setSpecAttrs] = useState<{ name: string; value: string }[]>(
-    order.selectedOptions.length > 0
-      ? order.selectedOptions.map((o) => ({ name: o.groupName, value: o.choiceName }))
-      : [{ name: "Renk", value: "" }]
+    () => {
+      const owned = ["boyut", "malzeme", "boyama / yüzey"];
+      const rows = order.selectedOptions
+        .filter((o) => !owned.includes(o.groupName.toLocaleLowerCase("tr")))
+        .map((o) => ({ name: o.groupName, value: o.choiceName }));
+      return rows.length > 0 ? rows : [{ name: "Renk", value: "" }];
+    }
   );
   const [editTelefonCountry, setEditTelefonCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [editTelefonNational, setEditTelefonNational] = useState("");
@@ -304,6 +319,24 @@ export function OrderDetailClient({ data, locale }: Props) {
   // Manual/WhatsApp orders are created without a spec, and any order may need a
   // correction after the customer clarifies something. This writes the same
   // fields the manufacturer panel reads.
+  /** Canonicalises the typed size ("17.5cm" → "17,5 cm") and echoes it back. */
+  const applySpecSize = (raw: string) => {
+    if (!raw.trim()) {
+      setSpecSizeError(null);
+      setSpecSizePreview(null);
+      return;
+    }
+    const normalized = normalizeSizeInput(raw);
+    if (!normalized.ok) {
+      setSpecSizeError(normalized.error);
+      setSpecSizePreview(null);
+      return;
+    }
+    setSpecSizeError(null);
+    setSpecSize(normalized.value);
+    setSpecSizePreview(sizeDisplayTr(normalized.value));
+  };
+
   const saveSpec = async () => {
     setLoading("spec");
     try {
@@ -1069,7 +1102,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                   <>
                     <div className="flex justify-between items-center">
                       <dt className="text-gray-400">{d["admin.orderDetail.size"]}</dt>
-                      <dd className="font-medium text-gray-900">{d[`sizes.${order.figurineSize}` as keyof typeof d] || order.figurineSize}</dd>
+                      <dd className="font-medium text-gray-900">{sizeDisplay(order.figurineSize, d) || "—"}</dd>
                     </div>
                     <div className="flex justify-between items-center">
                       <dt className="text-gray-400">{d["admin.orderDetail.style"]}</dt>
@@ -1240,20 +1273,47 @@ export function OrderDetailClient({ data, locale }: Props) {
               bırakılan alanlar gösterilmez; kaydedince atanmış üreticiye bildirim
               gider.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Boyut</label>
-                <select
-                  value={specSize}
-                  onChange={(e) => setSpecSize(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
-                >
-                  <option value="">Belirtilmedi</option>
-                  <option value="kucuk">Küçük</option>
-                  <option value="orta">Orta</option>
-                  <option value="buyuk">Büyük</option>
-                </select>
+            {/* Size is a real measurement, not one of three tiers — a bespoke
+                figure is whatever was agreed with the customer. */}
+            <div className="mb-3">
+              <label className="block text-xs text-gray-400 mb-1">
+                Boyut (yükseklik, cm)
+              </label>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {SIZE_PRESETS_CM.map((cm) => (
+                  <button
+                    key={cm}
+                    type="button"
+                    onClick={() => applySpecSize(String(cm))}
+                    className="rounded-full border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-900 hover:text-gray-900"
+                  >
+                    {cm} cm
+                  </button>
+                ))}
               </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                maxLength={SIZE_TEXT_MAX}
+                value={specSize}
+                onChange={(e) => {
+                  setSpecSize(e.target.value);
+                  setSpecSizeError(null);
+                  setSpecSizePreview(null);
+                }}
+                onBlur={(e) => applySpecSize(e.target.value)}
+                placeholder="örn. 18 · 17,5 · 15×10×22"
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+              />
+              {specSizeError ? (
+                <p className="mt-1 text-xs text-red-600">{specSizeError}</p>
+              ) : specSizePreview ? (
+                <p className="mt-1 text-xs text-green-600">
+                  ✓ Üreticiye şöyle görünecek: {specSizePreview}
+                </p>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Malzeme</label>
                 <select

@@ -7,6 +7,7 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { normalizePhone } from "@/lib/phone";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { normalizeSizeInput, sizeDisplayTr } from "@/lib/config/sizes";
 
 export async function POST(
   request: NextRequest,
@@ -29,7 +30,7 @@ export async function POST(
     shippingAddress?: TurkishAddress;
     // Technical spec the manufacturer prints from. `attributes` replaces the
     // whole spec list (send the full list, not a delta).
-    figurineSize?: "kucuk" | "orta" | "buyuk" | null;
+    figurineSize?: string | null;
     material?: "resin" | "filament" | null;
     finish?: string | null;
     attributes?: { name: string; value: string }[];
@@ -67,7 +68,6 @@ export async function POST(
   // ─── Technical spec ────────────────────────────────────────────────
   // Manual/WhatsApp orders are born without a spec; this is how an admin fills
   // it in (or corrects it) on an order that is already with a manufacturer.
-  const SIZES = ["kucuk", "orta", "buyuk"];
   const MATERIALS = ["resin", "filament"];
   const FINISHES = [
     "paintable_kit",
@@ -79,11 +79,20 @@ export async function POST(
     "painted",
   ];
 
+  // Free-form size in cm, or a catalogue preset key. `undefined` = not being
+  // edited; `null` = cleared.
+  let sizeValue: string | null | undefined = undefined;
   if (body.figurineSize !== undefined) {
-    if (body.figurineSize !== null && !SIZES.includes(body.figurineSize)) {
-      return NextResponse.json({ error: "Geçersiz boyut" }, { status: 400 });
+    if (body.figurineSize === null) {
+      sizeValue = null;
+    } else {
+      const normalized = normalizeSizeInput(String(body.figurineSize));
+      if (!normalized.ok) {
+        return NextResponse.json({ error: normalized.error }, { status: 400 });
+      }
+      sizeValue = normalized.value || null;
     }
-    updates.figurineSize = body.figurineSize;
+    updates.figurineSize = sizeValue;
     changedFields.push("figurineSize");
   }
   if (body.material !== undefined && body.material !== null) {
@@ -110,7 +119,19 @@ export async function POST(
         choiceName: String(a?.value ?? "").trim().slice(0, 200),
         priceDeltaKurus: 0,
       }))
-      .filter((a) => a.groupName && a.choiceName);
+      .filter((a) => a.groupName && a.choiceName)
+      // "Boyut" is owned by the typed column below — a free-form row with that
+      // name would contradict it on the manufacturer's card.
+      .filter((a) => a.groupName.toLocaleLowerCase("tr") !== "boyut");
+    // Keep the spec snapshot in sync with the typed size: without this the
+    // column said "18 cm" while the manufacturer still read the old "Orta".
+    if (sizeValue) {
+      cleaned.unshift({
+        groupName: "Boyut",
+        choiceName: sizeDisplayTr(sizeValue),
+        priceDeltaKurus: 0,
+      });
+    }
     updates.selectedOptions = cleaned.length > 0 ? cleaned : null;
     changedFields.push("selectedOptions");
   }

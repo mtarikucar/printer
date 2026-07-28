@@ -170,11 +170,10 @@ export const galleryReviewStatusEnum = pgEnum("gallery_review_status", [
   "rejected",
 ]);
 
-export const figurineSizeEnum = pgEnum("figurine_size", [
-  "kucuk",
-  "orta",
-  "buyuk",
-]);
+// Figurine size is free text (migration 0036): either a catalogue preset key
+// ("kucuk"/"orta"/"buyuk", which the public /create flow prices) or a real
+// measurement for a bespoke order ("17,5 cm"). Presets, normalization and
+// display all live in src/lib/config/sizes.ts — same pattern as `style` below.
 
 // Design template ("style") is now free text validated against the
 // design-template registry (src/lib/create/design-templates.ts), so adding a
@@ -373,7 +372,7 @@ export const previews = pgTable("previews", {
   // Null for single-photo previews. Persisted so the cleanup worker can delete
   // every uploaded reference photo, not just the primary one.
   photoKeys: jsonb("photo_keys").$type<string[]>(),
-  figurineSize: figurineSizeEnum("figurine_size").notNull(),
+  figurineSize: text("figurine_size").notNull(),
   style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   status: previewStatusEnum("status").notNull().default("generating"),
@@ -416,7 +415,7 @@ export const orderDrafts = pgTable("order_drafts", {
   phone: text("phone"),
   // Custom-order fields. Nullable since marketplace drafts carry no uploaded
   // photo / size choice — the product defines what's printed.
-  figurineSize: figurineSizeEnum("figurine_size"),
+  figurineSize: text("figurine_size"),
   style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),
@@ -545,7 +544,7 @@ export const orders = pgTable("orders", {
   customerName: text("customer_name").notNull(),
   phone: text("phone"),
   // Custom-order field. Nullable since marketplace orders carry no size choice.
-  figurineSize: figurineSizeEnum("figurine_size"),
+  figurineSize: text("figurine_size"),
   style: text("style").notNull().default("realistic"),
   modifiers: jsonb("modifiers").$type<string[]>(),
   material: figurineMaterialEnum("material").notNull().default("resin"),

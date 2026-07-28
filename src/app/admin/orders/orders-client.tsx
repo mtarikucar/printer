@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 const STATUS_COLORS: Record<string, string> = {
   pending_payment: "bg-amber-100 text-amber-700",
@@ -377,9 +378,7 @@ export function OrdersClient({
                   <p className="text-xs text-gray-500">{order.email}</p>
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  {d[
-                    `sizes.${order.figurineSize}` as keyof typeof d
-                  ] || order.figurineSize}
+                  {sizeDisplay(order.figurineSize, d, { short: true }) || "—"}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {d[

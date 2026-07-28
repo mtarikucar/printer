@@ -4,6 +4,11 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
 import { resolveOrCreateGuestUser } from "@/lib/services/guest-user";
+import {
+  SIZE_TEXT_MAX,
+  normalizeSizeInput,
+  sizeDisplayTr,
+} from "@/lib/config/sizes";
 import { buildDraftReference } from "@/lib/services/order-draft";
 
 /**
@@ -35,7 +40,6 @@ const addressSchema = z.object({
 // manufacturer receives an order with no size, no colour and no finish — the
 // typed columns would silently hold their schema defaults ("resin"/
 // "paintable_kit") that nobody actually chose.
-const SIZES = ["kucuk", "orta", "buyuk"] as const;
 const MATERIALS = ["resin", "filament"] as const;
 const FINISHES = [
   "paintable_kit",
@@ -47,11 +51,6 @@ const FINISHES = [
   "painted",
 ] as const;
 
-const SIZE_LABELS: Record<(typeof SIZES)[number], string> = {
-  kucuk: "Küçük",
-  orta: "Orta",
-  buyuk: "Büyük",
-};
 const MATERIAL_LABELS: Record<(typeof MATERIALS)[number], string> = {
   resin: "Reçine",
   filament: "Filament",
@@ -75,8 +74,9 @@ const schema = z.object({
   // Reference photos the customer sent over WhatsApp (storage keys from
   // /api/admin/orders/upload-photo). Max 4; become order_photos at promotion.
   photoKeys: z.array(z.string().trim().min(1).max(300)).max(4).optional(),
-  // Typed spec columns — also drive pricing/assignment filters downstream.
-  figurineSize: z.enum(SIZES).nullable().optional(),
+  // Free-form size in cm ("18 cm", "17,5 cm", "15×10×22 cm") or a catalogue
+  // preset key. Normalized server-side below — never trust the client's.
+  figurineSize: z.string().trim().max(SIZE_TEXT_MAX).nullable().optional(),
   material: z.enum(MATERIALS).nullable().optional(),
   finish: z.enum(FINISHES).nullable().optional(),
   // Free-form spec rows (colour, base, engraving, pose, packaging…). Stored as
@@ -106,6 +106,17 @@ export async function POST(request: NextRequest) {
     );
   }
   const input = parsed.data;
+
+  // Size is free text; normalize it here (the client normalizes too, for
+  // instant feedback, but the server is the trust boundary).
+  let sizeValue: string | null = null;
+  if (input.figurineSize) {
+    const normalized = normalizeSizeInput(input.figurineSize);
+    if (!normalized.ok) {
+      return NextResponse.json({ error: normalized.error }, { status: 400 });
+    }
+    sizeValue = normalized.value || null;
+  }
 
   // Resolve the buyer the same way guest checkout does (returning-guest attach,
   // new-guest create) — but as an ADMIN taking the order on the customer's
@@ -171,10 +182,10 @@ export async function POST(request: NextRequest) {
     choiceName: string;
     priceDeltaKurus: number;
   }[] = [];
-  if (input.figurineSize)
+  if (sizeValue)
     specOptions.push({
       groupName: "Boyut",
-      choiceName: SIZE_LABELS[input.figurineSize],
+      choiceName: sizeDisplayTr(sizeValue),
       priceDeltaKurus: 0,
     });
   if (input.material)
@@ -189,7 +200,12 @@ export async function POST(request: NextRequest) {
       choiceName: FINISH_LABELS[input.finish],
       priceDeltaKurus: 0,
     });
+  // The typed fields above own these group names — a free-form row with the
+  // same name would show up as a second, contradictory "Boyut" on the
+  // manufacturer's spec card.
+  const RESERVED_SPEC_GROUPS = ["boyut", "malzeme", "boyama / yüzey"];
   for (const attr of input.attributes ?? []) {
+    if (RESERVED_SPEC_GROUPS.includes(attr.name.toLocaleLowerCase("tr"))) continue;
     specOptions.push({
       groupName: attr.name,
       choiceName: attr.value,
@@ -214,7 +230,7 @@ export async function POST(request: NextRequest) {
     selectedOptions: specOptions.length > 0 ? specOptions : null,
     // Typed columns stay null/default when the admin left them unset; the
     // material filter in manufacturer assignment reads these.
-    ...(input.figurineSize ? { figurineSize: input.figurineSize } : {}),
+    ...(sizeValue ? { figurineSize: sizeValue } : {}),
     ...(input.material ? { material: input.material } : {}),
     ...(input.finish ? { finish: input.finish } : {}),
     photoKeys: input.photoKeys && input.photoKeys.length > 0 ? input.photoKeys : null,

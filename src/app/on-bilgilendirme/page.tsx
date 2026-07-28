@@ -17,7 +17,7 @@ export default async function OnBilgilendirmePage() {
           {isTr ? "Ön Bilgilendirme Formu" : "Preliminary Information Form"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 28 Temmuz 2026" : "Last updated: July 28, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -47,14 +47,14 @@ export default async function OnBilgilendirmePage() {
                 bir figürindir. Ürünün temel nitelikleri sipariş sırasında seçilen seçeneklere göre belirlenir:
               </p>
               <ul>
-                <li><strong>Boyut ve taban fiyat (reçine, KDV dahil):</strong> Küçük (~60mm) 999 TL, Orta (~80mm) 1.399 TL, Büyük (~120mm) 1.799 TL. Filament seçeneği her boyutta 300 TL daha uygundur.</li>
+                <li><strong>Boyut ve taban fiyat (reçine, KDV dahil):</strong> Küçük (~6 cm) 999 TL, Orta (~8 cm) 1.399 TL, Büyük (~12 cm) 1.799 TL. Filament seçeneği boyuta göre 100–300 TL daha uygundur. Bu ölçüler standart seçeneklerdir; farklı bir ölçü için özel sipariş/teklif verilir.</li>
                 <li><strong>Materyal:</strong> Reçine (premium) veya filament.</li>
                 <li><strong>Bitiş / paket seçenekleri:</strong>
                   <ul>
                     <li><strong>Boyanabilir Kit</strong> (varsayılan, fiyata dahil): reçine baskı, zımparalı, primerli ve mini boya kiti.</li>
                     <li><strong>Collector Raw</strong> (-100 TL): boyasız yüksek detaylı reçine, boya kiti yok.</li>
-                    <li><strong>El Boyaması</strong> (+800 TL): profesyonel el boyaması, QC fotoğrafı ve hediye kutusu.</li>
-                    <li><strong>Lüks Vitrin</strong> (+1.500 TL): premium kaide, isim plakası, sert kutu ve tam el boyaması.</li>
+                    <li><strong>El Boyaması</strong> (+1.000 TL): profesyonel el boyaması, QC fotoğrafı ve hediye kutusu.</li>
+                    <li><strong>Lüks Vitrin</strong> (+2.000 TL): premium kaide, isim plakası, sert kutu ve tam el boyaması.</li>
                   </ul>
                 </li>
                 <li><strong>İsteğe bağlı eklentiler:</strong> Ekstra boya (49 TL), hediye paketi (29 TL), hızlı kargo (79 TL).</li>
@@ -155,14 +155,14 @@ export default async function OnBilgilendirmePage() {
                 Its essential characteristics are determined by the options selected during the order:
               </p>
               <ul>
-                <li><strong>Size and base price (resin, VAT included):</strong> Small (~60mm) 999 TL, Medium (~80mm) 1,399 TL, Large (~120mm) 1,799 TL. The filament option is 300 TL cheaper at every size.</li>
+                <li><strong>Size and base price (resin, VAT included):</strong> Small (~6 cm) 999 TL, Medium (~8 cm) 1,399 TL, Large (~12 cm) 1,799 TL. The filament option is 100–300 TL cheaper depending on size. These are the standard sizes; a different size is quoted as a bespoke order.</li>
                 <li><strong>Material:</strong> Resin (premium) or filament.</li>
                 <li><strong>Finish / package options:</strong>
                   <ul>
                     <li><strong>Paintable Kit</strong> (default, included): resin print, sanded, primed and a mini paint kit.</li>
                     <li><strong>Collector Raw</strong> (-100 TL): unpainted high-detail resin, no paint kit.</li>
-                    <li><strong>Hand-Painted</strong> (+800 TL): professional hand painting, QC photo and gift box.</li>
-                    <li><strong>Luxury Display</strong> (+1,500 TL): premium base, name plate, hard case and full hand painting.</li>
+                    <li><strong>Hand-Painted</strong> (+1,000 TL): professional hand painting, QC photo and gift box.</li>
+                    <li><strong>Luxury Display</strong> (+2,000 TL): premium base, name plate, hard case and full hand painting.</li>
                   </ul>
                 </li>
                 <li><strong>Optional add-ons:</strong> Extra paint (49 TL), gift wrap (29 TL), express shipping (79 TL).</li>

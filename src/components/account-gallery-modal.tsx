@@ -7,6 +7,7 @@ import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import { Button, Input } from "@/components/ui";
 import type { AccountPreview } from "@/components/account-gallery-card";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 export function AccountGalleryModal({
   preview,
@@ -34,7 +35,7 @@ export function AccountGalleryModal({
   }, [onClose]);
 
   const sizeLabel =
-    d[`sizes.${preview.figurineSize}` as keyof typeof d] || preview.figurineSize;
+    sizeDisplay(preview.figurineSize, d, { short: true });
 
   const hasBoth = !!preview.photoUrl && !!preview.glbUrl;
   const hasOrder = !!preview.order;

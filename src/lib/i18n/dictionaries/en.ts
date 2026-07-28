@@ -1210,7 +1210,7 @@ const en = {
   "landing.faq.q2": "What kind of photos work best?",
   "landing.faq.a2": "Clear, well-lit photos with a visible face work best. Front-facing shots with minimal background clutter give the most accurate results.",
   "landing.faq.q3": "How big are the figurines?",
-  "landing.faq.a3": "We offer three sizes: Small (~60mm), Medium (~80mm), and Large (~120mm). Medium is our most popular choice.",
+  "landing.faq.a3": "We offer three standard sizes: Small (~6 cm), Medium (~8 cm) and Large (~12 cm) — Medium is the most popular. For a different size, order via WhatsApp.",
   "landing.faq.q4": "Is painting difficult?",
   "landing.faq.a4": "Not at all! Each kit includes a step-by-step guide designed for beginners. The figurine comes pre-primed, so paint goes on smoothly.",
   "landing.faq.q5": "Is shipping really free?",

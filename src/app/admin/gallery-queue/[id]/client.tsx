@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { sizeDisplayTr } from "@/lib/config/sizes";
 
 const ModelViewer = dynamic(
   () => import("@/components/model-viewer").then((m) => m.ModelViewer),
@@ -151,7 +152,7 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
             {review.customerName} · {review.email}
           </p>
           <p className="text-xs text-gray-400 mt-1">
-            Başvuru: {new Date(review.createdAt).toLocaleString("tr-TR")} · {review.figurineSize} · {review.style}
+            Başvuru: {new Date(review.createdAt).toLocaleString("tr-TR")} · {sizeDisplayTr(review.figurineSize, { short: true })} · {review.style}
             {review.modifiers.length > 0 && ` · ${review.modifiers.join(", ")}`}
           </p>
         </div>

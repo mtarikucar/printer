@@ -29,6 +29,7 @@ import { ContentConsent } from "@/components/content-consent";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
 import { DESIGN_TEMPLATES, priceKindForStyle, getTemplate } from "@/lib/create/design-templates";
 import { ExtraPhotos, type ExtraPhoto } from "@/components/create/extra-photos";
+import { SIZE_PRESETS, formatCm, sizeDisplay } from "@/lib/config/sizes";
 
 const PhotoEditor = dynamic(
   () => import("@/components/photo-editor/photo-editor").then((m) => ({ default: m.PhotoEditor })),
@@ -184,11 +185,13 @@ function CustomCreateFlow() {
   const editorExportRef = useRef<(() => Promise<Blob | null>) | null>(null);
   const turnstileRef = useRef<TurnstileRef>(null);
 
-  const SIZES = [
-    { key: "kucuk", label: d["sizes.kucuk"], height: "~60mm" },
-    { key: "orta", label: d["sizes.orta"], height: "~80mm" },
-    { key: "buyuk", label: d["sizes.buyuk"], height: "~120mm" },
-  ] as const;
+  // Heights come from SIZE_PRESETS (src/lib/config/sizes.ts) — the single
+  // source. cm is the primary information; the tier name is secondary.
+  const SIZES = SIZE_PRESETS.map((p) => ({
+    key: p.key,
+    label: (d[p.labelKey as keyof typeof d] as string) || p.labelTr,
+    height: `~${formatCm(p.heightMm)}`,
+  }));
 
   // Production materials. Resin = premium; filament (FDM) is cheaper. The price
   // varies by (size, material) — see figurinePriceKurus (single source).
@@ -1143,7 +1146,8 @@ function CustomCreateFlow() {
                           : "bg-bg-surface border border-bg-subtle hover:border-green-500/30"
                       }`}
                     >
-                      <p className={`text-sm font-semibold ${selectedSize === size.key ? "text-white" : "text-text-primary"}`}>{size.label} {size.height}</p>
+                      <p className={`text-base font-bold ${selectedSize === size.key ? "text-white" : "text-text-primary"}`}>{size.height}</p>
+                      <p className={`text-[11px] ${selectedSize === size.key ? "text-white/70" : "text-text-secondary"}`}>{size.label}</p>
                       <p className={`text-base font-mono font-bold mt-0.5 ${selectedSize === size.key ? "text-white" : "text-green-500"}`}>₺{priceLabel(size.key, selectedMaterial)}</p>
                     </button>
                   ))}
@@ -1512,7 +1516,7 @@ function CustomCreateFlow() {
             {/* Context pills */}
             <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-4 sm:mb-6 animate-fade-in-up delay-200">
               <span className="trust-pill">
-                {d["create.preview.sizeLabel"]}: {selectedSizeObj?.label} ({selectedSizeObj?.height})
+                {d["create.preview.sizeLabel"]}: {sizeDisplay(selectedSize, d)}
               </span>
               <span className="trust-pill">{selectedMaterialObj?.label}</span>
               <span className="trust-pill">
@@ -1960,7 +1964,7 @@ function CustomCreateFlow() {
               {/* Order Summary Card */}
               <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-text-secondary">{selectedSizeObj?.label} ({selectedSizeObj?.height}) · {selectedMaterialObj?.label}</span>
+                    <span className="text-sm font-medium text-text-secondary">{sizeDisplay(selectedSize, d)} · {selectedMaterialObj?.label}</span>
                     <span className="font-mono font-bold text-text-primary">₺{priceLabel(selectedSize, selectedMaterial)}</span>
                   </div>
                   {selectedFinishObj && selectedFinishObj.surchargeKurus !== 0 && (

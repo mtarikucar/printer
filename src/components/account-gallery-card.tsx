@@ -1,6 +1,7 @@
 "use client";
 
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 export interface AccountPreview {
   id: string;
@@ -29,7 +30,7 @@ export function AccountGalleryCard({
   const d = useDictionary();
 
   const sizeLabel =
-    d[`sizes.${preview.figurineSize}` as keyof typeof d] || preview.figurineSize;
+    sizeDisplay(preview.figurineSize, d, { short: true });
 
   const isGenerating = preview.status === "generating";
   const isFailed = preview.status === "failed";

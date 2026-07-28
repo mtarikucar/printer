@@ -56,6 +56,7 @@ import { recordEvent } from "@/lib/analytics/server";
 import { eq, and, or, isNull, isNotNull, count, inArray } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -727,9 +728,9 @@ export async function POST(request: NextRequest) {
         (tpl && (d[tpl.labelKey as keyof typeof d] as string)) ||
         customInput!.style;
     } else {
-      const sizeLabel =
-        d[`sizes.${customInput!.figurineSize}` as keyof typeof d] ||
-        customInput!.figurineSize;
+      const sizeLabel = sizeDisplay(customInput!.figurineSize, d, {
+        short: true,
+      });
       const materialLabel =
         d[`material.${customInput!.material}` as keyof typeof d] ||
         customInput!.material;

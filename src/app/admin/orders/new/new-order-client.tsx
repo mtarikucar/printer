@@ -4,6 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Button, Input, Select, FormField } from "@/components/ui";
 import { toWhatsAppDigits } from "@/lib/config/contact";
+import {
+  SIZE_PRESETS_CM,
+  SIZE_TEXT_MAX,
+  normalizeSizeInput,
+  sizeDisplayTr,
+} from "@/lib/config/sizes";
 
 interface LineItem {
   description: string;
@@ -17,12 +23,6 @@ interface SpecAttr {
   value: string;
 }
 
-const SIZE_OPTIONS = [
-  { value: "", label: "Belirtilmedi" },
-  { value: "kucuk", label: "Küçük" },
-  { value: "orta", label: "Orta" },
-  { value: "buyuk", label: "Büyük" },
-];
 const MATERIAL_OPTIONS = [
   { value: "", label: "Belirtilmedi" },
   { value: "resin", label: "Reçine" },
@@ -69,7 +69,11 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   const [postaKodu, setPostaKodu] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLine()]);
   // Technical spec — what the manufacturer needs in order to print.
+  // Free-form size in cm — a bespoke figure is whatever the customer agreed to,
+  // not one of three tiers. `sizePreview` echoes what the manufacturer will see.
   const [figurineSize, setFigurineSize] = useState("");
+  const [sizeError, setSizeError] = useState<string | null>(null);
+  const [sizePreview, setSizePreview] = useState<string | null>(null);
   const [material, setMaterial] = useState("");
   const [finish, setFinish] = useState("");
   const [attrs, setAttrs] = useState<SpecAttr[]>([{ name: "Renk", value: "" }]);
@@ -134,6 +138,24 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   const addLine = () => setLineItems((prev) => [...prev, emptyLine()]);
   const removeLine = (idx: number) =>
     setLineItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
+
+  /** Canonicalises what was typed ("17.5cm" → "17,5 cm") and echoes the result. */
+  const applySizeNormalization = (raw: string) => {
+    if (!raw.trim()) {
+      setSizeError(null);
+      setSizePreview(null);
+      return;
+    }
+    const normalized = normalizeSizeInput(raw);
+    if (!normalized.ok) {
+      setSizeError(normalized.error);
+      setSizePreview(null);
+      return;
+    }
+    setSizeError(null);
+    setFigurineSize(normalized.value);
+    setSizePreview(sizeDisplayTr(normalized.value));
+  };
 
   const updateAttr = (idx: number, patch: Partial<SpecAttr>) =>
     setAttrs((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
@@ -242,6 +264,8 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
               setResult(null);
               setLineItems([emptyLine()]);
               setFigurineSize("");
+              setSizeError(null);
+              setSizePreview(null);
               setMaterial("");
               setFinish("");
               setAttrs([{ name: "Renk", value: "" }]);
@@ -350,7 +374,7 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
                 {/* Açıklama tam satır: dar ekranda da yazılanın tamamı görünsün. */}
                 <FormField label="Ürün / açıklama">
                   <Input
-                    placeholder="örn. 15cm özel figür"
+                    placeholder="örn. çift kişilik özel figür"
                     value={li.description}
                     onChange={(e) => updateLine(idx, { description: e.target.value })}
                   />
@@ -397,16 +421,42 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
             Müşteriyle konuştuğunuz boyut, renk ve diğer detaylar. Boş bıraktığınız
             alanlar üretici ekranında görünmez.
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <FormField label="Boyut">
-              <Select value={figurineSize} onChange={(e) => setFigurineSize(e.target.value)}>
-                {SIZE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
+          <FormField
+            label="Boyut (yükseklik, cm)"
+            error={sizeError}
+            hint={
+              sizePreview
+                ? `✓ Üreticiye şöyle görünecek: ${sizePreview}`
+                : "Boş bırakırsanız üretici ekranında boyut satırı görünmez."
+            }
+          >
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {SIZE_PRESETS_CM.map((cm) => (
+                <button
+                  key={cm}
+                  type="button"
+                  onClick={() => applySizeNormalization(String(cm))}
+                  className="rounded-full border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-900 hover:text-gray-900"
+                >
+                  {cm} cm
+                </button>
+              ))}
+            </div>
+            <Input
+              inputMode="decimal"
+              maxLength={SIZE_TEXT_MAX}
+              placeholder="örn. 18 · 17,5 · 15×10×22"
+              value={figurineSize}
+              onChange={(e) => {
+                setFigurineSize(e.target.value);
+                setSizeError(null);
+                setSizePreview(null);
+              }}
+              onBlur={(e) => applySizeNormalization(e.target.value)}
+            />
+          </FormField>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <FormField label="Malzeme">
               <Select value={material} onChange={(e) => setMaterial(e.target.value)}>
                 {MATERIAL_OPTIONS.map((o) => (

@@ -8,6 +8,7 @@ import { promoteDraftToOrder } from "@/lib/services/order-draft";
 import { getClientIp } from "@/lib/utils/request";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { sizeDisplay } from "@/lib/config/sizes";
 
 /**
  * Retry a failed card payment on an existing draft (the customer pressed "try again"
@@ -88,7 +89,7 @@ export async function POST(
   const addr = draft.shippingAddress;
   const userIp = await getClientIp();
   const paymentAmountKurus = draft.amountKurus - draft.giftCardAmountKurus;
-  const sizeLabel = d[`sizes.${draft.figurineSize}` as keyof typeof d] || draft.figurineSize;
+  const sizeLabel = sizeDisplay(draft.figurineSize, d, { short: true });
 
   // PayTR rejects duplicate merchant_oids — once they've issued any token (even
   // for a transaction that didn't complete) the same oid can't be re-used.

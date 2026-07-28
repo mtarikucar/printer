@@ -31,6 +31,41 @@ const addressSchema = z.object({
   telefon: z.string().trim().min(1).max(40),
 });
 
+// Technical spec agreed with the customer over WhatsApp. Without this the
+// manufacturer receives an order with no size, no colour and no finish — the
+// typed columns would silently hold their schema defaults ("resin"/
+// "paintable_kit") that nobody actually chose.
+const SIZES = ["kucuk", "orta", "buyuk"] as const;
+const MATERIALS = ["resin", "filament"] as const;
+const FINISHES = [
+  "paintable_kit",
+  "hand_painted",
+  "luxe_display",
+  "collector_raw",
+  "raw",
+  "smoothed",
+  "painted",
+] as const;
+
+const SIZE_LABELS: Record<(typeof SIZES)[number], string> = {
+  kucuk: "Küçük",
+  orta: "Orta",
+  buyuk: "Büyük",
+};
+const MATERIAL_LABELS: Record<(typeof MATERIALS)[number], string> = {
+  resin: "Reçine",
+  filament: "Filament",
+};
+const FINISH_LABELS: Record<(typeof FINISHES)[number], string> = {
+  paintable_kit: "Boyanabilir Kit",
+  hand_painted: "El Boyaması",
+  luxe_display: "Lüks Vitrin",
+  collector_raw: "Collector Raw",
+  raw: "Ham baskı",
+  smoothed: "Pürüzsüz",
+  painted: "Boyalı",
+};
+
 const schema = z.object({
   customerName: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(200),
@@ -40,6 +75,22 @@ const schema = z.object({
   // Reference photos the customer sent over WhatsApp (storage keys from
   // /api/admin/orders/upload-photo). Max 4; become order_photos at promotion.
   photoKeys: z.array(z.string().trim().min(1).max(300)).max(4).optional(),
+  // Typed spec columns — also drive pricing/assignment filters downstream.
+  figurineSize: z.enum(SIZES).nullable().optional(),
+  material: z.enum(MATERIALS).nullable().optional(),
+  finish: z.enum(FINISHES).nullable().optional(),
+  // Free-form spec rows (colour, base, engraving, pose, packaging…). Stored as
+  // selectedOptions so every panel that already renders customer selections
+  // shows them without special-casing manual orders.
+  attributes: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(60),
+        value: z.string().trim().min(1).max(200),
+      })
+    )
+    .max(12)
+    .optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -111,6 +162,41 @@ export async function POST(request: NextRequest) {
       ? input.lineItems[0].description
       : `Özel sipariş (${input.lineItems.length} kalem)`;
 
+  // The spec the manufacturer prints from. Typed choices are mirrored into
+  // selectedOptions (priceDelta 0 — the price is already in the line items) so
+  // a manual order carries an EXPLICIT spec list; the typed columns alone
+  // cannot be told apart from their defaults once stored.
+  const specOptions: {
+    groupName: string;
+    choiceName: string;
+    priceDeltaKurus: number;
+  }[] = [];
+  if (input.figurineSize)
+    specOptions.push({
+      groupName: "Boyut",
+      choiceName: SIZE_LABELS[input.figurineSize],
+      priceDeltaKurus: 0,
+    });
+  if (input.material)
+    specOptions.push({
+      groupName: "Malzeme",
+      choiceName: MATERIAL_LABELS[input.material],
+      priceDeltaKurus: 0,
+    });
+  if (input.finish)
+    specOptions.push({
+      groupName: "Boyama / Yüzey",
+      choiceName: FINISH_LABELS[input.finish],
+      priceDeltaKurus: 0,
+    });
+  for (const attr of input.attributes ?? []) {
+    specOptions.push({
+      groupName: attr.name,
+      choiceName: attr.value,
+      priceDeltaKurus: 0,
+    });
+  }
+
   // orderType "marketplace" (not "custom"): a manual order is a physical,
   // admin-fulfilled item with NO photo/preview. The "marketplace" promote path
   // skips AI generation entirely and, with no seller assigned, leaves the order
@@ -125,6 +211,12 @@ export async function POST(request: NextRequest) {
     orderType: "marketplace",
     productTitleSnapshot,
     selectedAddons: lineItems,
+    selectedOptions: specOptions.length > 0 ? specOptions : null,
+    // Typed columns stay null/default when the admin left them unset; the
+    // material filter in manufacturer assignment reads these.
+    ...(input.figurineSize ? { figurineSize: input.figurineSize } : {}),
+    ...(input.material ? { material: input.material } : {}),
+    ...(input.finish ? { finish: input.finish } : {}),
     photoKeys: input.photoKeys && input.photoKeys.length > 0 ? input.photoKeys : null,
     shippingAddress: input.shippingAddress,
     amountKurus,

@@ -11,6 +11,43 @@ interface LineItem {
   quantity: string;
 }
 
+/** Free-form spec row (Renk, Kaide, Yazı…) carried to the manufacturer. */
+interface SpecAttr {
+  name: string;
+  value: string;
+}
+
+const SIZE_OPTIONS = [
+  { value: "", label: "Belirtilmedi" },
+  { value: "kucuk", label: "Küçük" },
+  { value: "orta", label: "Orta" },
+  { value: "buyuk", label: "Büyük" },
+];
+const MATERIAL_OPTIONS = [
+  { value: "", label: "Belirtilmedi" },
+  { value: "resin", label: "Reçine" },
+  { value: "filament", label: "Filament" },
+];
+const FINISH_OPTIONS = [
+  { value: "", label: "Belirtilmedi" },
+  { value: "paintable_kit", label: "Boyanabilir Kit" },
+  { value: "hand_painted", label: "El Boyaması" },
+  { value: "painted", label: "Boyalı (tek renk / temel)" },
+  { value: "luxe_display", label: "Lüks Vitrin" },
+  { value: "collector_raw", label: "Collector Raw (boyasız)" },
+  { value: "raw", label: "Ham baskı" },
+  { value: "smoothed", label: "Pürüzsüz" },
+];
+// Suggested spec names — the admin can type anything else.
+const ATTR_SUGGESTIONS = [
+  "Renk",
+  "Kaide / stand",
+  "Yazı / isim",
+  "Poz",
+  "Ambalaj",
+  "Teslim tarihi",
+];
+
 interface CreateResult {
   reference: string;
   payUrl: string;
@@ -31,6 +68,11 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   const [adres, setAdres] = useState("");
   const [postaKodu, setPostaKodu] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLine()]);
+  // Technical spec — what the manufacturer needs in order to print.
+  const [figurineSize, setFigurineSize] = useState("");
+  const [material, setMaterial] = useState("");
+  const [finish, setFinish] = useState("");
+  const [attrs, setAttrs] = useState<SpecAttr[]>([{ name: "Renk", value: "" }]);
   const [paymentMethod, setPaymentMethod] = useState<"card" | "bank_transfer">("card");
   // Reference photos the customer sent over WhatsApp (max 4).
   const [photos, setPhotos] = useState<{ key: string; previewUrl: string }[]>([]);
@@ -93,6 +135,12 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   const removeLine = (idx: number) =>
     setLineItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
+  const updateAttr = (idx: number, patch: Partial<SpecAttr>) =>
+    setAttrs((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
+  const addAttr = () => setAttrs((prev) => [...prev, { name: "", value: "" }]);
+  const removeAttr = (idx: number) =>
+    setAttrs((prev) => prev.filter((_, i) => i !== idx));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -128,6 +176,13 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           lineItems: parsedLines,
           paymentMethod,
           photoKeys: photos.map((p) => p.key),
+          figurineSize: figurineSize || null,
+          material: material || null,
+          finish: finish || null,
+          // Only fully filled rows are sent; half-typed rows are dropped.
+          attributes: attrs
+            .map((a) => ({ name: a.name.trim(), value: a.value.trim() }))
+            .filter((a) => a.name && a.value),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -186,6 +241,10 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
             onClick={() => {
               setResult(null);
               setLineItems([emptyLine()]);
+              setFigurineSize("");
+              setMaterial("");
+              setFinish("");
+              setAttrs([{ name: "Renk", value: "" }]);
               setPhotos([]);
               setCustomerName("");
               setEmail("");
@@ -325,6 +384,91 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           <p className="mt-2 text-right text-sm font-semibold text-gray-900">
             Toplam: ₺{totalTry.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
           </p>
+        </div>
+
+        {/* Teknik özellikler — üreticinin basmak için ihtiyaç duyduğu her şey.
+            Boş bırakılanlar siparişe hiç yazılmaz (varsayılan değer uydurmayız). */}
+        <div className="rounded-xl border border-gray-200 p-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">Teknik özellikler</span>
+            <span className="text-xs text-gray-400">Üreticiye iletilir</span>
+          </div>
+          <p className="mb-3 text-xs text-gray-500">
+            Müşteriyle konuştuğunuz boyut, renk ve diğer detaylar. Boş bıraktığınız
+            alanlar üretici ekranında görünmez.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <FormField label="Boyut">
+              <Select value={figurineSize} onChange={(e) => setFigurineSize(e.target.value)}>
+                {SIZE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Malzeme">
+              <Select value={material} onChange={(e) => setMaterial(e.target.value)}>
+                {MATERIAL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Boyama / Yüzey">
+              <Select value={finish} onChange={(e) => setFinish(e.target.value)}>
+                {FINISH_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+
+          <datalist id="spec-attr-names">
+            {ATTR_SUGGESTIONS.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+          <div className="mt-3 space-y-2">
+            {/* Widths come from the grid tracks, NOT from width utilities on
+                <Input>: `.input-base` sets width:100% and wins over them. */}
+            {attrs.map((a, idx) => (
+              <div
+                key={idx}
+                className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2"
+              >
+                <Input
+                  list="spec-attr-names"
+                  placeholder="Özellik (örn. Renk)"
+                  value={a.name}
+                  onChange={(e) => updateAttr(idx, { name: e.target.value })}
+                />
+                <Input
+                  placeholder="Değer (örn. Mavi ceket)"
+                  value={a.value}
+                  onChange={(e) => updateAttr(idx, { value: e.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeAttr(idx)}
+                  className="px-2 text-gray-400 hover:text-red-600"
+                  aria-label="Özelliği sil"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={addAttr}
+            className="mt-2 text-sm font-medium text-green-600 hover:text-green-700"
+          >
+            + Özellik ekle
+          </button>
         </div>
 
         <div>

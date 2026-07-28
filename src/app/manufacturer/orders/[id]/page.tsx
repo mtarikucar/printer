@@ -202,8 +202,13 @@ export default async function ManufacturerOrderDetailPage({
       phone: order.phone,
       figurineSize: order.figurineSize,
       material: order.material,
+      finish: order.finish,
       style: order.style,
       modifiers: order.modifiers as string[] | null,
+      // The technical spec the customer/admin agreed on (colour, base, engraving,
+      // and — on manual orders — size/material/finish mirrored here so they can
+      // be told apart from the columns' schema defaults).
+      selectedOptions: order.selectedOptions ?? [],
       status: order.status,
       manufacturerStatus: order.manufacturerStatus,
       needsPainting: order.needsPainting,

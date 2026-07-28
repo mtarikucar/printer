@@ -91,8 +91,14 @@ export default async function AdminOrderDetailPage({
       phone: order.phone,
       figurineSize: order.figurineSize,
       material: order.material,
+      finish: order.finish,
       style: order.style,
       modifiers: order.modifiers as string[] | null,
+      // Technical spec shown to the manufacturer; editable from this page.
+      selectedOptions: (order.selectedOptions ?? []).map((o) => ({
+        groupName: o.groupName,
+        choiceName: o.choiceName,
+      })),
       shippingAddress: order.shippingAddress as TurkishAddress | null,
       status: order.status,
       amountKurus: order.amountKurus,

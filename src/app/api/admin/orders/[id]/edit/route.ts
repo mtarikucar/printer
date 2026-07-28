@@ -27,6 +27,12 @@ export async function POST(
   const body = await request.json().catch(() => ({})) as {
     adminNotes?: string;
     shippingAddress?: TurkishAddress;
+    // Technical spec the manufacturer prints from. `attributes` replaces the
+    // whole spec list (send the full list, not a delta).
+    figurineSize?: "kucuk" | "orta" | "buyuk" | null;
+    material?: "resin" | "filament" | null;
+    finish?: string | null;
+    attributes?: { name: string; value: string }[];
   };
 
   const order = await db.query.orders.findFirst({
@@ -58,6 +64,57 @@ export async function POST(
     changedFields.push("shippingAddress");
   }
 
+  // ─── Technical spec ────────────────────────────────────────────────
+  // Manual/WhatsApp orders are born without a spec; this is how an admin fills
+  // it in (or corrects it) on an order that is already with a manufacturer.
+  const SIZES = ["kucuk", "orta", "buyuk"];
+  const MATERIALS = ["resin", "filament"];
+  const FINISHES = [
+    "paintable_kit",
+    "hand_painted",
+    "luxe_display",
+    "collector_raw",
+    "raw",
+    "smoothed",
+    "painted",
+  ];
+
+  if (body.figurineSize !== undefined) {
+    if (body.figurineSize !== null && !SIZES.includes(body.figurineSize)) {
+      return NextResponse.json({ error: "Geçersiz boyut" }, { status: 400 });
+    }
+    updates.figurineSize = body.figurineSize;
+    changedFields.push("figurineSize");
+  }
+  if (body.material !== undefined && body.material !== null) {
+    if (!MATERIALS.includes(body.material)) {
+      return NextResponse.json({ error: "Geçersiz malzeme" }, { status: 400 });
+    }
+    updates.material = body.material;
+    changedFields.push("material");
+  }
+  if (body.finish !== undefined && body.finish !== null) {
+    if (!FINISHES.includes(body.finish)) {
+      return NextResponse.json({ error: "Geçersiz yüzey" }, { status: 400 });
+    }
+    updates.finish = body.finish;
+    changedFields.push("finish");
+  }
+  if (body.attributes !== undefined) {
+    if (!Array.isArray(body.attributes) || body.attributes.length > 12) {
+      return NextResponse.json({ error: "Geçersiz özellik listesi" }, { status: 400 });
+    }
+    const cleaned = body.attributes
+      .map((a) => ({
+        groupName: String(a?.name ?? "").trim().slice(0, 60),
+        choiceName: String(a?.value ?? "").trim().slice(0, 200),
+        priceDeltaKurus: 0,
+      }))
+      .filter((a) => a.groupName && a.choiceName);
+    updates.selectedOptions = cleaned.length > 0 ? cleaned : null;
+    changedFields.push("selectedOptions");
+  }
+
   if (changedFields.length > 0) {
     await db
       .update(orders)
@@ -82,6 +139,23 @@ export async function POST(
       body: `${order.orderNumber} numaralı siparişin teslimat adresi güncellendi. Lütfen kargolamadan önce üretici panelinden güncel adresi kontrol edin.`,
       orderId: id,
     }).catch((e) => console.error("notifyManufacturer (order edit) failed", e));
+  }
+
+  // Spec changes alter WHAT gets printed — the manufacturer must not miss them,
+  // especially if printing already started.
+  const specChanged = changedFields.some((f) =>
+    ["figurineSize", "material", "finish", "selectedOptions"].includes(f)
+  );
+  if (order.manufacturerId && specChanged) {
+    await notifyManufacturer({
+      manufacturerId: order.manufacturerId,
+      type: "system_announcement",
+      subject: `Teknik özellikler güncellendi — ${order.orderNumber}`,
+      body: `${order.orderNumber} numaralı siparişin teknik özellikleri (boyut / malzeme / renk vb.) güncellendi. Baskıya başlamadan önce üretici panelinden güncel özellikleri kontrol edin.`,
+      orderId: id,
+    }).catch((e) =>
+      console.error("notifyManufacturer (spec edit) failed", e)
+    );
   }
 
   return NextResponse.json({ success: true });

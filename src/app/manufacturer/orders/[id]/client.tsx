@@ -23,8 +23,10 @@ interface OrderData {
   phone: string | null;
   figurineSize: string | null;
   material: string;
+  finish: string;
   style: string;
   modifiers: string[] | null;
+  selectedOptions: { groupName: string; choiceName: string }[];
   status: string;
   manufacturerStatus: string | null;
   needsPainting: boolean;
@@ -160,6 +162,24 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   // no product card, no production spec. Its contents are the line items.
   const hasProductContext = !!marketplaceProduct || productSpecs.length > 0;
   const lineItems = !hasProductContext ? order.selectedAddons : [];
+  // Technical spec rows. Product-backed orders already get their selections in
+  // the ProductionPanel's "Müşteri seçimleri" block, so we only surface the
+  // order-level spec where nothing else would show it.
+  const specRows: { label: string; value: string }[] = [];
+  if (!hasProductContext) {
+    for (const o of order.selectedOptions) {
+      specRows.push({ label: o.groupName, value: o.choiceName });
+    }
+  }
+  if (order.quantity > 1) {
+    specRows.push({ label: "Adet", value: String(order.quantity) });
+  }
+  if (order.needsPainting) {
+    specRows.push({
+      label: "Profesyonel boyama",
+      value: "Evet — QC sonrası boyacıya devredilir",
+    });
+  }
   // Size/material/style are only ever chosen on custom orders; marketplace and
   // upload orders fall back to schema defaults ("resin"/"realistic"), which
   // would read as a real spec the customer never picked.
@@ -466,6 +486,26 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left column (2/3) */}
         <div className="lg:col-span-2 space-y-5">
+          {/* ─── Technical spec ─────────────────────────── */}
+          {specRows.length > 0 && (
+            <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                {(d["manufacturer.orderDetail.techSpec" as keyof typeof d] as string) ||
+                  "Teknik özellikler"}
+              </h3>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+                {specRows.map((row, i) => (
+                  <div key={i} className="flex flex-col">
+                    <dt className="text-xs font-medium text-gray-400">{row.label}</dt>
+                    <dd className="text-sm font-medium text-gray-900 mt-0.5">
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
           {/* ─── Line items (manual / WhatsApp orders) ─── */}
           {lineItems.length > 0 && (
             <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
@@ -1136,6 +1176,20 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
                     </svg>
                     {(d[`material.${order.material}` as keyof typeof d] as string) || order.material}
+                  </dd>
+                </div>
+              )}
+              {/* Finish decides whether the manufacturer ships a paint kit, a
+                  hand-painted piece or a raw print — it was never shown. */}
+              {hasCustomSpec && (
+                <div>
+                  <dt className="text-xs font-medium text-gray-400">
+                    {(d["manufacturer.orderDetail.finish" as keyof typeof d] as string) ||
+                      "Boyama / Yüzey"}
+                  </dt>
+                  <dd className="text-sm font-semibold text-gray-900 mt-0.5">
+                    {(d[`create.finish.${order.finish}` as keyof typeof d] as string) ||
+                      order.finish}
                   </dd>
                 </div>
               )}

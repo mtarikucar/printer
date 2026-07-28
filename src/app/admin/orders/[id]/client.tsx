@@ -24,8 +24,10 @@ interface OrderData {
   phone: string | null;
   figurineSize: string | null;
   material: string;
+  finish: string;
   style: string;
   modifiers: string[] | null;
+  selectedOptions: { groupName: string; choiceName: string }[];
   shippingAddress: { adres: string; mahalle?: string; ilce: string; il: string; postaKodu: string; telefon: string } | null;
   status: string;
   amountKurus: number;
@@ -156,6 +158,15 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [editing, setEditing] = useState(false);
   const [editNotes, setEditNotes] = useState(order.adminNotes || "");
   const [editAddress, setEditAddress] = useState(order.shippingAddress);
+  // Technical spec (size / material / finish + free-form rows like colour).
+  const [specSize, setSpecSize] = useState(order.figurineSize || "");
+  const [specMaterial, setSpecMaterial] = useState(order.material || "");
+  const [specFinish, setSpecFinish] = useState(order.finish || "");
+  const [specAttrs, setSpecAttrs] = useState<{ name: string; value: string }[]>(
+    order.selectedOptions.length > 0
+      ? order.selectedOptions.map((o) => ({ name: o.groupName, value: o.choiceName }))
+      : [{ name: "Renk", value: "" }]
+  );
   const [editTelefonCountry, setEditTelefonCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [editTelefonNational, setEditTelefonNational] = useState("");
 
@@ -279,6 +290,36 @@ export function OrderDetailClient({ data, locale }: Props) {
       });
       if (res.ok) {
         setEditing(false);
+        router.refresh();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || d["admin.orderDetail.actionFailed"]);
+      }
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  // ─── Technical spec editor ───────────────────────────────────────
+  // Manual/WhatsApp orders are created without a spec, and any order may need a
+  // correction after the customer clarifies something. This writes the same
+  // fields the manufacturer panel reads.
+  const saveSpec = async () => {
+    setLoading("spec");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          figurineSize: specSize || null,
+          material: specMaterial || null,
+          finish: specFinish || null,
+          attributes: specAttrs
+            .map((a) => ({ name: a.name.trim(), value: a.value.trim() }))
+            .filter((a) => a.name && a.value),
+        }),
+      });
+      if (res.ok) {
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
@@ -1190,6 +1231,114 @@ export function OrderDetailClient({ data, locale }: Props) {
       {/* ═══ Üretim (production) ═════════════════════════════════ */}
       {tab === "production" && (
         <div className="space-y-5 max-w-3xl">
+
+          {/* ─── Teknik özellikler (üreticiye gider) ─────── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Teknik özellikler</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Üretici panelinde &quot;Teknik Özellikler&quot; kartında görünür. Boş
+              bırakılan alanlar gösterilmez; kaydedince atanmış üreticiye bildirim
+              gider.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Boyut</label>
+                <select
+                  value={specSize}
+                  onChange={(e) => setSpecSize(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                >
+                  <option value="">Belirtilmedi</option>
+                  <option value="kucuk">Küçük</option>
+                  <option value="orta">Orta</option>
+                  <option value="buyuk">Büyük</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Malzeme</label>
+                <select
+                  value={specMaterial}
+                  onChange={(e) => setSpecMaterial(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                >
+                  <option value="">Belirtilmedi</option>
+                  <option value="resin">Reçine</option>
+                  <option value="filament">Filament</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Boyama / Yüzey</label>
+                <select
+                  value={specFinish}
+                  onChange={(e) => setSpecFinish(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                >
+                  <option value="">Belirtilmedi</option>
+                  <option value="paintable_kit">Boyanabilir Kit</option>
+                  <option value="hand_painted">El Boyaması</option>
+                  <option value="painted">Boyalı (tek renk / temel)</option>
+                  <option value="luxe_display">Lüks Vitrin</option>
+                  <option value="collector_raw">Collector Raw (boyasız)</option>
+                  <option value="raw">Ham baskı</option>
+                  <option value="smoothed">Pürüzsüz</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {specAttrs.map((a, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={a.name}
+                    onChange={(e) =>
+                      setSpecAttrs((prev) =>
+                        prev.map((p, i) => (i === idx ? { ...p, name: e.target.value } : p))
+                      )
+                    }
+                    placeholder="Özellik (örn. Renk)"
+                    className="w-2/5 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                  />
+                  <input
+                    type="text"
+                    value={a.value}
+                    onChange={(e) =>
+                      setSpecAttrs((prev) =>
+                        prev.map((p, i) => (i === idx ? { ...p, value: e.target.value } : p))
+                      )
+                    }
+                    placeholder="Değer (örn. Mavi ceket, altın kaide)"
+                    className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSpecAttrs((prev) => prev.filter((_, i) => i !== idx))}
+                    className="px-2 text-gray-400 hover:text-red-600"
+                    aria-label="Özelliği sil"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSpecAttrs((prev) => [...prev, { name: "", value: "" }])}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                + Özellik ekle
+              </button>
+              <button
+                type="button"
+                onClick={saveSpec}
+                disabled={loading === "spec"}
+                className="ml-auto px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-400 transition-colors shadow-sm"
+              >
+                {loading === "spec" ? "Kaydediliyor…" : "Özellikleri kaydet"}
+              </button>
+            </div>
+          </div>
 
           {/* ─── Model dosyaları ve sürümler ─────── */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">

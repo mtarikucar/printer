@@ -1710,6 +1710,8 @@ const tr: Dictionary = {
   "manufacturer.orderDetail.customerPhoto": "Müşteri Fotoğrafı",
   "manufacturer.orderDetail.approvedImage": "Onaylı Görsel",
   "manufacturer.orderDetail.lineItems": "Sipariş Kalemleri",
+  "manufacturer.orderDetail.techSpec": "Teknik Özellikler",
+  "manufacturer.orderDetail.finish": "Boyama / Yüzey",
   "manufacturer.orderDetail.model3d": "3D Model",
   "manufacturer.orderDetail.downloadGlb": "GLB İndir",
   "manufacturer.orderDetail.downloadStl": "STL İndir",

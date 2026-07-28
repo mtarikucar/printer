@@ -270,40 +270,55 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
               + Kalem ekle
             </button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {lineItems.map((li, idx) => (
-              <div key={idx} className="flex gap-2">
-                <Input
-                  placeholder="Açıklama (örn. 15cm özel figür)"
-                  value={li.description}
-                  onChange={(e) => updateLine(idx, { description: e.target.value })}
-                  className="flex-1"
-                />
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="₺ birim"
-                  value={li.unitPriceTry}
-                  onChange={(e) => updateLine(idx, { unitPriceTry: e.target.value })}
-                  className="w-28"
-                />
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="Adet"
-                  value={li.quantity}
-                  onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                  className="w-20"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeLine(idx)}
-                  className="px-2 text-gray-400 hover:text-red-600"
-                  aria-label="Kalemi sil"
-                >
-                  ✕
-                </button>
+              <div key={idx} className="rounded-xl border border-gray-200 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                    Kalem {idx + 1}
+                  </span>
+                  {lineItems.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeLine(idx)}
+                      className="text-xs font-medium text-gray-400 hover:text-red-600"
+                      aria-label="Kalemi sil"
+                    >
+                      ✕ Sil
+                    </button>
+                  )}
+                </div>
+                {/* Açıklama tam satır: dar ekranda da yazılanın tamamı görünsün. */}
+                <FormField label="Ürün / açıklama">
+                  <Input
+                    placeholder="örn. 15cm özel figür"
+                    value={li.description}
+                    onChange={(e) => updateLine(idx, { description: e.target.value })}
+                  />
+                </FormField>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <FormField label="Birim fiyat (₺)">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={li.unitPriceTry}
+                      onChange={(e) => updateLine(idx, { unitPriceTry: e.target.value })}
+                    />
+                  </FormField>
+                  <FormField label="Adet">
+                    <Input
+                      type="number"
+                      min="1"
+                      inputMode="numeric"
+                      placeholder="1"
+                      value={li.quantity}
+                      onChange={(e) => updateLine(idx, { quantity: e.target.value })}
+                    />
+                  </FormField>
+                </div>
               </div>
             ))}
           </div>

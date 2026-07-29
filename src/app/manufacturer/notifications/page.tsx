@@ -15,6 +15,7 @@ interface Notification {
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
   order_assigned: { label: "Sipariş Atandı", color: "bg-indigo-100 text-indigo-700" },
+  order_unassigned: { label: "Atama Geri Alındı", color: "bg-orange-100 text-orange-700" },
   order_cancelled: { label: "Sipariş İptal", color: "bg-red-100 text-red-700" },
   admin_message: { label: "Admin Mesajı", color: "bg-amber-100 text-amber-700" },
   system_announcement: { label: "Duyuru", color: "bg-blue-100 text-blue-700" },

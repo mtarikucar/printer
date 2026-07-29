@@ -25,6 +25,8 @@ interface OrderData {
   id: string;
   orderNumber: string;
   orderType: "custom" | "marketplace" | "upload";
+  sellerManufacturerId: string | null;
+  painterStatus: string | null;
   productTitleSnapshot: string | null;
   email: string;
   customerName: string;
@@ -76,6 +78,7 @@ interface Props {
     qcPhotos?: { id: string; url: string; reviewStatus: string }[];
     qcReviews?: { id: string; round: number; decision: string; reason: string | null; adminEmail: string; createdAt: string }[];
     assignedToManufacturerAt?: string | null;
+    assignmentAgeHours?: number | null;
     activeManufacturers?: { id: string; companyName: string }[];
     candidates?: {
       manufacturerId: string;
@@ -143,7 +146,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, activeManufacturers, candidates } = data;
+  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -152,6 +155,11 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedManufacturerId, setSelectedManufacturerId] = useState("");
+  // Revoke controls (unresponsive / wrong manufacturer).
+  const [revokeReason, setRevokeReason] = useState("");
+  const [revokeStrike, setRevokeStrike] = useState(false);
+  const [revokeBlocklist, setRevokeBlocklist] = useState(true);
+  const [revokeOpen, setRevokeOpen] = useState(false);
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
 
@@ -419,7 +427,30 @@ export function OrderDetailClient({ data, locale }: Props) {
   const canStartPrinting = order.status === "approved" && !hasManufacturer;
   const canShip = order.status === "printing" && !hasManufacturer;
   const canDeliver = order.status === "shipped";
-  const canAssignManufacturer = order.status === "approved" && (!manufacturerStatus || manufacturerStatus === "unassigned");
+  // Mirror the API's own gate (assign-manufacturer route): marketplace orders
+  // are assignable straight from "paid".
+  const statusAssignable =
+    order.status === "approved" ||
+    (order.status === "paid" && order.orderType === "marketplace");
+  const canAssignManufacturer =
+    statusAssignable && (!manufacturerStatus || manufacturerStatus === "unassigned");
+  // Taking an order back is safe until QC is approved — that is where the
+  // manufacturer's earning can attach (see manufacturer-revoke.ts).
+  const REVOCABLE_STATUSES = [
+    "assigned",
+    "accepted",
+    "printing",
+    "printed",
+    "qc_pending",
+    "qc_rejected",
+  ];
+  const canRevokeManufacturer =
+    !!manufacturer &&
+    REVOCABLE_STATUSES.includes(manufacturerStatus ?? "") &&
+    (!order.painterStatus || order.painterStatus === "unassigned");
+  const waitingHours = assignmentAgeHours ?? 0;
+  const isStaleAssignment =
+    manufacturerStatus === "assigned" && waitingHours >= 24;
   // Model upload shows for awaiting_model, and also for admin-fulfilled WhatsApp
   // orders (marketplace, no seller) still sitting at "paid" — so the admin can
   // attach a model, reach "approved", and assign a manufacturer.
@@ -446,6 +477,49 @@ export function OrderDetailClient({ data, locale }: Props) {
         alert(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  /**
+   * Take the order back from the current manufacturer. With a target id it is
+   * handed over in the same call; without one it returns to the queue.
+   */
+  const revokeManufacturer = async (targetManufacturerId?: string) => {
+    if (revokeReason.trim().length < 3) {
+      alert("Geri alma sebebi zorunludur.");
+      return;
+    }
+    setLoading(targetManufacturerId ? `revoke-${targetManufacturerId}` : "revoke");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/revoke-manufacturer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: revokeReason.trim(),
+          strike: revokeStrike,
+          blocklist: revokeBlocklist,
+          ...(targetManufacturerId ? { targetManufacturerId } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        return;
+      }
+      if (data.prevStatus && data.prevStatus !== "assigned") {
+        alert(
+          `Atama geri alındı. Not: üretici bu sırada siparişi "${data.prevStatus}" durumuna almıştı.`
+        );
+      }
+      if (targetManufacturerId && data.reassigned === false) {
+        alert(
+          "Atama geri alındı ancak yeni üreticiye devredilemedi (sipariş bu sırada başkası tarafından alındı). Listeden tekrar seçin."
+        );
+      }
+      setRevokeReason("");
       router.refresh();
     } finally {
       setLoading(null);
@@ -857,6 +931,211 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {loading === "assign-manufacturer" ? d["admin.orderDetail.assigning"] : d["admin.orderDetail.assign"]}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ─── Atamayı geri al / başka üreticiye devret ───────
+            An assigned manufacturer who never answers used to freeze the order:
+            the assign endpoint only matches unassigned orders. */}
+        {canRevokeManufacturer && (
+          <div
+            className={`rounded-2xl border p-5 ${
+              isStaleAssignment
+                ? "border-red-200 bg-red-50/60"
+                : "border-amber-200 bg-amber-50/60"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Üretici ataması
+              </h3>
+              <span className="text-xs text-gray-500">
+                {manufacturer?.companyName} · {manufacturerStatus}
+              </span>
+            </div>
+
+            {assignedToManufacturerAt && (
+              <p className="mt-2 text-sm">
+                {manufacturerStatus === "assigned" ? (
+                  <span
+                    className={
+                      isStaleAssignment
+                        ? "font-semibold text-red-700"
+                        : waitingHours >= 12
+                          ? "font-medium text-amber-700"
+                          : "text-gray-600"
+                    }
+                  >
+                    {isStaleAssignment
+                      ? `⚠ ${waitingHours} saattir yanıt yok — 24 saatlik süre aşıldı`
+                      : `${waitingHours} saattir kabul bekliyor`}
+                  </span>
+                ) : (
+                  <span className="text-gray-600">
+                    Atandı: {formatDateTime(assignedToManufacturerAt, loc)}
+                  </span>
+                )}
+              </p>
+            )}
+
+            {order.orderType === "marketplace" && order.sellerManufacturerId && (
+              <p className="mt-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-900">
+                Bu bir mağaza siparişi — ürünü yalnızca sahibi üretici basabilir.
+                Başka bir üreticiye devretmek yerine iptal/iade değerlendirin.
+              </p>
+            )}
+            {["printed", "qc_pending", "qc_rejected"].includes(
+              manufacturerStatus ?? ""
+            ) && (
+              <p className="mt-2 rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+                Bu üreticinin yüklediği QC fotoğrafları yeni üreticiye
+                gösterilmeyecek (yeni QC turu başlar); denetim kaydında kalır.
+              </p>
+            )}
+
+            {!revokeOpen ? (
+              <button
+                onClick={() => setRevokeOpen(true)}
+                className="mt-3 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
+              >
+                Atamayı geri al / başka üreticiye ver
+              </button>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-600">
+                    Sebep <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={revokeReason}
+                    onChange={(e) => setRevokeReason(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    placeholder="örn. 36 saattir yanıt vermedi, telefonla da ulaşılamadı"
+                    className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-4 text-xs text-gray-700">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={revokeBlocklist}
+                      onChange={(e) => setRevokeBlocklist(e.target.checked)}
+                    />
+                    Bu üreticiyi bu sipariş için bir daha önerme
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={revokeStrike}
+                      onChange={(e) => setRevokeStrike(e.target.checked)}
+                    />
+                    Güvenilirlik cezası (strike) uygula
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => revokeManufacturer()}
+                    disabled={!!loading || revokeReason.trim().length < 3}
+                    className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:bg-gray-300 disabled:text-gray-500"
+                  >
+                    {loading === "revoke"
+                      ? "Geri alınıyor…"
+                      : "Atamayı geri al (kuyruğa döner)"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setRevokeOpen(false);
+                      setRevokeReason("");
+                    }}
+                    className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+
+                {/* Direct hand-off. The unresponsive manufacturer is filtered
+                    out — the ranker would otherwise put them first, since
+                    their load just dropped. */}
+                {(() => {
+                  const targets = (candidates ?? []).filter(
+                    (c) => c.eligible && c.manufacturerId !== manufacturer?.id
+                  );
+                  const fallback = (activeManufacturers ?? []).filter(
+                    (m) => m.id !== manufacturer?.id
+                  );
+                  if (targets.length === 0 && fallback.length === 0) return null;
+                  return (
+                    <div className="border-t border-gray-200 pt-3">
+                      <p className="mb-2 text-xs font-semibold text-gray-600">
+                        Doğrudan yeni üreticiye devret
+                      </p>
+                      {targets.length > 0 ? (
+                        <ul className="space-y-1.5">
+                          {targets.slice(0, 5).map((c) => (
+                            <li
+                              key={c.manufacturerId}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-xs"
+                            >
+                              <span className="font-medium text-gray-800">
+                                {c.companyName}
+                                {c.city ? (
+                                  <span className="ml-1 font-normal text-gray-500">
+                                    · {c.city}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <button
+                                onClick={() => revokeManufacturer(c.manufacturerId)}
+                                disabled={
+                                  !!loading || revokeReason.trim().length < 3
+                                }
+                                className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500"
+                              >
+                                {loading === `revoke-${c.manufacturerId}`
+                                  ? "Devrediliyor…"
+                                  : "Geri al ve ata"}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedManufacturerId}
+                            onChange={(e) =>
+                              setSelectedManufacturerId(e.target.value)
+                            }
+                            className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                          >
+                            <option value="">Üretici seçin…</option>
+                            {fallback.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.companyName}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() =>
+                              revokeManufacturer(selectedManufacturerId)
+                            }
+                            disabled={
+                              !selectedManufacturerId ||
+                              !!loading ||
+                              revokeReason.trim().length < 3
+                            }
+                            className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500"
+                          >
+                            Geri al ve ata
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
 

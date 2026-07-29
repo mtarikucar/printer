@@ -85,6 +85,10 @@ export default async function AdminOrderDetailPage({
       id: order.id,
       orderNumber: order.orderNumber,
       orderType: order.orderType,
+      // Revoke guards: a marketplace seller order can only be printed by its
+      // owner, and an order already with a painter must not be pulled back.
+      sellerManufacturerId: order.sellerManufacturerId,
+      painterStatus: order.painterStatus,
       productTitleSnapshot: order.productTitleSnapshot,
       email: order.email,
       customerName: order.customerName,
@@ -216,6 +220,13 @@ export default async function AdminOrderDetailPage({
       createdAt: r.createdAt.toISOString(),
     })),
     assignedToManufacturerAt: order.assignedToManufacturerAt?.toISOString() ?? null,
+    // Computed server-side: the client must not derive it from Date.now() in an
+    // effect (hydration mismatch + the set-state-in-effect lint rule).
+    assignmentAgeHours: order.assignedToManufacturerAt
+      ? Math.floor(
+          (Date.now() - order.assignedToManufacturerAt.getTime()) / 3600000
+        )
+      : null,
     activeManufacturers: activeManufacturers.map(m => ({
       id: m.id,
       companyName: m.companyName,

@@ -6,6 +6,9 @@ import { emitManufacturerNotification } from "@/lib/realtime/emit";
 
 export type ManufacturerNotificationType =
   | "order_assigned"
+  // Admin took an assigned order back (unresponsive manufacturer, or a
+  // reassignment). NOT "order_cancelled" — the order lives on elsewhere.
+  | "order_unassigned"
   | "order_cancelled"
   | "admin_message"
   | "system_announcement"

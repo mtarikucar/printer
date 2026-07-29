@@ -18,6 +18,7 @@ import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
+import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 import { ManufacturerOrderDetailClient } from "./client";
 
 export default async function ManufacturerOrderDetailPage({
@@ -219,6 +220,15 @@ export default async function ManufacturerOrderDetailPage({
       qcRound: order.qcRound,
       quantity: order.quantity,
       productTitleSnapshot: order.productTitleSnapshot,
+      // Earnings preview. The manufacturer has 24 hours to accept or decline
+      // and could not see what the job pays — the contract now promises this.
+      // Painting orders accrue on the print portion only, unless the
+      // manufacturer paints in house (then the full amount is theirs).
+      grossKurus:
+        order.needsPainting && !manufacturer.paintsInHouse
+          ? Math.max(0, order.amountKurus - order.paintingPriceKurus)
+          : order.amountKurus,
+      commissionRateBps: PLATFORM_COMMISSION_RATE_BPS,
       // Manual/WhatsApp orders carry no product row — their contents live here
       // as {name, priceKurus} line items. Without this the manufacturer has no
       // idea what was ordered.

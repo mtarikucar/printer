@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, count } from "drizzle-orm";
+import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions, qcPhotos } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
@@ -51,9 +52,12 @@ export async function POST(
     .select({ value: count() })
     .from(qcPhotos)
     .where(and(eq(qcPhotos.orderId, id), eq(qcPhotos.round, order.qcRound)));
-  if (Number(photoRow?.value ?? 0) < 1) {
+  // The partnership contract binds the manufacturer to at least 4 QC photos per
+  // round (overall front + back/side + close-up of the finest detail + a shot
+  // with a ruler). One photo cannot show what QC has to judge.
+  if (Number(photoRow?.value ?? 0) < QC_MIN_PHOTOS) {
     return NextResponse.json(
-      { error: "Add at least one photo before submitting" },
+      { error: `İncelemeye göndermek için en az ${QC_MIN_PHOTOS} fotoğraf yükleyin.` },
       { status: 400 }
     );
   }

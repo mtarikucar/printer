@@ -12,6 +12,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { formatPhoneDisplay } from "@/lib/phone";
+import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 import { sizeDisplay } from "@/lib/config/sizes";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -38,6 +39,8 @@ interface OrderData {
   productTitleSnapshot: string | null;
   // Manual/WhatsApp orders have no product row — this is what was ordered.
   selectedAddons: { name: string; priceKurus: number }[];
+  grossKurus: number;
+  commissionRateBps: number;
   customerNote: string | null;
   shippingAddress: {
     adres: string;
@@ -178,9 +181,17 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   if (order.needsPainting) {
     specRows.push({
       label: "Profesyonel boyama",
-      value: "Evet — QC sonrası boyacıya devredilir",
+      value: order.paintsInHouse
+        ? "Evet — profilinizde kendiniz boyuyorsunuz"
+        : "Evet — QC sonrası boyacıya devredilir",
     });
   }
+  // What this job pays. The 24-hour accept/decline decision was previously made
+  // blind; the partnership contract now promises this is visible beforehand.
+  const commissionKurus = Math.round(
+    (order.grossKurus * order.commissionRateBps) / 10000
+  );
+  const netEarningKurus = order.grossKurus - commissionKurus;
   // Size/material/style are only ever chosen on custom orders; marketplace and
   // upload orders fall back to schema defaults ("resin"/"realistic"), which
   // would read as a real spec the customer never picked.
@@ -487,6 +498,43 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left column (2/3) */}
         <div className="lg:col-span-2 space-y-5">
+          {/* ─── What this job pays ─────────────────────
+              Shown before the accept/decline decision, not after. */}
+          {order.grossKurus > 0 && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                Bu siparişten kazancınız
+              </h3>
+              <p className="mt-2 text-2xl font-bold text-emerald-900">
+                ₺
+                {(netEarningKurus / 100).toLocaleString("tr-TR", {
+                  minimumFractionDigits: 2,
+                })}
+              </p>
+              <p className="mt-1 text-xs text-emerald-800/80">
+                Sipariş tutarı ₺
+                {(order.grossKurus / 100).toLocaleString("tr-TR", {
+                  minimumFractionDigits: 2,
+                })}{" "}
+                · Platform hizmet bedeli %{order.commissionRateBps / 100} (₺
+                {(commissionKurus / 100).toLocaleString("tr-TR", {
+                  minimumFractionDigits: 2,
+                })}
+                )
+                {order.needsPainting && !order.paintsInHouse
+                  ? " · boyama bedeli hariç (baskı payı)"
+                  : ""}
+              </p>
+              <p className="mt-1 text-xs text-emerald-800/60">
+                Hak ediş, siparişi kargoladığınızda
+                {order.needsPainting && !order.paintsInHouse
+                  ? " (boyamalı siparişlerde boyacıya devrettiğinizde)"
+                  : ""}{" "}
+                tahakkuk eder.
+              </p>
+            </div>
+          )}
+
           {/* ─── Technical spec ─────────────────────────── */}
           {specRows.length > 0 && (
             <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
@@ -905,7 +953,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   />
                   <button
                     onClick={() => performAction("submit-qc")}
-                    disabled={loading === "submit-qc" || qcPhotoCount < 1}
+                    disabled={loading === "submit-qc" || qcPhotoCount < QC_MIN_PHOTOS}
                     className="mt-3 w-full px-6 py-3.5 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700 disabled:bg-amber-300 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                   >
                     {loading === "submit-qc" && (
@@ -918,9 +966,11 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                       ? d["manufacturer.orderDetail.qcSubmitting"]
                       : d["manufacturer.orderDetail.qcSubmit"]}
                   </button>
-                  {qcPhotoCount < 1 && (
+                  {qcPhotoCount < QC_MIN_PHOTOS && (
                     <p className="text-xs text-amber-700/60 mt-2">
-                      {d["manufacturer.orderDetail.qcNeedPhoto"]}
+                      En az {QC_MIN_PHOTOS} fotoğraf gerekli (genel ön, arka/yan,
+                      en detaylı bölgenin yakın çekimi ve cetvelli ölçü fotoğrafı).
+                      Şu an {qcPhotoCount} fotoğraf yüklü.
                     </p>
                   )}
                 </div>

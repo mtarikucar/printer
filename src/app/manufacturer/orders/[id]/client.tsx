@@ -29,6 +29,17 @@ interface OrderData {
   style: string;
   modifiers: string[] | null;
   selectedOptions: { groupName: string; choiceName: string }[];
+  upsells: string[];
+  productMaterial: string | null;
+  uploadedModel: {
+    fileName: string;
+    sourceFormat: string;
+    targetHeightMm: number;
+    material: string;
+    boundingBoxMm: { x: number; y: number; z: number } | null;
+    minWallThicknessMm: number | null;
+    printRisk: string[];
+  } | null;
   status: string;
   manufacturerStatus: string | null;
   needsPainting: boolean;
@@ -169,11 +180,51 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   // Technical spec rows. Product-backed orders already get their selections in
   // the ProductionPanel's "Müşteri seçimleri" block, so we only surface the
   // order-level spec where nothing else would show it.
+  // Size/material/style are only ever chosen on custom orders; marketplace and
+  // upload orders fall back to schema defaults ("resin"/"realistic"), which
+  // would read as a real spec the customer never picked.
+  const hasCustomSpec = order.orderType === "custom";
   const specRows: { label: string; value: string }[] = [];
   if (!hasProductContext) {
     for (const o of order.selectedOptions) {
       specRows.push({ label: o.groupName, value: o.choiceName });
     }
+  }
+  // Customer-uploaded model: the print height and the geometry analysis lived
+  // only on the admin quote screen, so the workshop had no idea what size to
+  // print or where the model is fragile.
+  if (order.uploadedModel) {
+    const um = order.uploadedModel;
+    specRows.push({ label: "Dosya", value: `${um.fileName} (${um.sourceFormat.toUpperCase()})` });
+    specRows.push({
+      label: "Baskı yüksekliği",
+      value: `${(um.targetHeightMm / 10).toLocaleString("tr-TR", { maximumFractionDigits: 1 })} cm`,
+    });
+    if (um.boundingBoxMm) {
+      const b = um.boundingBoxMm;
+      const f = (n: number) =>
+        (n / 10).toLocaleString("tr-TR", { maximumFractionDigits: 1 });
+      specRows.push({
+        label: "Ölçüler (en×boy×yükseklik)",
+        value: `${f(b.x)}×${f(b.y)}×${f(b.z)} cm`,
+      });
+    }
+    if (um.minWallThicknessMm != null) {
+      specRows.push({
+        label: "En ince duvar",
+        value: `${um.minWallThicknessMm.toLocaleString("tr-TR", { maximumFractionDigits: 2 })} mm`,
+      });
+    }
+    specRows.push({
+      label: "Malzeme",
+      value: um.material === "filament" ? "Filament" : "Reçine",
+    });
+  } else if (!hasCustomSpec && order.productMaterial) {
+    // Marketplace product: material comes from the listing, not the order.
+    specRows.push({
+      label: "Malzeme",
+      value: order.productMaterial === "filament" ? "Filament" : "Reçine",
+    });
   }
   if (order.quantity > 1) {
     specRows.push({ label: "Adet", value: String(order.quantity) });
@@ -186,16 +237,21 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
         : "Evet — QC sonrası boyacıya devredilir",
     });
   }
+  // Paid add-ons that change what leaves the workshop.
+  const UPSELL_LABELS: Record<string, string> = {
+    extra_paint: "Ekstra boya katmanı — daha doygun renk ve detay vurgusu",
+    gift_wrap: "Hediye paketi — kraft kutu + kurdele ile paketleyin",
+    rush_shipping: "Hızlı kargo — üretimi öne alın, QC sonrası aynı gün kargolayın",
+  };
+  // digital_files is delivered by the platform (download link), not the workshop.
+  const fulfillableUpsells = order.upsells.filter((u) => u in UPSELL_LABELS);
+
   // What this job pays. The 24-hour accept/decline decision was previously made
   // blind; the partnership contract now promises this is visible beforehand.
   const commissionKurus = Math.round(
     (order.grossKurus * order.commissionRateBps) / 10000
   );
   const netEarningKurus = order.grossKurus - commissionKurus;
-  // Size/material/style are only ever chosen on custom orders; marketplace and
-  // upload orders fall back to schema defaults ("resin"/"realistic"), which
-  // would read as a real spec the customer never picked.
-  const hasCustomSpec = order.orderType === "custom";
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -531,6 +587,27 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   ? " (boyamalı siparişlerde boyacıya devrettiğinizde)"
                   : ""}{" "}
                 tahakkuk eder.
+              </p>
+            </div>
+          )}
+
+          {/* ─── Paid add-ons the workshop must fulfil ─── */}
+          {fulfillableUpsells.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-800">
+                Müşterinin satın aldığı ek hizmetler
+              </h3>
+              <ul className="mt-3 space-y-2">
+                {fulfillableUpsells.map((u) => (
+                  <li key={u} className="flex items-start gap-2 text-sm text-amber-900">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                    <span>{UPSELL_LABELS[u]}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs text-amber-800/70">
+                Bu hizmetlerin bedeli müşteriden tahsil edildi; pakete eklemeniz
+                gerekir.
               </p>
             </div>
           )}

@@ -24,6 +24,8 @@ export async function GET() {
       id: painters.id,
       companyName: painters.companyName,
       city: painters.address,
+      contactPerson: painters.contactPerson,
+      phone: painters.phone,
       maxConcurrentOrders: painters.maxConcurrentOrders,
       capabilities: painters.capabilities,
     })
@@ -31,11 +33,34 @@ export async function GET() {
     .where(and(eq(painters.status, "active"), eq(painters.acceptingOrders, true)));
 
   return NextResponse.json({
-    painters: rows.map((p) => ({
-      id: p.id,
-      companyName: p.companyName,
-      il: (p.city as { il?: string } | null)?.il ?? null,
-      capabilities: p.capabilities ?? [],
-    })),
+    painters: rows.map((p) => {
+      const addr = p.city as {
+        adres?: string;
+        mahalle?: string;
+        ilce?: string;
+        il?: string;
+        postaKodu?: string;
+      } | null;
+      return {
+        id: p.id,
+        companyName: p.companyName,
+        il: addr?.il ?? null,
+        capabilities: p.capabilities ?? [],
+        // The manufacturer physically ships the base print to the painter, so
+        // they need the address and a phone for the courier — previously they
+        // got only a company name and a city.
+        contactPerson: p.contactPerson,
+        phone: p.phone,
+        address: addr
+          ? {
+              adres: addr.adres ?? "",
+              mahalle: addr.mahalle ?? "",
+              ilce: addr.ilce ?? "",
+              il: addr.il ?? "",
+              postaKodu: addr.postaKodu ?? "",
+            }
+          : null,
+      };
+    }),
   });
 }

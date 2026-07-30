@@ -20,6 +20,21 @@ interface Job {
   painterStatus: string | null;
   paintingPriceKurus: number;
   assignedAt: string | null;
+  /** Colour and other spec the customer/admin agreed on. */
+  specRows: { label: string; value: string }[];
+  customerNote: string | null;
+  quantity: number;
+  /** The styled image the customer signed off on — the painting reference. */
+  approvedImageUrl: string | null;
+  photoUrls: string[];
+  shippingAddress: {
+    adres: string;
+    mahalle?: string;
+    ilce: string;
+    il: string;
+    postaKodu: string;
+    telefon: string;
+  } | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -206,6 +221,74 @@ export function PainterJobsClient({
               {j.customerName && (
                 <div className="text-xs text-gray-500 mb-3">Müşteri: {j.customerName}</div>
               )}
+
+              {/* The brief. Without these the painter was guessing the colours
+                  and could not post the parcel. */}
+              {(j.approvedImageUrl || j.photoUrls.length > 0) && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {j.approvedImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={j.approvedImageUrl}
+                      alt="Onaylı görsel"
+                      className="h-28 w-28 rounded-lg border-2 border-green-300 object-cover"
+                      title="Müşterinin onayladığı görsel"
+                    />
+                  )}
+                  {j.photoUrls.map((u, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={i}
+                      src={u}
+                      alt="Müşteri fotoğrafı"
+                      className="h-28 w-28 rounded-lg border border-gray-200 object-cover"
+                      title="Müşteri fotoğrafı"
+                    />
+                  ))}
+                </div>
+              )}
+
+              {(j.specRows.length > 0 || j.quantity > 1) && (
+                <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-gray-50 p-3 sm:grid-cols-3">
+                  {j.specRows.map((row, i) => (
+                    <div key={i}>
+                      <dt className="text-[11px] text-gray-400">{row.label}</dt>
+                      <dd className="text-xs font-medium text-gray-900">{row.value}</dd>
+                    </div>
+                  ))}
+                  {j.quantity > 1 && (
+                    <div>
+                      <dt className="text-[11px] text-gray-400">Adet</dt>
+                      <dd className="text-xs font-medium text-gray-900">{j.quantity}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
+
+              {j.customerNote && (
+                <p className="mb-3 whitespace-pre-line rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <span className="font-semibold">Müşteri notu: </span>
+                  {j.customerNote}
+                </p>
+              )}
+
+              {/* The painter ships to the customer directly, so they need the
+                  address — it was never sent to this panel. */}
+              {j.shippingAddress &&
+                ["accepted", "painting", "painted", "qc_approved"].includes(
+                  j.painterStatus ?? ""
+                ) && (
+                  <div className="mb-3 rounded-lg border border-gray-200 p-3 text-xs text-gray-700">
+                    <p className="mb-1 font-semibold text-gray-500">Teslimat adresi</p>
+                    <p>{j.shippingAddress.adres}</p>
+                    {j.shippingAddress.mahalle && <p>{j.shippingAddress.mahalle}</p>}
+                    <p>
+                      {j.shippingAddress.ilce} / {j.shippingAddress.il}{" "}
+                      {j.shippingAddress.postaKodu}
+                    </p>
+                    <p className="mt-1">Tel: {j.shippingAddress.telefon}</p>
+                  </div>
+                )}
 
               <div className="flex flex-wrap items-center gap-2">
                 {j.painterStatus === "assigned" && (

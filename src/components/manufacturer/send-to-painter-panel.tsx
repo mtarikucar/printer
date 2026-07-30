@@ -8,6 +8,15 @@ interface PainterOption {
   companyName: string;
   il: string | null;
   capabilities: string[];
+  contactPerson: string;
+  phone: string;
+  address: {
+    adres: string;
+    mahalle: string;
+    ilce: string;
+    il: string;
+    postaKodu: string;
+  } | null;
 }
 
 // Shown on a manufacturer's order detail when the order carries the
@@ -90,6 +99,36 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
           </button>
         </div>
       )}
+
+      {/* You have to physically post the figure to this workshop, so the
+          address has to be on this screen. */}
+      {(() => {
+        const p = painters?.find((x) => x.id === selected);
+        if (!p) return null;
+        return (
+          <div className="mt-3 rounded-lg border border-purple-200 bg-white p-3 text-xs text-gray-700">
+            <p className="mb-1 font-semibold text-gray-500">
+              Baz baskıyı bu adrese gönderin
+            </p>
+            <p className="font-medium text-gray-900">{p.companyName}</p>
+            {p.contactPerson && <p>Yetkili: {p.contactPerson}</p>}
+            {p.address ? (
+              <>
+                <p>{p.address.adres}</p>
+                {p.address.mahalle && <p>{p.address.mahalle}</p>}
+                <p>
+                  {p.address.ilce} / {p.address.il} {p.address.postaKodu}
+                </p>
+              </>
+            ) : (
+              <p className="text-amber-700">
+                Adres kayıtlı değil — admin ekibinden isteyin.
+              </p>
+            )}
+            <p className="mt-1">Tel: {p.phone}</p>
+          </div>
+        );
+      })()}
       {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
     </div>
   );

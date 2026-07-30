@@ -1732,6 +1732,12 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     fields: [orders.previewId],
     references: [previews.id],
   }),
+  // Customer-uploaded STL/OBJ behind an `upload` order. ORM-level only — no
+  // migration; the FK column already exists.
+  uploadedModel: one(uploadedModels, {
+    fields: [orders.uploadedModelId],
+    references: [uploadedModels.id],
+  }),
   draft: one(orderDrafts, {
     fields: [orders.draftId],
     references: [orderDrafts.id],

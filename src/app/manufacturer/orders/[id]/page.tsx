@@ -76,7 +76,13 @@ export default async function ManufacturerOrderDetailPage({
         orderBy: [desc(qcReviews.createdAt)],
       },
       product: {
-        columns: { id: true, title: true, description: true, leadTimeDays: true },
+        columns: {
+          id: true,
+          title: true,
+          description: true,
+          leadTimeDays: true,
+          material: true,
+        },
         with: { images: { columns: { storageKey: true, sortOrder: true } } },
       },
       // Image-first flow: the styled image the customer approved IS the brief
@@ -84,6 +90,20 @@ export default async function ManufacturerOrderDetailPage({
       // manufacturer needs it just as much.
       preview: {
         columns: { selectedStyledImageUrl: true },
+      },
+      // Customer-uploaded STL/OBJ: the print height, the analysed geometry and
+      // the material were only ever visible on the admin quote screen, so the
+      // workshop printing it could not know what size to print.
+      uploadedModel: {
+        columns: {
+          fileName: true,
+          targetHeightMm: true,
+          material: true,
+          boundingBoxMm: true,
+          minWallThicknessMm: true,
+          printRisk: true,
+          sourceFormat: true,
+        },
       },
     },
   });
@@ -210,6 +230,25 @@ export default async function ManufacturerOrderDetailPage({
       // and — on manual orders — size/material/finish mirrored here so they can
       // be told apart from the columns' schema defaults).
       selectedOptions: order.selectedOptions ?? [],
+      // Paid add-ons the customer bought. gift_wrap / extra_paint / rush_shipping
+      // are physical work the workshop must actually do; they were charged for
+      // and shown to nobody who could fulfil them.
+      upsells: (order.upsells ?? []) as string[],
+      // Product material for marketplace orders — the workshop was otherwise
+      // guessing what an admin-owned store product is printed from.
+      productMaterial: order.product?.material ?? null,
+      // Customer-uploaded model facts (upload orders only).
+      uploadedModel: order.uploadedModel
+        ? {
+            fileName: order.uploadedModel.fileName,
+            sourceFormat: order.uploadedModel.sourceFormat,
+            targetHeightMm: order.uploadedModel.targetHeightMm,
+            material: order.uploadedModel.material,
+            boundingBoxMm: order.uploadedModel.boundingBoxMm ?? null,
+            minWallThicknessMm: order.uploadedModel.minWallThicknessMm ?? null,
+            printRisk: (order.uploadedModel.printRisk ?? []) as string[],
+          }
+        : null,
       status: order.status,
       manufacturerStatus: order.manufacturerStatus,
       needsPainting: order.needsPainting,

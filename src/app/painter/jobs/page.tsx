@@ -7,6 +7,8 @@ import { orders, painters } from "@/lib/db/schema";
 import { getPainterSession } from "@/lib/services/painter-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { PainterJobsClient } from "./jobs-client";
+import { normalizeFileUrl } from "@/lib/services/storage";
+import type { TurkishAddress } from "@/lib/db/schema";
 
 const PAGE_SIZE = 20;
 
@@ -82,9 +84,19 @@ export default async function PainterJobsPage({
         painterStatus: true,
         paintingPriceKurus: true,
         assignedToPainterAt: true,
+        // The painter holds the physical figure and ships it themselves, yet had
+        // none of the brief: no colour spec, no reference image, no note, and no
+        // address. Everything below is what they need to paint and post it.
+        selectedOptions: true,
+        customerNote: true,
+        quantity: true,
+        shippingAddress: true,
+        modelGlbUrl: true,
       },
       with: {
         user: { columns: { fullName: true } },
+        photos: { columns: { originalUrl: true }, limit: 4 },
+        preview: { columns: { selectedStyledImageUrl: true } },
       },
     }),
   ]);
@@ -107,6 +119,17 @@ export default async function PainterJobsPage({
           painterStatus: o.painterStatus,
           paintingPriceKurus: o.paintingPriceKurus,
           assignedAt: o.assignedToPainterAt?.toISOString() ?? null,
+          specRows: (o.selectedOptions ?? []).map((s) => ({
+            label: s.groupName,
+            value: s.choiceName,
+          })),
+          customerNote: o.customerNote,
+          quantity: o.quantity,
+          approvedImageUrl: normalizeFileUrl(
+            o.preview?.selectedStyledImageUrl ?? null
+          ),
+          photoUrls: o.photos.map((ph) => ph.originalUrl),
+          shippingAddress: o.shippingAddress as TurkishAddress | null,
         }))}
         total={totalCount}
         page={page}

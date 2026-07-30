@@ -26,6 +26,8 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
   const router = useRouter();
   const [painters, setPainters] = useState<PainterOption[] | null>(null);
   const [selected, setSelected] = useState("");
+  const [carrier, setCarrier] = useState("");
+  const [tracking, setTracking] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +49,11 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
       const res = await fetch(`/api/manufacturer/orders/${orderId}/send-to-painter`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ painterId: selected }),
+        body: JSON.stringify({
+          painterId: selected,
+          carrier: carrier || undefined,
+          trackingNumber: tracking.trim() || undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -126,6 +132,33 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
               </p>
             )}
             <p className="mt-1">Tel: {p.phone}</p>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <select
+                value={carrier}
+                onChange={(e) => setCarrier(e.target.value)}
+                className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+              >
+                <option value="">Kargo firması (opsiyonel)</option>
+                <option value="yurtici">Yurtiçi Kargo</option>
+                <option value="aras">Aras Kargo</option>
+                <option value="mng">MNG Kargo</option>
+                <option value="ptt">PTT Kargo</option>
+                <option value="surat">Sürat Kargo</option>
+                <option value="other">Diğer</option>
+                <option value="elden">Elden teslim</option>
+              </select>
+              <input
+                type="text"
+                value={tracking}
+                onChange={(e) => setTracking(e.target.value)}
+                placeholder="Takip numarası (opsiyonel)"
+                className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-gray-500">
+              Kargo bilgisini girerseniz kayıp/hasar durumunda gönderi takip
+              edilebilir ve boyacı teslim aldığını işaretleyebilir.
+            </p>
           </div>
         );
       })()}

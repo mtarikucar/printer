@@ -9,7 +9,15 @@ import { notifyPainter } from "@/lib/services/painter-notifications";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
-const schema = z.object({ painterId: z.string().uuid("Boyacı seçin") });
+const schema = z.object({
+  painterId: z.string().uuid("Boyacı seçin"),
+  // Courier record for the physical hand-off. Optional — some partners hand
+  // over in person — but without it a lost parcel has no owner.
+  carrier: z
+    .enum(["yurtici", "aras", "mng", "ptt", "surat", "other", "elden"])
+    .optional(),
+  trackingNumber: z.string().trim().max(60).optional(),
+});
 
 // Manufacturer hands a QC-approved, painting-required order to a painter instead
 // of shipping it. The manufacturer's part is done here, so their earning accrues
@@ -92,6 +100,8 @@ export async function POST(
       painterStatus: "assigned",
       assignedToPainterAt: now,
       sentToPainterAt: now,
+      painterHandoffCarrier: parsed.data.carrier ?? null,
+      painterHandoffTrackingNumber: parsed.data.trackingNumber || null,
       status: "painting",
       updatedAt: now,
     })

@@ -25,6 +25,9 @@ interface Job {
   specRows: { label: string; value: string }[];
   material: string | null;
   commissionRateBps: number;
+  handoffCarrier: string | null;
+  handoffTrackingNumber: string | null;
+  receivedAt: string | null;
   /** QC photos already uploaded for the current round (server truth). */
   qcPhotoCount: number;
   qcPhotoUrls: string[];
@@ -43,6 +46,16 @@ interface Job {
     telefon: string;
   } | null;
 }
+
+const CARRIER_LABELS: Record<string, string> = {
+  yurtici: "Yurtiçi",
+  aras: "Aras",
+  mng: "MNG",
+  ptt: "PTT",
+  surat: "Sürat",
+  other: "Diğer",
+  elden: "Elden",
+};
 
 const STATUS_BADGE: Record<string, string> = {
   assigned: "bg-amber-100 text-amber-700",
@@ -339,6 +352,34 @@ export function PainterJobsClient({
                       {j.shippingAddress.postaKodu}
                     </p>
                     <p className="mt-1">Tel: {j.shippingAddress.telefon}</p>
+                  </div>
+                )}
+
+              {/* Physical hand-off: courier record and the receipt confirmation
+                  that starts the defect-reporting window. */}
+              {(j.handoffTrackingNumber || j.handoffCarrier || !j.receivedAt) &&
+                ["assigned", "accepted"].includes(j.painterStatus ?? "") && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                    <span>
+                      {j.handoffCarrier === "elden"
+                        ? "Elden teslim"
+                        : j.handoffTrackingNumber
+                          ? `Kargo: ${CARRIER_LABELS[j.handoffCarrier ?? ""] ?? j.handoffCarrier ?? "—"} · ${j.handoffTrackingNumber}`
+                          : "Üretici kargo bilgisi girmedi"}
+                    </span>
+                    {j.receivedAt ? (
+                      <span className="font-semibold text-green-700">
+                        ✓ Teslim alındı
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => call(j.id, "received")}
+                        disabled={busy !== null}
+                        className="rounded-lg bg-blue-600 px-3 py-1 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Teslim aldım
+                      </button>
+                    )}
                   </div>
                 )}
 

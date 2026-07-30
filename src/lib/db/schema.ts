@@ -652,6 +652,11 @@ export const orders = pgTable("orders", {
   painterStatus: painterOrderStatusEnum("painter_status"),
   assignedToPainterAt: timestamp("assigned_to_painter_at"),
   sentToPainterAt: timestamp("sent_to_painter_at"),
+  // The base print physically travels to the painter. Without a courier record
+  // a lost parcel had no owner and nobody could tell whether it had arrived.
+  painterHandoffCarrier: text("painter_handoff_carrier"),
+  painterHandoffTrackingNumber: text("painter_handoff_tracking_number"),
+  receivedByPainterAt: timestamp("received_by_painter_at"),
   paintedAt: timestamp("painted_at"),
   declinedPainterIds: jsonb("declined_painter_ids").$type<string[]>(),
   // Painter QC reprint loop: bumps on each admin rejection so the painter's page

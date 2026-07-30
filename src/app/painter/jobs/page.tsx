@@ -96,6 +96,9 @@ export default async function PainterJobsPage({
         // Material decides the primer/adhesion the painter must use.
         material: true,
         painterQcRound: true,
+        painterHandoffCarrier: true,
+        painterHandoffTrackingNumber: true,
+        receivedByPainterAt: true,
       },
       with: {
         user: { columns: { fullName: true } },
@@ -151,6 +154,9 @@ export default async function PainterJobsPage({
           assignedAt: o.assignedToPainterAt?.toISOString() ?? null,
           material: o.material,
           commissionRateBps: PLATFORM_COMMISSION_RATE_BPS,
+          handoffCarrier: o.painterHandoffCarrier,
+          handoffTrackingNumber: o.painterHandoffTrackingNumber,
+          receivedAt: o.receivedByPainterAt?.toISOString() ?? null,
           qcPhotoCount: qcByOrder.get(o.id)?.count ?? 0,
           qcPhotoUrls: qcByOrder.get(o.id)?.urls ?? [],
           glbUrl: normalizeFileUrl(o.modelGlbUrl),

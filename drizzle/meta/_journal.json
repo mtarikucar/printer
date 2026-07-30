@@ -274,6 +274,13 @@
       "when": 1785395107782,
       "tag": "0038_order_commission_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785397655284,
+      "tag": "0039_painter_handoff_tracking",
+      "breakpoints": true
     }
   ]
 }

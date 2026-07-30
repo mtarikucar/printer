@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { redirect, notFound } from "next/navigation";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   orders,
@@ -12,6 +12,8 @@ import {
   manufacturers,
   qcPhotos,
   qcReviews,
+  products,
+  orderModelRevisions,
 } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
@@ -89,7 +91,13 @@ export default async function ManufacturerOrderDetailPage({
       // for what gets printed. The admin panel already surfaces it; the
       // manufacturer needs it just as much.
       preview: {
-        columns: { selectedStyledImageUrl: true },
+        columns: { selectedStyledImageUrl: true, photoKeys: true },
+      },
+      // If the admin uploaded a corrected model, the workshop must know the file
+      // it downloaded earlier is stale.
+      modelRevisions: {
+        columns: { revision: true, note: true, createdAt: true },
+        orderBy: [desc(orderModelRevisions.revision)],
       },
       // Customer-uploaded STL/OBJ: the print height, the analysed geometry and
       // the material were only ever visible on the admin quote screen, so the
@@ -103,6 +111,8 @@ export default async function ManufacturerOrderDetailPage({
           minWallThicknessMm: true,
           printRisk: true,
           sourceFormat: true,
+          volumeMm3: true,
+          isVolume: true,
         },
       },
     },
@@ -140,6 +150,7 @@ export default async function ManufacturerOrderDetailPage({
   // OR a cart sub-order's line items — each with its manufacturable spec, so the
   // fulfilling manufacturer can produce them all.
   const orderProductRefs: {
+    itemId: string;
     productId: string;
     title: string;
     quantity: number;
@@ -150,6 +161,7 @@ export default async function ManufacturerOrderDetailPage({
   if (order.orderType === "marketplace") {
     if (order.productId && order.product) {
       orderProductRefs.push({
+        itemId: "single",
         productId: order.productId,
         title: order.productTitleSnapshot ?? order.product.title,
         quantity: order.quantity,
@@ -160,6 +172,7 @@ export default async function ManufacturerOrderDetailPage({
     }
     const itemRows = await db
       .select({
+        id: orderItems.id,
         productId: orderItems.productId,
         title: orderItems.productTitleSnapshot,
         quantity: orderItems.quantity,
@@ -170,8 +183,11 @@ export default async function ManufacturerOrderDetailPage({
       .from(orderItems)
       .where(eq(orderItems.orderId, order.id));
     for (const it of itemRows) {
-      if (it.productId && !orderProductRefs.some((r) => r.productId === it.productId)) {
+      // One ref per LINE, not per product: two lines of the same product with
+      // different options are two separate production jobs.
+      if (it.productId) {
         orderProductRefs.push({
+          itemId: it.id,
           productId: it.productId,
           title: it.title,
           quantity: it.quantity,
@@ -182,13 +198,39 @@ export default async function ManufacturerOrderDetailPage({
       }
     }
   }
+  // Per-line product facts. getProductSpec covers files/BOM/steps but not the
+  // listing itself, so an admin-owned product reached the workshop with no
+  // material, no description and no images.
+  const refIds = [...new Set(orderProductRefs.map((r) => r.productId))];
+  const refProducts = refIds.length
+    ? await db.query.products.findMany({
+        where: inArray(products.id, refIds),
+        columns: { id: true, material: true, description: true, leadTimeDays: true },
+        with: {
+          images: { columns: { storageKey: true, sortOrder: true } },
+        },
+      })
+    : [];
+  const productById = new Map(refProducts.map((pr) => [pr.id, pr]));
+
   const productSpecs = await Promise.all(
     orderProductRefs.map(async (ref) => {
       const s = await getProductSpec(ref.productId);
+      const listing = productById.get(ref.productId);
       return {
+        itemId: ref.itemId,
         productId: ref.productId,
         title: ref.title,
         quantity: ref.quantity,
+        material: listing?.material ?? null,
+        // Only when there is no single-product card above (cart sub-orders),
+        // otherwise the description/images would appear twice.
+        description: marketplaceProduct ? null : listing?.description ?? null,
+        images: marketplaceProduct
+          ? []
+          : [...(listing?.images ?? [])]
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+              .map((img) => getPublicUrl(img.storageKey)),
         selectedOptions: ref.selectedOptions,
         selectedAddons: ref.selectedAddons,
         itemImageUrl: ref.itemImageUrl,
@@ -199,6 +241,11 @@ export default async function ManufacturerOrderDetailPage({
           sourceFormat: f.sourceFormat,
           quantity: f.quantity,
           glbUrl: f.glbUrl,
+          // Geometry the seller's upload already measured — the workshop can
+          // sanity-check the scale before starting a long print.
+          fileSizeBytes: f.fileSizeBytes,
+          volumeMm3: f.volumeMm3,
+          boundingBoxMm: f.boundingBoxMm,
         })),
         components: s.components.map((c) => ({
           name: c.name,
@@ -238,6 +285,19 @@ export default async function ManufacturerOrderDetailPage({
       // guessing what an admin-owned store product is printed from.
       productMaterial: order.product?.material ?? null,
       // Customer-uploaded model facts (upload orders only).
+      paidAt: order.paidAt?.toISOString() ?? null,
+      // Promised lead time (product listing) so the workshop can see the deadline.
+      leadTimeDays: refProducts.length
+        ? Math.min(...refProducts.map((pr) => pr.leadTimeDays ?? 7))
+        : order.product?.leadTimeDays ?? null,
+      // A later admin upload makes a previously downloaded file stale.
+      modelRevision: order.modelRevisions.length
+        ? {
+            current: order.modelRevisions[0].revision,
+            total: order.modelRevisions.length,
+            uploadedAt: order.modelUploadedAt?.toISOString() ?? null,
+          }
+        : null,
       uploadedModel: order.uploadedModel
         ? {
             fileName: order.uploadedModel.fileName,
@@ -247,6 +307,8 @@ export default async function ManufacturerOrderDetailPage({
             boundingBoxMm: order.uploadedModel.boundingBoxMm ?? null,
             minWallThicknessMm: order.uploadedModel.minWallThicknessMm ?? null,
             printRisk: (order.uploadedModel.printRisk ?? []) as string[],
+            volumeMm3: order.uploadedModel.volumeMm3 ?? null,
+            isVolume: order.uploadedModel.isVolume ?? null,
           }
         : null,
       status: order.status,
@@ -284,10 +346,16 @@ export default async function ManufacturerOrderDetailPage({
       shippedAt: order.shippedAt?.toISOString() ?? null,
       createdAt: order.createdAt.toISOString(),
     },
-    photos: order.photos.map((p) => ({
-      id: p.id,
-      originalUrl: p.originalUrl,
-    })),
+    photos: [
+      ...order.photos.map((p) => ({ id: p.id, originalUrl: p.originalUrl })),
+      // Multi-angle fusion sets: only the primary photo becomes an order_photo,
+      // so the other angles the customer uploaded never reached the workshop.
+      // photoKeys[0] IS the primary — skip it to avoid a duplicate.
+      ...(order.preview?.photoKeys ?? []).slice(1).map((k, i) => ({
+        id: `ref-${i}`,
+        originalUrl: getPublicUrl(k),
+      })),
+    ],
     qcPhotos: currentRoundPhotos,
     qcRejectReason,
     marketplaceProduct,

@@ -35,7 +35,7 @@ export async function GET(
 
   const model = await db.query.uploadedModels.findFirst({
     where: eq(uploadedModels.id, order.uploadedModelId),
-    columns: { sourceKey: true, sourceFormat: true },
+    columns: { sourceKey: true, sourceFormat: true, targetHeightMm: true },
   });
   if (!model) {
     return NextResponse.json({ error: "Model not found" }, { status: 404 });
@@ -46,7 +46,7 @@ export async function GET(
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${order.orderNumber}.${model.sourceFormat}"`,
+        "Content-Disposition": `attachment; filename="${order.orderNumber}-${model.targetHeightMm}mm.${model.sourceFormat}"`,
         "Content-Length": String(buffer.length),
       },
     });

@@ -22,6 +22,8 @@ interface Job {
   assignedAt: string | null;
   /** Colour and other spec the customer/admin agreed on. */
   specRows: { label: string; value: string }[];
+  material: string | null;
+  commissionRateBps: number;
   customerNote: string | null;
   quantity: number;
   /** The styled image the customer signed off on — the painting reference. */
@@ -208,16 +210,48 @@ export function PainterJobsClient({
                     {STATUS_LABEL[j.painterStatus ?? ""] || j.painterStatus}
                   </span>
                 </div>
-                <span className="text-sm font-semibold text-gray-800">
-                  ₺{(j.paintingPriceKurus / 100).toLocaleString("tr-TR")}
+                <span className="text-right text-sm font-semibold text-gray-800">
+                  {(() => {
+                    // Gross was shown as if it were the payout; commission is
+                    // deducted at accrual.
+                    const commission = Math.round(
+                      (j.paintingPriceKurus * j.commissionRateBps) / 10000
+                    );
+                    const net = j.paintingPriceKurus - commission;
+                    return (
+                      <>
+                        ₺{(net / 100).toLocaleString("tr-TR")}
+                        <span className="block text-[11px] font-normal text-gray-400">
+                          brüt ₺{(j.paintingPriceKurus / 100).toLocaleString("tr-TR")} ·
+                          komisyon %{j.commissionRateBps / 100}
+                        </span>
+                      </>
+                    );
+                  })()}
                 </span>
               </div>
               <div className="text-sm text-gray-700 mb-1">
                 {j.productTitleSnapshot || j.style || "Özel figür"}
                 {j.figurineSize &&
                   ` · ${sizeDisplayTr(j.figurineSize, { short: true })}`}
-                {j.finish && ` · ${j.finish}`}
+                {j.material && ` · ${j.material === "filament" ? "Filament" : "Reçine"}`}
               </div>
+              {/* Finish decides what actually has to be in the box. */}
+              <div className="mb-1 text-xs text-gray-600">
+                {j.finish === "luxe_display"
+                  ? "Lüks Vitrin — tam el boyaması + premium kaide, isim plakası ve sert kutu"
+                  : j.finish === "hand_painted"
+                    ? "El Boyaması — tam el boyaması + QC fotoğrafı + hediye kutusu"
+                    : j.finish || ""}
+              </div>
+              {j.modifiers && j.modifiers.length > 0 && (
+                <div className="mb-1 text-xs text-gray-600">
+                  Stil düzenleyici:{" "}
+                  {j.modifiers
+                    .map((m) => (m === "pixel_art" ? "Piksel Art — düz bloklu renkler, sınırlı palet" : m))
+                    .join(", ")}
+                </div>
+              )}
               {j.customerName && (
                 <div className="text-xs text-gray-500 mb-3">Müşteri: {j.customerName}</div>
               )}

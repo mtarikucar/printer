@@ -11,6 +11,10 @@ export interface PanelFile {
   sourceFormat: string;
   quantity: number;
   glbUrl: string | null;
+  /** Geometry measured at upload — lets the workshop sanity-check the scale. */
+  fileSizeBytes?: number;
+  volumeMm3?: number | null;
+  boundingBoxMm?: { x: number; y: number; z: number } | null;
 }
 export interface PanelComponent {
   name: string;
@@ -95,7 +99,19 @@ export function ProductionPanel({
                   <p className="text-sm font-medium text-gray-900 truncate">
                     {f.partName || f.fileName}
                   </p>
-                  <p className="text-xs text-gray-400">× {f.quantity}</p>
+                  <p className="text-xs text-gray-400">
+                    × {f.quantity}
+                    {f.boundingBoxMm &&
+                      ` · ${[f.boundingBoxMm.x, f.boundingBoxMm.y, f.boundingBoxMm.z]
+                        .map((n) =>
+                          (n / 10).toLocaleString("tr-TR", { maximumFractionDigits: 1 })
+                        )
+                        .join("×")} cm`}
+                    {f.volumeMm3 != null &&
+                      ` · ${(f.volumeMm3 / 1000).toLocaleString("tr-TR", {
+                        maximumFractionDigits: 1,
+                      })} cm³`}
+                  </p>
                 </div>
                 {f.glbUrl && (
                   <button

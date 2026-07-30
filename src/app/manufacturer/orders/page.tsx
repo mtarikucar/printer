@@ -80,6 +80,9 @@ export default async function ManufacturerOrdersPage({
         modifiers: true,
         manufacturerStatus: true,
         assignedToManufacturerAt: true,
+        quantity: true,
+        needsPainting: true,
+        upsells: true,
       },
     }),
   ]);
@@ -104,6 +107,9 @@ export default async function ManufacturerOrdersPage({
           modifiers: o.modifiers as string[] | null,
           manufacturerStatus: o.manufacturerStatus,
           assignedAt: o.assignedToManufacturerAt?.toISOString() ?? null,
+          quantity: o.quantity,
+          needsPainting: o.needsPainting,
+          rushShipping: ((o.upsells ?? []) as string[]).includes("rush_shipping"),
         }))}
         total={totalCount}
         page={page}

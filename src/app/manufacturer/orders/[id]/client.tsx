@@ -39,6 +39,15 @@ interface OrderData {
     boundingBoxMm: { x: number; y: number; z: number } | null;
     minWallThicknessMm: number | null;
     printRisk: string[];
+    volumeMm3: number | null;
+    isVolume: boolean | null;
+  } | null;
+  paidAt: string | null;
+  leadTimeDays: number | null;
+  modelRevision: {
+    current: number;
+    total: number;
+    uploadedAt: string | null;
   } | null;
   status: string;
   manufacturerStatus: string | null;
@@ -81,8 +90,12 @@ interface Props {
       images: string[];
     } | null;
     productSpecs: {
+      itemId: string;
       productId: string;
       title: string;
+      material: string | null;
+      description: string | null;
+      images: string[];
       quantity: number;
       selectedOptions: { groupName: string; choiceName: string }[];
       selectedAddons: { name: string }[];
@@ -94,6 +107,9 @@ interface Props {
         sourceFormat: string;
         quantity: number;
         glbUrl: string | null;
+        fileSizeBytes: number;
+        volumeMm3: number | null;
+        boundingBoxMm: { x: number; y: number; z: number } | null;
       }[];
       components: {
         name: string;
@@ -172,6 +188,7 @@ const STATUS_ICONS: Record<string, string> = {
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, actions } = data;
+  const d = useDictionary();
   const isMarketplace = order.orderType === "marketplace";
   // A manual/WhatsApp order is a "marketplace" order with no product behind it:
   // no product card, no production spec. Its contents are the line items.
@@ -215,9 +232,22 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
         value: `${um.minWallThicknessMm.toLocaleString("tr-TR", { maximumFractionDigits: 2 })} mm`,
       });
     }
+    if (um.volumeMm3 != null) {
+      specRows.push({
+        label: "Hacim",
+        value: `${(um.volumeMm3 / 1000).toLocaleString("tr-TR", { maximumFractionDigits: 1 })} cm³`,
+      });
+    }
     specRows.push({
       label: "Malzeme",
       value: um.material === "filament" ? "Filament" : "Reçine",
+    });
+    // On an upload order the finish IS the instruction (raw / smoothed / painted).
+    specRows.push({
+      label: "Boyama / Yüzey",
+      value:
+        (d[`create.finish.${order.finish}` as keyof typeof d] as string) ||
+        order.finish,
     });
   } else if (!hasCustomSpec && order.productMaterial) {
     // Marketplace product: material comes from the listing, not the order.
@@ -237,6 +267,18 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
         : "Evet — QC sonrası boyacıya devredilir",
     });
   }
+  // Geometry risks flagged by the upload analysis.
+  const PRINT_RISK_LABELS: Record<string, string> = {
+    thin_walls: "İnce duvar — kırılma riski",
+    non_manifold: "Kapalı olmayan yüzey (non-manifold)",
+    not_watertight: "Su sızdıran (watertight değil) model",
+    multiple_shells: "Çok parçalı/ayrık kabuk",
+    too_large: "Baskı hacmini aşıyor",
+    too_small: "Çok küçük — detay kaybı",
+    high_poly: "Çok yüksek poligon",
+    open_edges: "Açık kenarlar",
+  };
+
   // Paid add-ons that change what leaves the workshop.
   const UPSELL_LABELS: Record<string, string> = {
     extra_paint: "Ekstra boya katmanı — daha doygun renk ve detay vurgusu",
@@ -253,7 +295,6 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   );
   const netEarningKurus = order.grossKurus - commissionKurus;
   const router = useRouter();
-  const d = useDictionary();
   const loc = locale as Locale;
 
   const [loading, setLoading] = useState<string | null>(null);
@@ -400,6 +441,11 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 "-"}
             </span>
           </div>
+          {order.upsells.includes("rush_shipping") && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
+              ⚡ HIZLI KARGO
+            </span>
+          )}
           {/* What was ordered — the snapshot was serialized but never shown. */}
           {order.productTitleSnapshot && (
             <p className="text-sm font-medium text-gray-700">
@@ -411,6 +457,15 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {order.modelRevision && order.modelRevision.total > 1 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
+              ⚠ Model güncellendi — v{order.modelRevision.current}
+              {order.modelRevision.uploadedAt
+                ? ` · ${formatDateTime(order.modelRevision.uploadedAt, loc)}`
+                : ""}
+              . Yeni dosyayı indirin.
+            </span>
+          )}
           {glbUrl && (
             <a
               href={`/api/manufacturer/orders/${order.id}/download-glb`}
@@ -629,6 +684,25 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   </div>
                 ))}
               </dl>
+              {/* Geometry warnings the upload analysis produced. They were
+                  measured, stored and never shown to whoever prints the file. */}
+              {(order.uploadedModel?.printRisk.length ?? 0) > 0 && (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs font-semibold text-red-800">
+                    Model uyarıları — baskı öncesi kontrol edin
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {order.uploadedModel!.printRisk.map((r) => (
+                      <span
+                        key={r}
+                        className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-red-700 ring-1 ring-red-200"
+                      >
+                        {PRINT_RISK_LABELS[r] ?? r}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -702,7 +776,45 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           {/* ─── Production files + BOM + recipe (one panel per product) ── */}
           {isMarketplace &&
             productSpecs.map((ps) => (
-              <div key={ps.productId} className="space-y-3">
+              <div key={ps.itemId} className="space-y-3">
+                {/* Cart sub-orders have no single product card above, so the
+                    listing itself (material, description, images) has to appear
+                    per line or the workshop never sees it. */}
+                {(ps.material || ps.description || ps.images.length > 0) && (
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-semibold text-gray-900">
+                        {ps.title}
+                      </h4>
+                      {ps.material && (
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                          {ps.material === "filament" ? "Filament" : "Reçine"}
+                        </span>
+                      )}
+                      {ps.quantity > 1 && (
+                        <span className="text-xs text-gray-500">× {ps.quantity}</span>
+                      )}
+                    </div>
+                    {ps.images.length > 0 && (
+                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {ps.images.slice(0, 4).map((url) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={url}
+                            src={url}
+                            alt={ps.title}
+                            className="h-24 w-full rounded-lg border border-gray-100 object-cover"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {ps.description && (
+                      <p className="mt-2 whitespace-pre-line text-sm text-gray-600">
+                        {ps.description}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {(ps.selectedOptions.length > 0 ||
                   ps.selectedAddons.length > 0 ||
                   ps.itemImageUrl) && (
@@ -1345,7 +1457,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                         className="inline-block px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-full"
                       >
                         {(d[
-                          `modifiers.${mod}` as keyof typeof d
+                          `create.modifier.${mod}` as keyof typeof d
                         ] as string) || mod}
                       </span>
                     ))}

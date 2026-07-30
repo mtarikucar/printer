@@ -9,6 +9,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { PainterJobsClient } from "./jobs-client";
 import { normalizeFileUrl } from "@/lib/services/storage";
 import type { TurkishAddress } from "@/lib/db/schema";
+import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 
 const PAGE_SIZE = 20;
 
@@ -92,6 +93,8 @@ export default async function PainterJobsPage({
         quantity: true,
         shippingAddress: true,
         modelGlbUrl: true,
+        // Material decides the primer/adhesion the painter must use.
+        material: true,
       },
       with: {
         user: { columns: { fullName: true } },
@@ -119,6 +122,8 @@ export default async function PainterJobsPage({
           painterStatus: o.painterStatus,
           paintingPriceKurus: o.paintingPriceKurus,
           assignedAt: o.assignedToPainterAt?.toISOString() ?? null,
+          material: o.material,
+          commissionRateBps: PLATFORM_COMMISSION_RATE_BPS,
           specRows: (o.selectedOptions ?? []).map((s) => ({
             label: s.groupName,
             value: s.choiceName,

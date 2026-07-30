@@ -31,6 +31,9 @@ interface ManufacturerOrdersClientProps {
     modifiers: string[] | null;
     manufacturerStatus: string | null;
     assignedAt: string | null;
+    quantity: number;
+    needsPainting: boolean;
+    rushShipping: boolean;
   }>;
   total: number;
   page: number;
@@ -164,16 +167,40 @@ export function ManufacturerOrdersClient({
                         {(d["shop.title" as keyof typeof d] as string) ||
                           "Mağaza"}
                       </span>
-                      <span className="text-gray-700 truncate max-w-[160px]">
+                      <span
+                        className="text-gray-700 truncate max-w-[160px]"
+                        title={order.productTitleSnapshot ?? undefined}
+                      >
                         {order.productTitleSnapshot}
                       </span>
                     </span>
                   ) : (
                     sizeDisplay(order.figurineSize, d, { short: true }) || "—"
                   )}
+                  {/* Flags that change how the job is handled — invisible until
+                      you opened the order. */}
+                  <span className="ml-1.5 inline-flex flex-wrap gap-1 align-middle">
+                    {order.quantity > 1 && (
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-700">
+                        × {order.quantity}
+                      </span>
+                    )}
+                    {order.rushShipping && (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-semibold text-red-700">
+                        Hızlı
+                      </span>
+                    )}
+                    {order.needsPainting && (
+                      <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[11px] font-semibold text-purple-700">
+                        Boyamalı
+                      </span>
+                    )}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  {order.orderType === "marketplace"
+                  {/* Only custom orders carry a chosen design template; upload
+                      orders were showing the column default as if it were one. */}
+                  {order.orderType !== "custom"
                     ? "—"
                     : (d[
                         `create.style.${order.style}` as keyof typeof d

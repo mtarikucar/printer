@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Locale } from "@/lib/i18n/types";
 import { sizeDisplayTr } from "@/lib/config/sizes";
 import { QC_MIN_PHOTOS } from "@/lib/config/qc";
+import { ModelViewer } from "@/components/model-viewer";
 
 interface Job {
   id: string;
@@ -24,6 +25,10 @@ interface Job {
   specRows: { label: string; value: string }[];
   material: string | null;
   commissionRateBps: number;
+  /** QC photos already uploaded for the current round (server truth). */
+  qcPhotoCount: number;
+  qcPhotoUrls: string[];
+  glbUrl: string | null;
   customerNote: string | null;
   quantity: number;
   /** The styled image the customer signed off on — the painting reference. */
@@ -97,7 +102,9 @@ export function PainterJobsClient({
   const [busy, setBusy] = useState<string | null>(null);
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [carrier, setCarrier] = useState<Record<string, string>>({});
-  const [qcUploaded, setQcUploaded] = useState<Record<string, number>>({});
+  const [qcUploaded, setQcUploaded] = useState<Record<string, number>>(() =>
+    Object.fromEntries(jobs.map((j) => [j.id, j.qcPhotoCount]))
+  );
 
   const call = async (id: string, action: string, payload?: Record<string, unknown>) => {
     setBusy(`${action}-${id}`);
@@ -282,6 +289,17 @@ export function PainterJobsClient({
                 </div>
               )}
 
+              {j.glbUrl && (
+                <details className="mb-3 rounded-lg border border-gray-200 p-2">
+                  <summary className="cursor-pointer text-xs font-medium text-gray-600">
+                    3D modeli aç (tüm açılar)
+                  </summary>
+                  <div className="mt-2">
+                    <ModelViewer url={j.glbUrl} className="h-64 w-full rounded-lg" />
+                  </div>
+                </details>
+              )}
+
               {(j.specRows.length > 0 || j.quantity > 1) && (
                 <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-gray-50 p-3 sm:grid-cols-3">
                   {j.specRows.map((row, i) => (
@@ -368,6 +386,19 @@ export function PainterJobsClient({
                         }}
                       />
                     </label>
+                    {j.qcPhotoUrls.length > 0 && (
+                      <span className="flex gap-1">
+                        {j.qcPhotoUrls.slice(0, 4).map((u) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={u}
+                            src={u}
+                            alt="QC"
+                            className="h-10 w-10 rounded border border-gray-200 object-cover"
+                          />
+                        ))}
+                      </span>
+                    )}
                     {(qcUploaded[j.id] ?? 0) > 0 && (
                       <span className="text-xs text-green-600">
                         {qcUploaded[j.id]} fotoğraf eklendi
@@ -375,7 +406,9 @@ export function PainterJobsClient({
                     )}
                     <button
                       onClick={() => submitQc(j.id)}
-                      disabled={busy !== null || (qcUploaded[j.id] ?? 0) < 1}
+                      disabled={
+                        busy !== null || (qcUploaded[j.id] ?? 0) < QC_MIN_PHOTOS
+                      }
                       className="px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
                     >
                       QC&apos;ye gönder

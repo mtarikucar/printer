@@ -1,13 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc, count, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, painters } from "@/lib/db/schema";
+import { orders, painters, painterQcPhotos } from "@/lib/db/schema";
 import { getPainterSession } from "@/lib/services/painter-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { PainterJobsClient } from "./jobs-client";
-import { normalizeFileUrl } from "@/lib/services/storage";
+import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 
@@ -95,6 +95,7 @@ export default async function PainterJobsPage({
         modelGlbUrl: true,
         // Material decides the primer/adhesion the painter must use.
         material: true,
+        painterQcRound: true,
       },
       with: {
         user: { columns: { fullName: true } },
@@ -103,6 +104,32 @@ export default async function PainterJobsPage({
       },
     }),
   ]);
+
+  // QC photos already uploaded for the current round. Without this the submit
+  // button re-locked after every page reload, because the count lived only in
+  // client state.
+  const jobIds = orderRows.map((o) => o.id);
+  const qcRows = jobIds.length
+    ? await db
+        .select({
+          orderId: painterQcPhotos.orderId,
+          round: painterQcPhotos.round,
+          storageKey: painterQcPhotos.storageKey,
+          thumbnailKey: painterQcPhotos.thumbnailKey,
+        })
+        .from(painterQcPhotos)
+        .where(inArray(painterQcPhotos.orderId, jobIds))
+    : [];
+  const qcByOrder = new Map<string, { count: number; urls: string[] }>();
+  for (const row of orderRows) {
+    const mine = qcRows.filter(
+      (q) => q.orderId === row.id && q.round === row.painterQcRound
+    );
+    qcByOrder.set(row.id, {
+      count: mine.length,
+      urls: mine.map((q) => getPublicUrl(q.thumbnailKey ?? q.storageKey)),
+    });
+  }
 
   const totalCount = countResult[0]?.total ?? 0;
 
@@ -124,6 +151,9 @@ export default async function PainterJobsPage({
           assignedAt: o.assignedToPainterAt?.toISOString() ?? null,
           material: o.material,
           commissionRateBps: PLATFORM_COMMISSION_RATE_BPS,
+          qcPhotoCount: qcByOrder.get(o.id)?.count ?? 0,
+          qcPhotoUrls: qcByOrder.get(o.id)?.urls ?? [],
+          glbUrl: normalizeFileUrl(o.modelGlbUrl),
           specRows: (o.selectedOptions ?? []).map((s) => ({
             label: s.groupName,
             value: s.choiceName,

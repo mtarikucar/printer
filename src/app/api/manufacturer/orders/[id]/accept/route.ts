@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 
 export async function POST(
   request: NextRequest,
@@ -34,6 +35,10 @@ export async function POST(
     .set({
       manufacturerStatus: "accepted",
       manufacturerAcceptedAt: new Date(),
+      // Freeze the commission the partner agreed to. Earnings accrue at ship
+      // time; without this a rate change between accept and ship would apply
+      // retroactively, which the agreement rules out.
+      commissionRateBps: sql`COALESCE(${orders.commissionRateBps}, ${PLATFORM_COMMISSION_RATE_BPS})`,
       updatedAt: new Date(),
     })
     .where(

@@ -643,6 +643,10 @@ export const orders = pgTable("orders", {
   // paintingPriceKurus is the add-on price (part of orders.amountKurus). After
   // QC the manufacturer hands the figurine to a painter, who paints + ships.
   needsPainting: boolean("needs_painting").notNull().default(false),
+  // Platform commission frozen when the manufacturer accepted this order.
+  // Without it a later rate change would retroactively repay orders accepted
+  // under the old rate — the partnership agreement promises it will not.
+  commissionRateBps: integer("commission_rate_bps"),
   paintingPriceKurus: integer("painting_price_kurus").notNull().default(0),
   painterId: uuid("painter_id").references(() => painters.id),
   painterStatus: painterOrderStatusEnum("painter_status"),
@@ -1096,6 +1100,10 @@ export const manufacturers = pgTable("manufacturers", {
   paintsInHouse: boolean("paints_in_house").notNull().default(false),
   // Onboarding
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
+  // Which version of the partnership agreement was accepted. Without it a
+  // later edit to the contract text cannot be proven against a partner who
+  // signed the earlier one. See src/lib/config/contract-versions.ts.
+  onboardingVersion: text("onboarding_version"),
   status: manufacturerStatusEnum("status").notNull().default("pending_approval"),
   // Verification flow (issue #2): rejection note shown to the applicant, and the
   // timestamp the conditionally-approved manufacturer uploaded their 3D-printer
@@ -1195,6 +1203,10 @@ export const painters = pgTable("painters", {
   maxConcurrentOrders: integer("max_concurrent_orders").notNull().default(5),
   acceptingOrders: boolean("accepting_orders").notNull().default(true),
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
+  // Which version of the partnership agreement was accepted. Without it a
+  // later edit to the contract text cannot be proven against a partner who
+  // signed the earlier one. See src/lib/config/contract-versions.ts.
+  onboardingVersion: text("onboarding_version"),
   status: painterStatusEnum("status").notNull().default("pending_approval"),
   rejectionReason: text("rejection_reason"),
   // Conditional-approval gate: the painter uploads a sample of prior work; the

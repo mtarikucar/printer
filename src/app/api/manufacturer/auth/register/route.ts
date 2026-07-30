@@ -9,6 +9,7 @@ import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { parseTaxId } from "@/lib/services/tax-id";
 import { isValidTrIban, normalizeIban } from "@/lib/services/iban";
 import { phoneField } from "@/lib/phone";
+import { MANUFACTURER_CONTRACT_VERSION } from "@/lib/config/contract-versions";
 
 export async function POST(request: NextRequest) {
   const ip = extractClientIp(request);
@@ -121,6 +122,7 @@ export async function POST(request: NextRequest) {
         capabilities: validated.materials.map((m) => `material_${m}`),
         acceptingOrders: true,
         onboardingAcceptedAt: new Date(),
+        onboardingVersion: MANUFACTURER_CONTRACT_VERSION,
         status: "pending_approval",
       })
       .returning();

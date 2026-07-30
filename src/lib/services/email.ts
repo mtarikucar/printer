@@ -56,6 +56,8 @@ interface SendEmailParams {
   to: string;
   orderNumber: string;
   customerName: string;
+  /** Finish tier — decides whether the paint-kit list is included. */
+  finish?: string;
   trackingNumber?: string;
   adminEmail?: string;
   manufacturerEmail?: string;
@@ -163,14 +165,22 @@ function getTemplates(locale: Locale) {
           <p>${d["email.shipped.body"]}</p>
           <p><strong>${d["email.shipped.orderNumber"]}</strong> ${escHtml(p.orderNumber)}</p>
           ${p.trackingNumber ? `<p><strong>${d["email.shipped.trackingNumber"]}</strong> ${escHtml(p.trackingNumber)}</p>` : ""}
-          <h2>${d["email.shipped.kitContents"]}</h2>
+          ${
+            // Only the "Boyanabilir Kit" tier ships a paint kit. Collector Raw
+            // is explicitly kitless (and ₺100 cheaper for it) and the painted
+            // tiers arrive finished — listing kit contents to those customers
+            // promises something that is not in the box.
+            !p.finish || p.finish === "paintable_kit"
+              ? `<h2>${d["email.shipped.kitContents"]}</h2>
           <ul>
             <li>${d["email.shipped.item1"]}</li>
             <li>${d["email.shipped.item2"]}</li>
             <li>${d["email.shipped.item3"]}</li>
             <li>${d["email.shipped.item4"]}</li>
             <li>${d["email.shipped.item5"]}</li>
-          </ul>
+          </ul>`
+              : ""
+          }
           <a href="${trackUrl(p.orderNumber)}"
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.shipped.trackButton"]}

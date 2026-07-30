@@ -143,6 +143,27 @@ async function onTimeDeliveryScoreFor(manufacturerId: string): Promise<number> {
   return Math.round(totalPctSum / rows.length);
 }
 
+/**
+ * Action strings as written by the manufacturer routes — keep in sync with
+ * `manufacturerActions.action` inserts (accept / start_printing /
+ * finish_printing / submit_qc / send_to_painter / ship / decline /
+ * cancel_after_accept / admin_revoked).
+ */
+const GOOD_ACTIONS = new Set([
+  "accept",
+  "start_printing",
+  "finish_printing",
+  "submit_qc",
+  "send_to_painter",
+  "ship",
+]);
+/**
+ * `admin_revoked` is deliberately NOT counted: an admin takes an order back for
+ * many reasons (wrong material, customer change, silence), and the strike
+ * mechanism is the explicit, opt-in penalty for that.
+ */
+const BAD_ACTIONS = new Set(["decline", "cancel_after_accept"]);
+
 async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
   // Look at the last 20 manufacturer actions; reward "shipped" / "printed" outcomes,
   // penalize "rejected" / "cancelled". Default to 70 for new manufacturers.
@@ -158,13 +179,13 @@ async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
   let good = 0;
   let bad = 0;
   for (const r of rows) {
-    if (r.action === "shipped" || r.action === "printed" || r.action === "accepted") {
+    // These MUST match the strings the routes actually insert. The previous
+    // list ("shipped"/"printed"/"accepted") matched nothing that is ever
+    // written, so the good counter stayed 0 and a single decline dropped a
+    // manufacturer from 70 to 0.
+    if (GOOD_ACTIONS.has(r.action)) {
       good++;
-    } else if (
-      r.action === "rejected" ||
-      r.action === "cancelled" ||
-      r.action === "decline"
-    ) {
+    } else if (BAD_ACTIONS.has(r.action)) {
       // N12: a manufacturer-initiated decline costs reliability score; the
       // score feeds back into ranking so chronic decliners drift down the
       // candidate list and eventually become ineligible by score weight.

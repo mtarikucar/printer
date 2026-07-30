@@ -57,6 +57,7 @@ import { eq, and, or, isNull, isNotNull, count, inArray } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplay } from "@/lib/config/sizes";
+import { finishNeedsPainter, paintingPortionKurus } from "@/lib/config/prices";
 
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
@@ -361,13 +362,17 @@ export async function POST(request: NextRequest) {
     // base (the manufacturer's earning is amountKurus − paintingPriceKurus).
     const needsPainting =
       orderType === "custom" &&
-      customInput?.finish === "hand_painted" &&
-      // hand_painted is only a real, priced finish for character figures; on any
+      // hand_painted AND luxe_display are both hand-painted by a painter
+      // partner; luxe_display used to fall through and was never routed.
+      finishNeedsPainter(customInput?.finish) &&
+      // These are only real, priced finishes for character figures; on any
       // other price kind (object / Creative Lab flat items) the surcharge is not
       // collected, so the order must NOT be flagged for paid painting.
-      priceKindForStyle(customInput.style) === "figure";
+      priceKindForStyle(customInput!.style) === "figure";
+    // Only the painting part of the surcharge is the painter's base — the
+    // luxe_display extras (base, plate, case) are the platform's cost.
     const paintingPriceKurus = needsPainting
-      ? finishSurchargeKurus("hand_painted")
+      ? paintingPortionKurus(customInput!.finish)
       : 0;
     const amountKurus = itemAmountKurus + upsellAmountKurus;
 

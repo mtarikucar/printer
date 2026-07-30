@@ -7,6 +7,7 @@ import type { TurkishAddress } from "@/lib/db/schema";
 import { hashPassword } from "@/lib/services/painter-auth";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { phoneField } from "@/lib/phone";
+import { PAINTER_CONTRACT_VERSION } from "@/lib/config/contract-versions";
 
 export async function POST(request: NextRequest) {
   const ip = extractClientIp(request);
@@ -92,6 +93,7 @@ export async function POST(request: NextRequest) {
         maxConcurrentOrders: validated.maxConcurrentOrders,
         acceptingOrders: true,
         onboardingAcceptedAt: new Date(),
+        onboardingVersion: PAINTER_CONTRACT_VERSION,
         status: "pending_approval",
       })
       .returning();

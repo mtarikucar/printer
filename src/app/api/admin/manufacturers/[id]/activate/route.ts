@@ -19,7 +19,10 @@ export async function POST(
 
   const [manufacturer] = await db
     .update(manufacturers)
-    .set({ status: "active", updatedAt: new Date() })
+    // Clear the strikes too: leaving the count at the suspend threshold means
+    // the very next strike re-suspends the account instantly, so a
+    // reactivation would be meaningless.
+    .set({ status: "active", strikeCount: 0, updatedAt: new Date() })
     .where(
       and(
         eq(manufacturers.id, id),

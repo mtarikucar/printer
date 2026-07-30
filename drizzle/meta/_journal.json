@@ -260,6 +260,20 @@
       "when": 1785269328065,
       "tag": "0036_figurine_size_text",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785394894665,
+      "tag": "0037_partner_contract_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1785395107782,
+      "tag": "0038_order_commission_rate",
+      "breakpoints": true
     }
   ]
 }

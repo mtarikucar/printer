@@ -1239,7 +1239,7 @@ const tr: Dictionary = {
   "landing.fig.trust.statShippingLabel": "kargo · Türkiye geneli",
   "landing.fig.trust.badge.ssl": "256-bit SSL şifreli",
   "landing.fig.trust.badge.payment": "PayTR 3D Secure ödeme",
-  "landing.fig.trust.badge.refund": "Memnun değilseniz iade",
+  "landing.fig.trust.badge.refund": "Ayıplı üründe ücretsiz yenileme",
 
   // Landing - Son CTA
   "landing.cta.title": "Fotoğrafını Figürine Dönüştür",

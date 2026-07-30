@@ -63,6 +63,27 @@ export const FINISH_SURCHARGES_KURUS: Record<FigurineFinish, number> = {
   luxe_display: 200000,
 };
 
+/**
+ * The part of a finish surcharge that pays for PROFESSIONAL PAINTING, i.e. the
+ * painter partner's earning base.
+ *
+ * luxe_display costs ₺2.000, but only ₺1.000 of that is the hand-painting — the
+ * rest buys the premium base, the name plate and the hard case, which the
+ * platform supplies. Paying the painter on the full ₺2.000 would hand them the
+ * cost of goods they never bought.
+ */
+export function paintingPortionKurus(finish: string | null | undefined): number {
+  if (finish === "hand_painted" || finish === "luxe_display") {
+    return FINISH_SURCHARGES_KURUS.hand_painted;
+  }
+  return 0;
+}
+
+/** Finishes fulfilled by a painter partner rather than the manufacturer. */
+export function finishNeedsPainter(finish: string | null | undefined): boolean {
+  return finish === "hand_painted" || finish === "luxe_display";
+}
+
 // Surcharge for a finish key. Unknown finish → 0 (treated as the default kit).
 export function finishSurchargeKurus(finish: string | null | undefined): number {
   if (!finish) return 0;

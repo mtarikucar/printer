@@ -1,6 +1,6 @@
 import { eq, and, ne, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { manufacturerEarnings, payouts, invoices } from "@/lib/db/schema";
+import { manufacturerEarnings, payouts, invoices, orders } from "@/lib/db/schema";
 import { computeEarning, computeKdv } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS, KDV_RATE_BPS } from "@/lib/config/prices";
 import { eInvoiceProvider } from "@/lib/services/e-invoice";
@@ -12,7 +12,15 @@ export async function accrueEarning(
   manufacturerId: string,
   grossKurus: number
 ): Promise<void> {
-  const e = computeEarning(grossKurus, PLATFORM_COMMISSION_RATE_BPS);
+  // Use the rate frozen when the manufacturer accepted the order; fall back to
+  // the current rate for orders accepted before the column existed.
+  const [row] = await db
+    .select({ rate: orders.commissionRateBps })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  const rateBps = row?.rate ?? PLATFORM_COMMISSION_RATE_BPS;
+  const e = computeEarning(grossKurus, rateBps);
   await db
     .insert(manufacturerEarnings)
     .values({

@@ -34,7 +34,7 @@ export default async function KargoPage() {
               <ul>
                 <li>Gönderilerimiz <strong>Yurtiçi Kargo</strong> ile gerçekleştirilir.</li>
                 <li>Türkiye içi kargo <strong>ücretsizdir</strong>; sipariş bedeline ek bir kargo ücreti yansıtılmaz.</li>
-                <li>Gönderiler Ankara (Etimesgut) merkezimizden hazırlanıp kargoya verilir.</li>
+                <li>Gönderiler, siparişi üreten anlaşmalı atölyemizden hazırlanıp kargoya verilir; bu nedenle çıkış ili siparişe göre değişebilir.</li>
               </ul>
 
               <h2>2. Üretim Süresi</h2>
@@ -102,7 +102,7 @@ export default async function KargoPage() {
               <ul>
                 <li>Our shipments are carried out with <strong>Yurtici Kargo</strong>.</li>
                 <li>Domestic shipping within Turkey is <strong>free</strong>; no additional shipping fee is added to your order total.</li>
-                <li>Shipments are prepared and dispatched from our facility in Ankara (Etimesgut).</li>
+                <li>Shipments are prepared and dispatched by the partner workshop that produced the order, so the origin city can vary per order.</li>
               </ul>
 
               <h2>2. Production Time</h2>

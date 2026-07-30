@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and, or, isNull } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { orders, adminActions, manufacturers } from "@/lib/db/schema";
+import {
+  orders,
+  adminActions,
+  manufacturers,
+  generationAttempts,
+  orderItems,
+} from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
@@ -38,6 +44,56 @@ export async function POST(
     if (!manufacturer) {
       return NextResponse.json(
         { error: "Manufacturer not found or not active" },
+        { status: 400 }
+      );
+    }
+
+    // An order with nothing to print must never reach a manufacturer: that is
+    // exactly how an assigned order ended up showing the partner an empty
+    // screen. Printable content = an uploaded model, a legacy generated model,
+    // a marketplace product (own or per line item), a customer-uploaded file,
+    // or — for a manual/WhatsApp order — at least one written line item.
+    const target = await db.query.orders.findFirst({
+      where: eq(orders.id, id),
+      columns: {
+        id: true,
+        modelGlbKey: true,
+        modelStlKey: true,
+        productId: true,
+        uploadedModelId: true,
+        selectedAddons: true,
+      },
+      with: {
+        generationAttempts: {
+          where: eq(generationAttempts.status, "succeeded"),
+          columns: { id: true },
+          limit: 1,
+        },
+      },
+    });
+    if (!target) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+    // Cart sub-orders carry their products per line (there is no orders→items
+    // relation), so check that table directly.
+    const lineProducts = await db
+      .select({ productId: orderItems.productId })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, id));
+    const hasPrintable =
+      !!target.modelGlbKey ||
+      !!target.modelStlKey ||
+      !!target.productId ||
+      !!target.uploadedModelId ||
+      target.generationAttempts.length > 0 ||
+      lineProducts.some((i) => !!i.productId) ||
+      (target.selectedAddons?.length ?? 0) > 0;
+    if (!hasPrintable) {
+      return NextResponse.json(
+        {
+          error:
+            "Bu siparişte üreticiye gönderilecek basılabilir içerik yok (model, ürün veya kalem). Önce 3D modeli yükleyin ya da sipariş kalemlerini girin.",
+        },
         { status: 400 }
       );
     }

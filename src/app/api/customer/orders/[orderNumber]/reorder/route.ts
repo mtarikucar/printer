@@ -5,8 +5,9 @@ import { db } from "@/lib/db";
 import { orders, orderDrafts } from "@/lib/db/schema";
 import {
   itemPriceKurus,
-  finishSurchargeKurus,
   isPriceableSize,
+  finishNeedsPainter,
+  paintingPortionKurus,
 } from "@/lib/config/prices";
 import { priceKindForStyle } from "@/lib/create/design-templates";
 import { getSessionUser } from "@/lib/services/customer-auth";
@@ -118,9 +119,9 @@ export async function POST(
   // promoted order keeps needsPainting=false, ships unpainted, and the painting
   // money is wrongly credited to the manufacturer. Mirror /api/orders exactly.
   const needsPainting =
-    priceKindForStyle(order.style) === "figure" && order.finish === "hand_painted";
+    priceKindForStyle(order.style) === "figure" && finishNeedsPainter(order.finish);
   const paintingPriceKurus = needsPainting
-    ? finishSurchargeKurus("hand_painted")
+    ? paintingPortionKurus(order.finish)
     : 0;
 
   const havaleDiscountKurus =

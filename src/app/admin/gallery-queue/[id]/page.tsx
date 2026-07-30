@@ -41,6 +41,8 @@ export default async function AdminGalleryReviewPage({
       galleryReviewStatus: true,
       galleryReviewReason: true,
       createdAt: true,
+      // Admin-uploaded model is the real source since auto-3D was removed.
+      modelGlbUrl: true,
     },
   });
   if (!order) notFound();
@@ -63,7 +65,8 @@ export default async function AdminGalleryReviewPage({
           galleryReviewReason: order.galleryReviewReason,
           createdAt: order.createdAt.toISOString(),
           photoUrl: order.photos[0]?.originalUrl ?? null,
-          glbUrl: order.generationAttempts[0]?.outputGlbUrl ?? null,
+          glbUrl:
+            order.modelGlbUrl ?? order.generationAttempts[0]?.outputGlbUrl ?? null,
         }}
       />
     </div>

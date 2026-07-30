@@ -42,7 +42,13 @@ export async function POST(
     );
   }
 
-  if (order.generationAttempts.length === 0) {
+  // The printable model comes from the admin upload (orders.model_glb_url)
+  // since the auto-3D pipeline was removed; generation_attempts is the legacy
+  // source and is empty for every order created after that migration. Reading
+  // only the legacy table made publishing impossible for all new orders.
+  const hasModel =
+    !!order.modelGlbUrl || order.generationAttempts.length > 0;
+  if (!hasModel) {
     return NextResponse.json(
       { error: "No completed generation available" },
       { status: 400 }

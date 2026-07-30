@@ -1233,7 +1233,7 @@ const en = {
   "landing.fig.trust.statShippingLabel": "shipping · Turkey-wide",
   "landing.fig.trust.badge.ssl": "256-bit SSL encrypted",
   "landing.fig.trust.badge.payment": "PayTR 3D Secure checkout",
-  "landing.fig.trust.badge.refund": "Money-back if you're not happy",
+  "landing.fig.trust.badge.refund": "Free replacement if faulty",
 
   // Landing - Final CTA
   "landing.cta.title": "Turn Your Photo Into a Figurine",

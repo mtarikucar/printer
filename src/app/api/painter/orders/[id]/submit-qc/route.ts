@@ -5,6 +5,7 @@ import { orders, painterQcPhotos, painterActions } from "@/lib/db/schema";
 import { requireActivePainter } from "@/lib/services/painter-guard";
 import { painterQcNextStatus, type PainterOrderStatus } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 
 // Painter submits the current QC round for admin review:
 // accepted|painting|painted|qc_rejected → qc_pending (requires >=1 photo).
@@ -35,8 +36,13 @@ export async function POST(
     .select({ value: count() })
     .from(painterQcPhotos)
     .where(and(eq(painterQcPhotos.orderId, id), eq(painterQcPhotos.round, order.painterQcRound)));
-  if (Number(photoRow?.value ?? 0) < 1) {
-    return NextResponse.json({ error: "Göndermeden önce en az bir fotoğraf ekleyin" }, { status: 400 });
+  // The painter agreement binds each QC round to at least 4 photos
+  // (front, back/side, close-up of the finest detail, base).
+  if (Number(photoRow?.value ?? 0) < QC_MIN_PHOTOS) {
+    return NextResponse.json(
+      { error: `İncelemeye göndermek için en az ${QC_MIN_PHOTOS} fotoğraf yükleyin.` },
+      { status: 400 }
+    );
   }
 
   const [updated] = await db

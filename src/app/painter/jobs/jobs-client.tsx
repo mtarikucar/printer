@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Locale } from "@/lib/i18n/types";
 import { sizeDisplayTr } from "@/lib/config/sizes";
+import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 
 interface Job {
   id: string;
@@ -123,8 +124,11 @@ export function PainterJobsClient({
   };
 
   const submitQc = (id: string) => {
-    if ((qcUploaded[id] ?? 0) < 1) {
-      alert("Önce en az bir QC fotoğrafı yükleyin");
+    if ((qcUploaded[id] ?? 0) < QC_MIN_PHOTOS) {
+      alert(
+        `Önce en az ${QC_MIN_PHOTOS} QC fotoğrafı yükleyin: genel ön, arka/yan, ` +
+          `yüz veya en detaylı bölgenin yakın çekimi ve kaide/taban.`
+      );
       return;
     }
     call(id, "submit-qc");

@@ -70,6 +70,7 @@ export async function POST(
       to: order.email,
       orderNumber: order.orderNumber,
       customerName: order.customerName,
+      finish: order.finish,
       trackingNumber: validated.trackingNumber,
       locale,
     });

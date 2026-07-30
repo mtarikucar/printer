@@ -231,7 +231,7 @@ export default async function TermsPage() {
               <h2>9. Uyuşmazlık Çözümü</h2>
               <ul>
                 <li>Bu Koşullar Türkiye Cumhuriyeti kanunlarına tabidir.</li>
-                <li>Uyuşmazlıklarda İstanbul Mahkemeleri ve İcra Daireleri yetkilidir.</li>
+                <li>Uyuşmazlıklarda Ankara Mahkemeleri ve İcra Daireleri yetkilidir.</li>
                 <li>Tüketici şikayetleri için Tüketici Hakem Heyetlerine başvurulabilir.</li>
               </ul>
 

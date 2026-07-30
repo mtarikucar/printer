@@ -41,6 +41,9 @@ export interface EmailJobData {
   orderNumber: string;
   customerName: string;
   trackingNumber?: string;
+  // Finish tier of the shipped order. The shipped email lists the paint-kit
+  // contents, which only the paintable_kit tier actually receives.
+  finish?: string;
   adminEmail?: string;
   manufacturerEmail?: string;
   companyName?: string;

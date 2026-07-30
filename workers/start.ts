@@ -7,10 +7,12 @@ import { startDekontOcrWorker } from "../src/lib/queue/workers/dekont-ocr.worker
 import { startScoringEvaluationsCleanupWorker } from "../src/lib/queue/workers/scoring-evaluations-cleanup.worker";
 import { startNotificationWorker } from "../src/lib/queue/workers/notification.worker";
 import { startAnalyticsCleanupWorker } from "../src/lib/queue/workers/analytics-cleanup.worker";
+import { startAssignmentSlaWorker } from "../src/lib/queue/workers/assignment-sla.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
   getAnalyticsCleanupQueue,
+  getAssignmentSlaQueue,
 } from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
@@ -23,6 +25,7 @@ const dekontOcrWorker = startDekontOcrWorker();
 const scoringEvalCleanupWorker = startScoringEvaluationsCleanupWorker();
 const notificationWorker = startNotificationWorker();
 const analyticsCleanupWorker = startAnalyticsCleanupWorker();
+const assignmentSlaWorker = startAssignmentSlaWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -46,6 +49,14 @@ getAnalyticsCleanupQueue().upsertJobScheduler(
   { name: "analytics-cleanup" }
 );
 
+// The assignment email promises a 24h accept/decline; flag the ones that blow
+// through it so an admin can reassign instead of noticing by accident.
+getAssignmentSlaQueue().upsertJobScheduler(
+  "assignment-sla-hourly",
+  { every: 3600000 },
+  { name: "assignment-sla" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -55,6 +66,7 @@ console.log("  - dekont-ocr (concurrency: 2)");
 console.log("  - scoring-evaluations-cleanup (repeatable: every 24h)");
 console.log("  - notification (concurrency: 5)");
 console.log("  - analytics-cleanup (repeatable: every 24h)");
+console.log("  - assignment-sla (repeatable: every 1h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -67,6 +79,7 @@ async function shutdown() {
     scoringEvalCleanupWorker.close(),
     notificationWorker.close(),
     analyticsCleanupWorker.close(),
+    assignmentSlaWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

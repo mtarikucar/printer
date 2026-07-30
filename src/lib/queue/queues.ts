@@ -93,6 +93,7 @@ let dekontOcrQueue: Queue | null = null;
 let scoringEvaluationsCleanupQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let analyticsCleanupQueue: Queue | null = null;
+let assignmentSlaQueue: Queue | null = null;
 
 export function getPreviewGenerationQueue(): Queue {
   if (!previewGenerationQueue) {
@@ -163,6 +164,20 @@ export function getScoringEvaluationsCleanupQueue(): Queue {
     });
   }
   return scoringEvaluationsCleanupQueue;
+}
+
+/** Hourly sweep for assignments the manufacturer never answered. */
+export function getAssignmentSlaQueue(): Queue {
+  if (!assignmentSlaQueue) {
+    assignmentSlaQueue = new Queue("assignment-sla", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        removeOnComplete: { count: 10 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return assignmentSlaQueue;
 }
 
 export function getAnalyticsCleanupQueue(): Queue {

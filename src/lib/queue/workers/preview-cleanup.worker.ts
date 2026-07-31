@@ -4,11 +4,17 @@ import { getRedisConnection } from "../connection";
 import { db } from "../../db";
 import { previews, orders } from "../../db/schema";
 import { deleteFile } from "../../services/storage";
+import { sweepStagedUploads } from "../../services/chunked-upload";
 
 const BATCH_SIZE = 50;
 const EXPIRY_DAYS = 30;
 
 async function processJob(job: Job) {
+  // Staged chunks from uploads nobody finished (browser closed mid-upload) —
+  // a 350 MB model left behind would otherwise sit on disk forever.
+  const staleChunks = await sweepStagedUploads().catch(() => 0);
+  if (staleChunks > 0) job.log(`Swept ${staleChunks} abandoned upload chunks`);
+
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - EXPIRY_DAYS);
 

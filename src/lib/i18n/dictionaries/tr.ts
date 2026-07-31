@@ -215,7 +215,7 @@ const tr: Dictionary = {
   "upload.title": "Kendi 3D modelini bastır",
   "upload.sub": "Zaten elinde hazır bir 3D model dosyası (STL/OBJ) varsa yükle; baskıya hazırlayıp fiyatlandıralım. Sadece fotoğrafın varsa “Fotoğraftan üret”i kullan.",
   "upload.dropzone": "STL / OBJ dosyanı sürükle ya da seç",
-  "upload.dropzoneHint": "en fazla 50MB",
+  "upload.dropzoneHint": "STL veya OBJ — boyut sınırı yok",
   "upload.height": "Baskı yüksekliği",
   "upload.material": "Malzeme",
   "upload.submit": "Yükle ve fiyatla",

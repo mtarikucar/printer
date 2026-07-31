@@ -41,7 +41,20 @@ export interface UploadOptions {
   signal?: AbortSignal;
   /** Milliseconds with no activity before giving up. 0 disables. */
   timeoutMs?: number;
+  /**
+   * Give up if not a single byte moves for this long. A reverse proxy whose
+   * `client_max_body_size` is below the file simply stops reading the body:
+   * the browser reports 0% forever and no error ever arrives. Without this the
+   * UI just sits there. 0 disables.
+   */
+  stallTimeoutMs?: number;
 }
+
+/** Message used when an upload makes no progress at all. */
+export const UPLOAD_STALLED_MESSAGE =
+  "Yükleme ilerlemiyor. Dosya sunucuya ulaşamıyor — büyük ihtimalle sunucu " +
+  "önündeki ara katmanın dosya boyutu sınırı bu dosyadan küçük. Yöneticinize " +
+  "bildirin veya daha küçük bir dosya deneyin.";
 
 /**
  * POSTs a FormData body and resolves with the parsed JSON response.
@@ -52,7 +65,7 @@ export function uploadWithProgress<T = unknown>(
   body: FormData,
   opts: UploadOptions = {}
 ): Promise<T> {
-  const { onProgress, signal, timeoutMs = 0 } = opts;
+  const { onProgress, signal, timeoutMs = 0, stallTimeoutMs = 30000 } = opts;
 
   return new Promise<T>((resolve, reject) => {
     if (signal?.aborted) {
@@ -66,9 +79,32 @@ export function uploadWithProgress<T = unknown>(
     if (timeoutMs > 0) xhr.timeout = timeoutMs;
 
     let total = 0;
+    let lastLoaded = -1;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    let stalled = false;
+
+    const clearStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = null;
+    };
+    const armStall = () => {
+      if (stallTimeoutMs <= 0) return;
+      clearStall();
+      stallTimer = setTimeout(() => {
+        stalled = true;
+        xhr.abort();
+      }, stallTimeoutMs);
+    };
+    armStall();
 
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
+      // Only a real byte movement resets the stall clock; browsers keep firing
+      // progress events with an unchanged `loaded` while a connection hangs.
+      if (e.loaded > lastLoaded) {
+        lastLoaded = e.loaded;
+        armStall();
+      }
       total = e.total;
       onProgress?.({
         phase: "uploading",
@@ -78,8 +114,10 @@ export function uploadWithProgress<T = unknown>(
       });
     };
 
-    // Every byte is out; whatever happens now is the server's work.
+    // Every byte is out; whatever happens now is the server's work, which can
+    // legitimately take a while (geometry analysis), so stop the stall clock.
     xhr.upload.onload = () => {
+      clearStall();
       onProgress?.({
         phase: "processing",
         percent: 100,
@@ -94,14 +132,21 @@ export function uploadWithProgress<T = unknown>(
       aborted = false,
       body: unknown = null
     ) => {
+      clearStall();
       reject(new UploadError(message, status, aborted, body));
     };
 
     xhr.onerror = () => fail("Bağlantı hatası — yükleme tamamlanamadı.");
     xhr.ontimeout = () => fail("Yükleme zaman aşımına uğradı.");
-    xhr.onabort = () => fail("Yükleme iptal edildi.", 0, true);
+    // A stall aborts the request too — report it as a diagnosis, not a cancel,
+    // so the caller shows it instead of silently swallowing it.
+    xhr.onabort = () =>
+      stalled
+        ? fail(UPLOAD_STALLED_MESSAGE, 0, false)
+        : fail("Yükleme iptal edildi.", 0, true);
 
     xhr.onload = () => {
+      clearStall();
       const raw = xhr.responseText;
       let parsed: unknown = null;
       try {

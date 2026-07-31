@@ -54,3 +54,51 @@ function validateObj(buffer: Buffer): ModelValidationResult {
   if (hasVertex && hasFace) return { ok: true, format: "obj" };
   return { ok: false, error: "invalid_obj" };
 }
+
+/**
+ * Same checks for a file that is already on disk (chunk-staged upload), where
+ * reading the whole thing back into a Buffer would undo the point of streaming
+ * it. Works from a head sample, a tail sample and the real size.
+ *
+ * `head` should be at least 256 KB — enough to reach the first `f` line of an
+ * OBJ — and `tail` the last few KB, which is where an ASCII STL's `endsolid`
+ * lives.
+ */
+export function validateStagedModel(
+  head: Buffer,
+  tail: Buffer,
+  fileSize: number,
+  fileName: string
+): ModelValidationResult {
+  const ext = fileName.toLowerCase().split(".").pop() ?? "";
+  if (!UPLOAD_MODEL_FORMATS.includes(ext as UploadModelFormat)) {
+    return { ok: false, error: "unsupported_format" };
+  }
+  if (fileSize < 16) return { ok: false, error: "too_small" };
+
+  if (ext === "stl") {
+    const start = head.subarray(0, Math.min(512, head.length)).toString("latin1").trimStart();
+    if (start.toLowerCase().startsWith("solid")) {
+      const headText = head.toString("latin1");
+      const tailText = tail.toString("latin1");
+      if (headText.includes("facet") && (tailText.includes("endsolid") || headText.includes("endsolid"))) {
+        return { ok: true, format: "stl" };
+      }
+    }
+    // Binary STL: the triangle count in the header must match the file length.
+    if (head.length >= 84 && fileSize >= 84) {
+      const count = head.readUInt32LE(80);
+      const expected = 84 + count * 50;
+      if (count > 0 && fileSize >= expected && fileSize - expected <= 1024) {
+        return { ok: true, format: "stl" };
+      }
+    }
+    return { ok: false, error: "invalid_stl" };
+  }
+
+  const text = head.toString("utf8") + "\n" + tail.toString("utf8");
+  const hasVertex = /^v\s+-?\d/m.test(text);
+  const hasFace = /^f\s+\d/m.test(text);
+  if (hasVertex && hasFace) return { ok: true, format: "obj" };
+  return { ok: false, error: "invalid_obj" };
+}

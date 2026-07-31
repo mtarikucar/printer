@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { formatBytes, type UploadProgress } from "@/lib/upload-with-progress";
 
 /**
@@ -19,8 +20,32 @@ export function UploadProgressBar({
   processingLabel?: string;
   className?: string;
 }) {
+  // Warn before the hard stall timeout fires, so a proxy silently refusing the
+  // body is visible within seconds rather than looking like a slow connection.
+  const [stalledSeconds, setStalledSeconds] = useState(0);
+  const lastLoaded = useRef(-1);
+  const lastMove = useRef(Date.now());
+
+  useEffect(() => {
+    if (!progress || progress.phase !== "uploading") {
+      lastLoaded.current = -1;
+      setStalledSeconds(0);
+      return;
+    }
+    if (progress.loadedBytes > lastLoaded.current) {
+      lastLoaded.current = progress.loadedBytes;
+      lastMove.current = Date.now();
+      setStalledSeconds(0);
+    }
+    const t = setInterval(() => {
+      setStalledSeconds(Math.floor((Date.now() - lastMove.current) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [progress]);
+
   if (!progress) return null;
   const isProcessing = progress.phase === "processing";
+  const isStalling = !isProcessing && stalledSeconds >= 8;
 
   return (
     <div className={`w-full ${className}`}>
@@ -45,14 +70,22 @@ export function UploadProgressBar({
           )}
         </span>
       </div>
+      {isStalling && (
+        <p className="mb-1 text-xs text-amber-700">
+          {stalledSeconds} saniyedir veri gitmiyor. Bağlantınız çok yavaş olabilir
+          ya da sunucu bu boyuttaki dosyayı kabul etmiyor olabilir.
+        </p>
+      )}
       <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
         {isProcessing ? (
           // Indeterminate: the server is busy and there is nothing to measure.
           <div className="h-full w-1/3 animate-[upload-slide_1.1s_ease-in-out_infinite] rounded-full bg-indigo-500" />
         ) : (
           <div
-            className="h-full rounded-full bg-indigo-500 transition-[width] duration-150"
-            style={{ width: `${progress.percent}%` }}
+            className={`h-full rounded-full transition-[width] duration-150 ${
+              isStalling ? "bg-amber-500" : "bg-indigo-500"
+            }`}
+            style={{ width: `${Math.max(progress.percent, 1)}%` }}
           />
         )}
       </div>

@@ -10,10 +10,21 @@ import { db } from "@/lib/db";
 import { uploadedModels } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
-import { saveFile, getPublicUrl } from "@/lib/services/storage";
-import { validateModelFile } from "@/lib/services/model-file-validation";
-import { UPLOAD_MODEL_MAX_SIZE_BYTES } from "@/lib/config/upload";
+import { saveFile, getPublicUrl, absoluteFilePath } from "@/lib/services/storage";
+import {
+  validateModelFile,
+  validateStagedModel,
+} from "@/lib/services/model-file-validation";
+
 import { uploadModelPriceKurus, uploadModelNeedsQuote } from "@/lib/config/prices";
+import {
+  isValidUploadId,
+  promoteStagedUpload,
+  readStagedHead,
+  readStagedTail,
+  discardStagedUpload,
+  stagedSize,
+} from "@/lib/services/chunked-upload";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -42,26 +53,52 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "turnstile_failed" }, { status: 403 });
   }
 
+  // Two ways in: a small multipart file, or a chunk-staged upload whose bytes
+  // are already on disk. The staged path is what makes a 350 MB model possible
+  // — the whole file never enters memory.
   const file = form.get("file");
-  if (!(file instanceof File)) {
+  const uploadId = String(form.get("uploadId") ?? "");
+  const stagedName = String(form.get("fileName") ?? "model.stl");
+  if (!(file instanceof File) && !uploadId) {
     return NextResponse.json({ error: "file_required" }, { status: 400 });
   }
-  if (file.size > UPLOAD_MODEL_MAX_SIZE_BYTES) {
-    return NextResponse.json({ error: "too_large" }, { status: 400 });
+  if (uploadId && !isValidUploadId(uploadId)) {
+    return NextResponse.json({ error: "invalid_model" }, { status: 400 });
   }
 
   const material = form.get("material") === "filament" ? "filament" : "resin";
   const targetHeightMm = clampHeight(Number(form.get("targetHeightMm")));
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const validation = validateModelFile(buffer, file.name);
+  const displayName = file instanceof File ? file.name : stagedName;
+  // Validate without pulling the model into memory: a head sample (enough to
+  // reach an OBJ's first face), the tail (ASCII STL's `endsolid`) and the size.
+  const stagedBytes = uploadId ? (await stagedSize(uploadId)) ?? 0 : 0;
+  const validation = uploadId
+    ? validateStagedModel(
+        await readStagedHead(uploadId, 256 * 1024).catch(() => Buffer.alloc(0)),
+        await readStagedTail(uploadId, 8 * 1024).catch(() => Buffer.alloc(0)),
+        stagedBytes,
+        displayName
+      )
+    : validateModelFile(
+        Buffer.from(await (file as File).arrayBuffer()),
+        displayName
+      );
   if (!validation.ok || !validation.format) {
+    if (uploadId) await discardStagedUpload(uploadId).catch(() => {});
     return NextResponse.json({ error: validation.error ?? "invalid_model" }, { status: 400 });
   }
 
   const session = await getSessionUser();
   const ext = validation.format;
-  const sourceKey = await saveFile(buffer, "models-upload", `${nanoid()}.${ext}`);
+  const fileSize = uploadId ? stagedBytes : (file as File).size;
+  const sourceKey = uploadId
+    ? await promoteStagedUpload(uploadId, "models-upload", `${nanoid()}.${ext}`)
+    : await saveFile(
+        Buffer.from(await (file as File).arrayBuffer()),
+        "models-upload",
+        `${nanoid()}.${ext}`
+      );
 
   const [row] = await db
     .insert(uploadedModels)
@@ -69,8 +106,8 @@ export async function POST(req: NextRequest) {
       userId: session?.userId ?? null,
       sourceKey,
       sourceFormat: ext,
-      fileName: file.name.slice(0, 200),
-      fileSizeBytes: file.size,
+      fileName: displayName.slice(0, 200),
+      fileSizeBytes: fileSize,
       targetHeightMm,
       material,
       status: "processing",
@@ -79,7 +116,7 @@ export async function POST(req: NextRequest) {
 
   let result: { report: Record<string, unknown>; glbKey: string } | null = null;
   try {
-    result = await runGeometry(buffer, ext, targetHeightMm, row.id);
+    result = await runGeometry(sourceKey, ext, targetHeightMm, row.id);
   } catch {
     result = null;
   }
@@ -139,17 +176,19 @@ function clampHeight(n: number): number {
 }
 
 async function runGeometry(
-  buffer: Buffer,
+  sourceKey: string,
   ext: string,
   targetHeightMm: number,
   id: string
 ): Promise<{ report: Record<string, unknown>; glbKey: string }> {
   const dir = await mkdtemp(join(tmpdir(), "upmodel-"));
-  const inputPath = join(dir, `input.${ext}`);
   const glbPath = join(dir, "preview.glb");
   const reportPath = join(dir, "report.json");
   try {
-    await writeFile(inputPath, buffer);
+    // Point python at the stored file. Copying it through a Buffer first would
+    // put the whole model back in the heap, which is what we just avoided.
+    const inputPath = absoluteFilePath(sourceKey);
+    void ext;
     const scriptPath = join(process.cwd(), "scripts", "process_upload_model.py");
     await execFileAsync(
       "python3",

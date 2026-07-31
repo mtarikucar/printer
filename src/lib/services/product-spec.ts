@@ -84,7 +84,10 @@ export async function saveProductFile(args: {
   sortOrder: number;
 }): Promise<SaveProductFileResult> {
   const { productId, buffer, fileName } = args;
-  if (buffer.length > UPLOAD_MODEL_MAX_SIZE_BYTES) {
+  if (
+    UPLOAD_MODEL_MAX_SIZE_BYTES !== null &&
+    buffer.length > UPLOAD_MODEL_MAX_SIZE_BYTES
+  ) {
     return { ok: false, error: "too_large" };
   }
   const validation = validateModelFile(buffer, fileName);

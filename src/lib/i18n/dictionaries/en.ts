@@ -213,7 +213,7 @@ const en = {
   "upload.title": "Print your own 3D model",
   "upload.sub": "Already have a ready 3D model file (STL/OBJ)? Upload it — we'll prep it for printing and price it. If you only have a photo, use “From a photo” instead.",
   "upload.dropzone": "Drag or choose your STL / OBJ file",
-  "upload.dropzoneHint": "up to 50MB",
+  "upload.dropzoneHint": "STL or OBJ — no size limit",
   "upload.height": "Print height",
   "upload.material": "Material",
   "upload.submit": "Upload & price",

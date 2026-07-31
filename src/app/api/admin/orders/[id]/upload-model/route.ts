@@ -4,12 +4,21 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions, orderModelRevisions } from "@/lib/db/schema";
 import { saveFile, getPublicUrl } from "@/lib/services/storage";
+import {
+  isValidUploadId,
+  promoteStagedUpload,
+  readStagedHead,
+  discardStagedUpload,
+} from "@/lib/services/chunked-upload";
 import { nanoid } from "nanoid";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
-const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
+// No size cap: production models are hundreds of megabytes. Large files come
+// in through the chunked staging API (src/lib/services/chunked-upload.ts) and
+// are never held in memory — the small multipart path below stays for small
+// files and older clients.
 
 // Admin uploads the manually-produced 3D model for a paid custom order. In the
 // image-first flow there is NO automatic 3D — a paid order sits in
@@ -31,15 +40,19 @@ export async function POST(
   const formData = await request.formData();
   const glbFile = formData.get("glb") as File | null;
   const stlFile = formData.get("stl") as File | null;
+  // Chunk-staged uploads: the bytes are already on disk, the form only carries
+  // the id. This is how a 350 MB model gets here without a 700 MB heap spike.
+  const glbUploadId = String(formData.get("glbUploadId") ?? "");
+  const stlUploadId = String(formData.get("stlUploadId") ?? "");
 
-  if (!glbFile) {
+  if (!glbFile && !glbUploadId) {
     return NextResponse.json({ error: "Missing glb file" }, { status: 400 });
   }
-  if (glbFile.size > MAX_SIZE) {
-    return NextResponse.json(
-      { error: "File too large. Maximum size is 50MB." },
-      { status: 400 },
-    );
+  if (glbUploadId && !isValidUploadId(glbUploadId)) {
+    return NextResponse.json({ error: "Geçersiz yükleme kimliği." }, { status: 400 });
+  }
+  if (stlUploadId && !isValidUploadId(stlUploadId)) {
+    return NextResponse.json({ error: "Geçersiz yükleme kimliği." }, { status: 400 });
   }
 
   const order = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
@@ -57,29 +70,42 @@ export async function POST(
     );
   }
 
-  // Validate + save GLB (glTF magic bytes: 0x67 0x6C 0x54 0x46 = "glTF").
-  const glbBuffer = Buffer.from(await glbFile.arrayBuffer());
+  // Validate the GLB header (glTF magic bytes: 0x67 0x6C 0x54 0x46 = "glTF").
+  // For a staged file only the first bytes are read — never the whole model.
+  const glbHead = glbUploadId
+    ? await readStagedHead(glbUploadId, 4).catch(() => Buffer.alloc(0))
+    : Buffer.from(await glbFile!.slice(0, 4).arrayBuffer());
   if (
-    glbBuffer.length < 4 ||
-    glbBuffer[0] !== 0x67 ||
-    glbBuffer[1] !== 0x6c ||
-    glbBuffer[2] !== 0x54 ||
-    glbBuffer[3] !== 0x46
+    glbHead.length < 4 ||
+    glbHead[0] !== 0x67 ||
+    glbHead[1] !== 0x6c ||
+    glbHead[2] !== 0x54 ||
+    glbHead[3] !== 0x46
   ) {
+    if (glbUploadId) await discardStagedUpload(glbUploadId).catch(() => {});
     return NextResponse.json({ error: "Invalid GLB file" }, { status: 400 });
   }
-  const glbKey = await saveFile(glbBuffer, `models/${orderId}`, `model-${nanoid()}.glb`);
+
+  const glbName = `model-${nanoid()}.glb`;
+  const glbKey = glbUploadId
+    ? await promoteStagedUpload(glbUploadId, `models/${orderId}`, glbName)
+    : await saveFile(
+        Buffer.from(await glbFile!.arrayBuffer()),
+        `models/${orderId}`,
+        glbName
+      );
   const glbUrl = getPublicUrl(glbKey);
 
   let stlKey: string | null = null;
   let stlUrl: string | null = null;
-  if (stlFile) {
-    if (stlFile.size > MAX_SIZE) {
-      return NextResponse.json(
-        { error: "STL too large. Maximum size is 50MB." },
-        { status: 400 },
-      );
-    }
+  if (stlUploadId) {
+    stlKey = await promoteStagedUpload(
+      stlUploadId,
+      `models/${orderId}`,
+      `model-${nanoid()}.stl`
+    );
+    stlUrl = getPublicUrl(stlKey);
+  } else if (stlFile) {
     const stlBuffer = Buffer.from(await stlFile.arrayBuffer());
     stlKey = await saveFile(stlBuffer, `models/${orderId}`, `model-${nanoid()}.stl`);
     stlUrl = getPublicUrl(stlKey);

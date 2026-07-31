@@ -7,13 +7,13 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
-import { UPLOAD_MODEL_MAX_SIZE_BYTES } from "@/lib/config/upload";
 import {
   uploadWithProgress,
   type UploadProgress,
   type UploadError,
 } from "@/lib/upload-with-progress";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
+import { uploadLargeFile } from "@/lib/upload-large-file";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
 
 const HEIGHTS = [40, 60, 80, 120, 160];
@@ -53,7 +53,7 @@ export function UploadModelFlow() {
 
   const pickFile = (file: File) => {
     const ext = file.name.toLowerCase().split(".").pop();
-    if ((ext !== "stl" && ext !== "obj") || file.size > UPLOAD_MODEL_MAX_SIZE_BYTES) {
+    if (ext !== "stl" && ext !== "obj") {
       setError(d["upload.errGeneric"]);
       return;
     }
@@ -70,8 +70,15 @@ export function UploadModelFlow() {
     abortRef.current = new AbortController();
     try {
       const token = (await turnstileRef.current?.getToken()) ?? "";
+      // Chunked: a print-ready STL can be hundreds of megabytes, which no
+      // single request survives (proxy limits, server memory).
+      const staged = await uploadLargeFile(pendingFile, {
+        onProgress: setProgress,
+        signal: abortRef.current?.signal,
+      });
       const fd = new FormData();
-      fd.append("file", pendingFile);
+      fd.append("uploadId", staged.uploadId);
+      fd.append("fileName", staged.fileName);
       fd.append("targetHeightMm", String(height));
       fd.append("material", material);
       fd.append("turnstileToken", token);

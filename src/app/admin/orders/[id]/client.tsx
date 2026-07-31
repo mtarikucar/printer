@@ -15,6 +15,7 @@ import {
   type UploadError,
 } from "@/lib/upload-with-progress";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
+import { uploadLargeFile } from "@/lib/upload-large-file";
 import {
   SIZE_PRESETS_CM,
   SIZE_TEXT_MAX,
@@ -246,11 +247,45 @@ export function OrderDetailClient({ data, locale }: Props) {
     const controller = new AbortController();
     modelAbortRef.current = controller;
     try {
+      // Print models run to hundreds of megabytes. They go up in chunks so
+      // neither the reverse proxy's body limit nor the server's memory is a
+      // ceiling; the final POST carries only the staged ids.
+      const totalBytes =
+        modelGlbFile.size + (modelStlFile ? modelStlFile.size : 0);
+      let doneBytes = 0;
+      const relay = (p: UploadProgress) => {
+        if (p.phase === "processing") {
+          setModelProgress({ ...p, loadedBytes: totalBytes, totalBytes });
+          return;
+        }
+        const loaded = doneBytes + p.loadedBytes;
+        setModelProgress({
+          phase: "uploading",
+          percent: Math.min(99, Math.round((loaded / totalBytes) * 100)),
+          loadedBytes: loaded,
+          totalBytes,
+        });
+      };
+
+      const glb = await uploadLargeFile(modelGlbFile, {
+        onProgress: relay,
+        signal: controller.signal,
+      });
+      doneBytes += modelGlbFile.size;
+      let stl: { uploadId: string } | null = null;
+      if (modelStlFile) {
+        stl = await uploadLargeFile(modelStlFile, {
+          onProgress: relay,
+          signal: controller.signal,
+        });
+      }
+
       const fd = new FormData();
-      fd.append("glb", modelGlbFile);
-      if (modelStlFile) fd.append("stl", modelStlFile);
+      fd.append("glbUploadId", glb.uploadId);
+      if (stl) fd.append("stlUploadId", stl.uploadId);
       await uploadWithProgress(`/api/admin/orders/${order.id}/upload-model`, fd, {
-        onProgress: setModelProgress,
+        onProgress: (p) =>
+          setModelProgress({ ...p, phase: "processing", loadedBytes: totalBytes, totalBytes }),
         signal: controller.signal,
       });
       setModelGlbFile(null);

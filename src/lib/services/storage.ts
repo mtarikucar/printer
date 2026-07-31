@@ -17,6 +17,16 @@ export async function saveFile(
   return `${subdir}/${filename}`;
 }
 
+/**
+ * Absolute path for a stored key, for tools that must read the file from disk
+ * (the python geometry pass) instead of through a Buffer.
+ */
+export function absoluteFilePath(relativePath: string): string {
+  const full = join(UPLOAD_DIR, relativePath);
+  assertSafePath(full);
+  return full;
+}
+
 function assertSafePath(fullPath: string): void {
   // Defence against:
   //  1. POSIX `..` traversal      → relative starts with `..`

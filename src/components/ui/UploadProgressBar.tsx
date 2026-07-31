@@ -24,21 +24,26 @@ export function UploadProgressBar({
   // body is visible within seconds rather than looking like a slow connection.
   const [stalledSeconds, setStalledSeconds] = useState(0);
   const lastLoaded = useRef(-1);
-  const lastMove = useRef(Date.now());
+  // Seeded inside the effect, never during render: Date.now() is impure and a
+  // re-render would silently reset the stall clock.
+  const lastMove = useRef<number | null>(null);
 
   useEffect(() => {
     if (!progress || progress.phase !== "uploading") {
       lastLoaded.current = -1;
+      lastMove.current = null;
       setStalledSeconds(0);
       return;
     }
-    if (progress.loadedBytes > lastLoaded.current) {
+    if (lastMove.current === null || progress.loadedBytes > lastLoaded.current) {
       lastLoaded.current = progress.loadedBytes;
       lastMove.current = Date.now();
       setStalledSeconds(0);
     }
     const t = setInterval(() => {
-      setStalledSeconds(Math.floor((Date.now() - lastMove.current) / 1000));
+      const since = lastMove.current;
+      if (since === null) return;
+      setStalledSeconds(Math.floor((Date.now() - since) / 1000));
     }, 1000);
     return () => clearInterval(t);
   }, [progress]);

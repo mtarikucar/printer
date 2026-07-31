@@ -8,6 +8,12 @@ import { SiteHeader } from "@/components/site-header";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
 import { UPLOAD_MODEL_MAX_SIZE_BYTES } from "@/lib/config/upload";
+import {
+  uploadWithProgress,
+  type UploadProgress,
+  type UploadError,
+} from "@/lib/upload-with-progress";
+import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
 
 const HEIGHTS = [40, 60, 80, 120, 160];
@@ -42,6 +48,8 @@ export function UploadModelFlow() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [quoteEmail, setQuoteEmail] = useState("");
   const [requesting, setRequesting] = useState(false);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const pickFile = (file: File) => {
     const ext = file.name.toLowerCase().split(".").pop();
@@ -58,6 +66,8 @@ export function UploadModelFlow() {
     if (!pendingFile) return;
     setStep(1);
     setError(null);
+    setProgress(null);
+    abortRef.current = new AbortController();
     try {
       const token = (await turnstileRef.current?.getToken()) ?? "";
       const fd = new FormData();
@@ -65,17 +75,27 @@ export function UploadModelFlow() {
       fd.append("targetHeightMm", String(height));
       fd.append("material", material);
       fd.append("turnstileToken", token);
-      const res = await fetch("/api/upload/model", { method: "POST", body: fd });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error || "upload");
-      }
-      const data: UploadResult = await res.json();
+      // The endpoint stores the file AND runs the geometry analysis in the same
+      // request, so a 50 MB STL means a long silent wait. Show the bytes going
+      // out, then say plainly that the server is analysing.
+      const data = await uploadWithProgress<UploadResult>(
+        "/api/upload/model",
+        fd,
+        { onProgress: setProgress, signal: abortRef.current?.signal }
+      );
       setResult(data);
       setStep(2);
-    } catch {
-      setError(d["upload.errGeneric"]);
-      setStep(0);
+    } catch (e) {
+      const err = e as UploadError;
+      if (err?.aborted) {
+        setStep(0);
+      } else {
+        setError(err?.message || d["upload.errGeneric"]);
+        setStep(0);
+      }
+    } finally {
+      setProgress(null);
+      abortRef.current = null;
     }
   };
 
@@ -211,6 +231,13 @@ export function UploadModelFlow() {
           <div className="mt-12 flex flex-col items-center gap-5 py-10 text-center">
             <span className="h-12 w-12 animate-spin rounded-full border-4 border-green-500/20 border-t-green-500" />
             <p className="max-w-sm text-text-secondary">{d["upload.processing"]}</p>
+            <div className="w-full max-w-sm">
+              <UploadProgressBar
+                progress={progress}
+                processingLabel="Model inceleniyor (boyut, duvar kalınlığı, hacim)…"
+                onCancel={() => abortRef.current?.abort()}
+              />
+            </div>
           </div>
         )}
 

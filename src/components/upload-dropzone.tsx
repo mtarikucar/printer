@@ -4,6 +4,7 @@ import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
+import { uploadWithProgress } from "@/lib/upload-with-progress";
 
 interface UploadDropzoneProps {
   onUploadComplete: (key: string, previewUrl: string) => void;
@@ -63,20 +64,15 @@ export function UploadDropzone({
         const formData = new FormData();
         formData.append("file", file);
 
-        setProgress(30);
-
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
+        // Was a fake 10 → 30 → 100 ladder that sat at 30% for the whole
+        // upload. These are real bytes.
+        const { key, previewUrl: signedPreviewUrl } = await uploadWithProgress<{
+          key: string;
+          previewUrl?: string;
+        }>("/api/upload", formData, {
+          onProgress: (p) =>
+            setProgress(p.phase === "processing" ? 100 : Math.max(5, p.percent)),
         });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || d["upload.failed"]);
-        }
-
-        const { key, previewUrl: signedPreviewUrl } = await res.json();
-        setProgress(100);
 
         // Pass the SERVER-SIGNED URL to the caller (not the local blob URL).
         // The blob URL is fine for the immediate in-card preview below, but

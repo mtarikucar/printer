@@ -2,6 +2,12 @@
 
 import { useRef, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import {
+  uploadWithProgress,
+  type UploadProgress,
+  type UploadError,
+} from "@/lib/upload-with-progress";
+import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 
 interface QcPhoto {
   id: string;
@@ -28,6 +34,7 @@ export function QcPhotoUploader({
   const d = useDictionary();
   const [photos, setPhotos] = useState<QcPhoto[]>(initialPhotos);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,21 +54,22 @@ export function QcPhotoUploader({
     }
     setUploading(true);
     try {
-      const res = await fetch(`/api/manufacturer/orders/${orderId}/qc-photos`, {
-        method: "POST",
-        body: form,
+      // Four photos from a phone is easily 20 MB on a workshop's connection.
+      const data = await uploadWithProgress<{ photos?: unknown[] }>(
+        `/api/manufacturer/orders/${orderId}/qc-photos`,
+        form,
+        { onProgress: setProgress }
+      ).catch((e: UploadError) => {
+        setError(e?.message || d["manufacturer.orderDetail.qcUploadFailed"]);
+        return null;
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || d["manufacturer.orderDetail.qcUploadFailed"]);
-        return;
-      }
-      const data = await res.json();
+      if (!data) return;
       update([...photos, ...((data.photos as QcPhoto[]) || [])]);
     } catch {
       setError(d["manufacturer.orderDetail.qcUploadFailed"]);
     } finally {
       setUploading(false);
+      setProgress(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   };
@@ -113,6 +121,13 @@ export function QcPhotoUploader({
       )}
 
       {error && <p className="text-sm text-red-600 mb-2 text-left">{error}</p>}
+      {progress && (
+        <UploadProgressBar
+          progress={progress}
+          processingLabel="Fotoğraflar işleniyor…"
+          className="mb-2"
+        />
+      )}
 
       {!disabled && !atMax && (
         <div>

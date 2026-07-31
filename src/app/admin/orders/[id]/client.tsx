@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
@@ -9,6 +9,12 @@ import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/Pho
 import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
 import { useDictionary } from "@/lib/i18n/locale-context";
+import {
+  uploadWithProgress,
+  type UploadProgress,
+  type UploadError,
+} from "@/lib/upload-with-progress";
+import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import {
   SIZE_PRESETS_CM,
   SIZE_TEXT_MAX,
@@ -168,6 +174,8 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [modelStlFile, setModelStlFile] = useState<File | null>(null);
   const [uploadingModel, setUploadingModel] = useState(false);
   const [uploadModelError, setUploadModelError] = useState<string | null>(null);
+  const [modelProgress, setModelProgress] = useState<UploadProgress | null>(null);
+  const modelAbortRef = useRef<AbortController | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -231,23 +239,32 @@ export function OrderDetailClient({ data, locale }: Props) {
     if (!modelGlbFile) return;
     setUploadingModel(true);
     setUploadModelError(null);
+    setModelProgress(null);
+    // A GLB+STL pair is tens of megabytes; fetch() reports nothing while they
+    // are on the wire, which is why this used to sit on "Yükleniyor…" with no
+    // sign of life. XHR gives us the real byte count.
+    const controller = new AbortController();
+    modelAbortRef.current = controller;
     try {
       const fd = new FormData();
       fd.append("glb", modelGlbFile);
       if (modelStlFile) fd.append("stl", modelStlFile);
-      const res = await fetch(`/api/admin/orders/${order.id}/upload-model`, {
-        method: "POST",
-        body: fd,
+      await uploadWithProgress(`/api/admin/orders/${order.id}/upload-model`, fd, {
+        onProgress: setModelProgress,
+        signal: controller.signal,
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setUploadModelError(data.error || d["admin.orderDetail.actionFailed"]);
-        return;
-      }
+      setModelGlbFile(null);
+      setModelStlFile(null);
       router.refresh();
-    } catch {
-      setUploadModelError(d["admin.orderDetail.actionFailed"]);
+    } catch (e) {
+      const err = e as UploadError;
+      // A cancel is the admin's own doing — not an error to shout about.
+      if (!err?.aborted) {
+        setUploadModelError(err?.message || d["admin.orderDetail.actionFailed"]);
+      }
     } finally {
+      modelAbortRef.current = null;
+      setModelProgress(null);
       setUploadingModel(false);
     }
   };
@@ -681,6 +698,14 @@ export function OrderDetailClient({ data, locale }: Props) {
                 >
                   {uploadingModel ? "Yükleniyor…" : "Yükle"}
                 </button>
+                {modelProgress && (
+                  <UploadProgressBar
+                    progress={modelProgress}
+                    processingLabel="Model kaydediliyor…"
+                    onCancel={() => modelAbortRef.current?.abort()}
+                    className="mt-3"
+                  />
+                )}
               </div>
             </div>
           </div>

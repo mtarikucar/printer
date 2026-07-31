@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import type { Locale } from "@/lib/i18n/types";
 import { sizeDisplayTr } from "@/lib/config/sizes";
 import { QC_MIN_PHOTOS } from "@/lib/config/qc";
+import {
+  uploadWithProgress,
+  type UploadProgress,
+  type UploadError,
+} from "@/lib/upload-with-progress";
+import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import { ModelViewer } from "@/components/model-viewer";
 
 interface Job {
@@ -115,6 +121,10 @@ export function PainterJobsClient({
   const [busy, setBusy] = useState<string | null>(null);
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [carrier, setCarrier] = useState<Record<string, string>>({});
+  const [qcProgress, setQcProgress] = useState<{
+    id: string;
+    p: UploadProgress;
+  } | null>(null);
   const [qcUploaded, setQcUploaded] = useState<Record<string, number>>(() =>
     Object.fromEntries(jobs.map((j) => [j.id, j.qcPhotoCount]))
   );
@@ -134,6 +144,7 @@ export function PainterJobsClient({
       }
       router.refresh();
     } finally {
+      setQcProgress(null);
       setBusy(null);
     }
   };
@@ -148,12 +159,15 @@ export function PainterJobsClient({
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/painter/orders/${id}/qc-photos`, { method: "POST", body: fd });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        alert(e.error || "Fotoğraf yüklenemedi");
-        return;
-      }
+      const ok = await uploadWithProgress(`/api/painter/orders/${id}/qc-photos`, fd, {
+        onProgress: (p) => setQcProgress({ id, p }),
+      })
+        .then(() => true)
+        .catch((e: UploadError) => {
+          alert(e?.message || "Fotoğraf yüklenemedi");
+          return false;
+        });
+      if (!ok) return;
       setQcUploaded((s) => ({ ...s, [id]: (s[id] ?? 0) + 1 }));
     } finally {
       setBusy(null);
@@ -427,6 +441,13 @@ export function PainterJobsClient({
                         }}
                       />
                     </label>
+                    {qcProgress?.id === j.id && (
+                      <UploadProgressBar
+                        progress={qcProgress.p}
+                        processingLabel="Fotoğraf işleniyor…"
+                        className="w-full"
+                      />
+                    )}
                     {j.qcPhotoUrls.length > 0 && (
                       <span className="flex gap-1">
                         {j.qcPhotoUrls.slice(0, 4).map((u) => (

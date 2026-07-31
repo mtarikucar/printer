@@ -5,6 +5,12 @@ import Link from "next/link";
 import { Button, Input, Select, FormField } from "@/components/ui";
 import { toWhatsAppDigits } from "@/lib/config/contact";
 import {
+  uploadWithProgress,
+  type UploadProgress,
+  type UploadError,
+} from "@/lib/upload-with-progress";
+import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
+import {
   SIZE_PRESETS_CM,
   SIZE_TEXT_MAX,
   normalizeSizeInput,
@@ -81,6 +87,7 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   // Reference photos the customer sent over WhatsApp (max 4).
   const [photos, setPhotos] = useState<{ key: string; previewUrl: string }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [photoProgress, setPhotoProgress] = useState<UploadProgress | null>(null);
   const MAX_PHOTOS = 4;
 
   const uploadPhotos = async (files: FileList | null) => {
@@ -96,15 +103,15 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
       for (const file of Array.from(files).slice(0, room)) {
         const fd = new FormData();
         fd.append("file", file);
-        const res = await fetch("/api/admin/orders/upload-photo", {
-          method: "POST",
-          body: fd,
+        const data = await uploadWithProgress<{ key: string; previewUrl: string }>(
+          "/api/admin/orders/upload-photo",
+          fd,
+          { onProgress: setPhotoProgress }
+        ).catch((e: UploadError) => {
+          setError(e?.message || "Fotoğraf yüklenemedi.");
+          return null;
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setError(data.error || "Fotoğraf yüklenemedi.");
-          continue;
-        }
+        if (!data) continue;
         setPhotos((prev) =>
           prev.length < MAX_PHOTOS
             ? [...prev, { key: data.key, previewUrl: data.previewUrl }]
@@ -113,6 +120,7 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
       }
     } finally {
       setUploading(false);
+      setPhotoProgress(null);
     }
   };
   const removePhoto = (key: string) =>
@@ -547,6 +555,13 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           <p className="mb-2 text-xs text-gray-500">
             Müşterinin WhatsApp&apos;tan gönderdiği görseller. JPG/PNG, her biri en fazla 20MB.
           </p>
+          {photoProgress && (
+            <UploadProgressBar
+              progress={photoProgress}
+              processingLabel="Görsel işleniyor…"
+              className="mb-2"
+            />
+          )}
           {photos.length > 0 && (
             <div className="flex flex-wrap gap-3">
               {photos.map((p) => (

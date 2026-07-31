@@ -4,6 +4,12 @@ import { useRef, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Textarea } from "@/components/ui";
 import { ModelViewer } from "@/components/model-viewer";
+import {
+  uploadWithProgress,
+  type UploadProgress,
+  type UploadError,
+} from "@/lib/upload-with-progress";
+import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 
 export interface SpecFile {
   id: string;
@@ -65,6 +71,10 @@ export function ProductSpecEditor({
 
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  // Byte-level progress for the file currently on the wire. A 45 MB part used
+  // to show only "Yükleniyor 3/12…" with no sign it was moving.
+  const [fileProgress, setFileProgress] = useState<UploadProgress | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [savingSpec, setSavingSpec] = useState(false);
   const [specMsg, setSpecMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,21 +101,23 @@ export function ProductSpecEditor({
       form.append("file", file, fileName);
       if (name && name.trim()) form.append("partName", name.trim());
       form.append("quantity", String(Math.max(1, quantity || 1)));
-      const res = await fetch(`${fileBase}/files`, { method: "POST", body: form });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const code = (data as { code?: string }).code;
-        const message =
-          (code && ERROR_MESSAGES[code]) ||
-          t("product.files.error", "Dosya yüklenemedi (STL/OBJ, ≤50MB, geçerli geometri).") +
-            ` [HTTP ${res.status}]`;
-        return { ok: false, message };
-      }
+      const data = await uploadWithProgress<{ file: SpecFile }>(
+        `${fileBase}/files`,
+        form,
+        { onProgress: setFileProgress, signal: abortRef.current?.signal }
+      );
       return { ok: true, file: data.file as SpecFile };
-    } catch {
+    } catch (e) {
+      const err = e as UploadError;
+      // The route answers with a `code` for the known refusals; keep those
+      // translated messages and fall back to whatever the server said.
+      const code = (err?.body as { code?: string } | null)?.code;
       return {
         ok: false,
-        message: t("product.files.error", "Dosya yüklenemedi (STL/OBJ, ≤50MB)."),
+        message:
+          (code && ERROR_MESSAGES[code]) ||
+          err?.message ||
+          t("product.files.error", "Dosya yüklenemedi (STL/OBJ, ≤50MB)."),
       };
     }
   };
@@ -148,6 +160,8 @@ export function ProductSpecEditor({
     setError(null);
     setUploading(true);
     setProgress(null);
+    setFileProgress(null);
+    abortRef.current = new AbortController();
 
     try {
       // Single non-zip file + a typed name/qty → preserve the precise path.
@@ -420,6 +434,14 @@ export function ProductSpecEditor({
         </div>
         {progress && (
           <p className="text-xs font-medium text-indigo-600">{progress}</p>
+        )}
+        {fileProgress && (
+          <UploadProgressBar
+            progress={fileProgress}
+            processingLabel="Geometri kontrol ediliyor…"
+            onCancel={() => abortRef.current?.abort()}
+            className="mt-1"
+          />
         )}
         <p className="text-xs text-gray-400">
           {t(

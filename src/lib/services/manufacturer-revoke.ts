@@ -25,6 +25,13 @@ export const REVOCABLE_MFG_STATUSES = [
   "printed",
   "qc_pending",
   "qc_rejected",
+  // Safe to revoke even after admin QC approval, AS LONG AS the order has not
+  // yet shipped and has not been handed to a painter. No earning has accrued at
+  // `qc_approved` itself — accrual happens only at ship (→ manufacturer_status
+  // "shipped" + shippedAt) and send-to-painter (→ painter_status set), and the
+  // `shippedAt IS NULL` + painter-unassigned guards below exclude both. So a
+  // bare `qc_approved` order has no manufacturer_earnings row to strand.
+  "qc_approved",
 ] as const;
 
 export type RevokeResult =
@@ -46,10 +53,14 @@ export type RevokeResult =
 
 /**
  * Money boundary: `accrueEarning` is only ever called from the ship and
- * send-to-painter routes, both gated on `qc_approved`. Everything at or past
- * `qc_approved` is therefore refused here — `manufacturer_earnings.order_id` is
- * UNIQUE and `accrueEarning` uses onConflictDoNothing, so a reassignment past
- * that point would silently pay the new manufacturer ₺0.
+ * send-to-painter routes. `manufacturer_earnings.order_id` is UNIQUE and
+ * `accrueEarning` uses onConflictDoNothing, so revoking after an earning row
+ * exists would silently pay a re-assigned manufacturer ₺0. The two accrual
+ * points each move the order out of a revocable state: ship sets
+ * `manufacturer_status = "shipped"` + `shippedAt`, and send-to-painter sets
+ * `painter_status`. The `shippedAt IS NULL` + painter-unassigned guards below
+ * therefore keep this function strictly before any accrual — `qc_approved` on
+ * its own (pre-ship, pre-painter) is safe and revocable; ship / hand-off is not.
  */
 export async function revokeManufacturerAssignment(args: {
   orderId: string;

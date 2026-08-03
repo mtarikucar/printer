@@ -47,6 +47,7 @@ export default async function AdminOrderDetailPage({
         orderBy: [desc(adminMessages.sentAt)],
       },
       manufacturer: true,
+      painter: true,
       manufacturerActions: {
         orderBy: [desc(manufacturerActions.createdAt)],
       },
@@ -89,6 +90,10 @@ export default async function AdminOrderDetailPage({
       // owner, and an order already with a painter must not be pulled back.
       sellerManufacturerId: order.sellerManufacturerId,
       painterStatus: order.painterStatus,
+      // Painting economics — the "revoke from painter" panel warns which
+      // print-portion earning (amountKurus − paintingPriceKurus) gets reversed.
+      needsPainting: order.needsPainting,
+      paintingPriceKurus: order.paintingPriceKurus,
       productTitleSnapshot: order.productTitleSnapshot,
       email: order.email,
       customerName: order.customerName,
@@ -195,6 +200,10 @@ export default async function AdminOrderDetailPage({
       companyName: order.manufacturer.companyName,
       contactPerson: order.manufacturer.contactPerson,
       status: order.manufacturer.status,
+    } : null,
+    painter: order.painter ? {
+      id: order.painter.id,
+      companyName: order.painter.companyName,
     } : null,
     manufacturerActions: order.manufacturerActions.map(a => ({
       id: a.id,

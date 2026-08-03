@@ -34,6 +34,8 @@ interface OrderData {
   orderType: "custom" | "marketplace" | "upload";
   sellerManufacturerId: string | null;
   painterStatus: string | null;
+  needsPainting: boolean;
+  paintingPriceKurus: number;
   productTitleSnapshot: string | null;
   email: string;
   customerName: string;
@@ -79,6 +81,7 @@ interface Props {
     adminActions: { id: string; action: string; adminEmail: string; notes: string | null; createdAt: string }[];
     adminMessages: { id: string; subject: string | null; body: string; templateKey: string | null; adminEmail: string; sentAt: string }[];
     manufacturer?: { id: string; companyName: string; contactPerson: string; status: string } | null;
+    painter?: { id: string; companyName: string } | null;
     manufacturerActions?: { id: string; action: string; notes: string | null; createdAt: string }[];
     manufacturerStatus?: string | null;
     qcRound?: number;
@@ -153,7 +156,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
+  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -167,6 +170,10 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [revokeStrike, setRevokeStrike] = useState(false);
   const [revokeBlocklist, setRevokeBlocklist] = useState(true);
   const [revokeOpen, setRevokeOpen] = useState(false);
+  // Revoke-from-painter controls (bad hand-off → back to assignment queue).
+  const [revokePainterReason, setRevokePainterReason] = useState("");
+  const [revokePainterOpen, setRevokePainterOpen] = useState(false);
+  const [revokePainterBlocklist, setRevokePainterBlocklist] = useState(true);
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
 
@@ -486,8 +493,9 @@ export function OrderDetailClient({ data, locale }: Props) {
     (order.status === "paid" && order.orderType === "marketplace");
   const canAssignManufacturer =
     statusAssignable && (!manufacturerStatus || manufacturerStatus === "unassigned");
-  // Taking an order back is safe until QC is approved — that is where the
-  // manufacturer's earning can attach (see manufacturer-revoke.ts).
+  // Taking an order back is safe up to and INCLUDING qc_approved, as long as it
+  // has not shipped and has not been handed to a painter — the manufacturer's
+  // earning only attaches at ship / send-to-painter (see manufacturer-revoke.ts).
   const REVOCABLE_STATUSES = [
     "assigned",
     "accepted",
@@ -495,11 +503,20 @@ export function OrderDetailClient({ data, locale }: Props) {
     "printed",
     "qc_pending",
     "qc_rejected",
+    "qc_approved",
   ];
   const canRevokeManufacturer =
     !!manufacturer &&
     REVOCABLE_STATUSES.includes(manufacturerStatus ?? "") &&
     (!order.painterStatus || order.painterStatus === "unassigned");
+  // Once handed to a painter the manufacturer revoke refuses (earning accrued),
+  // so a dedicated "pull back from painter" path takes over: valid while the
+  // painter has not shipped (painter-ship sets shippedAt + status "shipped").
+  const canRevokePainter =
+    !!order.painterStatus &&
+    order.painterStatus !== "unassigned" &&
+    order.painterStatus !== "shipped" &&
+    !order.shippedAt;
   const waitingHours = assignmentAgeHours ?? 0;
   const isStaleAssignment =
     manufacturerStatus === "assigned" && waitingHours >= 24;
@@ -572,6 +589,39 @@ export function OrderDetailClient({ data, locale }: Props) {
         );
       }
       setRevokeReason("");
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  /**
+   * Pull a painting order back from the painter to the assignment queue. Detaches
+   * both the painter and the manufacturer and reverses the manufacturer's accrued
+   * print earning (server-side).
+   */
+  const revokePainter = async () => {
+    if (revokePainterReason.trim().length < 3) {
+      alert("Geri alma sebebi zorunludur.");
+      return;
+    }
+    setLoading("revoke-painter");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/revoke-painter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: revokePainterReason.trim(),
+          blocklistManufacturer: revokePainterBlocklist,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        return;
+      }
+      setRevokePainterReason("");
+      setRevokePainterOpen(false);
       router.refresh();
     } finally {
       setLoading(null);
@@ -829,6 +879,15 @@ export function OrderDetailClient({ data, locale }: Props) {
                         {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
                       </button>
                     </div>
+                    {/* Undo an accidental self-print: back to the assignment stage
+                        so the admin can hand the job to a manufacturer instead. */}
+                    <button
+                      onClick={() => { if (confirm("Baskıyı geri alıp siparişi 'onaylı' (atama) aşamasına döndür? Sonra bir üreticiye atayabilirsiniz.")) performAction("unstart-printing"); }}
+                      disabled={!!loading}
+                      className="mt-3 text-xs font-medium text-emerald-700 hover:text-emerald-900 hover:underline disabled:text-gray-400"
+                    >
+                      {loading === "unstart-printing" ? "Geri alınıyor…" : "↩ Baskıyı geri al (onaya döndür)"}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1044,7 +1103,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                 Başka bir üreticiye devretmek yerine iptal/iade değerlendirin.
               </p>
             )}
-            {["printed", "qc_pending", "qc_rejected"].includes(
+            {["printed", "qc_pending", "qc_rejected", "qc_approved"].includes(
               manufacturerStatus ?? ""
             ) && (
               <p className="mt-2 rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
@@ -1194,6 +1253,81 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                   );
                 })()}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Revoke from painter (bad hand-off → assignment queue) ─────── */}
+        {canRevokePainter && (
+          <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/60 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Boyacı devri
+              </h3>
+              <span className="text-xs text-gray-500">
+                {painter?.companyName ?? "Boyacı"} · {order.painterStatus}
+              </span>
+            </div>
+
+            <p className="mt-2 rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-900">
+              ⚠ Bu işlem hem <strong>boyacıyı</strong> hem <strong>üreticiyi</strong> çıkarır ve
+              sipariş tekrar atama kuyruğuna (onaylı) döner. Üreticinin baskı hakedişi
+              {" "}(<strong>{formatCurrency(Math.max(0, order.amountKurus - order.paintingPriceKurus), loc)}</strong>
+              {" "}brüt) geri alınır; yeni bir üretici sıfırdan basar. Hakediş zaten
+              ödenmişse (payout kapanmış) işlem reddedilir — iade akışını kullanın.
+            </p>
+
+            {!revokePainterOpen ? (
+              <button
+                onClick={() => setRevokePainterOpen(true)}
+                className="mt-3 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
+              >
+                Boyacıdan geri al (atamaya döndür)
+              </button>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-600">
+                    Sebep <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={revokePainterReason}
+                    onChange={(e) => setRevokePainterReason(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    placeholder="örn. boyacı işi teslim almadı / yanlış boyacıya gönderildi"
+                    className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                  />
+                </div>
+                <label className="flex items-center gap-1.5 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={revokePainterBlocklist}
+                    onChange={(e) => setRevokePainterBlocklist(e.target.checked)}
+                  />
+                  Bu üreticiyi bu sipariş için bir daha önerme
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={revokePainter}
+                    disabled={!!loading || revokePainterReason.trim().length < 3}
+                    className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:bg-gray-300 disabled:text-gray-500"
+                  >
+                    {loading === "revoke-painter"
+                      ? "Geri alınıyor…"
+                      : "Geri al (atama kuyruğuna)"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setRevokePainterOpen(false);
+                      setRevokePainterReason("");
+                    }}
+                    className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
               </div>
             )}
           </div>

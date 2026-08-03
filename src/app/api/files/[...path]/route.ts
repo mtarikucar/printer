@@ -11,11 +11,38 @@ const MIME_TYPES: Record<string, string> = {
   ".stl": "application/octet-stream",
 };
 
+// These files are bearer-capability URLs (a valid ?exp=&sig=, or public legacy
+// URLs). Anyone holding the URL can already read the bytes, so exposing them to
+// cross-origin JS adds no new access — but the browser's same-origin policy
+// still blocks the response body from a fetch/XHR mounted on a DIFFERENT origin
+// unless we say Access-Control-Allow-Origin. The in-app 3D viewer (three.js
+// GLTFLoader) issues exactly such a cross-origin XHR whenever the page origin
+// differs from the file host: local dev (localhost -> figurunica.com), a
+// www/apex split, or a preview deployment. Without these headers the loader
+// reports an opaque "Load failed". No credentials are involved (loader is
+// anonymous), so `*` is correct and safe.
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+  "Access-Control-Allow-Headers": "Range, Content-Type",
+  // Let the loader read length/type for progress + MIME handling.
+  "Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range",
+};
+
 // When FILES_REQUIRE_SIGNATURE=1 every download must carry valid ?exp=&sig=
 // query params. When unset (current default), we accept unsigned requests for
 // backward compatibility with URLs already in the wild. Flip the flag once
 // callers are migrated.
 const REQUIRE_SIGNATURE = process.env.FILES_REQUIRE_SIGNATURE === "1";
+
+export async function OPTIONS() {
+  // Preflight for any cross-origin loader that adds a non-simple header
+  // (e.g. Range). Simple GETs skip this, but answering it is cheap insurance.
+  return new NextResponse(null, {
+    status: 204,
+    headers: { ...CORS_HEADERS, "Access-Control-Max-Age": "86400" },
+  });
+}
 
 export async function GET(
   request: NextRequest,
@@ -26,7 +53,10 @@ export async function GET(
 
   // Prevent path traversal — defence-in-depth on top of assertSafePath in storage.
   if (relativePath.includes("..")) {
-    return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid file path" },
+      { status: 400, headers: CORS_HEADERS }
+    );
   }
 
   const exp = Number(request.nextUrl.searchParams.get("exp"));
@@ -38,7 +68,7 @@ export async function GET(
   if (REQUIRE_SIGNATURE && !signatureValid) {
     return NextResponse.json(
       { error: "Missing or invalid signature" },
-      { status: 401 }
+      { status: 401, headers: CORS_HEADERS }
     );
   }
 
@@ -49,6 +79,7 @@ export async function GET(
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
+        ...CORS_HEADERS,
         "Content-Type": contentType,
         // Never let the browser MIME-sniff a stored upload into an executable
         // type — defuses a polyglot (valid image header + HTML/JS body) being
@@ -62,6 +93,9 @@ export async function GET(
       },
     });
   } catch {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "File not found" },
+      { status: 404, headers: CORS_HEADERS }
+    );
   }
 }

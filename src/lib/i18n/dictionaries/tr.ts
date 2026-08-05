@@ -1990,7 +1990,15 @@ const tr: Dictionary = {
   "manufacturer.status.qc_pending": "Kalite Kontrol",
   "manufacturer.status.qc_rejected": "QC Reddedildi",
   "manufacturer.status.qc_approved": "QC Onaylandı",
+  "manufacturer.status.sent_to_painter": "Boyacıya Gönderildi",
   "manufacturer.action.submit_qc": "QC fotoğrafları gönderildi",
+  // The rest of the action log fell back to the raw English enum name.
+  "manufacturer.action.accept": "Sipariş kabul edildi",
+  "manufacturer.action.start_printing": "Baskı başladı",
+  "manufacturer.action.finish_printing": "Baskı tamamlandı",
+  "manufacturer.action.send_to_painter": "Boyacıya gönderildi",
+  "manufacturer.action.ship": "Müşteriye kargolandı",
+  "manufacturer.action.cancel_after_accept": "Üretici siparişi iptal etti",
   "manufacturer.orderDetail.qcTitle": "Kalite Kontrol Fotoğrafları",
   "manufacturer.orderDetail.qcDescription":
     "Tamamlanan baskının net fotoğraflarını yükleyin. Kargolayabilmeniz için admin inceleyecek.",

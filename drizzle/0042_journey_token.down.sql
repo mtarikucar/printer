@@ -1,0 +1,16 @@
+-- Rollback (down) for 0042_journey_token.
+--
+-- The project's drizzle-kit `migrate` pipeline is forward-only and NEVER runs
+-- this file automatically — it is intentionally NOT listed in meta/_journal.json.
+-- It exists so the change stays reversible per policy: apply it by hand
+-- (`psql "$DATABASE_URL" -f drizzle/0042_journey_token.down.sql`) to remove
+-- exactly what 0042 created — the orders.journey_token column and its unique
+-- constraint (dropped with the column). Idempotent and tightly scoped: it drops
+-- ONLY that column and no-ops if it is already gone (safe to re-run).
+--
+-- Data loss on rollback: every issued journey link stops resolving, so QR codes
+-- already printed on cards inside shipped boxes become dead. Re-applying the up
+-- migration does NOT bring them back — tokens are minted fresh, so a customer
+-- scanning an old card would land on a 404. Nothing else is affected: the
+-- order, its photos, its model and its money are untouched.
+ALTER TABLE "orders" DROP COLUMN IF EXISTS "journey_token";

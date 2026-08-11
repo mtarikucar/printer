@@ -1,0 +1,205 @@
+/*
+ * Journey page — a keepsake, not a product page.
+ *
+ * Scoped entirely under .j-root so it cannot leak into the storefront theme.
+ * The colour system encodes the story rather than decorating it: the ambient
+ * glow behind the page travels cool → rose → amber as you scroll, because the
+ * content travels memory → imagination → object. That shift is the one bold
+ * move; everything else stays quiet so it reads.
+ */
+
+.j-root {
+  /* Deep plum ink. Not near-black — the warmth matters when the whole page is
+     about something handmade arriving in a box. */
+  --j-ink: #1e1726;
+  --j-ink-2: #2a2035;
+  --j-porcelain: #f7f3ee;
+  --j-mist: #9b92ad;
+  --j-amber: #e9a13b;
+
+  /* Stage glows, in narrative order. */
+  --j-glow-memory: #5b6fa8;
+  --j-glow-idea: #c4577b;
+  --j-glow-real: #e9a13b;
+
+  position: relative;
+  min-height: 100vh;
+  background: var(--j-ink);
+  color: var(--j-porcelain);
+  font-family: var(--font-inter-tight), system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* The ambient bloom. A single fixed layer whose hue is driven by --j-stage
+   (set from scroll position), so the page temperature changes without
+   repainting any content. */
+.j-root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      68vw 68vw at 50% 18%,
+      color-mix(in oklab, var(--j-stage, var(--j-glow-memory)) 42%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      52vw 52vw at 82% 88%,
+      color-mix(in oklab, var(--j-stage, var(--j-glow-memory)) 22%, transparent),
+      transparent 70%
+    );
+  transition: background 900ms ease;
+}
+
+.j-root > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Type ──────────────────────────────────────────────────────────────── */
+
+.j-display {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  line-height: 0.94;
+  letter-spacing: -0.03em;
+  /* Big, but never wider than a comfortable measure on a phone held one-handed. */
+  font-size: clamp(2.6rem, 11vw, 5.5rem);
+}
+
+.j-label {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--j-mist);
+}
+
+.j-lede {
+  font-size: clamp(1rem, 4.2vw, 1.25rem);
+  line-height: 1.55;
+  color: color-mix(in oklab, var(--j-porcelain) 78%, transparent);
+  font-weight: 300;
+}
+
+.j-hint {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--j-mist);
+}
+
+/* ─── Surfaces ──────────────────────────────────────────────────────────── */
+
+.j-frame {
+  background: var(--j-ink-2);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 30px 80px -40px rgba(0, 0, 0, 0.9);
+}
+
+/* Stage caption tags on the comparison, kept legible over any photograph. */
+.j-tag {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(20, 14, 26, 0.55);
+  backdrop-filter: blur(6px);
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+}
+
+/* The künye reads as a specimen label — this object was made, once, for one
+   person, and these are its particulars. */
+.j-spec {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1.25rem;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.j-spec dt {
+  color: var(--j-mist);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.625rem;
+  align-self: center;
+}
+.j-spec dd {
+  margin: 0;
+  color: var(--j-porcelain);
+}
+
+.j-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.85rem 1.6rem;
+  font-weight: 500;
+  font-size: 0.9375rem;
+  background: var(--j-amber);
+  color: #241a10;
+  transition: transform 160ms ease, filter 160ms ease;
+}
+.j-cta:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.j-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.85rem 1.6rem;
+  font-size: 0.9375rem;
+  color: var(--j-porcelain);
+  border: 1px solid color-mix(in oklab, var(--j-porcelain) 26%, transparent);
+  transition: background 160ms ease;
+}
+.j-ghost:hover {
+  background: color-mix(in oklab, var(--j-porcelain) 10%, transparent);
+}
+
+/* ─── Reveal ────────────────────────────────────────────────────────────── */
+
+.j-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 700ms ease, transform 700ms ease;
+}
+.j-reveal[data-shown="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Keyboard users must be able to see where they are on a dark ground. */
+.j-root :focus-visible {
+  outline: 2px solid var(--j-amber);
+  outline-offset: 3px;
+}
+.j-range:focus-visible {
+  opacity: 1;
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .j-root::before {
+    transition: none;
+  }
+  .j-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .j-cta,
+  .j-ghost {
+    transition: none;
+  }
+}

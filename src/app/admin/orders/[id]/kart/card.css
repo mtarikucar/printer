@@ -1,0 +1,99 @@
+/*
+ * The physical card. Everything here is in millimetres because the output is a
+ * printed object, not a screen: an A6 sheet the customer finds in the box.
+ */
+
+.journey-card {
+  width: 105mm;
+  height: 148mm;
+  margin: 1.5rem;
+  background: #1e1726;
+  color: #f7f3ee;
+  border-radius: 4mm;
+  overflow: hidden;
+  /* On screen it should read as a physical card sitting on the admin page. */
+  box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.6);
+}
+
+.journey-card__inner {
+  height: 100%;
+  padding: 12mm 10mm;
+  display: flex;
+  flex-direction: column;
+  /* A soft bloom, the same amber the journey page lands on, so the card and the
+     page it opens feel like one object. */
+  background:
+    radial-gradient(60mm 60mm at 78% 8%, rgba(233, 161, 59, 0.28), transparent 70%),
+    radial-gradient(50mm 50mm at 10% 96%, rgba(196, 87, 123, 0.22), transparent 72%);
+}
+
+.journey-card__brand {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 2.6mm;
+  letter-spacing: 0.3em;
+  color: #9b92ad;
+  margin: 0;
+}
+
+.journey-card__title {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  font-size: 8.4mm;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin: 9mm 0 0;
+}
+
+.journey-card__body {
+  font-family: var(--font-inter-tight), system-ui, sans-serif;
+  font-weight: 300;
+  font-size: 3.6mm;
+  line-height: 1.5;
+  color: rgba(247, 243, 238, 0.78);
+  margin: 5mm 0 0;
+  max-width: 62mm;
+}
+
+/* The QR is the card's function; give it room and a white quiet zone so a
+   phone camera locks on instantly under bad lighting. */
+.journey-card__qr {
+  margin-top: auto;
+  align-self: flex-start;
+  background: #fff;
+  padding: 3mm;
+  border-radius: 2.5mm;
+  line-height: 0;
+}
+.journey-card__qr svg {
+  display: block;
+  width: 32mm;
+  height: 32mm;
+}
+
+.journey-card__order {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 2.6mm;
+  letter-spacing: 0.16em;
+  color: #9b92ad;
+  margin: 5mm 0 0;
+}
+
+@media print {
+  /* Only the card survives printing — no admin chrome, no sidebar. */
+  .no-print {
+    display: none !important;
+  }
+  .journey-card {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+    /* Backgrounds are the whole design here; without this most browsers drop
+       them and print a white card with black text. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  @page {
+    size: A6 portrait;
+    margin: 0;
+  }
+}

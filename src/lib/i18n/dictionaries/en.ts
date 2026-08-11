@@ -246,6 +246,9 @@ const en = {
   "box.cartGroup": "Keychain box — {qty} pieces",
   "admin.box.title": "Keychain box pricing",
 
+  "email.shipped.journeyLabel": "The story",
+  "email.shipped.journeyBody": "Scan this to see how your photo became the figure in your hands.",
+  "email.shipped.journeyLink": "Open the journey page",
   "checkout.summary": "Order summary",
   "checkout.giftCard": "Gift card code (optional)",
   "design.title": "2D design → 3D object",

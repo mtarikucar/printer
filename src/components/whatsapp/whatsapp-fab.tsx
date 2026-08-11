@@ -15,7 +15,12 @@ export function WhatsAppFab() {
   const pathname = usePathname();
   if (
     pathname?.startsWith("/admin") ||
-    pathname?.startsWith("/manufacturer")
+    pathname?.startsWith("/manufacturer") ||
+    pathname?.startsWith("/painter") ||
+    // The journey page is a keepsake someone opens after unwrapping a gift.
+    // A sales button floating over it breaks that, and they are already a
+    // customer — there is nothing to sell here but the page's own CTA.
+    pathname?.startsWith("/yolculuk")
   ) {
     return null;
   }

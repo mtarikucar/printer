@@ -38,6 +38,7 @@ export default function robots(): MetadataRoute.Robots {
           "/track/",
           "/havale/",
           "/quote/",
+          "/yolculuk/",
           "/reset-password/",
           "/verify-email/",
         ],

@@ -248,6 +248,9 @@ const tr: Dictionary = {
   "box.cartGroup": "Anahtarlık kutusu — {qty} adet",
   "admin.box.title": "Anahtarlık kutusu fiyatları",
 
+  "email.shipped.journeyLabel": "Hikâyesi",
+  "email.shipped.journeyBody": "Fotoğrafının elindeki figüre nasıl dönüştüğünü görmek için okut.",
+  "email.shipped.journeyLink": "Yolculuk sayfasını aç",
   "checkout.summary": "Sipariş özeti",
   "checkout.giftCard": "Hediye kartı kodu (opsiyonel)",
   "design.title": "2D tasarım → 3D obje",

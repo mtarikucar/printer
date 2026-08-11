@@ -4,7 +4,8 @@ import { getRedisConnection } from "../connection";
 import type { EmailJobData } from "../queues";
 import { sendEmail } from "../../services/email";
 import { db } from "../../db";
-import { manufacturerNotifications } from "../../db/schema";
+import { manufacturerNotifications, orders } from "../../db/schema";
+import { ensureJourneyToken } from "../../services/order-journey";
 
 async function processJob(job: Job<EmailJobData>) {
   const {
@@ -20,9 +21,29 @@ async function processJob(job: Job<EmailJobData>) {
     notificationSubject, notificationBody, notificationType,
   } = job.data;
 
+  // The journey link rides on the shipped mail. Resolved here rather than in
+  // each ship route because five different actors can ship an order (admin,
+  // admin+kargo, manufacturer, painter, and the painter's second path) and a
+  // sixth would silently ship without it. Non-eligible orders resolve to
+  // undefined and the template omits the block.
+  let journeyToken: string | undefined;
+  if (type === "order_shipped" && orderNumber) {
+    try {
+      const [row] = await db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(eq(orders.orderNumber, orderNumber))
+        .limit(1);
+      if (row) journeyToken = (await ensureJourneyToken(row.id)) ?? undefined;
+    } catch (err) {
+      // A missing journey link must never hold up the shipping notification.
+      console.error("email.worker: journey token lookup failed", err);
+    }
+  }
+
   try {
     await sendEmail({
-      type, to, orderNumber, customerName, trackingNumber, locale,
+      type, to, orderNumber, customerName, trackingNumber, locale, journeyToken,
       adminEmail, manufacturerEmail, companyName, cancelReason,
       photoUrl, glbUrl, revisionNote,
       giftCardCode, giftCardAmount, giftCardMessage, senderName,

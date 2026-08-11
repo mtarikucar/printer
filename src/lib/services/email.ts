@@ -59,6 +59,12 @@ interface SendEmailParams {
   /** Finish tier — decides whether the paint-kit list is included. */
   finish?: string;
   trackingNumber?: string;
+  /**
+   * Journey page token (custom orders with a finished model). When present the
+   * shipped mail carries the QR + link, so a customer who loses the printed
+   * card in the box can still reach the page.
+   */
+  journeyToken?: string;
   adminEmail?: string;
   manufacturerEmail?: string;
   companyName?: string;
@@ -112,6 +118,10 @@ function getTemplates(locale: Locale) {
   const d = getDictionary(locale);
   const trackUrl = (orderNumber: string) =>
     `${process.env.NEXT_PUBLIC_APP_URL}/track/${orderNumber}`;
+  const appUrl = () =>
+    (process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com").replace(/\/$/, "");
+  const journeyPageUrl = (token: string) => `${appUrl()}/yolculuk/${token}`;
+  const journeyQrUrl = (token: string) => `${appUrl()}/api/yolculuk/${token}/qr.png`;
 
   const templates: Record<
     SendEmailParams["type"],
@@ -185,6 +195,23 @@ function getTemplates(locale: Locale) {
              style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">
             ${d["email.shipped.trackButton"]}
           </a>
+          ${
+            // The journey page. The QR is a hosted PNG, not a data: URI —
+            // Gmail and Outlook strip inline images. The link is repeated as
+            // text underneath because a QR is useless when the mail is already
+            // being read on the phone that would scan it.
+            p.journeyToken
+              ? `<div style="margin-top: 32px; padding: 20px; background: #1e1726; border-radius: 12px; color: #f7f3ee;">
+            <p style="margin: 0 0 4px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #9b92ad;">${escHtml(d["email.shipped.journeyLabel"])}</p>
+            <p style="margin: 0 0 16px; font-size: 15px;">${escHtml(d["email.shipped.journeyBody"])}</p>
+            <img src="${journeyQrUrl(p.journeyToken)}" alt="" width="132" height="132"
+                 style="display: block; background: #fff; padding: 8px; border-radius: 8px;" />
+            <p style="margin: 14px 0 0;">
+              <a href="${journeyPageUrl(p.journeyToken)}" style="color: #e9a13b;">${escHtml(d["email.shipped.journeyLink"])}</a>
+            </p>
+          </div>`
+              : ""
+          }
         </div>
       `,
     }),

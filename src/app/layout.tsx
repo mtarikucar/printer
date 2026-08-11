@@ -24,7 +24,9 @@ const spaceGrotesk = Space_Grotesk({
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains",
-  subsets: ["latin"],
+  // latin-ext so Turkish uppercase (Ğ, Ş, İ, Ç, Ö, Ü) renders in the mono face
+  // instead of silently falling back mid-word in labels like "FOTOĞRAF".
+  subsets: ["latin", "latin-ext"],
 });
 
 const dmSerifDisplay = DM_Serif_Display({

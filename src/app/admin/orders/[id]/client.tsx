@@ -806,6 +806,19 @@ export function OrderDetailClient({ data, locale }: Props) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* The card that goes in the box. Only bespoke orders with a finished
+              model have a journey to tell; the page itself explains why when
+              they don't, so the link stays visible rather than mysteriously
+              absent. */}
+          {order.orderType === "custom" && (
+            <a
+              href={`/admin/orders/${order.id}/kart`}
+              className="flex items-center gap-2 rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-fuchsia-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+              Yolculuk kartı
+            </a>
+          )}
           {displayGlbUrl && (
             <a href={displayGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>

@@ -625,6 +625,13 @@ export const orders = pgTable("orders", {
   // Set when admin approves the gallery item; null otherwise. Unique so a
   // single slug always resolves to one order — collisions get a suffix.
   gallerySlug: text("gallery_slug").unique(),
+  // Capability token for the customer's private "journey" page (/yolculuk/<token>),
+  // the QR on the card in the box. Deliberately NOT derived from orderNumber:
+  // that number travels on shipping labels, invoices and WhatsApp threads, and
+  // the journey shows the photo the customer uploaded — usually someone's face.
+  // A separate token means seeing a parcel label grants nothing, and a leaked
+  // link can be rotated without touching the order's identity.
+  journeyToken: text("journey_token").unique(),
   galleryCategory: text("gallery_category"),
   galleryTags: jsonb("gallery_tags").$type<string[]>(),
   // Customer-requested gallery publication moderation (Q4 in roadmap).

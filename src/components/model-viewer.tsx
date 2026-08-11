@@ -103,11 +103,18 @@ export function ModelViewer({
   className,
   autoRotate,
   previewMode = false,
+  background = "#F3F2EC",
 }: {
   url: string;
   className?: string;
   autoRotate?: boolean;
   previewMode?: boolean;
+  /**
+   * Scene + placeholder colour. Defaults to the warm light the storefront and
+   * admin surfaces use; the journey page passes its own ink so the viewer sits
+   * inside a dark composition instead of punching a white hole through it.
+   */
+  background?: string;
 }) {
   const d = useDictionary();
   const controlsRef = useRef<any>(null);
@@ -136,7 +143,10 @@ export function ModelViewer({
     : "w-full h-96 rounded-lg";
 
   const fallback = (
-    <div className="flex h-full w-full items-center justify-center bg-[#F3F2EC] p-6 text-center">
+    <div
+      className="flex h-full w-full items-center justify-center p-6 text-center"
+      style={{ background }}
+    >
       <p className="text-sm text-gray-500">
         {d["model.viewer.webglUnavailable"]}
       </p>
@@ -151,14 +161,13 @@ export function ModelViewer({
       <div className={className || defaultClass}>
         {webgl === null ? (
           // Pre-probe placeholder — identical on server + first client render.
-          <div className="h-full w-full bg-[#F3F2EC]" />
+          <div className="h-full w-full" style={{ background }} />
         ) : webgl ? (
           <WebGLBoundary fallback={fallback}>
             <Canvas
               camera={{ position: CAM_POS, fov: 45, near: 0.05, far: 100 }}
             >
-              {/* Warm dark background */}
-              <color attach="background" args={["#F3F2EC"]} />
+              <color attach="background" args={[background]} />
               <ambientLight intensity={previewMode ? 0.4 : 0.3} />
               {/* Emerald key light */}
               <directionalLight position={[5, 5, 5]} intensity={1} color="#00D4FF" />

@@ -440,6 +440,14 @@ export const orderDrafts = pgTable("order_drafts", {
   // survive a later product edit or archive.
   productTitleSnapshot: text("product_title_snapshot"),
   quantity: integer("quantity").notNull().default(1),
+  // Toplu üretim: the buyer actually received a volume-tier price. Snapshotted
+  // here (not re-derived at promotion) because a havale draft lives 72h and its
+  // amountKurus is frozen — re-reading live tiers could flag an order whose
+  // money says otherwise. Cart drafts fan out per seller and each sub-order
+  // recomputes its own flag from ITS order_items; this draft-level copy is what
+  // carries the flag for the single-product "Satın Al" path, which writes no
+  // order_items rows at all.
+  isBulk: boolean("is_bulk").notNull().default(false),
   // Single-product marketplace option/add-on selection snapshot + the resolved
   // (painted/unpainted) primary image. amountKurus already reflects the deltas.
   // Cart selections live per-line on order_items instead.
@@ -562,6 +570,12 @@ export const orders = pgTable("orders", {
   ),
   productTitleSnapshot: text("product_title_snapshot"),
   quantity: integer("quantity").notNull().default(1),
+  // Toplu üretim. For a cart sub-order this is derived from that group's own
+  // order_items (so a mixed multi-seller cart flags only the seller who
+  // actually sold at a tier price); for a single-product order it is copied
+  // from the draft. Drives the admin "Toplu" badge/filter and the
+  // /admin/bulk-orders production queue.
+  isBulk: boolean("is_bulk").notNull().default(false),
   // Copied from the draft on promotion (single-product marketplace). Cart
   // selections live per-line on order_items.
   selectedOptions:
@@ -1376,6 +1390,17 @@ export const products = pgTable(
       onDelete: "set null",
     }),
     leadTimeDays: integer("lead_time_days").default(7),
+    // ─── Toplu sipariş (bulk / volume pricing) ───
+    // When true the product is sellable in bulk: the cart lets the buyer go past
+    // the normal 20-unit ceiling and productPriceTiers rows kick in. Restricted
+    // to ownerType='admin' products in v1 — putting a tier on a SELLER's product
+    // would cut their 65% payout without their consent (commission is a flat
+    // 3500bps), which is a partner-contract decision, not a pricing knob.
+    bulkEnabled: boolean("bulk_enabled").notNull().default(false),
+    // Per-product line ceiling. NULL → BULK_DEFAULT_MAX_QTY from config/bulk.ts.
+    bulkMaxQuantity: integer("bulk_max_quantity"),
+    // Bulk runs take longer than a one-off. NULL → fall back to leadTimeDays.
+    bulkLeadTimeDays: integer("bulk_lead_time_days"),
     // Denormalized cover image key for list cards (avoids a join on /shop).
     primaryImageKey: text("primary_image_key"),
     // Polish: denormalised rating for cards (recomputed on each review insert).
@@ -1468,6 +1493,36 @@ export const productAddons = pgTable(
   },
   (t) => ({
     byProduct: index("product_addons_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
+// ─── Toplu sipariş: volume price tiers ──────────────────────────────────────
+// A ladder of quantity breaks for one product. `unitPriceKurus` REPLACES
+// products.priceKurus once the buyer's quantity reaches `minQuantity` — option
+// choice deltas and add-ons still stack on top of it unchanged. Below the first
+// tier the base price applies. Validated in services/product-tiers.ts:
+// minQuantity >= 2, strictly increasing, unitPriceKurus strictly DECREASING and
+// always under the base price, so "buy more, pay more" is impossible.
+export const productPriceTiers = pgTable(
+  "product_price_tiers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    minQuantity: integer("min_quantity").notNull(),
+    unitPriceKurus: integer("unit_price_kurus").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    // One tier per (product, minQuantity). Doubles as the lookup index for
+    // loadProductConfigs' batched `WHERE product_id IN (…) ORDER BY min_quantity`
+    // — a separate non-unique index on the same columns would be dead weight.
+    productMinQtyUnique: uniqueIndex("product_price_tiers_product_min_qty_key").on(
+      t.productId,
+      t.minQuantity
+    ),
   })
 );
 
@@ -1637,6 +1692,14 @@ export const orderItems = pgTable(
     unitPriceKurus: integer("unit_price_kurus").notNull(),
     quantity: integer("quantity").notNull().default(1),
     lineTotalKurus: integer("line_total_kurus").notNull(),
+    // Toplu sipariş audit pair. listUnitPriceKurus is the unit price the buyer
+    // WOULD have paid without any volume tier (base + same option deltas +
+    // add-ons) — it is DISPLAY ONLY and must never enter a sum; every total is
+    // built from unitPriceKurus/lineTotalKurus, which already carry the
+    // discount. appliedTierMinQuantity records which tier fired (NULL = none)
+    // and is the sole source for the order's isBulk flag at promotion.
+    listUnitPriceKurus: integer("list_unit_price_kurus"),
+    appliedTierMinQuantity: integer("applied_tier_min_quantity"),
     selectedOptions:
       jsonb("selected_options").$type<
         { groupName: string; choiceName: string; priceDeltaKurus: number }[]
@@ -1994,8 +2057,19 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   assemblySteps: many(productAssemblySteps),
   optionGroups: many(productOptionGroups),
   addons: many(productAddons),
+  priceTiers: many(productPriceTiers),
   orders: many(orders),
 }));
+
+export const productPriceTiersRelations = relations(
+  productPriceTiers,
+  ({ one }) => ({
+    product: one(products, {
+      fields: [productPriceTiers.productId],
+      references: [products.id],
+    }),
+  })
+);
 
 export const productImagesRelations = relations(productImages, ({ one }) => ({
   product: one(products, {

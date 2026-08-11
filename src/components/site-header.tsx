@@ -78,6 +78,9 @@ export function SiteHeader() {
       href: "/shop",
       items: [
         { href: "/shop", label: d["landing.market.cats.all"] },
+        // Volume ordering is a distinct buying mode, not a category — it gets
+        // its own entry rather than hiding behind a product page.
+        { href: "/toplu-siparis", label: "Toplu sipariş" },
         ...rootCats.map((c) => ({
           href: `/shop?category=${encodeURIComponent(c.path)}`,
           label: c.name,

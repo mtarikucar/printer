@@ -24,7 +24,22 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "bg-red-100 text-red-700",
 };
 
-const BUCKET_ORDER = ["all", "needsAction", "inProgress", "completed", "problems"] as const;
+// `unassigned` is not a status bucket — it is paid marketplace work with no
+// manufacturer on it. Platform-owned products live there until someone (or the
+// auto-assigner) places them, and at `paid` they would otherwise hide inside
+// the crowded "in progress" bucket.
+const BUCKET_ORDER = [
+  "all",
+  "needsAction",
+  "unassigned",
+  "inProgress",
+  "completed",
+  "problems",
+] as const;
+
+const BUCKET_LABELS: Partial<Record<(typeof BUCKET_ORDER)[number], string>> = {
+  unassigned: "Üretici bekliyor",
+};
 
 // Exact statuses for the power-user dropdown (every value used in admin.status.*)
 const EXACT_STATUSES = [
@@ -52,6 +67,8 @@ interface OrdersClientProps {
     figurineSize: string | null;
     style: string;
     status: string;
+    isBulk: boolean;
+    quantity: number;
     amountKurus: number;
     createdAt: string;
   }>;
@@ -267,7 +284,7 @@ export function OrdersClient({
                   : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
               }`}
             >
-              {d[`admin.orders.bucket.${b}` as keyof typeof d]}
+              {BUCKET_LABELS[b] ?? d[`admin.orders.bucket.${b}` as keyof typeof d]}
             </Link>
           );
         })}
@@ -370,6 +387,14 @@ export function OrdersClient({
                 </td>
                 <td className="px-4 py-3 font-mono text-sm font-medium">
                   {order.orderNumber}
+                  {order.isBulk && (
+                    <span
+                      className="ml-2 inline-block rounded bg-orange-100 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-orange-700"
+                      title={`Toplu üretim — ${order.quantity} adet`}
+                    >
+                      Toplu · {order.quantity}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-sm font-medium text-gray-900">

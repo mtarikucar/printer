@@ -9,6 +9,8 @@ import { signOutAction } from "./actions";
 
 export function AdminSidebar({
   reviewCount,
+  unassignedMarketplaceCount,
+  unassignedBulkCount,
   pendingManufacturerCount,
   pendingProductCount,
   draftReviewCount,
@@ -18,6 +20,8 @@ export function AdminSidebar({
   painterQcPendingCount,
 }: {
   reviewCount: number;
+  unassignedMarketplaceCount: number;
+  unassignedBulkCount: number;
   pendingManufacturerCount: number;
   pendingProductCount: number;
   draftReviewCount: number;
@@ -57,7 +61,15 @@ export function AdminSidebar({
           href: "/admin/orders",
           label: d["admin.nav.orders"],
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />,
-          badge: reviewCount,
+          // Both kinds of "waiting on the admin": a model to upload, and a paid
+          // marketplace order with no manufacturer on it yet.
+          badge: reviewCount + unassignedMarketplaceCount,
+        },
+        {
+          href: "/admin/bulk-orders",
+          label: "Toplu üretim",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />,
+          badge: unassignedBulkCount,
         },
         {
           href: "/admin/drafts",

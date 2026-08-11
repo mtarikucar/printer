@@ -6,6 +6,11 @@ import type { Locale } from "@/lib/i18n/types";
 import { issueGuestClaimToken } from "@/lib/services/password-reset";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import {
+  assignManufacturerToOrder,
+  orderHasPrintableContent,
+} from "@/lib/services/manufacturer-assign";
+import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 
 /**
  * Kick off post-payment processing for an order that is already in `status='paid'`.
@@ -128,10 +133,25 @@ export async function sendOrderConfirmationEmails(
 
 /**
  * Marketplace counterpart to kickOffOrderProcessing. A marketplace order skips
- * AI generation / mesh entirely — the owning seller already has the physical
- * product to print. The seller was auto-assigned at promotion time
- * (manufacturerStatus='assigned'); here we just notify them and email the
- * customer. Idempotent at the notification layer (best-effort).
+ * AI generation / mesh entirely — the product to print already exists. Three
+ * shapes land here:
+ *
+ *  1. Seller-owned product — the seller was auto-assigned at promotion
+ *     (manufacturerStatus='assigned'); we just notify them.
+ *  2. Platform (admin-owned) catalogue product — nobody is assigned yet, but
+ *     the product HAS print files (enforced at product approval). It stays at
+ *     `paid`, which is an assignable status, and we try to auto-assign the
+ *     best-scoring manufacturer right away.
+ *  3. Admin-typed WhatsApp order — no productId, no order_items, so there is
+ *     genuinely nothing to print yet. It goes to `awaiting_model` so the admin
+ *     can upload a model, exactly as before.
+ *
+ * Shapes 2 and 3 used to be conflated: every seller-less marketplace order was
+ * pushed to `awaiting_model`, which is NOT an assignable status — so a paid
+ * platform-product order could never reach a manufacturer at all, and the
+ * customer's tracker claimed "Modeliniz Hazırlanıyor" for a stock item.
+ *
+ * Idempotent at the notification layer (best-effort).
  */
 export async function kickOffMarketplaceOrder(
   order: {
@@ -145,9 +165,6 @@ export async function kickOffMarketplaceOrder(
   },
   locale: Locale
 ) {
-  // Notify the owning seller so the order shows up in their queue. Admin
-  // (platform) products have no seller yet — they surface in the admin order
-  // queue for manual assignment instead.
   if (order.sellerManufacturerId) {
     try {
       const productLine = order.productTitleSnapshot
@@ -166,11 +183,20 @@ export async function kickOffMarketplaceOrder(
         err
       );
     }
+  } else if (await orderHasPrintableContent(order.id)) {
+    // Shape 2. Leave the status at `paid` — it is already assignable — and try
+    // to place it. A failure here is never fatal: the order simply stays
+    // unassigned and shows up in the admin's "atanmamış" bucket.
+    try {
+      await autoAssignMarketplaceOrder(order.id, order.orderNumber);
+    } catch (err) {
+      console.error(
+        `kickOffMarketplaceOrder: auto-assign failed for ${order.id}`,
+        err
+      );
+    }
   } else {
-    // Admin-fulfilled order (WhatsApp / platform product with no seller): move it
-    // to awaiting_model so the admin can upload the 3D model, then approve and
-    // assign a manufacturer. Without this the order sits at "paid" with no
-    // forward action available in the admin UI.
+    // Shape 3.
     await db
       .update(orders)
       .set({ status: "awaiting_model", updatedAt: new Date() })
@@ -184,5 +210,42 @@ export async function kickOffMarketplaceOrder(
   }
 
   await sendOrderConfirmationEmails(order, locale);
+}
+
+/**
+ * Place a platform-product order with the best-scoring eligible manufacturer.
+ *
+ * Ranking goes through the Q7 shadow wrapper (not the raw ranker) so automatic
+ * assignments show up in the same canary/evaluation telemetry as the admin UI
+ * and the decline-retry path. The ranker's batch-affinity signal is what makes
+ * repeat orders of the same product cluster in one workshop.
+ *
+ * No eligible candidate is a normal outcome, not an error: the order keeps its
+ * `paid` + unassigned state and waits for an admin in /admin/bulk-orders.
+ */
+async function autoAssignMarketplaceOrder(orderId: string, orderNumber: string) {
+  const candidates = await rankForOrderWithShadow(orderId);
+  const best = candidates.find((c) => c.eligible);
+  if (!best) {
+    console.warn(
+      `autoAssignMarketplaceOrder: no eligible manufacturer for ${orderNumber}`
+    );
+    return;
+  }
+  const result = await assignManufacturerToOrder({
+    orderId,
+    manufacturerId: best.manufacturerId,
+    // Already proved above, and the ranker just read the same order.
+    skipPrintableCheck: true,
+    notification: {
+      subject: `Yeni sipariş atandı: ${orderNumber}`,
+      body: `${orderNumber} numaralı sipariş otomatik olarak size atandı.\n\nÜretici panelinizden 24 saat içinde kabul veya reddedin.`,
+    },
+  });
+  if (!result.ok) {
+    console.warn(
+      `autoAssignMarketplaceOrder: ${orderNumber} not assigned (${result.reason})`
+    );
+  }
 }
 

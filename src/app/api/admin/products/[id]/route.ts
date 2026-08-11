@@ -6,6 +6,7 @@ import { products } from "@/lib/db/schema";
 import { createProductSchema } from "@/lib/validators/product";
 import { resolveProductCategoryId } from "@/lib/services/categories";
 import { hardDeleteProduct } from "@/lib/services/product-delete";
+import { basePriceConflictsWithTiers } from "@/lib/services/product-tiers";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 
 export async function GET(
@@ -41,6 +42,18 @@ export async function PATCH(
       categoryId = await resolveProductCategoryId(input.categoryId);
     } catch {
       return NextResponse.json({ error: "invalid category" }, { status: 400 });
+    }
+    // Volume tiers are validated as strictly below the base price when they are
+    // saved — but nothing stops a later price edit from sinking underneath them,
+    // at which point buying more would cost more. Refuse the edit instead.
+    if (await basePriceConflictsWithTiers(id, input.priceKurus)) {
+      return NextResponse.json(
+        {
+          error:
+            "Liste fiyatı, tanımlı toplu fiyat kademelerinin altına indirilemez. Önce kademeleri güncelleyin.",
+        },
+        { status: 400 }
+      );
     }
     const [updated] = await db
       .update(products)

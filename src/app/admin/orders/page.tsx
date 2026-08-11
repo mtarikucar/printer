@@ -19,6 +19,14 @@ const BUCKETS: Record<string, string[]> = {
   problems: ["failed_generation", "failed_mesh", "rejected"],
 };
 
+// Not a status bucket: paid marketplace work nobody is producing yet. Since the
+// platform-product fix these sit at `paid` (an assignable status) rather than
+// `awaiting_model`, so they need their own filter or they vanish into
+// "inProgress" alongside everything already being printed.
+const UNASSIGNED_MARKETPLACE = sql`${orders.orderType} = 'marketplace'
+  AND ${orders.status} = 'paid'
+  AND (${orders.manufacturerStatus} IS NULL OR ${orders.manufacturerStatus} = 'unassigned')`;
+
 export default async function AdminOrdersPage({
   searchParams,
 }: {
@@ -49,6 +57,8 @@ export default async function AdminOrdersPage({
 
   if (filterStatus) {
     conditions.push(eq(orders.status, filterStatus as any));
+  } else if (bucket === "unassigned") {
+    conditions.push(UNASSIGNED_MARKETPLACE);
   } else if (bucket && BUCKETS[bucket]) {
     conditions.push(inArray(orders.status, BUCKETS[bucket] as any));
   }
@@ -106,6 +116,8 @@ export default async function AdminOrdersPage({
           figurineSize: o.figurineSize,
           style: o.style,
           status: o.status,
+          isBulk: o.isBulk,
+          quantity: o.quantity,
           amountKurus: o.amountKurus,
           createdAt: o.createdAt.toISOString(),
         }))}

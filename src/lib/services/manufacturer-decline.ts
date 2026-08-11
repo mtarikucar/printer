@@ -1,8 +1,8 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturerActions } from "@/lib/db/schema";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
-import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { assignManufacturerToOrder } from "@/lib/services/manufacturer-assign";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
@@ -230,56 +230,30 @@ export async function declineOrder(args: {
     };
   }
 
-  // Atomic re-assign — guard against a concurrent admin reassigning in the
-  // gap between rankManufacturersForOrder and this update by requiring the
-  // status is still `unassigned`.
-  const [updated] = await db
-    .update(orders)
-    .set({
-      manufacturerId: next.manufacturerId,
-      manufacturerStatus: "assigned",
-      assignedToManufacturerAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(orders.id, orderId),
-        eq(orders.manufacturerStatus, "unassigned")
-      )
-    )
-    .returning({ id: orders.id });
-  if (!updated) {
-    return {
-      ok: true,
-      action: "admin_queue",
-      reason: "concurrent_assignment_lost_race",
-    };
-  }
-
-  // Reassign committed: order now assigned to the NEW manufacturer. Emit with
-  // the new manufacturerId so that manufacturer's panel picks the order up.
-  await emitOrderChanged({
+  // Atomic re-assign via the shared service: it guards on the order still
+  // being unassigned (closing the race with a concurrent admin assignment in
+  // the gap since ranking), then notifies and emits. `statusGuard: null`
+  // because the decline flow has already validated this order's state — the
+  // service's default guard is for the admin/auto paths that start cold.
+  const assigned = await assignManufacturerToOrder({
     orderId,
-    orderNumber: result.orderNumber,
-    userId: result.userId,
     manufacturerId: next.manufacturerId,
-    manufacturerStatus: "assigned",
-  });
-
-  // Best-effort notification to the newly-assigned manufacturer.
-  try {
-    await notifyManufacturer({
-      manufacturerId: next.manufacturerId,
-      type: "order_assigned",
+    statusGuard: null,
+    skipPrintableCheck: true,
+    notification: {
       subject: `Yeni sipariş atandı — ${result.orderNumber}`,
       body:
         `Size yeni bir sipariş atandı: ${result.orderNumber}\n\n` +
         `Önceki üretici siparişi reddettiği için otomatik olarak siz görevlendirildiniz.\n\n` +
         `Üretici panelinden detayları görüntüleyebilirsiniz.`,
-      orderId,
-    });
-  } catch (err) {
-    console.error("[N12] reassign notification failed", err);
+    },
+  });
+  if (!assigned.ok) {
+    return {
+      ok: true,
+      action: "admin_queue",
+      reason: "concurrent_assignment_lost_race",
+    };
   }
 
   return { ok: true, action: "reassigned", newManufacturerId: next.manufacturerId };

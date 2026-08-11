@@ -10,6 +10,7 @@ import {
   sizeDisplayTr,
 } from "@/lib/config/sizes";
 import { buildDraftReference } from "@/lib/services/order-draft";
+import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
 
 /**
  * Admin creates an order on a customer's behalf (e.g. an order negotiated over
@@ -151,7 +152,7 @@ export async function POST(request: NextRequest) {
   const amountKurus = lineItems.reduce((s, li) => s + li.priceKurus, 0);
   // Upper bound keeps the total within Postgres int4 (amount_kurus column) and
   // turns an otherwise opaque "integer out of range" 500 into a clear 400.
-  const MAX_AMOUNT_KURUS = 2_000_000_00; // ₺2.000.000
+  // Shared with customer checkout via config/prices.ts so the two can't drift.
   if (amountKurus <= 0 || amountKurus > MAX_AMOUNT_KURUS) {
     return NextResponse.json(
       { error: "Tutar geçersiz (0 ile ₺2.000.000 arasında olmalı)." },

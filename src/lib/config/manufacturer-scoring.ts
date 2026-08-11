@@ -21,6 +21,17 @@ export interface ScoringWeights {
   reliability: number;
   onTimeDelivery: number;
   compliance: number;
+  /**
+   * Toplu üretim batching: favours a workshop that is ALREADY producing the
+   * same product, so repeat orders of one item cluster into a single run
+   * (one plate setup, one resin colour, one QC pass) instead of scattering.
+   *
+   * Deliberately modest — it reorders otherwise-comparable candidates; it must
+   * not out-argue distance or capacity. It also never widens eligibility: the
+   * material / capacity / previously-declined hard filters run unchanged, so
+   * batching can't push work into a full shop.
+   */
+  batchAffinity: number;
 }
 
 function envFloat(name: string, fallback: number): number {
@@ -30,33 +41,46 @@ function envFloat(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+/**
+ * v1.1 rebalance: batchAffinity was carved out of distance (0.40 → 0.35),
+ * load (0.35 → 0.30) and reliability (0.20 → 0.18). It ships enabled in v1
+ * because v1 is the AUTHORITATIVE profile by default (the v2 canary is 0%),
+ * and automatic batching of repeat bulk orders is a shipped requirement, not
+ * an experiment. Consumers do not normalize — this must sum to exactly 1.0.
+ */
 export const V1_WEIGHTS: ScoringWeights = {
-  distance: 0.4,
-  load: 0.35,
-  reliability: 0.2,
+  distance: 0.35,
+  load: 0.3,
+  reliability: 0.18,
   onTimeDelivery: 0,
   compliance: 0.05,
+  batchAffinity: 0.12,
 };
 
 export function getAssignmentWeights(profile: ScoringProfile): ScoringWeights {
   if (profile === "v1") return V1_WEIGHTS;
   return {
-    distance: envFloat("MFG_W2_DISTANCE", 0.3),
-    load: envFloat("MFG_W2_LOAD", 0.25),
-    reliability: envFloat("MFG_W2_RELIABILITY", 0.15),
-    onTimeDelivery: envFloat("MFG_W2_OTD", 0.25),
+    distance: envFloat("MFG_W2_DISTANCE", 0.25),
+    load: envFloat("MFG_W2_LOAD", 0.22),
+    reliability: envFloat("MFG_W2_RELIABILITY", 0.14),
+    onTimeDelivery: envFloat("MFG_W2_OTD", 0.22),
     compliance: envFloat("MFG_W2_COMPLIANCE", 0.05),
+    batchAffinity: envFloat("MFG_W2_BATCH", 0.12),
   };
 }
 
 /**
  * Used as the `weights_version` value on
- * `manufacturer_assignment_evaluations`. Bump the v2 string (e.g.
- * "v2.1") when you change defaults so historic evaluations stay
- * grouped under their original weight set.
+ * `manufacturer_assignment_evaluations`. Bump the string (e.g. "v2.1") when
+ * you change defaults so historic evaluations stay grouped under the weight
+ * set that actually produced them.
+ *
+ * Both bumped to .1 when batchAffinity was introduced: v1's other weights were
+ * rebalanced to make room for it, so pre-change rows were scored by a
+ * different algorithm and must not be compared against post-change ones.
  */
 export function weightsVersion(profile: ScoringProfile): string {
-  return profile === "v1" ? "v1.0" : "v2.0";
+  return profile === "v1" ? "v1.1" : "v2.1";
 }
 
 /**

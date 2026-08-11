@@ -41,6 +41,23 @@ export default async function AdminLayout({
     .from(orders)
     .where(sql`${orders.status} = 'awaiting_model'`);
 
+  // Paid marketplace orders with no manufacturer yet, and the bulk subset of
+  // them. Platform-owned (admin) products now correctly stay at `paid` instead
+  // of being parked in `awaiting_model`, so without these counters they'd be
+  // invisible in the sidebar badges and buried in the crowded "in progress"
+  // bucket. Both come from one scan.
+  const [unassignedCounts] = await db
+    .select({
+      marketplace: sql<number>`count(*)::int`,
+      bulk: sql<number>`count(*) FILTER (WHERE ${orders.isBulk})::int`,
+    })
+    .from(orders)
+    .where(
+      sql`${orders.orderType} = 'marketplace'
+        AND ${orders.status} = 'paid'
+        AND (${orders.manufacturerStatus} IS NULL OR ${orders.manufacturerStatus} = 'unassigned')`
+    );
+
   // Count pending manufacturer approvals
   const [pendingMfgCount] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -90,6 +107,8 @@ export default async function AdminLayout({
         sidebar={
           <AdminSidebar
             reviewCount={reviewCount.count}
+            unassignedMarketplaceCount={unassignedCounts.marketplace}
+            unassignedBulkCount={unassignedCounts.bulk}
             pendingManufacturerCount={pendingMfgCount.count}
             pendingProductCount={pendingProductCount.count}
             draftReviewCount={draftReviewCount.count}

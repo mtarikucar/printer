@@ -11,6 +11,9 @@ interface CartItem {
   title: string;
   quantity: number;
   lineTotalKurus: number;
+  listPriceKurus: number;
+  priceKurus: number;
+  appliedTierMinQuantity: number | null;
   optionChoiceIds: string[];
   addonIds: string[];
   selectedOptions: { choiceName: string }[];
@@ -23,6 +26,7 @@ export function CheckoutClient() {
   const { refresh } = useCart();
   const [items, setItems] = useState<CartItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [savings, setSavings] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,10 +36,13 @@ export function CheckoutClient() {
         if (dd) {
           setItems(dd.items);
           setTotal(dd.totalKurus);
+          setSavings(dd.bulkSavingsKurus ?? 0);
         }
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const hasBulk = items.some((i) => i.appliedTierMinQuantity != null);
 
   if (loading) return <div className="py-20 text-center text-text-muted">…</div>;
   if (items.length === 0)
@@ -61,10 +68,25 @@ export function CheckoutClient() {
             <span className="shrink-0">{formatCurrency(it.lineTotalKurus, locale)}</span>
           </div>
         ))}
-        <div className="mt-3 flex justify-between border-t border-border-default pt-3 font-bold text-text-primary">
+        {savings > 0 && (
+          <div className="mt-3 flex justify-between border-t border-border-default pt-3 text-sm text-green-700">
+            <span>{d["bulk.savings"]}</span>
+            <span className="font-semibold">
+              −{formatCurrency(savings, locale)}
+            </span>
+          </div>
+        )}
+        <div
+          className={`mt-3 flex justify-between font-bold text-text-primary ${savings > 0 ? "" : "border-t border-border-default pt-3"}`}
+        >
           <span>{d["cart.total"]}</span>
           <span>{formatCurrency(total, locale)}</span>
         </div>
+        {hasBulk && (
+          <div className="mt-4 rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">
+            {d["bulk.checkoutNotice"]}
+          </div>
+        )}
       </div>
       <div className="card p-5">
         <CheckoutForm

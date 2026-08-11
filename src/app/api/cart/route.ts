@@ -7,6 +7,7 @@ import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRedisConnection } from "@/lib/queue/connection";
 import { resolveOrderLines } from "@/lib/services/product-options";
+import { ABSOLUTE_MAX_LINE_QTY, effectiveMaxQty } from "@/lib/config/bulk";
 
 export const runtime = "nodejs";
 
@@ -62,7 +63,10 @@ async function getLines(key: string): Promise<Line[]> {
       return {
         id: l.id ?? lineKey(String(l.productId), optionChoiceIds, addonIds),
         productId: String(l.productId),
-        quantity: Math.max(1, Math.min(20, Math.round(Number(l.quantity) || 1))),
+        // DB-free sanity bound only — this runs without knowing which product
+        // the line points at. The authoritative, product-aware cap
+        // (effectiveMaxQty) is applied in hydrate(), which already has the row.
+        quantity: clampQty(l.quantity),
         optionChoiceIds,
         addonIds,
       };
@@ -83,8 +87,22 @@ async function setLines(key: string, lines: Line[]): Promise<void> {
 // on purpose: a product in a TRANSIENT non-active state (pending_review after a
 // seller edit, draft) or a temporarily-suspended seller must reappear when it
 // goes active again — persisting a pruned cart would delete it permanently.
+// Also returns `lines` — the stored lines with each quantity clamped to its
+// product's real ceiling. POST/PATCH persist that back, so a line can never sit
+// in Redis above a cap the customer has no UI to lower it to (which would make
+// the cart display one quantity and /api/orders reject it: an uncheckoutable
+// cart). GET intentionally does NOT persist; it only displays the clamp.
 async function hydrate(lines: Line[]) {
-  if (lines.length === 0) return { items: [], totalKurus: 0, count: 0 };
+  if (lines.length === 0) {
+    return {
+      items: [],
+      totalKurus: 0,
+      count: 0,
+      bulkSavingsKurus: 0,
+      lines: [] as Line[],
+      clamped: false,
+    };
+  }
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const rows = await db.query.products.findMany({
     where: inArray(products.id, productIds),
@@ -101,28 +119,60 @@ async function hydrate(lines: Line[]) {
     );
   };
 
-  // Server-authoritative price + selection snapshot + painted/unpainted image.
-  const resolved = await resolveOrderLines(
-    lines.map((l) => ({
-      productId: l.productId,
-      basePriceKurus: byId.get(l.productId)?.priceKurus ?? 0,
-      optionChoiceIds: l.optionChoiceIds,
-      addonIds: l.addonIds,
-    }))
+  // Authoritative per-product ceiling. Applied here (not in the Redis
+  // normalizer) because only here do we know which product a line points at.
+  let clamped = false;
+  const clampedLines: Line[] = lines.map((l) => {
+    const p = byId.get(l.productId);
+    // Unknown product: leave the line untouched — it is hidden below anyway and
+    // may become purchasable again (see the storage-preservation note above).
+    if (!p) return l;
+    const cap = effectiveMaxQty(p);
+    if (l.quantity <= cap) return l;
+    clamped = true;
+    return { ...l, quantity: cap };
+  });
+
+  // Volume tiers are computed on the PER-PRODUCT total, so only purchasable
+  // lines may contribute: checkout posts exactly the visible items, and a
+  // hidden line inflating the tier here would advertise a discount that
+  // /api/orders (which never sees that line) would refuse to honour.
+  const priceable = clampedLines.filter(isPurchasable);
+  const resolvedByLineId = new Map(
+    (
+      await resolveOrderLines(
+        priceable.map((l) => ({
+          productId: l.productId,
+          basePriceKurus: byId.get(l.productId)?.priceKurus ?? 0,
+          optionChoiceIds: l.optionChoiceIds,
+          addonIds: l.addonIds,
+          quantity: l.quantity,
+        }))
+      )
+    ).map((r, i) => [priceable[i].id, r] as const)
   );
 
-  const items = lines
-    .map((l, i) => {
+  const items = clampedLines
+    .map((l) => {
       const p = byId.get(l.productId);
-      if (!p || !isPurchasable(l)) return null;
-      const r = resolved[i];
+      const r = resolvedByLineId.get(l.id);
+      if (!p || !r) return null;
       const imageKey = r.itemImageKey ?? p.primaryImageKey;
+      const cap = effectiveMaxQty(p);
       return {
         id: l.id,
         productId: p.id,
         slug: p.slug,
         title: p.title,
         priceKurus: r.unitPriceKurus,
+        // Display-only: what this unit would cost without the volume tier.
+        listPriceKurus: r.listUnitPriceKurus,
+        appliedTierMinQuantity: r.appliedTierMinQuantity,
+        // Total units of this product across the cart — the tier basis, and
+        // what the grouped cart UI shows so the price change is explainable.
+        productQuantity: r.productQuantity,
+        maxQuantity: cap,
+        bulkEnabled: p.bulkEnabled,
         imageUrl: imageKey ? getPublicUrl(imageKey) : null,
         sellerName: p.manufacturer?.companyName ?? null,
         quantity: l.quantity,
@@ -139,6 +189,13 @@ async function hydrate(lines: Line[]) {
     items,
     totalKurus: items.reduce((s, i) => s + i.lineTotalKurus, 0),
     count: items.reduce((s, i) => s + i.quantity, 0),
+    // Derived from the display-only list price; never subtracted from a total.
+    bulkSavingsKurus: items.reduce(
+      (s, i) => s + (i.listPriceKurus - i.priceKurus) * i.quantity,
+      0
+    ),
+    lines: clampedLines,
+    clamped,
   };
 }
 
@@ -156,32 +213,81 @@ function respond(data: unknown, newCookie?: string) {
 }
 
 const clampQty = (n: unknown) =>
-  Math.max(1, Math.min(20, Math.round(Number(n) || 1)));
+  Math.max(1, Math.min(ABSOLUTE_MAX_LINE_QTY, Math.round(Number(n) || 1)));
 const idArray = (v: unknown) =>
   Array.isArray(v) ? v.map((x) => String(x)).slice(0, 50) : [];
 
+// Strip the internal `lines` from the hydrate result — the client gets the
+// rendered view, never the raw storage shape.
+function publicView(h: Awaited<ReturnType<typeof hydrate>>) {
+  const { lines: _lines, ...rest } = h;
+  void _lines;
+  return rest;
+}
+
+// Persist the product-aware clamp hydrate computed, then respond. Sharing this
+// between POST and PATCH is what guarantees storage and display agree: whatever
+// the customer is shown is what is actually in the cart.
+async function persistAndRespond(
+  key: string,
+  lines: Line[],
+  newCookie?: string
+) {
+  const h = await hydrate(lines);
+  await setLines(key, h.lines);
+  return respond(publicView(h), newCookie);
+}
+
 export async function GET(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
-  return respond(await hydrate(await getLines(key)), newCookie);
+  return respond(publicView(await hydrate(await getLines(key))), newCookie);
 }
 
 // Add (merges into the existing line with the SAME product + selection).
+// Accepts either a single {productId, quantity, …} or a batch {items:[…]} —
+// the batch form is what /toplu-siparis uses, so adding N products costs one
+// hydrate round trip instead of N.
 export async function POST(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
   const body = await req.json().catch(() => ({}));
-  const productId = String(body.productId ?? "");
-  if (!productId) return NextResponse.json({ error: "productId" }, { status: 400 });
-  const qty = clampQty(body.quantity);
-  const optionChoiceIds = idArray(body.optionChoiceIds);
-  const addonIds = idArray(body.addonIds);
-  const id = lineKey(productId, optionChoiceIds, addonIds);
+
+  const rawItems: unknown[] = Array.isArray(body.items)
+    ? body.items.slice(0, 50)
+    : [body];
+  const additions = rawItems
+    .map((raw) => {
+      const item = (raw ?? {}) as Record<string, unknown>;
+      const productId = String(item.productId ?? "");
+      if (!productId) return null;
+      const optionChoiceIds = idArray(item.optionChoiceIds);
+      const addonIds = idArray(item.addonIds);
+      return {
+        id: lineKey(productId, optionChoiceIds, addonIds),
+        productId,
+        quantity: clampQty(item.quantity),
+        optionChoiceIds,
+        addonIds,
+      };
+    })
+    .filter((x): x is Line => x !== null);
+
+  if (additions.length === 0) {
+    return NextResponse.json({ error: "productId" }, { status: 400 });
+  }
 
   const lines = await getLines(key);
-  const existing = lines.find((l) => l.id === id);
-  if (existing) existing.quantity = Math.min(20, existing.quantity + qty);
-  else lines.push({ id, productId, quantity: qty, optionChoiceIds, addonIds });
-  await setLines(key, lines);
-  return respond(await hydrate(lines), newCookie);
+  for (const add of additions) {
+    const existing = lines.find((l) => l.id === add.id);
+    if (existing) {
+      existing.quantity = Math.min(
+        ABSOLUTE_MAX_LINE_QTY,
+        existing.quantity + add.quantity
+      );
+    } else {
+      lines.push(add);
+    }
+  }
+  return persistAndRespond(key, lines, newCookie);
 }
 
 // Set an exact quantity for a line (0 removes it). Keyed by line id.
@@ -190,19 +296,24 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const id = String(body.id ?? "");
   if (!id) return NextResponse.json({ error: "id" }, { status: 400 });
-  const qty = Math.max(0, Math.min(20, Math.round(Number(body.quantity) || 0)));
+  const qty = Math.max(
+    0,
+    Math.min(ABSOLUTE_MAX_LINE_QTY, Math.round(Number(body.quantity) || 0))
+  );
   let lines = await getLines(key);
   if (qty === 0) lines = lines.filter((l) => l.id !== id);
   else {
     const existing = lines.find((l) => l.id === id);
     if (existing) existing.quantity = qty;
   }
-  await setLines(key, lines);
-  return respond(await hydrate(lines), newCookie);
+  return persistAndRespond(key, lines, newCookie);
 }
 
 export async function DELETE(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
   await setLines(key, []);
-  return respond({ items: [], totalKurus: 0, count: 0 }, newCookie);
+  return respond(
+    { items: [], totalKurus: 0, count: 0, bulkSavingsKurus: 0, clamped: false },
+    newCookie
+  );
 }

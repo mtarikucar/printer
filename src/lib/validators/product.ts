@@ -3,6 +3,11 @@ import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { createTurkishAddressSchema } from "@/lib/validators/order";
+import {
+  ABSOLUTE_MAX_LINE_QTY,
+  MAX_TIERS_PER_PRODUCT,
+  MIN_TIER_QUANTITY,
+} from "@/lib/config/bulk";
 
 // Curated product categories. Keep in sync with the `shop.category.*` and
 // `product.category.*` dictionary keys used for the storefront filter + labels.
@@ -71,6 +76,32 @@ export const updateProductSpecSchema = z.object({
 export type ProductComponentInput = z.infer<typeof productComponentSchema>;
 export type ProductAssemblyStepInput = z.infer<typeof productAssemblyStepSchema>;
 
+// Toplu sipariş: the product's bulk flag, its ceiling/lead time, and the whole
+// volume ladder, saved atomically. Shape-level checks only — the ladder's real
+// invariants (strictly decreasing prices, below base price, reachable top rung,
+// admin-owned product) need the product row and live in
+// services/product-tiers.ts validateTiers.
+export const priceTierSchema = z.object({
+  minQuantity: z.number().int().min(MIN_TIER_QUANTITY).max(ABSOLUTE_MAX_LINE_QTY),
+  unitPriceKurus: z.number().int().min(1).max(100_000_000),
+});
+
+export const updateProductBulkSchema = z.object({
+  bulkEnabled: z.boolean(),
+  bulkMaxQuantity: z
+    .number()
+    .int()
+    .min(MIN_TIER_QUANTITY)
+    .max(ABSOLUTE_MAX_LINE_QTY)
+    .nullable()
+    .default(null),
+  bulkLeadTimeDays: z.number().int().min(1).max(365).nullable().default(null),
+  tiers: z.array(priceTierSchema).max(MAX_TIERS_PER_PRODUCT).default([]),
+});
+
+export type PriceTierInput = z.infer<typeof priceTierSchema>;
+export type UpdateProductBulkInput = z.infer<typeof updateProductBulkSchema>;
+
 // Storefront checkout for a marketplace purchase. Shares the common checkout
 // fields with createOrderSchema (address/payment/gift-card/guest), but carries
 // a productId + quantity instead of photoKey/figurineSize/style.
@@ -78,7 +109,16 @@ export function createMarketplaceOrderSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
   return z.object({
     productId: z.string().uuid(d["validator.product.id.invalid"]),
-    quantity: z.number().int().min(1).max(20).optional().default(1),
+    // Sanity bound only. The authoritative, product-aware ceiling (20 for a
+    // normal product, up to 200 for a bulk-enabled one) is enforced in
+    // /api/orders where the product row is loaded — see effectiveMaxQty.
+    quantity: z
+      .number()
+      .int()
+      .min(1)
+      .max(ABSOLUTE_MAX_LINE_QTY)
+      .optional()
+      .default(1),
     // Per-product option choices (one per group) + add-ons. Validated +
     // re-priced server-side; ids that don't belong to the product are ignored.
     optionChoiceIds: z.array(z.string().uuid()).max(50).optional().default([]),
@@ -108,7 +148,9 @@ export function createCartOrderSchema(_locale: Locale = defaultLocale) {
       .array(
         z.object({
           productId: z.string().uuid(),
-          quantity: z.number().int().min(1).max(20),
+          // Sanity bound; the per-product ceiling is enforced server-side in
+          // /api/orders against the PER-PRODUCT total across lines.
+          quantity: z.number().int().min(1).max(ABSOLUTE_MAX_LINE_QTY),
           optionChoiceIds: z.array(z.string().uuid()).max(50).optional().default([]),
           addonIds: z.array(z.string().uuid()).max(50).optional().default([]),
         })

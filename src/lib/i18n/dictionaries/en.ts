@@ -193,6 +193,39 @@ const en = {
   "cart.checkout": "Checkout",
   "cart.remove": "Remove",
   "cart.continue": "Continue shopping",
+
+  // Bulk ordering (toplu sipariş) — volume price tiers on cheap items.
+  // {n}/{price}/{qty} placeholders are replaced at the call site.
+  "bulk.title": "Bulk order",
+  "bulk.intro":
+    "On keychains and similar small items the unit price drops as the quantity grows. Enter an amount next to each product and add them all to your cart at once.",
+  "bulk.priceTable": "Bulk prices",
+  "bulk.tierRange": "{from}-{to} pcs",
+  "bulk.tierOpenRange": "{from}+ pcs",
+  "bulk.discountBadge": "{percent}% off",
+  "bulk.quantity": "Quantity",
+  "bulk.nudge": "Add {n} more and the unit price drops to {price}.",
+  "bulk.completeTo": "Round up to {qty} → {price} each",
+  "bulk.savings": "Bulk production discount",
+  "bulk.capReached": "You can order at most {max} pcs in one go.",
+  "bulk.capReachedHint":
+    "For larger quantities message us — we can quote a bulk production price.",
+  "bulk.groupTotal": "{title} — {qty} pcs in total",
+  "bulk.groupTierNote": "the bulk price applies to every variant",
+  "bulk.tierUnitPrice": "{qty} pcs bulk price · total {total}",
+  "bulk.perUnit": "{price} / pc",
+  "bulk.summary": "Order summary",
+  "bulk.summaryEmpty": "Enter quantities above.",
+  "bulk.addAll": "Add everything to cart",
+  "bulk.adding": "Adding…",
+  "bulk.addedGoToCart": "Added to cart ✓ — go to cart",
+  "bulk.none":
+    "No products are open to bulk ordering right now. Message us if you have a custom bulk production request.",
+  "bulk.leadTimeNotice":
+    "Prices include VAT. Bulk orders are batched at a single workshop; lead time varies with quantity.",
+  "bulk.checkoutNotice":
+    "Bulk production order. High-quantity orders are printed as one batch at a single workshop, so preparation may take a few extra business days. We'll keep you posted before shipping.",
+
   "checkout.summary": "Order summary",
   "checkout.giftCard": "Gift card code (optional)",
   "design.title": "2D design → 3D object",

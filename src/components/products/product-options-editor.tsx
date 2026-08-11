@@ -19,7 +19,7 @@ const toKurus = (tl: string) => Math.round((Number(tl.replace(",", ".")) || 0) *
  * admin-any / seller-own.
  */
 export function ProductOptionsEditor({ productId }: { productId: string }) {
-  const [config, setConfig] = useState<ProductConfig>({ optionGroups: [], addons: [] });
+  const [config, setConfig] = useState<ProductConfig>({ optionGroups: [], addons: [], tiers: [] });
   const [images, setImages] = useState<ProductImage[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function ProductOptionsEditor({ productId }: { productId: string }) {
     const r = await fetch(`/api/products/${productId}/options`);
     if (r.ok) {
       const d = await r.json();
-      setConfig(d.config ?? { optionGroups: [], addons: [] });
+      setConfig(d.config ?? { optionGroups: [], addons: [], tiers: [] });
       setImages(d.images ?? []);
     }
   }, [productId]);

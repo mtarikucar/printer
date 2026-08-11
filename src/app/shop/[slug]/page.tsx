@@ -11,6 +11,7 @@ import { getPublicUrl } from "@/lib/services/storage";
 import { getProductPublicSpec } from "@/lib/services/product-spec";
 import { getProductConfig } from "@/lib/services/product-options";
 import { sellerNotSuspended } from "@/lib/services/shop-query";
+import { effectiveMaxQty } from "@/lib/config/bulk";
 import { ProductDetailClient } from "./detail-client";
 import { ProductReviews } from "@/components/reviews/product-reviews";
 import { ProductRow } from "@/components/marketplace/product-row";
@@ -141,6 +142,12 @@ export default async function ProductDetailPage({
             optionGroups: optionConfig.optionGroups,
             addons: optionConfig.addons,
             choiceImages,
+            // Volume tiers ride along on the config getProductConfig already
+            // loads — the ladder costs no extra query here.
+            tiers: optionConfig.tiers,
+            bulkEnabled: product.bulkEnabled,
+            maxQuantity: effectiveMaxQty(product),
+            bulkLeadTimeDays: product.bulkLeadTimeDays,
           }}
         />
         <ProductReviews productId={product.id} />

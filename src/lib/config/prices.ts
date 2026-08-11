@@ -205,6 +205,14 @@ export const PLATFORM_COMMISSION_RATE_BPS = 3500;
 // KDV-inclusive, so the invoice breaks the paid total into base + KDV.
 export const KDV_RATE_BPS = 2000; // 20%
 
+// Ceiling for any single order/line amount. Every money column is pg `integer`
+// (int4, max 2,147,483,647 kuruş ≈ ₺21.4M); blowing past it raises a Postgres
+// "integer out of range" and surfaces as an opaque 500 mid-checkout. ₺2M is far
+// above any legitimate order while leaving an order of magnitude of headroom.
+// Enforced on the admin manual-order route AND on customer checkout — bulk
+// quantities make a 50-line × 200-unit cart trivially reachable.
+export const MAX_AMOUNT_KURUS = 2_000_000_00;
+
 // Professional painting is NOT a separate add-on price: it is the existing
 // "hand_painted" figurine finish (see FINISH_SURCHARGES_KURUS.hand_painted).
 // Orders with that finish are routed to a painter partner, and its surcharge

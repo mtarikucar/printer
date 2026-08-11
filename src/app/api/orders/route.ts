@@ -21,7 +21,9 @@ import {
   calculateUpsellAmount,
   itemPriceKurus,
   finishSurchargeKurus,
+  MAX_AMOUNT_KURUS,
 } from "@/lib/config/prices";
+import { effectiveMaxQty } from "@/lib/config/bulk";
 import { priceKindForStyle, getTemplate, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { resolveOrderLines, type ResolvedOrderLine } from "@/lib/services/product-options";
 import { getSessionUser } from "@/lib/services/customer-auth";
@@ -158,6 +160,17 @@ export async function POST(request: NextRequest) {
     // resolve the painted/unpainted image — server-authoritative.
     let mpLine: ResolvedOrderLine | null = null;
     if (orderType === "marketplace" && !isCart) {
+      // Product-aware quantity ceiling. The cart UI already clamps to this, so
+      // an over-cap body here means a stale or tampered client — refuse rather
+      // than silently reducing the quantity the customer thinks they're buying.
+      if (mpInput!.quantity > effectiveMaxQty(product!)) {
+        return NextResponse.json(
+          {
+            error: `Bu üründen en fazla ${effectiveMaxQty(product!)} adet sipariş verebilirsiniz.`,
+          },
+          { status: 400 }
+        );
+      }
       mpLine = (
         await resolveOrderLines([
           {
@@ -165,6 +178,7 @@ export async function POST(request: NextRequest) {
             basePriceKurus: product!.priceKurus,
             optionChoiceIds: mpInput!.optionChoiceIds,
             addonIds: mpInput!.addonIds,
+            quantity: mpInput!.quantity,
           },
         ])
       )[0];
@@ -178,6 +192,8 @@ export async function POST(request: NextRequest) {
       sellerManufacturerId: string | null;
       titleSnapshot: string;
       unitPriceKurus: number;
+      listUnitPriceKurus: number;
+      appliedTierMinQuantity: number | null;
       quantity: number;
       lineTotalKurus: number;
       selectedOptions: ResolvedOrderLine["selectedOptions"];
@@ -193,6 +209,10 @@ export async function POST(request: NextRequest) {
         with: { manufacturer: { columns: { status: true } } },
       });
       const byId = new Map(rows.map((r) => [r.id, r]));
+      // A product may legitimately appear on several lines (different options),
+      // so the ceiling is checked against the per-product TOTAL — the same basis
+      // the volume tier is computed on.
+      const qtyByProduct = new Map<string, number>();
       for (const item of cartInput!.items) {
         const p = byId.get(item.productId);
         if (
@@ -205,15 +225,32 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
+        qtyByProduct.set(
+          item.productId,
+          (qtyByProduct.get(item.productId) ?? 0) + item.quantity
+        );
       }
-      // Server-authoritative re-pricing per line (base + option deltas + add-ons)
-      // with the resolved painted/unpainted image — never trust client prices.
+      for (const [productId, totalQty] of qtyByProduct) {
+        const cap = effectiveMaxQty(byId.get(productId)!);
+        if (totalQty > cap) {
+          return NextResponse.json(
+            {
+              error: `"${byId.get(productId)!.title}" ürününden en fazla ${cap} adet sipariş verebilirsiniz.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+      // Server-authoritative re-pricing per line (base + option deltas + add-ons,
+      // volume tier from the per-product total) with the resolved
+      // painted/unpainted image — never trust client prices.
       const resolved = await resolveOrderLines(
         cartInput!.items.map((item) => ({
           productId: item.productId,
           basePriceKurus: byId.get(item.productId)!.priceKurus,
           optionChoiceIds: item.optionChoiceIds,
           addonIds: item.addonIds,
+          quantity: item.quantity,
         }))
       );
       cartInput!.items.forEach((item, i) => {
@@ -224,6 +261,8 @@ export async function POST(request: NextRequest) {
           sellerManufacturerId: p.manufacturerId ?? null,
           titleSnapshot: p.title,
           unitPriceKurus: r.unitPriceKurus,
+          listUnitPriceKurus: r.listUnitPriceKurus,
+          appliedTierMinQuantity: r.appliedTierMinQuantity,
           quantity: item.quantity,
           lineTotalKurus: r.unitPriceKurus * item.quantity,
           selectedOptions: r.selectedOptions,
@@ -375,6 +414,27 @@ export async function POST(request: NextRequest) {
       ? paintingPortionKurus(customInput!.finish)
       : 0;
     const amountKurus = itemAmountKurus + upsellAmountKurus;
+    // Every money column is pg int4. Bulk quantities make a total past that
+    // ceiling reachable, and overflowing it surfaces as an opaque 500 mid-
+    // checkout instead of a fixable error. Guard both the whole order and each
+    // individual line (a single 200 × high-priced line can overflow on its own).
+    const overflowingLine = cartLines.find(
+      (l) => l.lineTotalKurus > MAX_AMOUNT_KURUS
+    );
+    if (amountKurus <= 0 || amountKurus > MAX_AMOUNT_KURUS || overflowingLine) {
+      return NextResponse.json(
+        { error: "Sipariş tutarı geçersiz (0 ile ₺2.000.000 arasında olmalı)." },
+        { status: 400 }
+      );
+    }
+    // Toplu üretim: the buyer actually received a volume-tier price. Snapshotted
+    // on the draft so promotion never re-reads live tiers — a havale draft lives
+    // 72h with a frozen amountKurus, and a retuned ladder in that window must not
+    // change the flag on money that was already agreed. Cart sub-orders refine
+    // this per seller from their own order_items at promotion time.
+    const isBulkOrder = isCart
+      ? cartLines.some((l) => l.appliedTierMinQuantity != null)
+      : mpLine?.appliedTierMinQuantity != null;
 
     let giftCardId: string | undefined;
     if (common.giftCardCode) {
@@ -541,6 +601,7 @@ export async function POST(request: NextRequest) {
             orderType === "custom" || orderType === "upload"
               ? CONTENT_CONSENT_VERSION
               : null,
+          isBulk: isBulkOrder,
           productId: orderType === "marketplace" && !isCart ? product!.id : null,
           sellerManufacturerId:
             orderType === "marketplace" && !isCart ? product!.manufacturerId : null,
@@ -598,6 +659,8 @@ export async function POST(request: NextRequest) {
             sellerManufacturerId: l.sellerManufacturerId,
             productTitleSnapshot: l.titleSnapshot,
             unitPriceKurus: l.unitPriceKurus,
+            listUnitPriceKurus: l.listUnitPriceKurus,
+            appliedTierMinQuantity: l.appliedTierMinQuantity,
             quantity: l.quantity,
             lineTotalKurus: l.lineTotalKurus,
             selectedOptions: l.selectedOptions.length > 0 ? l.selectedOptions : null,

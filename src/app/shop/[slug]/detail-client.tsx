@@ -11,6 +11,12 @@ import {
 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { AddToCartButton } from "@/components/cart/add-to-cart-button";
+import { QuantityInput } from "@/components/cart/quantity-input";
+import {
+  TierPriceTable,
+  type PriceTier,
+} from "@/components/products/tier-price-table";
+import { nextTier as nextTierFor, pickTier } from "@/lib/config/bulk";
 import { WhatsAppButton } from "@/components/whatsapp/whatsapp-button";
 import { track } from "@/lib/analytics/client";
 import type {
@@ -32,6 +38,11 @@ interface ProductDetail {
   addons: AddonConfig[];
   /** Painted-set images keyed by option choice id (swaps the gallery). */
   choiceImages: Record<string, string[]>;
+  /** Toplu sipariş: volume ladder + the per-line ceiling and bulk lead time. */
+  tiers: PriceTier[];
+  bulkEnabled: boolean;
+  maxQuantity: number;
+  bulkLeadTimeDays: number | null;
 }
 
 export function ProductDetailClient({ product }: { product: ProductDetail }) {
@@ -69,7 +80,16 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
     (sum, a) => sum + (selectedAddons.has(a.id) ? a.priceKurus : 0),
     0
   );
-  const unitPriceKurus = product.priceKurus + optionsDeltaKurus + addonsDeltaKurus;
+  // Toplu sipariş: the tier price replaces the base price; option/add-on deltas
+  // still stack on top, exactly as the server recomputes it (computeSelectionPrice).
+  const [quantity, setQuantity] = useState(1);
+  const activeTier = pickTier(product.tiers, quantity);
+  const effectiveBaseKurus = activeTier?.unitPriceKurus ?? product.priceKurus;
+  const unitPriceKurus =
+    effectiveBaseKurus + optionsDeltaKurus + addonsDeltaKurus;
+  const listUnitPriceKurus =
+    product.priceKurus + optionsDeltaKurus + addonsDeltaKurus;
+  const nextTier = nextTierFor(product.tiers, quantity);
 
   // Gallery swaps to a selected choice's image set (e.g. painted) when present.
   const paintedChoiceId = selectedChoiceIds.find(
@@ -173,7 +193,7 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
         body: JSON.stringify({
           orderType: "marketplace",
           productId: product.id,
-          quantity: 1,
+          quantity,
           optionChoiceIds: selectedChoiceIds,
           addonIds: [...selectedAddons],
           shippingAddress: {
@@ -266,10 +286,25 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
             {t("product.detail.soldBy", "Satıcı")}: {product.sellerName}
           </p>
         )}
-        <p className="mt-4 text-3xl font-semibold text-text-primary">
+        <p className="mt-4 flex items-baseline gap-2 text-3xl font-semibold text-text-primary">
           {formatCurrency(unitPriceKurus, locale)}
+          {activeTier && (
+            <span className="text-base font-normal text-text-muted line-through">
+              {formatCurrency(listUnitPriceKurus, locale)}
+            </span>
+          )}
         </p>
-        {unitPriceKurus !== product.priceKurus && (
+        {activeTier && (
+          <p className="mt-0.5 text-sm font-medium text-green-700">
+            {d["bulk.tierUnitPrice"]
+              .replace("{qty}", String(quantity))
+              .replace(
+                "{total}",
+                formatCurrency(unitPriceKurus * quantity, locale)
+              )}
+          </p>
+        )}
+        {!activeTier && unitPriceKurus !== product.priceKurus && (
           <p className="mt-0.5 text-sm text-text-muted">
             {t("product.basePrice", "Taban fiyat")}:{" "}
             {formatCurrency(product.priceKurus, locale)}
@@ -404,12 +439,54 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
           </div>
         )}
 
+        {product.bulkEnabled && product.tiers.length > 0 && (
+          <div className="mt-6 space-y-3">
+            <TierPriceTable
+              basePriceKurus={product.priceKurus}
+              tiers={product.tiers}
+              quantity={quantity}
+            />
+            {nextTier && (
+              <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
+                {d["bulk.nudge"]
+                  .replace("{n}", String(nextTier.minQuantity - quantity))
+                  .replace(
+                    "{price}",
+                    formatCurrency(nextTier.unitPriceKurus, locale)
+                  )}
+              </p>
+            )}
+            {quantity >= product.maxQuantity && (
+              <p className="text-xs text-text-muted">
+                {d["bulk.capReached"].replace(
+                  "{max}",
+                  String(product.maxQuantity)
+                )}{" "}
+                {d["bulk.capReachedHint"]}
+              </p>
+            )}
+          </div>
+        )}
+
         {!checkoutOpen ? (
           <div className="mt-8 space-y-2">
+            {product.bulkEnabled && (
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className="text-sm text-text-secondary">
+                  {d["bulk.quantity"]}
+                </span>
+                <QuantityInput
+                  value={quantity}
+                  max={product.maxQuantity}
+                  onChange={setQuantity}
+                />
+              </div>
+            )}
             <AddToCartButton
               productId={product.id}
               optionChoiceIds={selectedChoiceIds}
               addonIds={[...selectedAddons]}
+              quantity={quantity}
             />
             <button
               onClick={() => setCheckoutOpen(true)}

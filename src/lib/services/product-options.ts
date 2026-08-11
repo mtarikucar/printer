@@ -4,8 +4,15 @@ import {
   productImages,
   productOptionChoices,
   productOptionGroups,
+  productPriceTiers,
 } from "@/lib/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { pickTier, type PriceTierConfig } from "@/lib/config/bulk";
+
+// Re-exported so pricing consumers have one import for the whole vocabulary;
+// the definitions live in config/bulk.ts because client components need them
+// without dragging in the DB layer.
+export { pickTier, type PriceTierConfig };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 export interface OptionChoiceConfig {
@@ -31,10 +38,25 @@ export interface AddonConfig {
 export interface ProductConfig {
   optionGroups: OptionGroupConfig[];
   addons: AddonConfig[];
+  /**
+   * Volume price tiers, ascending by minQuantity. REQUIRED (never optional):
+   * an `undefined` here would silently mean "no discount" inside a pricing
+   * path, which is exactly the kind of bug that only shows up as money.
+   * Empty array = this product has no bulk pricing.
+   */
+  tiers: PriceTierConfig[];
 }
 
 export interface PricedSelection {
   unitPriceKurus: number;
+  /**
+   * What the same selection would cost per unit WITHOUT any volume tier
+   * (base price + the same option deltas + the same add-ons). Display only —
+   * it must never enter a total. Equal to unitPriceKurus when no tier applied.
+   */
+  listUnitPriceKurus: number;
+  /** minQuantity of the tier that fired, or null when none did. */
+  appliedTierMinQuantity: number | null;
   selectedOptions: {
     groupName: string;
     choiceName: string;
@@ -48,15 +70,17 @@ export interface PricedSelection {
 
 // ─── Config loading (batched) ───────────────────────────────────────────────
 /**
- * Load the option groups (+choices, with hasImages) and add-ons for many
- * products at once. Used by the cart (re-pricing every line) and the buyer page.
+ * Load the option groups (+choices, with hasImages), add-ons and volume price
+ * tiers for many products at once. Used by the cart (re-pricing every line) and
+ * the buyer page.
  */
 export async function loadProductConfigs(
   productIds: string[]
 ): Promise<Map<string, ProductConfig>> {
   const out = new Map<string, ProductConfig>();
   if (productIds.length === 0) return out;
-  for (const id of productIds) out.set(id, { optionGroups: [], addons: [] });
+  for (const id of productIds)
+    out.set(id, { optionGroups: [], addons: [], tiers: [] });
 
   const groups = await db
     .select()
@@ -95,6 +119,17 @@ export async function loadProductConfigs(
     .where(inArray(productAddons.productId, productIds))
     .orderBy(asc(productAddons.sortOrder), asc(productAddons.name));
 
+  // Ascending by minQuantity so pickTier can scan for the last match.
+  const tiers = await db
+    .select({
+      productId: productPriceTiers.productId,
+      minQuantity: productPriceTiers.minQuantity,
+      unitPriceKurus: productPriceTiers.unitPriceKurus,
+    })
+    .from(productPriceTiers)
+    .where(inArray(productPriceTiers.productId, productIds))
+    .orderBy(asc(productPriceTiers.minQuantity));
+
   const choicesByGroup = new Map<string, OptionChoiceConfig[]>();
   for (const c of choices) {
     const list = choicesByGroup.get(c.groupId) ?? [];
@@ -128,6 +163,14 @@ export async function loadProductConfigs(
       priceKurus: a.priceKurus,
     });
   }
+  for (const t of tiers) {
+    const cfg = out.get(t.productId);
+    if (!cfg) continue;
+    cfg.tiers.push({
+      minQuantity: t.minQuantity,
+      unitPriceKurus: t.unitPriceKurus,
+    });
+  }
   return out;
 }
 
@@ -136,26 +179,41 @@ export async function getProductConfig(productId: string): Promise<ProductConfig
     (await loadProductConfigs([productId])).get(productId) ?? {
       optionGroups: [],
       addons: [],
+      tiers: [],
     }
   );
 }
+
 
 // ─── Pricing (pure, server-authoritative) ───────────────────────────────────
 /**
  * Compute the trusted unit price for a selection. Invalid ids are ignored;
  * each group contributes at most one choice (the selected one, else its default).
  * NEVER trust a client-sent price — always recompute from the config here.
+ *
+ * `quantity` drives the toplu-sipariş volume ladder: the matching tier's price
+ * REPLACES `basePriceKurus`, and option deltas / add-ons then stack on top of it
+ * unchanged (a hand-painting upcharge costs the same whether you buy 1 or 100).
+ * Callers that don't care about volume pricing can omit it and get the old
+ * behaviour exactly.
  */
 export function computeSelectionPrice(
   config: ProductConfig,
   basePriceKurus: number,
   rawChoiceIds: string[],
-  rawAddonIds: string[]
+  rawAddonIds: string[],
+  quantity: number = 1
 ): PricedSelection {
   const chosen = new Set(rawChoiceIds);
   const selectedOptions: PricedSelection["selectedOptions"] = [];
   const appliedChoiceIds: string[] = [];
-  let total = basePriceKurus;
+  const tier = pickTier(config.tiers, quantity);
+  // Everything after this point works off `effectiveBase`; `listDelta` is the
+  // gap we must add back to reconstruct the undiscounted display price, so the
+  // two prices can never disagree about the options/add-ons applied.
+  const effectiveBase = tier ? tier.unitPriceKurus : basePriceKurus;
+  const listDelta = basePriceKurus - effectiveBase;
+  let total = effectiveBase;
 
   for (const group of config.optionGroups) {
     // The buyer's pick for this group, else the group's default choice.
@@ -191,6 +249,8 @@ export function computeSelectionPrice(
     // amount — a cross-seller subsidy where the platform pays out more than it
     // collected. A cheaper option is fine; a negative-priced line is not.
     unitPriceKurus: Math.max(0, total),
+    listUnitPriceKurus: Math.max(0, total + listDelta),
+    appliedTierMinQuantity: tier?.minQuantity ?? null,
     selectedOptions,
     selectedAddons,
     appliedChoiceIds,
@@ -226,6 +286,11 @@ export function resolveGalleryImageKeys(
 // ─── Order-line resolution (price + snapshot + image, batched) ──────────────
 export interface ResolvedOrderLine {
   unitPriceKurus: number;
+  /** Undiscounted unit price for the same selection. Display only — never summed. */
+  listUnitPriceKurus: number;
+  appliedTierMinQuantity: number | null;
+  /** Total units of THIS product across all resolved lines (the tier basis). */
+  productQuantity: number;
   selectedOptions: PricedSelection["selectedOptions"];
   selectedAddons: PricedSelection["selectedAddons"];
   /** Resolved primary image (painted set if a selected choice has one). */
@@ -237,6 +302,16 @@ export interface ResolvedOrderLine {
  * Loads every product's config + images once, then resolves each line. Used by
  * the cart hydrate and the order-creation route so a line is never charged the
  * bare base price when options/add-ons were chosen.
+ *
+ * Volume tiers are evaluated on the PER-PRODUCT total across the whole batch,
+ * not per line: 6 red + 6 blue keychains is a 12-unit production run and gets
+ * the 10+ price. Safe against the cart's per-seller fan-out because two lines
+ * sharing a productId necessarily share a seller, so an aggregated tier can
+ * never subsidise one seller's sub-order out of another's.
+ *
+ * Callers MUST pass only the lines they intend to charge for — the cart hydrate
+ * excludes its hidden (unpurchasable) lines, so the tier the customer sees is
+ * the tier /api/orders recomputes from the same set.
  */
 export async function resolveOrderLines(
   lines: {
@@ -244,9 +319,17 @@ export async function resolveOrderLines(
     basePriceKurus: number;
     optionChoiceIds: string[];
     addonIds: string[];
+    quantity: number;
   }[]
 ): Promise<ResolvedOrderLine[]> {
   const productIds = [...new Set(lines.map((l) => l.productId))];
+  const qtyByProduct = new Map<string, number>();
+  for (const l of lines) {
+    qtyByProduct.set(
+      l.productId,
+      (qtyByProduct.get(l.productId) ?? 0) + Math.max(0, l.quantity)
+    );
+  }
   const configs = await loadProductConfigs(productIds);
   const imagesByProduct = new Map<string, ProductImageRow[]>();
   if (productIds.length) {
@@ -271,12 +354,18 @@ export async function resolveOrderLines(
   }
 
   return lines.map((line) => {
-    const config = configs.get(line.productId) ?? { optionGroups: [], addons: [] };
+    const config = configs.get(line.productId) ?? {
+      optionGroups: [],
+      addons: [],
+      tiers: [],
+    };
+    const productQuantity = qtyByProduct.get(line.productId) ?? line.quantity;
     const priced = computeSelectionPrice(
       config,
       line.basePriceKurus,
       line.optionChoiceIds,
-      line.addonIds
+      line.addonIds,
+      productQuantity
     );
     const gallery = resolveGalleryImageKeys(
       imagesByProduct.get(line.productId) ?? [],
@@ -284,6 +373,9 @@ export async function resolveOrderLines(
     );
     return {
       unitPriceKurus: priced.unitPriceKurus,
+      listUnitPriceKurus: priced.listUnitPriceKurus,
+      appliedTierMinQuantity: priced.appliedTierMinQuantity,
+      productQuantity,
       selectedOptions: priced.selectedOptions,
       selectedAddons: priced.selectedAddons,
       itemImageKey: gallery[0] ?? null,

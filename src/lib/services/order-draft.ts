@@ -6,6 +6,7 @@ import {
   orders,
   orderItems,
   orderPhotos,
+  products,
   giftCards,
   giftCardRedemptions,
 } from "@/lib/db/schema";
@@ -123,6 +124,34 @@ export async function promoteDraftToOrder(
         if (g) g.push(it);
         else groups.set(key, [it]);
       }
+
+      // A cart draft can't name one material (it may span products), so it is
+      // stored as the 'resin' column default. That was harmless while cart
+      // orders never went near the scoring engine — but platform-product orders
+      // now DO get auto-assigned, and the ranker hard-filters candidates on
+      // orders.material. Recovering the real material per sub-order keeps a
+      // filament-only keychain from being routed to a resin-only workshop.
+      // Mixed-material groups keep the draft's value: there is no single right
+      // answer, and an admin reassignment is the correct escape hatch.
+      const productIds = [
+        ...new Set(items.map((i) => i.productId).filter((id): id is string => !!id)),
+      ];
+      const materialByProduct = new Map<string, string | null>();
+      if (productIds.length > 0) {
+        const rows = await tx
+          .select({ id: products.id, material: products.material })
+          .from(products)
+          .where(inArray(products.id, productIds));
+        for (const r of rows) materialByProduct.set(r.id, r.material);
+      }
+      const groupMaterial = (groupItems: typeof items) => {
+        const materials = new Set(
+          groupItems
+            .map((it) => (it.productId ? materialByProduct.get(it.productId) : null))
+            .filter((m): m is "resin" | "filament" => !!m)
+        );
+        return materials.size === 1 ? [...materials][0] : draft.material;
+      };
       const createdOrders: Array<{
         id: string;
         orderNumber: string;
@@ -187,6 +216,9 @@ export async function promoteDraftToOrder(
             shippingAddress: draft.shippingAddress,
             status: "paid",
             locale: draft.locale,
+            // Recovered from this group's products (see groupMaterial) so the
+            // assignment ranker's material filter sees the truth.
+            material: groupMaterial(groupItems),
             paymentMethod: draft.paymentMethod,
             paymentStatus: "succeeded",
             amountKurus: groupAmount,
@@ -198,6 +230,11 @@ export async function promoteDraftToOrder(
             sellerManufacturerId: sellerId,
             productTitleSnapshot: title,
             quantity: groupQty,
+            // Toplu üretim, per sub-order: derived from THIS seller's own lines,
+            // so a mixed cart flags only the seller who actually sold at a tier
+            // price. Read from the snapshot on order_items, never from live
+            // tiers — the draft's amount was frozen at checkout.
+            isBulk: groupItems.some((it) => it.appliedTierMinQuantity != null),
             manufacturerId: sellerId ?? null,
             manufacturerStatus: sellerId ? "assigned" : "unassigned",
             assignedToManufacturerAt: sellerId ? new Date() : null,
@@ -327,6 +364,9 @@ export async function promoteDraftToOrder(
         sellerManufacturerId: draft.sellerManufacturerId,
         productTitleSnapshot: draft.productTitleSnapshot,
         quantity: draft.quantity,
+        // Toplu üretim: a single-product order writes no order_items rows, so
+        // the flag can only come from the draft snapshot taken at checkout.
+        isBulk: draft.isBulk,
         // Single-product option/add-on selection + resolved image.
         selectedOptions: draft.selectedOptions,
         selectedAddons: draft.selectedAddons,

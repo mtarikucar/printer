@@ -7,6 +7,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { CategoryPicker } from "@/components/category-picker";
 import { ProductOptionsEditor } from "@/components/products/product-options-editor";
+import { ProductBulkTiersEditor } from "@/components/products/product-bulk-tiers-editor";
 import {
   ProductSpecEditor,
   type SpecFile,
@@ -434,6 +435,9 @@ export function EditProductClient({
           initialSteps={initialSteps}
         />
         <ProductOptionsEditor productId={product.id} />
+        <div className="mt-6">
+          <ProductBulkTiersEditor productId={product.id} />
+        </div>
       </div>
     </div>
   );

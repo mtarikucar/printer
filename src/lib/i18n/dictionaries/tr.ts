@@ -195,6 +195,39 @@ const tr: Dictionary = {
   "cart.checkout": "Ödemeye geç",
   "cart.remove": "Kaldır",
   "cart.continue": "Alışverişe devam",
+
+  // Toplu sipariş — ucuz ürünlerde adede göre kademeli fiyat.
+  // {n}/{price}/{qty} yer tutucuları çağrı yerinde değiştirilir.
+  "bulk.title": "Toplu Sipariş",
+  "bulk.intro":
+    "Anahtarlık ve benzeri küçük ürünlerde adet arttıkça birim fiyat düşer. İstediğiniz ürünlerin yanına adedi yazın, hepsini tek seferde sepete ekleyin.",
+  "bulk.priceTable": "Toplu alım fiyatları",
+  "bulk.tierRange": "{from}-{to} adet",
+  "bulk.tierOpenRange": "{from}+ adet",
+  "bulk.discountBadge": "%{percent} indirim",
+  "bulk.quantity": "Adet",
+  "bulk.nudge": "{n} adet daha ekleyin, birim fiyat {price}'ye düşsün.",
+  "bulk.completeTo": "{qty}'e tamamla → birim {price}",
+  "bulk.savings": "Toplu üretim indirimi",
+  "bulk.capReached": "Tek seferde en fazla {max} adet sipariş verebilirsiniz.",
+  "bulk.capReachedHint":
+    "Daha yüksek adetler için bize yazın — toplu üretim için özel fiyat verebiliriz.",
+  "bulk.groupTotal": "{title} — toplam {qty} adet",
+  "bulk.groupTierNote": "toplu fiyat tüm varyantlara uygulanır",
+  "bulk.tierUnitPrice": "{qty} adet toplu fiyatı · toplam {total}",
+  "bulk.perUnit": "{price} / adet",
+  "bulk.summary": "Sipariş özeti",
+  "bulk.summaryEmpty": "Yukarıdan adet girin.",
+  "bulk.addAll": "Hepsini sepete ekle",
+  "bulk.adding": "Ekleniyor…",
+  "bulk.addedGoToCart": "Sepete eklendi ✓ — sepete git",
+  "bulk.none":
+    "Şu an toplu siparişe açık ürün yok. Özel bir toplu üretim talebiniz varsa bize yazın.",
+  "bulk.leadTimeNotice":
+    "Fiyatlar KDV dahildir. Toplu üretim siparişleri tek üreticide toplanarak hazırlanır; teslim süresi adede göre değişebilir.",
+  "bulk.checkoutNotice":
+    "Toplu üretim siparişi. Yüksek adetli siparişler tek atölyede toplu olarak basılır; hazırlık süresi normal siparişlere göre birkaç iş günü uzayabilir. Kargo öncesi sizi bilgilendiririz.",
+
   "checkout.summary": "Sipariş özeti",
   "checkout.giftCard": "Hediye kartı kodu (opsiyonel)",
   "design.title": "2D tasarım → 3D obje",

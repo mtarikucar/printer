@@ -15,16 +15,24 @@ interface AddOptions {
   addonIds?: string[];
 }
 
+/** One line of a batch add — same shape as a single add, plus its product. */
+export interface AddItem extends AddOptions {
+  productId: string;
+}
+
 interface CartState {
   count: number;
   refresh: () => Promise<void>;
   add: (productId: string, opts?: AddOptions) => Promise<void>;
+  /** Add several products in ONE request (the /toplu-siparis order sheet). */
+  addMany: (items: AddItem[]) => Promise<void>;
 }
 
 const CartContext = createContext<CartState>({
   count: 0,
   refresh: async () => {},
   add: async () => {},
+  addMany: async () => {},
 });
 
 // App-wide cart state: the count drives the header badge; add() is called from
@@ -73,8 +81,35 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Batch add. One request, one server-side hydrate — adding 8 products from
+  // the bulk order sheet as 8 sequential POSTs would mean 8 full cart
+  // re-pricing round trips.
+  const addMany = useCallback(async (items: AddItem[]) => {
+    const payload = items.filter((i) => i.productId && (i.quantity ?? 1) > 0);
+    if (payload.length === 0) return;
+    try {
+      const r = await fetch("/api/cart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: payload }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setCount(d.count ?? 0);
+        for (const item of payload) {
+          track("add_to_cart", {
+            productId: item.productId,
+            quantity: item.quantity ?? 1,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   return (
-    <CartContext.Provider value={{ count, refresh, add }}>
+    <CartContext.Provider value={{ count, refresh, add, addMany }}>
       {children}
     </CartContext.Provider>
   );

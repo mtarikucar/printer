@@ -1,6 +1,11 @@
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { manufacturers, orders, manufacturerActions } from "@/lib/db/schema";
+import {
+  manufacturers,
+  orders,
+  orderItems,
+  manufacturerActions,
+} from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { regionOf } from "@/lib/data/turkey-regions";
 import {
@@ -70,7 +75,10 @@ export interface CandidateScore {
     reliability: number;
     onTimeDelivery: number;
     compliance: number;
+    batchAffinity: number;
   };
+  /** Units of the order's product(s) already on this shop's bench. */
+  sameProductUnits: number;
   totalScore: number;
   reasons: string[];
   eligible: boolean;
@@ -91,6 +99,83 @@ function loadScore(currentLoad: number, max: number): number {
   if (currentLoad >= max) return 0;
   const ratio = currentLoad / max;
   return Math.max(0, Math.round((1 - ratio) * 100));
+}
+
+/**
+ * Units of the same product already on a shop's bench, mapped to 0-100.
+ *
+ * Saturating rather than linear: the operational win (one plate setup, one
+ * resin batch, one QC pass) is mostly realised as soon as the shop is already
+ * making the item at all, and a shop holding 400 units is not four times better
+ * a fit than one holding 100 — it is closer to being full.
+ */
+const BATCH_SATURATION_UNITS = 100;
+function batchAffinityScore(sameProductUnits: number): number {
+  if (sameProductUnits <= 0) return 0;
+  return Math.min(
+    100,
+    Math.round(50 + (50 * Math.min(sameProductUnits, BATCH_SATURATION_UNITS)) / BATCH_SATURATION_UNITS)
+  );
+}
+
+/**
+ * For each active manufacturer, how many units of `productIds` they currently
+ * hold. Counts both order shapes: a single-product order carries its product on
+ * the orders row, a cart sub-order carries them on order_items. Same bench
+ * definition as `currentLoad`, so the two signals can never disagree about what
+ * "in progress" means.
+ */
+async function sameProductUnitsByManufacturer(
+  productIds: string[]
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (productIds.length === 0) return out;
+
+  const onBench = and(
+    inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
+    orderStillOnManufacturerBench(),
+    sql`${orders.manufacturerId} IS NOT NULL`
+  );
+
+  const scalar = await db
+    .select({
+      manufacturerId: orders.manufacturerId,
+      units: sql<number>`coalesce(sum(${orders.quantity}), 0)::int`,
+    })
+    .from(orders)
+    .where(and(onBench, inArray(orders.productId, productIds)))
+    .groupBy(orders.manufacturerId);
+
+  const perLine = await db
+    .select({
+      manufacturerId: orders.manufacturerId,
+      units: sql<number>`coalesce(sum(${orderItems.quantity}), 0)::int`,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orderItems.orderId, orders.id))
+    .where(and(onBench, inArray(orderItems.productId, productIds)))
+    .groupBy(orders.manufacturerId);
+
+  for (const row of [...scalar, ...perLine]) {
+    if (!row.manufacturerId) continue;
+    out.set(row.manufacturerId, (out.get(row.manufacturerId) ?? 0) + row.units);
+  }
+  return out;
+}
+
+/** The product(s) this order is asking to have produced. */
+async function productIdsForOrder(
+  orderId: string,
+  scalarProductId: string | null
+): Promise<string[]> {
+  const lines = await db
+    .select({ productId: orderItems.productId })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
+  const ids = new Set<string>();
+  if (scalarProductId) ids.add(scalarProductId);
+  for (const l of lines) if (l.productId) ids.add(l.productId);
+  return [...ids];
 }
 
 /**
@@ -209,7 +294,12 @@ export async function rankManufacturersForOrder(
 ): Promise<CandidateScore[]> {
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
-    columns: { shippingAddress: true, material: true, declinedManufacturerIds: true },
+    columns: {
+      shippingAddress: true,
+      material: true,
+      declinedManufacturerIds: true,
+      productId: true,
+    },
   });
   if (!order) return [];
 
@@ -254,6 +344,15 @@ export async function rankManufacturersForOrder(
     if (l.manufacturerId) loadMap.set(l.manufacturerId, l.load);
   }
 
+  // Batching signal. Skipped entirely when the weight is 0, mirroring the OTD
+  // skip below — a disabled signal must not cost two queries per ranking.
+  const batchUnits =
+    weights.batchAffinity > 0
+      ? await sameProductUnitsByManufacturer(
+          await productIdsForOrder(orderId, order.productId)
+        )
+      : new Map<string, number>();
+
   const candidates = await Promise.all(
     mfgs.map(async (m): Promise<CandidateScore> => {
       const addr = m.address as TurkishAddress | null;
@@ -269,6 +368,7 @@ export async function rankManufacturersForOrder(
           ? onTimeDeliveryScoreFor(m.id)
           : Promise.resolve(70),
       ]);
+      const sameProductUnits = batchUnits.get(m.id) ?? 0;
       const scores = {
         distance: distanceScore(orderCity, city ?? undefined),
         load: loadScore(currentLoad, max),
@@ -278,6 +378,7 @@ export async function rankManufacturersForOrder(
           (m.requiresManualTaxReview ? 60 : 100) +
           (m.iban ? 0 : -10) +
           (m.acceptingOrders ? 0 : -20),
+        batchAffinity: batchAffinityScore(sameProductUnits),
       };
       scores.compliance = Math.max(0, Math.min(100, scores.compliance));
 
@@ -286,7 +387,8 @@ export async function rankManufacturersForOrder(
         scores.load * weights.load +
         scores.reliability * weights.reliability +
         scores.onTimeDelivery * weights.onTimeDelivery +
-        scores.compliance * weights.compliance;
+        scores.compliance * weights.compliance +
+        scores.batchAffinity * weights.batchAffinity;
 
       let eligible = true;
       let ineligibleReason: string | undefined;
@@ -319,6 +421,8 @@ export async function rankManufacturersForOrder(
       if (scores.reliability >= 85) reasons.push("Güvenilir");
       if (weights.onTimeDelivery > 0 && scores.onTimeDelivery >= 85)
         reasons.push("Hızlı teslimat");
+      if (sameProductUnits > 0)
+        reasons.push(`Aynı ürünü üretiyor (${sameProductUnits} adet)`);
       if (m.requiresManualTaxReview) reasons.push("Vergi incelemede");
       if (!m.iban) reasons.push("⚠ IBAN eksik");
 
@@ -334,6 +438,7 @@ export async function rankManufacturersForOrder(
         maxConcurrentOrders: max,
         acceptingOrders: m.acceptingOrders,
         scores,
+        sameProductUnits,
         totalScore: Math.round(totalScore),
         reasons,
         eligible,

@@ -33,6 +33,8 @@ export interface ShopFilters {
   material?: string | null;
   priceMin?: number | null;
   priceMax?: number | null;
+  /** Toplu sipariş sheet: only products the admin opened to volume ordering. */
+  bulkOnly?: boolean;
   offset?: number;
   limit?: number;
 }
@@ -52,6 +54,7 @@ export async function queryShopProducts(
         : [desc(products.createdAt)];
 
   const conds: SQL[] = [eq(products.status, "active"), sellerNotSuspended()];
+  if (f.bulkOnly) conds.push(eq(products.bulkEnabled, true));
   // Category filter is now a node PATH; match the node + its whole subtree, so
   // selecting "figurine" also returns "figurine/marvel" products. An unknown
   // path yields an impossible filter (no products) rather than ignoring it.

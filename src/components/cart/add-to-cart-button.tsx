@@ -12,12 +12,15 @@ export function AddToCartButton({
   label,
   optionChoiceIds,
   addonIds,
+  quantity = 1,
 }: {
   productId: string;
   className?: string;
   label?: string;
   optionChoiceIds?: string[];
   addonIds?: string[];
+  /** Bulk products let the buyer pick an amount on the detail page. */
+  quantity?: number;
 }) {
   const { add } = useCart();
   const d = useDictionary();
@@ -28,7 +31,7 @@ export function AddToCartButton({
     e.preventDefault();
     e.stopPropagation();
     setAdding(true);
-    await add(productId, { optionChoiceIds, addonIds });
+    await add(productId, { quantity, optionChoiceIds, addonIds });
     setAdding(false);
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);

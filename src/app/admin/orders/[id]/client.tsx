@@ -27,6 +27,87 @@ import { formatCurrency, formatDateTime, formatNumber } from "@/lib/i18n/format"
 import type { Locale } from "@/lib/i18n/types";
 import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
 
+/**
+ * Everything the painting leg of an order is doing. Populated only for orders
+ * that need painting or already have a painter; an ordinary print job gets an
+ * empty shell and the panel stays hidden.
+ */
+interface PaintingData {
+  needsPainting: boolean;
+  paintingPriceKurus: number;
+  painterStatus: string | null;
+  qcRound: number;
+  assignedAt: string | null;
+  sentAt: string | null;
+  receivedAt: string | null;
+  handoffCarrier: string | null;
+  handoffTrackingNumber: string | null;
+  earning: {
+    grossKurus: number;
+    netKurus: number;
+    commissionKurus: number;
+    status: string;
+  } | null;
+  actions: { id: string; action: string; notes: string | null; createdAt: string }[];
+  qcPhotos: { id: string; url: string; reviewStatus: string }[];
+  qcReviews: {
+    id: string;
+    round: number;
+    decision: string;
+    reason: string | null;
+    adminEmail: string;
+    createdAt: string;
+  }[];
+  candidates: {
+    id: string;
+    companyName: string;
+    contactPerson: string | null;
+    phone: string | null;
+    currentLoad: number;
+    maxConcurrentOrders: number;
+    acceptingOrders: boolean;
+    declined: boolean;
+    eligible: boolean;
+  }[];
+  declined: { id: string; companyName: string }[];
+}
+
+// Painter-side order states, in the order they actually happen, so the panel
+// can render a timeline instead of a bare enum value.
+const PAINTER_STEPS: { key: string; label: string }[] = [
+  { key: "assigned", label: "Atandı" },
+  { key: "accepted", label: "Kabul etti" },
+  { key: "painting", label: "Boyuyor" },
+  { key: "painted", label: "Boyandı" },
+  { key: "qc_pending", label: "QC'de" },
+  { key: "qc_approved", label: "QC onaylı" },
+  { key: "shipped", label: "Kargolandı" },
+];
+
+const PAINTER_STATUS_LABEL: Record<string, string> = {
+  unassigned: "Atanmadı",
+  assigned: "Atandı, kabul bekleniyor",
+  accepted: "Kabul edildi",
+  painting: "Boyanıyor",
+  painted: "Boyandı",
+  qc_pending: "QC onayı bekliyor",
+  qc_rejected: "QC reddedildi — yeniden boyuyor",
+  qc_approved: "QC onaylandı",
+  shipped: "Kargolandı",
+};
+
+const PAINTER_ACTION_LABEL: Record<string, string> = {
+  assigned: "Atandı",
+  admin_assigned: "Admin tarafından atandı",
+  accept: "İşi kabul etti",
+  decline: "İşi reddetti",
+  received: "Baskıyı teslim aldı",
+  painted: "Boyamayı bitirdi",
+  submit_qc: "QC fotoğrafı gönderdi",
+  ship: "Kargoladı",
+  admin_revoked: "Admin geri aldı",
+};
+
 // ─── Types ───────────────────────────────────────────────────
 interface OrderData {
   id: string;
@@ -81,7 +162,16 @@ interface Props {
     adminActions: { id: string; action: string; adminEmail: string; notes: string | null; createdAt: string }[];
     adminMessages: { id: string; subject: string | null; body: string; templateKey: string | null; adminEmail: string; sentAt: string }[];
     manufacturer?: { id: string; companyName: string; contactPerson: string; status: string } | null;
-    painter?: { id: string; companyName: string } | null;
+    painter?: {
+      id: string;
+      companyName: string;
+      contactPerson: string | null;
+      phone: string | null;
+      email: string;
+      status: string;
+      acceptingOrders: boolean;
+    } | null;
+    painting?: PaintingData;
     manufacturerActions?: { id: string; action: string; notes: string | null; createdAt: string }[];
     manufacturerStatus?: string | null;
     qcRound?: number;
@@ -156,7 +246,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
+  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -174,6 +264,11 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [revokePainterReason, setRevokePainterReason] = useState("");
   const [revokePainterOpen, setRevokePainterOpen] = useState(false);
   const [revokePainterBlocklist, setRevokePainterBlocklist] = useState(true);
+  // Admin-side painter hand-off (used when the manufacturer never sent it, or
+  // after a revoke/decline left the job with nobody).
+  const [painterPick, setPainterPick] = useState("");
+  const [painterCarrier, setPainterCarrier] = useState("");
+  const [painterTracking, setPainterTracking] = useState("");
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
 
@@ -622,6 +717,38 @@ export function OrderDetailClient({ data, locale }: Props) {
       }
       setRevokePainterReason("");
       setRevokePainterOpen(false);
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  /**
+   * Hand the job to a painter on the manufacturer's behalf. Server-side this is
+   * the same operation as the manufacturer's "send to painter": same guards,
+   * same status transition, and it accrues the manufacturer's print earning.
+   */
+  const handleAssignPainter = async () => {
+    if (!painterPick) return;
+    setLoading("assign-painter");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/assign-painter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          painterId: painterPick,
+          carrier: painterCarrier || undefined,
+          trackingNumber: painterTracking.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        return;
+      }
+      setPainterPick("");
+      setPainterCarrier("");
+      setPainterTracking("");
       router.refresh();
     } finally {
       setLoading(null);
@@ -1253,6 +1380,291 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                   );
                 })()}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Painting leg: who has it, where it is, what they earn ─────── */}
+        {painting?.needsPainting && (
+          <div className="rounded-2xl border border-fuchsia-200 bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+                Boyama
+              </h3>
+              <span className="rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">
+                {PAINTER_STATUS_LABEL[painting.painterStatus ?? "unassigned"] ??
+                  painting.painterStatus ??
+                  "Atanmadı"}
+              </span>
+            </div>
+
+            {/* Who */}
+            {painter ? (
+              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="font-medium text-gray-900">{painter.companyName}</p>
+                  <span
+                    className={`text-xs ${painter.status === "active" ? "text-green-700" : "text-red-700"}`}
+                  >
+                    {painter.status}
+                    {!painter.acceptingOrders && " · iş almıyor"}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-gray-600">
+                  {[painter.contactPerson, painter.phone, painter.email]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Bu sipariş boyama içeriyor ama <strong>henüz bir boyacıya
+                atanmadı</strong>. Normalde üretici QC onayından sonra
+                gönderir; takıldıysa aşağıdan siz atayabilirsiniz.
+              </p>
+            )}
+
+            {/* Money — the painter's cut of the painting add-on. */}
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-gray-500">Boyama ücreti</p>
+                <p className="font-medium text-gray-900">
+                  {formatCurrency(painting.paintingPriceKurus, loc)}
+                </p>
+              </div>
+              {painting.earning ? (
+                <>
+                  <div>
+                    <p className="text-xs text-gray-500">Boyacı net hakediş</p>
+                    <p className="font-medium text-gray-900">
+                      {formatCurrency(painting.earning.netKurus, loc)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Hakediş durumu</p>
+                    <p className="font-medium text-gray-900">
+                      {painting.earning.status}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="col-span-2">
+                  <p className="text-xs text-gray-500">Boyacı hakedişi</p>
+                  <p className="text-gray-600">
+                    Henüz tahakkuk etmedi (boyacı kargoladığında oluşur)
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Where it physically is */}
+            {painting.painterStatus && painting.painterStatus !== "unassigned" && (
+              <div className="mt-4">
+                <div className="flex flex-wrap gap-1.5">
+                  {PAINTER_STEPS.map((step) => {
+                    const idx = PAINTER_STEPS.findIndex(
+                      (s) => s.key === painting.painterStatus
+                    );
+                    const myIdx = PAINTER_STEPS.findIndex((s) => s.key === step.key);
+                    const done = idx >= 0 && myIdx <= idx;
+                    return (
+                      <span
+                        key={step.key}
+                        className={`rounded-full px-2 py-0.5 text-[11px] ${
+                          done
+                            ? "bg-fuchsia-600 text-white"
+                            : "bg-gray-100 text-gray-500"
+                        }`}
+                      >
+                        {step.label}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                <dl className="mt-3 space-y-1 text-xs text-gray-600">
+                  {painting.sentAt && (
+                    <div className="flex gap-2">
+                      <dt className="w-32 shrink-0 text-gray-500">Gönderildi</dt>
+                      <dd>
+                        {formatDateTime(painting.sentAt, loc)}
+                        {painting.handoffCarrier && (
+                          <>
+                            {" · "}
+                            {painting.handoffCarrier}
+                            {painting.handoffTrackingNumber &&
+                              ` / ${painting.handoffTrackingNumber}`}
+                          </>
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                  {painting.receivedAt ? (
+                    <div className="flex gap-2">
+                      <dt className="w-32 shrink-0 text-gray-500">Teslim alındı</dt>
+                      <dd>{formatDateTime(painting.receivedAt, loc)}</dd>
+                    </div>
+                  ) : (
+                    painting.sentAt && (
+                      <div className="flex gap-2">
+                        <dt className="w-32 shrink-0 text-gray-500">Teslim alındı</dt>
+                        <dd className="text-amber-700">
+                          Boyacı henüz teslim aldığını işaretlemedi
+                        </dd>
+                      </div>
+                    )
+                  )}
+                  {painting.qcRound > 1 && (
+                    <div className="flex gap-2">
+                      <dt className="w-32 shrink-0 text-gray-500">QC turu</dt>
+                      <dd className="text-amber-700">
+                        {painting.qcRound}. tur (önceki turlar reddedildi)
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            )}
+
+            {/* Painter QC photos for the live round */}
+            {painting.qcPhotos.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-1.5 text-xs font-medium text-gray-600">
+                  Boyacı QC fotoğrafları ({painting.qcRound}. tur)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {painting.qcPhotos.map((p) => (
+                    <a
+                      key={p.id}
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block h-20 w-20 overflow-hidden rounded-lg border border-gray-200"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.url} alt="" className="h-full w-full object-cover" />
+                    </a>
+                  ))}
+                </div>
+                <a
+                  href="/admin/painter-qc-queue"
+                  className="mt-1.5 inline-block text-xs text-blue-700 hover:underline"
+                >
+                  Boyacı QC kuyruğunda onayla/reddet →
+                </a>
+              </div>
+            )}
+
+            {/* What has happened, in the painter's own log */}
+            {painting.actions.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-1.5 text-xs font-medium text-gray-600">
+                  Boyacı hareketleri
+                </p>
+                <ul className="space-y-1 text-xs text-gray-600">
+                  {painting.actions.map((x) => (
+                    <li key={x.id} className="flex flex-wrap gap-2">
+                      <span className="text-gray-400">
+                        {formatDateTime(x.createdAt, loc)}
+                      </span>
+                      <span className="font-medium text-gray-800">
+                        {PAINTER_ACTION_LABEL[x.action] ?? x.action}
+                      </span>
+                      {x.notes && <span className="text-gray-500">{x.notes}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {painting.declined.length > 0 && (
+              <p className="mt-3 text-xs text-gray-500">
+                Reddedenler:{" "}
+                {painting.declined.map((p) => p.companyName).join(", ")} — bu
+                boyacılara tekrar atanamaz.
+              </p>
+            )}
+
+            {/* Assign / reassign. Only while nobody holds the job and the print
+                has cleared QC — the same gate the manufacturer's hand-off uses. */}
+            {(!painting.painterStatus ||
+              painting.painterStatus === "unassigned") && (
+              <div className="mt-4 border-t border-gray-200 pt-4">
+                <p className="mb-2 text-xs font-medium text-gray-600">
+                  Boyacı ata
+                </p>
+                {manufacturerStatus !== "qc_approved" ? (
+                  <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                    Atama, üretici QC onayından sonra açılır. Şu anki üretici
+                    durumu: <strong>{manufacturerStatus ?? "—"}</strong>.
+                  </p>
+                ) : painting.candidates.length === 0 ? (
+                  <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                    Aktif boyacı yok.{" "}
+                    <a href="/admin/painters" className="text-blue-700 hover:underline">
+                      Boyacılar
+                    </a>
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <select
+                      value={painterPick}
+                      onChange={(e) => setPainterPick(e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">Boyacı seçin…</option>
+                      {painting.candidates.map((c) => (
+                        <option key={c.id} value={c.id} disabled={!c.eligible}>
+                          {c.companyName} — {c.currentLoad}/{c.maxConcurrentOrders}
+                          {c.declined
+                            ? " (reddetti)"
+                            : !c.acceptingOrders
+                              ? " (iş almıyor)"
+                              : c.currentLoad >= c.maxConcurrentOrders
+                                ? " (kapasite dolu)"
+                                : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={painterCarrier}
+                        onChange={(e) => setPainterCarrier(e.target.value)}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Teslim şekli (ops.)</option>
+                        <option value="elden">Elden</option>
+                        <option value="yurtici">Yurtiçi</option>
+                        <option value="aras">Aras</option>
+                        <option value="mng">MNG</option>
+                        <option value="ptt">PTT</option>
+                        <option value="surat">Sürat</option>
+                        <option value="other">Diğer</option>
+                      </select>
+                      <input
+                        value={painterTracking}
+                        onChange={(e) => setPainterTracking(e.target.value)}
+                        placeholder="Takip no (ops.)"
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAssignPainter}
+                      disabled={!painterPick || loading === "assign-painter"}
+                      className="w-full rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-700 disabled:opacity-50"
+                    >
+                      {loading === "assign-painter"
+                        ? "Atanıyor…"
+                        : "Boyacıya ata ve gönder"}
+                    </button>
+                    <p className="text-[11px] text-gray-500">
+                      Atama, üreticinin baskı hakedişini tahakkuk ettirir ve
+                      siparişi &quot;boyanıyor&quot; durumuna alır — üreticinin
+                      kendi &quot;boyacıya gönder&quot; işlemiyle aynı sonuç.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>

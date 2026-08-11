@@ -27,6 +27,17 @@ const UNASSIGNED_MARKETPLACE = sql`${orders.orderType} = 'marketplace'
   AND ${orders.status} = 'paid'
   AND (${orders.manufacturerStatus} IS NULL OR ${orders.manufacturerStatus} = 'unassigned')`;
 
+// Painting jobs. Two things hide here that an admin needs to find: a job the
+// manufacturer QC-approved but never handed to a painter (nobody is working on
+// it), and one that is with a painter (status 'painting'). Both are "boyama"
+// from the desk's point of view, so one bucket covers them.
+const PAINTING_BUCKET = sql`${orders.needsPainting} = true
+  AND ${orders.status} NOT IN ('shipped', 'delivered', 'rejected')
+  AND (
+    ${orders.status} = 'painting'
+    OR ${orders.manufacturerStatus} = 'qc_approved'
+  )`;
+
 export default async function AdminOrdersPage({
   searchParams,
 }: {
@@ -59,6 +70,8 @@ export default async function AdminOrdersPage({
     conditions.push(eq(orders.status, filterStatus as any));
   } else if (bucket === "unassigned") {
     conditions.push(UNASSIGNED_MARKETPLACE);
+  } else if (bucket === "painting") {
+    conditions.push(PAINTING_BUCKET);
   } else if (bucket && BUCKETS[bucket]) {
     conditions.push(inArray(orders.status, BUCKETS[bucket] as any));
   }
@@ -116,6 +129,8 @@ export default async function AdminOrdersPage({
           figurineSize: o.figurineSize,
           style: o.style,
           status: o.status,
+          needsPainting: o.needsPainting,
+          painterStatus: o.painterStatus,
           isBulk: o.isBulk,
           quantity: o.quantity,
           amountKurus: o.amountKurus,

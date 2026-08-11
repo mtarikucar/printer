@@ -32,6 +32,7 @@ const BUCKET_ORDER = [
   "all",
   "needsAction",
   "unassigned",
+  "painting",
   "inProgress",
   "completed",
   "problems",
@@ -39,6 +40,19 @@ const BUCKET_ORDER = [
 
 const BUCKET_LABELS: Partial<Record<(typeof BUCKET_ORDER)[number], string>> = {
   unassigned: "Üretici bekliyor",
+  painting: "Boyama",
+};
+
+// Painter-side state, kept short enough for a table cell.
+const PAINTER_BADGE: Record<string, { label: string; cls: string }> = {
+  assigned: { label: "Boyacı kabul bekliyor", cls: "bg-amber-100 text-amber-800" },
+  accepted: { label: "Boyacıda", cls: "bg-fuchsia-100 text-fuchsia-800" },
+  painting: { label: "Boyanıyor", cls: "bg-fuchsia-100 text-fuchsia-800" },
+  painted: { label: "Boyandı", cls: "bg-fuchsia-100 text-fuchsia-800" },
+  qc_pending: { label: "Boyacı QC", cls: "bg-yellow-100 text-yellow-800" },
+  qc_rejected: { label: "Boyacı QC ret", cls: "bg-red-100 text-red-700" },
+  qc_approved: { label: "Boyacı QC onaylı", cls: "bg-green-100 text-green-700" },
+  shipped: { label: "Boyacı kargoladı", cls: "bg-emerald-100 text-emerald-700" },
 };
 
 // Exact statuses for the power-user dropdown (every value used in admin.status.*)
@@ -67,6 +81,8 @@ interface OrdersClientProps {
     figurineSize: string | null;
     style: string;
     status: string;
+    needsPainting: boolean;
+    painterStatus: string | null;
     isBulk: boolean;
     quantity: number;
     amountKurus: number;
@@ -418,6 +434,21 @@ export function OrdersClient({
                       `admin.status.${order.status}` as keyof typeof d
                     ] || order.status}
                   </span>
+                  {/* Painter state is a parallel track: the order status says
+                      "painting" for every stage of it, so without this the desk
+                      can't tell "waiting for the painter to accept" from
+                      "painted, awaiting QC". */}
+                  {order.needsPainting && (
+                    <span
+                      className={`ml-1 inline-block rounded px-2 py-0.5 text-xs font-medium ${
+                        PAINTER_BADGE[order.painterStatus ?? ""]?.cls ??
+                        "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {PAINTER_BADGE[order.painterStatus ?? ""]?.label ??
+                        "Boyacı atanmadı"}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {formatCurrency(order.amountKurus, locale as Locale)}

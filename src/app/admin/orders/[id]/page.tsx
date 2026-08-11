@@ -1,15 +1,16 @@
 export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, orderModelRevisions, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews } from "@/lib/db/schema";
+import { orders, orderPhotos, orderModelRevisions, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
+import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 
 export default async function AdminOrderDetailPage({
   params,
@@ -68,6 +69,105 @@ export default async function AdminOrderDetailPage({
     where: sql`${manufacturers.status} = 'active'`,
     columns: { id: true, companyName: true },
   });
+
+  // ─── Painting side ───────────────────────────────────────────────────────
+  // Queried separately rather than through `with:` because orders has no
+  // relation to these three tables, and adding one just to read them here
+  // would be schema churn for a page-local need.
+  //
+  // Only fetched for orders that actually involve a painter — an ordinary print
+  // job pays nothing for this.
+  const paintingRelevant = order.needsPainting || !!order.painterId;
+
+  const [painterActionLog, painterQc, painterQcDecisions, painterEarning] =
+    paintingRelevant
+      ? await Promise.all([
+          db
+            .select()
+            .from(painterActions)
+            .where(eq(painterActions.orderId, id))
+            .orderBy(desc(painterActions.createdAt)),
+          db
+            .select()
+            .from(painterQcPhotos)
+            .where(eq(painterQcPhotos.orderId, id))
+            .orderBy(desc(painterQcPhotos.createdAt)),
+          db
+            .select()
+            .from(painterQcReviews)
+            .where(eq(painterQcReviews.orderId, id))
+            .orderBy(desc(painterQcReviews.createdAt)),
+          db.query.painterEarnings.findFirst({
+            where: eq(painterEarnings.orderId, id),
+          }),
+        ])
+      : [[], [], [], undefined];
+
+  // Painters the admin can hand this job to. Capacity is computed here (not in
+  // the browser) so the dropdown can grey out a full shop instead of letting
+  // the admin pick one and eat a 409.
+  const declinedPainterIds = Array.isArray(order.declinedPainterIds)
+    ? (order.declinedPainterIds as string[])
+    : [];
+  const painterCandidates = paintingRelevant
+    ? await (async () => {
+        const rows = await db
+          .select({
+            id: painters.id,
+            companyName: painters.companyName,
+            contactPerson: painters.contactPerson,
+            phone: painters.phone,
+            status: painters.status,
+            acceptingOrders: painters.acceptingOrders,
+            maxConcurrentOrders: painters.maxConcurrentOrders,
+          })
+          .from(painters)
+          .where(eq(painters.status, "active"))
+          .orderBy(painters.companyName);
+        if (rows.length === 0) return [];
+        const loads = await db
+          .select({
+            painterId: orders.painterId,
+            load: sql<number>`count(*)::int`,
+          })
+          .from(orders)
+          .where(
+            and(
+              sql`${orders.painterId} IS NOT NULL`,
+              inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
+            )
+          )
+          .groupBy(orders.painterId);
+        const loadMap = new Map(loads.map((l) => [l.painterId, l.load]));
+        return rows.map((p) => {
+          const currentLoad = loadMap.get(p.id) ?? 0;
+          const declined = declinedPainterIds.includes(p.id);
+          return {
+            id: p.id,
+            companyName: p.companyName,
+            contactPerson: p.contactPerson,
+            phone: p.phone,
+            currentLoad,
+            maxConcurrentOrders: p.maxConcurrentOrders,
+            acceptingOrders: p.acceptingOrders,
+            declined,
+            eligible:
+              p.acceptingOrders &&
+              !declined &&
+              currentLoad < p.maxConcurrentOrders,
+          };
+        });
+      })()
+    : [];
+
+  // Names for the "already refused this job" list — an id tells the admin nothing.
+  const declinedPainters =
+    declinedPainterIds.length > 0
+      ? await db
+          .select({ id: painters.id, companyName: painters.companyName })
+          .from(painters)
+          .where(inArray(painters.id, declinedPainterIds))
+      : [];
 
   // Rank candidates for the assignment recommendation UI. Goes through
   // the Q7 shadow wrapper which logs both v1/v2 winners and returns the
@@ -204,7 +304,57 @@ export default async function AdminOrderDetailPage({
     painter: order.painter ? {
       id: order.painter.id,
       companyName: order.painter.companyName,
+      contactPerson: order.painter.contactPerson,
+      phone: order.painter.phone,
+      email: order.painter.email,
+      status: order.painter.status,
+      acceptingOrders: order.painter.acceptingOrders,
     } : null,
+    // ─── Everything the painting side of this order is doing ───
+    painting: {
+      needsPainting: order.needsPainting,
+      paintingPriceKurus: order.paintingPriceKurus,
+      painterStatus: order.painterStatus,
+      qcRound: order.painterQcRound,
+      assignedAt: order.assignedToPainterAt?.toISOString() ?? null,
+      sentAt: order.sentToPainterAt?.toISOString() ?? null,
+      receivedAt: order.receivedByPainterAt?.toISOString() ?? null,
+      handoffCarrier: order.painterHandoffCarrier,
+      handoffTrackingNumber: order.painterHandoffTrackingNumber,
+      // What the painter is owed for this job, once it has accrued.
+      earning: painterEarning
+        ? {
+            grossKurus: painterEarning.grossKurus,
+            netKurus: painterEarning.netKurus,
+            commissionKurus: painterEarning.commissionKurus,
+            status: painterEarning.status,
+          }
+        : null,
+      actions: painterActionLog.map((x) => ({
+        id: x.id,
+        action: x.action,
+        notes: x.notes,
+        createdAt: x.createdAt.toISOString(),
+      })),
+      // Only the live round — earlier rounds are superseded by a reject.
+      qcPhotos: painterQc
+        .filter((p) => p.round === order.painterQcRound)
+        .map((p) => ({
+          id: p.id,
+          url: getPublicUrl(p.storageKey),
+          reviewStatus: p.reviewStatus,
+        })),
+      qcReviews: painterQcDecisions.map((r) => ({
+        id: r.id,
+        round: r.round,
+        decision: r.decision,
+        reason: r.reason,
+        adminEmail: r.adminEmail,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      candidates: painterCandidates,
+      declined: declinedPainters,
+    },
     manufacturerActions: order.manufacturerActions.map(a => ({
       id: a.id,
       action: a.action,

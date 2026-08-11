@@ -1,0 +1,8 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - button "mount viewer" [active] [ref=f1e3]
+    - paragraph [ref=f1e21]: 3D önizleme bu tarayıcıda görüntülenemiyor (WebGL devre dışı).
+  - link "WhatsApp ile iletişime geç" [ref=f1e4] [cursor=pointer]:
+    - /url: https://wa.me/908508407303?text=Merhaba!%20Fig%C3%BCr%C3%BCnica%20hakk%C4%B1nda%20bilgi%20almak%20%2F%20sipari%C5%9F%20vermek%20istiyorum.
+  - button "Open Next.js Dev Tools" [ref=f1e12] [cursor=pointer]
+  - alert [ref=f1e16]

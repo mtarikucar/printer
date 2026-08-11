@@ -1,0 +1,263 @@
+- generic [active] [ref=f3e1]:
+  - main [ref=f3e2]:
+    - generic [ref=f3e3]:
+      - generic [ref=f3e4]:
+        - text: Figurunica
+        - paragraph [ref=f3e5]: Üretici Paneli
+      - generic [ref=f3e6]:
+        - heading "Başvurudan önce lütfen okuyun" [level=1] [ref=f3e7]
+        - generic [ref=f3e8]:
+          - heading "Üretici Ortaklık Sözleşmesi ve Bilgilendirme" [level=1] [ref=f3e9]
+          - paragraph [ref=f3e10]:
+            - text: Bu metin,
+            - strong [ref=f3e11]: Figurunica
+            - text: platformu ("Platform") ile üretici ağına başvuran ve başvuruyu onaylayarak ("Üretici") aşağıdaki şartlar altında hizmet vermeyi kabul eden taraf arasındaki çalışma esaslarını düzenler. Başvuruyu tamamlamadan önce bu metni
+            - strong [ref=f3e12]: dikkatle okumanız ve kabul etmeniz zorunludur
+            - text: . Hesabınız onaylandıktan sonra paneliniz aktifleşir ve size sipariş atanmaya başlar.
+          - blockquote [ref=f3e13]:
+            - paragraph [ref=f3e14]: Bu metin bilgilendirme amaçlı çerçeve sözleşme niteliğindedir. Platform, hizmet kalitesini ve mevzuata uyumu korumak için şartları güncelleyebilir; önemli değişiklikler kayıtlı e-postanıza bildirilir ve panelde yayınlanır.
+          - heading "1. Taraflar ve Kapsam" [level=2] [ref=f3e15]
+          - list [ref=f3e16]:
+            - listitem [ref=f3e17]:
+              - text: Üretici, Platform üzerinden iletilen 3D figürin baskı işlerini
+              - strong [ref=f3e18]: kendi ekipmanı, sarf malzemesi ve iş gücüyle bağımsız bir hizmet sağlayıcı
+              - text: sıfatıyla üretir. Bu sözleşme bir iş akdi (işçi-işveren ilişkisi) doğurmaz.
+            - listitem [ref=f3e19]:
+              - text: Üretici ile Platform arasında münhasırlık yoktur; ancak atanan her sipariş için bu metindeki kalite, süre ve gizlilik yükümlülükleri
+              - strong [ref=f3e20]: bağlayıcıdır
+              - text: .
+          - heading "2. Başvuru, Kimlik Doğrulama ve Hesap Durumları" [level=2] [ref=f3e21]
+          - paragraph [ref=f3e22]: "Hesabınız yaşam döngüsü boyunca aşağıdaki durumlardan birinde bulunur:"
+          - list [ref=f3e23]:
+            - listitem [ref=f3e24]:
+              - strong [ref=f3e25]: "Beklemede:"
+              - text: Başvurunuz admin onayında. Henüz sipariş alamazsınız.
+            - listitem [ref=f3e26]:
+              - strong [ref=f3e27]: "Koşullu Onaylı:"
+              - text: Ön onay verildi;
+              - strong [ref=f3e28]: yazıcı fotoğrafı ve belge doğrulamasını (KYC) tamamlamanız
+              - text: beklenir. Eksikler giderilene kadar sipariş atanmaz.
+            - listitem [ref=f3e29]:
+              - strong [ref=f3e30]: "Aktif:"
+              - text: Tüm doğrulamalar tamam; sipariş alabilirsiniz.
+            - listitem [ref=f3e31]:
+              - strong [ref=f3e32]: "Askıya Alınmış:"
+              - text: Yeni atama yapılmaz; varsa devam eden siparişlerinizi tamamlamanız beklenir.
+          - paragraph [ref=f3e33]:
+            - text: Başvuru ve onay için
+            - strong [ref=f3e34]: geçerli VKN veya TCKN, IBAN ve istenen üretim belgeleri (yazıcı/atölye fotoğrafı dâhil) zorunludur
+            - text: . Beyan edilen bilgilerin doğru, güncel ve size ait olduğunu taahhüt edersiniz; yanlış/yanıltıcı beyan, hesabın askıya alınması veya feshi sebebidir.
+          - heading "3. Sipariş Atama ve Kabul Süreci" [level=2] [ref=f3e35]
+          - list [ref=f3e36]:
+            - listitem [ref=f3e37]:
+              - text: Müşteriler siparişi portaldan oluşturur ve
+              - strong [ref=f3e38]: ödemeyi tamamlar
+              - text: ; üretime yalnızca ödemesi alınmış siparişler düşer.
+            - listitem [ref=f3e39]: Admin ekibi; mevcut iş yükü, lokasyon (kargo mesafesi), geçmiş performans ve uygunluk puanına göre sipariş atamasını yapar.
+            - listitem [ref=f3e40]:
+              - text: Atanan siparişe
+              - strong [ref=f3e41]: 24 saat içinde "Kabul Et" veya "Reddet" yanıtı vermeniz zorunludur.
+              - text: Yanıt verilmez veya reddedilirse sipariş otomatik olarak başka bir üreticiye yönlendirilir.
+              - strong [ref=f3e42]: Tekrarlayan reddetme ve yanıtsız bırakma, performans puanınızı düşürür
+              - text: ve atama önceliğinizi azaltır.
+            - listitem [ref=f3e43]:
+              - text: "Kapasitenizi panelden yönetebilirsiniz: eş zamanlı iş limitinizi belirleyebilir,"
+              - strong [ref=f3e44]: "\"Sipariş Almıyorum\" düğmesiyle dilediğiniz zaman yeni atamaları durdurabilirsiniz."
+              - text: Bu, devam eden işlerinizi etkilemez.
+          - heading "4. Üretim Standartları ve Kalite Beklentileri" [level=2] [ref=f3e45]
+          - paragraph [ref=f3e46]:
+            - text: Platform hem
+            - strong [ref=f3e47]: reçine (SLA/DLP/resin)
+            - text: hem de
+            - strong [ref=f3e48]: filament (FDM/FFF)
+            - text: üretimini destekler.
+            - strong [ref=f3e49]: Her sipariş, üretilmesi gereken malzemeyi (reçine veya filament) belirtir ve siparişi tam olarak belirtilen malzeme ve yöntemle üretmeniz zorunludur.
+            - text: Yalnızca elinizdeki ekipmanın karşılayabildiği malzemedeki siparişleri kabul edin; uygun değilse siparişi reddedebilirsiniz.
+          - paragraph [ref=f3e50]:
+            - strong [ref=f3e51]: "Reçine (resin) baskı:"
+          - list [ref=f3e52]:
+            - listitem [ref=f3e53]:
+              - strong [ref=f3e54]: Katman yüksekliği 50 mikron (0,05 mm) veya altı
+              - text: olmalıdır.
+            - listitem [ref=f3e55]: Destekler dikkatlice sökülmeli, destek/izleme noktaları zımparalanıp temizlenmeli, parça yıkanıp tam olarak kürlenmelidir (UV cure).
+            - listitem [ref=f3e56]:
+              - strong [ref=f3e57]: Eksik kürlenme (yapışkan/yumuşak yüzey), beyazlama, görünür destek izi ve kırılgan/çatlak yüzey reddedilme sebebidir.
+          - paragraph [ref=f3e58]:
+            - strong [ref=f3e59]: "Filament (FDM) baskı:"
+          - list [ref=f3e60]:
+            - listitem [ref=f3e61]:
+              - strong [ref=f3e62]: Katman yüksekliği 200 mikron (0,20 mm) veya altı
+              - text: olmalıdır; ince detaylı modellerde daha düşük katman (0,10–0,12 mm) tercih edilmelidir.
+            - listitem [ref=f3e63]:
+              - text: Sipariş, dolum (infill) ve dayanım gereksinimini taşıyabilir; aksi belirtilmedikçe
+              - strong [ref=f3e64]: figürin bütünlüğünü koruyacak yeterli dolum ve duvar kalınlığı
+              - text: kullanılmalıdır.
+            - listitem [ref=f3e65]:
+              - text: Yüzeydeki
+              - strong [ref=f3e66]: ipliklenme (stringing), sarkma, katman ayrışması/kabarma (delaminasyon), çarpılma (warping), eksik ekstrüzyon (under-extrusion), fil ayağı (elephant foot) ve belirgin dikiş/ek izleri reddedilme sebebidir.
+              - text: Destek/raft izleri temizlenmeli, gerekli yerlerde zımpara/rötuş yapılmalıdır.
+          - paragraph [ref=f3e67]:
+            - strong [ref=f3e68]: "Her iki yöntem için ortak:"
+          - list [ref=f3e69]:
+            - listitem [ref=f3e70]:
+              - text: Üretilen model; müşteriye gönderilen önizlemeye ve sipariş özelliklerine (boyut, stil, yüzey, malzeme)
+              - strong [ref=f3e71]: birebir uygun
+              - text: olmalıdır.
+            - listitem [ref=f3e72]:
+              - text: Renklendirme ve son rötuş tamamlanmalıdır.
+              - strong [ref=f3e73]: Kırık, eksik/yanlış parça, eksik boyama ve ölçü sapması her durumda reddedilme sebebidir.
+            - listitem [ref=f3e74]:
+              - text: Sipariş "Hazır" işaretlenmeden önce, kalite kontrol (QC) için
+              - strong [ref=f3e75]: net ve yeterli sayıda fotoğraf yüklemeniz zorunludur.
+              - text: Admin QC onayı verilene kadar sipariş kargoya verilmez.
+              - strong [ref=f3e76]: QC reddi hâlinde, kusurlu işi ek ücret talep etmeden yeniden üretmekle yükümlüsünüz.
+          - heading "5. Paketleme ve Kargo" [level=2] [ref=f3e77]
+          - list [ref=f3e78]:
+            - listitem [ref=f3e79]:
+              - text: Her pakete
+              - strong [ref=f3e80]: Platformun sağladığı standart fırça setini ve QR kartı
+              - text: eklemeniz zorunludur. Müşteriye Platform markası dışında tanıtım/iletişim materyali, kendi kartınız veya fatura konulamaz.
+            - listitem [ref=f3e81]:
+              - text: Ürün, taşımada hasar görmeyecek şekilde
+              - strong [ref=f3e82]: uygun koruyucu malzemeyle
+              - text: paketlenmelidir.
+              - strong [ref=f3e83]: Yetersiz paketlemeden kaynaklanan taşıma hasarının sorumluluğu Üreticiye aittir.
+            - listitem [ref=f3e84]:
+              - text: Kargo,
+              - strong [ref=f3e85]: Yurtiçi Kargo üzerinden Platform tarafından açılır
+              - text: ; siparişi "Hazır" işaretlediğinizde kargo etiketi panelinize düşer. Etiketi basıp paketin üzerine yapıştırır ve gönderiyi teslim edersiniz.
+          - paragraph [ref=f3e86]:
+            - strong [ref=f3e87]: "Profesyonel boyama siparişleri (boyacıya devir):"
+            - text: Bazı siparişlerde müşteri
+            - strong [ref=f3e88]: profesyonel el boyama
+            - text: seçeneğini satın alır. Bu siparişlerde figürini
+            - strong [ref=f3e89]: siz boyamaz ve müşteriye kargolamazsınız.
+            - text: Baskıyı üretip QC onayından geçirdikten sonra, figürini panelinizdeki
+            - strong [ref=f3e90]: "\"Boyacıya Gönder\""
+            - text: adımıyla, Platformun boyacı ağındaki bir
+            - strong [ref=f3e91]: boyacı ortağa
+            - text: devredersiniz. Bu andan itibaren boyama, kendi kalite kontrolü, paketleme ve müşteriye kargo
+            - strong [ref=f3e92]: boyacı tarafından
+            - text: yürütülür. Sizin sorumluluğunuz, siparişin özelliklerine birebir uygun, kusursuz ve QC-onaylı
+            - strong [ref=f3e93]: boyasız/baz baskıyı
+            - text: zamanında ve eksiksiz biçimde boyacıya iletmektir. Boyacıya devredilen işteki baskı kusurları (kırık, eksik parça, ölçü sapması, temizlenmemiş destek izi vb.) sizin sorumluluğunuzdadır.
+          - heading "6. Süreler ve Gecikme" [level=2] [ref=f3e94]
+          - list [ref=f3e95]:
+            - listitem [ref=f3e96]:
+              - text: Kabul edilen bir sipariş için
+              - strong [ref=f3e97]: ortalama üretim süresi 5 iş günüdür.
+              - text: Bu süre, kabul anından kargoya teslim anına kadar geçen süredir.
+            - listitem [ref=f3e98]:
+              - text: Öngörülemeyen bir gecikme doğacaksa,
+              - strong [ref=f3e99]: süre dolmadan admin ekibini bilgilendirmeniz
+              - text: beklenir.
+              - strong [ref=f3e100]: Bildirimsiz ve tekrarlayan gecikmeler
+              - text: performans puanını düşürür, atama önceliğini azaltır ve hesabın askıya alınmasına yol açabilir.
+          - heading "7. Ücretlendirme, Komisyon ve Ödeme" [level=2] [ref=f3e101]
+          - list [ref=f3e102]:
+            - listitem [ref=f3e103]:
+              - text: Her tamamlanan ve teslim edilen sipariş için Üreticiye
+              - strong [ref=f3e104]: net üretici payı
+              - text: ödenir. Net pay, sipariş tutarından
+              - strong [ref=f3e105]: Platform hizmet bedeli (komisyon)
+              - text: düşülerek hesaplanır.
+              - strong [ref=f3e106]: Güncel Platform komisyonu %35, üreticinin net payı ise %65'tir.
+              - text: Komisyon oranı ve her siparişin net payı panelde şeffaf biçimde gösterilir; oran değişirse önceden bildirilir.
+            - listitem [ref=f3e107]:
+              - strong [ref=f3e108]: Profesyonel boyama içeren siparişlerde
+              - text: net üretici payınız, sipariş tutarından
+              - strong [ref=f3e109]: boyama bedeli düşülerek (yalnızca baskı payı) üzerinden
+              - text: hesaplanır; boyama bedelinin payı ilgili
+              - strong [ref=f3e110]: boyacıya
+              - text: ödenir. Bu siparişlerde üretici hak edişiniz, işi boyacıya devrettiğinizde tahakkuk eder.
+            - listitem [ref=f3e111]:
+              - text: Ödemeler,
+              - strong [ref=f3e112]: tanımlı IBAN'ınıza haftalık olarak (Cuma günleri) toplu
+              - text: yapılır. Hesap kesim/ödeme raporunuzu panelden indirebilirsiniz.
+            - listitem [ref=f3e113]:
+              - text: Ödemenin yapılabilmesi için
+              - strong [ref=f3e114]: VKN/TCKN ve IBAN bilgilerinizin eksiksiz ve doğru
+              - text: olması şarttır; eksik/hatalı bilgiden kaynaklanan ödeme gecikmeleri Platformun sorumluluğunda değildir.
+            - listitem [ref=f3e115]: İade, iptal veya QC reddi gibi tamamlanmamış işler için pay tahakkuk etmez; kusurlu iş nedeniyle doğan yeniden üretim maliyeti Üreticiye aittir.
+          - heading "8. Vergi ve Faturalandırma" [level=2] [ref=f3e116]
+          - list [ref=f3e117]:
+            - listitem [ref=f3e118]:
+              - text: Üretici, elde ettiği gelire ilişkin
+              - strong [ref=f3e119]: vergisel yükümlülüklerden (beyan, fatura düzenleme dâhil) bizzat sorumludur.
+              - text: Platform yalnızca net payı IBAN'a aktarır ve kesim raporu sağlar.
+            - listitem [ref=f3e120]: Tüzel kişi/şahıs şirketi iseniz, mevzuatın gerektirdiği hâllerde Platforma fatura düzenlemeniz gerekebilir.
+          - heading "9. Gizlilik ve Kişisel Verilerin Korunması (KVKK)" [level=2] [ref=f3e121]
+          - list [ref=f3e122]:
+            - listitem [ref=f3e123]:
+              - text: Sipariş kapsamında erişeceğiniz
+              - strong [ref=f3e124]: müşteri fotoğrafları, 3D modeller, adres ve iletişim bilgileri kişisel veridir.
+              - text: Bu verileri yalnızca ilgili siparişi üretmek amacıyla işleyebilir;
+              - strong [ref=f3e125]: üçüncü kişilerle paylaşamaz, kopyalayamaz, saklamaya devam edemez ve başka hiçbir amaçla kullanamazsınız.
+            - listitem [ref=f3e126]:
+              - text: Sipariş tamamlandıktan sonra, yasal saklama zorunluluğu yoksa, müşteriye ait dosya ve verileri
+              - strong [ref=f3e127]: imha etmeniz
+              - text: beklenir.
+            - listitem [ref=f3e128]:
+              - text: Bu gizlilik yükümlülüğü, ortaklık sona erse dahi
+              - strong [ref=f3e129]: süresiz olarak geçerlidir.
+          - heading "10. Fikrî Mülkiyet" [level=2] [ref=f3e130]
+          - list [ref=f3e131]:
+            - listitem [ref=f3e132]:
+              - text: Müşteri tasarımları, üretilen 3D modeller ve baskı dosyaları (STL/OBJ)
+              - strong [ref=f3e133]: ilgili müşteriye ve/veya Platforma aittir.
+              - text: Üretici, bu dosya ve modeller üzerinde
+              - strong [ref=f3e134]: hiçbir mülkiyet veya kullanım hakkı iddia edemez.
+            - listitem [ref=f3e135]:
+              - text: Atanan siparişin dosyalarını
+              - strong [ref=f3e136]: yeniden satamaz, çoğaltıp dağıtamaz, vitrin/ numune olarak sergileyemez veya başka bir müşteriye üretemezsiniz.
+          - heading "11. Performans, Uyarı, Askıya Alma ve Fesih" [level=2] [ref=f3e137]
+          - list [ref=f3e138]:
+            - listitem [ref=f3e139]: Performansınız; kabul oranı, zamanında teslim, QC onay oranı ve müşteri memnuniyeti üzerinden değerlendirilir.
+            - listitem [ref=f3e140]:
+              - strong [ref=f3e141]: Kalite/süre standartlarının tekrarlayan ihlali, gizlilik veya fikrî mülkiyet ihlali, yanıltıcı beyan ya da Platform dışına yönlendirme girişimi
+              - text: ", uyarı, askıya alma veya"
+              - strong [ref=f3e142]: sözleşmenin tek taraflı feshi
+              - text: sebebidir.
+            - listitem [ref=f3e143]: Her iki taraf da, devam eden siparişlerin tamamlanması kaydıyla, ortaklığı sonlandırabilir. Fesih hâlinde, hak edilmiş net ödemeleriniz olağan ödeme takviminde yapılır.
+          - heading "12. Mağaza/Pazaryeri Ürünleri (varsa)" [level=2] [ref=f3e144]
+          - list [ref=f3e145]:
+            - listitem [ref=f3e146]:
+              - text: Aktif üretici olarak, kendi hazır 3D baskı ürünlerinizi panelden mağazaya listeleyebilirsiniz. Listelenen her ürün
+              - strong [ref=f3e147]: admin onayından geçer
+              - text: ve aynı kalite, paketleme, süre ve komisyon esaslarına tabidir.
+          - heading "13. Sorumluluk, Garanti ve Mücbir Sebep" [level=2] [ref=f3e148]
+          - list [ref=f3e149]:
+            - listitem [ref=f3e150]:
+              - text: Üretici, teslim ettiği işin bu sözleşmedeki standartlara uygunluğunu garanti eder;
+              - strong [ref=f3e151]: kusurlu işin yeniden üretim sorumluluğu Üreticiye aittir.
+            - listitem [ref=f3e152]:
+              - text: Platform; ödeme tahsilatı, sipariş yönetimi, kargo entegrasyonu ve müşteri iletişimini sağlar. Tarafların kontrolü dışındaki olaylar (doğal afet, genel kesinti, mevzuat değişikliği vb.
+              - strong [ref=f3e153]: mücbir sebepler
+              - text: ) süre yükümlülüklerini makul ölçüde askıya alır; taraflar durumu en kısa sürede bildirir.
+          - heading "14. İletişim, Bildirimler ve Uyuşmazlık" [level=2] [ref=f3e154]
+          - list [ref=f3e155]:
+            - listitem [ref=f3e156]:
+              - text: Yeni atamalar, durum değişiklikleri ve admin mesajları
+              - strong [ref=f3e157]: kayıtlı e-posta adresinize
+              - text: gönderilir; e-postalarınızı düzenli takip etmeniz beklenir. Belirttiğiniz telefon ve (varsa) WhatsApp numarası admin ekibine görünür olur.
+            - listitem [ref=f3e158]: Bildirimler için esas alınan adres, panelinizdeki kayıtlı iletişim bilgilerinizdir; bunları güncel tutmak Üreticinin sorumluluğundadır.
+            - listitem [ref=f3e159]:
+              - text: Taraflar, uyuşmazlıkları öncelikle
+              - strong [ref=f3e160]: iyi niyetle ve doğrudan iletişimle
+              - text: çözmeye çalışır.
+          - separator [ref=f3e161]
+          - paragraph [ref=f3e162]: Bu metni okuyup kabul ederek, yukarıdaki tüm şartlar altında Figurunica üretici ortaklığına başvurmayı kabul etmiş sayılırsınız.
+          - paragraph [ref=f3e163]:
+            - text: "Sorularınız için:"
+            - strong [ref=f3e164]:
+              - link "admin@figurunica.com" [ref=f3e165] [cursor=pointer]:
+                - /url: mailto:admin@figurunica.com
+        - generic [ref=f3e166]:
+          - checkbox "Yukarıdaki şartları okudum ve üretici ortaklığını bu şartlar altında kabul ediyorum." [ref=f3e167]
+          - generic [ref=f3e168]: Yukarıdaki şartları okudum ve üretici ortaklığını bu şartlar altında kabul ediyorum.
+        - generic [ref=f3e169]:
+          - link "Hesabım var, giriş yap" [ref=f3e170] [cursor=pointer]:
+            - /url: /manufacturer/login
+          - button "Devam et" [disabled] [ref=f3e171]
+  - button "Open Next.js Dev Tools" [ref=f3e177] [cursor=pointer]
+  - alert [ref=f3e181]

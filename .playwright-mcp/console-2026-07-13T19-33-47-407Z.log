@@ -1,0 +1,8 @@
+[     184ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     206ms] [LOG] [HMR] connected @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     277ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3099/api/manufacturer/auth/me:0
+[     278ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3099/api/auth/me:0
+[     579ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     606ms] [LOG] [Fast Refresh] done in 127ms @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[   53408ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "new-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:3099/manufacturer/register:0
+[   53409ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "new-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:3099/manufacturer/register:0

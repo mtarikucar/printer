@@ -1,0 +1,22 @@
+- generic [active] [ref=f2e1]:
+  - main [ref=f2e2]:
+    - generic [ref=f2e4]:
+      - generic [ref=f2e5]:
+        - text: Figurunica
+        - paragraph [ref=f2e6]: Üretici Paneli
+      - generic [ref=f2e7]:
+        - heading "Üretici Girişi" [level=1] [ref=f2e8]
+        - generic [ref=f2e9]:
+          - generic [ref=f2e10]:
+            - generic [ref=f2e11]: E-posta
+            - textbox "manufacturer@example.com" [ref=f2e12]
+          - generic [ref=f2e13]:
+            - generic [ref=f2e14]: Şifre
+            - textbox [ref=f2e15]
+          - button "Giriş Yap" [ref=f2e16]
+      - paragraph [ref=f2e17]:
+        - text: Hesabınız yok mu?
+        - link "Üretici Olarak Kayıt Ol" [ref=f2e18] [cursor=pointer]:
+          - /url: /manufacturer/register
+  - button "Open Next.js Dev Tools" [ref=f2e24] [cursor=pointer]
+  - alert [ref=f2e28]

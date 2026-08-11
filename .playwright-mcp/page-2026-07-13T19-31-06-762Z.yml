@@ -1,0 +1,21 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - heading "Figurunica" [level=1] [ref=e6]
+        - paragraph [ref=e7]: Üretici Paneli
+      - navigation [ref=e8]:
+        - link [ref=e9] [cursor=pointer]:
+          - /url: /manufacturer/orders
+        - link [ref=e13] [cursor=pointer]:
+          - /url: /manufacturer/products
+        - link [ref=e17] [cursor=pointer]:
+          - /url: /manufacturer/earnings
+        - link [ref=e21] [cursor=pointer]:
+          - /url: /manufacturer/notifications
+        - link [ref=e25] [cursor=pointer]:
+          - /url: /manufacturer/profile
+      - button "Çıkış Yap" [ref=e30]
+    - main [ref=e33]:
+      - main [ref=e34]
+  - button "Open Next.js Dev Tools" [ref=e41] [cursor=pointer]

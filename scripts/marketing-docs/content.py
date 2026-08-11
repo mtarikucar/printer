@@ -993,4 +993,311 @@ DOC4 = {
     ],
 }
 
-DOCS = [DOC1, DOC2, DOC3, DOC4]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DOKÜMAN 5 — PAZARLAMACI SAHA & GÖREV KİTİ
+# ═══════════════════════════════════════════════════════════════════════════
+
+DOC5 = {
+    "num": "05",
+    "slug": "05-pazarlamaci-saha-kilavuzu",
+    "title": "Pazarlamacı El Kitabı",
+    "subtitle": "Görev tanımı, kime ulaşılır ve ne denir, teklif senaryoları, fiyat cep kartı ve "
+                "asla söylenmeyecekler — sahada tek elde taşınan kılavuz.",
+    "audience": "Hedef kitle: pazarlama / saha / büyüme sorumlusu",
+    "blocks": [
+        {"t": "h1", "x": "Görev tanımı"},
+        {"t": "lead", "x": "Pazarlamacı, Figurunica’nın büyüme ve saha operasyonunu tek elden yürütür: partner "
+                           "ağını (üretici + boyacı) büyütür, kurumsal ve mekân taleplerini açar, kaliteyi ve "
+                           "lojistiği gözetir, atölyeleri organize eder ve sosyal medyayı yönetir. Aşağıdaki altı "
+                           "alan bu rolün tamamıdır."},
+        {"t": "table",
+         "head": ["Alan", "Ne yapar", "Araç / kaynak"],
+         "w": [3.8, 8.4, 3.8],
+         "rows": [
+             ["Üretici bulma", "Gerektiği kadar 3D baskı atölyesi (üretici) bul, başvuruya yönlendir, aktifleştir — "
+              "ağın kapasitesini talebe göre büyüt.", "Doküman 02"],
+             ["Boyacı bulma", "Gerektiği kadar el boyama sanatçısı / atölyesi (boyacı) bul ve ağa kat.", "Doküman 02"],
+             ["Saha satışı (B2B)", "Otel, kurumsal firma, workshop kafe ve konsept restoranları arayıp workshop ve "
+              "üretim teklifi sun.", "Bu kılavuz · Doküman 03"],
+             ["Kalite & lojistik", "Kalite kontrole gelen ürünleri onayla; kargo ağını gözet.", "Yönetim paneli"],
+             ["Atölye organizasyonu", "Workshopları organize et, yönet ve yönlendir; konsept workshoplar için "
+              "reklam / pazarlama işlerini yürüt.", "/atolye · yönetim paneli"],
+             ["Sosyal medya & mesaj", "Sosyal medya pazarlama adımlarını kontrol et; gelen mesajları "
+              "(WhatsApp / DM / e-posta) yönet ve yönlendir.", "Kanal ciro raporu"],
+         ]},
+        {"t": "note", "x": "Bu kılavuz esas olarak saha satışına (3) ve partner kazanımına (1–2) odaklanır; "
+                           "operasyonel maddeler (4–6) için sondaki “Operasyonel görevler” bölümüne bakın. "
+                           "Partner kazanımının tam metni Doküman 02’dedir."},
+
+        {"t": "h1", "x": "Bu kılavuz nasıl kullanılır"},
+        {"t": "p", "x": "Figurunica sahaya üç teklifle çıkar. Her segment kartı aynı altı satırla okunur; "
+                        "kartın söylediğinin dışına, “Herkese geçerli kurallar” bölümünü çiğneyerek çıkma."},
+        {"t": "ul", "x": [
+            "**Mekânda Atölye:** kafe, restoran, okul, kreş, ofis, otel ya da etkinlik salonuna gidip uygulamalı "
+            "figür boyama & tasarım deneyimi kurarız. Tüm malzeme ve ekipman bizden. **Sabit fiyat yok — her "
+            "etkinliğe özel teklif.**",
+            "**Kurumsal hediyelik & figür:** fotoğraftan ya da logodan kişiye özel figür, anahtarlık, magnet ve "
+            "gece lambası. Sitede gerçek ödeme, Türkiye içi ücretsiz kargo.",
+            "**Endüstriyel / maker baskı:** hazır STL/OBJ dosyasını hacim bazlı fiyatla bastırma; büyük ve karmaşık "
+            "işlerde ekip özel teklif hazırlar.",
+        ]},
+        {"t": "p", "x": "Her kart şu altı satırla okunur: **Kime ulaş · Karar verici · 20 saniyelik açılış · "
+                        "Ne teklif et · Fiyatta ne de · Bu segmentte asla söyleme.**"},
+
+        {"t": "h1", "x": "Herkese geçerli 7 altın kural"},
+        {"t": "callout", "kind": "danger", "title": "Hangi segmentte olursan ol, bu yedi kural değişmez",
+         "x": ["Aşağıdakiler sistemin gerçekte yaptığıyla sabittir. Kart ne derse desin, bunların dışına çıkma."]},
+        {"t": "ul", "x": [
+            "**Workshop’un sabit fiyatı yoktur.** Kişi başı ya da paket sabit fiyat, sabit süre veya sabit içerik "
+            "vaat etme — her talep elle fiyatlanır, teklif yazılı gider.",
+            "**Form / talep bağlayıcı sipariş değildir.** Bunu açıkça söyle; taahhüt korkusunu kaldırır, dönüşümü "
+            "artırır.",
+            "**Sadece Türkiye içi teslimat; kargo ücretsiz.** “Dünyaya gönderim” yok. “Hızlı kargo” (₺79) yalnızca "
+            "süreyi kısaltan opsiyonel bir ektir.",
+            "**Teslim süreleri tahminidir, “garanti” deme.** Onaydan sonra genellikle 5–7 iş günü üretim + 2–3 iş "
+            "günü kargo.",
+            "**Kupon / toplu alım indirimi yok.** Tek indirim mekanizmaları: %3 havale/EFT indirimi ve hediye kartı. "
+            "**Müşteri hediye kartı satın alamaz** (kartları yalnızca yönetici oluşturur).",
+            "**Uydurma sosyal kanıt yasak.** “5.000+ mutlu müşteri”, “4,9 puan”, “binlerce hazır ürün” gibi "
+            "doğrulanmamış sayılar kullanılamaz.",
+            "**AI yalnızca 2 boyutlu önizleme üretir.** “Fotoğrafı anında 3D’ye çevirir” ya da “satın almadan 3D’yi "
+            "döndür” deme; 3D modeli ödeme sonrası ekip hazırlar. Doğru mesaj: “baskıdan önce tasarımını onaylarsın.”",
+        ]},
+
+        {"t": "pb"},
+        {"t": "h1", "x": "Kime ulaş, ne de — segment kartları"},
+
+        {"t": "h2", "x": "Üretici — 3D baskı atölyesi bul"},
+        {"t": "quote", "x": "“Yazıcınızı kurmuşsunuz ama iş bulmakla uğraşıyorsunuz. Biz müşteriyi, tasarımı ve "
+                            "ödemeyi getiriyoruz — size yalnızca ödemesi alınmış, malzemenize uyan ve kapasitenize "
+                            "sığan işler düşüyor. Komisyon %35, net payınız %65; kargoladığınız an hak ediş işlenir. "
+                            "Yoğunsanız ‘sipariş almıyorum’ dersiniz. Münhasırlık yok.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "Reçine (SLA) ve/veya filament (FDM) 3D baskı atölyeleri, prototip / maker atölyeleri, "
+                          "baskı hizmeti veren bireysel operatörler"],
+            ["Karar verici", "Atölye sahibi / operatör"],
+            ["Ne teklif et", "Ödemesi alınmış, malzeme + kapasiteye göre yönlendirilen iş akışı · %35 platform / "
+                             "%65 partner · panelden tek tuş ödeme talebi · münhasırlık yok"],
+            ["Fiyatta ne de", "Oran tek: **%35 / %65.** Örnek: reçine orta figür ₺1.399 → partnere net ₺909,35"],
+            ["Bu segmentte asla", "%70/30 · “her Cuma otomatik ödeme” · “kargo etiketi panele düşer” · “24 saatte "
+                                  "otomatik başka atölyeye gider”. Tam pitch: Doküman 02"],
+        ]},
+
+        {"t": "h2", "x": "Boyacı — el boyama sanatçısı bul"},
+        {"t": "quote", "x": "“Yazıcıya, reçineye, kargoya yatırım yapmanıza gerek yok. Üretici, kalite kontrolden "
+                            "geçmiş boyasız figürü size devreder; siz boyar, fotoğrafını yükler ve onaydan sonra "
+                            "doğrudan müşteriye gönderirsiniz. El boyama bedeli ₺1.000, komisyon sonrası figür "
+                            "başına net ₺650. Kaç iş alacağınıza siz karar verirsiniz.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "Minyatür / figür boyama sanatçıları, model boyacıları, tabletop & hobiciler, el sanatları "
+                          "atölyeleri"],
+            ["Karar verici", "Sanatçı / atölye sahibi"],
+            ["Ne teklif et", "Baskıyla uğraşmadan sadece boyama; üretici işi devreder, boyacı doğrudan kargolar · "
+                             "figür başına net ₺650 · kapasite kendisinde"],
+            ["Fiyatta ne de", "El boyama bedeli ₺1.000 → net **₺650** (aynı %35 komisyon)"],
+            ["Bu segmentte asla", "“Panelden kazancınızı takip edip ödeme talep edersiniz” — boyacı panelinde "
+                                  "kazanç dökümü/ödeme düğmesi YOK, ödeme ekiple yürür · “reddedilen iş otomatik "
+                                  "sıradaki boyacıya gider” — boyacı ataması algoritmik değil"],
+        ]},
+
+        {"t": "h2", "x": "Oteller"},
+        {"t": "quote", "x": "“Mekânınıza geliyoruz — tüm malzeme ve ekipmanı biz getiriyoruz. Misafirlerinize ya da "
+                            "ekibinize, her yaşa uyarlanabilen uygulamalı bir figür boyama & tasarım deneyimi "
+                            "kuruyoruz. Katılımcı sayısı ve konsepte göre size özel program ve teklif hazırlıyoruz; "
+                            "form bağlayıcı değil, önce konuşuruz.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "Butik ve zincir oteller, tatil köyleri, spa / resort — özellikle aile ve etkinlik odaklı olanlar"],
+            ["Karar verici", "Etkinlik / animasyon müdürü, satış-pazarlama müdürü, F&B veya misafir deneyimi sorumlusu"],
+            ["Ne teklif et", "Misafir aktivitesi ya da kurumsal etkinlik olarak **Mekânda Atölye** (figür boyama & "
+                             "tasarım); anahtar teslim, malzeme bizden. Yan satış: hediyelik reyonu için kişiye özel "
+                             "figür / anahtarlık"],
+            ["Fiyatta ne de", "Atölye: **sabit fiyat yok, özel teklif.** Hediyelik istenirse: figür ₺899’dan, "
+                              "anahtarlık ₺149"],
+            ["Bu segmentte asla", "Kişi başı sabit fiyat · “online rezervasyon/ödeme yapın” · “atölyeyi siteden "
+                                  "takip edin” (yalnız e-posta + WS- referansı) · şehrinize kesin geliş vaadi "
+                                  "(teklif aşamasında netleşir)"],
+        ]},
+
+        {"t": "h2", "x": "Workshop & atölye kafeler"},
+        {"t": "quote", "x": "“Kafenize hazır bir etkinlik getiriyoruz: uygulamalı figür boyama & tasarım atölyesi, "
+                            "tüm malzeme ve ekipman bizden. Doğum günü, özel grup ya da hafta içi etkinlik olarak "
+                            "kurgularız; katılımcı sayısına göre size özel teklif çıkarırız.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "Atölye / hobi kafeleri, seramik veya resim atölyesi olan kafeler, oyun & etkinlik "
+                          "kafeleri, çocuk kafeleri"],
+            ["Karar verici", "Kafe sahibi / işletme müdürü / etkinlik koordinatörü"],
+            ["Ne teklif et", "Takvimlerine koyacakları hazır bir **Mekânda Atölye** deneyimi; doğum günü / özel grup / "
+                             "düzenli etkinlik konseptleri"],
+            ["Fiyatta ne de", "**Sabit fiyat yok — katılımcı ve konsepte göre özel teklif.** (Formdaki örnek rakamlar "
+                              "bağlayıcı değildir.)"],
+            ["Bu segmentte asla", "Sabit paket fiyatı/süresi · gelir paylaşımı / komisyon modeli vaadi (sistemde yok) · "
+                                  "online rezervasyon"],
+        ]},
+
+        {"t": "h2", "x": "Kurumsal firmalar — ofiste workshop"},
+        {"t": "quote", "x": "“Ofisinize gelip ekibinize takım etkinliği olarak uygulamalı bir figür boyama & tasarım "
+                            "atölyesi kuruyoruz — tüm malzeme bizden, anahtar teslim. İstenirse çalışan ya da etkinlik "
+                            "hediyesi olarak fotoğraftan veya logonuzdan kişiye özel figür ve hediyelik de üretiyoruz.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "İnsan kaynakları, kurumsal iletişim, ofis / idari işler, etkinlik & organizasyon ajansları"],
+            ["Karar verici", "İK müdürü, kurumsal iletişim, ofis müdürü, satın alma"],
+            ["Ne teklif et", "Takım etkinliği / motivasyon günü olarak **Mekânda Atölye** · yan satış: kurumsal "
+                             "hediyelik (fotoğraf ya da logodan figür, anahtarlık, magnet, lamba)"],
+            ["Fiyatta ne de", "Atölye: özel teklif. Hediyelik: anahtarlık ₺149 · magnet ₺129 · lamba ₺399 · figür "
+                              "₺899’dan · logo/2D ₺549–1.499. Kurumsal transferde **%3 havale indirimi**"],
+            ["Bu segmentte asla", "Toplu alım indirimi / kupon · “kurumsal faturalı self-servis” (sipariş akışında "
+                                  "VKN/unvan/e-fatura YOK — manuel) · sepette 20 adet üstü self-servis · “size ödeme "
+                                  "linki gönderelim” akışı (canlı değil)"],
+        ]},
+
+        {"t": "h2", "x": "Okul, anaokulu ve kreşler"},
+        {"t": "quote", "x": "“Sınıfınıza ya da etkinlik salonunuza geliyoruz; çocukların yaş grubuna uyarlanmış, "
+                            "güvenli ve uygulamalı bir figür boyama & tasarım atölyesi kuruyoruz. Tüm malzeme ve "
+                            "ekipman bizden. Mezuniyet, yıl sonu ya da özel gün için katılımcı sayısına göre program "
+                            "ve teklif hazırlıyoruz.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "Anaokulları / kreşler, ilkokullar, özel okullar, kurs & etüt merkezleri, çocuk etkinlik "
+                          "organizatörleri"],
+            ["Karar verici", "Okul / kurum müdürü, müdür yardımcısı, etkinlik veya rehberlik koordinatörü, sınıf öğretmeni"],
+            ["Ne teklif et", "Sınıf ya da okul etkinliği olarak **Mekânda Atölye** (yaş grubuna uyarlanır: çocuk 4–12, "
+                             "genç 13–17, karışık); mezuniyet / yıl sonu / özel gün programı"],
+            ["Fiyatta ne de", "**Sabit fiyat yok — katılımcı sayısı ve yaş grubuna göre özel teklif.**"],
+            ["Bu segmentte asla", "Kişi başı sabit fiyat · online ödeme/takip · sabit süre. Talepler /atolye "
+                                  "formundan gelir; KVKK açık rızası formda zorunludur"],
+        ]},
+
+        {"t": "h2", "x": "Konsept restoranlar"},
+        {"t": "quote", "x": "“Konseptinizi somut bir objeye çeviriyoruz: maskotunuzu, logonuzu ya da bir fotoğrafı "
+                            "kişiye özel figüre, anahtarlığa veya gece lambasına dönüştürüyoruz — masaüstü dekoru, "
+                            "hediyelik ya da koleksiyon olarak. İsterseniz mekânınızda misafir etkinliği olarak figür "
+                            "boyama atölyesi de kuruyoruz.”"},
+        {"t": "kv", "x": [
+            ["Kime ulaş", "Temalı / konsept restoranlar, zincir kafeler, marka konsepti güçlü mekânlar, eğlence & "
+                          "aktivite mekânları"],
+            ["Karar verici", "Sahip / işletmeci, marka veya pazarlama müdürü, satın alma"],
+            ["Ne teklif et", "Marka figürü / maskotu: fotoğraf ya da logodan kişiye özel figür & hediyelik (dekor, "
+                             "çekiliş / hediye, satış reyonu). Opsiyon: mekânda misafir atölyesi"],
+            ["Fiyatta ne de", "Figür ₺899–1.799 (el boyama +₺1.000, lüks vitrin +₺2.000) · logo/2D’den ürün "
+                              "₺549–1.499 · anahtarlık ₺149 · lamba ₺399. Atölye: özel teklif"],
+            ["Bu segmentte asla", "“Anında 3D’ye çeviririz / 3D’yi döndürerek görün” (AI sadece 2D) · sepette 20 adet "
+                                  "üstü self-servis toplu üretim · toplu indirim/kupon · “dünyaya gönderim”"],
+        ]},
+
+        {"t": "pb"},
+        {"t": "h1", "x": "Fiyat cep kartı"},
+        {"t": "table",
+         "head": ["Ne", "Fiyat", "Not"],
+         "w": [4.4, 3.2, 8.4],
+         "rows": [
+             ["Mekânda Atölye", "Özel teklif", "Sabit fiyat yok; katılımcı + konsepte göre elle fiyatlanır, yazılı teklif"],
+             ["Kişiye özel figür", "₺899 – ₺1.799", "Filament ₺899’dan, reçine ₺999’dan; boyuta göre artar"],
+             ["El boyaması (bitiş)", "+₺1.000", "Profesyonel el boyama + kalite kontrol fotoğrafı + hediye kutusu"],
+             ["Lüks vitrin (bitiş)", "+₺2.000", "Premium kaide, isim plakası, sert kutu, tam el boyama"],
+             ["Logo / 2D tasarımdan ürün", "₺549 – ₺1.499", "Kurum logosu, çizim veya düz görselden 3D ürün"],
+             ["Anahtarlık", "₺149", "Fotoğraftan, sabit fiyat (/urunler)"],
+             ["Buzdolabı magneti", "₺129", "Fotoğraftan, sabit fiyat (/urunler)"],
+             ["Gece lambası", "₺399", "Fotoğraftan, sabit fiyat (/urunler)"],
+             ["Kendi STL/OBJ baskısı", "Hacim bazlı", "Reçine ₺99 + ₺15/cm³ (min ₺199) · filament ₺69 + ₺9/cm³ "
+              "(min ₺149); bitiş +₺0 / +₺150 / +₺400"],
+             ["Ödeme avantajı", "%3 indirim", "Havale/EFT ile, 72 saat süre. Kupon veya toplu indirim yoktur"],
+         ]},
+        {"t": "note", "x": "Tüm fiyatlar KDV dahildir ve ödemeden önce müşteriye net gösterilir. Başlangıç fiyatı "
+                           "iletişiminde tek rakama sadık kal: filament ₺899’dan / reçine ₺999’dan — ikisini aynı "
+                           "cümlede karıştırma."},
+
+        {"t": "h1", "x": "Genel “asla söyleme” — tek liste"},
+        {"t": "callout", "kind": "danger", "title": "Sahada en sık yapılan hatalar — bunları söyleme",
+         "x": ["Segment kartındaki uyarıların üstüne, tüm görüşmelerde geçerli genel yasak liste."]},
+        {"t": "ul", "x": [
+            "**“Yapay zekâ fotoğrafı anında 3D modele çevirir.”** — AI yalnızca 2D görsel üretir; 3D’yi ödeme sonrası "
+            "ekip hazırlar.",
+            "**“Satın almadan 3D modeli döndürerek incele.”** — Önizleme düz 2D’dir; döndürülebilir 3D yoktur "
+            "(mağaza ürünlerinde de).",
+            "**“Koşulsuz para iade garantisi / memnun kalmazsan iade.”** — Kişiye özel üründe fikir değişikliğiyle "
+            "iade yok. Doğru mesaj: onaylamadan baskı başlamaz + hasar/ayıpta ücretsiz yenileme, değişim veya bedel "
+            "iadesi; hazır üründe 14 gün cayma hakkı.",
+            "**“E-faturanız otomatik düzenlenir.”** — E-fatura entegrasyonu yok; yalnızca uygulama içinde KDV "
+            "ayrıştırmalı döküm gösterilir.",
+            "**“Kampanya kodu / indirim kuponu / toplu alım indirimi girin.”** — Yoktur. Tek indirim: %3 havale + "
+            "hediye kartı.",
+            "**“Sevdiklerinize hediye kartı satın alın.”** — Müşteri hediye kartı satın alamaz.",
+            "**“Dünyaya gönderim.”** — Yalnızca Türkiye içi teslimat vardır.",
+            "**“Yüklediğiniz her modele anında otomatik fiyat.”** — Geometri işlenemezse veya baskı zarfı aşılırsa "
+            "talep sessizce özel teklife düşer.",
+            "**Teslim sürelerini “garanti” diye sunmak.** — Politika açıkça “tahminidir, garanti edilmez” der.",
+            "**Uydurma hacim/puan (“5.000+ müşteri”, “4,9 puan”).** — Doğrulanmış sayı yok; kullanma.",
+            "**İngilizce materyali site metnine dayandırmak.** — Site yalnızca Türkçe yayındadır.",
+        ]},
+
+        {"t": "pb"},
+        {"t": "h1", "x": "Operasyonel görevler"},
+        {"t": "p", "x": "Saha satışı dışındaki görevler. Bunlar yönetim panelinden ve operasyon akışından yürür; "
+                        "dışarıya verilecek vaatte yine “asla söyleme” disiplini geçerlidir."},
+        {"t": "h2", "x": "Kalite kontrol onayı"},
+        {"t": "ul", "x": [
+            "Üretici baskıyı bitirince en az 1 ürün fotoğrafı yükleyip kalite kontrole gönderir. **Sen onaylamadan "
+            "kargolama açılmaz;** reddedersen düzeltilip yeniden gönderilir.",
+            "El boyamalı siparişte, boyamadan sonra **ikinci** bir kalite kontrol turu daha vardır.",
+            "Kaç turda geçildiği kayıt altındadır; onaylar yönetim panelinden yapılır.",
+        ]},
+        {"t": "h2", "x": "Kargo ağı"},
+        {"t": "ul", "x": [
+            "Desteklenen firmalar: **Yurtiçi, Aras, MNG, PTT ve Sürat.** Müşteriye tıklanabilir takip bağlantısı + "
+            "e-posta + site içi bildirim gider.",
+            "“Teslim edildi” bilgisi kargo firmasından otomatik gelmez — **elle işaretlenir.** “Kargonuzu canlı "
+            "izliyoruz, teslimatta otomatik haber veriyoruz” deme.",
+            "Türkiye içi kargo ücretsizdir; “hızlı kargo” (₺79) yalnızca süreyi kısaltan opsiyonel ektir.",
+        ]},
+        {"t": "h2", "x": "Workshop organizasyonu"},
+        {"t": "ol", "x": [
+            "Talepler **figurunica.com/atolye** formundan gelir; her talebe **WS-XXXXXX** referansı ve anında onay "
+            "e-postası verilir.",
+            "Yaşam döngüsü: **Yeni → İnceleniyor → Planlandı → Tamamlandı.** “Planlandı” aşamasında tarih, teklif "
+            "tutarı ve adres yazılı olarak e-postayla iletilir.",
+            "Konsept workshoplar için reklam / pazarlama işlerini sen kurgularsın; kişi başı sabit fiyat listesi "
+            "yoktur, her etkinlik elle fiyatlanır.",
+            "KVKK açık rızası formda zorunlu ve zaman damgalıdır.",
+        ]},
+        {"t": "h2", "x": "Sosyal medya & mesaj yönetimi"},
+        {"t": "ul", "x": [
+            "Gelen mesajları (WhatsApp, DM, e-posta) yönet ve yönlendir; sepette ve iletişimde “WhatsApp’tan Sipariş "
+            "Ver” akışı vardır.",
+            "Kampanya / kanal bilgisi siparişe yazılır; yönetim panelinde **kanal bazlı ciro raporu** vardır — hangi "
+            "kanalın iş getirdiğini buradan ölç.",
+            "**Ölçüm şu an yalnızca GA4 / GTM ile.** Meta ve TikTok pikselleri canlı değil — reklam performansını "
+            "bunlara dayandırma.",
+            "**İYS (ticari ileti izni) entegrasyonu yok** — toplu ticari e-posta/SMS göndermeden önce hukuk teyidi "
+            "al. Ticari ileti izni opt-in ve zaman damgalıdır.",
+        ]},
+
+        {"t": "h1", "x": "Görüşme sonrası — talebi gerçek işe çevir"},
+        {"t": "ol", "x": [
+            "**Workshop (otel / kafe / okul / kurumsal / restoran):** müşteriyi figurunica.com/atolye formuna "
+            "yönlendir ya da bilgileri sen gir; WS- referansını paylaş, teklifi “Planlandı” aşamasında yazılı ilet.",
+            "**Hediyelik / figür (birey veya küçük hacim):** siteden gerçek ödemeyle sipariş (misafir checkout yeter) "
+            "veya WhatsApp’tan ilerle.",
+            "**Büyük hacim (satır başına 20 adet üstü):** self-servis yapılamaz — WhatsApp/e-posta ile ekiple yürüt.",
+            "**Partner (üretici / boyacı):** başvuruya yönlendir. Akış: **Beklemede → Koşullu Onaylı → Aktif** "
+            "(üreticide yazıcı fotoğrafı, boyacıda örnek çalışma). Aktif olmadan iş atanmaz.",
+        ]},
+
+        {"t": "h1", "x": "Görüşme öncesi netleştirilecekler"},
+        {"t": "p", "x": "Aşağıdakiler cevaplanmadan ilgili konuda kesin taahhüt verme; kurucudan/ekipten teyit al."},
+        {"t": "ol", "x": [
+            "Workshop için verilebilecek bir **referans fiyat bandı** var mı? (Kişi başı ya da paket — bir bant "
+            "olmadan sahada ilerlemek zor.)",
+            "Atölye **hizmet bölgemiz** neresi? 81 ilden talep alıyoruz ama stüdyo Ankara’da — fiilen hangi illere "
+            "gidiyoruz?",
+            "**Boyacı ödemeleri** fiilen nasıl yapılıyor? (Panelde ödeme talep akışı yok.)",
+            "**Ödeme sağlayıcısı canlı modda mı, SMS sağlayıcısı bağlı mı?** Değilse “canlı ödeme / kargo SMS’i” "
+            "vaadi kaldırılmalı.",
+            "**Pazaryerinde onaylı ürün var mı?** Yoksa ana sayfa rafları boş görünür.",
+            "Kurumsal **e-fatura / e-arşiv** ve **kupon / indirim kodu motoru** yol haritasında ne zaman? İkisi de "
+            "şu an yok.",
+        ]},
+        *CONTACT,
+    ],
+}
+
+DOCS = [DOC1, DOC2, DOC3, DOC4, DOC5]

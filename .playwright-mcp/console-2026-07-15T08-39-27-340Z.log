@@ -1,0 +1,28 @@
+[     284ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     430ms] [LOG] [HMR] connected @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     548ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     852ms] [LOG] [Fast Refresh] done in 403ms @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[     872ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3099/api/auth/me:0
+[    8948ms] [WARNING] THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[    9218ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[    9285ms] [LOG] [Fast Refresh] done in 204ms @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[    9374ms] [INFO] Connecting to 'https://raw.githack.com/pmndrs/drei-assets/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/potsdamer_platz_1k.hdr' violates the following Content Security Policy directive: "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://graph.facebook.com https://connect.facebook.net https://business-api.tiktok.com https://analytics.tiktok.com https://*.ingest.sentry.io https://*.sentry.io". The policy is report-only, so the violation has been logged but no further action has been taken. @ http://localhost:3099/_next/static/chunks/node_modules_three_build_three_core_996ef05a.js:31664
+[    9374ms] [INFO] Connecting to 'https://raw.githack.com/pmndrs/drei-assets/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/potsdamer_platz_1k.hdr' violates the following Content Security Policy directive: "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://graph.facebook.com https://connect.facebook.net https://business-api.tiktok.com https://analytics.tiktok.com https://*.ingest.sentry.io https://*.sentry.io". The policy is report-only, so the violation has been logged but no further action has been taken. @ http://localhost:3099/_next/static/chunks/node_modules_three_build_three_core_996ef05a.js:31664
+[    9739ms] [INFO] Connecting to 'https://raw.githubusercontent.com/pmndrs/drei-assets/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/potsdamer_platz_1k.hdr' violates the following Content Security Policy directive: "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://graph.facebook.com https://connect.facebook.net https://business-api.tiktok.com https://analytics.tiktok.com https://*.ingest.sentry.io https://*.sentry.io". The policy is report-only, so the violation has been logged but no further action has been taken. @ http://localhost:3099/zz-webgl-check:0
+[   10381ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[   10404ms] [LOG] [Fast Refresh] done in 123ms @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[   39760ms] [ERROR] Failed to load resource: net::ERR_TIMED_OUT @ https://raw.githubusercontent.com/pmndrs/drei-assets/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/potsdamer_platz_1k.hdr:0
+[   39789ms] Error: Could not load potsdamer_platz_1k.hdr: Failed to fetch
+    at Object.onError (http://localhost:3099/_next/static/chunks/node_modules_%40react-three_fiber_dist_eecc0a55._.js:1233:48)
+    at http://localhost:3099/_next/static/chunks/node_modules_three_build_three_core_996ef05a.js:31762:48
+[   39810ms] [ERROR] %o
+
+%s Error: Could not load potsdamer_platz_1k.hdr: Failed to fetch
+    at Object.onError (http://localhost:3099/_next/static/chunks/node_modules_%40react-three_fiber_dist_eecc0a55._.js:1233:48)
+    at http://localhost:3099/_next/static/chunks/node_modules_three_build_three_core_996ef05a.js:31762:48 The above error occurred in the <CanvasImpl> component. It was handled by the <WebGLBoundary> error boundary. @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_client_e6ad3705._.js:2642
+[   39812ms] [WARNING] [ModelViewer] 3D preview disabled — WebGL unavailable: Error: Could not load potsdamer_platz_1k.hdr: Failed to fetch
+    at Object.onError (http://localhost:3099/_next/static/chunks/node_modules_%40react-three_fiber_dist_eecc0a55._.js:1233:48)
+    at http://localhost:3099/_next/static/chunks/node_modules_three_build_three_core_996ef05a.js:31762:48 @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[   39936ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[   39945ms] [LOG] [Fast Refresh] done in 109ms @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053
+[   41826ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3099/_next/static/chunks/node_modules_next_dist_617d3e51._.js:1053

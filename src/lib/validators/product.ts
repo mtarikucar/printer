@@ -88,6 +88,7 @@ export const priceTierSchema = z.object({
 
 export const updateProductBulkSchema = z.object({
   bulkEnabled: z.boolean(),
+  boxEligible: z.boolean().default(false),
   bulkMaxQuantity: z
     .number()
     .int()
@@ -151,6 +152,9 @@ export function createCartOrderSchema(_locale: Locale = defaultLocale) {
           // Sanity bound; the per-product ceiling is enforced server-side in
           // /api/orders against the PER-PRODUCT total across lines.
           quantity: z.number().int().min(1).max(ABSOLUTE_MAX_LINE_QTY),
+          // Anahtarlık kutusu line. Only a claim — the server re-checks that
+          // the product is actually box-eligible before honouring box pricing.
+          box: z.boolean().optional().default(false),
           optionChoiceIds: z.array(z.string().uuid()).max(50).optional().default([]),
           addonIds: z.array(z.string().uuid()).max(50).optional().default([]),
         })

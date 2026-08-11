@@ -32,6 +32,7 @@ export async function GET(
     ownerType: product.ownerType,
     priceKurus: product.priceKurus,
     bulkEnabled: product.bulkEnabled,
+    boxEligible: product.boxEligible,
     bulkMaxQuantity: product.bulkMaxQuantity,
     bulkLeadTimeDays: product.bulkLeadTimeDays,
     tiers: await listTiers(id),
@@ -76,11 +77,25 @@ export async function PUT(
     );
   }
 
+  // The box applies ONE per-piece price across every design in it, so putting a
+  // seller's listing in a box would cut their payout without consent — the same
+  // reason bulk tiers are admin-only.
+  if (input.boxEligible && product.ownerType !== "admin") {
+    return NextResponse.json(
+      {
+        error:
+          "Kutuya uygun işareti yalnızca platform ürünlerinde kullanılabilir.",
+      },
+      { status: 400 }
+    );
+  }
+
   await replaceTiers(id, validation.tiers);
   await db
     .update(products)
     .set({
       bulkEnabled: input.bulkEnabled,
+      boxEligible: input.boxEligible,
       bulkMaxQuantity: input.bulkMaxQuantity,
       bulkLeadTimeDays: input.bulkLeadTimeDays,
       updatedAt: new Date(),
@@ -90,6 +105,7 @@ export async function PUT(
   return NextResponse.json({
     success: true,
     bulkEnabled: input.bulkEnabled,
+    boxEligible: input.boxEligible,
     bulkMaxQuantity: input.bulkMaxQuantity,
     bulkLeadTimeDays: input.bulkLeadTimeDays,
     tiers: validation.tiers,

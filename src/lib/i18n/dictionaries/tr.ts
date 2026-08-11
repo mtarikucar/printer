@@ -228,6 +228,26 @@ const tr: Dictionary = {
   "bulk.checkoutNotice":
     "Toplu üretim siparişi. Yüksek adetli siparişler tek atölyede toplu olarak basılır; hazırlık süresi normal siparişlere göre birkaç iş günü uzayabilir. Kargo öncesi sizi bilgilendiririz.",
 
+  // Anahtarlık kutusu — kutunun TOPLAM adedine göre fiyatlanan karışık kutu.
+  "box.title": "Anahtarlık Kutusu",
+  "box.intro":
+    "Beğendiğin anahtarlıklardan 10'ar 10'ar seç, kutunu kendin oluştur. Kutudaki toplam adet arttıkça birim fiyat düşer — hangi tasarımları seçtiğin fark etmez.",
+  "box.ladderIntro": "Kutu fiyatları:",
+  "box.panelTitle": "Kutun",
+  "box.unitNow": "Adedi {price}",
+  "box.belowMinimum": "Kutu en az {min} adetten başlar.",
+  "box.nudge": "{n} adet daha ekle, her adet {price}'ye düşsün.",
+  "box.remainingToMinimum": "Kutuyu tamamlamak için {n} adet daha.",
+  "box.order": "Kutuyu sipariş et",
+  "box.ordering": "Ekleniyor…",
+  "box.orderFailed": "Kutu eklenemedi. Lütfen tekrar deneyin.",
+  "box.unavailable":
+    "Anahtarlık kutusu şu an hazır değil. Dilersen mağazaya göz atabilirsin.",
+  "box.footnote":
+    "Fiyatlar KDV dahildir. Kutu tek atölyede toplu olarak üretilir; teslim süresi adede göre değişebilir.",
+  "box.cartGroup": "Anahtarlık kutusu — {qty} adet",
+  "admin.box.title": "Anahtarlık kutusu fiyatları",
+
   "checkout.summary": "Sipariş özeti",
   "checkout.giftCard": "Hediye kartı kodu (opsiyonel)",
   "design.title": "2D tasarım → 3D obje",

@@ -21,6 +21,7 @@ interface CartItem {
   productQuantity: number;
   maxQuantity: number;
   bulkEnabled: boolean;
+  isBoxItem: boolean;
   imageUrl: string | null;
   sellerName: string | null;
   quantity: number;
@@ -69,18 +70,23 @@ export function CartClient() {
     }
   };
 
-  // Group by product. Volume tiers are priced on the per-product TOTAL, so two
-  // variant lines of one keychain share a price neither line can explain on its
-  // own — and deleting one would silently re-price the other. The group header
-  // is what makes that visible.
+  // Group by pricing basis, because that is what the customer needs explained.
+  // Box lines are ONE group regardless of design — their price comes from the
+  // box total, so removing a design can re-price every other design in the box.
+  // Everything else groups by product: two variant lines of one keychain share
+  // a per-product tier neither line can explain alone.
   const groups = useMemo(() => {
-    const byProduct = new Map<string, CartItem[]>();
+    const byKey = new Map<string, CartItem[]>();
     for (const it of items) {
-      const list = byProduct.get(it.productId);
+      const key = it.isBoxItem ? "__box__" : it.productId;
+      const list = byKey.get(key);
       if (list) list.push(it);
-      else byProduct.set(it.productId, [it]);
+      else byKey.set(key, [it]);
     }
-    return [...byProduct.values()];
+    // The box first — it is the headline purchase when present.
+    return [...byKey.entries()]
+      .sort(([a], [b]) => (a === "__box__" ? -1 : b === "__box__" ? 1 : 0))
+      .map(([key, list]) => ({ key, items: list, isBox: key === "__box__" }));
   }, [items]);
 
   if (loading) {
@@ -105,16 +111,21 @@ export function CartClient() {
       ) : (
         <div className="grid gap-8 md:grid-cols-3">
           <div className="space-y-3 md:col-span-2">
-            {groups.map((group) => {
+            {groups.map(({ key, items: group, isBox }) => {
               const head = group[0];
-              const showGroupHeader = group.length > 1 && head.bulkEnabled;
+              const showGroupHeader = isBox || (group.length > 1 && head.bulkEnabled);
               return (
-                <div key={head.productId} className="space-y-3">
+                <div key={key} className="space-y-3">
                   {showGroupHeader && (
                     <p className="px-1 text-xs text-text-secondary">
-                      {d["bulk.groupTotal"]
-                        .replace("{title}", head.title)
-                        .replace("{qty}", String(head.productQuantity))}
+                      {isBox
+                        ? d["box.cartGroup"].replace(
+                            "{qty}",
+                            String(head.productQuantity)
+                          )
+                        : d["bulk.groupTotal"]
+                            .replace("{title}", head.title)
+                            .replace("{qty}", String(head.productQuantity))}
                       {head.appliedTierMinQuantity != null && (
                         <>
                           {" · "}

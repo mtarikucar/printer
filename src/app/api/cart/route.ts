@@ -25,16 +25,26 @@ interface Line {
   quantity: number;
   optionChoiceIds: string[];
   addonIds: string[];
+  /**
+   * Part of an anahtarlık kutusu — priced off the box ladder, not the
+   * product's. Always present (getLines defaults legacy rows to false) so the
+   * flag can never be silently undefined inside a pricing path.
+   */
+  box: boolean;
 }
 
+// `box` is part of the identity: the same keychain bought inside a box and
+// bought on its own are different offers at different prices, so they must not
+// merge into one line.
 function lineKey(
   productId: string,
   optionChoiceIds: string[],
-  addonIds: string[]
+  addonIds: string[],
+  box: boolean
 ): string {
-  return `${productId}|${[...optionChoiceIds].sort().join(",")}|${[...addonIds]
+  return `${box ? "box|" : ""}${productId}|${[...optionChoiceIds]
     .sort()
-    .join(",")}`;
+    .join(",")}|${[...addonIds].sort().join(",")}`;
 }
 
 async function resolveCartKey(
@@ -60,8 +70,9 @@ async function getLines(key: string): Promise<Line[]> {
         ? l.optionChoiceIds.map(String)
         : [];
       const addonIds = Array.isArray(l.addonIds) ? l.addonIds.map(String) : [];
+      const box = l.box === true;
       return {
-        id: l.id ?? lineKey(String(l.productId), optionChoiceIds, addonIds),
+        id: l.id ?? lineKey(String(l.productId), optionChoiceIds, addonIds, box),
         productId: String(l.productId),
         // DB-free sanity bound only — this runs without knowing which product
         // the line points at. The authoritative, product-aware cap
@@ -69,6 +80,7 @@ async function getLines(key: string): Promise<Line[]> {
         quantity: clampQty(l.quantity),
         optionChoiceIds,
         addonIds,
+        box,
       };
     });
   } catch {
@@ -99,6 +111,7 @@ async function hydrate(lines: Line[]) {
       totalKurus: 0,
       count: 0,
       bulkSavingsKurus: 0,
+      boxQuantity: 0,
       lines: [] as Line[],
       clamped: false,
     };
@@ -147,6 +160,11 @@ async function hydrate(lines: Line[]) {
           optionChoiceIds: l.optionChoiceIds,
           addonIds: l.addonIds,
           quantity: l.quantity,
+          // Same guard as /api/orders: a stored box flag only counts while the
+          // product is actually box-eligible, so un-flagging a product silently
+          // reprices it at list instead of leaving a phantom box discount that
+          // checkout would refuse to honour.
+          box: l.box && byId.get(l.productId)?.boxEligible,
         }))
       )
     ).map((r, i) => [priceable[i].id, r] as const)
@@ -173,6 +191,7 @@ async function hydrate(lines: Line[]) {
         productQuantity: r.productQuantity,
         maxQuantity: cap,
         bulkEnabled: p.bulkEnabled,
+        isBoxItem: r.isBoxItem,
         imageUrl: imageKey ? getPublicUrl(imageKey) : null,
         sellerName: p.manufacturer?.companyName ?? null,
         quantity: l.quantity,
@@ -192,6 +211,13 @@ async function hydrate(lines: Line[]) {
     // Derived from the display-only list price; never subtracted from a total.
     bulkSavingsKurus: items.reduce(
       (s, i) => s + (i.listPriceKurus - i.priceKurus) * i.quantity,
+      0
+    ),
+    // Total pieces in the anahtarlık kutusu, so the cart can render it as one
+    // block ("Anahtarlık kutusu — 100 adet") above its per-design lines. 0 when
+    // there is no box.
+    boxQuantity: items.reduce(
+      (s, i) => s + (i.isBoxItem ? i.quantity : 0),
       0
     ),
     lines: clampedLines,
@@ -261,12 +287,14 @@ export async function POST(req: NextRequest) {
       if (!productId) return null;
       const optionChoiceIds = idArray(item.optionChoiceIds);
       const addonIds = idArray(item.addonIds);
+      const box = item.box === true;
       return {
-        id: lineKey(productId, optionChoiceIds, addonIds),
+        id: lineKey(productId, optionChoiceIds, addonIds, box),
         productId,
         quantity: clampQty(item.quantity),
         optionChoiceIds,
         addonIds,
+        box,
       };
     })
     .filter((x): x is Line => x !== null);

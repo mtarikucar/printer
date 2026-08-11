@@ -194,6 +194,7 @@ export async function POST(request: NextRequest) {
       unitPriceKurus: number;
       listUnitPriceKurus: number;
       appliedTierMinQuantity: number | null;
+      isBoxItem: boolean;
       quantity: number;
       lineTotalKurus: number;
       selectedOptions: ResolvedOrderLine["selectedOptions"];
@@ -251,6 +252,10 @@ export async function POST(request: NextRequest) {
           optionChoiceIds: item.optionChoiceIds,
           addonIds: item.addonIds,
           quantity: item.quantity,
+          // Never trust the client's box claim: only a product the admin
+          // actually opened to the box gets box pricing. Otherwise anyone could
+          // post box:true for a ₺2.000 figure and buy it at the keychain rate.
+          box: item.box && byId.get(item.productId)!.boxEligible,
         }))
       );
       cartInput!.items.forEach((item, i) => {
@@ -263,6 +268,7 @@ export async function POST(request: NextRequest) {
           unitPriceKurus: r.unitPriceKurus,
           listUnitPriceKurus: r.listUnitPriceKurus,
           appliedTierMinQuantity: r.appliedTierMinQuantity,
+          isBoxItem: r.isBoxItem,
           quantity: item.quantity,
           lineTotalKurus: r.unitPriceKurus * item.quantity,
           selectedOptions: r.selectedOptions,
@@ -661,6 +667,7 @@ export async function POST(request: NextRequest) {
             unitPriceKurus: l.unitPriceKurus,
             listUnitPriceKurus: l.listUnitPriceKurus,
             appliedTierMinQuantity: l.appliedTierMinQuantity,
+            isBoxItem: l.isBoxItem,
             quantity: l.quantity,
             lineTotalKurus: l.lineTotalKurus,
             selectedOptions: l.selectedOptions.length > 0 ? l.selectedOptions : null,

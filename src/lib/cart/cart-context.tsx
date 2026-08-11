@@ -13,6 +13,8 @@ interface AddOptions {
   quantity?: number;
   optionChoiceIds?: string[];
   addonIds?: string[];
+  /** Adds the line as part of an anahtarlık kutusu (box-ladder pricing). */
+  box?: boolean;
 }
 
 /** One line of a batch add — same shape as a single add, plus its product. */
@@ -58,12 +60,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const add = useCallback(async (productId: string, opts: AddOptions = {}) => {
-    const { quantity = 1, optionChoiceIds, addonIds } = opts;
+    const { quantity = 1, optionChoiceIds, addonIds, box } = opts;
     try {
       const r = await fetch("/api/cart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, quantity, optionChoiceIds, addonIds }),
+        body: JSON.stringify({
+          productId,
+          quantity,
+          optionChoiceIds,
+          addonIds,
+          box,
+        }),
       });
       if (r.ok) {
         const d = await r.json();

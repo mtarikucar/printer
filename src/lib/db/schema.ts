@@ -1401,6 +1401,11 @@ export const products = pgTable(
     bulkMaxQuantity: integer("bulk_max_quantity"),
     // Bulk runs take longer than a one-off. NULL → fall back to leadTimeDays.
     bulkLeadTimeDays: integer("bulk_lead_time_days"),
+    // Toplu sipariş and "anahtarlık kutusu" are separate offers: a ₺450 figure
+    // can be sensible to sell in volume at its own tiers while having no place
+    // in a mixed keychain box, where ONE per-piece price covers every design.
+    // Also admin-only, for the same payout reason bulk tiers are.
+    boxEligible: boolean("box_eligible").notNull().default(false),
     // Denormalized cover image key for list cards (avoids a join on /shop).
     primaryImageKey: text("primary_image_key"),
     // Polish: denormalised rating for cards (recomputed on each review insert).
@@ -1493,6 +1498,31 @@ export const productAddons = pgTable(
   },
   (t) => ({
     byProduct: index("product_addons_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
+// ─── Anahtarlık kutusu: the box-level price ladder ──────────────────────────
+// ONE global ladder, not per product. A box is priced on its TOTAL piece count
+// across designs — 10 each of 10 keychains is a 100-piece production run and
+// every piece costs the 100+ rate, whichever designs were picked. That is the
+// entire reason the box is a separate surface from /toplu-siparis, where each
+// product's own ladder would see only 10 units and grant nothing.
+//
+// Rows are a singleton ladder (no productId): the box is a format, not a SKU.
+// Its first rung doubles as the box minimum — below it there is no tier, so the
+// customer simply pays list price, which is self-correcting rather than a
+// dead-end cart.
+export const boxPriceTiers = pgTable(
+  "box_price_tiers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    minQuantity: integer("min_quantity").notNull().unique(),
+    unitPriceKurus: integer("unit_price_kurus").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byMinQty: index("box_price_tiers_min_qty_idx").on(t.minQuantity),
   })
 );
 
@@ -1700,6 +1730,12 @@ export const orderItems = pgTable(
     // and is the sole source for the order's isBulk flag at promotion.
     listUnitPriceKurus: integer("list_unit_price_kurus"),
     appliedTierMinQuantity: integer("applied_tier_min_quantity"),
+    // True when this line was bought as part of an anahtarlık kutusu, so its
+    // price came from the box ladder (total pieces across designs) rather than
+    // the product's own. Production reads the per-design lines either way; this
+    // just lets the order views say "kutu" instead of implying a per-product
+    // volume discount that never applied.
+    isBoxItem: boolean("is_box_item").notNull().default(false),
     selectedOptions:
       jsonb("selected_options").$type<
         { groupName: string; choiceName: string; priceDeltaKurus: number }[]

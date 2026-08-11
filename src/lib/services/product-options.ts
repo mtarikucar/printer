@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { pickTier, type PriceTierConfig } from "@/lib/config/bulk";
+import { listBoxTiers } from "@/lib/services/box-tiers";
 
 // Re-exported so pricing consumers have one import for the whole vocabulary;
 // the definitions live in config/bulk.ts because client components need them
@@ -196,18 +197,23 @@ export async function getProductConfig(productId: string): Promise<ProductConfig
  * unchanged (a hand-painting upcharge costs the same whether you buy 1 or 100).
  * Callers that don't care about volume pricing can omit it and get the old
  * behaviour exactly.
+ *
+ * `tiers` defaults to the product's own ladder. The anahtarlık kutusu passes the
+ * BOX ladder plus the box's total piece count instead — same mechanism, a
+ * different basis — so a mixed box charges one per-piece rate across designs.
  */
 export function computeSelectionPrice(
   config: ProductConfig,
   basePriceKurus: number,
   rawChoiceIds: string[],
   rawAddonIds: string[],
-  quantity: number = 1
+  quantity: number = 1,
+  tiers: PriceTierConfig[] = config.tiers
 ): PricedSelection {
   const chosen = new Set(rawChoiceIds);
   const selectedOptions: PricedSelection["selectedOptions"] = [];
   const appliedChoiceIds: string[] = [];
-  const tier = pickTier(config.tiers, quantity);
+  const tier = pickTier(tiers, quantity);
   // Everything after this point works off `effectiveBase`; `listDelta` is the
   // gap we must add back to reconstruct the undiscounted display price, so the
   // two prices can never disagree about the options/add-ons applied.
@@ -291,6 +297,8 @@ export interface ResolvedOrderLine {
   appliedTierMinQuantity: number | null;
   /** Total units of THIS product across all resolved lines (the tier basis). */
   productQuantity: number;
+  /** Priced off the box ladder rather than this product's own. */
+  isBoxItem: boolean;
   selectedOptions: PricedSelection["selectedOptions"];
   selectedAddons: PricedSelection["selectedAddons"];
   /** Resolved primary image (painted set if a selected choice has one). */
@@ -312,6 +320,11 @@ export interface ResolvedOrderLine {
  * Callers MUST pass only the lines they intend to charge for — the cart hydrate
  * excludes its hidden (unpurchasable) lines, so the tier the customer sees is
  * the tier /api/orders recomputes from the same set.
+ *
+ * Lines flagged `box` are an anahtarlık kutusu: they are pooled across DESIGNS
+ * and priced off the global box ladder at the box's total piece count, so 10
+ * each of 10 keychains is one 100-piece box at the 100+ rate. Everything else
+ * (per-seller split, gift cards, order items) treats them as ordinary lines.
  */
 export async function resolveOrderLines(
   lines: {
@@ -320,16 +333,21 @@ export async function resolveOrderLines(
     optionChoiceIds: string[];
     addonIds: string[];
     quantity: number;
+    box?: boolean;
   }[]
 ): Promise<ResolvedOrderLine[]> {
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const qtyByProduct = new Map<string, number>();
+  let boxQuantity = 0;
   for (const l of lines) {
     qtyByProduct.set(
       l.productId,
       (qtyByProduct.get(l.productId) ?? 0) + Math.max(0, l.quantity)
     );
+    if (l.box) boxQuantity += Math.max(0, l.quantity);
   }
+  // Loaded once, and only when a box is actually in play.
+  const boxTiers = boxQuantity > 0 ? await listBoxTiers() : [];
   const configs = await loadProductConfigs(productIds);
   const imagesByProduct = new Map<string, ProductImageRow[]>();
   if (productIds.length) {
@@ -360,12 +378,15 @@ export async function resolveOrderLines(
       tiers: [],
     };
     const productQuantity = qtyByProduct.get(line.productId) ?? line.quantity;
+    // A box line is priced on the whole box, not on how many of THIS design
+    // the customer happened to pick.
     const priced = computeSelectionPrice(
       config,
       line.basePriceKurus,
       line.optionChoiceIds,
       line.addonIds,
-      productQuantity
+      line.box ? boxQuantity : productQuantity,
+      line.box ? boxTiers : config.tiers
     );
     const gallery = resolveGalleryImageKeys(
       imagesByProduct.get(line.productId) ?? [],
@@ -375,7 +396,8 @@ export async function resolveOrderLines(
       unitPriceKurus: priced.unitPriceKurus,
       listUnitPriceKurus: priced.listUnitPriceKurus,
       appliedTierMinQuantity: priced.appliedTierMinQuantity,
-      productQuantity,
+      productQuantity: line.box ? boxQuantity : productQuantity,
+      isBoxItem: !!line.box,
       selectedOptions: priced.selectedOptions,
       selectedAddons: priced.selectedAddons,
       itemImageKey: gallery[0] ?? null,

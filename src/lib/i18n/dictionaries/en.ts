@@ -226,6 +226,26 @@ const en = {
   "bulk.checkoutNotice":
     "Bulk production order. High-quantity orders are printed as one batch at a single workshop, so preparation may take a few extra business days. We'll keep you posted before shipping.",
 
+  // Anahtarlık kutusu — assorted box priced on its TOTAL piece count.
+  "box.title": "Keychain Box",
+  "box.intro":
+    "Pick the keychains you like, ten at a time, and build your own box. The more pieces in the box, the lower the price per piece — whichever designs you choose.",
+  "box.ladderIntro": "Box prices:",
+  "box.panelTitle": "Your box",
+  "box.unitNow": "{price} per piece",
+  "box.belowMinimum": "A box starts at {min} pieces.",
+  "box.nudge": "Add {n} more and every piece drops to {price}.",
+  "box.remainingToMinimum": "{n} more pieces to complete a box.",
+  "box.order": "Order the box",
+  "box.ordering": "Adding…",
+  "box.orderFailed": "The box could not be added. Please try again.",
+  "box.unavailable":
+    "The keychain box isn't available right now. Take a look at the shop in the meantime.",
+  "box.footnote":
+    "Prices include VAT. A box is produced as one batch at a single workshop; lead time varies with the piece count.",
+  "box.cartGroup": "Keychain box — {qty} pieces",
+  "admin.box.title": "Keychain box pricing",
+
   "checkout.summary": "Order summary",
   "checkout.giftCard": "Gift card code (optional)",
   "design.title": "2D design → 3D object",

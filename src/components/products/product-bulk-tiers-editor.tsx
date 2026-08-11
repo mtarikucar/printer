@@ -36,6 +36,7 @@ export function ProductBulkTiersEditor({ productId }: { productId: string }) {
   const [ownerType, setOwnerType] = useState<"admin" | "seller">("admin");
   const [basePriceKurus, setBasePriceKurus] = useState(0);
   const [bulkEnabled, setBulkEnabled] = useState(false);
+  const [boxEligible, setBoxEligible] = useState(false);
   const [maxQty, setMaxQty] = useState("");
   const [leadTime, setLeadTime] = useState("");
   const [tiers, setTiers] = useState<TierRow[]>([]);
@@ -47,6 +48,7 @@ export function ProductBulkTiersEditor({ productId }: { productId: string }) {
       setOwnerType(d.ownerType);
       setBasePriceKurus(d.priceKurus);
       setBulkEnabled(d.bulkEnabled);
+      setBoxEligible(d.boxEligible ?? false);
       setMaxQty(d.bulkMaxQuantity != null ? String(d.bulkMaxQuantity) : "");
       setLeadTime(d.bulkLeadTimeDays != null ? String(d.bulkLeadTimeDays) : "");
       setTiers(
@@ -73,6 +75,7 @@ export function ProductBulkTiersEditor({ productId }: { productId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bulkEnabled,
+          boxEligible,
           bulkMaxQuantity: maxQty.trim() ? Number(maxQty) : null,
           bulkLeadTimeDays: leadTime.trim() ? Number(leadTime) : null,
           tiers: tiers
@@ -145,6 +148,26 @@ export function ProductBulkTiersEditor({ productId }: { productId: string }) {
           className="rounded border-gray-300"
         />
         Bu ürün toplu siparişe açık
+      </label>
+
+      <label className="flex items-start gap-2 text-sm text-gray-800">
+        <input
+          type="checkbox"
+          checked={boxEligible}
+          onChange={(e) => setBoxEligible(e.target.checked)}
+          className="mt-0.5 rounded border-gray-300"
+        />
+        <span>
+          Anahtarlık kutusuna uygun
+          <span className="mt-0.5 block text-xs font-normal text-gray-500">
+            /anahtarlik-kutusu sayfasında listelenir. Kutuda fiyat ürünün kendi
+            kademelerinden değil, kutunun toplam adedinden gelir — merdiveni{" "}
+            <a href="/admin/kutu-fiyatlari" className="text-blue-700 hover:underline">
+              kutu fiyatları
+            </a>{" "}
+            sayfasından yönetirsiniz.
+          </span>
+        </span>
       </label>
 
       <div className="grid gap-3 sm:grid-cols-2">

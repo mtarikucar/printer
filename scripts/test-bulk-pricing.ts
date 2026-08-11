@@ -5,11 +5,15 @@ import {
   type ProductConfig,
 } from "../src/lib/services/product-options";
 import { validateTiers } from "../src/lib/services/product-tiers";
+import { validateBoxTiers } from "../src/lib/services/box-tiers";
 import {
   ABSOLUTE_MAX_LINE_QTY,
+  BOX_QUANTITY_STEP,
   BULK_DEFAULT_MAX_QTY,
   NORMAL_MAX_LINE_QTY,
+  boxMinimumQuantity,
   effectiveMaxQty,
+  roundToBoxStep,
 } from "../src/lib/config/bulk";
 
 let passed = 0;
@@ -384,6 +388,130 @@ test("every validated ladder actually prices correctly end to end", () => {
   assert.equal(computeSelectionPrice(cfg, BASE, [], [], 24).unitPriceKurus, 3000);
   assert.equal(computeSelectionPrice(cfg, BASE, [], [], 25).unitPriceKurus, 2400);
   assert.equal(computeSelectionPrice(cfg, BASE, [], [], 100).unitPriceKurus, 1900);
+});
+
+// ─── Anahtarlık kutusu ──────────────────────────────────────────────────────
+// The box ladder is a SEPARATE basis: priced on total pieces across designs.
+
+const BOX_TIERS = [
+  { minQuantity: 50, unitPriceKurus: 2800 },
+  { minQuantity: 100, unitPriceKurus: 2500 },
+  { minQuantity: 200, unitPriceKurus: 2200 },
+];
+
+test("box: the minimum is the ladder's first rung, not a separate constant", () => {
+  assert.equal(boxMinimumQuantity(BOX_TIERS), 50);
+  assert.equal(boxMinimumQuantity([]), 0);
+  // Retuning the ladder moves the minimum — one source of truth.
+  assert.equal(boxMinimumQuantity([{ minQuantity: 30, unitPriceKurus: 2900 }]), 30);
+});
+
+test("box: a mixed box is priced on its TOTAL, which per-product tiers would miss", () => {
+  // 10 each of 10 designs = 100 pieces. Per PRODUCT that is only 10 units — the
+  // keychain's own 10+ rung at best. On the box ladder it is the 100+ rate, and
+  // this gap is the whole reason the box is a separate surface.
+  const perDesign = 10;
+  const designs = 10;
+  const boxTotal = perDesign * designs;
+  assert.equal(pickTier(BOX_TIERS, perDesign), null, "10 pieces is below any box rung");
+  assert.equal(pickTier(BOX_TIERS, boxTotal)?.unitPriceKurus, 2500);
+});
+
+test("box: every design in the box is charged the same per-piece price", () => {
+  const cheapDesign: ProductConfig = { optionGroups: [], addons: [], tiers: [] };
+  const boxTotal = 120;
+  const a = computeSelectionPrice(cheapDesign, 3000, [], [], boxTotal, BOX_TIERS);
+  const b = computeSelectionPrice(cheapDesign, 4000, [], [], boxTotal, BOX_TIERS);
+  // Different list prices, one box rate — that is what "kutu fiyatı" means.
+  assert.equal(a.unitPriceKurus, 2500);
+  assert.equal(b.unitPriceKurus, 2500);
+  // ...but each keeps its own honest list price for the strike-through.
+  assert.equal(a.listUnitPriceKurus, 3000);
+  assert.equal(b.listUnitPriceKurus, 4000);
+});
+
+test("box: the product's own ladder is ignored when the box ladder is passed", () => {
+  const withOwnTiers: ProductConfig = {
+    optionGroups: [],
+    addons: [],
+    tiers: [{ minQuantity: 10, unitPriceKurus: 999 }],
+  };
+  // 120 pieces would hit the product's 10+ rung at ₺9.99 if we used config.tiers.
+  const priced = computeSelectionPrice(withOwnTiers, 3000, [], [], 120, BOX_TIERS);
+  assert.equal(priced.unitPriceKurus, 2500);
+  assert.equal(priced.appliedTierMinQuantity, 100);
+});
+
+test("box: below the minimum there is no tier, so the customer pays list", () => {
+  const design: ProductConfig = { optionGroups: [], addons: [], tiers: [] };
+  const priced = computeSelectionPrice(design, 3000, [], [], 40, BOX_TIERS);
+  assert.equal(priced.unitPriceKurus, 3000);
+  assert.equal(priced.appliedTierMinQuantity, null);
+});
+
+test("roundToBoxStep snaps to tens and never lands between steps", () => {
+  assert.equal(roundToBoxStep(0), 0);
+  assert.equal(roundToBoxStep(-5), 0);
+  assert.equal(roundToBoxStep(1), BOX_QUANTITY_STEP);
+  assert.equal(roundToBoxStep(14), 10);
+  assert.equal(roundToBoxStep(15), 20);
+  assert.equal(roundToBoxStep(97), 100);
+});
+
+const boxOk = { cheapestEligiblePriceKurus: 3000 };
+
+test("box ladder: a well-formed ladder validates and comes back sorted", () => {
+  const r = validateBoxTiers({
+    ...boxOk,
+    tiers: [
+      { minQuantity: 100, unitPriceKurus: 2500 },
+      { minQuantity: 50, unitPriceKurus: 2800 },
+    ],
+  });
+  assert.ok(r.ok);
+  assert.deepEqual(r.tiers.map((t) => t.minQuantity), [50, 100]);
+});
+
+test("box ladder: quantities must be multiples of the step the UI offers", () => {
+  const r = validateBoxTiers({ ...boxOk, tiers: [{ minQuantity: 55, unitPriceKurus: 2800 }] });
+  assert.ok(!r.ok);
+  assert.equal(r.error, "not_a_step_multiple");
+});
+
+test("box ladder: prices must strictly decrease", () => {
+  const r = validateBoxTiers({
+    ...boxOk,
+    tiers: [
+      { minQuantity: 50, unitPriceKurus: 2500 },
+      { minQuantity: 100, unitPriceKurus: 2800 },
+    ],
+  });
+  assert.ok(!r.ok);
+  assert.equal(r.error, "price_not_decreasing");
+});
+
+test("box ladder: a box that costs more than buying singly is rejected", () => {
+  // Cheapest eligible design is ₺30; a ₺30 box rung means the box saves nothing.
+  const r = validateBoxTiers({
+    cheapestEligiblePriceKurus: 3000,
+    tiers: [{ minQuantity: 50, unitPriceKurus: 3000 }],
+  });
+  assert.ok(!r.ok);
+  assert.equal(r.error, "price_above_cheapest_product");
+});
+
+test("box ladder: with no eligible products yet, the price ceiling is not enforced", () => {
+  const r = validateBoxTiers({
+    cheapestEligiblePriceKurus: null,
+    tiers: [{ minQuantity: 50, unitPriceKurus: 2800 }],
+  });
+  assert.ok(r.ok);
+});
+
+test("box ladder: an empty ladder is valid and simply closes the box page", () => {
+  const r = validateBoxTiers({ ...boxOk, tiers: [] });
+  assert.ok(r.ok);
+  assert.equal(boxMinimumQuantity(r.tiers), 0);
 });
 
 for (const [name, fn] of cases) {

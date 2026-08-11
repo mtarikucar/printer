@@ -191,6 +191,7 @@ export async function getProductBulkSettings(productId: string) {
       ownerType: true,
       priceKurus: true,
       bulkEnabled: true,
+      boxEligible: true,
       bulkMaxQuantity: true,
       bulkLeadTimeDays: true,
     },

@@ -32,6 +32,32 @@ export const ABSOLUTE_MAX_LINE_QTY = 200;
 /** Most tiers one product may define (keeps the ladder readable + the editor sane). */
 export const MAX_TIERS_PER_PRODUCT = 5;
 
+/**
+ * Anahtarlık kutusu: quantities move in tens. The box is a production batch —
+ * designs are printed a plate at a time — so a 7-of-this, 13-of-that box buys
+ * the customer nothing and costs the workshop a re-setup.
+ */
+export const BOX_QUANTITY_STEP = 10;
+
+/** Round a typed box quantity to the nearest valid step (never below zero). */
+export function roundToBoxStep(quantity: number): number {
+  if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+  return Math.max(
+    BOX_QUANTITY_STEP,
+    Math.round(quantity / BOX_QUANTITY_STEP) * BOX_QUANTITY_STEP
+  );
+}
+
+/**
+ * The box minimum is the first rung of the box ladder, not a separate constant —
+ * below it `pickTier` returns null and the customer simply pays list price.
+ * Deriving it keeps one source of truth: retuning the ladder moves the minimum.
+ */
+export function boxMinimumQuantity(tiers: PriceTierConfig[]): number {
+  if (tiers.length === 0) return 0;
+  return Math.min(...tiers.map((t) => t.minQuantity));
+}
+
 /** Lowest quantity a tier may start at — a tier at 1 is just the base price. */
 export const MIN_TIER_QUANTITY = 2;
 

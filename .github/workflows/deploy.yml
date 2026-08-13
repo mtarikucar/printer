@@ -137,7 +137,12 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
-          command_timeout: 10m
+          # Pulling both images off GHCR is the long pole and grows with the
+          # app: on 8389a2b it alone took ~9 of the 10 minutes, so the trailing
+          # housekeeping tipped a fully successful deploy (migrated, restarted,
+          # health-checked) into a red pipeline. Headroom here is cheap; a
+          # deploy that is genuinely stuck still fails, just later.
+          command_timeout: 20m
           envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH,NEXT_PUBLIC_GTM_ID,NEXT_PUBLIC_GA4_ID,META_PIXEL_ID,TIKTOK_PIXEL_ID,NEXT_PUBLIC_SENTRY_DSN
           script: |
             set -euo pipefail
@@ -270,8 +275,11 @@ jobs:
             done
 
             # ─── 7. Cleanup ──────────────────────────────────────────
+            # Housekeeping AFTER the health check must never decide whether the
+            # deploy passed — the new code is already serving by this point.
+            # Bounded so a slow docker daemon cannot hold the SSH session open.
             log "Eski image'lar temizleniyor..."
-            docker image prune -f --filter "until=24h" > /dev/null 2>&1 || true
+            timeout 60 docker image prune -f --filter "until=24h" > /dev/null 2>&1 || true
 
             # ─── Done ────────────────────────────────────────────────
             echo ""

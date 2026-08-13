@@ -11,6 +11,11 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
+import {
+  ensureJourneyToken,
+  journeyUrl,
+  orderHasJourney,
+} from "@/lib/services/order-journey";
 
 export default async function AdminOrderDetailPage({
   params,
@@ -78,6 +83,26 @@ export default async function AdminOrderDetailPage({
   // Only fetched for orders that actually involve a painter — an ordinary print
   // job pays nothing for this.
   const paintingRelevant = order.needsPainting || !!order.painterId;
+
+  // ─── Journey QR ──────────────────────────────────────────────────────────
+  // Resolved here so the order page can show the code itself rather than a
+  // button leading somewhere else — and, when there is no code, say WHY. An
+  // absent button reads as "the feature is missing", which is exactly how this
+  // landed the first time.
+  const journeyEligible = orderHasJourney(order);
+  const journeyToken = journeyEligible ? await ensureJourneyToken(id) : null;
+  const journey = {
+    eligible: journeyEligible,
+    // The one thing blocking a code, in the operator's terms.
+    blockedBy:
+      order.orderType !== "custom"
+        ? ("not_custom" as const)
+        : !order.modelGlbKey && !order.modelGlbUrl
+          ? ("no_model" as const)
+          : null,
+    url: journeyToken ? journeyUrl(journeyToken) : null,
+    qrUrl: journeyToken ? `/api/yolculuk/${journeyToken}/qr.png` : null,
+  };
 
   const [painterActionLog, painterQc, painterQcDecisions, painterEarning] =
     paintingRelevant
@@ -311,6 +336,7 @@ export default async function AdminOrderDetailPage({
       acceptingOrders: order.painter.acceptingOrders,
     } : null,
     // ─── Everything the painting side of this order is doing ───
+    journey,
     painting: {
       needsPainting: order.needsPainting,
       paintingPriceKurus: order.paintingPriceKurus,

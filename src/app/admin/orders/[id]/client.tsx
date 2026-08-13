@@ -172,6 +172,12 @@ interface Props {
       acceptingOrders: boolean;
     } | null;
     painting?: PaintingData;
+    journey?: {
+      eligible: boolean;
+      blockedBy: "not_custom" | "no_model" | null;
+      url: string | null;
+      qrUrl: string | null;
+    };
     manufacturerActions?: { id: string; action: string; notes: string | null; createdAt: string }[];
     manufacturerStatus?: string | null;
     qcRound?: number;
@@ -246,7 +252,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
+  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -269,6 +275,7 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [painterPick, setPainterPick] = useState("");
   const [painterCarrier, setPainterCarrier] = useState("");
   const [painterTracking, setPainterTracking] = useState("");
+  const [journeyCopied, setJourneyCopied] = useState(false);
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
 
@@ -806,19 +813,6 @@ export function OrderDetailClient({ data, locale }: Props) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* The card that goes in the box. Only bespoke orders with a finished
-              model have a journey to tell; the page itself explains why when
-              they don't, so the link stays visible rather than mysteriously
-              absent. */}
-          {order.orderType === "custom" && (
-            <a
-              href={`/admin/orders/${order.id}/kart`}
-              className="flex items-center gap-2 rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-fuchsia-700"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
-              Yolculuk kartı
-            </a>
-          )}
           {displayGlbUrl && (
             <a href={displayGlbUrl} download className="flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -1397,6 +1391,90 @@ export function OrderDetailClient({ data, locale }: Props) {
             )}
           </div>
         )}
+
+        {/* ─── Journey QR: the code itself, in the order, not behind a link ── */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+              Yolculuk karekodu
+            </h3>
+            {journey?.url && (
+              <a
+                href={`/admin/orders/${order.id}/kart`}
+                className="text-xs font-medium text-fuchsia-700 hover:underline"
+              >
+                Kartı yazdır →
+              </a>
+            )}
+          </div>
+
+          {journey?.qrUrl && journey.url ? (
+            <div className="mt-3 flex flex-wrap items-start gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={journey.qrUrl}
+                alt="Yolculuk sayfası karekodu"
+                className="h-32 w-32 shrink-0 rounded-lg border border-gray-200 bg-white p-1"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-gray-600">
+                  Müşteri bunu okutunca fotoğrafının figüre nasıl dönüştüğünü
+                  görür. Kargo e-postasına da otomatik eklenir.
+                </p>
+                <p className="mt-2 break-all rounded-lg bg-gray-50 px-2 py-1.5 font-mono text-[11px] text-gray-700">
+                  {journey.url}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await navigator.clipboard
+                        .writeText(journey.url!)
+                        .catch(() => {});
+                      setJourneyCopied(true);
+                      setTimeout(() => setJourneyCopied(false), 2000);
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                  >
+                    {journeyCopied ? "Kopyalandı ✓" : "Bağlantıyı kopyala"}
+                  </button>
+                  <a
+                    href={journey.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                  >
+                    Sayfayı aç →
+                  </a>
+                  <a
+                    href={journey.qrUrl}
+                    download={`karekod-${order.orderNumber}.png`}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                  >
+                    Karekodu indir
+                  </a>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* No code yet. Say which of the two reasons it is — a blank space
+               here reads as a broken feature, which is how this first landed. */
+            <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              {journey?.blockedBy === "not_custom" ? (
+                <>
+                  Bu sipariş mağazadan alınmış bir ürün. Müşterinin yüklediği bir
+                  fotoğraf olmadığı için anlatılacak bir yolculuk ve karekod yok
+                  — karekod yalnızca fotoğraftan üretilen özel siparişlerde çıkar.
+                </>
+              ) : (
+                <>
+                  Karekod, <strong>3D model yüklendikten sonra</strong> otomatik
+                  oluşur. Modeli yükleyin, bu alanda görünecek.
+                </>
+              )}
+            </p>
+          )}
+        </div>
 
         {/* ─── Painting leg: who has it, where it is, what they earn ─────── */}
         {painting?.needsPainting && (

@@ -14,7 +14,7 @@ import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import {
   ensureJourneyToken,
   journeyUrl,
-  orderHasJourney,
+  journeyEligibility,
 } from "@/lib/services/order-journey";
 
 export default async function AdminOrderDetailPage({
@@ -89,17 +89,14 @@ export default async function AdminOrderDetailPage({
   // button leading somewhere else — and, when there is no code, say WHY. An
   // absent button reads as "the feature is missing", which is exactly how this
   // landed the first time.
-  const journeyEligible = orderHasJourney(order);
-  const journeyToken = journeyEligible ? await ensureJourneyToken(id) : null;
+  const { eligible: journeyEligible, blockedBy } = await journeyEligibility(order);
+  // An order that already has a token keeps its code even if it would no longer
+  // qualify — the card may already be printed and in the box.
+  const journeyToken =
+    journeyEligible || order.journeyToken ? await ensureJourneyToken(id) : null;
   const journey = {
     eligible: journeyEligible,
-    // The one thing blocking a code, in the operator's terms.
-    blockedBy:
-      order.orderType !== "custom"
-        ? ("not_custom" as const)
-        : !order.modelGlbKey && !order.modelGlbUrl
-          ? ("no_model" as const)
-          : null,
+    blockedBy,
     url: journeyToken ? journeyUrl(journeyToken) : null,
     qrUrl: journeyToken ? `/api/yolculuk/${journeyToken}/qr.png` : null,
   };

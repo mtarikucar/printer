@@ -174,7 +174,7 @@ interface Props {
     painting?: PaintingData;
     journey?: {
       eligible: boolean;
-      blockedBy: "not_custom" | "no_model" | null;
+      blockedBy: "no_photo" | "no_model" | null;
       url: string | null;
       qrUrl: string | null;
     };
@@ -1460,11 +1460,12 @@ export function OrderDetailClient({ data, locale }: Props) {
             /* No code yet. Say which of the two reasons it is — a blank space
                here reads as a broken feature, which is how this first landed. */
             <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
-              {journey?.blockedBy === "not_custom" ? (
+              {journey?.blockedBy === "no_photo" ? (
                 <>
-                  Bu sipariş mağazadan alınmış bir ürün. Müşterinin yüklediği bir
-                  fotoğraf olmadığı için anlatılacak bir yolculuk ve karekod yok
-                  — karekod yalnızca fotoğraftan üretilen özel siparişlerde çıkar.
+                  Bu siparişe müşteri fotoğrafı eklenmemiş. Anlatılacak bir
+                  yolculuk olmadığı için karekod da çıkmıyor — karekod
+                  fotoğraftan üretilen siparişlere özel. Fotoğrafı siparişe
+                  yükleyin, karekod burada belirir.
                 </>
               ) : (
                 <>

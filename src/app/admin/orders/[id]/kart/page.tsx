@@ -8,7 +8,7 @@ import { orders } from "@/lib/db/schema";
 import {
   ensureJourneyToken,
   journeyUrl,
-  orderHasJourney,
+  journeyEligibility,
 } from "@/lib/services/order-journey";
 import { CardActions } from "./card-actions";
 import "./card.css";
@@ -33,9 +33,10 @@ export default async function OrderJourneyCardPage({
       id: true,
       orderNumber: true,
       customerName: true,
-      orderType: true,
+      previewId: true,
       modelGlbKey: true,
       modelGlbUrl: true,
+      journeyToken: true,
     },
   });
 
@@ -47,19 +48,22 @@ export default async function OrderJourneyCardPage({
     );
   }
 
-  if (!orderHasJourney(order)) {
+  const { eligible, blockedBy } = await journeyEligibility(order);
+  // A token already minted keeps the card printable even if the order would no
+  // longer qualify (a purged photo must not invalidate a card in the box).
+  if (!eligible && !order.journeyToken) {
     return (
       <div className="p-4 sm:p-8">
         <h1 className="text-2xl font-bold text-gray-900">Yolculuk kartı</h1>
         <div className="mt-4 max-w-xl rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p>
-            Bu sipariş için kart üretilemez. Yolculuk sayfası yalnızca{" "}
-            <strong>fotoğraftan üretilen özel siparişlerde</strong> ve{" "}
-            <strong>3D model yüklendikten sonra</strong> anlamlı olur.
+            Bu sipariş için kart üretilemez. Yolculuk sayfası bir{" "}
+            <strong>müşteri fotoğrafı</strong> ve{" "}
+            <strong>yüklenmiş bir 3D model</strong> ile anlamlı olur.
           </p>
           <p className="mt-2 text-amber-800">
-            {order.orderType !== "custom"
-              ? "Bu bir mağaza/pazaryeri siparişi — müşterinin yüklediği bir fotoğraf yok."
+            {blockedBy === "no_photo"
+              ? "Bu siparişte müşteri fotoğrafı yok — anlatılacak bir dönüşüm yok."
               : "Modeli yükleyin, kart otomatik olarak hazır olacak."}
           </p>
         </div>

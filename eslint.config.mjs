@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Self-contained MCP sub-package with its own tsconfig/lint/test toolchain.
+    "mcp/**",
   ]),
   // Project lint policy. `npm run lint` is a CI quality gate (see
   // .github/workflows), and `npm run typecheck` (tsc --noEmit) is the

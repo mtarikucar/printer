@@ -79,8 +79,16 @@ export async function PATCH(request: NextRequest) {
     validated = profileSchema.parse(body);
   } catch (err) {
     if (err instanceof z.ZodError) {
+      // Name the offending field. A bare "Too small: expected string to have
+      // >=2 characters" tells a partner nothing about WHICH box to fix.
+      const issue = err.issues[0];
+      const field = issue?.path.join(".");
       return NextResponse.json(
-        { error: err.issues[0]?.message ?? "Validation failed" },
+        {
+          error: issue
+            ? `${field ? `${field}: ` : ""}${issue.message}`
+            : "Validation failed",
+        },
         { status: 400 }
       );
     }

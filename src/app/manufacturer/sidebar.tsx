@@ -17,6 +17,22 @@ export function ManufacturerSidebar({
 
   const links = [
     {
+      // The dashboard hosts the "sipariş alıyorum" switch. Without a nav entry
+      // it was only reachable on the post-login redirect, so a manufacturer who
+      // had moved on to Orders had no way back to pause new assignments.
+      href: "/manufacturer/dashboard",
+      label: d["manufacturer.dashboard.title" as keyof typeof d] || "Panel",
+      icon: (
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+        />
+      ),
+      badge: 0,
+    },
+    {
       href: "/manufacturer/orders",
       label: d["manufacturer.nav.orders" as keyof typeof d] || "Orders",
       icon: (

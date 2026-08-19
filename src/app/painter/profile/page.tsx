@@ -64,7 +64,7 @@ export default function PainterProfilePage() {
     setMsg(null);
     try {
       const res = await fetch("/api/painter/iban", {
-        method: "POST",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ iban }),
       });

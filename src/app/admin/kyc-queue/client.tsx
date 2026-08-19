@@ -12,6 +12,7 @@ interface Doc {
 }
 interface IbanChange {
   id: string;
+  realm: "manufacturer" | "painter";
   company: string;
   current: string | null;
   pending: string | null;
@@ -43,10 +44,14 @@ export function KycQueueClient({
     }
   };
 
-  const reviewIban = async (id: string, action: "approve" | "reject") => {
-    setBusy(`iban-${id}`);
+  const reviewIban = async (
+    c: IbanChange,
+    action: "approve" | "reject"
+  ) => {
+    const realmPath = c.realm === "painter" ? "painters" : "manufacturers";
+    setBusy(`iban-${c.realm}-${c.id}`);
     try {
-      const res = await fetch(`/api/admin/manufacturers/${id}/iban`, {
+      const res = await fetch(`/api/admin/${realmPath}/${c.id}/iban`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -110,24 +115,38 @@ export function KycQueueClient({
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
           {ibanChanges.map((c) => (
-            <div key={c.id} className="flex items-center justify-between px-4 py-3 text-sm">
+            <div
+              key={`${c.realm}-${c.id}`}
+              className="flex items-center justify-between px-4 py-3 text-sm"
+            >
               <div>
-                <p className="font-medium text-gray-900">{c.company}</p>
+                <p className="font-medium text-gray-900">
+                  {c.company}
+                  <span
+                    className={`ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      c.realm === "painter"
+                        ? "bg-purple-100 text-purple-700"
+                        : "bg-indigo-100 text-indigo-700"
+                    }`}
+                  >
+                    {c.realm === "painter" ? "Boyacı" : "Üretici"}
+                  </span>
+                </p>
                 <p className="text-xs text-gray-500 font-mono">
                   {c.current ?? "—"} → <span className="text-gray-900">{c.pending}</span>
                 </p>
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => reviewIban(c.id, "approve")}
-                  disabled={busy === `iban-${c.id}`}
+                  onClick={() => reviewIban(c, "approve")}
+                  disabled={busy === `iban-${c.realm}-${c.id}`}
                   className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400"
                 >
                   Onayla
                 </button>
                 <button
-                  onClick={() => reviewIban(c.id, "reject")}
-                  disabled={busy === `iban-${c.id}`}
+                  onClick={() => reviewIban(c, "reject")}
+                  disabled={busy === `iban-${c.realm}-${c.id}`}
                   className="px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-400"
                 >
                   Reddet

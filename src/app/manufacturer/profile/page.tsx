@@ -156,6 +156,13 @@ export default function ManufacturerProfilePage() {
     setSaveError(null);
     try {
       const ibanClean = iban.replace(/\s+/g, "").toUpperCase();
+      // Send only the fields that actually carry a value. An older account can
+      // have no IBAN/bank/address on file (those columns are nullable and the
+      // register form only started demanding them later); posting them back as
+      // empty strings made the server reject the WHOLE request, so a
+      // manufacturer could not change unrelated settings — the capacity or the
+      // "sipariş alıyorum" flag — until the bank section was filled in.
+      const addressTouched = [adres, ilce, il, postaKodu].some((v) => v.trim());
       const res = await fetch("/api/manufacturer/auth/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -163,17 +170,19 @@ export default function ManufacturerProfilePage() {
           contactPerson,
           phone: phoneE164,
           whatsappPhone: whatsappE164,
-          address: {
-            adres,
-            mahalle: mahalle || undefined,
-            ilce,
-            il,
-            postaKodu,
-            telefon: phoneE164,
-          },
-          iban: ibanClean,
-          bankAccountHolder,
-          bankName,
+          ...(addressTouched && {
+            address: {
+              adres,
+              mahalle: mahalle || undefined,
+              ilce,
+              il,
+              postaKodu,
+              telefon: phoneE164,
+            },
+          }),
+          ...(ibanClean && { iban: ibanClean }),
+          ...(bankAccountHolder.trim() && { bankAccountHolder }),
+          ...(bankName.trim() && { bankName }),
           maxConcurrentOrders: clampCapacity(maxConcurrent),
           acceptingOrders,
           paintsInHouse,

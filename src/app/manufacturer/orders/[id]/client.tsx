@@ -157,10 +157,25 @@ const ACTION_DOT_COLORS: Record<string, string> = {
   start_printing: "bg-purple-500",
   finish_printing: "bg-amber-500",
   submit_qc: "bg-amber-500",
+  send_to_painter: "bg-purple-500",
   ship: "bg-emerald-500",
+  cancel_after_accept: "bg-red-500",
 };
 
-const TIMELINE_STEPS = ["assigned", "accepted", "printing", "printed", "qc_pending", "shipped"];
+// The last step depends on the order: a painting order the workshop does not
+// paint itself ends at the painter hand-off (the painter ships to the customer),
+// everything else ends at the manufacturer's own shipment. `qc_approved` is its
+// own step so an approved order visibly moves forward instead of sitting on the
+// QC dot exactly as it did while it was still under review.
+const timelineStepsFor = (endsAtPainter: boolean) => [
+  "assigned",
+  "accepted",
+  "printing",
+  "printed",
+  "qc_pending",
+  "qc_approved",
+  endsAtPainter ? "sent_to_painter" : "shipped",
+];
 
 // Step icons as SVG path data
 const STEP_ICONS: Record<string, { d: string; viewBox?: string }> = {
@@ -169,7 +184,22 @@ const STEP_ICONS: Record<string, { d: string; viewBox?: string }> = {
   printing: { d: "M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z" },
   printed: { d: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
   qc_pending: { d: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  qc_approved: { d: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  sent_to_painter: { d: "M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" },
   shipped: { d: "M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" },
+};
+
+// Painter-side sub-status, shown to the manufacturer after the hand-off. The raw
+// enum leaked into the UI here ("durum: assigned"), which reads as an error.
+const PAINTER_STATUS_LABELS: Record<string, string> = {
+  assigned: "boyacıya atandı, kabul bekleniyor",
+  accepted: "boyacı işi kabul etti",
+  painting: "boyanıyor",
+  painted: "boyama bitti, QC bekleniyor",
+  qc_pending: "boyama kalite kontrolünde",
+  qc_rejected: "boyama QC'den döndü, boyacı düzeltiyor",
+  qc_approved: "boyama onaylandı, kargoya hazır",
+  shipped: "boyacı müşteriye kargoladı",
 };
 
 // Status icons for the badge
@@ -359,28 +389,36 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   // NOT handed off to a painter (mirrors the server ship gate). Once a painter is
   // assigned, only the hand-off pipeline applies.
   const notHandedOff = !order.painterStatus || order.painterStatus === "unassigned";
+  const handedOffToPainter = !notHandedOff;
   const inHousePaint = order.needsPainting && order.paintsInHouse && notHandedOff;
   const canShipDirect = canShip && (!order.needsPainting || inHousePaint);
   const isShipped = order.manufacturerStatus === "shipped";
-  const canCancel = [
-    "accepted",
-    "printing",
-    "printed",
-    "qc_pending",
-    "qc_rejected",
-    "qc_approved",
-  ].includes(order.manufacturerStatus || "");
+  // Mirrors the server gate: cancel is rejected once the order is at a painter,
+  // so don't offer a button whose only outcome is an error.
+  const canCancel =
+    !handedOffToPainter &&
+    [
+      "accepted",
+      "printing",
+      "printed",
+      "qc_pending",
+      "qc_rejected",
+      "qc_approved",
+    ].includes(order.manufacturerStatus || "");
 
   const addr = order.shippingAddress;
 
   // Timeline
-  // qc_rejected / qc_approved both render at the QC step on the timeline.
-  const timelineStatus =
-    order.manufacturerStatus === "qc_rejected" ||
-    order.manufacturerStatus === "qc_approved"
+  // qc_rejected renders at the QC step (the order is going back through it).
+  // Once handed off, manufacturerStatus stays 'qc_approved' forever — the
+  // painter ships — so the hand-off itself is what the timeline must show.
+  const timelineSteps = timelineStepsFor(order.needsPainting && !inHousePaint);
+  const timelineStatus = handedOffToPainter
+    ? "sent_to_painter"
+    : order.manufacturerStatus === "qc_rejected"
       ? "qc_pending"
       : order.manufacturerStatus || "";
-  const currentStepIndex = TIMELINE_STEPS.indexOf(timelineStatus);
+  const currentStepIndex = timelineSteps.indexOf(timelineStatus);
 
   const copyAddress = () => {
     if (!addr) return;
@@ -556,11 +594,11 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             <div
               className="absolute top-5 left-[10%] h-0.5 bg-gradient-to-r from-indigo-500 to-indigo-400 transition-all duration-500"
               style={{
-                width: `${(currentStepIndex / (TIMELINE_STEPS.length - 1)) * 80}%`,
+                width: `${(currentStepIndex / (timelineSteps.length - 1)) * 80}%`,
               }}
             />
           )}
-          {TIMELINE_STEPS.map((step, i) => {
+          {timelineSteps.map((step, i) => {
             const isCompleted = i < currentStepIndex;
             const isCurrent = i === currentStepIndex;
             const stepIcon = STEP_ICONS[step];
@@ -1197,22 +1235,46 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
-          {/* Painting orders: hand off to a painter instead of shipping. */}
-          {canShip &&
-            order.needsPainting &&
-            (!order.painterStatus || order.painterStatus === "unassigned") && (
-              <SendToPainterPanel orderId={order.id} />
-            )}
-
-          {order.needsPainting &&
-            order.painterStatus &&
-            order.painterStatus !== "unassigned" && (
-              <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-5 text-sm text-purple-900">
-                Bu sipariş boyacıya gönderildi (durum:{" "}
-                <span className="font-medium">{order.painterStatus}</span>). Boyacı
-                boyayıp müşteriye kargolayacak.
+          {/* QC passed — say in one line what the remaining step actually is.
+              Without this the page jumps straight from "photos under review" to
+              a panel whose title ("Profesyonel boyama gerekiyor") reads like a
+              warning rather than the next action. */}
+          {canShip && !handedOffToPainter && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="flex items-start gap-3">
+                <svg className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-sm text-emerald-900">
+                  <p className="font-semibold">Kalite kontrolü geçti.</p>
+                  <p className="mt-0.5 text-emerald-800/80">
+                    {canShipDirect && inHousePaint
+                      ? "Sıradaki adım: figürü kendiniz boyayıp aşağıdan kargo bilgisiyle müşteriye gönderin — ya da boyamayı istemiyorsanız aşağıdaki bölümden bir boyacıya devredin."
+                      : canShipDirect
+                        ? "Sıradaki adım: aşağıdan kargo firmasını ve takip numarasını girip müşteriye gönderin."
+                        : "Sıradaki adım: bu sipariş profesyonel boyama içeriyor, siz kargolamıyorsunuz. Aşağıdaki bölümden bir boyacı seçip figürü ona gönderin; boyayıp müşteriye o kargolayacak."}
+                  </p>
+                </div>
               </div>
-            )}
+            </div>
+          )}
+
+          {/* Painting orders: hand off to a painter instead of shipping. */}
+          {canShip && order.needsPainting && !handedOffToPainter && (
+            <SendToPainterPanel orderId={order.id} />
+          )}
+
+          {order.needsPainting && handedOffToPainter && (
+            <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-5 text-sm text-purple-900">
+              Bu sipariş boyacıya gönderildi —{" "}
+              <span className="font-medium">
+                {PAINTER_STATUS_LABELS[order.painterStatus ?? ""] ??
+                  order.painterStatus}
+              </span>
+              . Boyacı boyayıp müşteriye kargolayacak; sizin için bu siparişte
+              yapılacak başka bir işlem yok.
+            </div>
+          )}
 
           {canShipDirect && (
             <div className="rounded-2xl shadow-sm border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-5">

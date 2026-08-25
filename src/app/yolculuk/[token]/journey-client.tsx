@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { TransformSlider } from "@/components/journey/transform-slider";
+import { sizeDisplayTr } from "@/lib/config/sizes";
 import type { JourneyData } from "@/lib/services/order-journey";
 
 // The viewer pulls in three.js. Loading it lazily keeps the first paint — the
@@ -14,11 +15,6 @@ const ModelViewer = dynamic(
   { ssr: false }
 );
 
-const SIZE_LABEL: Record<string, string> = {
-  kucuk: "Küçük",
-  orta: "Orta",
-  buyuk: "Büyük",
-};
 const MATERIAL_LABEL: Record<string, string> = {
   resin: "Reçine",
   filament: "Filament",
@@ -200,7 +196,11 @@ export function JourneyClient({ data }: { data: JourneyData }) {
           {data.figurineSize && (
             <>
               <dt>Boyut</dt>
-              <dd>{SIZE_LABEL[data.figurineSize] ?? data.figurineSize}</dd>
+              {/* Shared resolver, like every panel: it knows the current preset
+                  AND the retired tiers, so a legacy order still reads "Orta
+                  (~8 cm)" instead of a raw key — and a new one reads
+                  "Standart (~15 cm)" instead of a bare "standart". */}
+              <dd>{sizeDisplayTr(data.figurineSize)}</dd>
             </>
           )}
           <dt>Malzeme</dt>

@@ -10,7 +10,22 @@ import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, priceKindForStyle } from "@
 // objects. The server is the trust boundary — a finish must belong to the
 // kind implied by the chosen design template, else the price dispatcher would
 // silently apply a 0 surcharge to a mismatched (e.g. expensive) finish.
-const FIGURE_FINISHES = ["paintable_kit", "hand_painted", "collector_raw", "luxe_display"];
+//
+// Since 2026-08-24 a character figure is ONE product whose price already
+// bundles professional hand painting, so `hand_painted` is the ONLY finish a
+// NEW figure order may carry. The retired kit/raw/luxe tiers are deliberately
+// gone from this set: their surcharges are all 0 (so the customer still paid
+// ₺3.499) but `finishNeedsPainter("paintable_kit")` is false, which would ship
+// the order straight past the painter — painter earns ₺0, their ₺1.000 share
+// falls into the manufacturer's base, and the shipped-email lists paint-kit
+// contents that are not in the box. Only /create's client constant was keeping
+// that shut; this is the server-side gate.
+//
+// This narrows NEW orders only. Reading, displaying, invoicing or fulfilling an
+// order written before this date is untouched — nothing re-parses stored rows
+// through this schema (see prices.ts, which still resolves all four legacy
+// finishes to a 0 surcharge).
+const FIGURE_FINISHES = ["hand_painted"];
 const OBJECT_FINISHES = ["raw", "smoothed", "painted"];
 // Creative Lab items (keychain/magnet/lamp) are flat-priced with no finish axis,
 // so only the neutral default is valid — otherwise a mismatched finish like
@@ -24,6 +39,17 @@ const FINISHES_BY_KIND: Record<string, string[]> = {
   fridge_magnet: FLAT_FINISHES,
   lamp: FLAT_FINISHES,
 };
+
+/**
+ * Default finish when the client omits one. It MUST depend on the price kind:
+ * a single flat default would be valid for one kind and instantly rejected by
+ * the per-kind refine for the others. The figure default is `hand_painted` —
+ * the finish the ₺3.499 base price actually pays for.
+ */
+function defaultFinishForStyle(style: unknown): string {
+  const slug = typeof style === "string" && isValidTemplateSlug(style) ? style : DEFAULT_TEMPLATE_SLUG;
+  return (FINISHES_BY_KIND[priceKindForStyle(slug)] ?? FIGURE_FINISHES)[0];
+}
 
 function defaultCountryForLocale(_locale: Locale) {
   // Shipping is Turkey-only today; default the parser to TR regardless of UI locale.
@@ -47,7 +73,7 @@ export function createTurkishAddressSchema(locale: Locale = defaultLocale) {
 
 export function createOrderSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
-  return z.object({
+  const schema = z.object({
     photoKey: z.string().min(1, d["validator.photo.required"]),
     // One sellable size (`standart`, 15 cm). A bespoke measurement is quoted by
     // hand over WhatsApp, so it never reaches this schema.
@@ -61,17 +87,19 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     // One product, one material: 15 cm SLA resin. Filament is no longer sold.
     // Existing orders keep whatever they stored; this only gates NEW orders.
     material: z.enum(["resin"]).default("resin"),
-    finish: z
-      .enum([
-        "paintable_kit",
-        "hand_painted",
-        "collector_raw",
-        "luxe_display",
-        "raw",
-        "smoothed",
-        "painted",
-      ])
-      .default("paintable_kit"),
+    // The union of every finish any kind may use; the per-kind refine below is
+    // what actually gates it. Omitted values are filled in by the preprocess
+    // step (see `defaultFinishForStyle`), never by a `.default()` here — a
+    // fixed default cannot be right for all three kinds at once.
+    finish: z.enum([
+      "paintable_kit",
+      "hand_painted",
+      "collector_raw",
+      "luxe_display",
+      "raw",
+      "smoothed",
+      "painted",
+    ]),
     modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
     shippingAddress: createTurkishAddressSchema(locale),
     giftCardCode: z.string().optional(),
@@ -94,6 +122,16 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
     },
     { message: "Seçilen tasarım deseni için geçersiz bitiş seçimi", path: ["finish"] }
   );
+
+  // Fill the omitted `finish` from the chosen design template's price kind
+  // BEFORE validation, so the refine above sees a value that belongs to the
+  // right kind. Everything else passes through untouched.
+  return z.preprocess((raw) => {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+    const input = raw as Record<string, unknown>;
+    if (input.finish != null) return raw;
+    return { ...input, finish: defaultFinishForStyle(input.style) };
+  }, schema);
 }
 
 export function createShipOrderSchema(locale: Locale = defaultLocale) {

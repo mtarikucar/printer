@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
-import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
-import { formatCurrency } from "@/lib/i18n/format";
-import { objectPriceKurus } from "@/lib/config/prices";
+import { useDictionary } from "@/lib/i18n/locale-context";
 import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 
 // Faz 2: 2D design/logo → stylized object IMAGE. Reuses the "object" style
@@ -17,7 +15,6 @@ import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
 // schema / order path). The admin sculpts the 3D after payment.
 export function DesignToProductFlow() {
   const d = useDictionary();
-  const locale = useLocale();
   const router = useRouter();
   const turnstileRef = useRef<TurnstileRef>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -332,11 +329,7 @@ export function DesignToProductFlow() {
               />
             </div>
             <p className="mt-4 text-center text-sm text-text-secondary">
-              {d["design.fromPrice"]}{" "}
-              <span className="font-semibold text-text-primary">
-                {formatCurrency(objectPriceKurus("orta", "resin"), locale)}
-              </span>
-              <span className="mt-1 block text-xs text-text-muted">{d["design.priceNote"]}</span>
+              {d["create.designFlow.quotePrice"]}
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button

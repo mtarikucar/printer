@@ -22,6 +22,7 @@ import {
   itemPriceKurus,
   finishSurchargeKurus,
   MAX_AMOUNT_KURUS,
+  UnpricedSizeError,
 } from "@/lib/config/prices";
 import { effectiveMaxQty } from "@/lib/config/bulk";
 import { priceKindForStyle, getTemplate, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
@@ -982,6 +983,14 @@ async function handleCreateOrder(
       );
     }
   } catch (error) {
+    if (error instanceof UnpricedSizeError) {
+      // Object/design prints are quote-only (see itemPriceKurus) — a client
+      // request for one is a client error, not a server failure.
+      return NextResponse.json(
+        { error: d["api.order.quoteOnly"] },
+        { status: 400 }
+      );
+    }
     if (error instanceof Error && error.name === "ZodError") {
       const errors = (error as Error & { errors?: unknown }).errors;
       // Return the structured Zod issues array; never fall back to

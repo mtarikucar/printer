@@ -161,6 +161,7 @@ const tr: Dictionary = {
   "create.soon.title": "Bu akış çok yakında",
   "create.soon.body": "Bu üretim yolunu geliştiriyoruz. Bu sırada hemen bir fotoğraftan figür ya da obje üretebilirsin.",
   "create.soon.back": "Üretim yollarına dön",
+  "create.designFlow.quotePrice": "Fiyat tasarımına göre belirlenir",
   "store.search.placeholder": "Ürün, kategori ara…",
   "store.search.aria": "Ara",
   "store.row.new": "Yeni Gelenler",
@@ -1137,6 +1138,8 @@ const tr: Dictionary = {
   "api.auth.userNotFound": "Kullanıcı bulunamadı",
   "api.auth.emailRegistered": "Bu e-posta adresi kayıtlı. Lütfen giriş yapın.",
   "api.order.createFailed": "Sipariş oluşturma başarısız",
+  "api.order.quoteOnly":
+    "Bu ürün için fiyat elle belirleniyor. WhatsApp'tan teklif alabilirsiniz.",
   "api.order.productUnavailable": "Bu ürün artık mevcut değil",
   "api.auth.emailPasswordRequired": "E-posta ve şifre zorunludur",
   "api.auth.invalidCredentials": "E-posta veya şifre hatalı",

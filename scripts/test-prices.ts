@@ -72,6 +72,46 @@ test("Creative Lab düz fiyatları boyuttan etkilenmez", () => {
   assert.equal(itemPriceKurus({ kind: "lamp", size: "orta", material: "resin" }), 39900);
 });
 
+test("obje ve tasarım fiyatlanamaz — teklif-only", () => {
+  // Regresyon koruması: boyutlar tek "standart"a indirilince OBJECT_PRICES_KURUS'ta
+  // o anahtar yok ve kod `?? 0`'a düşüyordu → /api/orders üzerinden ₺0 sipariş.
+  for (const kind of ["object", "design"] as const) {
+    for (const size of ["standart", "kucuk", "orta", "buyuk", "17,5 cm"]) {
+      assert.throws(
+        () => itemPriceKurus({ kind, size, material: "resin", finish: "raw" }),
+        UnpricedSizeError,
+        `${kind}/${size} fiyatlanabiliyor — ₺0 sipariş deliği açık`
+      );
+    }
+  }
+});
+
+test("figür ve Creative Lab fiyatlanmaya devam ediyor", () => {
+  // Yukarıdaki kilit, satılabilir yolları KAPATMAMALI.
+  assert.equal(
+    itemPriceKurus({ kind: "figure", size: "standart", material: "resin", finish: "hand_painted" }),
+    349900
+  );
+  assert.equal(itemPriceKurus({ kind: "keychain", size: "orta", material: "resin" }), 14900);
+  assert.equal(itemPriceKurus({ kind: "fridge_magnet", size: "orta", material: "resin" }), 12900);
+  assert.equal(itemPriceKurus({ kind: "lamp", size: "orta", material: "resin" }), 39900);
+});
+
+test("isFlatPricedKind: tek doğruluk kaynağı — Creative Lab true, figür/obje false", () => {
+  // Regresyon koruması: reorder route'undaki guard ve itemPriceKurus eskiden
+  // aynı üç yönlü === kind listesini bağımsız kopyalar olarak tutuyordu.
+  // isFlatPricedKind tek kaynak; bu test o kaynağın kendisini doğruluyor —
+  // ikisinin ayrı ayrı bunu doğru yapıp yapmadığını değil.
+  assert.equal(isFlatPricedKind("keychain"), true);
+  assert.equal(isFlatPricedKind("fridge_magnet"), true);
+  assert.equal(isFlatPricedKind("lamp"), true);
+  assert.equal(isFlatPricedKind("figure"), false);
+  assert.equal(isFlatPricedKind("object"), false);
+  assert.equal(isFlatPricedKind("design"), false);
+  assert.equal(isFlatPricedKind("upload"), false);
+  assert.equal(isFlatPricedKind(""), false);
+});
+
 for (const [name, fn] of cases) {
   try {
     fn();

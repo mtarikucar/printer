@@ -48,6 +48,7 @@ backup_*.sql
 /playwright-report
 /blob-report
 /playwright/.cache
+/.playwright-mcp/
 
 # Claude Code local settings
 /.claude/settings.local.json

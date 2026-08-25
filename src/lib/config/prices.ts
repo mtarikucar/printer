@@ -296,6 +296,13 @@ export const OBJECT_PRICES_KURUS: Record<FigurineMaterial, Record<string, number
   resin: { kucuk: 79900, orta: 109900, buyuk: 149900 },
   filament: { kucuk: 54900, orta: 84900, buyuk: 119900 },
 };
+/**
+ * NOT used to price new orders anymore — `itemPriceKurus` refuses object/design
+ * kinds with `UnpricedSizeError` (quote-only since 2026-08-24; see there). This
+ * function is kept only for display/history of orders placed before that date
+ * (their stored `size`/`material` can still be re-priced for a receipt or admin
+ * view) — do not wire it back into checkout pricing.
+ */
 export function objectPriceKurus(size: string, material: string): number {
   const m: FigurineMaterial = material === "filament" ? "filament" : "resin";
   return OBJECT_PRICES_KURUS[m][size] ?? OBJECT_PRICES_KURUS.resin[size] ?? 0;
@@ -360,8 +367,13 @@ export function itemPriceKurus(args: {
   // catalogue price and MUST NOT fall through to `?? 0` — that silently
   // produced a ₺0 (or, with collector_raw, a negative) order.
   if (!isPriceableSize(size)) throw new UnpricedSizeError(size);
+  // Object / design prints are QUOTE-ONLY since 2026-08-24. There is no sellable
+  // size for them: the catalogue collapsed to a single 15 cm figurine tier, and
+  // OBJECT_PRICES_KURUS has no "standart" key — so this branch used to fall
+  // through `?? 0` and return a FREE order that `createOrderSchema` happily
+  // accepted. Refusing to price them is the fix; the admin quotes by hand.
   if (kind === "object" || kind === "design") {
-    return objectPriceKurus(size, material) + objectFinishSurchargeKurus(finish);
+    throw new UnpricedSizeError(size);
   }
   return figurinePriceKurus(size, material) + finishSurchargeKurus(finish);
 }

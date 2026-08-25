@@ -6,6 +6,7 @@ import { orders, orderDrafts } from "@/lib/db/schema";
 import {
   itemPriceKurus,
   isPriceableSize,
+  isFlatPricedKind,
   finishNeedsPainter,
   paintingPortionKurus,
 } from "@/lib/config/prices";
@@ -94,10 +95,7 @@ export async function POST(
   // guard here would wrongly block every Creative Lab reorder — itemPriceKurus
   // returns before it even looks at the size for those kinds.
   const reorderKind = priceKindForStyle(order.style);
-  const isFlatPriced =
-    reorderKind === "keychain" ||
-    reorderKind === "fridge_magnet" ||
-    reorderKind === "lamp";
+  const isFlatPriced = isFlatPricedKind(reorderKind);
 
   // A retired-tier or bespoke figurine has no catalogue price — itemPriceKurus
   // would throw, and before the guard existed it silently priced the reorder at

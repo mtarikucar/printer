@@ -4,6 +4,7 @@ import {
   finishSurchargeKurus,
   paintingPortionKurus,
   itemPriceKurus,
+  isFlatPricedKind,
   UnpricedSizeError,
   FIGURINE_PRICE_KURUS,
   PAINTING_PORTION_KURUS,

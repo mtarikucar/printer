@@ -340,6 +340,22 @@ export function creativeLabPriceKurus(kind: string): number {
   return CREATIVE_LAB_PRICES_KURUS[kind as CreativeLabKind] ?? 0;
 }
 
+const FLAT_PRICED_KINDS: readonly string[] = ["keychain", "fridge_magnet", "lamp"];
+
+/**
+ * True for the Creative Lab kinds (keychain / fridge magnet / lamp) — flat
+ * price, no size/material/finish axis. Single source for that kind list, used
+ * both by `itemPriceKurus` below (to short-circuit before it ever looks at
+ * size) and by the reorder route's reorderability guard (to know a retired/
+ * neutral stored size like "orta" must NOT block a Creative Lab reorder).
+ * Previously the same three-way `===` check was duplicated in both places;
+ * a future edit to one (e.g. dropping "lamp") could silently drift from the
+ * other with no test catching it.
+ */
+export function isFlatPricedKind(kind: string): boolean {
+  return FLAT_PRICED_KINDS.includes(kind);
+}
+
 // ─── Dispatcher: one trusted entry point for a bespoke item's base+finish ────
 export type ItemKind =
   | "figure"
@@ -355,7 +371,7 @@ export function itemPriceKurus(args: {
   volumeMm3?: number; // upload (scaled volume)
 }): number {
   const { kind, size, material, finish, volumeMm3 } = args;
-  if (kind === "keychain" || kind === "fridge_magnet" || kind === "lamp") {
+  if (isFlatPricedKind(kind)) {
     // Flat price — size/material/finish do not apply to these products.
     return creativeLabPriceKurus(kind);
   }

@@ -1,9 +1,56 @@
 import { writeFile, readFile, mkdir, rm, access } from "fs/promises";
 import { constants as fsConstants } from "fs";
-import { join, resolve, relative, sep, isAbsolute } from "path";
+import { join, resolve, relative, sep, isAbsolute, posix } from "path";
 import crypto from "node:crypto";
 
 const UPLOAD_DIR = resolve(process.env.UPLOAD_DIR || "./uploads");
+
+/**
+ * Max percent-decode passes before giving up. Legitimate storage keys are
+ * nanoid filenames (alphanumeric + "-"/"_", see every `saveFile` call site)
+ * and never contain "%", so they reach fixpoint on the FIRST pass —
+ * `decodeURIComponent` is a no-op for them. Multiple rounds only fire for an
+ * attacker stacking encode layers ("%2e%2e" -> 1 layer, "%252e%252e" -> 2
+ * layers, ...); 5 is generous headroom over anything a real URL path segment
+ * could plausibly carry.
+ */
+const MAX_DECODE_ROUNDS = 5;
+
+/**
+ * Percent-decode `input` until it stops changing (or the round cap is hit),
+ * rejecting (returning null) the moment ANY intermediate form contains a
+ * traversal marker (`..` or a backslash) or fails to decode.
+ *
+ * Why loop instead of decoding once: Next's router decodes a URL path segment
+ * exactly once before handing it to a route handler, so a SINGLE-encoded
+ * "%2e%2e" already arrives as a literal ".." and a one-shot `.includes("..")`
+ * check on the raw string catches it. But a DOUBLE-encoded "%252e%252e"
+ * arrives at the handler as the literal string "%2e%2e" — one decode short of
+ * ".." — so a one-shot check misses it entirely (`isPublicUnsignedKey` had
+ * exactly this hole before this fix). Nothing downstream is guaranteed to
+ * stop at exactly one decode forever (a future refactor, or a CDN/proxy that
+ * normalizes encodings), so we decode to a fixpoint and inspect every layer,
+ * not just the first.
+ */
+function decodeToFixpoint(input: string): string | null {
+  let current = input;
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round++) {
+    if (current.includes("..") || current.includes("\\")) return null;
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      // Malformed %-escape (e.g. a lone "%" or a truncated sequence). An
+      // undecodable path is never provably safe — fail closed.
+      return null;
+    }
+    if (next === current) return current; // fixpoint: nothing left to unwrap
+    current = next;
+  }
+  // Didn't stabilize within the round cap — treat as an attempt to bury a
+  // traversal marker under more encode layers than we're willing to peel.
+  return null;
+}
 
 export async function saveFile(
   buffer: Buffer,
@@ -43,6 +90,15 @@ function assertSafePath(fullPath: string): void {
   if (isAbsolute(rel)) throw new Error("Invalid file path");
   if (rel.startsWith("..")) throw new Error("Invalid file path");
   if (rel.includes(`..${sep}`)) throw new Error("Invalid file path");
+  // Same class of bug as `isPublicUnsignedKey`: `resolve`/`relative` only
+  // collapse LITERAL ".." segments. A caller that hands this function a still
+  // percent-encoded segment (e.g. "%2e%2e", or double-encoded "%252e%252e")
+  // sails through every check above because the string never contains a
+  // literal "..", and only becomes one after a decode this function never
+  // performed. Every real storage key is nanoid-generated (see
+  // `MAX_DECODE_ROUNDS` comment) and never contains "%", so decoding here
+  // cannot reject a legitimate key — it only closes the encoded-traversal gap.
+  if (decodeToFixpoint(rel) === null) throw new Error("Invalid file path");
 }
 
 export async function getFileBuffer(relativePath: string): Promise<Buffer> {
@@ -170,10 +226,20 @@ export const PUBLIC_UNSIGNED_PREFIXES = ["products/"] as const;
 
 /** True when `relativePath` may be served unsigned from `/media`. */
 export function isPublicUnsignedKey(relativePath: string): boolean {
-  // Reject traversal before prefix matching: "products/../uploads/pii.webp"
-  // starts with "products/" but resolves outside it.
-  if (relativePath.includes("..")) return false;
-  return PUBLIC_UNSIGNED_PREFIXES.some((p) => relativePath.startsWith(p));
+  // Reject traversal — including percent-encoded and DOUBLE-percent-encoded
+  // traversal — before prefix matching: "products/../uploads/pii.webp" starts
+  // with "products/" but resolves outside it, and so does
+  // "products/%252e%252e/uploads/pii.webp" once unwrapped twice.
+  const decoded = decodeToFixpoint(relativePath);
+  if (decoded === null) return false;
+  // Second, independent layer: collapse `.`/`..`/repeated separators and
+  // re-check the PREFIX on the collapsed form. `decoded` is already
+  // guaranteed free of ".."/"\\" by `decodeToFixpoint`, but this catches any
+  // future change to that function (or a caller that skips it) before it can
+  // turn into a prefix-match bypass.
+  const normalized = posix.normalize(decoded);
+  if (normalized.includes("..") || normalized.startsWith("/")) return false;
+  return PUBLIC_UNSIGNED_PREFIXES.some((p) => normalized.startsWith(p));
 }
 
 /**

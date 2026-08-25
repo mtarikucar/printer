@@ -58,6 +58,28 @@ test("prefix kaçışı engellenir", () => {
   }
 });
 
+test("çift-encode edilmiş traversal engellenir (Important fix)", () => {
+  // Next'in router'ı bir path segmentini TAM OLARAK BİR KEZ decode eder. Tekli
+  // encode ("%2e%2e") bu yüzden handler'a zaten literal ".." olarak ulaşır ve
+  // eski tek-atım `.includes("..")` kontrolü bunu yakalardı. Ama çift encode
+  // ("%252e%252e") handler'a HALA encode'lu "%2e%2e" olarak ulaşır — bir
+  // decode daha yapılmadan ".." olmaz. decodeToFixpoint bu yüzden decode'u
+  // sabit noktaya kadar TEKRARLIYOR, her turu kontrol ediyor.
+  for (const key of [
+    "products/%2e%2e/uploads/pii.webp",
+    "products/%252e%252e/uploads/pii.webp",
+    "products/%2e%2e%2f%2e%2e%2fuploads/pii.webp",
+    "products/..\\uploads\\pii.webp",
+  ]) {
+    assert.equal(isPublicUnsignedKey(key), false, `${key} imzasız sayılmış`);
+  }
+});
+
+test("çift-encode fix'i meşru anahtarları kırmıyor (regresyon koruması)", () => {
+  assert.equal(isPublicUnsignedKey("products/abc123.webp"), true);
+  assert.equal(isPublicUnsignedKey("products/nested/abc123.webp"), true);
+});
+
 for (const [name, fn] of cases) {
   try {
     fn();

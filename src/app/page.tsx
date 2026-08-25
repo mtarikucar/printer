@@ -4,7 +4,7 @@ import { products } from "@/lib/db/schema";
 import { SiteHeader } from "@/components/site-header";
 import { StorefrontHome } from "@/components/marketplace/storefront";
 import { type ProductListItem } from "@/components/product-card";
-import { getPublicUrl } from "@/lib/services/storage";
+import { getPublicImageUrl } from "@/lib/services/storage";
 import { getChildCategories } from "@/lib/services/categories";
 
 export const revalidate = 60;
@@ -30,7 +30,7 @@ export default async function HomePage() {
     categoryPath: p.categoryNode?.path ?? null,
     categoryName: p.categoryNode?.name ?? null,
     leadTimeDays: p.leadTimeDays,
-    imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
+    imageUrl: p.primaryImageKey ? getPublicImageUrl(p.primaryImageKey) : null,
     sellerName: p.manufacturer?.companyName ?? null,
     ratingAvgX100: p.ratingAvgX100,
     ratingCount: p.ratingCount,

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, ilike, gte, lte, inArray, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products, manufacturers } from "@/lib/db/schema";
-import { getPublicUrl } from "@/lib/services/storage";
+import { getPublicImageUrl } from "@/lib/services/storage";
 import type { ProductListItem } from "@/components/product-card";
 import { getCategoryByPath, getSubtreeIds } from "@/lib/services/categories";
 
@@ -102,7 +102,7 @@ export async function queryShopProducts(
     categoryPath: p.categoryNode?.path ?? null,
     categoryName: p.categoryNode?.name ?? null,
     leadTimeDays: p.leadTimeDays,
-    imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
+    imageUrl: p.primaryImageKey ? getPublicImageUrl(p.primaryImageKey) : null,
     sellerName: p.manufacturer?.companyName ?? null,
     ratingAvgX100: p.ratingAvgX100,
     ratingCount: p.ratingCount,

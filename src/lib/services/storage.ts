@@ -154,6 +154,44 @@ export function getPublicUrl(relativePath: string): string {
 }
 
 /**
+ * Storage key prefixes served WITHOUT a signature, from `/media/...`.
+ *
+ * Only storefront product photos. They are already shown to every anonymous
+ * visitor, so a signature adds no confidentiality — but it does add an
+ * expiry, and an expiring URL is fatal for crawlers: Google/Bing re-fetch
+ * images days-to-weeks after the crawl and got a 401 every time, so
+ * `Product.image` and `og:image` were unusable.
+ *
+ * Everything else — customer photos (PII), GLB/STL meshes, chat attachments,
+ * bank receipts — stays signed. Do NOT add a prefix here without checking that
+ * every file under it is already public to anonymous visitors.
+ */
+export const PUBLIC_UNSIGNED_PREFIXES = ["products/"] as const;
+
+/** True when `relativePath` may be served unsigned from `/media`. */
+export function isPublicUnsignedKey(relativePath: string): boolean {
+  // Reject traversal before prefix matching: "products/../uploads/pii.webp"
+  // starts with "products/" but resolves outside it.
+  if (relativePath.includes("..")) return false;
+  return PUBLIC_UNSIGNED_PREFIXES.some((p) => relativePath.startsWith(p));
+}
+
+/**
+ * URL for an image that may be embedded in JSON-LD, `og:image`, or a sitemap —
+ * i.e. anywhere a crawler will re-fetch it later. Product keys get a stable
+ * unsigned `/media` URL; anything else falls back to the signed URL.
+ */
+export function getPublicImageUrl(relativePath: string): string {
+  if (!isPublicUnsignedKey(relativePath)) return getPublicUrl(relativePath);
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://figurunica.com"
+      : "http://localhost:3000");
+  return `${appUrl}/media/${relativePath}`;
+}
+
+/**
  * Rewrite any file URL to use the current app origin and freshly-signed
  * params. Handles old URLs pointing to previous domains (e.g.
  * printer.muhammedtarikucar.com) by extracting the path and re-signing.

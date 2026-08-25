@@ -7,7 +7,7 @@ import { products } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
-import { getPublicUrl } from "@/lib/services/storage";
+import { getPublicImageUrl } from "@/lib/services/storage";
 import { getProductPublicSpec } from "@/lib/services/product-spec";
 import { getProductConfig } from "@/lib/services/product-options";
 import { sellerNotSuspended } from "@/lib/services/shop-query";
@@ -66,18 +66,18 @@ export default async function ProductDetailPage({
   );
   const images = sortedImages
     .filter((img) => !img.optionChoiceId)
-    .map((img) => getPublicUrl(img.storageKey));
+    .map((img) => getPublicImageUrl(img.storageKey));
   const choiceImages: Record<string, string[]> = {};
   for (const img of sortedImages) {
     if (!img.optionChoiceId) continue;
-    (choiceImages[img.optionChoiceId] ??= []).push(getPublicUrl(img.storageKey));
+    (choiceImages[img.optionChoiceId] ??= []).push(getPublicImageUrl(img.storageKey));
   }
   // Fallback: if every image was tagged to a choice (no default), still show
   // something rather than an empty gallery.
   const defaultImages =
     images.length > 0
       ? images
-      : sortedImages.map((img) => getPublicUrl(img.storageKey));
+      : sortedImages.map((img) => getPublicImageUrl(img.storageKey));
 
   const optionConfig = await getProductConfig(product.id);
 
@@ -107,7 +107,7 @@ export default async function ProductDetailPage({
     categoryPath: p.categoryNode?.path ?? null,
     categoryName: p.categoryNode?.name ?? null,
     leadTimeDays: p.leadTimeDays,
-    imageUrl: p.primaryImageKey ? getPublicUrl(p.primaryImageKey) : null,
+    imageUrl: p.primaryImageKey ? getPublicImageUrl(p.primaryImageKey) : null,
     sellerName: p.manufacturer?.companyName ?? null,
     ratingAvgX100: p.ratingAvgX100,
     ratingCount: p.ratingCount,

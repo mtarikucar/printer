@@ -2,6 +2,8 @@ import assert from "node:assert";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createOrderSchema } from "../src/lib/validators/order";
+import { generateSchema } from "../src/app/api/preview/generate/route";
+import { SIZE_PRESETS, SIZE_PRESET_KEYS } from "../src/lib/config/sizes";
 import { reorderBlocked } from "../src/app/api/customer/orders/[orderNumber]/reorder/route";
 
 /**
@@ -181,6 +183,35 @@ check("every fetch method is exported by its route handler", () => {
 // ---------------------------------------------------------------------------
 // Order-schema contract: one product, one material, one size (2026-08-24).
 // ---------------------------------------------------------------------------
+// A hardcoded `figurineSize: "<key>"` anywhere in the app is the exact shape of
+// the 2026-08-24 regression: /urunler and the 2D-design flow kept sending the
+// retired "orta" long after SIZE_PRESET_KEYS collapsed to one preset, so their
+// preview generation AND checkout 400'd — invisibly to tsc, lint and the type
+// system, because it is just a string. Every legitimate literal must be a
+// currently sellable preset; a bespoke measurement always arrives in a variable.
+check("hiçbir dosya geçersiz bir figurineSize literali göndermiyor", () => {
+  const bad: string[] = [];
+  for (const file of files) {
+    const src = readFileSync(file, "utf8");
+    const re = /figurineSize:\s*["'`]([^"'`]+)["'`]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      if (!(SIZE_PRESET_KEYS as readonly string[]).includes(m[1])) {
+        bad.push(
+          `    ${relative(ROOT, file)}:${src.slice(0, m.index).split("\n").length} → "${m[1]}"`
+        );
+      }
+    }
+  }
+  assert.strictEqual(
+    bad.length,
+    0,
+    `\n  Satılamayan figurineSize literalleri (şema 400 döner):\n${bad.join("\n")}\n` +
+      `  Satılabilir preset(ler): ${SIZE_PRESET_KEYS.join(", ")}. ` +
+      `Sabit yazmak yerine SIZE_PRESETS[0].key kullanın.\n`
+  );
+});
+
 
 check("sipariş doğrulama: yalnızca reçine ve standart boyut kabul edilir", () => {
   const base = {
@@ -259,6 +290,156 @@ check("reorderBlocked: figür ve Creative Lab reorder yolu BOZULMADI", () => {
     "marketplace siparişleri hâlâ engellenmeli"
   );
 });
+
+// ─── Creative Lab + 2D-design contract (2026-08-25) ─────────────────────────
+// Bu blok, `SIZE_PRESET_KEYS` daralmasının açtığı deliğin nöbetçisidir.
+// SIZE_PRESET_KEYS `["standart"]`'a indirildiğinde /urunler (anahtarlık,
+// buzdolabı magneti, gece lambası) ve /create?path=design hâlâ emekli
+// `figurineSize: "orta"` gönderiyordu; iki şema da `z.enum(SIZE_PRESET_KEYS)`
+// kullandığı için hem önizleme üretimi hem checkout sessizce 400 döndü. Hiçbir
+// tsc/lint hatası vermedi, çünkü gönderilen değer düz bir string literaliydi.
+// Buradaki case'ler payload'ları ŞEMALARIN KENDİSİNE parse ettirir: bir preset
+// yeniden adlandırılır/emekliye ayrılırsa test kırmızıya döner, müşteri değil.
+
+const ADDRESS = {
+  adres: "Akın 688 Sitesi B32",
+  mahalle: "Şehit Osman Avcı Mahallesi",
+  ilce: "Etimesgut",
+  il: "Ankara",
+  postaKodu: "06790",
+  telefon: "+905551112233",
+} as const;
+
+/** /urunler'in CheckoutForm'a verdiği orderPayload'ın birebir şekli. */
+function creativeLabOrder(style: string, over: Record<string, unknown> = {}) {
+  return {
+    orderType: "custom",
+    photoKey: "photos/x.webp",
+    figurineSize: SIZE_PRESETS[0].key,
+    style,
+    material: "resin",
+    finish: "paintable_kit",
+    shippingAddress: ADDRESS,
+    ...over,
+  };
+}
+
+const CREATIVE_LAB_STYLES = ["keychain", "fridge_magnet", "lamp"] as const;
+
+check("Creative Lab checkout'u sipariş şemasından GEÇER (üç ürün de)", () => {
+  for (const style of CREATIVE_LAB_STYLES) {
+    const res = createOrderSchema("tr").safeParse(creativeLabOrder(style));
+    assert.equal(
+      res.success,
+      true,
+      `${style} checkout'u 400 dönüyor: ${JSON.stringify(res.error?.issues)}`
+    );
+  }
+});
+
+check("Creative Lab checkout'u emekli tier ile REDDEDİLİR", () => {
+  for (const style of CREATIVE_LAB_STYLES) {
+    assert.equal(
+      createOrderSchema("tr").safeParse(creativeLabOrder(style, { figurineSize: "orta" }))
+        .success,
+      false,
+      `${style} emekli "orta" boyutunu kabul ediyor`
+    );
+  }
+});
+
+check("önizleme şeması: Creative Lab ve 2D-tasarım payload'ları GEÇER", () => {
+  for (const style of [...CREATIVE_LAB_STYLES, "object", "realistic"]) {
+    const res = generateSchema.safeParse({
+      photoKey: "photos/x.webp",
+      figurineSize: SIZE_PRESETS[0].key,
+      style,
+      modifiers: [],
+    });
+    assert.equal(
+      res.success,
+      true,
+      `${style} önizleme üretimi 400 dönüyor: ${JSON.stringify(res.error?.issues)}`
+    );
+  }
+});
+
+check("önizleme şeması: emekli tier REDDEDİLİR", () => {
+  for (const size of ["orta", "kucuk", "buyuk"]) {
+    assert.equal(
+      generateSchema.safeParse({
+        photoKey: "photos/x.webp",
+        figurineSize: size,
+        style: "keychain",
+        modifiers: [],
+      }).success,
+      false,
+      `önizleme şeması emekli "${size}" boyutunu kabul ediyor`
+    );
+  }
+});
+
+// ─── Finish gating: boyacı ₺0 deliği (2026-08-25) ───────────────────────────
+// `figurineSize`/`material` tek ürüne sabitlenmişti ama `finish` sabitlenmemiş
+// ve varsayılanı emekli `paintable_kit` kalmıştı. Tüm surcharge'lar 0 olduğu
+// için fiyat yine ₺3.499 çıkıyor, ancak `finishNeedsPainter("paintable_kit")`
+// false → sipariş boyacıya HİÇ yönlendirilmiyor (boyacı ₺0 alır, payı
+// üreticinin tabanına geçer) ve kargo e-postası kutuda olmayan boya kiti
+// içeriğini listeliyor. Bunu kapalı tutan tek şey /create'in client sabitiydi.
+
+function figureOrder(over: Record<string, unknown> = {}) {
+  return {
+    photoKey: "photos/x.webp",
+    figurineSize: SIZE_PRESETS[0].key,
+    style: "realistic",
+    material: "resin",
+    finish: "hand_painted",
+    shippingAddress: ADDRESS,
+    ...over,
+  };
+}
+
+check("figür siparişi: yalnızca hand_painted kabul edilir", () => {
+  assert.equal(createOrderSchema("tr").safeParse(figureOrder()).success, true);
+  for (const finish of ["paintable_kit", "collector_raw", "luxe_display", "raw"]) {
+    assert.equal(
+      createOrderSchema("tr").safeParse(figureOrder({ finish })).success,
+      false,
+      `figür siparişi emekli "${finish}" bitişini kabul ediyor — boyacı ₺0 alır`
+    );
+  }
+});
+
+check("finish atlanırsa varsayılan, ürün türüne göre doldurulur", () => {
+  const fig = createOrderSchema("tr").safeParse(figureOrder({ finish: undefined }));
+  assert.equal(fig.success, true);
+  assert.equal(
+    fig.data?.finish,
+    "hand_painted",
+    "figür varsayılanı hand_painted değil — sipariş boyacıya gitmez"
+  );
+  // Düz fiyatlı Creative Lab ürünlerinin finish ekseni yok: sabit bir
+  // varsayılan burada refine'a takılıp checkout'u 400'lerdi.
+  for (const style of CREATIVE_LAB_STYLES) {
+    const cl = createOrderSchema("tr").safeParse(
+      creativeLabOrder(style, { finish: undefined })
+    );
+    assert.equal(cl.success, true, `${style} finish'siz payload'da 400 dönüyor`);
+    assert.equal(cl.data?.finish, "paintable_kit");
+  }
+});
+
+check("Creative Lab hand_painted'i REDDEDER (ödenmemiş boyama)", () => {
+  for (const style of CREATIVE_LAB_STYLES) {
+    assert.equal(
+      createOrderSchema("tr").safeParse(creativeLabOrder(style, { finish: "hand_painted" }))
+        .success,
+      false,
+      `${style} hand_painted kabul ediyor — düz fiyata ücretsiz boyama işaretlenir`
+    );
+  }
+});
+
 
 console.log(
   `\n✅ api-contracts: ${passed} checks passed ` +

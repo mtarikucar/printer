@@ -38,6 +38,43 @@ const reorderSchema = z.object({
 const PHOTO_KEY_REGEX = /\/(photos\/[^?#]+)$/;
 
 /**
+ * Whether a stored order CANNOT be self-service reordered without a manual
+ * quote — `true` means "block, return 400". Pure and exported so a
+ * regression test can exercise every kind/size combination directly,
+ * without a request/DB round-trip (see scripts/test-api-contracts.ts).
+ *
+ * - Marketplace orders have no figurineSize/photo to replay.
+ * - Object prints are QUOTE-ONLY since 2026-08-24 (see the `kind === "object"`
+ *   branch of `itemPriceKurus` in prices.ts) — that holds no matter what
+ *   figurineSize the row carries. A "standart" one in particular would
+ *   otherwise pass the size check below and reach `itemPriceKurus`, which
+ *   throws `UnpricedSizeError` with nothing downstream to catch it — an
+ *   uncaught 500 instead of a clean 400. Block it here, before pricing is
+ *   ever attempted.
+ * - Creative Lab kinds (keychain/fridge_magnet/lamp) are flat-priced
+ *   (`isFlatPricedKind`) and store a placeholder figurineSize they never price
+ *   from — the sellable preset on rows written after 2026-08-25, a retired
+ *   "orta" on older ones. Exempt them from the size check below, or every
+ *   legacy Creative Lab reorder would be wrongly blocked.
+ * - Anything else (figure) needs a real, still-priceable figurineSize
+ *   ("standart"; retired tiers like "orta"/"buyuk" are quoted by hand).
+ */
+export function reorderBlocked(order: {
+  orderType: string;
+  style: string;
+  figurineSize: string | null;
+}): boolean {
+  const reorderKind = priceKindForStyle(order.style);
+  const isFlatPriced = isFlatPricedKind(reorderKind);
+  const isQuoteOnlyKind = reorderKind === "object";
+  return (
+    order.orderType === "marketplace" ||
+    isQuoteOnlyKind ||
+    (!isFlatPriced && (!order.figurineSize || !isPriceableSize(order.figurineSize)))
+  );
+}
+
+/**
  * Reorder = create a new draft using a confirmed order's snapshot data, then route the
  * customer through the same payment flow as a fresh checkout.
  *

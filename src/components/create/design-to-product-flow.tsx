@@ -7,6 +7,7 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { UPLOAD_MAX_SIZE_BYTES } from "@/lib/config/upload";
+import { SIZE_PRESETS } from "@/lib/config/sizes";
 
 // Faz 2: 2D design/logo → stylized object IMAGE. Reuses the "object" style
 // engine end-to-end: upload → /api/preview/generate (style="object") → poll →
@@ -184,11 +185,13 @@ export function DesignToProductFlow() {
       const res = await fetch("/api/preview/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // object style + a neutral size; the object engine ignores size for
-        // generation and the user re-picks size/material at checkout.
+        // The object engine ignores size for generation, but the preview schema
+        // still requires one and only accepts the ONE sellable preset since
+        // 2026-08-24 — so read it from the single source. The size that ends up
+        // being produced is agreed in the quote flow, not picked here.
         body: JSON.stringify({
           photoKey,
-          figurineSize: "orta",
+          figurineSize: SIZE_PRESETS[0].key,
           style: "object",
           modifiers: [],
           turnstileToken: token,

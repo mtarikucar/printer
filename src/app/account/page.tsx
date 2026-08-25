@@ -42,7 +42,8 @@ interface CustomerOrder {
 }
 
 // The order-row secondary label. Creative Lab products (keychain/magnet/lamp)
-// carry a neutral "orta" figurineSize placeholder, so show their real product
+// carry a placeholder figurineSize that describes nothing (a retired "orta" on
+// legacy rows, the sellable preset on new ones), so show their real product
 // name instead of a misleading size; everything else shows the size.
 function orderItemLabel(order: CustomerOrder, d: Dictionary): string {
   const kind = priceKindForStyle(order.style);

@@ -5,6 +5,7 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
 import { creativeLabPriceKurus } from "@/lib/config/prices";
+import { SIZE_PRESETS } from "@/lib/config/sizes";
 import { useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
 
@@ -103,11 +104,13 @@ export default function UrunlerPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // The Creative Lab products are modelled as custom orders: the product
-        // is the `style`, and size/material are ignored (flat-priced). figurineSize
-        // is required by the schema, so send a neutral default.
+        // is the `style`, and size/material are ignored (flat-priced). The
+        // schema still requires a `figurineSize`, and since 2026-08-24 it only
+        // accepts the ONE sellable preset — so read it from the single source
+        // (`SIZE_PRESETS`) instead of hardcoding a key that can be retired.
         body: JSON.stringify({
           photoKey,
-          figurineSize: "orta",
+          figurineSize: SIZE_PRESETS[0].key,
           style: product,
           modifiers: [],
           turnstileToken: token,
@@ -292,8 +295,14 @@ export default function UrunlerPage() {
                   photoKey,
                   previewId,
                   style: product,
-                  figurineSize: "orta",
+                  // Flat-priced: size/material never affect the price here, but
+                  // `createOrderSchema` still validates them. Take the size from
+                  // the single source so a preset rename can't 400 checkout.
+                  figurineSize: SIZE_PRESETS[0].key,
                   material: "resin",
+                  // Creative Lab items have no finish axis; `FLAT_FINISHES` in
+                  // the order validator accepts only this neutral value, which
+                  // keeps them out of the paid-painting (painter) routing.
                   finish: "paintable_kit",
                 }}
                 priceKurus={priceKurus}

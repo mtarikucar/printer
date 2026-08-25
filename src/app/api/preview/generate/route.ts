@@ -20,7 +20,12 @@ import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, getTemplate } from "@/lib/create/design-templates";
 import { eq, count } from "drizzle-orm";
 
-const generateSchema = z.object({
+// Exported for scripts/test-api-contracts.ts. `figurineSize` here is shared with
+// `createOrderSchema`, and narrowing SIZE_PRESET_KEYS to the ONE sellable preset
+// silently 400'd every Creative Lab and 2D-design preview (they used to send a
+// now-retired tier). The regression test parses this schema directly, so the
+// contract is asserted rather than assumed.
+export const generateSchema = z.object({
   photoKey: z.string().min(1),
   // Optional multi-image fusion set (accepts 1-4
   // images). When present, generation fuses several reference angles into a

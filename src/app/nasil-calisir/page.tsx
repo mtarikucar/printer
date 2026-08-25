@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
-import { FIGURINE_PRICE_KURUS, UPSELL_PRICES_KURUS } from "@/lib/config/prices";
+import {
+  FIGURINE_PRICE_KURUS,
+  UPSELL_PRICES_KURUS,
+  CREATIVE_LAB_PRICES_KURUS,
+} from "@/lib/config/prices";
 import { SIZE_PRESETS, formatCm } from "@/lib/config/sizes";
 
 // Every number on this page is DERIVED, never typed. This is the page an AI
@@ -55,8 +59,8 @@ export default async function HowItWorksPage() {
           </h1>
           <p className="mt-4 text-lg leading-relaxed text-text-secondary">
             {isTr
-              ? `Kişiye özel figür tek bir üründür: ${HEIGHT} boyunda, SLA reçine baskı, profesyonel el boyamalı ve sergilemeye hazır. ${PRICE_TR} TL (KDV dahil), Türkiye içi kargo ücretsiz. Yanı sıra hazır ürünlerin satıldığı bir pazaryeri ve teklifle ilerleyen özel işler var.`
-              : `The custom figurine is a single product: ${HEIGHT} tall, SLA resin printed, professionally hand-painted, display-ready. ${PRICE_EN} TL (VAT included), free shipping within Türkiye. Alongside it we run a marketplace of ready-made products and take bespoke work by quote.`}
+              ? `Kişiye özel figür tek bir üründür: ${HEIGHT} boyunda, SLA reçine baskı, profesyonel el boyamalı ve sergilemeye hazır. ${PRICE_TR} TL (KDV dahil), Türkiye içi kargo ücretsiz. Yanı sıra fotoğraftan üretilen küçük Creative Lab ürünleri, hazır ürünlerin satıldığı bir pazaryeri ve teklifle ilerleyen özel işler var.`
+              : `The custom figurine is a single product: ${HEIGHT} tall, SLA resin printed, professionally hand-painted, display-ready. ${PRICE_EN} TL (VAT included), free shipping within Türkiye. Alongside it we sell small Creative Lab products made from the same photo, run a marketplace of ready-made products, and take bespoke work by quote.`}
           </p>
         </div>
       </section>
@@ -140,11 +144,23 @@ export default async function HowItWorksPage() {
                 halinde basılır.
               </p>
 
+              <h2>Creative Lab: fotoğraftan küçük ürünler</h2>
+              <p>
+                Kişiye özel figür tek başına değil: <Link href="/urunler">Creative Lab</Link>&apos;de aynı
+                fotoğraftan üretilen üç küçük ürün de sabit fiyatla satılır — anahtarlık{" "}
+                {tr(CREATIVE_LAB_PRICES_KURUS.keychain)} TL, buzdolabı magneti{" "}
+                {tr(CREATIVE_LAB_PRICES_KURUS.fridge_magnet)} TL, gece lambası{" "}
+                {tr(CREATIVE_LAB_PRICES_KURUS.lamp)} TL. Akış figürdekiyle aynıdır: fotoğrafını yükle,
+                üretilen görseli onayla, kartla ya da havale/EFT ile öde. Bu ürünlerde de seçilecek boyut,
+                malzeme veya bitiş yoktur; fiyat listedeki tek fiyattır.
+              </p>
+
               <h2>Teklifle ilerleyen işler</h2>
               <p>
-                Sabit fiyatlı ürün yalnızca kişiye özel figürdür. Aşağıdakiler için sabit fiyat yoktur;
-                fiyat, modelin karmaşıklığına ve baskı hacmine göre <strong>elle</strong> belirlenir ve
-                sipariş öncesi WhatsApp üzerinden yazılı olarak bildirilir:
+                Sabit fiyat yukarıdaki ürünler için geçerlidir: kişiye özel figür ve Creative Lab
+                ürünleri. Aşağıdakiler için sabit fiyat yoktur; fiyat, modelin karmaşıklığına ve baskı
+                hacmine göre <strong>elle</strong> belirlenir ve sipariş öncesi WhatsApp üzerinden yazılı
+                olarak bildirilir:
               </p>
               <ul>
                 <li><strong>Obje / nesne baskısı:</strong> bir araba, oyuncak ya da koleksiyon parçasının fotoğrafından üretim.</li>
@@ -250,11 +266,23 @@ export default async function HowItWorksPage() {
                 printed in a T-pose, but as you were in the photo.
               </p>
 
+              <h2>Creative Lab: small products from a photo</h2>
+              <p>
+                The custom figurine is not on its own: the <Link href="/urunler">Creative Lab</Link> sells
+                three small products made from the same photo at a fixed price too — a keychain{" "}
+                {en(CREATIVE_LAB_PRICES_KURUS.keychain)} TL, a fridge magnet{" "}
+                {en(CREATIVE_LAB_PRICES_KURUS.fridge_magnet)} TL, and a night lamp{" "}
+                {en(CREATIVE_LAB_PRICES_KURUS.lamp)} TL. The flow is the figurine&apos;s: upload your
+                photo, approve the generated image, and pay by card or bank transfer. These have no size,
+                material, or finish to choose either — the listed price is the price.
+              </p>
+
               <h2>Work that goes by quote</h2>
               <p>
-                The custom figurine is our only fixed-price product. The following have no list price:
-                it is set <strong>by hand</strong> from the model&apos;s complexity and print volume, and
-                confirmed in writing over WhatsApp before you order:
+                Fixed prices cover the products above: the custom figurine and the Creative Lab items.
+                The following have no list price: it is set <strong>by hand</strong> from the
+                model&apos;s complexity and print volume, and confirmed in writing over WhatsApp before
+                you order:
               </p>
               <ul>
                 <li><strong>Object prints:</strong> made from a photo of a car, a toy, or a collectible.</li>

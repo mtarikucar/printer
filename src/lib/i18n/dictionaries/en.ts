@@ -159,7 +159,7 @@ const en = {
   "create.soon.title": "This flow is coming soon",
   "create.soon.body": "We're building this production path. In the meantime, you can create from a photo — figurine or object — right now.",
   "create.soon.back": "Back to production paths",
-  "create.designFlow.quotePrice": "Priced based on your design",
+  "create.designFlow.quotePrice": "No list price: it is set by hand from your design's complexity and print volume, and confirmed in writing over WhatsApp.",
   "store.search.placeholder": "Search products, categories…",
   "store.search.aria": "Search",
   "store.row.new": "New Arrivals",
@@ -261,10 +261,10 @@ const en = {
   "design.generate": "Generate 3D preview",
   "design.generating": "Building your model… this can take a couple of minutes.",
   "design.previewTitle": "Here's your design",
-  "design.previewSub": "Happy with it? Continue to pick size, material, and checkout.",
+  "design.previewSub": "Happy with it? Continue and we'll quote your design.",
   "design.fromPrice": "Starting from",
   "design.priceNote": "Final price is set by size & material at checkout.",
-  "design.toCheckout": "Continue to checkout",
+  "design.toCheckout": "Continue and get a quote",
   "design.regen": "Try another design",
   "design.note": "Tip: clean, high-contrast images with a plain background work best.",
   "design.errGeneric": "Something went wrong. Please try again.",
@@ -628,6 +628,9 @@ const en = {
   "manufacturer.orderDetail.declineReasonPlaceholder": "Reason (optional)…",
   "manufacturer.orderDetail.confirmDecline": "Decline",
   "nav.styles": "Styles",
+
+  // Create — single product (2026-08-24: one product, no selector)
+  "create.customDesign.quoteNext": "Your design is ready. This one has no list price — it is set by hand from model complexity and print volume, and nothing is charged on this screen. Send us the image on WhatsApp and we will quote it the same day.",
 
   // Create — Material
   "create.materialSelection": "Material Selection",

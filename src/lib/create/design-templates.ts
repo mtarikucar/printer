@@ -244,6 +244,40 @@ export function priceKindForStyle(
 }
 
 /**
+ * Kinds that are QUOTE-ONLY: no list price, the admin quotes by hand over
+ * WhatsApp. Since 2026-08-24 that is the `object` kind — which covers both the
+ * "3D Obje" template and the 2D-design flow (it reuses `style: "object"`).
+ * `itemPriceKurus` refuses to price them (UnpricedSizeError), so any UI that
+ * lets one of them reach checkout is promising a price we do not sell it at.
+ */
+export function isQuoteOnlyKind(kind: DesignTemplate["priceKind"]): boolean {
+  return kind === "object";
+}
+
+/**
+ * Whether `/create` may restore `style` from a saved preview (`?previewId=`) or
+ * a previous order (`?fromOrder=`).
+ *
+ * Restored:
+ *  - figure kinds — the single fixed-price product this page sells.
+ *  - the `object` kind — NOT sellable here, and restoring it is precisely what
+ *    routes the customer to the WhatsApp quote card (`isObjectStyle` in
+ *    create/page.tsx) instead of silently re-pricing their 2D design as a
+ *    ₺3.499 figurine.
+ *
+ * NOT restored:
+ *  - Creative Lab (`keychain`/`fridge_magnet`/`lamp`) — those products live on
+ *    /urunler with their own flat price and finish set. Restoring one here made
+ *    the "modify and reorder" link run the whole figurine form and only fail
+ *    server-side at submit (regression fixed in 5b738d9 — keep it fixed).
+ *    Falling back to the default figure style keeps that flow usable.
+ */
+export function isRestorableCreateStyle(slug: string): boolean {
+  const kind = priceKindForStyle(slug);
+  return kind === "figure" || isQuoteOnlyKind(kind);
+}
+
+/**
  * Builds the fal.ai image prompt: [look] + [modifier] + POSE_FROM_PHOTO +
  * FIGURINE_PRESENTATION. Always returns a prompt (unknown slug → realistic look).
  * The composition (who is in the figure, how they're arranged) comes straight

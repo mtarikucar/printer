@@ -161,7 +161,7 @@ const tr: Dictionary = {
   "create.soon.title": "Bu akış çok yakında",
   "create.soon.body": "Bu üretim yolunu geliştiriyoruz. Bu sırada hemen bir fotoğraftan figür ya da obje üretebilirsin.",
   "create.soon.back": "Üretim yollarına dön",
-  "create.designFlow.quotePrice": "Fiyat tasarımına göre belirlenir",
+  "create.designFlow.quotePrice": "Sabit fiyat yok: fiyat, tasarımının karmaşıklığına ve baskı hacmine göre elle belirlenip WhatsApp'tan yazılı olarak iletilir.",
   "store.search.placeholder": "Ürün, kategori ara…",
   "store.search.aria": "Ara",
   "store.row.new": "Yeni Gelenler",
@@ -263,10 +263,10 @@ const tr: Dictionary = {
   "design.generate": "3D önizleme oluştur",
   "design.generating": "Modelin oluşturuluyor… bu birkaç dakika sürebilir.",
   "design.previewTitle": "İşte tasarımın",
-  "design.previewSub": "Beğendin mi? Boyut, malzeme ve ödeme için devam et.",
+  "design.previewSub": "Beğendin mi? Devam et, tasarımın için fiyat teklifi alalım.",
   "design.fromPrice": "Başlangıç fiyatı",
   "design.priceNote": "Son fiyat ödeme adımında boyut ve malzemeye göre belirlenir.",
-  "design.toCheckout": "Devam et ve sipariş ver",
+  "design.toCheckout": "Devam et ve teklif al",
   "design.regen": "Başka bir tasarım dene",
   "design.note": "İpucu: sade, yüksek kontrastlı ve arka planı temiz görseller en iyi sonucu verir.",
   "design.errGeneric": "Bir şeyler ters gitti. Lütfen tekrar dene.",
@@ -630,6 +630,9 @@ const tr: Dictionary = {
   "manufacturer.orderDetail.declineReasonPlaceholder": "Sebebiniz (opsiyonel)…",
   "manufacturer.orderDetail.confirmDecline": "Reddet",
   "nav.styles": "Stiller",
+
+  // Create — single product (2026-08-24: tek ürün, seçici yok)
+  "create.customDesign.quoteNext": "Tasarımın hazır. Bu ürünün liste fiyatı yoktur — fiyat, modelin karmaşıklığına ve baskı hacmine göre elle belirlenir, bu ekrandan ödeme alınmaz. Görselini WhatsApp'tan gönder, aynı gün fiyat verelim.",
 
   // Create — Material
   "create.materialSelection": "Malzeme Seçimi",

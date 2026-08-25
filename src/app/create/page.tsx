@@ -24,7 +24,12 @@ import { CreatePathSelector } from "@/components/create/path-selector";
 import { UploadModelFlow } from "@/components/create/upload-model-flow";
 import { ContentConsent } from "@/components/content-consent";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
-import { DESIGN_TEMPLATES, priceKindForStyle, getTemplate } from "@/lib/create/design-templates";
+import {
+  DESIGN_TEMPLATES,
+  priceKindForStyle,
+  getTemplate,
+  isRestorableCreateStyle,
+} from "@/lib/create/design-templates";
 import { ExtraPhotos, type ExtraPhoto } from "@/components/create/extra-photos";
 import { SIZE_PRESETS, sizeDisplay } from "@/lib/config/sizes";
 import { WhatsAppButton } from "@/components/whatsapp/whatsapp-button";
@@ -181,12 +186,11 @@ function CustomCreateFlow() {
   const turnstileRef = useRef<TurnstileRef>(null);
 
   // One product since 2026-08-24: 15 cm SLA resin, professionally hand-painted.
-  // No size / material / finish axis in the public flow — a different size or a
-  // custom design goes to WhatsApp for a hand quote.
+  // No size / material / finish axis in the public flow. Object/design
+  // templates (style="object") no longer price or self-checkout here either —
+  // a different size or a custom design goes to WhatsApp for a hand quote
+  // (see the isObjectStyle branch in the JSX below).
   const isObjectStyle = priceKindForStyle(selectedStyle) === "object";
-  const FIXED_SIZE = SIZE_PRESETS[0].key;
-  const FIXED_MATERIAL = "resin" as const;
-  const FIXED_FINISH = "hand_painted" as const;
   // Multi-image fusion is offered only for non-stylized templates (object +
   // realistic). Single-subject stylized looks restyle one photo, so extra
   // angles add nothing — the multi-upload UI is hidden there.
@@ -195,8 +199,10 @@ function CustomCreateFlow() {
   // before generating from multiple photos; object does not (geometry-only).
   const needsCompatAck =
     selectedStyle === "realistic" && extraPhotos.length > 0;
-  // The one price, Turkish-grouped ("3.499"). Derived from the single source in
-  // src/lib/config/prices.ts — never hardcode the number in the UI.
+  const FIXED_SIZE = SIZE_PRESETS[0].key;
+  const FIXED_MATERIAL = "resin" as const;
+  const FIXED_FINISH = "hand_painted" as const;
+
   const priceLabel = Math.round(FIGURINE_PRICE_KURUS / 100).toLocaleString("tr-TR");
 
   // Design templates ("Hazır Tasarım Desenleri") come from the single registry
@@ -399,10 +405,12 @@ function CustomCreateFlow() {
         if (!data) return;
         setPreviewId(qPreviewId);
         if (data.photoKey) setPhotoKey(data.photoKey);
-        // Restore the preview's style (e.g. "object" from the 2D design flow) so
-        // pricing + the persisted order match the product the customer designed,
-        // instead of defaulting to a figure style.
-        if (data.style) setSelectedStyle(data.style);
+        // Restore figure AND object kinds, but never Creative Lab ones — see
+        // isRestorableCreateStyle. Restoring "object" is what makes the 2D-design
+        // flow honest: its preview arrives here via ?previewId= and MUST land on
+        // the WhatsApp quote card (isObjectStyle), not on the fixed-price
+        // figurine checkout the customer never asked for.
+        if (data.style && isRestorableCreateStyle(data.style)) setSelectedStyle(data.style);
         if (data.status === "approved") {
           setApprovedImageUrl(data.selectedStyledImageUrl);
           setStep(2);
@@ -412,9 +420,16 @@ function CustomCreateFlow() {
   }, [searchParams]);
 
   // Restore from ?fromOrder= query param — "modify and reorder" flow from the
-  // track page. Pulls the prior order's photoKey + style + modifiers and
-  // prefills the form (size/material/finish are fixed — one product). Customer lands on step 0 with everything filled
+  // track page. Pulls the prior order's photoKey + size + style + modifiers
+  // and prefills the form. Customer lands on step 0 with everything filled
   // in and can change anything before submitting.
+  //
+  // Figure and object styles are restored; Creative Lab ones are not (see
+  // isRestorableCreateStyle). A prior keychain/fridge_magnet/lamp order has no
+  // size/finish match in this single-product flow, so restoring its style would
+  // let the customer fill in the whole form and only find out at submit that the
+  // server rejects it. An "object" reorder DOES restore, so it lands on the
+  // quote card rather than being silently re-sold as a fixed-price figurine.
   useEffect(() => {
     const qFromOrder = searchParams.get("fromOrder");
     if (!qFromOrder) return;
@@ -424,7 +439,7 @@ function CustomCreateFlow() {
         if (!data) return;
         if (data.photoKey) setPhotoKey(data.photoKey);
         if (data.photoPreviewUrl) setPhotoPreviewUrl(data.photoPreviewUrl);
-        if (data.style) setSelectedStyle(data.style);
+        if (data.style && isRestorableCreateStyle(data.style)) setSelectedStyle(data.style);
         if (Array.isArray(data.modifiers)) setSelectedModifiers(data.modifiers);
       })
       .catch(() => {});
@@ -754,6 +769,10 @@ function CustomCreateFlow() {
 
   const handleApprove = () => {
     if (loggedIn === null) return; // Auth check still loading
+    // Quote-only kinds never reach the fixed-price checkout. Step 2 hides this
+    // button for them, so this is the belt-and-braces half: a restored
+    // object/design preview must not be able to buy a ₺3.499 figurine.
+    if (isObjectStyle) return;
     // Q6: guest checkout — allow logged-out customers to proceed to step 3
     // where they enter email + name alongside the shipping form.
     setStep(3);
@@ -806,6 +825,14 @@ function CustomCreateFlow() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Quote-only kinds (object/design) have no list price — `itemPriceKurus`
+    // throws UnpricedSizeError for them server-side. Step 3 is unreachable for
+    // them, but refuse here too so no future JSX change can turn a 2D design
+    // into a fixed-price figurine order.
+    if (isObjectStyle) {
+      setError(d["create.customDesign.quoteNext"]);
+      return;
+    }
     if (!photoKey) {
       setError(d["create.photoRequired"]);
       return;
@@ -1068,36 +1095,6 @@ function CustomCreateFlow() {
               {/* Step 2 — Details, revealed only after a photo is engaged. */}
               {(photoKey || selectedFile) && (
                 <div className="space-y-8 animate-fade-in-up">
-              {/* The one product. No size / material / finish choice — a
-                  different size is quoted by hand over WhatsApp. */}
-              {isObjectStyle ? (
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-200">
-                  <h2 className="text-lg font-serif text-text-primary">{d["create.customDesign.title"]}</h2>
-                  <p className="mt-2 text-sm text-text-secondary">{d["create.customDesign.body"]}</p>
-                  <div className="mt-4">
-                    <WhatsAppButton
-                      message="Merhaba! Özel tasarım siparişi için fiyat almak istiyorum."
-                      label={d["create.customDesign.cta"]}
-                    />
-                  </div>
-                </Card>
-              ) : (
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-200">
-                  <h2 className="text-lg font-serif text-text-primary">{d["create.product.title"]}</h2>
-                  <p className="mt-1 text-sm text-text-secondary">{d["create.product.spec"]}</p>
-                  <p className="mt-3 text-2xl font-mono font-semibold text-green-500">₺{priceLabel}</p>
-                  <p className="mt-2 text-xs text-text-muted">{d["create.product.included"]}</p>
-                  <div className="mt-4 border-t border-bg-subtle pt-4">
-                    <p className="text-sm text-text-secondary mb-3">{d["create.product.customSize"]}</p>
-                    <WhatsAppButton
-                      variant="outline"
-                      message={`Merhaba! ${d["create.product.title"]} için farklı bir boyut istiyorum.`}
-                      label={d["create.product.customSizeCta"]}
-                    />
-                  </div>
-                </Card>
-              )}
-
               {/* Style Selection */}
               <div className="animate-fade-in-up delay-250">
                 <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.styleSelection"]}</h2>
@@ -1126,178 +1123,211 @@ function CustomCreateFlow() {
               </div>
 
 
-              {/* Style Modifiers */}
-              <div className="animate-fade-in-up delay-250">
-                <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.modifiers"]}</h2>
-                <div className="flex flex-wrap gap-2">
-                  {MODIFIERS.map((m) => {
-                    const active = selectedModifiers.includes(m.key);
-                    return (
-                      <button
-                        key={m.key}
-                        type="button"
-                        onClick={() => toggleModifier(m.key)}
-                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                          active
-                            ? "bg-green-500 text-white"
-                            : "bg-bg-surface border border-bg-subtle hover:border-green-500/30 text-text-primary"
-                        }`}
-                      >
-                        <img src={m.img} alt={m.label} className="w-6 h-6 rounded object-cover" />
-                        <span>{m.label}</span>
-                        {active && (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {selectedModifiers.length > 0 && (
-                  <p className="text-xs text-text-muted mt-2">
-                    {MODIFIERS.filter((m) => selectedModifiers.includes(m.key)).map((m) => m.desc).join(" · ")}
-                  </p>
-                )}
-              </div>
-
-              {/* Extra reference photos (multi-image-to-3d) — object/realistic
-                  only, shown once a primary photo is engaged. Optional. */}
-              {isMultiCapable && (photoKey || selectedFile) && (
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
-                  <div className="flex items-baseline justify-between gap-2 mb-1">
-                    <h2 className="text-lg font-serif text-text-primary">{d["create.multiPhoto.title"]}</h2>
-                    <span className="text-xs uppercase tracking-wide text-text-muted">{d["create.multiPhoto.optional"]}</span>
-                  </div>
-                  <p className="text-sm text-text-muted mb-4">{d["create.multiPhoto.subtitle"]}</p>
-                  <ExtraPhotos
-                    photos={extraPhotos}
-                    onChange={setExtraPhotos}
-                    max={3}
-                    onError={setError}
+              {/* One product since 2026-08-24 (15 cm, resin, hand-painted) —
+                  no size/material/finish axis. Object/design templates no
+                  longer self-checkout here; they go to a hand quote over
+                  WhatsApp instead (see isObjectStyle above). */}
+              {isObjectStyle ? (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-250">
+                  <h2 className="text-lg font-serif text-text-primary mb-2">{d["create.customDesign.title"]}</h2>
+                  <p className="text-sm text-text-secondary mb-4">{d["create.customDesign.body"]}</p>
+                  <WhatsAppButton
+                    message="Merhaba! Özel tasarım siparişi için fiyat almak istiyorum."
+                    label={d["create.customDesign.cta"]}
                   />
-                  {needsCompatAck && (
-                    <div className="mt-4 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-3">
-                      <div className="flex items-start gap-2">
-                        <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.73 4a2 2 0 00-3.46 0L3.33 16a2 2 0 001.74 3z" />
-                        </svg>
-                        <div className="text-sm text-amber-800">
-                          <p className="font-semibold">{d["create.multiPhoto.compat.title"]}</p>
-                          <p className="mt-0.5">{d["create.multiPhoto.compat.body"]}</p>
-                        </div>
-                      </div>
-                      <label className="mt-3 flex items-start gap-2 text-sm text-amber-900 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={multiAck}
-                          onChange={(e) => setMultiAck(e.target.checked)}
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-amber-400 text-green-600 focus:ring-green-500"
-                        />
-                        <span>{d["create.multiPhoto.compat.ack"]}</span>
-                      </label>
-                    </div>
-                  )}
                 </Card>
-              )}
-
-              {loggedIn === true && emailVerified === false && (
-                <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-3 animate-fade-in-up">
-                  <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                  <div className="text-sm text-amber-800">
-                    <p>{d["create.verifyEmailNotice"]}</p>
-                    <button
-                      type="button"
-                      onClick={resendVerification}
-                      disabled={resendState !== "idle"}
-                      className="mt-1 font-medium underline underline-offset-2 disabled:opacity-60"
-                    >
-                      {resendState === "sent"
-                        ? d["create.verifyEmailResent"]
-                        : resendState === "sending"
-                          ? d["common.loading"]
-                          : d["create.verifyEmailResend"]}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {needsPhoneVerify && (
-                <div className="mb-3 rounded-xl border border-indigo-300/40 bg-indigo-50/60 px-4 py-3 animate-fade-in-up">
-                  <p className="mb-2 text-sm text-indigo-900">{d["create.otp.notice"]}</p>
-                  {otpStage === "phone" ? (
-                    <div className="flex flex-wrap gap-2">
-                      <input
-                        type="tel"
-                        inputMode="tel"
-                        value={otpPhone}
-                        onChange={(e) => setOtpPhone(e.target.value)}
-                        placeholder="05XX XXX XX XX"
-                        className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm"
+              ) : (
+                <>
+                  {/* Product card */}
+                  <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-250">
+                    <h2 className="text-lg font-serif text-text-primary mb-1">{d["create.product.title"]}</h2>
+                    <p className="text-sm text-text-muted mb-3">{d["create.product.spec"]}</p>
+                    <p className="text-2xl font-mono font-bold text-green-500 mb-3">₺{priceLabel}</p>
+                    <p className="text-sm text-text-secondary mb-4">{d["create.product.included"]}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-bg-subtle bg-bg-surface px-4 py-3">
+                      <p className="text-sm text-text-secondary">{d["create.product.customSize"]}</p>
+                      <WhatsAppButton
+                        variant="outline"
+                        message={`Merhaba! ${d["create.product.title"]} için farklı bir boyut istiyorum.`}
+                        label={d["create.product.customSizeCta"]}
                       />
-                      <button
-                        type="button"
-                        onClick={sendOtp}
-                        disabled={otpBusy || otpPhone.trim().length < 5}
-                        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
-                      >
-                        {d["create.otp.send"]}
-                      </button>
                     </div>
-                  ) : (
+                  </Card>
+
+                  {/* Style Modifiers */}
+                  <div className="animate-fade-in-up delay-250">
+                    <h2 className="text-lg font-serif text-text-primary mb-4">{d["create.modifiers"]}</h2>
                     <div className="flex flex-wrap gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={otpCode}
-                        onChange={(e) => setOtpCode(e.target.value)}
-                        placeholder="••••••"
-                        className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm tracking-widest"
+                      {MODIFIERS.map((m) => {
+                        const active = selectedModifiers.includes(m.key);
+                        return (
+                          <button
+                            key={m.key}
+                            type="button"
+                            onClick={() => toggleModifier(m.key)}
+                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                              active
+                                ? "bg-green-500 text-white"
+                                : "bg-bg-surface border border-bg-subtle hover:border-green-500/30 text-text-primary"
+                            }`}
+                          >
+                            <img src={m.img} alt={m.label} className="w-6 h-6 rounded object-cover" />
+                            <span>{m.label}</span>
+                            {active && (
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedModifiers.length > 0 && (
+                      <p className="text-xs text-text-muted mt-2">
+                        {MODIFIERS.filter((m) => selectedModifiers.includes(m.key)).map((m) => m.desc).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Extra reference photos (multi-image-to-3d) — object/realistic
+                      only, shown once a primary photo is engaged. Optional. */}
+                  {isMultiCapable && (photoKey || selectedFile) && (
+                    <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <h2 className="text-lg font-serif text-text-primary">{d["create.multiPhoto.title"]}</h2>
+                        <span className="text-xs uppercase tracking-wide text-text-muted">{d["create.multiPhoto.optional"]}</span>
+                      </div>
+                      <p className="text-sm text-text-muted mb-4">{d["create.multiPhoto.subtitle"]}</p>
+                      <ExtraPhotos
+                        photos={extraPhotos}
+                        onChange={setExtraPhotos}
+                        max={3}
+                        onError={setError}
                       />
-                      <button
-                        type="button"
-                        onClick={verifyOtp}
-                        disabled={otpBusy || otpCode.trim().length < 4}
-                        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
-                      >
-                        {d["create.otp.verify"]}
-                      </button>
+                      {needsCompatAck && (
+                        <div className="mt-4 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-3">
+                          <div className="flex items-start gap-2">
+                            <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.73 4a2 2 0 00-3.46 0L3.33 16a2 2 0 001.74 3z" />
+                            </svg>
+                            <div className="text-sm text-amber-800">
+                              <p className="font-semibold">{d["create.multiPhoto.compat.title"]}</p>
+                              <p className="mt-0.5">{d["create.multiPhoto.compat.body"]}</p>
+                            </div>
+                          </div>
+                          <label className="mt-3 flex items-start gap-2 text-sm text-amber-900 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={multiAck}
+                              onChange={(e) => setMultiAck(e.target.checked)}
+                              className="mt-0.5 h-4 w-4 shrink-0 rounded border-amber-400 text-green-600 focus:ring-green-500"
+                            />
+                            <span>{d["create.multiPhoto.compat.ack"]}</span>
+                          </label>
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {loggedIn === true && emailVerified === false && (
+                    <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-3 animate-fade-in-up">
+                      <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      <div className="text-sm text-amber-800">
+                        <p>{d["create.verifyEmailNotice"]}</p>
+                        <button
+                          type="button"
+                          onClick={resendVerification}
+                          disabled={resendState !== "idle"}
+                          className="mt-1 font-medium underline underline-offset-2 disabled:opacity-60"
+                        >
+                          {resendState === "sent"
+                            ? d["create.verifyEmailResent"]
+                            : resendState === "sending"
+                              ? d["common.loading"]
+                              : d["create.verifyEmailResend"]}
+                        </button>
+                      </div>
                     </div>
                   )}
-                  {otpMsg && <p className="mt-2 text-xs text-indigo-700">{otpMsg}</p>}
-                </div>
-              )}
 
-              <Button
-                type="button"
-                onClick={handleGeneratePreview}
-                disabled={
-                  (!photoKey && !selectedFile) ||
-                  loggedIn === null ||
-                  (loggedIn === true && emailVerified === false) ||
-                  needsPhoneVerify ||
-                  (needsCompatAck && !multiAck)
-                }
-                loading={submitting}
-                size="lg"
-                fullWidth
-                className="animate-fade-in-up delay-400"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-                </svg>
-                {submitting ? d["common.loading"] : d["create.generatePreview"]}
-              </Button>
+                  {needsPhoneVerify && (
+                    <div className="mb-3 rounded-xl border border-indigo-300/40 bg-indigo-50/60 px-4 py-3 animate-fade-in-up">
+                      <p className="mb-2 text-sm text-indigo-900">{d["create.otp.notice"]}</p>
+                      {otpStage === "phone" ? (
+                        <div className="flex flex-wrap gap-2">
+                          <input
+                            type="tel"
+                            inputMode="tel"
+                            value={otpPhone}
+                            onChange={(e) => setOtpPhone(e.target.value)}
+                            placeholder="05XX XXX XX XX"
+                            className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={sendOtp}
+                            disabled={otpBusy || otpPhone.trim().length < 5}
+                            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+                          >
+                            {d["create.otp.send"]}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={otpCode}
+                            onChange={(e) => setOtpCode(e.target.value)}
+                            placeholder="••••••"
+                            className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm tracking-widest"
+                          />
+                          <button
+                            type="button"
+                            onClick={verifyOtp}
+                            disabled={otpBusy || otpCode.trim().length < 4}
+                            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+                          >
+                            {d["create.otp.verify"]}
+                          </button>
+                        </div>
+                      )}
+                      {otpMsg && <p className="mt-2 text-xs text-indigo-700">{otpMsg}</p>}
+                    </div>
+                  )}
 
-              {loggedIn === false && photoKey && (
-                <div className="flex items-center gap-2 justify-center text-sm text-amber-400 animate-fade-in-up delay-400">
-                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  {d["create.loginRequired"]}
-                </div>
+                  <Button
+                    type="button"
+                    onClick={handleGeneratePreview}
+                    disabled={
+                      (!photoKey && !selectedFile) ||
+                      loggedIn === null ||
+                      (loggedIn === true && emailVerified === false) ||
+                      needsPhoneVerify ||
+                      (needsCompatAck && !multiAck)
+                    }
+                    loading={submitting}
+                    size="lg"
+                    fullWidth
+                    className="animate-fade-in-up delay-400"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+                    </svg>
+                    {submitting ? d["common.loading"] : d["create.generatePreview"]}
+                  </Button>
+
+                  {loggedIn === false && photoKey && (
+                    <div className="flex items-center gap-2 justify-center text-sm text-amber-400 animate-fade-in-up delay-400">
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {d["create.loginRequired"]}
+                    </div>
+                  )}
+                </>
               )}
                 </div>
               )}
@@ -1393,27 +1423,38 @@ function CustomCreateFlow() {
           </div>
         )}
 
-        {/* Step 2: 3D Preview */}
+        {/* Step 2: Preview */}
         {step === 2 && approvedImageUrl && (
           <div className="animate-fade-in pb-6">
             <div className="text-center mb-4 sm:mb-6">
-              <h2 className="text-xl sm:text-2xl font-serif text-text-primary animate-fade-in-up">{d["create.preview.wow"]}</h2>
-              <p className="text-text-secondary mt-1 text-sm sm:text-base animate-fade-in-up delay-100">{d["create.preview.wow.sub"]}</p>
+              <h2 className="text-xl sm:text-2xl font-serif text-text-primary animate-fade-in-up">
+                {isObjectStyle ? d["design.previewTitle"] : d["create.preview.wow"]}
+              </h2>
+              {/* No subtitle for a quote-only preview — the quote card below
+                  carries the "what happens next" message; repeating it here
+                  just says the same thing twice. */}
+              {!isObjectStyle && (
+                <p className="text-text-secondary mt-1 text-sm sm:text-base animate-fade-in-up delay-100">
+                  {d["create.preview.wow.sub"]}
+                </p>
+              )}
             </div>
 
-            {/* Context pills */}
-            <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-4 sm:mb-6 animate-fade-in-up delay-200">
-              <span className="trust-pill">
-                {d["create.preview.sizeLabel"]}: {sizeDisplay(FIXED_SIZE, d)}
-              </span>
-              <span className="trust-pill">{d["material.resin"]}</span>
-              {/* Object/design prints are quoted by hand — no catalogue price. */}
-              {!isObjectStyle && (
+            {/* Context pills — the fixed-price figurine only. An object/design
+                preview (this is where the 2D-design flow lands via ?previewId=)
+                is quote-only since 2026-08-24, so showing the size/₺3.499 pills
+                here would advertise a price we do not sell it at. */}
+            {!isObjectStyle && (
+              <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-4 sm:mb-6 animate-fade-in-up delay-200">
+                <span className="trust-pill">
+                  {d["create.preview.sizeLabel"]}: {sizeDisplay(FIXED_SIZE, d)}
+                </span>
+                <span className="trust-pill">{d["material.resin"]}</span>
                 <span className="trust-pill">
                   {d["create.preview.priceLabel"]}: <span className="font-mono">₺{priceLabel}</span>
                 </span>
-              )}
-            </div>
+              </div>
+            )}
 
             <Card elevated className="overflow-hidden animate-fade-in-up delay-200">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1424,17 +1465,33 @@ function CustomCreateFlow() {
               />
             </Card>
 
+            {/* Quote card — an object/design preview stops here. There is no
+                "approve → pay" for it: the price is set by hand and confirmed
+                over WhatsApp, exactly as /nasil-calisir promises. */}
+            {isObjectStyle && (
+              <Card elevated padding="md" className="mt-4 sm:mt-8 overflow-hidden animate-fade-in-up delay-300">
+                <h3 className="text-lg font-serif text-text-primary mb-2">{d["create.customDesign.title"]}</h3>
+                <p className="text-sm text-text-secondary mb-4">{d["create.customDesign.quoteNext"]}</p>
+                <WhatsAppButton
+                  message="Merhaba! Özel tasarım siparişi için fiyat almak istiyorum."
+                  label={d["create.customDesign.cta"]}
+                />
+              </Card>
+            )}
+
             <div className="mt-4 sm:mt-8 flex flex-col sm:flex-row gap-3 sm:gap-4 animate-fade-in-up delay-300">
-              <Button
-                onClick={handleApprove}
-                size="lg"
-                className="flex-1"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                {d["create.preview.approve"]}
-              </Button>
+              {!isObjectStyle && (
+                <Button
+                  onClick={handleApprove}
+                  size="lg"
+                  className="flex-1"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  {d["create.preview.approve"]}
+                </Button>
+              )}
               <Button
                 onClick={() => setRevisionModalOpen(true)}
                 variant="amber"
@@ -1448,7 +1505,7 @@ function CustomCreateFlow() {
               </Button>
             </div>
 
-            {loggedIn === false && (
+            {loggedIn === false && !isObjectStyle && (
               <div className="mt-4 flex items-center gap-2 justify-center text-sm text-amber-400 animate-fade-in-up delay-400">
                 <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1514,452 +1571,434 @@ function CustomCreateFlow() {
               {d["create.step3.back"]}
             </button>
 
-            {/* An object / custom-design print has no catalogue price — its
-                cost depends on model complexity and print volume, so the whole
-                checkout is replaced by a hand quote over WhatsApp. */}
-            {isObjectStyle ? (
-              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up">
-                <h2 className="text-xl font-serif text-text-primary">{d["create.customDesign.title"]}</h2>
-                <p className="mt-2 text-sm text-text-secondary">{d["create.customDesign.body"]}</p>
-                <div className="mt-5">
-                  <WhatsAppButton
-                    message="Merhaba! Özel tasarım siparişi için fiyat almak istiyorum."
-                    label={d["create.customDesign.cta"]}
-                  />
-                </div>
-              </Card>
-            ) : (
-              <>
-              <div className="text-center mb-8">
-                <h1 className="text-3xl font-serif text-text-primary animate-fade-in-up">{d["create.shippingAddress"]}</h1>
-                <p className="mt-2 text-text-secondary animate-fade-in-up delay-100">{d["create.shippingNote"]}</p>
-              </div>
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-serif text-text-primary animate-fade-in-up">{d["create.shippingAddress"]}</h1>
+              <p className="mt-2 text-text-secondary animate-fade-in-up delay-100">{d["create.shippingNote"]}</p>
+            </div>
 
-              <form onSubmit={handleSubmit} className="space-y-8">
-                {/* Guest checkout (Q6) — captures the buyer's email + name
-                    without forcing a login. Post-purchase email lets them
-                    claim the account via a 30-day token. Logged-in customers
-                    don't see this card. */}
-                {!loggedIn && (
-                  <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-100">
-                    <h3 className="text-sm font-medium text-text-secondary mb-1">
-                      {d["create.guest.title"]}
-                    </h3>
-                    <p className="text-xs text-text-muted mb-4">
-                      {d["create.guest.subtitle"]}
-                    </p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <FormField label={d["create.guest.fullName"]} required>
-                        <Input
-                          type="text"
-                          required
-                          value={guestName}
-                          onChange={(e) => setGuestName(e.target.value)}
-                          autoComplete="name"
-                          minLength={2}
-                          maxLength={120}
-                        />
-                      </FormField>
-                      <FormField label={d["create.guest.email"]} required>
-                        <Input
-                          type="email"
-                          required
-                          value={guestEmail}
-                          onChange={(e) => setGuestEmail(e.target.value)}
-                          autoComplete="email"
-                        />
-                      </FormField>
-                    </div>
-                    <label className="flex items-start gap-2.5 text-xs text-text-muted mt-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={marketingConsent}
-                        onChange={(e) => setMarketingConsent(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-bg-subtle text-green-500 focus:ring-green-500"
-                      />
-                      <span>
-                        {d["register.marketingConsent"]}{" "}
-                        <Link href="/ticari-ileti" className="text-green-500 hover:text-green-400">
-                          {d["register.marketingConsentLink"]}
-                        </Link>
-                      </span>
-                    </label>
-                    <p className="text-xs text-text-muted mt-3">
-                      <Link
-                        href={`/login?redirect=${encodeURIComponent(
-                          previewId ? `/create?previewId=${previewId}` : "/create?path=photo"
-                        )}`}
-                        className="underline"
-                      >
-                        {d["create.guest.alreadyHaveAccount"]}
-                      </Link>
-                    </p>
-                  </Card>
-                )}
-
-                {/* Saved address dropdown (Q5) — only shown when the logged-in
-                    customer already has saved addresses; new customers see the
-                    empty form unchanged. */}
-                {savedAddresses.length > 0 && (
-                  <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-150">
-                    <FormField label={d["create.savedAddresses.label"]}>
-                      <Select
-                        defaultValue=""
-                        onChange={(e) => {
-                          if (e.target.value) applySavedAddress(e.target.value);
-                        }}
-                      >
-                        <option value="">
-                          {d["create.savedAddresses.placeholder"]}
-                        </option>
-                        {savedAddresses.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.label} — {a.ilce}, {a.il}
-                            {a.isDefault
-                              ? ` (${d["account.addresses.default"]})`
-                              : ""}
-                          </option>
-                        ))}
-                      </Select>
-                    </FormField>
-                    <p className="text-xs text-text-muted mt-2">
-                      {d["create.savedAddresses.hint"]}
-                    </p>
-                  </Card>
-                )}
-
-                {/* Form Card */}
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-200">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <FormField label={d["create.city"]} required>
-                      <Select
-                        required
-                        value={form.il}
-                        onChange={(e) => updateField("il", e.target.value)}
-                      >
-                        <option value="">{d["create.city.placeholder"]}</option>
-                        {PROVINCES.map((il) => (
-                          <option key={il} value={il}>{il}</option>
-                        ))}
-                      </Select>
-                    </FormField>
-                    <FormField label={d["create.district"]} required>
-                      {form.il ? (
-                        <Select
-                          required
-                          value={form.ilce}
-                          onChange={(e) => updateField("ilce", e.target.value)}
-                        >
-                          <option value="">{d["create.district.placeholder"]}</option>
-                          {districtOptions.map((district) => (
-                            <option key={district} value={district}>{district}</option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <div className="input-base opacity-60 cursor-not-allowed text-text-muted">
-                          {d["create.district.selectCity"]}
-                        </div>
-                      )}
-                    </FormField>
-                    <FormField
-                      label={d["create.neighborhood"]}
-                      required
-                      className="sm:col-span-2"
-                    >
-                      <SearchableSelect
-                        options={neighborhoodOptions}
-                        value={form.mahalle}
-                        onChange={(val) => setForm((prev) => ({ ...prev, mahalle: val }))}
-                        placeholder={d["create.neighborhood.placeholder"]}
-                        disabled={!form.ilce}
-                        disabledPlaceholder={d["create.neighborhood.selectDistrict"]}
-                        loading={neighborhoodLoading}
-                        loadingText={d["create.neighborhood.loading"]}
-                        required
-                      />
-                    </FormField>
-                    <FormField
-                      label={d["create.address"]}
-                      required
-                      className="sm:col-span-2"
-                    >
+            <form onSubmit={handleSubmit} className="space-y-8">
+              {/* Guest checkout (Q6) — captures the buyer's email + name
+                  without forcing a login. Post-purchase email lets them
+                  claim the account via a 30-day token. Logged-in customers
+                  don't see this card. */}
+              {!loggedIn && (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-100">
+                  <h3 className="text-sm font-medium text-text-secondary mb-1">
+                    {d["create.guest.title"]}
+                  </h3>
+                  <p className="text-xs text-text-muted mb-4">
+                    {d["create.guest.subtitle"]}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label={d["create.guest.fullName"]} required>
                       <Input
                         type="text"
                         required
-                        value={form.adres}
-                        onChange={(e) => updateField("adres", e.target.value)}
-                        placeholder={d["create.address.placeholder"]}
+                        value={guestName}
+                        onChange={(e) => setGuestName(e.target.value)}
+                        autoComplete="name"
+                        minLength={2}
+                        maxLength={120}
                       />
                     </FormField>
-                    <FormField label={d["create.postalCode"]} required>
+                    <FormField label={d["create.guest.email"]} required>
                       <Input
-                        type="text"
+                        type="email"
                         required
-                        maxLength={5}
-                        value={form.postaKodu}
-                        onChange={(e) => updateField("postaKodu", e.target.value)}
-                        placeholder={d["create.postalCode.placeholder"]}
-                      />
-                    </FormField>
-                    <FormField label={d["common.phone"]} required>
-                      <PhoneInput
-                        required
-                        country={telefonCountry}
-                        nationalNumber={telefonNational}
-                        onCountryChange={setTelefonCountry}
-                        onNationalNumberChange={setTelefonNational}
+                        value={guestEmail}
+                        onChange={(e) => setGuestEmail(e.target.value)}
+                        autoComplete="email"
                       />
                     </FormField>
                   </div>
-                </Card>
-
-                {/* Upsells (Q10) — opt-in add-ons for AOV lift. Each row shows
-                    the kuruş price computed from the same constants the server
-                    validates against. */}
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-225">
-                  <h3 className="text-sm font-medium text-text-secondary mb-3">
-                    {d["create.upsells.title"]}
-                  </h3>
-                  <p className="text-xs text-text-muted mb-4">
-                    {d["create.upsells.subtitle"]}
+                  <label className="flex items-start gap-2.5 text-xs text-text-muted mt-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={marketingConsent}
+                      onChange={(e) => setMarketingConsent(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-bg-subtle text-green-500 focus:ring-green-500"
+                    />
+                    <span>
+                      {d["register.marketingConsent"]}{" "}
+                      <Link href="/ticari-ileti" className="text-green-500 hover:text-green-400">
+                        {d["register.marketingConsentLink"]}
+                      </Link>
+                    </span>
+                  </label>
+                  <p className="text-xs text-text-muted mt-3">
+                    <Link
+                      href={`/login?redirect=${encodeURIComponent(
+                        previewId ? `/create?previewId=${previewId}` : "/create?path=photo"
+                      )}`}
+                      className="underline"
+                    >
+                      {d["create.guest.alreadyHaveAccount"]}
+                    </Link>
                   </p>
-                  <div className="space-y-2">
-                    {UPSELLS.map((u) => {
-                      const checked = selectedUpsells.includes(u.key);
-                      return (
+                </Card>
+              )}
+
+              {/* Saved address dropdown (Q5) — only shown when the logged-in
+                  customer already has saved addresses; new customers see the
+                  empty form unchanged. */}
+              {savedAddresses.length > 0 && (
+                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-150">
+                  <FormField label={d["create.savedAddresses.label"]}>
+                    <Select
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (e.target.value) applySavedAddress(e.target.value);
+                      }}
+                    >
+                      <option value="">
+                        {d["create.savedAddresses.placeholder"]}
+                      </option>
+                      {savedAddresses.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.label} — {a.ilce}, {a.il}
+                          {a.isDefault
+                            ? ` (${d["account.addresses.default"]})`
+                            : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <p className="text-xs text-text-muted mt-2">
+                    {d["create.savedAddresses.hint"]}
+                  </p>
+                </Card>
+              )}
+
+              {/* Form Card */}
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-200">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label={d["create.city"]} required>
+                    <Select
+                      required
+                      value={form.il}
+                      onChange={(e) => updateField("il", e.target.value)}
+                    >
+                      <option value="">{d["create.city.placeholder"]}</option>
+                      {PROVINCES.map((il) => (
+                        <option key={il} value={il}>{il}</option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label={d["create.district"]} required>
+                    {form.il ? (
+                      <Select
+                        required
+                        value={form.ilce}
+                        onChange={(e) => updateField("ilce", e.target.value)}
+                      >
+                        <option value="">{d["create.district.placeholder"]}</option>
+                        {districtOptions.map((district) => (
+                          <option key={district} value={district}>{district}</option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <div className="input-base opacity-60 cursor-not-allowed text-text-muted">
+                        {d["create.district.selectCity"]}
+                      </div>
+                    )}
+                  </FormField>
+                  <FormField
+                    label={d["create.neighborhood"]}
+                    required
+                    className="sm:col-span-2"
+                  >
+                    <SearchableSelect
+                      options={neighborhoodOptions}
+                      value={form.mahalle}
+                      onChange={(val) => setForm((prev) => ({ ...prev, mahalle: val }))}
+                      placeholder={d["create.neighborhood.placeholder"]}
+                      disabled={!form.ilce}
+                      disabledPlaceholder={d["create.neighborhood.selectDistrict"]}
+                      loading={neighborhoodLoading}
+                      loadingText={d["create.neighborhood.loading"]}
+                      required
+                    />
+                  </FormField>
+                  <FormField
+                    label={d["create.address"]}
+                    required
+                    className="sm:col-span-2"
+                  >
+                    <Input
+                      type="text"
+                      required
+                      value={form.adres}
+                      onChange={(e) => updateField("adres", e.target.value)}
+                      placeholder={d["create.address.placeholder"]}
+                    />
+                  </FormField>
+                  <FormField label={d["create.postalCode"]} required>
+                    <Input
+                      type="text"
+                      required
+                      maxLength={5}
+                      value={form.postaKodu}
+                      onChange={(e) => updateField("postaKodu", e.target.value)}
+                      placeholder={d["create.postalCode.placeholder"]}
+                    />
+                  </FormField>
+                  <FormField label={d["common.phone"]} required>
+                    <PhoneInput
+                      required
+                      country={telefonCountry}
+                      nationalNumber={telefonNational}
+                      onCountryChange={setTelefonCountry}
+                      onNationalNumberChange={setTelefonNational}
+                    />
+                  </FormField>
+                </div>
+              </Card>
+
+              {/* Upsells (Q10) — opt-in add-ons for AOV lift. Each row shows
+                  the kuruş price computed from the same constants the server
+                  validates against. */}
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-225">
+                <h3 className="text-sm font-medium text-text-secondary mb-3">
+                  {d["create.upsells.title"]}
+                </h3>
+                <p className="text-xs text-text-muted mb-4">
+                  {d["create.upsells.subtitle"]}
+                </p>
+                <div className="space-y-2">
+                  {UPSELLS.map((u) => {
+                    const checked = selectedUpsells.includes(u.key);
+                    return (
+                      <label
+                        key={u.key}
+                        className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
+                          checked
+                            ? "bg-green-500/10 border-green-500/30"
+                            : "bg-bg-surface border-bg-subtle hover:bg-bg-elevated"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleUpsell(u.key)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-text-primary">
+                              {d[`upsell.${u.key}.label` as keyof typeof d]}
+                            </span>
+                            <span className="text-sm text-text-secondary shrink-0">
+                              +₺{(u.priceKurus / 100).toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-muted mt-0.5">
+                            {d[`upsell.${u.key}.description` as keyof typeof d]}
+                          </p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                {upsellTotalKurus > 0 && (
+                  <p className="text-xs text-text-muted mt-3 text-right">
+                    {d["create.upsells.added"]} +₺
+                    {(upsellTotalKurus / 100).toFixed(2)}
+                  </p>
+                )}
+              </Card>
+
+              {/* Gift Card */}
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-250">
+                <h3 className="text-sm font-medium text-text-secondary mb-3">{d["giftCard.hasCard"]}</h3>
+                {gcApplied ? (
+                  <div className="flex items-center justify-between bg-green-500/10 rounded-lg p-3">
+                    <div>
+                      <p className="text-sm font-medium text-green-400">{d["giftCard.applied"]}</p>
+                      <p className="text-xs text-green-400 font-mono">{gcApplied.code}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setGcApplied(null); setGcCode(""); }}
+                      className="text-sm text-red-400 hover:text-red-300"
+                    >
+                      {d["giftCard.remove"]}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={gcCode}
+                      onChange={(e) => setGcCode(e.target.value.toUpperCase())}
+                      placeholder={d["giftCard.enterCode"]}
+                      className="flex-1 font-mono"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handleApplyGiftCard}
+                      disabled={!gcCode.trim()}
+                      loading={gcApplying}
+                      variant="secondary"
+                      className="whitespace-nowrap"
+                    >
+                      {gcApplying ? d["giftCard.applying"] : d["giftCard.apply"]}
+                    </Button>
+                  </div>
+                )}
+                {gcError && <p className="text-sm text-error mt-2">{gcError}</p>}
+              </Card>
+
+              {/* Payment Method Selector */}
+              {(() => {
+                const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
+                const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
+                const remaining = total - gcDiscount;
+                const isFullyCovered = remaining <= 0;
+                if (isFullyCovered) return null;
+                return (
+                  <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-275">
+                    <h3 className="text-sm font-medium text-text-secondary mb-3">{d["payment.method.title"]}</h3>
+                    <div className="space-y-2">
                         <label
-                          key={u.key}
-                          className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
-                            checked
-                              ? "bg-green-500/10 border-green-500/30"
-                              : "bg-bg-surface border-bg-subtle hover:bg-bg-elevated"
+                          className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition ${
+                            paymentMethod === "card"
+                              ? "border-green-500 bg-green-500/5"
+                              : "border-bg-subtle hover:border-green-400/50"
                           }`}
                         >
                           <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleUpsell(u.key)}
-                            className="mt-1"
+                            type="radio"
+                            name="paymentMethod"
+                            value="card"
+                            checked={paymentMethod === "card"}
+                            onChange={() => setPaymentMethod("card")}
+                            className="mt-1 accent-green-500"
                           />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-text-primary">
-                                {d[`upsell.${u.key}.label` as keyof typeof d]}
-                              </span>
-                              <span className="text-sm text-text-secondary shrink-0">
-                                +₺{(u.priceKurus / 100).toFixed(2)}
-                              </span>
-                            </div>
-                            <p className="text-xs text-text-muted mt-0.5">
-                              {d[`upsell.${u.key}.description` as keyof typeof d]}
-                            </p>
+                          <div className="flex-1">
+                            <p className="font-medium text-text-primary">{d["payment.method.card"]}</p>
+                            <p className="text-xs text-text-secondary mt-1">{d["payment.method.card.desc"]}</p>
                           </div>
                         </label>
-                      );
-                    })}
-                  </div>
-                  {upsellTotalKurus > 0 && (
-                    <p className="text-xs text-text-muted mt-3 text-right">
-                      {d["create.upsells.added"]} +₺
-                      {(upsellTotalKurus / 100).toFixed(2)}
-                    </p>
-                  )}
-                </Card>
-
-                {/* Gift Card */}
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-250">
-                  <h3 className="text-sm font-medium text-text-secondary mb-3">{d["giftCard.hasCard"]}</h3>
-                  {gcApplied ? (
-                    <div className="flex items-center justify-between bg-green-500/10 rounded-lg p-3">
-                      <div>
-                        <p className="text-sm font-medium text-green-400">{d["giftCard.applied"]}</p>
-                        <p className="text-xs text-green-400 font-mono">{gcApplied.code}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setGcApplied(null); setGcCode(""); }}
-                        className="text-sm text-red-400 hover:text-red-300"
-                      >
-                        {d["giftCard.remove"]}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <Input
-                        type="text"
-                        value={gcCode}
-                        onChange={(e) => setGcCode(e.target.value.toUpperCase())}
-                        placeholder={d["giftCard.enterCode"]}
-                        className="flex-1 font-mono"
-                      />
-                      <Button
-                        type="button"
-                        onClick={handleApplyGiftCard}
-                        disabled={!gcCode.trim()}
-                        loading={gcApplying}
-                        variant="secondary"
-                        className="whitespace-nowrap"
-                      >
-                        {gcApplying ? d["giftCard.applying"] : d["giftCard.apply"]}
-                      </Button>
-                    </div>
-                  )}
-                  {gcError && <p className="text-sm text-error mt-2">{gcError}</p>}
-                </Card>
-
-                {/* Payment Method Selector */}
-                {(() => {
-                  const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
-                  const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
-                  const remaining = total - gcDiscount;
-                  const isFullyCovered = remaining <= 0;
-                  if (isFullyCovered) return null;
-                  return (
-                    <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-275">
-                      <h3 className="text-sm font-medium text-text-secondary mb-3">{d["payment.method.title"]}</h3>
-                      <div className="space-y-2">
-                          <label
-                            className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition ${
-                              paymentMethod === "card"
-                                ? "border-green-500 bg-green-500/5"
-                                : "border-bg-subtle hover:border-green-400/50"
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="paymentMethod"
-                              value="card"
-                              checked={paymentMethod === "card"}
-                              onChange={() => setPaymentMethod("card")}
-                              className="mt-1 accent-green-500"
-                            />
-                            <div className="flex-1">
-                              <p className="font-medium text-text-primary">{d["payment.method.card"]}</p>
-                              <p className="text-xs text-text-secondary mt-1">{d["payment.method.card.desc"]}</p>
-                            </div>
-                          </label>
-                          <label
-                            className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition ${
-                              paymentMethod === "bank_transfer"
-                                ? "border-green-500 bg-green-500/5"
-                                : "border-bg-subtle hover:border-green-400/50"
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="paymentMethod"
-                              value="bank_transfer"
-                              checked={paymentMethod === "bank_transfer"}
-                              onChange={() => setPaymentMethod("bank_transfer")}
-                              className="mt-1 accent-green-500"
-                            />
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-medium text-text-primary">{d["payment.method.bankTransfer"]}</p>
-                                <span className="inline-flex items-center text-xs font-semibold text-green-600 bg-green-500/10 px-2 py-0.5 rounded-full">
-                                  {d["payment.method.bankTransferBadge"]}
-                                </span>
-                              </div>
-                              <p className="text-xs text-text-secondary mt-1">{d["payment.method.bankTransfer.desc"]}</p>
-                            </div>
-                          </label>
-                      </div>
-                    </Card>
-                  );
-                })()}
-
-                {/* Order Summary Card */}
-                <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-text-secondary">{d["create.product.title"]} · {d["create.product.spec"]}</span>
-                      <span className="font-mono font-bold text-text-primary">₺{priceLabel}</span>
-                    </div>
-                    {(() => {
-                      const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
-                      const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
-                      const afterGc = total - gcDiscount;
-                      const havaleDiscount =
-                        paymentMethod === "bank_transfer" && afterGc > 0
-                          ? calculateHavaleDiscount(afterGc)
-                          : 0;
-                      const finalTotal = afterGc - havaleDiscount;
-                      const isFullyCovered = afterGc <= 0;
-                      return (
-                        <>
-                          {gcApplied && (
-                            <div className="flex items-center justify-between mb-2 text-green-400">
-                              <span className="text-sm">{d["giftCard.discount"]}</span>
-                              <span className="font-mono font-bold">-₺{(gcDiscount / 100).toLocaleString("tr-TR")}</span>
-                            </div>
-                          )}
-                          {havaleDiscount > 0 && (
-                            <div className="flex items-center justify-between mb-2 text-green-400">
-                              <span className="text-sm">{d["payment.havaleDiscount"]}</span>
-                              <span className="font-mono font-bold">-₺{(havaleDiscount / 100).toLocaleString("tr-TR")}</span>
-                            </div>
-                          )}
-                          <div className="border-t border-bg-subtle pt-2 flex items-center justify-between">
-                            <span className="text-sm font-medium text-text-primary">{d["payment.total"]}</span>
-                            <span className="text-xl font-mono font-bold text-green-500">
-                              {isFullyCovered
-                                ? d["giftCard.fullyCovered"]
-                                : `₺${(finalTotal / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                            </span>
-                          </div>
-                        </>
-                      );
-                    })()}
-                </Card>
-
-                {error && (
-                  <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
-                    <svg className="w-5 h-5 text-error-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p className="text-sm text-error-700">{error}</p>
-                  </div>
-                )}
-
-                <ContentConsent
-                  onChange={setContentConsentOk}
-                  className="mb-4 space-y-2 text-left"
-                />
-
-                {(() => {
-                  const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
-                  const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
-                  const showLock = !isFullyCovered;
-                  return (
-                    <Button
-                      type="submit"
-                      loading={submitting}
-                      disabled={!contentConsentOk}
-                      size="lg"
-                      fullWidth
-                      className="inline-flex items-center justify-center gap-2"
-                    >
-                      {showLock && (
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
+                        <label
+                          className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition ${
+                            paymentMethod === "bank_transfer"
+                              ? "border-green-500 bg-green-500/5"
+                              : "border-bg-subtle hover:border-green-400/50"
+                          }`}
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 11c-1.105 0-2 .9-2 2v3a2 2 0 002 2 2 2 0 002-2v-3c0-1.1-.895-2-2-2zm6-2V8a6 6 0 10-12 0v1a3 3 0 00-3 3v8a3 3 0 003 3h12a3 3 0 003-3v-8a3 3 0 00-3-3zm-9-1a3 3 0 016 0v1H9V8z"
+                          <input
+                            type="radio"
+                            name="paymentMethod"
+                            value="bank_transfer"
+                            checked={paymentMethod === "bank_transfer"}
+                            onChange={() => setPaymentMethod("bank_transfer")}
+                            className="mt-1 accent-green-500"
                           />
-                        </svg>
-                      )}
-                      {submitting ? d["create.submitting"] : isFullyCovered ? d["giftCard.fullyCovered"] : d["create.submitButton"]}
-                    </Button>
-                  );
-                })()}
-              </form>
-              </>
-            )}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium text-text-primary">{d["payment.method.bankTransfer"]}</p>
+                              <span className="inline-flex items-center text-xs font-semibold text-green-600 bg-green-500/10 px-2 py-0.5 rounded-full">
+                                {d["payment.method.bankTransferBadge"]}
+                              </span>
+                            </div>
+                            <p className="text-xs text-text-secondary mt-1">{d["payment.method.bankTransfer.desc"]}</p>
+                          </div>
+                        </label>
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* Order Summary Card */}
+              <Card elevated padding="md" className="overflow-hidden animate-fade-in-up delay-300">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-text-secondary">{sizeDisplay(FIXED_SIZE, d)} · {d["material.resin"]}</span>
+                    <span className="font-mono font-bold text-text-primary">₺{priceLabel}</span>
+                  </div>
+                  {(() => {
+                    const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
+                    const gcDiscount = gcApplied ? Math.min(gcApplied.balanceKurus, total) : 0;
+                    const afterGc = total - gcDiscount;
+                    const havaleDiscount =
+                      paymentMethod === "bank_transfer" && afterGc > 0
+                        ? calculateHavaleDiscount(afterGc)
+                        : 0;
+                    const finalTotal = afterGc - havaleDiscount;
+                    const isFullyCovered = afterGc <= 0;
+                    return (
+                      <>
+                        {gcApplied && (
+                          <div className="flex items-center justify-between mb-2 text-green-400">
+                            <span className="text-sm">{d["giftCard.discount"]}</span>
+                            <span className="font-mono font-bold">-₺{(gcDiscount / 100).toLocaleString("tr-TR")}</span>
+                          </div>
+                        )}
+                        {havaleDiscount > 0 && (
+                          <div className="flex items-center justify-between mb-2 text-green-400">
+                            <span className="text-sm">{d["payment.havaleDiscount"]}</span>
+                            <span className="font-mono font-bold">-₺{(havaleDiscount / 100).toLocaleString("tr-TR")}</span>
+                          </div>
+                        )}
+                        <div className="border-t border-bg-subtle pt-2 flex items-center justify-between">
+                          <span className="text-sm font-medium text-text-primary">{d["payment.total"]}</span>
+                          <span className="text-xl font-mono font-bold text-green-500">
+                            {isFullyCovered
+                              ? d["giftCard.fullyCovered"]
+                              : `₺${(finalTotal / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
+              </Card>
+
+              {error && (
+                <div className="bg-error-50 border-l-4 border-error-500 rounded-r-xl p-4 flex items-start gap-3">
+                  <svg className="w-5 h-5 text-error-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm text-error-700">{error}</p>
+                </div>
+              )}
+
+              <ContentConsent
+                onChange={setContentConsentOk}
+                className="mb-4 space-y-2 text-left"
+              />
+
+              {(() => {
+                const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
+                const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
+                const showLock = !isFullyCovered;
+                return (
+                  <Button
+                    type="submit"
+                    loading={submitting}
+                    disabled={!contentConsentOk}
+                    size="lg"
+                    fullWidth
+                    className="inline-flex items-center justify-center gap-2"
+                  >
+                    {showLock && (
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 11c-1.105 0-2 .9-2 2v3a2 2 0 002 2 2 2 0 002-2v-3c0-1.1-.895-2-2-2zm6-2V8a6 6 0 10-12 0v1a3 3 0 00-3 3v8a3 3 0 003 3h12a3 3 0 003-3v-8a3 3 0 00-3-3zm-9-1a3 3 0 016 0v1H9V8z"
+                        />
+                      </svg>
+                    )}
+                    {submitting ? d["create.submitting"] : isFullyCovered ? d["giftCard.fullyCovered"] : d["create.submitButton"]}
+                  </Button>
+                );
+              })()}
+            </form>
           </div>
         )}
       </div>

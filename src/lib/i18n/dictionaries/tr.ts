@@ -169,7 +169,7 @@ const tr: Dictionary = {
   // Homepage production-led hero
   "hero.create.eyebrow": "FOTOĞRAFTAN FİGÜRE",
   "hero.create.title": "Fotoğrafından kendi 3D figürünü oluştur",
-  "hero.create.sub": "Yükle — yapay zekâ saniyeler içinde tasarlasın; biz reçineyle basıp profesyonel el boyamasıyla kapına gönderelim.",
+  "hero.create.sub": "Yükle — yapay zekâ saniyeler içinde tasarlasın; biz reçineyle basıp profesyonelce elle boyayıp kapına gönderelim.",
   "hero.create.step1": "Fotoğrafını yükle",
   "hero.create.step2": "AI figürünü tasarlar",
   "hero.create.step3": "Baskı + el boyaması kapında",
@@ -1200,7 +1200,7 @@ const tr: Dictionary = {
   "email.confirmation.step2":
     "Ekibimiz modeli kalite kontrolünden geçirir",
   "email.confirmation.step3": "Figürününüz reçine baskı ile üretilir",
-  "email.confirmation.step4": "Atölyemizde profesyonelce elle boyanır ve size gönderilir",
+  "email.confirmation.step4": "Profesyonelce elle boyanıp size gönderilir",
   "email.confirmation.trackPrompt":
     "Siparişinizi istediğiniz zaman takip edin:",
   "email.confirmation.trackButton": "Siparişi Takip Et",

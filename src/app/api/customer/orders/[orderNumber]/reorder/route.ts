@@ -87,13 +87,24 @@ export async function POST(
 
   // This route reconstructs a CUSTOM figurine draft. Marketplace orders have no
   // figurineSize/photo — to re-buy, the customer goes back to the product page.
-  // A bespoke size ("17,5 cm") has no catalogue price — itemPriceKurus would
-  // throw, and before the guard existed it silently priced the reorder at ₺0.
-  // Those orders are re-quoted by hand, so they are not self-service reorderable.
+  //
+  // Creative Lab products (keychain / fridge magnet / lamp) are flat-priced and
+  // store `figurineSize` as a neutral "orta". Since 2026-08-24 "orta" is a
+  // retired tier and no longer priceable, so an unconditional isPriceableSize
+  // guard here would wrongly block every Creative Lab reorder — itemPriceKurus
+  // returns before it even looks at the size for those kinds.
+  const reorderKind = priceKindForStyle(order.style);
+  const isFlatPriced =
+    reorderKind === "keychain" ||
+    reorderKind === "fridge_magnet" ||
+    reorderKind === "lamp";
+
+  // A retired-tier or bespoke figurine has no catalogue price — itemPriceKurus
+  // would throw, and before the guard existed it silently priced the reorder at
+  // ₺0. Those are re-quoted by hand, so they are not self-service reorderable.
   if (
     order.orderType === "marketplace" ||
-    !order.figurineSize ||
-    !isPriceableSize(order.figurineSize)
+    (!isFlatPriced && (!order.figurineSize || !isPriceableSize(order.figurineSize)))
   ) {
     return NextResponse.json(
       { error: d["api.order.notReorderable"] },
@@ -108,8 +119,11 @@ export async function POST(
   // figurinePriceKurus() charged every reorder as a figurine (up to ~9x on a
   // keychain, whose figurineSize was stored as a neutral "orta").
   const amountKurus = itemPriceKurus({
-    kind: priceKindForStyle(order.style),
-    size: order.figurineSize,
+    kind: reorderKind,
+    // Nullable only on the flat-priced path — the guard above already rejected a
+    // figure/object reorder without a priceable size, and itemPriceKurus ignores
+    // `size` entirely for keychain / magnet / lamp.
+    size: order.figurineSize ?? undefined,
     material: order.material,
     finish: order.finish,
   });
@@ -118,8 +132,7 @@ export async function POST(
   // so the draft MUST also carry needsPainting/paintingPriceKurus — otherwise the
   // promoted order keeps needsPainting=false, ships unpainted, and the painting
   // money is wrongly credited to the manufacturer. Mirror /api/orders exactly.
-  const needsPainting =
-    priceKindForStyle(order.style) === "figure" && finishNeedsPainter(order.finish);
+  const needsPainting = reorderKind === "figure" && finishNeedsPainter(order.finish);
   const paintingPriceKurus = needsPainting
     ? paintingPortionKurus(order.finish)
     : 0;

@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { createOrderSchema } from "../src/lib/validators/order";
 
 /**
  * Static contract check between the client and the App Router API.
@@ -174,6 +175,39 @@ check("every fetch method is exported by its route handler", () => {
     )
     .join("\n");
   assert.strictEqual(mismatched.length, 0, `\n  Method mismatches (405):\n${detail}\n`);
+});
+
+// ---------------------------------------------------------------------------
+// Order-schema contract: one product, one material, one size (2026-08-24).
+// ---------------------------------------------------------------------------
+
+check("sipariş doğrulama: yalnızca reçine ve standart boyut kabul edilir", () => {
+  const base = {
+    photoKey: "uploads/x.webp",
+    figurineSize: "standart",
+    style: "realistic",
+    material: "resin",
+    finish: "hand_painted",
+    shippingAddress: {
+      adres: "Test Mahallesi 1",
+      mahalle: "Test Mahallesi",
+      il: "Ankara",
+      ilce: "Etimesgut",
+      postaKodu: "06790",
+      telefon: "+905551112233",
+    },
+  };
+  assert.equal(createOrderSchema("tr").safeParse(base).success, true);
+  // Filament artık satılmıyor.
+  assert.equal(
+    createOrderSchema("tr").safeParse({ ...base, material: "filament" }).success,
+    false
+  );
+  // Emekli tier'lar reddedilir.
+  assert.equal(
+    createOrderSchema("tr").safeParse({ ...base, figurineSize: "orta" }).success,
+    false
+  );
 });
 
 console.log(

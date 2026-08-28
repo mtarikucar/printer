@@ -49,8 +49,8 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
   const d = getDictionary(locale);
   return z.object({
     photoKey: z.string().min(1, d["validator.photo.required"]),
-    // The public flow still sells the three catalogue tiers — their prices come
-    // from the tier table. Bespoke sizes are taken over WhatsApp instead.
+    // One sellable size (`standart`, 15 cm). A bespoke measurement is quoted by
+    // hand over WhatsApp, so it never reaches this schema.
     figurineSize: z.enum(SIZE_PRESET_KEYS, {
       error: d["validator.size.invalid"],
     }),
@@ -58,7 +58,9 @@ export function createOrderSchema(locale: Locale = defaultLocale) {
       .string()
       .refine(isValidTemplateSlug, "invalid template")
       .default(DEFAULT_TEMPLATE_SLUG),
-    material: z.enum(["resin", "filament"]).default("resin"),
+    // One product, one material: 15 cm SLA resin. Filament is no longer sold.
+    // Existing orders keep whatever they stored; this only gates NEW orders.
+    material: z.enum(["resin"]).default("resin"),
     finish: z
       .enum([
         "paintable_kit",

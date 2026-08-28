@@ -11,11 +11,13 @@ import { startAnalyticsCleanupWorker } from "../src/lib/queue/workers/analytics-
 import { startAssignmentSlaWorker } from "../src/lib/queue/workers/assignment-sla.worker";
 import { startModelGenerationWorker } from "../src/lib/queue/workers/model-generation.worker";
 import { startMeshProcessingWorker } from "../src/lib/queue/workers/mesh-processing.worker";
+import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-approval-sla.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
   getAnalyticsCleanupQueue,
   getAssignmentSlaQueue,
+  getModelApprovalSlaQueue,
 } from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
@@ -33,6 +35,9 @@ const assignmentSlaWorker = startAssignmentSlaWorker();
 // processing (python, CPU-bound, concurrency 1).
 const modelGenerationWorker = startModelGenerationWorker();
 const meshProcessingWorker = startMeshProcessingWorker();
+// A paid order parked in `awaiting_customer_approval` prints nothing until
+// somebody decides; this sweeper is that somebody.
+const modelApprovalSlaWorker = startModelApprovalSlaWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -64,6 +69,14 @@ getAssignmentSlaQueue().upsertJobScheduler(
   { name: "assignment-sla" }
 );
 
+// 48h auto-approve (only a clean `pass`), 72h customer reminder, 7d admin
+// escalation. DB-backed scheduler so it survives a Redis restart.
+getModelApprovalSlaQueue().upsertJobScheduler(
+  "model-approval-sla-6h",
+  { every: 6 * 3600 * 1000 },
+  { name: "model-approval-sla" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -76,6 +89,7 @@ console.log("  - analytics-cleanup (repeatable: every 24h)");
 console.log("  - assignment-sla (repeatable: every 1h)");
 console.log("  - model-generation (concurrency: 4, meshy)");
 console.log("  - mesh-processing (concurrency: 1, python)");
+console.log("  - model-approval-sla (repeatable: every 6h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -91,6 +105,7 @@ async function shutdown() {
     assignmentSlaWorker.close(),
     modelGenerationWorker.close(),
     meshProcessingWorker.close(),
+    modelApprovalSlaWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

@@ -40,6 +40,16 @@ function appUrl(): string {
 }
 
 /**
+ * The customer-facing address of an already-opened approval. The SLA sweeper
+ * re-sends the request mail for a token that was minted days ago, and must not
+ * call `openModelApproval()` to get the link — that would insert a second
+ * "shown to the customer" evidence row for a model shown only once.
+ */
+export function modelApprovalUrl(token: string): string {
+  return `${appUrl()}/onay/${token}`;
+}
+
+/**
  * Record that a specific model was shown to the customer, and mint (or reuse)
  * the capability token for /onay/<token>.
  */
@@ -87,7 +97,7 @@ export async function openModelApproval(
 
   return {
     token,
-    approvalUrl: `${appUrl()}/onay/${token}`,
+    approvalUrl: modelApprovalUrl(token),
     revision,
     turntableUrl:
       order.modelTurntableUrl ??

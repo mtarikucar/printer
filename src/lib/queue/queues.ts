@@ -128,6 +128,7 @@ let scoringEvaluationsCleanupQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let analyticsCleanupQueue: Queue | null = null;
 let assignmentSlaQueue: Queue | null = null;
+let modelApprovalSlaQueue: Queue | null = null;
 
 export function getPreviewGenerationQueue(): Queue {
   if (!previewGenerationQueue) {
@@ -248,6 +249,27 @@ export function getAssignmentSlaQueue(): Queue {
     });
   }
   return assignmentSlaQueue;
+}
+
+/**
+ * Six-hourly sweep over orders parked in `awaiting_customer_approval`. A paid
+ * order waiting there is printing nothing, and until this queue existed nobody
+ * was watching it.
+ */
+export function getModelApprovalSlaQueue(): Queue {
+  if (!modelApprovalSlaQueue) {
+    modelApprovalSlaQueue = new Queue("model-approval-sla", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // One attempt on purpose: the sweep is idempotent and runs again in six
+        // hours, so a retry storm would only re-scan the same orders.
+        attempts: 1,
+        removeOnComplete: { count: 20 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return modelApprovalSlaQueue;
 }
 
 export function getAnalyticsCleanupQueue(): Queue {

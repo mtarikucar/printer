@@ -1157,6 +1157,11 @@ export const orderModelApprovals = pgTable(
     turntableKey: text("turntable_key"),
     channel: text("channel").notNull().default("email"),
     shownAt: timestamp("shown_at").notNull().defaultNow(),
+    // Set by the approval SLA sweeper when it re-sends the request email. It is
+    // the only record that a reminder went out: the email queue drops completed
+    // jobs, so without this column every 6-hourly sweep would mail the customer
+    // again for as long as the order sits undecided.
+    reminderSentAt: timestamp("reminder_sent_at"),
     decidedAt: timestamp("decided_at"),
     decision: modelApprovalDecisionEnum("decision"),
     note: text("note"),

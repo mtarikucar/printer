@@ -4,7 +4,7 @@ const tr: Dictionary = {
   // Meta
   "meta.title": "Figurunica — Fotoğrafın, Figürün",
   "meta.description":
-    "Fotoğraf yükle, biz onu 3D baskılı figürine dönüştürelim. Boyama kiti ile birlikte kapına gelsin.",
+    "Fotoğrafını yükle, biz onu 15 cm SLA reçine figürine dönüştürelim. Atölyemizde profesyonel el boyamasıyla boyanır, sergilemeye hazır kapına gelir.",
 
   // Common
   "common.figurineStudio": "Figurunica",
@@ -78,9 +78,9 @@ const tr: Dictionary = {
   // Landing - Hero
   "landing.hero.title": "Fotoğrafın, Figürün",
   "landing.hero.subtitle":
-    "Bir fotoğraf yükle. Biz onu 3D baskılı figürine dönüştürelim ve boyama kiti ile birlikte kapına gönderelim.",
+    "Bir fotoğraf yükle. Biz onu 3D baskılı figürine dönüştürelim, profesyonel el boyamasıyla boyayıp kapına gönderelim.",
   "landing.hero.tagline":
-    "Figürin + boyama kiti + ücretsiz kargo. Abonelik yok.",
+    "Figürin + profesyonel el boyaması + ücretsiz kargo. Abonelik yok.",
 
   // Landing - How It Works
   "landing.howItWorks.title": "Nasıl Çalışır?",
@@ -90,24 +90,24 @@ const tr: Dictionary = {
   "landing.howItWorks.step2.title": "Figürünü Oluşturalım",
   "landing.howItWorks.step2.description":
     "Yapay zekamız detaylı bir 3D model oluşturur, reçine baskı ile üretilir.",
-  "landing.howItWorks.step3.title": "Boya ve Sergile",
+  "landing.howItWorks.step3.title": "Kutudan Çıkar, Sergile",
   "landing.howItWorks.step3.description":
-    "Kitin astarlanmış figürin, boyalar, fırçalar ve adım adım rehber ile gelir.",
+    "Figürin atölyemizde elle boyanmış hâlde, kraft hediye kutusunda ve hatıra karekoduyla gelir.",
 
   // Landing - Pricing
   "landing.pricing.title": "Fiyatlandırma",
   "landing.pricing.subtitle": "Tek seferlik ödeme. Her şey dahil.",
   "landing.pricing.select": "Seç",
-  "landing.pricing.feature1": "3D baskı reçine figürin",
-  "landing.pricing.feature2": "Astarlanmış, boyamaya hazır",
-  "landing.pricing.feature3": "6 akrilik boya",
-  "landing.pricing.feature4": "2 fırça (orta + ince)",
-  "landing.pricing.feature5": "Boyama rehberi",
+  "landing.pricing.feature1": "15 cm SLA reçine figürin",
+  "landing.pricing.feature2": "Profesyonel el boyaması dahil",
+  "landing.pricing.feature3": "Sergilemeye hazır teslim",
+  "landing.pricing.feature4": "Kraft hediye kutusu",
+  "landing.pricing.feature5": "Hatıra karekodu kartı",
   "landing.pricing.feature6": "Ücretsiz kargo (Yurtiçi)",
 
   // Landing - Footer
   "landing.footer.rights": "Tüm hakları saklıdır.",
-  "landing.footer.description": "Fotoğraflarınızı boyama kiti ile birlikte özel 3D baskılı figürinlere dönüştürün.",
+  "landing.footer.description": "Fotoğraflarınızı profesyonel el boyamalı, özel 3D baskılı figürinlere dönüştürün.",
   "landing.footer.product": "Ürün",
   "landing.footer.support": "Destek",
   "landing.footer.legal": "Yasal",
@@ -168,10 +168,10 @@ const tr: Dictionary = {
   // Homepage production-led hero
   "hero.create.eyebrow": "FOTOĞRAFTAN FİGÜRE",
   "hero.create.title": "Fotoğrafından kendi 3D figürünü oluştur",
-  "hero.create.sub": "Yükle — yapay zekâ saniyeler içinde tasarlasın; biz reçineyle basıp boyama kitiyle kapına gönderelim.",
+  "hero.create.sub": "Yükle — yapay zekâ saniyeler içinde tasarlasın; biz reçineyle basıp profesyonel el boyamasıyla kapına gönderelim.",
   "hero.create.step1": "Fotoğrafını yükle",
   "hero.create.step2": "AI figürünü tasarlar",
-  "hero.create.step3": "Baskı + boyama kiti kapında",
+  "hero.create.step3": "Baskı + el boyaması kapında",
   "hero.create.aiBadge": "Yapay Zekâ",
   "hero.create.cta": "Kendi Figürünü Oluştur",
   "hero.create.browse": "Hazır ürünlere göz at",
@@ -1158,7 +1158,7 @@ const tr: Dictionary = {
   "email.confirmation.step2":
     "Ekibimiz modeli kalite kontrolünden geçirir",
   "email.confirmation.step3": "Figürününüz reçine baskı ile üretilir",
-  "email.confirmation.step4": "Boyama kiti ile birlikte size gönderilir",
+  "email.confirmation.step4": "Atölyemizde profesyonelce elle boyanır ve size gönderilir",
   "email.confirmation.trackPrompt":
     "Siparişinizi istediğiniz zaman takip edin:",
   "email.confirmation.trackButton": "Siparişi Takip Et",
@@ -1178,7 +1178,7 @@ const tr: Dictionary = {
     "Figürününüz yola çıktı! #{orderNumber}",
   "email.shipped.heading": "Harika haber, {customerName}!",
   "email.shipped.body":
-    "Özel figürününüz ve boyama kitiniz kargoya verildi!",
+    "Özel figürününüz profesyonel el boyamasıyla tamamlandı ve kargoya verildi!",
   "email.shipped.orderNumber": "Sipariş Numarası:",
   "email.shipped.trackingNumber": "Kargo Takip Numarası:",
   "email.shipped.kitContents": "Kit İçeriği",
@@ -1217,7 +1217,7 @@ const tr: Dictionary = {
   // Email - Delivered
   "email.delivered.subject": "Figürününüz teslim edildi! #{orderNumber}",
   "email.delivered.heading": "Merhaba {customerName}!",
-  "email.delivered.body": "Figürününüz teslim edildi! Boyamayı keyifle yapmanızı umuyoruz. İyi boyamalar!",
+  "email.delivered.body": "Figürününüz teslim edildi! Sergilerken keyfini çıkarmanızı dileriz.",
   "email.delivered.shareCta": "Sonucu beğendin mi? Figürünü aşağıdaki sipariş sayfandan topluluk galerimizde paylaşabilirsin.",
   "email.delivered.orderNumber": "Sipariş Numarası:",
   "email.delivered.trackButton": "Siparişi Takip Et",
@@ -1236,23 +1236,25 @@ const tr: Dictionary = {
 
   // Landing - Hero Güven Badge'leri
   "landing.hero.trust1": "\u00DCcretsiz kargo",
-  "landing.hero.trust2": "Boyama kiti dahil",
-  "landing.hero.trust3": "\u20BA999'dan ba\u015Flayan",
+  "landing.hero.trust2": "Profesyonel el boyamas\u0131",
+  "landing.hero.trust3": "\u20BA3.499 tek fiyat",
   "landing.hero.trust4": "Bask\u0131 \u00F6ncesi \u00F6nizleme",
 
   // Landing - Stil Vitrini
 
   // Landing - Kutuda Neler Var
   "landing.box.title": "Kutuda Neler Var?",
-  "landing.box.subtitle": "Figürinini hayata geçirmek için ihtiyacın olan her şey",
+  "landing.box.subtitle": "Kutuyu açtığın anda sergilemeye hazır",
   "landing.box.figurine": "Reçine Figürin",
-  "landing.box.figurine.desc": "Yüksek detaylı 3D baskı reçine figürin, astarlanmış ve boyamaya hazır.",
-  "landing.box.paints": "6 Akrilik Boya",
-  "landing.box.paints.desc": "Figürinin tasarımına uygun özenle seçilmiş renk paleti.",
-  "landing.box.brushes": "2 Fırça",
-  "landing.box.brushes.desc": "Geniş yüzeyler için orta, detaylar için ince uçlu.",
-  "landing.box.guide": "Boyama Rehberi",
-  "landing.box.guide.desc": "Adım adım talimatlar, yeni başlayanlar için bile.",
+  "landing.box.figurine.desc": "15 cm, yüksek detaylı SLA reçine baskı; atölyemizde elle boyanmış.",
+  // NOT: paints/brushes/guide anahtar adları eski boyama-kiti dönemindendir;
+  // anahtar adları bileşen referanslarını kırmamak için korunuyor, içerik güncel.
+  "landing.box.paints": "Profesyonel El Boyaması",
+  "landing.box.paints.desc": "Figürin atölyemizde tek tek elle boyanır; sergilemeye hazır çıkar.",
+  "landing.box.brushes": "Hatıra Karekodu",
+  "landing.box.brushes.desc": "Kutudaki kartın karekodunu okut, figürünün yolculuğunu gör.",
+  "landing.box.guide": "Sana Özel Üretim",
+  "landing.box.guide.desc": "Her figür siparişin üzerine üretilir; seri üretim yok.",
   "landing.box.packaging": "Özenli Paketleme",
   "landing.box.packaging.desc": "Her şeyi güvenle koruyan özel tasarım kutu.",
   "landing.box.shipping": "Ücretsiz Kargo",
@@ -1262,7 +1264,7 @@ const tr: Dictionary = {
   "landing.useCases.title": "Her An İçin Mükemmel Hediye",
   "landing.useCases.subtitle": "Asla unutamayacakları, gerçekten kişisel bir hediye",
   "landing.useCases.birthday": "Doğum Günü Hediyesi",
-  "landing.useCases.birthday.desc": "Boyayıp sergileyebilecekleri eşsiz bir figürin.",
+  "landing.useCases.birthday.desc": "Rafına koyabilecekleri, elle boyanmış eşsiz bir figürin.",
   "landing.useCases.love": "Sevgiliye Özel",
   "landing.useCases.love.desc": "Birlikte çekilmiş favori fotoğrafınızı hatıraya dönüştürün.",
   "landing.useCases.pet": "Evcil Hayvan Figürini",
@@ -1280,10 +1282,10 @@ const tr: Dictionary = {
   "landing.faq.a1": "Sipariş verdikten sonra figürininiz genellikle 5-7 iş günü içinde hazır olur. Kargo yurtiçinde ek 2-3 gün sürer.",
   "landing.faq.q2": "Hangi tür fotoğraflar en iyi sonucu verir?",
   "landing.faq.a2": "Net, iyi aydınlatılmış ve yüzün görünebildiği fotoğraflar en iyi sonucu verir. Arka planı sade, önden çekilmiş kareler idealdir.",
-  "landing.faq.q3": "Figürinler ne kadar büyük?",
-  "landing.faq.a3": "Standart üç ölçü sunuyoruz: Küçük (~6 cm), Orta (~8 cm) ve Büyük (~12 cm) — en popüleri Orta. Farklı bir ölçü isterseniz WhatsApp'tan özel sipariş verebilirsiniz.",
-  "landing.faq.q4": "Boyamak zor mu?",
-  "landing.faq.a4": "Hiç de değil! Her kitte yeni başlayanlar için tasarlanmış adım adım rehber bulunur. Figürin önceden astarlanmış gelir, boya kolayca tutunur.",
+  "landing.faq.q3": "Figürler tek ölçüde mi?",
+  "landing.faq.a3": "Standart figürümüz 15 cm. Farklı bir ölçü isterseniz WhatsApp'tan özel sipariş verebilirsiniz.",
+  "landing.faq.q4": "Figürü ben mi boyuyorum?",
+  "landing.faq.a4": "Hayır. Figürünüz atölyemizde profesyonel olarak el ile boyanır ve sergilemeye hazır gelir.",
   "landing.faq.q5": "Kargo gerçekten ücretsiz mi?",
   "landing.faq.a5": "Evet, Türkiye içi kargo tamamen ücretsiz. Şu an yalnızca Türkiye içine gönderim yapıyoruz; yurt dışı teslimat talepleriniz için info@figurunica.com adresinden bize ulaşabilirsiniz.",
   "landing.faq.q6": "Figürinler hangi malzemeden yapılıyor?",
@@ -1308,7 +1310,7 @@ const tr: Dictionary = {
 
   // Landing - Son CTA
   "landing.cta.title": "Fotoğrafını Figürine Dönüştür",
-  "landing.cta.subtitle": "₺899'dan başlayan fiyatlarla. Boyama kiti dahil.",
+  "landing.cta.subtitle": "Tek fiyat ₺3.499. Profesyonel el boyaması ve ücretsiz kargo dahil.",
   "landing.cta.button": "Hemen Başla",
 
   // Gallery Modal - Before/After
@@ -1948,7 +1950,7 @@ const tr: Dictionary = {
 
   "landing.fig.sta.05.titleLead": "El",
   "landing.fig.sta.05.titleItalic": "işçiliği.",
-  "landing.fig.sta.05.desc": "Destekler sökülür, yüzeyler zımparalanır, elle primer'lanıp kontrol edilir — boyamaya hazır gelir. Seri üretim değil, sana özel.",
+  "landing.fig.sta.05.desc": "Destekler sökülür, yüzeyler zımparalanır, elle primer'lanır ve profesyonelce boyanır — sergilemeye hazır gelir. Seri üretim değil, sana özel.",
   "landing.fig.sta.05.caption": "qc · el işçiliği",
 
   "landing.fig.sta.06.titleLead": "Özenle",

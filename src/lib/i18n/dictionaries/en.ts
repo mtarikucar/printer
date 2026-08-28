@@ -2,7 +2,7 @@ const en = {
   // Meta
   "meta.title": "Figurunica — Your Photo, Your Figurine",
   "meta.description":
-    "Upload a photo, we'll turn it into a 3D printed figurine. Delivered to your door with a paint kit.",
+    "Upload a photo, we'll turn it into a 15 cm SLA resin figurine. Hand-painted by our studio and delivered display-ready to your door.",
 
   // Common
   "common.figurineStudio": "Figurunica",
@@ -76,9 +76,9 @@ const en = {
   // Landing - Hero
   "landing.hero.title": "Your Photo, Your Figurine",
   "landing.hero.subtitle":
-    "Upload a photo. We'll turn it into a 3D printed figurine and deliver it to your door with a paint kit.",
+    "Upload a photo. We'll turn it into a 3D printed figurine, hand-paint it professionally and deliver it to your door.",
   "landing.hero.tagline":
-    "Figurine + paint kit + free shipping. No subscription.",
+    "Figurine + professional hand-painting + free shipping. No subscription.",
 
   // Landing - How It Works
   "landing.howItWorks.title": "How It Works",
@@ -88,24 +88,24 @@ const en = {
   "landing.howItWorks.step2.title": "We Create Your Figurine",
   "landing.howItWorks.step2.description":
     "Our AI creates a detailed 3D model, produced with resin printing.",
-  "landing.howItWorks.step3.title": "Paint & Display",
+  "landing.howItWorks.step3.title": "Unbox & Display",
   "landing.howItWorks.step3.description":
-    "Your kit comes with a primed figurine, paints, brushes, and a step-by-step guide.",
+    "Your figurine arrives hand-painted, in a kraft gift box, with its keepsake QR card.",
 
   // Landing - Pricing
   "landing.pricing.title": "Pricing",
   "landing.pricing.subtitle": "One-time payment. Everything included.",
   "landing.pricing.select": "Select",
-  "landing.pricing.feature1": "3D printed resin figurine",
-  "landing.pricing.feature2": "Primed, ready to paint",
-  "landing.pricing.feature3": "6 acrylic paints",
-  "landing.pricing.feature4": "2 brushes (medium + fine)",
-  "landing.pricing.feature5": "Painting guide",
+  "landing.pricing.feature1": "15 cm SLA resin figurine",
+  "landing.pricing.feature2": "Professional hand-painting included",
+  "landing.pricing.feature3": "Delivered display-ready",
+  "landing.pricing.feature4": "Kraft gift box",
+  "landing.pricing.feature5": "Keepsake QR card",
   "landing.pricing.feature6": "Free shipping (Domestic)",
 
   // Landing - Footer
   "landing.footer.rights": "All rights reserved.",
-  "landing.footer.description": "Turn your photos into custom 3D printed figurines with a paint kit.",
+  "landing.footer.description": "Turn your photos into custom, hand-painted 3D printed figurines.",
   "landing.footer.product": "Product",
   "landing.footer.support": "Support",
   "landing.footer.legal": "Legal",
@@ -166,10 +166,10 @@ const en = {
   // Homepage production-led hero
   "hero.create.eyebrow": "PHOTO TO FIGURINE",
   "hero.create.title": "Turn your photo into your own 3D figurine",
-  "hero.create.sub": "Upload — let AI design it in seconds; we resin-print it and ship it with a paint kit.",
+  "hero.create.sub": "Upload — let AI design it in seconds; we resin-print it, hand-paint it and ship it to you.",
   "hero.create.step1": "Upload your photo",
   "hero.create.step2": "AI designs your figurine",
-  "hero.create.step3": "Print + paint kit at your door",
+  "hero.create.step3": "Print + hand-painting at your door",
   "hero.create.aiBadge": "AI",
   "hero.create.cta": "Create Your Figurine",
   "hero.create.browse": "Browse ready-made products",
@@ -1154,7 +1154,7 @@ const en = {
     "Our team quality-checks the model",
   "email.confirmation.step3": "Your figurine is produced with resin printing",
   "email.confirmation.step4":
-    "It's shipped to you with the paint kit",
+    "It is hand-painted by our studio and shipped to you",
   "email.confirmation.trackPrompt": "Track your order anytime:",
   "email.confirmation.trackButton": "Track Order",
   "email.confirmation.estimate": "Estimated delivery: 7-10 business days",
@@ -1173,7 +1173,7 @@ const en = {
     "Your figurine is on its way! #{orderNumber}",
   "email.shipped.heading": "Great news, {customerName}!",
   "email.shipped.body":
-    "Your custom figurine and paint kit have been shipped!",
+    "Your custom figurine is hand-painted and on its way!",
   "email.shipped.orderNumber": "Order Number:",
   "email.shipped.trackingNumber": "Tracking Number:",
   "email.shipped.kitContents": "Kit Contents",
@@ -1211,7 +1211,7 @@ const en = {
   // Email - Delivered
   "email.delivered.subject": "Your figurine has been delivered! #{orderNumber}",
   "email.delivered.heading": "Hello {customerName}!",
-  "email.delivered.body": "Your figurine has been delivered! We hope you enjoy painting it. Happy painting!",
+  "email.delivered.body": "Your figurine has been delivered! We hope you enjoy displaying it.",
   "email.delivered.shareCta": "Happy with how it turned out? You can share your figurine in our community gallery from your order page below.",
   "email.delivered.orderNumber": "Order Number:",
   "email.delivered.trackButton": "Track Order",
@@ -1230,23 +1230,25 @@ const en = {
 
   // Landing - Hero Trust Badges
   "landing.hero.trust1": "Free shipping",
-  "landing.hero.trust2": "Paint kit included",
-  "landing.hero.trust3": "From \u20BA999",
+  "landing.hero.trust2": "Professional hand-painting",
+  "landing.hero.trust3": "\u20BA3,499 flat",
   "landing.hero.trust4": "Preview before print",
 
   // Landing - Style Showcase
 
   // Landing - What's in the Box
   "landing.box.title": "What's in the Box?",
-  "landing.box.subtitle": "Everything you need to bring your figurine to life",
+  "landing.box.subtitle": "Display-ready the moment you open the box",
   "landing.box.figurine": "Resin Figurine",
-  "landing.box.figurine.desc": "High-detail 3D printed resin figurine, primed and ready to paint.",
-  "landing.box.paints": "6 Acrylic Paints",
-  "landing.box.paints.desc": "Curated color palette matched to your figurine's design.",
-  "landing.box.brushes": "2 Brushes",
-  "landing.box.brushes.desc": "Medium for base coats, fine-tip for details.",
-  "landing.box.guide": "Painting Guide",
-  "landing.box.guide.desc": "Step-by-step instructions, even for first-timers.",
+  "landing.box.figurine.desc": "15 cm, high-detail SLA resin print, hand-painted in our studio.",
+  // NOTE: the paints/brushes/guide key names date from the paint-kit era; the
+  // names are kept so component references do not break, the copy is current.
+  "landing.box.paints": "Professional Hand-Painting",
+  "landing.box.paints.desc": "Painted one by one in our studio; it arrives display-ready.",
+  "landing.box.brushes": "Keepsake QR",
+  "landing.box.brushes.desc": "Scan the card in the box to follow your figurine's journey.",
+  "landing.box.guide": "Made for You",
+  "landing.box.guide.desc": "Every figurine is produced for your order. Never mass-produced.",
   "landing.box.packaging": "Premium Packaging",
   "landing.box.packaging.desc": "Protective box designed to keep everything safe.",
   "landing.box.shipping": "Free Shipping",
@@ -1256,7 +1258,7 @@ const en = {
   "landing.useCases.title": "The Perfect Gift for Every Moment",
   "landing.useCases.subtitle": "A truly personal gift they'll never forget",
   "landing.useCases.birthday": "Birthday Gift",
-  "landing.useCases.birthday.desc": "A one-of-a-kind figurine they can paint and display.",
+  "landing.useCases.birthday.desc": "A one-of-a-kind, hand-painted figurine for their shelf.",
   "landing.useCases.love": "For Your Special Someone",
   "landing.useCases.love.desc": "Turn your favorite photo together into a keepsake.",
   "landing.useCases.pet": "Pet Figurine",
@@ -1274,10 +1276,10 @@ const en = {
   "landing.faq.a1": "After you place your order, your figurine is typically ready within 5-7 business days. Shipping takes an additional 2-3 days domestically.",
   "landing.faq.q2": "What kind of photos work best?",
   "landing.faq.a2": "Clear, well-lit photos with a visible face work best. Front-facing shots with minimal background clutter give the most accurate results.",
-  "landing.faq.q3": "How big are the figurines?",
-  "landing.faq.a3": "We offer three standard sizes: Small (~6 cm), Medium (~8 cm) and Large (~12 cm) — Medium is the most popular. For a different size, order via WhatsApp.",
-  "landing.faq.q4": "Is painting difficult?",
-  "landing.faq.a4": "Not at all! Each kit includes a step-by-step guide designed for beginners. The figurine comes pre-primed, so paint goes on smoothly.",
+  "landing.faq.q3": "Do figurines come in one size?",
+  "landing.faq.a3": "Our standard figurine is 15 cm. For a different size, place a bespoke order via WhatsApp.",
+  "landing.faq.q4": "Do I paint the figurine myself?",
+  "landing.faq.a4": "No. Your figurine is hand-painted by professionals in our studio and arrives display-ready.",
   "landing.faq.q5": "Is shipping really free?",
   "landing.faq.a5": "Yes, shipping within Turkey is completely free. We currently deliver only within Turkey; for international requests you can reach us at info@figurunica.com.",
   "landing.faq.q6": "What material are figurines made from?",
@@ -1302,7 +1304,7 @@ const en = {
 
   // Landing - Final CTA
   "landing.cta.title": "Turn Your Photo Into a Figurine",
-  "landing.cta.subtitle": "Starting from ₺899. Paint kit included.",
+  "landing.cta.subtitle": "One flat price: ₺3,499. Professional hand-painting and free shipping included.",
   "landing.cta.button": "Get Started Now",
 
   // Gallery Modal - Before/After
@@ -1942,7 +1944,7 @@ const en = {
 
   "landing.fig.sta.05.titleLead": "Finished",
   "landing.fig.sta.05.titleItalic": "by hand.",
-  "landing.fig.sta.05.desc": "Supports removed, surfaces sanded, primed and QC'd by hand — it arrives ready to paint. Not mass-produced, made for you.",
+  "landing.fig.sta.05.desc": "Supports removed, surfaces sanded, primed and painted by hand — it arrives display-ready. Not mass-produced, made for you.",
   "landing.fig.sta.05.caption": "qc · hand finish",
 
   "landing.fig.sta.06.titleLead": "Boxed with",

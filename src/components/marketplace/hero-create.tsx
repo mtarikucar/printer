@@ -158,7 +158,7 @@ export function HeroCreate() {
         <p className="mx-auto mt-3 max-w-xl text-sm text-text-secondary md:text-base">
           {t(
             "hero.create.sub",
-            "Yükle — yapay zekâ saniyeler içinde tasarlasın; biz reçineyle basıp boyama kitiyle kapına gönderelim."
+            "Yükle — yapay zekâ saniyeler içinde tasarlasın; biz reçineyle basıp profesyonel el boyamasıyla kapına gönderelim."
           )}
         </p>
 

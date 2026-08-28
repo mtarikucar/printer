@@ -17,7 +17,7 @@ export default async function PrivacyPage() {
           {isTr ? "Gizlilik Politikası" : "Privacy Policy"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 31 Mart 2026" : "Last updated: March 31, 2026"}
+          {isTr ? "Son güncelleme: 28 Ağustos 2026" : "Last updated: August 28, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -60,7 +60,8 @@ export default async function PrivacyPage() {
               <h3>2.3 Fotoğraflar ve Görseller</h3>
               <ul>
                 <li>Figürin oluşturmak için yüklediğiniz fotoğraflar</li>
-                <li>AI tarafından oluşturulan 3D model önizlemeleri</li>
+                <li>Fotoğrafınızdan üretilen stilize 2D görseller</li>
+                <li>AI tarafından oluşturulan 3D model önizlemeleri ve bunların 360° önizleme videosu</li>
                 <li>Galeriye paylaşmayı tercih ettiğiniz figürin görselleri</li>
               </ul>
 
@@ -98,31 +99,64 @@ export default async function PrivacyPage() {
                 <li>Sözleşmenin kurulması veya ifası için gerekli olması (sipariş ve teslimat)</li>
                 <li>Kanunlarda açıkça öngörülmesi (vergi mevzuatı, tüketici hakları)</li>
                 <li>Meşru menfaatlerimiz için zorunlu olması (hizmet iyileştirme, güvenlik)</li>
-                <li>Açık rızanız (pazarlama iletişimleri, galeri paylaşımları)</li>
+                <li>
+                  Açık rızanız (pazarlama iletişimleri, galeri paylaşımları ve fotoğrafınızın stilize görsel ile 3D model
+                  üretimi amacıyla yurt dışındaki hizmet sağlayıcılara aktarılması — KVKK m.5/1 ve m.9)
+                </li>
               </ul>
 
               <h2>5. Verilerin Aktarılması</h2>
               <p>Kişisel verileriniz aşağıdaki taraflarla paylaşılabilir:</p>
               <ul>
                 <li><strong>Ödeme işleme:</strong> PayTR (PCI DSS uyumlu ödeme altyapısı)</li>
-                <li><strong>Bulut depolama:</strong> Amazon Web Services (AWS S3 — fotoğraf ve 3D model depolama)</li>
-                <li><strong>E-posta hizmeti:</strong> Resend (sipariş bildirimleri)</li>
-                <li><strong>Yapay zeka hizmeti:</strong> fal.ai (fotoğraftan görsel oluşturma — yalnızca fotoğraflar işlenir)</li>
+                <li>
+                  <strong>Depolama:</strong> Fotoğraflarınız, stilize görseller ve 3D model dosyaları üçüncü taraf bir
+                  bulut depolama hizmetinde değil, <strong>Figurunica&apos;nın kendi sunucusunda</strong> saklanır.
+                </li>
+                <li><strong>E-posta gönderimi:</strong> Sipariş bildirimleri, kullandığımız SMTP e-posta sağlayıcısı üzerinden gönderilir.</li>
+                <li>
+                  <strong>Yapay zeka — 2D görsel:</strong> fal.ai (yüklediğiniz fotoğraftan stilize görsel üretimi —
+                  yalnızca fotoğraf işlenir; ad, adres, telefon veya ödeme bilgisi aktarılmaz)
+                </li>
+                <li>
+                  <strong>Yapay zeka — 3D model:</strong> Meshy (onayladığınız stilize görselden baskıya hazır 3D model
+                  üretimi — yalnızca görsel işlenir)
+                </li>
                 <li><strong>Kargo şirketleri:</strong> Teslimat için gerekli adres ve iletişim bilgileri</li>
                 <li><strong>Üretici firmalar:</strong> Üretim için gerekli sipariş detayları</li>
                 <li><strong>Yasal makamlar:</strong> Kanuni zorunluluk halinde yetkili kurumlara</li>
               </ul>
               <p>
-                Verileriniz yurt dışında bulunan hizmet sağlayıcılara aktarılabilir. Bu aktarımlar, KVKK&apos;nın 9. maddesi
-                kapsamında gerekli önlemler alınarak gerçekleştirilir.
+                fal.ai ve Meshy Türkiye dışında yerleşiktir. Fotoğrafınız <strong>stilize görsel üretimi</strong> için
+                fal.ai&apos;ye, fotoğraftan üretilen ve sizin seçtiğiniz stilize görsel ise <strong>3D model üretimi</strong>
+                için Meshy&apos;ye aktarılır. Bu yurt dışı aktarım, KVKK&apos;nın 9. maddesi kapsamında, sipariş sırasında
+                işaretlediğiniz onay kutusuyla verdiğiniz <strong>açık rızanıza</strong> dayanır ve yalnızca siparişinizin
+                üretimi amacıyla yapılır. Rızanızı vermezseniz kişiye özel figürin üretimi teknik olarak sağlanamaz;
+                rızanızı her zaman info@figurunica.com adresine yazarak geri alabilirsiniz — geri alma, o ana kadar
+                gerçekleşmiş aktarımları etkilemez.
               </p>
 
               <h2>6. Verilerin Saklanma Süresi</h2>
               <ul>
                 <li><strong>Hesap bilgileri:</strong> Hesap aktif olduğu sürece</li>
                 <li><strong>Sipariş bilgileri:</strong> Yasal zorunluluklar gereği en az 10 yıl (Türk Ticaret Kanunu)</li>
-                <li><strong>Fotoğraflar:</strong> Sipariş tamamlandıktan 90 gün sonra otomatik silinir (galeriye paylaştığınız görseller hariç)</li>
-                <li><strong>3D modeller:</strong> Sipariş tamamlandıktan 90 gün sonra otomatik silinir</li>
+                <li>
+                  <strong>Siparişe dönüşmeyen önizlemeler:</strong> Yüklediğiniz fotoğraflar ve üretilen 3D model dosyası,
+                  önizlemenin oluşturulmasından <strong>30 gün</strong> sonra otomatik olarak silinir.
+                </li>
+                <li>
+                  <strong>Stilize 2D görseller:</strong> Yapay zekanın ürettiği stilize görseller şu anda otomatik silme
+                  kapsamında değildir; sunucumuzda kalır ve talebiniz üzerine silinir.
+                </li>
+                <li>
+                  <strong>Siparişe bağlı fotoğraflar ve 3D modeller:</strong> Otomatik olarak silinmez; garanti, yeniden
+                  üretim ve olası uyuşmazlıklar için sipariş kaydı saklandığı sürece tutulur. Silinmesini KVKK&apos;nın
+                  11. maddesi kapsamında her zaman talep edebilirsiniz (bkz. 9. bölüm).
+                </li>
+                <li>
+                  <strong>Galeri görselleri:</strong> Galeriye paylaşmayı seçtiğiniz görseller, kaldırılmasını talep
+                  edene kadar yayında kalır.
+                </li>
                 <li><strong>Ödeme kayıtları:</strong> 10 yıl (vergi mevzuatı)</li>
                 <li><strong>Teknik loglar:</strong> 6 ay</li>
               </ul>
@@ -218,7 +252,8 @@ export default async function PrivacyPage() {
               <h3>2.3 Photos and Images</h3>
               <ul>
                 <li>Photos you upload for figurine creation</li>
-                <li>AI-generated 3D model previews</li>
+                <li>Stylised 2D images generated from your photo</li>
+                <li>AI-generated 3D model previews and their 360° preview video</li>
                 <li>Figurine images you choose to share in the gallery</li>
               </ul>
 
@@ -256,31 +291,63 @@ export default async function PrivacyPage() {
                 <li>Necessity for the performance of a contract (orders and delivery)</li>
                 <li>Legal obligations (tax legislation, consumer rights)</li>
                 <li>Legitimate interests (service improvement, security)</li>
-                <li>Your explicit consent (marketing communications, gallery sharing)</li>
+                <li>
+                  Your explicit consent (marketing communications, gallery sharing, and the transfer of your photo abroad
+                  for stylised image and 3D model generation)
+                </li>
               </ul>
 
               <h2>5. Data Sharing</h2>
               <p>Your personal data may be shared with the following parties:</p>
               <ul>
                 <li><strong>Payment processing:</strong> PayTR (PCI DSS compliant payment infrastructure)</li>
-                <li><strong>Cloud storage:</strong> Amazon Web Services (AWS S3 — photo and 3D model storage)</li>
-                <li><strong>Email service:</strong> Resend (order notifications)</li>
-                <li><strong>AI service:</strong> fal.ai (image generation from photos — only photos are processed)</li>
+                <li>
+                  <strong>Storage:</strong> Your photos, stylised images and 3D model files are stored on
+                  <strong> Figurunica&apos;s own server</strong>, not with a third-party cloud storage service.
+                </li>
+                <li><strong>Email delivery:</strong> Order notifications are sent through the SMTP email provider we use.</li>
+                <li>
+                  <strong>AI — 2D image:</strong> fal.ai (stylised image generation from the photo you upload — only the
+                  photo is processed; no name, address, phone or payment data is transferred)
+                </li>
+                <li>
+                  <strong>AI — 3D model:</strong> Meshy (print-ready 3D model generation from the stylised image you
+                  selected — only the image is processed)
+                </li>
                 <li><strong>Shipping companies:</strong> Address and contact details required for delivery</li>
                 <li><strong>Manufacturers:</strong> Order details necessary for production</li>
                 <li><strong>Legal authorities:</strong> When required by law</li>
               </ul>
               <p>
-                Your data may be transferred to service providers located outside of Turkey.
-                Such transfers are carried out with appropriate safeguards as required by applicable law.
+                fal.ai and Meshy are established outside Turkey. Your photo is transferred to fal.ai for
+                <strong>stylised image generation</strong>, and the stylised image you selected is transferred to Meshy for
+                <strong>3D model generation</strong>. This cross-border transfer relies on the <strong>explicit consent</strong>
+                you give via the checkbox at checkout (Article 9 of the KVKK) and is made solely to produce your order.
+                Without that consent, custom figurine production cannot technically be provided; you may withdraw your
+                consent at any time by writing to info@figurunica.com — withdrawal does not affect transfers already made.
               </p>
 
               <h2>6. Data Retention Period</h2>
               <ul>
                 <li><strong>Account information:</strong> As long as the account remains active</li>
                 <li><strong>Order information:</strong> Minimum 10 years as required by Turkish Commercial Code</li>
-                <li><strong>Photos:</strong> Automatically deleted 90 days after order completion (except images shared to the gallery)</li>
-                <li><strong>3D models:</strong> Automatically deleted 90 days after order completion</li>
+                <li>
+                  <strong>Previews that did not become an order:</strong> The photos you uploaded and the generated 3D
+                  model file are automatically deleted <strong>30 days</strong> after the preview was created.
+                </li>
+                <li>
+                  <strong>Stylised 2D images:</strong> AI-generated stylised images are currently not covered by automatic
+                  deletion; they remain on our server and are deleted upon your request.
+                </li>
+                <li>
+                  <strong>Photos and 3D models linked to an order:</strong> Not deleted automatically; they are kept for as
+                  long as the order record is retained, for warranty, reproduction and potential disputes. You may request
+                  their deletion at any time under Article 11 of the KVKK (see section 9).
+                </li>
+                <li>
+                  <strong>Gallery images:</strong> Images you choose to share in the gallery remain published until you
+                  ask for them to be removed.
+                </li>
                 <li><strong>Payment records:</strong> 10 years (tax legislation)</li>
                 <li><strong>Technical logs:</strong> 6 months</li>
               </ul>

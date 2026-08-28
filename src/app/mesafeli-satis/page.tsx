@@ -17,7 +17,7 @@ export default async function MesafeliSatisPage() {
           {isTr ? "Mesafeli Satış Sözleşmesi" : "Distance Sales Agreement"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 24 Ağustos 2026" : "Last updated: August 24, 2026"}
+          {isTr ? "Son güncelleme: 28 Ağustos 2026" : "Last updated: August 28, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -67,7 +67,9 @@ export default async function MesafeliSatisPage() {
                   sipariş oluşturulmadan önce Alıcı&apos;ya yazılı olarak bildirilir.
                 </li>
                 <li>
-                  Her sipariş için baskı öncesi dijital önizleme sunulur; üretim, Alıcı önizlemeyi onaylayana kadar başlamaz.
+                  Her sipariş için baskı öncesi dijital önizleme sunulur; üretim, Alıcı önizlemeyi onaylayana kadar
+                  başlamaz. Kişiye özel figürinlerde onaya sunulan önizleme, basılacak 3D modelin
+                  <strong> 360° dönen kısa videosudur</strong>; onayın işleyişi aşağıdaki 3.1 bölümünde açıklanmıştır.
                 </li>
                 <li>
                   Ürünün temel nitelikleri, adedi ve KDV dahil satış fiyatı, sipariş sayfasında ve sipariş özetinde gösterilir.
@@ -79,6 +81,44 @@ export default async function MesafeliSatisPage() {
                 <li>
                   Satıcı, fiyatları önceden bildirimde bulunmaksızın güncelleme hakkını saklı tutar; değişiklikler onaylanmış
                   mevcut siparişleri etkilemez.
+                </li>
+              </ul>
+
+              <h3>3.1 Baskı Öncesi 3D Önizleme ve Onay</h3>
+              <ul>
+                <li>
+                  <strong>Onaya sunulan içerik:</strong> Kişiye özel siparişlerde, Alıcı&apos;nın seçtiği görselden
+                  baskıya hazır bir 3D model üretilir ve bu modelin <strong>360° dönen kısa videosu</strong> Alıcı&apos;ya
+                  gösterilir. Alıcı&apos;nın onayladığı şey, bu videoda görünen 3D modeldir. <strong>Baskı, bu onay
+                  verilmeden başlamaz</strong>; sipariş, onay verilene kadar üretim için hiçbir üreticiye iletilmez.
+                </li>
+                <li>
+                  <strong>Onay kanalı:</strong> Onay bağlantısı, Alıcı&apos;nın sipariş sırasında bildirdiği e-posta
+                  adresine gönderilir ve figurunica.com üzerindeki kişiye özel onay sayfasına (figurunica.com/onay/…)
+                  götürür. Aynı onay ileride WhatsApp üzerinden de sunulabilir; onayın hukuki sonucu kanala göre değişmez.
+                </li>
+                <li>
+                  <strong>Onay sayfasındaki seçenekler:</strong> &quot;Onaylıyorum, baskıya başlansın&quot;,
+                  &quot;Değişiklik istiyorum&quot; ve &quot;Vazgeç ve siparişi iptal et&quot;. Üçüncü seçenek, 6. bölümde
+                  açıklanan ücretsiz iptal hakkının doğrudan kullanıldığı butondur.
+                </li>
+                <li>
+                  <strong>Revizyon:</strong> Alıcı, sipariş başına <strong>bir kez ücretsiz revizyon</strong> talep
+                  edebilir. Değişiklik talebi alındığında sipariş üretime girmez; model yeniden hazırlanır ve yeni 360°
+                  video aynı şekilde tekrar onaya sunulur. Sonraki değişiklik talepleri kapsamına göre ayrıca
+                  değerlendirilir; varsa bedeli, çalışmaya başlanmadan önce Alıcı&apos;ya yazılı olarak bildirilir.
+                </li>
+                <li>
+                  <strong>Karar süresi:</strong> Alıcı&apos;nın karar vermesi için tanınan azami süre, onay bağlantısının
+                  gönderilmesinden itibaren <strong>14 gündür</strong>. Bu süre içinde karar bildirilmezse 72. saatte bir
+                  hatırlatma e-postası gönderilir.
+                </li>
+                <li>
+                  <strong>Onay alınmadan üretime geçilmesi:</strong> Otomatik baskıya uygunluk denetiminden uyarısız geçen
+                  modellerde Satıcı, onay bağlantısının gönderilmesinden <strong>48 saat</strong> sonra ve her hâlükârda
+                  14 günlük sürenin sonunda süreci kendi inisiyatifiyle sürdürebilir. Bu, Alıcı&apos;nın onayının yerine
+                  geçmez: <strong>üretim fiilen başlayana kadar sipariş ücretsiz iptal edilebilir</strong> ve Alıcı onay
+                  vermemişse 6. bölümdeki cayma hakkı istisnası uygulanmaz.
                 </li>
               </ul>
 
@@ -116,7 +156,13 @@ export default async function MesafeliSatisPage() {
                 üretime başlanan kişiye özel siparişler için cayma hakkı kullanılamaz.
               </p>
               <p>
-                Önizleme onayı verilmeden ve üretim başlamadan önce sipariş ücretsiz iptal edilebilir.
+                Önizleme onayı verilmeden ve üretim başlamadan önce sipariş <strong>ücretsiz iptal edilebilir</strong>;
+                tahsil edilen bedel iade edilir. Kişiye özel siparişlerde bu hak, 3.1&apos;de anlatılan onay sayfasındaki
+                <strong> &quot;Vazgeç ve siparişi iptal et&quot;</strong> butonuyla doğrudan kullanılabilir; dilerseniz
+                info@figurunica.com adresine yazarak da kullanabilirsiniz. Cayma hakkı istisnası yalnızca Alıcı
+                önizlemeyi onayladıktan sonra devreye girer.
+              </p>
+              <p>
                 Ürünün ayıplı/hasarlı teslim edilmesi halinde tüketicinin yasal hakları saklıdır; bu durumda Alıcı,
                 teslim tarihinden itibaren 14 gün içinde ürünün fotoğrafı ve sorunun açıklamasıyla info@figurunica.com
                 adresine başvurabilir. Kalite sorunu teyit edilirse <strong>değişim, ücretsiz yeniden üretim veya iade</strong> sağlanır.
@@ -191,7 +237,9 @@ export default async function MesafeliSatisPage() {
                 </li>
                 <li>
                   A digital preview is provided before printing for every order; production does not begin until the
-                  Buyer approves the preview.
+                  Buyer approves the preview. For custom-made figurines the preview submitted for approval is a
+                  <strong>short 360° video of the 3D model</strong> that will be printed; how the approval works is set
+                  out in section 3.1 below.
                 </li>
                 <li>
                   The essential characteristics, quantity, and VAT-inclusive sale price of the product are shown on the
@@ -204,6 +252,47 @@ export default async function MesafeliSatisPage() {
                 <li>
                   The Seller reserves the right to update prices without prior notice; changes do not affect approved
                   existing orders.
+                </li>
+              </ul>
+
+              <h3>3.1 Pre-Print 3D Preview and Approval</h3>
+              <ul>
+                <li>
+                  <strong>What is submitted for approval:</strong> For custom-made orders, a print-ready 3D model is
+                  produced from the image the Buyer selected, and a <strong>short 360° video of that model</strong> is
+                  shown to the Buyer. What the Buyer approves is the 3D model shown in that video.
+                  <strong> Printing does not begin without this approval</strong>; the order is not passed to any
+                  manufacturer for production until it is given.
+                </li>
+                <li>
+                  <strong>Approval channel:</strong> The approval link is sent to the email address provided by the Buyer
+                  at checkout and leads to a personal approval page on figurunica.com (figurunica.com/onay/…). The same
+                  approval may later also be offered over WhatsApp; the legal effect of the approval does not depend on
+                  the channel.
+                </li>
+                <li>
+                  <strong>Options on the approval page:</strong> &quot;I approve, start printing&quot;, &quot;I want a
+                  change&quot; and &quot;Cancel my order&quot;. The third option is the button through which the free
+                  cancellation right described in section 6 is exercised directly.
+                </li>
+                <li>
+                  <strong>Revision:</strong> The Buyer may request <strong>one free revision</strong> per order. When a
+                  change request is received the order does not go into production; the model is prepared again and a new
+                  360° video is submitted for approval in the same way. Further change requests are assessed separately
+                  according to their scope; any fee is communicated to the Buyer in writing before work begins.
+                </li>
+                <li>
+                  <strong>Time to decide:</strong> The maximum time allowed for the Buyer to decide is
+                  <strong>14 days</strong> from the moment the approval link is sent. If no decision is communicated, a
+                  reminder email is sent after 72 hours.
+                </li>
+                <li>
+                  <strong>Proceeding without an approval:</strong> For models that clear the automated printability check
+                  without a warning, the Seller may continue the process on its own initiative <strong>48 hours</strong>
+                  after the approval link is sent, and in any event at the end of the 14-day period. This does not replace
+                  the Buyer&apos;s approval: <strong>the order can be cancelled free of charge until production actually
+                  starts</strong>, and where the Buyer has not given an approval, the exception to the right of withdrawal
+                  in section 6 does not apply.
                 </li>
               </ul>
 
@@ -238,7 +327,13 @@ export default async function MesafeliSatisPage() {
                 withdrawal cannot be exercised for custom-made orders that have been approved at preview and put into production.
               </p>
               <p>
-                Before preview approval and the start of production, an order can be cancelled free of charge.
+                Before preview approval and the start of production, an order <strong>can be cancelled free of
+                charge</strong> and any amount collected is refunded. For custom-made orders this right can be exercised
+                directly through the <strong>&quot;Cancel my order&quot;</strong> button on the approval page described in
+                section 3.1; you may also exercise it by writing to info@figurunica.com. The exception to the right of
+                withdrawal only takes effect once the Buyer has approved the preview.
+              </p>
+              <p>
                 In the event of a defective/damaged delivery, the Consumer&apos;s legal rights are reserved; in such cases the
                 Buyer may apply to info@figurunica.com within 14 days of delivery with a photo of the product and a description
                 of the issue. If a quality issue is confirmed, an <strong>exchange, free reproduction, or refund</strong> is provided.

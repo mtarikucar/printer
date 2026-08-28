@@ -1,11 +1,11 @@
 /**
  * Figurine size — single source of truth.
  *
- * A size is either one of the three catalogue preset KEYS ("kucuk"/"orta"/
- * "buyuk", which the public /create flow sells at fixed prices) or a real,
- * free-form measurement for a bespoke order ("17,5 cm", "15×10×22 cm"). The DB
- * column is plain text (migration 0036) exactly like `style` before it, so a
- * new size needs no migration.
+ * A size is either the ONE sellable preset KEY ("standart", 15 cm — what the
+ * public /create flow sells), a retired tier key kept alive for display
+ * ("kucuk"/"orta"/"buyuk"), or a real, free-form measurement for a bespoke
+ * order ("17,5 cm", "15×10×22 cm"). The DB column is plain text (migration
+ * 0036) exactly like `style` before it, so a new size needs no migration.
  *
  * Nothing outside this file may hardcode a size label or a mm/cm figure.
  *
@@ -13,15 +13,38 @@
  * modules through order-draft.ts and would crash-loop on it.
  */
 
-/** Catalogue presets. `heightMm` is the ONE place the nominal heights live. */
+/**
+ * The ONE sellable preset. Since 2026-08-24 the custom figurine is a single
+ * product: 15 cm, SLA resin, professionally hand-painted. `heightMm` is the ONE
+ * place the nominal height lives.
+ */
 export const SIZE_PRESETS = [
+  { key: "standart", heightMm: 150, labelKey: "sizes.standart", labelTr: "Standart" },
+] as const;
+
+export const SIZE_PRESET_KEYS = ["standart"] as const;
+export type SizePresetKey = (typeof SIZE_PRESET_KEYS)[number];
+
+/**
+ * Retired tiers. Orders, drafts and previews written before 2026-08-24 still
+ * carry these keys, so display helpers MUST resolve them — otherwise the admin
+ * panel renders a raw "orta". They are deliberately NOT sellable and NOT
+ * priceable: `isSizePreset` rejects them, so `itemPriceKurus` throws
+ * `UnpricedSizeError` and a reorder is re-quoted by hand.
+ */
+export const LEGACY_SIZE_PRESETS = [
   { key: "kucuk", heightMm: 60, labelKey: "sizes.kucuk", labelTr: "Küçük" },
   { key: "orta", heightMm: 80, labelKey: "sizes.orta", labelTr: "Orta" },
   { key: "buyuk", heightMm: 120, labelKey: "sizes.buyuk", labelTr: "Büyük" },
 ] as const;
 
-export const SIZE_PRESET_KEYS = ["kucuk", "orta", "buyuk"] as const;
-export type SizePresetKey = (typeof SIZE_PRESET_KEYS)[number];
+/** Every preset ever sold — for display lookups only, never for pricing. */
+const ALL_PRESETS = [...SIZE_PRESETS, ...LEGACY_SIZE_PRESETS] as ReadonlyArray<{
+  key: string;
+  heightMm: number;
+  labelKey: string;
+  labelTr: string;
+}>;
 
 /** Quick-fill chips (cm) for the bespoke size field in the admin panels. */
 export const SIZE_PRESETS_CM = [6, 8, 10, 12, 15, 18, 20, 25] as const;
@@ -29,14 +52,23 @@ export const SIZE_PRESETS_CM = [6, 8, 10, 12, 15, 18, 20, 25] as const;
 /** Max stored/typed length of a free-form size. */
 export const SIZE_TEXT_MAX = 40;
 
+/** True only for a size the public flow may sell and price. */
 export function isSizePreset(v: unknown): v is SizePresetKey {
   return (
     typeof v === "string" && (SIZE_PRESET_KEYS as readonly string[]).includes(v)
   );
 }
 
-export function presetHeightMm(key: SizePresetKey): number {
-  return SIZE_PRESETS.find((p) => p.key === key)!.heightMm;
+/** True for a retired tier — resolvable for display, never priceable. */
+export function isLegacySizePreset(v: unknown): boolean {
+  return (
+    typeof v === "string" && LEGACY_SIZE_PRESETS.some((p) => p.key === v)
+  );
+}
+
+/** Nominal height for any preset key ever sold; null for free-form/unknown. */
+export function presetHeightMm(key: string): number | null {
+  return ALL_PRESETS.find((p) => p.key === key)?.heightMm ?? null;
 }
 
 /** 80 → "8 cm"; 175 → "17,5 cm" (tr-TR decimal comma, 1 decimal max). */
@@ -70,7 +102,12 @@ export function normalizeSizeInput(
     };
   }
   const lower = text.toLocaleLowerCase("tr");
-  if (isSizePreset(lower)) return { ok: true, value: lower };
+  // Retired tier keys are accepted as-is too: the admin panels re-normalize
+  // whatever a legacy order already stores when the form is re-opened, and
+  // rejecting "orta" there would block editing those orders.
+  if (isSizePreset(lower) || isLegacySizePreset(lower)) {
+    return { ok: true, value: lower };
+  }
 
   const numbers = text.match(/\d+(?:[.,]\d{1,2})?/g);
   if (!numbers || numbers.length === 0) {
@@ -111,7 +148,7 @@ export function sizeDisplay(
   opts?: { short?: boolean }
 ): string {
   if (!size) return "";
-  const preset = SIZE_PRESETS.find((p) => p.key === size);
+  const preset = ALL_PRESETS.find((p) => p.key === size);
   if (!preset) return size;
   const cm = `~${formatCm(preset.heightMm)}`;
   if (opts?.short) return cm;
@@ -125,7 +162,7 @@ export function sizeDisplayTr(
   opts?: { short?: boolean }
 ): string {
   if (!size) return "";
-  const preset = SIZE_PRESETS.find((p) => p.key === size);
+  const preset = ALL_PRESETS.find((p) => p.key === size);
   if (!preset) return size;
   const cm = `~${formatCm(preset.heightMm)}`;
   return opts?.short ? cm : `${preset.labelTr} (${cm})`;

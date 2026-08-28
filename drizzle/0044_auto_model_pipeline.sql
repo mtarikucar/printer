@@ -36,5 +36,17 @@ ALTER TABLE "orders" ADD COLUMN "customer_model_approved_at" timestamp;--> state
 ALTER TABLE "orders" ADD COLUMN "customer_model_revision_note" text;--> statement-breakpoint
 ALTER TABLE "order_model_approvals" ADD CONSTRAINT "order_model_approvals_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "order_model_approvals_order_idx" ON "order_model_approvals" USING btree ("order_id","revision");--> statement-breakpoint
+-- Backfill before the unique index, or this migration cannot be applied to any
+-- database that already has history: `round` defaults to 1 for every existing
+-- row, and the old auto-3D pipeline retried (queue attempts: 3, plus an admin
+-- "regenerate" action), so orders with several attempts are expected. Without
+-- this, CREATE UNIQUE INDEX raises 23505 and the whole deploy aborts.
+UPDATE "generation_attempts" ga
+SET "round" = numbered.rn
+FROM (
+  SELECT "id", row_number() OVER (PARTITION BY "order_id" ORDER BY "created_at", "id") AS rn
+  FROM "generation_attempts"
+) numbered
+WHERE ga."id" = numbered."id" AND ga."round" <> numbered.rn;--> statement-breakpoint
 CREATE UNIQUE INDEX "generation_attempts_order_round_uq" ON "generation_attempts" USING btree ("order_id","round");--> statement-breakpoint
 ALTER TABLE "orders" ADD CONSTRAINT "orders_model_approval_token_unique" UNIQUE("model_approval_token");

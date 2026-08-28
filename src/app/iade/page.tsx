@@ -17,7 +17,7 @@ export default async function IadePage() {
           {isTr ? "İade, Değişim ve Hasar Politikası" : "Returns, Exchange & Damage Policy"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 24 Ağustos 2026" : "Last updated: August 24, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -34,7 +34,7 @@ export default async function IadePage() {
               <h2>1. Genel İlke</h2>
               <p>İki tür ürün satıyoruz ve iade koşulları ürün tipine göre farklılık gösterir:</p>
               <ul>
-                <li><strong>Kişiye özel figürinler (sipariş üzerine üretim):</strong> Yüklediğiniz fotoğrafa göre özel olarak üretildiğinden kişiselleştirilmiş mal niteliğindedir ve standart 14 günlük cayma hakkı kapsamı dışındadır.</li>
+                <li><strong>Kişiye özel figürinler (sipariş üzerine üretim):</strong> Yüklediğiniz fotoğrafa göre özel olarak üretilen, 15 cm SLA reçine baskı ve profesyonel el boyamalı figürinler kişiselleştirilmiş mal niteliğindedir ve standart 14 günlük cayma hakkı kapsamı dışındadır.</li>
                 <li><strong>Hazır / standart mağaza ürünleri:</strong> Stoktan satılan kişiselleştirilmemiş ürünler, yasal 14 günlük cayma hakkı kapsamındadır ve süresi içinde iade edilebilir.</li>
               </ul>
               <p>
@@ -141,7 +141,7 @@ export default async function IadePage() {
               <h2>1. General Principle</h2>
               <p>We sell two types of products, and return conditions differ by product type:</p>
               <ul>
-                <li><strong>Personalized figurines (made-to-order):</strong> Produced specifically from the photo you upload, these qualify as personalized goods and are therefore excluded from the standard 14-day right of withdrawal.</li>
+                <li><strong>Personalized figurines (made-to-order):</strong> Produced specifically from the photo you upload — 15 cm, SLA resin print, professionally hand-painted — these qualify as personalized goods and are therefore excluded from the standard 14-day right of withdrawal.</li>
                 <li><strong>Ready / standard store products:</strong> Non-personalized items sold from stock fall under the statutory 14-day right of withdrawal and can be returned within that period.</li>
               </ul>
               <p>

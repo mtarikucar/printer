@@ -17,7 +17,7 @@ export default async function MesafeliSatisPage() {
           {isTr ? "Mesafeli Satış Sözleşmesi" : "Distance Sales Agreement"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 24 Ağustos 2026" : "Last updated: August 24, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -61,8 +61,10 @@ export default async function MesafeliSatisPage() {
                   oluşturularak reçine baskı yöntemiyle üretilen, <strong>kişiye özel (siparişe göre üretilen)</strong> bir figürindir.
                 </li>
                 <li>
-                  Figürin; seçilen boyut, materyal ve bitiş seçeneğine (Boyanabilir Kit / El Boyaması / Lüks Vitrin)
-                  göre fiyatlandırılır.
+                  Figürin, tek standart yapılandırmayla sunulur: <strong>15 cm, SLA reçine baskı, profesyonel el
+                  boyamalı ve sergilemeye hazır</strong>. Boyut, materyal veya bitiş seçimi bulunmadığından ürün tek
+                  fiyatlıdır. Standart dışı ölçü veya özel tasarım talepleri, kapsamına göre ayrıca fiyatlandırılır ve
+                  sipariş oluşturulmadan önce Alıcı&apos;ya yazılı olarak bildirilir.
                 </li>
                 <li>
                   Her sipariş için baskı öncesi dijital önizleme sunulur; üretim, Alıcı önizlemeyi onaylayana kadar başlamaz.
@@ -182,8 +184,10 @@ export default async function MesafeliSatisPage() {
                   by generating a 3D model with AI from the photos uploaded by the Buyer and printing it using resin.
                 </li>
                 <li>
-                  The figurine is priced according to the selected size, material, and finish option
-                  (Paintable Kit / Hand-Painted / Luxury Display).
+                  The figurine is offered in a single standard configuration: <strong>15 cm, SLA resin print,
+                  professionally hand-painted and display-ready</strong>. As there is no size, material or finish
+                  choice, the product has a single price. Non-standard sizes or bespoke designs are priced separately
+                  according to their scope and communicated to the Buyer in writing before the order is created.
                 </li>
                 <li>
                   A digital preview is provided before printing for every order; production does not begin until the

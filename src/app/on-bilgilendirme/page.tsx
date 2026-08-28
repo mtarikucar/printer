@@ -1,5 +1,6 @@
 import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
+import { FIGURINE_PRICE_KURUS, UPSELL_PRICES_KURUS } from "@/lib/config/prices";
 
 export const metadata = {
   title: "Ön Bilgilendirme Formu — Figurunica",
@@ -9,6 +10,16 @@ export default async function OnBilgilendirmePage() {
   const locale = await getLocale();
   const isTr = locale === "tr";
 
+  // Prices are DERIVED, never typed by hand: this is a legally binding
+  // pre-contract form, so it must state exactly what checkout charges.
+  const numberLocale = isTr ? "tr-TR" : "en-US";
+  const tl = (kurus: number) => Math.round(kurus / 100).toLocaleString(numberLocale);
+  const figurinePrice = tl(FIGURINE_PRICE_KURUS);
+  const extraPaintPrice = tl(UPSELL_PRICES_KURUS.extra_paint);
+  const giftWrapPrice = tl(UPSELL_PRICES_KURUS.gift_wrap);
+  const rushShippingPrice = tl(UPSELL_PRICES_KURUS.rush_shipping);
+  const digitalFilesPrice = tl(UPSELL_PRICES_KURUS.digital_files);
+
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
@@ -17,7 +28,7 @@ export default async function OnBilgilendirmePage() {
           {isTr ? "Ön Bilgilendirme Formu" : "Preliminary Information Form"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 28 Temmuz 2026" : "Last updated: July 28, 2026"}
+          {isTr ? "Son güncelleme: 24 Ağustos 2026" : "Last updated: August 24, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -44,25 +55,29 @@ export default async function OnBilgilendirmePage() {
               <h2>2. Ürünün Temel Nitelikleri ve Fiyatı</h2>
               <p>
                 Siparişe konu ürün, tarafınızca yüklenen fotoğraftan oluşturulan kişiye özel (kişiselleştirilmiş)
-                bir figürindir. Ürünün temel nitelikleri sipariş sırasında seçilen seçeneklere göre belirlenir:
+                bir figürindir. Tek bir standart ürün sunulmaktadır; boyut, materyal veya bitiş seçimi yoktur:
               </p>
               <ul>
-                <li><strong>Boyut ve taban fiyat (reçine, KDV dahil):</strong> Küçük (~6 cm) 999 TL, Orta (~8 cm) 1.399 TL, Büyük (~12 cm) 1.799 TL. Filament seçeneği boyuta göre 100–300 TL daha uygundur. Bu ölçüler standart seçeneklerdir; farklı bir ölçü için özel sipariş/teklif verilir.</li>
-                <li><strong>Materyal:</strong> Reçine (premium) veya filament.</li>
-                <li><strong>Bitiş / paket seçenekleri:</strong>
-                  <ul>
-                    <li><strong>Boyanabilir Kit</strong> (varsayılan, fiyata dahil): reçine baskı, zımparalı, primerli ve mini boya kiti.</li>
-                    <li><strong>Collector Raw</strong> (-100 TL): boyasız yüksek detaylı reçine, boya kiti yok.</li>
-                    <li><strong>El Boyaması</strong> (+1.000 TL): profesyonel el boyaması, QC fotoğrafı ve hediye kutusu.</li>
-                    <li><strong>Lüks Vitrin</strong> (+2.000 TL): premium kaide, isim plakası, sert kutu ve tam el boyaması.</li>
-                  </ul>
+                <li>
+                  <strong>Ürün ve fiyat:</strong> Kişiye özel figür — 15 cm, SLA reçine baskı, profesyonel el
+                  boyamalı, sergilemeye hazır. <strong>{figurinePrice} TL (KDV dahil).</strong> Türkiye içi kargo
+                  ücretsizdir.
                 </li>
-                <li><strong>İsteğe bağlı eklentiler:</strong> Ekstra boya (49 TL), hediye paketi (29 TL), hızlı kargo (79 TL).</li>
+                <li>
+                  <strong>Farklı ölçü ve özel tasarım:</strong> Standart dışı bir ölçü veya özel tasarım talebinde
+                  fiyat, talebin kapsamına göre ayrıca belirlenir ve sipariş oluşturulmadan önce tarafınıza yazılı
+                  olarak bildirilir.
+                </li>
+                <li>
+                  <strong>İsteğe bağlı eklentiler:</strong> Ekstra boya katmanı ({extraPaintPrice} TL), hediye paketi
+                  ({giftWrapPrice} TL), hızlı kargo ({rushShippingPrice} TL), dijital dosyalar — STL + OBJ
+                  ({digitalFilesPrice} TL).
+                </li>
               </ul>
               <p>
-                Tüm fiyatlar Türk Lirası (TL) cinsinden ve KDV dahildir. Yukarıdaki tutarlar bilgilendirme amaçlıdır;
-                seçilen boyut, materyal, bitiş ve eklentilere göre hesaplanan güncel ve bağlayıcı nihai fiyat,
-                herhangi bir gizli ek ücret olmaksızın ödeme öncesinde sipariş ekranında açıkça gösterilir.
+                Tüm fiyatlar Türk Lirası (TL) cinsinden ve KDV dahildir. Seçtiğiniz eklentilerle birlikte hesaplanan
+                güncel ve bağlayıcı nihai fiyat, herhangi bir gizli ek ücret olmaksızın ödeme öncesinde sipariş
+                ekranında açıkça gösterilir.
               </p>
 
               <h2>3. Ödeme Şekli</h2>
@@ -152,25 +167,29 @@ export default async function OnBilgilendirmePage() {
               <h2>2. Essential Characteristics and Price of the Product</h2>
               <p>
                 The product subject to the order is a custom (personalized) figurine created from the photo you upload.
-                Its essential characteristics are determined by the options selected during the order:
+                A single standard product is offered; there is no size, material or finish choice:
               </p>
               <ul>
-                <li><strong>Size and base price (resin, VAT included):</strong> Small (~6 cm) 999 TL, Medium (~8 cm) 1,399 TL, Large (~12 cm) 1,799 TL. The filament option is 100–300 TL cheaper depending on size. These are the standard sizes; a different size is quoted as a bespoke order.</li>
-                <li><strong>Material:</strong> Resin (premium) or filament.</li>
-                <li><strong>Finish / package options:</strong>
-                  <ul>
-                    <li><strong>Paintable Kit</strong> (default, included): resin print, sanded, primed and a mini paint kit.</li>
-                    <li><strong>Collector Raw</strong> (-100 TL): unpainted high-detail resin, no paint kit.</li>
-                    <li><strong>Hand-Painted</strong> (+1,000 TL): professional hand painting, QC photo and gift box.</li>
-                    <li><strong>Luxury Display</strong> (+2,000 TL): premium base, name plate, hard case and full hand painting.</li>
-                  </ul>
+                <li>
+                  <strong>Product and price:</strong> Custom figurine — 15 cm, SLA resin print, professionally
+                  hand-painted, display-ready. <strong>{figurinePrice} TL (VAT included).</strong> Domestic shipping
+                  within Turkey is free.
                 </li>
-                <li><strong>Optional add-ons:</strong> Extra paint (49 TL), gift wrap (29 TL), express shipping (79 TL).</li>
+                <li>
+                  <strong>Different sizes and bespoke designs:</strong> For a non-standard size or a bespoke design, the
+                  price is determined separately according to the scope of the request and is communicated to you in
+                  writing before the order is created.
+                </li>
+                <li>
+                  <strong>Optional add-ons:</strong> Extra paint layer ({extraPaintPrice} TL), gift wrap
+                  ({giftWrapPrice} TL), express shipping ({rushShippingPrice} TL), digital files — STL + OBJ
+                  ({digitalFilesPrice} TL).
+                </li>
               </ul>
               <p>
-                All prices are in Turkish Lira (TL) and include VAT. The figures above are for information; the current and
-                binding final price, calculated according to the selected size, material, finish and add-ons, is displayed
-                clearly on the order screen before payment, with no hidden charges.
+                All prices are in Turkish Lira (TL) and include VAT. The current and binding final price, calculated
+                together with the add-ons you select, is displayed clearly on the order screen before payment, with no
+                hidden charges.
               </p>
 
               <h2>3. Payment Method</h2>

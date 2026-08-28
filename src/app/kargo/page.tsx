@@ -17,7 +17,7 @@ export default async function KargoPage() {
           {isTr ? "Kargo ve Teslimat Politikası" : "Shipping & Delivery Policy"}
         </h1>
         <p className="text-sm text-text-muted mb-12">
-          {isTr ? "Son güncelleme: 9 Haziran 2026" : "Last updated: June 9, 2026"}
+          {isTr ? "Son güncelleme: 24 Ağustos 2026" : "Last updated: August 24, 2026"}
         </p>
 
         <div className="prose prose-neutral max-w-none [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-text-primary [&_h2]:mt-12 [&_h2]:mb-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-text-primary [&_h3]:mt-8 [&_h3]:mb-3 [&_p]:text-text-secondary [&_p]:leading-relaxed [&_p]:mb-4 [&_ul]:text-text-secondary [&_ul]:mb-4 [&_ul]:ml-6 [&_ul]:list-disc [&_li]:mb-2 [&_li]:leading-relaxed [&_strong]:text-text-primary">
@@ -26,8 +26,9 @@ export default async function KargoPage() {
             <>
               <p>
                 Bu Kargo ve Teslimat Politikası, Figurunica (&quot;Şirket&quot;, &quot;biz&quot;, &quot;bizim&quot;) tarafından
-                hazırlanan kişiye özel figürinlerin üretim ve teslimat sürecini açıklamaktadır. Sorularınız için
-                info@figurunica.com adresinden veya +90 850 840 73 03 numaralı telefondan bize ulaşabilirsiniz.
+                hazırlanan kişiye özel figürinlerin — 15 cm, SLA reçine baskı, profesyonel el boyamalı ve sergilemeye
+                hazır — üretim ve teslimat sürecini açıklamaktadır. Sorularınız için info@figurunica.com adresinden
+                veya +90 850 840 73 03 numaralı telefondan bize ulaşabilirsiniz.
               </p>
 
               <h2>1. Kargo Firması ve Ücret</h2>
@@ -35,6 +36,7 @@ export default async function KargoPage() {
                 <li>Gönderilerimiz <strong>Yurtiçi Kargo</strong> ile gerçekleştirilir.</li>
                 <li>Türkiye içi kargo <strong>ücretsizdir</strong>; sipariş bedeline ek bir kargo ücreti yansıtılmaz.</li>
                 <li>Gönderiler, siparişi üreten anlaşmalı atölyemizden hazırlanıp kargoya verilir; bu nedenle çıkış ili siparişe göre değişebilir.</li>
+                <li>Figüriniz boyanmış ve sergilemeye hazır hâlde, dolgulu ve korumalı bir kutuda gönderilir; ayrıca bir boyama kiti gönderilmez. Hediye paketi, sipariş sırasında seçilebilen isteğe bağlı bir eklentidir.</li>
               </ul>
 
               <h2>2. Üretim Süresi</h2>
@@ -93,8 +95,9 @@ export default async function KargoPage() {
           ) : (
             <>
               <p>
-                This Shipping & Delivery Policy explains the production and delivery process for custom figurines
-                prepared by Figurunica (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;). For any questions, you can reach us at
+                This Shipping & Delivery Policy explains the production and delivery process for the custom figurines
+                prepared by Figurunica (&quot;Company&quot;, &quot;we&quot;, &quot;our&quot;) — 15 cm, SLA resin print,
+                professionally hand-painted and display-ready. For any questions, you can reach us at
                 info@figurunica.com or by phone at +90 850 840 73 03.
               </p>
 
@@ -103,6 +106,7 @@ export default async function KargoPage() {
                 <li>Our shipments are carried out with <strong>Yurtici Kargo</strong>.</li>
                 <li>Domestic shipping within Turkey is <strong>free</strong>; no additional shipping fee is added to your order total.</li>
                 <li>Shipments are prepared and dispatched by the partner workshop that produced the order, so the origin city can vary per order.</li>
+                <li>Your figurine ships painted and display-ready in a padded, protective box; no separate paint kit is included. Gift wrapping is an optional add-on selectable at checkout.</li>
               </ul>
 
               <h2>2. Production Time</h2>

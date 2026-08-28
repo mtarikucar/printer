@@ -51,8 +51,13 @@ export default async function CommercialMessageConsentPage() {
               <h2>3. Onayın Alınması ve İYS Kaydı</h2>
               <p>
                 Onayınız, kayıt sırasında ilgili kutucuğu işaretlemeniz ile alınır ve onay tarihi sistemlerimize
-                kaydedilir. Ticari elektronik ileti onayları, mevzuat gereği İleti Yönetim Sistemi&apos;ne (İYS) iletilir;
-                onay durumunuzu İYS üzerinden de yönetebilirsiniz.
+                kaydedilir. Ticari elektronik ileti onaylarının, mevzuat gereği İleti Yönetim Sistemi&apos;ne (İYS)
+                bildirilmesi gerekir. Şu an için İYS entegrasyonumuz tamamlanmamıştır; bu nedenle
+                <strong> hiçbir ticari elektronik ileti göndermiyoruz</strong> ve onayınız yalnızca kendi
+                sistemlerimizde saklanmaktadır. Sipariş durumu, ödeme ve teslimat bildirimleri gibi işleme ilişkin
+                bilgilendirmeler ticari elektronik ileti kapsamında değildir ve bu kapsamdan bağımsız olarak gönderilir.
+                İYS entegrasyonu tamamlandığında onaylarınız mevzuatta öngörülen süre içinde İYS&apos;ye bildirilecek
+                ve bu metin güncellenecektir.
               </p>
 
               <h2>4. Onaydan Vazgeçme (Ret Hakkı)</h2>
@@ -63,7 +68,7 @@ export default async function CommercialMessageConsentPage() {
               <ul>
                 <li>Gönderilen her e-postadaki abonelikten çık / ileti almak istemiyorum bağlantısı,</li>
                 <li>info@figurunica.com adresine talebinizi iletmek,</li>
-                <li>İYS üzerinden onayınızı geri almak.</li>
+                <li>İYS entegrasyonu tamamlandığında İYS üzerinden onayınızı geri almak.</li>
               </ul>
               <p>
                 Ret talebiniz, mevzuatta öngörülen süre içinde işlenir ve bu süreden sonra tarafınıza ticari elektronik
@@ -106,8 +111,12 @@ export default async function CommercialMessageConsentPage() {
               <h2>3. How Consent Is Collected and the IYS Record</h2>
               <p>
                 Your consent is collected when you tick the relevant box during registration, and the date of consent is
-                recorded in our systems. Commercial-message consents are reported to the Message Management System (IYS)
-                as required by law; you can also manage your consent status through IYS.
+                recorded in our systems. Commercial-message consents must be reported to the Message Management System
+                (IYS) as required by law. Our IYS integration is not yet complete, so we currently
+                <strong> do not send any commercial electronic messages</strong> and your consent is stored only in our
+                own systems. Transactional notices — order status, payment and delivery updates — are not commercial
+                electronic messages and are sent independently of this. Once the IYS integration is complete, consents
+                will be reported to IYS within the period prescribed by law and this text will be updated.
               </p>
 
               <h2>4. Withdrawing Consent (Right to Opt Out)</h2>

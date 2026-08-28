@@ -114,6 +114,16 @@ export interface ApprovalView {
   glbUrl: string | null;
   decided: boolean;
   decision: ModelApprovalDecision | null;
+  /**
+   * True once a revision has already been requested and decided on this order.
+   *
+   * The distance-selling contract promises ONE FREE revision. Nothing counted
+   * them before, so a second request was silently free too — the page and the
+   * contract said one thing and the code did another. This does not BLOCK a
+   * second request (the contract does not forbid one, it just stops paying for
+   * it); it makes the page say so honestly and routes it to a human.
+   */
+  freeRevisionUsed: boolean;
 }
 
 /** Read the approval page's state for a token. Never leaks another order. */
@@ -141,6 +151,13 @@ export async function getApprovalByToken(token: string): Promise<ApprovalView | 
     .orderBy(desc(orderModelApprovals.revision))
     .limit(1);
 
+  const [{ revisionCount }] = await db
+    .select({
+      revisionCount: sql<number>`count(*) filter (where ${orderModelApprovals.decision} = 'revision')::int`,
+    })
+    .from(orderModelApprovals)
+    .where(eq(orderModelApprovals.orderId, order.id));
+
   return {
     orderId: order.id,
     orderNumber: order.orderNumber,
@@ -150,6 +167,7 @@ export async function getApprovalByToken(token: string): Promise<ApprovalView | 
     glbUrl: order.modelGlbUrl,
     decided: order.status !== "awaiting_customer_approval",
     decision: (latest?.decision as ModelApprovalDecision) ?? null,
+    freeRevisionUsed: (revisionCount ?? 0) >= 1,
   };
 }
 

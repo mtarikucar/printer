@@ -113,7 +113,7 @@ export function ApprovalClient({ token, view }: { token: string; view: ApprovalV
           onClick={() => setChoice(choice === "revision" ? null : "revision")}
           className="w-full rounded-lg border border-border px-4 py-3 text-sm hover:bg-surface-hover"
         >
-          Değişiklik istiyorum
+          {view.freeRevisionUsed ? "Yine de değişiklik istiyorum" : "Değişiklik istiyorum"}
         </button>
 
         {choice === "revision" && (
@@ -128,7 +128,9 @@ export function ApprovalClient({ token, view }: { token: string; view: ApprovalV
               placeholder="Örn. saç kısmı fotoğraftaki gibi değil"
             />
             <p className="mt-2 text-xs text-text-secondary">
-              Bir kez ücretsiz revizyon hakkınız var.
+              {view.freeRevisionUsed
+                ? "Ücretsiz revizyon hakkınızı kullandınız. Talebinizi yine iletebilirsiniz; ekibimiz sizinle iletişime geçip ne yapabileceğimizi konuşacak."
+                : "Bir kez ücretsiz revizyon hakkınız var."}
             </p>
             <Button
               onClick={() => submit("revision")}

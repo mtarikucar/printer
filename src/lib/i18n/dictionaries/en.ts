@@ -45,6 +45,7 @@ const en = {
   "sizes.kucuk": "Small",
   "sizes.orta": "Medium",
   "sizes.buyuk": "Large",
+  "sizes.standart": "Standard",
 
   // Materials
   "material.resin": "Resin",
@@ -683,6 +684,14 @@ const en = {
   "create.subtitle.object": "Upload a photo of the object, we'll turn it into a print-ready 3D product.",
   "create.myAccount": "My Account",
   "create.sizeSelection": "Size Selection",
+  "create.product.title": "Your custom figurine",
+  "create.product.spec": "15 cm · SLA resin · professionally hand-painted",
+  "create.product.included": "Free shipping included. Produced in 5-7 business days after preview approval, shipping 2-3 business days.",
+  "create.product.customSize": "Want a different size?",
+  "create.product.customSizeCta": "Get a quote on WhatsApp",
+  "create.customDesign.title": "Custom design order",
+  "create.customDesign.body": "For your own design or a 2D drawing, the price depends on model complexity and print volume. Send us your design and we will quote the same day.",
+  "create.customDesign.cta": "Get a quote on WhatsApp",
   "create.photo": "Your Photo",
   "create.shippingAddress": "Shipping Address",
   "create.address": "Address",

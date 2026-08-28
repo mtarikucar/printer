@@ -47,6 +47,7 @@ const tr: Dictionary = {
   "sizes.kucuk": "Küçük",
   "sizes.orta": "Orta",
   "sizes.buyuk": "Büyük",
+  "sizes.standart": "Standart",
 
   // Materials
   "material.resin": "Reçine",
@@ -685,6 +686,14 @@ const tr: Dictionary = {
   "create.subtitle.object": "Nesnenin fotoğrafını yükle, biz 3D baskıya hazır bir ürüne dönüştürelim.",
   "create.myAccount": "Hesabım",
   "create.sizeSelection": "Boyut Seçimi",
+  "create.product.title": "Kişiye Özel Figürün",
+  "create.product.spec": "15 cm · SLA reçine · profesyonel el boyamalı",
+  "create.product.included": "Ücretsiz kargo dahil. Önizleme onayından sonra 5-7 iş günü içinde üretilir, kargo 2-3 iş günü.",
+  "create.product.customSize": "Farklı bir boyut mu istiyorsun?",
+  "create.product.customSizeCta": "WhatsApp'tan teklif al",
+  "create.customDesign.title": "Özel tasarım siparişi",
+  "create.customDesign.body": "Kendi tasarımın ya da 2D çizimden üretim için fiyat, modelin karmaşıklığına ve baskı hacmine göre belirlenir. Tasarımını gönder, aynı gün fiyat verelim.",
+  "create.customDesign.cta": "WhatsApp'tan teklif al",
   "create.photo": "Fotoğrafınız",
   "create.shippingAddress": "Teslimat Adresi",
   "create.address": "Adres",

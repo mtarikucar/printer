@@ -531,6 +531,12 @@ export const orderDrafts = pgTable("order_drafts", {
   utmCampaign: text("utm_campaign"),
   utmContent: text("utm_content"),
   utmTerm: text("utm_term"),
+  // How the order was actually taken. NOT `attributionChannel` — that is a
+  // MARKETING attribution and a Google Ads campaign can legitimately be tagged
+  // "whatsapp", so it cannot carry a consent rule. This is the hard field the
+  // KVKK gate reads: a non-web draft with no content_consent_at must not be
+  // able to start a payment, because consent is collected on /pay, never in chat.
+  channel: text("channel").notNull().default("web"),
   attributionChannel: text("attribution_channel"),
   visitorId: text("visitor_id"),
   attribution: jsonb("attribution").$type<Attribution>(),
@@ -2585,4 +2591,66 @@ export const waMediaCache = pgTable("wa_media_cache", {
   metaMediaId: text("meta_media_id").notNull(),
   mimeType: text("mime_type"),
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+});
+
+// ─── AI sales agent (Faz 3) ─────────────────────────────────────────────────
+// Every model turn and every tool call is recorded. An injection attempt or an
+// abuse pattern then becomes a SQL query rather than a log grep, and the token
+// spend is auditable per conversation instead of arriving as a monthly invoice.
+
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => waConversations.id),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    // If this stays zero across turns, a silent cache invalidator is at work —
+    // the system prompt and tool list are supposed to be byte-identical.
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    costCents: integer("cost_cents").notNull().default(0),
+    stopReason: text("stop_reason"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("agent_runs_conversation_idx").on(t.conversationId, t.createdAt)]
+);
+
+export const agentActions = pgTable(
+  "agent_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => agentRuns.id),
+    tool: text("tool").notNull(),
+    argsJson: jsonb("args_json"),
+    resultStatus: text("result_status").notNull(),
+    deniedReason: text("denied_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("agent_actions_run_idx").on(t.runId)]
+);
+
+// What the agent has assembled for one conversation, on the SERVER.
+//
+// `create_draft` takes no arguments precisely because this row is the order:
+// the amount is recomputed from it with the same itemPriceKurus the web
+// checkout uses, so a number the model invented cannot reach order_drafts.
+// UNIQUE on conversation_id makes a second create_draft return the same link.
+export const agentOrderSpecs = pgTable("agent_order_specs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conversationId: uuid("conversation_id")
+    .notNull()
+    .unique()
+    .references(() => waConversations.id),
+  spec: jsonb("spec").$type<Record<string, unknown>>(),
+  draftId: uuid("draft_id"),
+  draftReference: text("draft_reference"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

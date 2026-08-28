@@ -13,6 +13,7 @@
     "dev": "next dev --port 3005",
     "lint": "eslint",
     "start": "next start",
+    "test:agent": "npx tsx scripts/test-agent-contract.ts",
     "test:analytics": "tsx scripts/test-analytics.ts",
     "test:api-contracts": "tsx scripts/test-api-contracts.ts",
     "test:approval-sla": "npx tsx scripts/test-approval-sla.ts",
@@ -35,7 +36,7 @@
     "test:scoring-v2": "tsx scripts/test-scoring-v2.ts",
     "test:slug": "tsx scripts/test-slug.ts",
     "test:tax-id": "tsx scripts/test-tax-id.ts",
-    "test:unit": "npx tsx scripts/test-tax-id.ts && npx tsx scripts/test-dekont-parsers.ts && npx tsx scripts/test-scoring-v2.ts && npx tsx scripts/test-upsells.ts && npx tsx scripts/test-slug.ts && npx tsx scripts/test-ocr-confidence.ts && npx tsx scripts/test-payment.ts && npx tsx scripts/test-fuzzy-match.ts && npx tsx scripts/test-qc.ts && npx tsx scripts/test-order-messages.ts && npx tsx scripts/test-finance.ts && npx tsx scripts/test-carriers.ts && npx tsx scripts/test-performance.ts && npx tsx scripts/test-capability.ts && npx tsx scripts/test-prices.ts && npx tsx scripts/test-bulk-pricing.ts && npx tsx scripts/test-sizes.ts && npx tsx scripts/test-phone.ts && npx tsx scripts/test-analytics.ts && npx tsx scripts/test-api-contracts.ts && npx tsx scripts/test-ops-spine.ts && npx tsx scripts/test-print-gate.ts && npx tsx scripts/test-approval-sla.ts && npx tsx scripts/test-whatsapp-verify.ts",
+    "test:unit": "npx tsx scripts/test-tax-id.ts && npx tsx scripts/test-dekont-parsers.ts && npx tsx scripts/test-scoring-v2.ts && npx tsx scripts/test-upsells.ts && npx tsx scripts/test-slug.ts && npx tsx scripts/test-ocr-confidence.ts && npx tsx scripts/test-payment.ts && npx tsx scripts/test-fuzzy-match.ts && npx tsx scripts/test-qc.ts && npx tsx scripts/test-order-messages.ts && npx tsx scripts/test-finance.ts && npx tsx scripts/test-carriers.ts && npx tsx scripts/test-performance.ts && npx tsx scripts/test-capability.ts && npx tsx scripts/test-prices.ts && npx tsx scripts/test-bulk-pricing.ts && npx tsx scripts/test-sizes.ts && npx tsx scripts/test-phone.ts && npx tsx scripts/test-analytics.ts && npx tsx scripts/test-api-contracts.ts && npx tsx scripts/test-ops-spine.ts && npx tsx scripts/test-print-gate.ts && npx tsx scripts/test-approval-sla.ts && npx tsx scripts/test-whatsapp-verify.ts && npx tsx scripts/test-agent-contract.ts",
     "test:upsells": "tsx scripts/test-upsells.ts",
     "test:whatsapp": "npx tsx scripts/test-whatsapp-verify.ts",
     "typecheck": "tsc --noEmit",
@@ -43,6 +44,7 @@
     "workers": "npx tsx workers/start.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "@huggingface/transformers": "^3.8.1",
     "@react-email/components": "^1.0.8",
     "@react-three/drei": "^10.7.7",

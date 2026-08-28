@@ -26,6 +26,7 @@ import {
 import { downloadInboundImage } from "../../services/whatsapp-media";
 import { decideModelApproval } from "../../services/model-approval";
 import { isFlagEnabled } from "../../services/flags";
+import { scheduleAgentTurn } from "./wa-agent.worker";
 
 /**
  * Words that mean "stop guessing and get me a person". Matched before anything
@@ -224,12 +225,12 @@ async function handleInbound(job: Job<WaInboundJobData>) {
     await markKvkkNoticeSent(conversation.id);
   }
 
-  // 4. Anything else waits for a human (Faz 2) or the agent (Faz 3).
+  // 4. Hand the turn to the agent, or park it for a human.
   if (!(await isFlagEnabled("wa_agent_enabled"))) {
     job.log("no agent enabled; message parked for the admin inbox");
     return;
   }
-  job.log("agent is enabled but not yet wired in this phase");
+  await scheduleAgentTurn(conversation.id, data.imageId ? [data.imageId] : []);
 }
 
 async function handleStatus(job: Job<WaInboundJobData>) {

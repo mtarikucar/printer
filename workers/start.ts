@@ -13,6 +13,7 @@ import { startModelGenerationWorker } from "../src/lib/queue/workers/model-gener
 import { startMeshProcessingWorker } from "../src/lib/queue/workers/mesh-processing.worker";
 import { startWhatsAppOutboundWorker } from "../src/lib/queue/workers/whatsapp-outbound.worker";
 import { startWaInboundWorker } from "../src/lib/queue/workers/wa-inbound.worker";
+import { startWaAgentWorker } from "../src/lib/queue/workers/wa-agent.worker";
 import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-approval-sla.worker";
 import {
   getPreviewCleanupQueue,
@@ -40,6 +41,8 @@ const meshProcessingWorker = startMeshProcessingWorker();
 // WhatsApp channel. Both are inert until platform_flags.wa_bot_enabled is on.
 const whatsappOutboundWorker = startWhatsAppOutboundWorker();
 const waInboundWorker = startWaInboundWorker();
+// Inert until platform_flags.wa_agent_enabled is on AND ANTHROPIC_API_KEY is set.
+const waAgentWorker = startWaAgentWorker();
 // A paid order parked in `awaiting_customer_approval` prints nothing until
 // somebody decides; this sweeper is that somebody.
 const modelApprovalSlaWorker = startModelApprovalSlaWorker();
@@ -96,6 +99,7 @@ console.log("  - model-generation (concurrency: 4, meshy)");
 console.log("  - mesh-processing (concurrency: 1, python)");
 console.log("  - wa-outbound (concurrency: 4, 40/min)");
 console.log("  - wa-inbound (concurrency: 4)");
+console.log("  - wa-agent (concurrency: 4, 30/min, attempts: 1)");
 console.log("  - model-approval-sla (repeatable: every 6h)");
 
 async function shutdown() {
@@ -114,6 +118,7 @@ async function shutdown() {
     meshProcessingWorker.close(),
     whatsappOutboundWorker.close(),
     waInboundWorker.close(),
+    waAgentWorker.close(),
     modelApprovalSlaWorker.close(),
   ]);
   console.log("Workers shut down gracefully");

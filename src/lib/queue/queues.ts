@@ -79,6 +79,12 @@ export interface WaOutboundJobData {
   senderKind?: "admin" | "bot" | "agent" | "system";
 }
 
+export interface WaAgentJobData {
+  conversationId: string;
+  /** Media ids from the messages this turn is answering. */
+  pendingMediaIds?: string[];
+}
+
 export interface EmailJobData {
   type:
     | "order_confirmation"
@@ -250,6 +256,24 @@ export function getWaOutboundQueue(): Queue {
     });
   }
   return waOutboundQueue;
+}
+
+let waAgentQueue: Queue | null = null;
+
+export function getWaAgentQueue(): Queue {
+  if (!waAgentQueue) {
+    waAgentQueue = new Queue("wa-agent", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // An LLM turn is NEVER retried automatically: a retry spends the tokens
+        // again and can duplicate a side effect. Failure is a handoff.
+        attempts: 1,
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 1000 },
+      },
+    });
+  }
+  return waAgentQueue;
 }
 
 export function getPreviewCleanupQueue(): Queue {

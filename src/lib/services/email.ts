@@ -52,7 +52,9 @@ interface SendEmailParams {
     | "new_message"
     | "manufacturer_welcome"
     | "manufacturer_approved"
-    | "manufacturer_rejected";
+    | "manufacturer_rejected"
+    // Auto-3D: the customer must approve the 360° turntable before printing.
+    | "model_approval_request";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -71,6 +73,10 @@ interface SendEmailParams {
   cancelReason?: string;
   photoUrl?: string;
   glbUrl?: string;
+  /** /onay/<token> capability link for the 3D approval gate. */
+  approvalUrl?: string;
+  /** Signed URL of the 360° turntable MP4 shown on that page. */
+  turntableUrl?: string;
   revisionNote?: string;
   giftCardCode?: string;
   giftCardAmount?: number;
@@ -270,6 +276,30 @@ function getTemplates(locale: Locale) {
         `,
       };
     },
+
+    /**
+     * The 3D approval gate. Deliberately NOT worded as "your order is
+     * approved": from the customer's side nothing is approved until they press
+     * the button on this page, and the distance-selling contract makes
+     * production conditional on exactly that.
+     */
+    model_approval_request: (p) => ({
+      subject: d["email.modelApproval.subject"].replace("{orderNumber}", p.orderNumber),
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h1 style="color: #1a1a1a;">${d["email.modelApproval.heading"].replace("{customerName}", escHtml(p.customerName))}</h1>
+          <p>${d["email.modelApproval.body"]}</p>
+          <p><strong>${d["email.modelApproval.orderNumber"]}</strong> ${p.orderNumber}</p>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${p.approvalUrl ?? trackUrl(p.orderNumber)}"
+               style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600;">
+              ${d["email.modelApproval.button"]}
+            </a>
+          </div>
+          <p style="color: #6b7280; font-size: 13px;">${d["email.modelApproval.note"]}</p>
+        </div>
+      `,
+    }),
 
     order_approved: (p) => ({
       subject: d["email.approved.subject"].replace("{orderNumber}", p.orderNumber),

@@ -10,6 +10,7 @@ function getSteps(d: Dictionary) {
     { key: "paid", label: d["tracker.paid.label"], description: d["tracker.paid.description"] },
     { key: "awaiting_model", label: d["tracker.awaiting_model.label"], description: d["tracker.awaiting_model.description"] },
     { key: "review", label: d["tracker.review.label"], description: d["tracker.review.description"] },
+    { key: "awaiting_customer_approval", label: d["tracker.awaiting_customer_approval.label"], description: d["tracker.awaiting_customer_approval.description"] },
     { key: "approved", label: d["tracker.approved.label"], description: d["tracker.approved.description"] },
     { key: "printing", label: d["tracker.printing.label"], description: d["tracker.printing.description"] },
     { key: "quality_check", label: d["tracker.quality_check.label"], description: d["tracker.quality_check.description"] },
@@ -18,10 +19,11 @@ function getSteps(d: Dictionary) {
   ] as const;
 }
 
-// Legacy order states the fal.ai image-first flow no longer produces
-// (auto-3D generation ran server-side before the admin-upload model). Historical
-// orders still carrying them collapse onto the awaiting_model step so the
-// tracker resolves to a sensible active step instead of rendering all-grey.
+// `generating` and `processing_mesh` are LIVE again with the auto-3D pipeline,
+// but they are internal machine states: to a customer they are all "we are
+// preparing your model", which is exactly what the awaiting_model step says.
+// Collapsing them keeps the tracker from rendering all-grey on a status it has
+// no step for, and avoids narrating our provider chain to the buyer.
 const LEGACY_STEP_MAP: Record<string, string> = {
   generating: "awaiting_model",
   processing_mesh: "awaiting_model",

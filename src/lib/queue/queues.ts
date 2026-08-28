@@ -13,6 +13,36 @@ export interface PreviewGenerationJobData {
   modifiers?: string[];
 }
 
+/**
+ * Auto-3D generation, run as a self-re-enqueuing state machine rather than a
+ * blocking poll: one order must never hold a worker slot for minutes.
+ *
+ *   create -> poll (x90, 10s apart) -> analyze (free) -> repair -> poll-repair
+ */
+export interface ModelGenerationJobData {
+  orderId: string;
+  round: number;
+  stage: "create" | "poll" | "poll-repair";
+  /** image-to-3d task id, set once stage `create` succeeds. */
+  taskId?: string;
+  /** print/repair task id, set once stage `poll` succeeds. */
+  repairTaskId?: string;
+  polls?: number;
+  /** ai_spend_ledger row backing the in-flight provider call. */
+  reservationId?: string;
+  /** Meshy's free print/analyze result, carried to the gate. */
+  printability?: unknown;
+}
+
+export interface MeshProcessingJobData {
+  orderId: string;
+  round: number;
+  /** Storage key of Meshy's REPAIRED glb. */
+  glbKey: string;
+  generationAttemptId: string;
+  printability?: unknown;
+}
+
 export interface EmailJobData {
   type:
     | "order_confirmation"
@@ -36,7 +66,9 @@ export interface EmailJobData {
     | "manufacturer_notification"
     | "qc_submitted"
     | "manufacturer_cancelled"
-    | "new_message";
+    | "new_message"
+    // Auto-3D: the customer must approve the 360° turntable before printing.
+    | "model_approval_request";
   to: string;
   orderNumber: string;
   customerName: string;
@@ -50,6 +82,8 @@ export interface EmailJobData {
   cancelReason?: string;
   photoUrl?: string;
   glbUrl?: string;
+  approvalUrl?: string;
+  turntableUrl?: string;
   revisionNote?: string;
   giftCardCode?: string;
   giftCardAmount?: number;
@@ -108,6 +142,42 @@ export function getPreviewGenerationQueue(): Queue {
     });
   }
   return previewGenerationQueue;
+}
+
+let modelGenerationQueue: Queue | null = null;
+let meshProcessingQueue: Queue | null = null;
+
+export function getModelGenerationQueue(): Queue {
+  if (!modelGenerationQueue) {
+    modelGenerationQueue = new Queue("model-generation", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // A failed stage is retried once; beyond that the order falls to
+        // failed_generation where an admin decides, because every retry past
+        // the first risks buying another 20-credit provider task.
+        attempts: 2,
+        backoff: { type: "exponential", delay: 30000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return modelGenerationQueue;
+}
+
+export function getMeshProcessingQueue(): Queue {
+  if (!meshProcessingQueue) {
+    meshProcessingQueue = new Queue("mesh-processing", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 15000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return meshProcessingQueue;
 }
 
 export function getPreviewCleanupQueue(): Queue {

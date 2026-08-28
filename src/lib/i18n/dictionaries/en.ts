@@ -856,7 +856,7 @@ const en = {
   "consent.content.termsLink": "Terms of Service",
   "consent.content.box1b": ".",
   "consent.content.box2":
-    "I acknowledge that my photo may be transferred to AI providers located abroad to produce the stylized image; ",
+    "I acknowledge that my photo may be transferred to service providers located abroad (fal.ai, Meshy, Meta/WhatsApp, Anthropic) to produce the stylized image and the 3D model, and to communicate about my order; ",
   "consent.content.kvkkLink": "KVKK Privacy Notice",
   "consent.content.box2b":
     ", which I have read, and I give my explicit consent to this processing/transfer.",
@@ -904,6 +904,8 @@ const en = {
   "tracker.processing_mesh.description": "Model is being prepared for printing",
   "tracker.review.label": "Quality Review",
   "tracker.review.description": "Our team is reviewing your model",
+  "tracker.awaiting_customer_approval.label": "Waiting for your approval",
+  "tracker.awaiting_customer_approval.description": "Your 3D model is ready. Approve it from the link we sent and printing starts right away.",
   "tracker.approved.label": "Approved",
   "tracker.approved.description": "Model approved for printing",
   "tracker.printing.label": "Printing",
@@ -982,6 +984,7 @@ const en = {
   "admin.orders.empty": "No orders found",
 
   // Admin - Orders (extra status labels for filter)
+  "admin.status.awaiting_customer_approval": "Awaiting customer approval",
   "admin.status.review": "Review",
   "admin.status.approved": "Approved",
   "admin.status.printing": "Printing",
@@ -1199,6 +1202,18 @@ const en = {
   "email.revision.action": "Please contact the customer to discuss the revision.",
 
   // Email - Approved
+  "email.modelApproval.subject":
+    "Your 3D model is ready — we need your approval ({orderNumber})",
+  "email.modelApproval.heading":
+    "{customerName}, your figurine's 3D model is ready!",
+  "email.modelApproval.body":
+    "We have prepared a 360° video so you can see your figurine from every angle. We need your approval before printing starts — if you are not happy, you have one free revision.",
+  "email.modelApproval.orderNumber":
+    "Order number:",
+  "email.modelApproval.button":
+    "View and approve the model",
+  "email.modelApproval.note":
+    "Production does not begin until you approve. At this stage you can still cancel your order free of charge.",
   "email.approved.subject": "Your figurine is approved! #{orderNumber}",
   "email.approved.heading": "Great news, {customerName}!",
   "email.approved.body": "Your figurine has been approved and will start printing soon.",

@@ -9,6 +9,8 @@ import { startScoringEvaluationsCleanupWorker } from "../src/lib/queue/workers/s
 import { startNotificationWorker } from "../src/lib/queue/workers/notification.worker";
 import { startAnalyticsCleanupWorker } from "../src/lib/queue/workers/analytics-cleanup.worker";
 import { startAssignmentSlaWorker } from "../src/lib/queue/workers/assignment-sla.worker";
+import { startModelGenerationWorker } from "../src/lib/queue/workers/model-generation.worker";
+import { startMeshProcessingWorker } from "../src/lib/queue/workers/mesh-processing.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -27,6 +29,10 @@ const scoringEvalCleanupWorker = startScoringEvaluationsCleanupWorker();
 const notificationWorker = startNotificationWorker();
 const analyticsCleanupWorker = startAnalyticsCleanupWorker();
 const assignmentSlaWorker = startAssignmentSlaWorker();
+// Auto-3D: Meshy generation (short API calls, self-re-enqueuing) and mesh
+// processing (python, CPU-bound, concurrency 1).
+const modelGenerationWorker = startModelGenerationWorker();
+const meshProcessingWorker = startMeshProcessingWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -68,6 +74,8 @@ console.log("  - scoring-evaluations-cleanup (repeatable: every 24h)");
 console.log("  - notification (concurrency: 5)");
 console.log("  - analytics-cleanup (repeatable: every 24h)");
 console.log("  - assignment-sla (repeatable: every 1h)");
+console.log("  - model-generation (concurrency: 4, meshy)");
+console.log("  - mesh-processing (concurrency: 1, python)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -81,6 +89,8 @@ async function shutdown() {
     notificationWorker.close(),
     analyticsCleanupWorker.close(),
     assignmentSlaWorker.close(),
+    modelGenerationWorker.close(),
+    meshProcessingWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

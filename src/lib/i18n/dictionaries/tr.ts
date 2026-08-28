@@ -858,7 +858,7 @@ const tr: Dictionary = {
   "consent.content.termsLink": "Kullanım Koşulları'nı",
   "consent.content.box1b": " okuyup kabul ettiğimi beyan ederim.",
   "consent.content.box2":
-    "Fotoğrafımın stilize görsel üretimi için yurt dışındaki yapay zeka sağlayıcılarına aktarılabileceğini; ",
+    "Fotoğrafımın; stilize görsel ve 3D model üretimi ile sipariş iletişimi amacıyla yurt dışındaki hizmet sağlayıcılara (fal.ai, Meshy, Meta/WhatsApp, Anthropic) aktarılabileceğini; ",
   "consent.content.kvkkLink": "KVKK Aydınlatma Metni'ni",
   "consent.content.box2b":
     " okuduğumu ve bu işleme/aktarıma açık rıza verdiğimi beyan ederim.",
@@ -906,6 +906,8 @@ const tr: Dictionary = {
   "tracker.processing_mesh.description": "Model baskı için hazırlanıyor",
   "tracker.review.label": "Kalite Kontrolü",
   "tracker.review.description": "Ekibimiz modelinizi inceliyor",
+  "tracker.awaiting_customer_approval.label": "Onayınız bekleniyor",
+  "tracker.awaiting_customer_approval.description": "3D modeliniz hazır. Size gönderdiğimiz bağlantıdan onaylayın, baskı hemen başlasın.",
   "tracker.approved.label": "Onaylandı",
   "tracker.approved.description": "Model baskı için onaylandı",
   "tracker.printing.label": "Baskıda",
@@ -984,6 +986,7 @@ const tr: Dictionary = {
   "admin.orders.empty": "Sipariş bulunamadı",
 
   // Admin - Orders (extra status labels for filter)
+  "admin.status.awaiting_customer_approval": "Müşteri onayı bekliyor",
   "admin.status.review": "İnceleme",
   "admin.status.approved": "Onaylandı",
   "admin.status.printing": "Baskıda",
@@ -1205,6 +1208,18 @@ const tr: Dictionary = {
   "email.revision.action": "Lütfen revizyonu görüşmek için müşteri ile iletişime geçin.",
 
   // Email - Approved
+  "email.modelApproval.subject":
+    "3D modeliniz hazır — onayınızı bekliyoruz ({orderNumber})",
+  "email.modelApproval.heading":
+    "{customerName}, figürünüzün 3D modeli hazır!",
+  "email.modelApproval.body":
+    "Figürünüzü her açıdan görebileceğiniz 360° videoyu hazırladık. Baskıya başlamadan önce onayınızı istiyoruz — beğenmediyseniz bir kez ücretsiz revizyon hakkınız var.",
+  "email.modelApproval.orderNumber":
+    "Sipariş numarası:",
+  "email.modelApproval.button":
+    "Modeli görüntüle ve onayla",
+  "email.modelApproval.note":
+    "Üretim, siz onaylayana kadar başlamaz. Bu aşamada siparişinizi ücretsiz iptal edebilirsiniz.",
   "email.approved.subject": "Figürününüz onaylandı! #{orderNumber}",
   "email.approved.heading": "Harika haber, {customerName}!",
   "email.approved.body": "Figürününüz onaylandı, yakında baskıya başlıyoruz.",

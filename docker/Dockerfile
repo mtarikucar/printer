@@ -1,4 +1,9 @@
 # ── Base: Node 20 + Python 3 + system libs ──────────────────────────
+#
+# ffmpeg is here for scripts/render_turntable.py, which stitches the customer's
+# 360° approval video. The turntable frames are rasterised in pure numpy on
+# purpose: pyrender does not build in this image and OSMesa/PyOpenGL are
+# deliberately NOT installed.
 FROM node:20-slim AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -9,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     poppler-utils \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

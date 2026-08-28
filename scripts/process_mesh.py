@@ -1,260 +1,273 @@
 #!/usr/bin/env python3
-"""
-Mesh processing pipeline for photo-to-figurine service.
-
-Takes a GLB file, repairs it for 3D printing, adds a base,
-and exports a watertight binary STL with a JSON report.
+"""Turn a Meshy GLB into a print-ready STL plus a numeric report the print gate
+can rule on.
 
 Usage:
-    python process_mesh.py input.glb output.stl report.json
-"""
+    process_mesh.py <input.glb> <output.stl> <report.json>
+                    --height-mm 150 [--material resin]
 
+Pipeline order matters and every step here was chosen against measured output
+from the live Meshy API (2026-08-27/28), not from first principles:
+
+  1. orient_z_up    glTF is Y-up, STL/slicers are Z-up. Without this the height
+                    is measured on the figure's DEPTH: a 150 mm target produced
+                    a 433 mm tall object and glued the base to the figure's back.
+                    This is the bug that most likely sank the first Meshy attempt.
+  2. merge_components  union every shell above 2% of the largest instead of
+                    deleting it. keep_largest_component() alone amputates an
+                    arm/bow/sword and the result stays PERFECTLY watertight, so
+                    every naive check passes and a one-armed figure ships.
+  3. pymeshlab repair
+  4. decimate       cap face count so the slicer is not drowned.
+  5. scale_to_target  to (height - base height): the target is the FINISHED object.
+  6. wall measurement  deterministic (see estimate_wall_percentiles).
+  7. add_base       the cylinder OVERLAPS the model. A base whose top face is
+                    coplanar with the model's bottom unions into two
+                    disconnected solids — watertight, but component_count == 2,
+                    which fails the gate on every single order.
+
+NOTE: the caller must hand us Meshy's REPAIRED glb (POST /openapi/v1/print/repair).
+Raw meshy-7 output measured 610 disconnected shells, is_watertight false, and
+this pipeline cannot rescue it — the union fails and the concatenate fallback
+loses two thirds of the faces.
+"""
+import argparse
 import json
 import sys
 import time
-import numpy as np
 
+import numpy as np
 import trimesh
-import pymeshlab
+
+try:
+    import pymeshlab
+except ImportError:  # pragma: no cover - deployment guard
+    pymeshlab = None
+
+BASE_HEIGHT_MM = 3.0
+# The cylinder pokes this far INTO the model so the boolean actually fuses.
+BASE_OVERLAP_MM = 0.6
+# Union any shell at least this fraction of the largest one's volume.
+COMPONENT_KEEP_RATIO = 0.02
+# Anything below KEEP_RATIO but above this is a real feature we had to drop.
+COMPONENT_SIGNIFICANT_RATIO = 0.001
+# Meshy is asked for target_polycount=300000, so a healthy mesh lands just under
+# this and is never decimated. Decimation is a safety net, not a stage.
+MAX_FACES = 400_000
+DECIMATE_TARGET = 300_000
 
 
 def load_mesh(input_path: str) -> trimesh.Trimesh:
-    """Load a GLB/GLTF file and return the combined mesh."""
-    scene = trimesh.load(input_path, force="scene")
+    """Load a GLB/GLTF and return one mesh with node transforms APPLIED.
 
-    if isinstance(scene, trimesh.Scene):
-        meshes = [g for g in scene.geometry.values() if isinstance(g, trimesh.Trimesh)]
-        if not meshes:
-            raise ValueError("No valid meshes found in file")
-        if len(meshes) == 1:
-            return meshes[0]
-        # Combine all meshes into one
-        combined = trimesh.util.concatenate(meshes)
-        return combined
-    elif isinstance(scene, trimesh.Trimesh):
-        return scene
-    else:
-        raise ValueError(f"Unexpected type from trimesh.load: {type(scene)}")
-
-
-def keep_largest_component(mesh: trimesh.Trimesh) -> tuple[trimesh.Trimesh, bool]:
-    """If mesh has multiple disconnected bodies, keep only the largest.
-
-    Returns (largest_component, dropped_significant). dropped_significant is
-    True if any discarded component had >=10% of the largest's volume/area —
-    a signal that Meshy interpreted the image as a multi-piece object and the
-    user may want to review the result.
+    The previous version read `scene.geometry.values()` directly, which silently
+    discarded the scene graph transform.
     """
-    components = mesh.split()
-    if len(components) <= 1:
-        return mesh, False
+    loaded = trimesh.load(input_path, force="scene")
+    if isinstance(loaded, trimesh.Trimesh):
+        return loaded
+    if not isinstance(loaded, trimesh.Scene):
+        raise ValueError(f"Unexpected type from trimesh.load: {type(loaded)}")
 
-    def size(m):
-        return m.volume if m.is_volume else m.area
-
-    sized = [(c, size(c)) for c in components]
-    sized.sort(key=lambda p: p[1], reverse=True)
-    largest, largest_size = sized[0]
-    dropped_significant = any(
-        s > 0 and (s / largest_size) >= 0.10 for _, s in sized[1:]
-    )
-    return largest, dropped_significant
-
-
-def estimate_min_wall_thickness_mm(mesh: trimesh.Trimesh) -> float | None:
-    """Estimate the thinnest wall of the mesh by sampling surface points and
-    measuring inward ray distance. Returns None on failure.
-
-    This is a coarse heuristic — good enough to flag obvious risk regions
-    (< 1mm for FDM) without the cost of a full medial-axis computation.
-    """
+    meshes = [g for g in loaded.geometry.values() if isinstance(g, trimesh.Trimesh)]
+    if not meshes:
+        raise ValueError("No valid meshes found in file")
     try:
-        # Sample up to 2000 points uniformly on the surface.
-        sample_count = min(2000, max(200, len(mesh.faces) // 10))
-        points, face_idx = trimesh.sample.sample_surface(mesh, sample_count)
-        # Inward direction = -face_normal at each sample.
-        normals = mesh.face_normals[face_idx]
-        ray_origins = points - normals * 1e-4  # nudge inside the surface
-        ray_directions = -normals
-
-        # Cast inward rays; nearest hit distance = local thickness.
-        locations, index_ray, _ = mesh.ray.intersects_location(
-            ray_origins=ray_origins,
-            ray_directions=ray_directions,
-            multiple_hits=False,
-        )
-        if len(locations) == 0:
-            return None
-        distances = np.linalg.norm(locations - ray_origins[index_ray], axis=1)
-        # Filter degenerate near-zero hits (grazing rays / self-intersection).
-        valid = distances[distances > 0.05]
-        if len(valid) == 0:
-            return None
-        return float(np.percentile(valid, 1))  # 1st percentile as min estimate
-    except Exception as e:
-        print(f"Warning: wall-thickness estimate failed: {e}", file=sys.stderr)
-        return None
+        combined = loaded.to_geometry()
+        if isinstance(combined, trimesh.Trimesh) and len(combined.faces) > 0:
+            return combined
+    except Exception as exc:  # noqa: BLE001 - fall back, never fail the job here
+        print(f"Warning: scene.to_geometry() failed ({exc}); using raw geometry", file=sys.stderr)
+    return meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
 
 
-def repair_self_intersections(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
-    """Run an extra pymeshlab pass to fix non-manifold faces left over after
-    the primary repair step. No-op if the mesh is already clean."""
-    try:
-        ms = pymeshlab.MeshSet()
-        m = pymeshlab.Mesh(
-            vertex_matrix=mesh.vertices.astype(np.float64),
-            face_matrix=mesh.faces.astype(np.int32),
-        )
-        ms.add_mesh(m)
-        ms.meshing_repair_non_manifold_faces()
-        repaired = ms.current_mesh()
-        if repaired.face_number() != mesh.faces.shape[0]:
-            repairs.append("repair_non_manifold_faces")
-        return trimesh.Trimesh(
-            vertices=repaired.vertex_matrix(),
-            faces=repaired.face_matrix(),
-            process=True,
-        )
-    except Exception as e:
-        print(f"Warning: repair_non_manifold_faces failed: {e}", file=sys.stderr)
+def orient_z_up(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
+    """Put the figure's long axis on Z, which is what scaling and the base assume."""
+    extents = np.asarray(mesh.bounding_box.extents, dtype=float)
+    if int(np.argmax(extents)) == 2:
+        repairs.append("axis_already_z_up")
         return mesh
 
-
-def repair_with_pymeshlab(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
-    """Use pymeshlab to repair non-manifold geometry and close holes."""
-    ms = pymeshlab.MeshSet()
-    m = pymeshlab.Mesh(
-        vertex_matrix=mesh.vertices.astype(np.float64),
-        face_matrix=mesh.faces.astype(np.int32),
-    )
-    ms.add_mesh(m)
-
-    # Repair non-manifold edges
-    try:
-        ms.meshing_repair_non_manifold_edges(method="Remove Faces")
-        repairs.append("repair_non_manifold_edges")
-    except Exception as e:
-        print(f"Warning: repair_non_manifold_edges failed: {e}", file=sys.stderr)
-
-    # Repair non-manifold vertices
-    try:
-        ms.meshing_repair_non_manifold_vertices()
-        repairs.append("repair_non_manifold_vertices")
-    except Exception as e:
-        print(f"Warning: repair_non_manifold_vertices failed: {e}", file=sys.stderr)
-
-    # Close holes
-    try:
-        ms.meshing_close_holes(maxholesize=100)
-        repairs.append("close_holes")
-    except Exception as e:
-        print(f"Warning: close_holes failed: {e}", file=sys.stderr)
-
-    # Extract repaired mesh
-    repaired = ms.current_mesh()
-    return trimesh.Trimesh(
-        vertices=repaired.vertex_matrix(),
-        faces=repaired.face_matrix(),
-        process=True,
-    )
-
-
-def decimate_if_needed(
-    mesh: trimesh.Trimesh, max_faces: int = 200000, target_faces: int = 150000, repairs: list[str] = []
-) -> trimesh.Trimesh:
-    """Decimate mesh if it has too many faces."""
-    if len(mesh.faces) <= max_faces:
+    mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    if int(np.argmax(np.asarray(mesh.bounding_box.extents, dtype=float))) == 2:
+        repairs.append("axis_rotated_y_up_to_z_up")
         return mesh
 
-    ms = pymeshlab.MeshSet()
-    m = pymeshlab.Mesh(
-        vertex_matrix=mesh.vertices.astype(np.float64),
-        face_matrix=mesh.faces.astype(np.int32),
-    )
-    ms.add_mesh(m)
-
-    ms.meshing_decimation_quadric_edge_collapse(
-        targetfacenum=target_faces,
-        preservenormal=True,
-        preservetopology=True,
-    )
-    repairs.append(f"decimated_{len(mesh.faces)}_to_{target_faces}")
-
-    decimated = ms.current_mesh()
-    return trimesh.Trimesh(
-        vertices=decimated.vertex_matrix(),
-        faces=decimated.face_matrix(),
-        process=True,
-    )
-
-
-def scale_to_target(mesh: trimesh.Trimesh, target_height_mm: float = 80.0) -> trimesh.Trimesh:
-    """Scale mesh so its height is the target height in mm."""
-    bounds = mesh.bounds
-    current_height = bounds[1][2] - bounds[0][2]
-
-    if current_height <= 0:
-        raise ValueError("Mesh has zero or negative height")
-
-    scale_factor = target_height_mm / current_height
-    mesh.apply_scale(scale_factor)
-
-    # Center on XY plane, bottom at Z=0
-    bounds = mesh.bounds
-    translation = [
-        -(bounds[0][0] + bounds[1][0]) / 2,
-        -(bounds[0][1] + bounds[1][1]) / 2,
-        -bounds[0][2],
-    ]
-    mesh.apply_translation(translation)
-
+    # Neither Y nor Z was the long axis; bring X up as a last resort.
+    mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+    repairs.append("axis_rotated_x_up_to_z_up")
     return mesh
 
 
+def merge_components(
+    mesh: trimesh.Trimesh, repairs: list[str]
+) -> tuple[trimesh.Trimesh, int, bool]:
+    """Fuse accessory shells into the body; report anything real we still lost."""
+    components = mesh.split(only_watertight=False)
+    if len(components) <= 1:
+        return mesh, 1, False
+
+    volumes = [abs(c.volume) if c.volume else 0.0 for c in components]
+    largest = max(volumes) if volumes else 0.0
+    if largest <= 0:
+        return mesh, len(components), False
+
+    keep = [c for c, v in zip(components, volumes) if v >= largest * COMPONENT_KEEP_RATIO]
+    dropped_significant = any(
+        largest * COMPONENT_SIGNIFICANT_RATIO <= v < largest * COMPONENT_KEEP_RATIO
+        for v in volumes
+    )
+
+    if len(keep) <= 1:
+        repairs.append(f"kept_largest_of_{len(components)}_components")
+        return (keep[0] if keep else mesh), 1, dropped_significant
+
+    try:
+        merged = trimesh.boolean.union(keep, engine="manifold")
+        if isinstance(merged, trimesh.Trimesh) and len(merged.faces) > 0:
+            repairs.append(f"merged_{len(keep)}_components_boolean")
+            return merged, len(keep), dropped_significant
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: component union failed: {exc}", file=sys.stderr)
+
+    repairs.append(f"merged_{len(keep)}_components_concatenate")
+    return trimesh.util.concatenate(keep), len(keep), dropped_significant
+
+
+def repair_with_pymeshlab(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
+    # Meshy's print/repair already returns a watertight, manifold, hole-free
+    # mesh. Running close-holes / remove-faces over a good mesh only risks
+    # breaking it, so this is a rescue path, not a stage.
+    if mesh.is_watertight and mesh.is_volume:
+        repairs.append("repair_skipped_already_clean")
+        return mesh
+    if pymeshlab is None:
+        print("Warning: pymeshlab unavailable; skipping repair", file=sys.stderr)
+        return mesh
+    try:
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=mesh.vertices, face_matrix=mesh.faces))
+        ms.meshing_repair_non_manifold_edges(method="Remove Faces")
+        ms.meshing_repair_non_manifold_vertices()
+        ms.meshing_close_holes(maxholesize=300)
+        out = ms.current_mesh()
+        repairs.append("pymeshlab_repair")
+        return trimesh.Trimesh(
+            vertices=out.vertex_matrix(), faces=out.face_matrix(), process=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: pymeshlab repair failed: {exc}", file=sys.stderr)
+        return mesh
+
+
+def decimate_if_needed(mesh: trimesh.Trimesh, repairs: list[str]) -> trimesh.Trimesh:
+    if len(mesh.faces) <= MAX_FACES or pymeshlab is None:
+        return mesh
+    try:
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=mesh.vertices, face_matrix=mesh.faces))
+        # preservetopology=True is NOT optional: without it quadric edge collapse
+        # silently breaks watertightness (measured: wt True -> False) and no
+        # later repair filter in this stack puts it back.
+        ms.meshing_decimation_quadric_edge_collapse(
+            targetfacenum=DECIMATE_TARGET,
+            preserveboundary=True,
+            preservenormal=True,
+            preservetopology=True,
+            planarquadric=True,
+        )
+        out = ms.current_mesh()
+        repairs.append(f"decimated_to_{DECIMATE_TARGET}")
+        return trimesh.Trimesh(
+            vertices=out.vertex_matrix(), faces=out.face_matrix(), process=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: decimation failed: {exc}", file=sys.stderr)
+        return mesh
+
+
+def scale_to_target(mesh: trimesh.Trimesh, target_height_mm: float) -> trimesh.Trimesh:
+    current = mesh.bounds[1][2] - mesh.bounds[0][2]
+    if current <= 0:
+        raise ValueError("Mesh has zero height on Z after orientation")
+    mesh.apply_scale(target_height_mm / current)
+    bounds = mesh.bounds
+    mesh.apply_translation(
+        [
+            -(bounds[0][0] + bounds[1][0]) / 2,
+            -(bounds[0][1] + bounds[1][1]) / 2,
+            -bounds[0][2],
+        ]
+    )
+    return mesh
+
+
+def estimate_wall_percentiles(
+    mesh: trimesh.Trimesh, max_samples: int = 6000
+) -> tuple[float | None, float | None]:
+    """Thinnest-wall estimate, in mm, as (p1, p5).
+
+    DETERMINISTIC on purpose: rays start at an evenly strided subset of face
+    centroids rather than a random surface sample. The random version moved the
+    p1 estimate by up to 0.12 mm between identical runs, and a gate whose
+    verdict flips between identical runs is not a gate.
+
+    p1 catches a single thin splinter; p5 says whether thinness is widespread.
+    """
+    try:
+        face_count = len(mesh.faces)
+        if face_count == 0:
+            return None, None
+        stride = max(1, face_count // max_samples)
+        idx = np.arange(0, face_count, stride)
+        normals = mesh.face_normals[idx]
+        origins = mesh.triangles_center[idx] - normals * 1e-4
+        locations, index_ray, _ = mesh.ray.intersects_location(
+            ray_origins=origins, ray_directions=-normals, multiple_hits=False
+        )
+        if len(locations) == 0:
+            return None, None
+        distances = np.linalg.norm(locations - origins[index_ray], axis=1)
+        valid = distances[distances > 0.05]
+        if len(valid) == 0:
+            return None, None
+        return float(np.percentile(valid, 1)), float(np.percentile(valid, 5))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: wall-thickness estimate failed: {exc}", file=sys.stderr)
+        return None, None
+
+
 def add_base(mesh: trimesh.Trimesh, repairs: list[str]) -> tuple[trimesh.Trimesh, bool]:
-    """Add a cylindrical base to the mesh using boolean union."""
     bounds = mesh.bounds
     width = bounds[1][0] - bounds[0][0]
     depth = bounds[1][1] - bounds[0][1]
+    radius = max(max(width, depth) * 0.6 / 2, 10.0)
 
-    base_radius = max(width, depth) * 0.6 / 2
-    base_radius = max(base_radius, 10.0)  # minimum 10mm radius
-    base_height = 3.0
+    height = BASE_HEIGHT_MM + BASE_OVERLAP_MM
+    base = trimesh.creation.cylinder(radius=radius, height=height, sections=64)
+    base.apply_translation([0, 0, -height / 2 + BASE_OVERLAP_MM])
 
-    # Create cylinder base
-    base = trimesh.creation.cylinder(
-        radius=base_radius,
-        height=base_height,
-        sections=64,
-    )
-
-    # Position base so top surface is at Z=0 (bottom of model)
-    base.apply_translation([0, 0, -base_height / 2])
-
-    # Try boolean union with manifold3d
     try:
         result = trimesh.boolean.union([mesh, base], engine="manifold")
         if isinstance(result, trimesh.Trimesh) and len(result.faces) > 0:
             repairs.append("base_added_boolean")
             return result, True
-    except Exception as e:
-        print(f"Warning: Boolean union failed: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: base union failed: {exc}", file=sys.stderr)
 
-    # Fallback: concatenate (slicers handle overlapping solids)
     try:
-        result = trimesh.util.concatenate([mesh, base])
         repairs.append("base_added_concatenate")
-        return result, True
-    except Exception as e:
-        print(f"Warning: Base concatenation also failed: {e}", file=sys.stderr)
+        return trimesh.util.concatenate([mesh, base]), True
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: base concatenation failed: {exc}", file=sys.stderr)
         return mesh, False
 
 
-def validate_mesh(mesh: trimesh.Trimesh) -> dict:
-    """Run validation checks and return report data."""
+def build_report(mesh: trimesh.Trimesh) -> dict:
     bounds = mesh.bounds
     size = bounds[1] - bounds[0]
-
+    volume_cm3 = float(abs(mesh.volume)) / 1000.0
+    bbox_cm3 = float(size[0] * size[1] * size[2]) / 1000.0
     return {
         "is_watertight": bool(mesh.is_watertight),
         "is_volume": bool(mesh.is_volume),
@@ -266,85 +279,74 @@ def validate_mesh(mesh: trimesh.Trimesh) -> dict:
             "max": bounds[1].tolist(),
             "size": size.tolist(),
         },
+        "volume_cm3": round(volume_cm3, 3),
+        "fill_ratio": round(volume_cm3 / bbox_cm3, 4) if bbox_cm3 > 0 else 0.0,
     }
 
 
-def process_mesh(input_path: str, output_stl_path: str, report_path: str):
-    """Main processing pipeline."""
-    start_time = time.time()
+def process_mesh(
+    input_path: str, output_stl_path: str, report_path: str, height_mm: float, material: str
+) -> dict:
+    started = time.time()
     repairs: list[str] = []
 
-    print(f"Loading mesh from {input_path}...")
     mesh = load_mesh(input_path)
-    print(f"  Loaded: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
+    print(f"Loaded: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
 
-    # Keep largest component
-    original_components = len(mesh.split())
-    mesh, dropped_significant = keep_largest_component(mesh)
-    if original_components > 1:
-        repairs.append(f"kept_largest_of_{original_components}_components")
-        print(f"  Kept largest of {original_components} components")
-
-    # Repair with pymeshlab
-    print("Repairing mesh...")
+    mesh = orient_z_up(mesh, repairs)
+    mesh, merged_count, dropped_significant = merge_components(mesh, repairs)
     mesh = repair_with_pymeshlab(mesh, repairs)
-    print(f"  After repair: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
+    mesh = decimate_if_needed(mesh, repairs)
 
-    # Extra pass for self-intersections / non-manifold faces missed above.
-    mesh = repair_self_intersections(mesh, repairs)
+    body_height = max(height_mm - BASE_HEIGHT_MM, 1.0)
+    mesh = scale_to_target(mesh, body_height)
 
-    # Decimate if needed
-    mesh = decimate_if_needed(mesh, repairs=repairs)
-
-    # Scale to target height
-    print("Scaling to 80mm height...")
-    mesh = scale_to_target(mesh, target_height_mm=80.0)
-
-    # Wall-thickness estimate happens AFTER scaling so the value is in mm.
-    min_wall_mm = estimate_min_wall_thickness_mm(mesh)
-
-    # Add base
-    print("Adding base...")
+    p1, p5 = estimate_wall_percentiles(mesh)
     mesh, base_added = add_base(mesh, repairs)
 
-    # Validate
-    report = validate_mesh(mesh)
-    report["base_added"] = base_added
-    report["repairs_applied"] = repairs
-    report["dropped_significant_component"] = dropped_significant
-    report["min_wall_thickness_estimate_mm"] = (
-        round(min_wall_mm, 3) if min_wall_mm is not None else None
+    report = build_report(mesh)
+    report.update(
+        {
+            "base_added": base_added,
+            "repairs_applied": repairs,
+            "dropped_significant_component": dropped_significant,
+            "merged_component_count": merged_count,
+            "min_wall_p1_mm": None if p1 is None else round(p1, 3),
+            "min_wall_p5_mm": None if p5 is None else round(p5, 3),
+            "target_height_mm": height_mm,
+            "measured_height_mm": round(float(report["bounding_box"]["size"][2]), 2),
+            "material": material,
+            "processing_time_seconds": round(time.time() - started, 2),
+        }
     )
-    risks: list[str] = []
-    if min_wall_mm is not None and min_wall_mm < 1.0:
-        risks.append("thin_walls")
-    if dropped_significant:
-        risks.append("dropped_significant_component")
-    report["print_risk"] = risks
-    report["processing_time_seconds"] = round(time.time() - start_time, 2)
 
-    print(f"  Watertight: {report['is_watertight']}")
-    print(f"  Volume: {report['is_volume']}")
-    print(f"  Vertices: {report['vertex_count']}")
-    print(f"  Faces: {report['face_count']}")
-    print(f"  Components: {report['component_count']}")
-    print(f"  Size (mm): {report['bounding_box']['size']}")
-    print(f"  Base added: {base_added}")
-
-    # Export binary STL
-    print(f"Exporting STL to {output_stl_path}...")
     mesh.export(output_stl_path, file_type="stl")
+    with open(report_path, "w") as handle:
+        json.dump(report, handle, indent=2)
 
-    # Write report
-    with open(report_path, "w") as f:
-        json.dump(report, f, indent=2)
+    print(json.dumps({k: v for k, v in report.items() if k != "bounding_box"}, indent=2))
+    return report
 
-    print(f"Done in {report['processing_time_seconds']}s")
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Prepare a Meshy GLB for resin printing")
+    parser.add_argument("input")
+    parser.add_argument("output_stl")
+    parser.add_argument("report")
+    parser.add_argument("--height-mm", type=float, required=True)
+    parser.add_argument("--material", default="resin", choices=["resin", "filament"])
+    args = parser.parse_args()
+
+    if args.height_mm <= 0 or args.height_mm > 1000:
+        print(f"Error: implausible height {args.height_mm} mm", file=sys.stderr)
+        return 2
+    try:
+        process_mesh(args.input, args.output_stl, args.report, args.height_mm, args.material)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print(f"Usage: {sys.argv[0]} input.glb output.stl report.json", file=sys.stderr)
-        sys.exit(1)
-
-    process_mesh(sys.argv[1], sys.argv[2], sys.argv[3])
+    sys.exit(main())

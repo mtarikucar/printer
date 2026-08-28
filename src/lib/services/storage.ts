@@ -169,3 +169,29 @@ export function normalizeFileUrl(url: string | null): string | null {
   }
   return url;
 }
+
+/**
+ * Recover the storage key from a URL this app produced.
+ *
+ * Signed file URLs look like `<origin>/api/files/<key>?exp=..&sig=..`. Several
+ * tables (previews.selectedStyledImageUrl among them) persist only the URL, so
+ * anything that needs the BYTES has to get back to the key.
+ *
+ * Returns null for anything that is not one of our own file URLs, and refuses
+ * traversal — the caller must be able to trust the result as a key.
+ */
+export function fileKeyFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = "/api/files/";
+  const at = url.indexOf(marker);
+  if (at === -1) return null;
+  const withoutQuery = url.slice(at + marker.length).split("?")[0];
+  let key: string;
+  try {
+    key = decodeURIComponent(withoutQuery);
+  } catch {
+    return null;
+  }
+  if (!key || key.includes("..") || key.startsWith("/")) return null;
+  return key;
+}

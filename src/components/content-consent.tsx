@@ -64,7 +64,7 @@ export function ContentConsent({
         <span>
           {t(
             "consent.content.box2",
-            "Fotoğrafımın stilize görsel üretimi için yurt dışındaki yapay zeka sağlayıcılarına aktarılabileceğini; "
+            "Fotoğrafımın; stilize görsel ve 3D model üretimi ile sipariş iletişimi amacıyla yurt dışındaki hizmet sağlayıcılara (fal.ai, Meshy, Meta/WhatsApp, Anthropic) aktarılabileceğini; "
           )}
           <Link href="/privacy" target="_blank" className="underline hover:text-text-primary">
             {t("consent.content.kvkkLink", "KVKK Aydınlatma Metni'ni")}

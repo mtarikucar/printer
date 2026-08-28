@@ -14,7 +14,18 @@ const PAGE_SIZE = 25;
 // replace the old wall of 13 status chips; the exact-status dropdown still wins.
 const BUCKETS: Record<string, string[]> = {
   needsAction: ["awaiting_model", "review"],
-  inProgress: ["paid", "generating", "processing_mesh", "approved", "printing", "shipped"],
+  // `awaiting_customer_approval` is deliberately NOT in needsAction: the ball
+  // is in the customer's court, not ours. It sits in inProgress and gets its
+  // own SLA sweeper for the ones that go quiet.
+  inProgress: [
+    "paid",
+    "generating",
+    "processing_mesh",
+    "awaiting_customer_approval",
+    "approved",
+    "printing",
+    "shipped",
+  ],
   completed: ["delivered"],
   problems: ["failed_generation", "failed_mesh", "rejected"],
 };

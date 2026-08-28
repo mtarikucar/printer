@@ -9,6 +9,9 @@ const MIME_TYPES: Record<string, string> = {
   ".webp": "image/webp",
   ".glb": "model/gltf-binary",
   ".stl": "application/octet-stream",
+  // The 3D approval turntable. Without this entry the MP4 downloaded as
+  // application/octet-stream and <video> refused to play it.
+  ".mp4": "video/mp4",
 };
 
 // These files are bearer-capability URLs (a valid ?exp=&sig=, or public legacy
@@ -77,9 +80,56 @@ export async function GET(
     const ext = extname(relativePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
+    // Range support. The CORS block above already advertises Range and
+    // Content-Range, but the body never honoured either — and <video> asks for
+    // a range before it will seek, or even play, on several browsers.
+    const rangeHeader = request.headers.get("range");
+    const rangeMatch = rangeHeader?.match(/^bytes=(\d*)-(\d*)$/);
+    if (rangeMatch) {
+      const size = buffer.length;
+      const startRaw = rangeMatch[1];
+      const endRaw = rangeMatch[2];
+      let start = startRaw ? Number(startRaw) : 0;
+      let end = endRaw ? Number(endRaw) : size - 1;
+      // A suffix range ("bytes=-500") asks for the LAST N bytes.
+      if (!startRaw && endRaw) {
+        start = Math.max(0, size - Number(endRaw));
+        end = size - 1;
+      }
+      if (
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        start >= 0 &&
+        start < size &&
+        end >= start
+      ) {
+        end = Math.min(end, size - 1);
+        const slice = buffer.subarray(start, end + 1);
+        return new NextResponse(new Uint8Array(slice), {
+          status: 206,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": contentType,
+            "Content-Range": `bytes ${start}-${end}/${size}`,
+            "Content-Length": String(slice.length),
+            "Accept-Ranges": "bytes",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": signatureValid
+              ? "public, max-age=31536000, immutable"
+              : "public, max-age=3600",
+          },
+        });
+      }
+      return new NextResponse(null, {
+        status: 416,
+        headers: { ...CORS_HEADERS, "Content-Range": `bytes */${size}` },
+      });
+    }
+
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         ...CORS_HEADERS,
+        "Accept-Ranges": "bytes",
         "Content-Type": contentType,
         // Never let the browser MIME-sniff a stored upload into an executable
         // type — defuses a polyglot (valid image header + HTML/JS body) being

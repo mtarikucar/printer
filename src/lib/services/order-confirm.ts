@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, users } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
@@ -11,19 +11,75 @@ import {
   orderHasPrintableContent,
 } from "@/lib/services/manufacturer-assign";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
+import { getModelGenerationQueue } from "@/lib/queue/queues";
+import { isFlagEnabled } from "@/lib/services/flags";
+import { reserveSpend, releaseSpend } from "@/lib/services/spend-guard";
+import { resolveTargetHeightMm } from "@/lib/config/sizes";
+import { CONTENT_CONSENT_VERSION_MESHY } from "@/lib/config/content-consent";
+import { getCreditBalance, MESHY_CREDITS_PER_ORDER } from "@/lib/services/meshy";
 
 /**
  * Kick off post-payment processing for an order that is already in `status='paid'`.
  *
- * Image-first flow: there is NO automatic 3D generation anymore. The customer
- * already approved a fal.ai image before paying, so a paid custom order simply
- * moves to `awaiting_model`, where the admin manually produces + uploads the
- * 3D model. Upload orders (customer supplied their own mesh) go straight to
- * `review` for manufacturer assignment, as before.
+ * A paid custom order takes one of two roads:
+ *
+ *  - `generating` when the auto-3D pipeline is eligible (see
+ *    `autoModelEligibility`), which hands it to the Meshy worker chain.
+ *  - `awaiting_model` otherwise. That is TODAY's behaviour, byte for byte, and
+ *    it is also the kill switch: flipping `auto_model_enabled` off puts every
+ *    new order back on the manual road with no code path removed.
+ *
+ * Upload orders (customer supplied their own mesh) go straight to `review` for
+ * manufacturer assignment, as before.
  *
  * Idempotent: only the first caller transitioning from `paid` succeeds; the
  * rest are no-ops. No queue work, so no crash-revert dance is needed.
  */
+/**
+ * Why an order may or may not take the automatic road.
+ *
+ * Returned as a reason rather than a boolean so the fallback is explainable in
+ * the admin panel: "this one went manual because the size is bespoke" is a
+ * different operational fact from "we were out of Meshy credit".
+ */
+export async function autoModelEligibility(order: {
+  orderType: string | null;
+  previewId: string | null;
+  uploadedModelId: string | null;
+  figurineSize: string | null;
+  contentConsentVersion: string | null;
+}): Promise<{ eligible: true } | { eligible: false; reason: string }> {
+  if (!(await isFlagEnabled("auto_model_enabled"))) {
+    return { eligible: false, reason: "auto_model_disabled" };
+  }
+  if (order.orderType !== "custom") return { eligible: false, reason: "not_custom" };
+  if (!order.previewId) return { eligible: false, reason: "no_preview" };
+  if (order.uploadedModelId) return { eligible: false, reason: "customer_supplied_model" };
+
+  if (!resolveTargetHeightMm(order.figurineSize).ok) {
+    return { eligible: false, reason: "bespoke_size" };
+  }
+
+  // Consent given for the OLD processor list does not cover Meshy. KVKK art. 3
+  // requires açık rıza to be specific; an order whose consent predates the
+  // Meshy disclosure goes down the manual road rather than being sent abroad
+  // under a permission its buyer never gave.
+  if (
+    !order.contentConsentVersion ||
+    order.contentConsentVersion < CONTENT_CONSENT_VERSION_MESHY
+  ) {
+    return { eligible: false, reason: "consent_predates_meshy" };
+  }
+
+  const minBalance = Number(process.env.MESHY_MIN_CREDIT_BALANCE ?? 60);
+  const balance = await getCreditBalance().catch(() => -1);
+  if (balance >= 0 && balance < Math.max(minBalance, MESHY_CREDITS_PER_ORDER)) {
+    return { eligible: false, reason: "low_meshy_balance" };
+  }
+
+  return { eligible: true };
+}
+
 export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
   const result = await db.transaction(async (tx) => {
     // Row-lock to serialize concurrent kickoff calls (admin replay + webhook race).
@@ -51,7 +107,9 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
       return { order, action: "upload" as const };
     }
 
-    // Custom orders (image-first): wait for the admin to sculpt + upload the 3D.
+    // Custom orders: either the automatic pipeline or today's manual road.
+    // The eligibility check runs OUTSIDE this transaction (it makes a network
+    // call), so it is decided before the lock is taken — see below.
     await tx
       .update(orders)
       .set({ status: "awaiting_model", updatedAt: new Date() })
@@ -61,12 +119,59 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
 
   if (result.action === "noop") return;
 
+  // Promote awaiting_model -> generating when the auto-3D road is open. Done
+  // after the transaction so a slow provider call never holds a row lock, and
+  // guarded on the status we just wrote so a concurrent admin action wins.
+  let finalStatus: string = result.action === "upload" ? "review" : "awaiting_model";
+  if (result.action === "awaiting_model") {
+    const eligibility = await autoModelEligibility(result.order);
+    if (eligibility.eligible) {
+      const round = (result.order.modelGenerationRound ?? 0) + 1;
+      // Reserve before enqueueing: a job that cannot afford its provider call
+      // should never be created.
+      const reservation = await reserveSpend("meshy", 0, {
+        kind: "order",
+        id: result.order.id,
+      });
+      const promoted = await db
+        .update(orders)
+        .set({ status: "generating", modelGenerationRound: round, updatedAt: new Date() })
+        .where(and(eq(orders.id, orderId), eq(orders.status, "awaiting_model")))
+        .returning({ id: orders.id });
+
+      if (promoted.length > 0) {
+        try {
+          await getModelGenerationQueue().add(
+            "step",
+            { orderId, round, stage: "create" as const },
+            { jobId: `model-gen:${orderId}:${round}` }
+          );
+          finalStatus = "generating";
+        } catch (err) {
+          // Enqueue failed after the status write: put it back on the manual
+          // road rather than leaving a paid order stuck in `generating` with
+          // no job behind it.
+          console.error(`[order-confirm] enqueue failed for ${orderId}; reverting`, err);
+          await db
+            .update(orders)
+            .set({ status: "awaiting_model", updatedAt: new Date() })
+            .where(and(eq(orders.id, orderId), eq(orders.status, "generating")));
+        }
+      }
+      if (reservation.ok) await releaseSpend(reservation.reservationId);
+    } else {
+      console.info(
+        `[order-confirm] order=${orderId} stays manual: ${eligibility.reason}`
+      );
+    }
+  }
+
   await emitOrderChanged({
     orderId: result.order.id,
     orderNumber: result.order.orderNumber,
     userId: result.order.userId,
     manufacturerId: result.order.manufacturerId,
-    status: result.action === "upload" ? "review" : "awaiting_model",
+    status: finalStatus,
   });
 
   await sendOrderConfirmationEmails(result.order, locale);

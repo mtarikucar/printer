@@ -47,6 +47,11 @@ export const orderStatusEnum = pgEnum("order_status", [
   // paid custom order waits here for the ADMIN to manually produce + upload the
   // 3D model (there is no automatic 3D generation anymore).
   "awaiting_model",
+  // Auto-3D flow: the model is generated, the print gate has ruled and an admin
+  // has clicked approve — now the CUSTOMER must approve the 360° turntable
+  // before anything is printed. The distance-selling contract makes production
+  // conditional on that approval, and the withdrawal-right exclusion rests on it.
+  "awaiting_customer_approval",
   // Legacy auto-3D lifecycle states — no longer written by the app, kept so
   // historical rows still validate against the enum.
   "generating",
@@ -619,6 +624,23 @@ export const orders = pgTable("orders", {
   modelStlKey: text("model_stl_key"),
   modelStlUrl: text("model_stl_url"),
   modelUploadedAt: timestamp("model_uploaded_at"),
+  // ─── Auto-3D pipeline (Meshy) ─────────────────────────────────────────────
+  // Which hand produced the live model: "meshy_auto" or "admin_upload". The
+  // customer-approval gate applies only to the automatic one; a model an admin
+  // sculpted by hand keeps today's behaviour exactly.
+  modelSource: text("model_source"),
+  // Bounded retries. Only an ADMIN may spend another round; a customer button
+  // that costs 30 Meshy credits per press is not a button we hand out.
+  modelGenerationRound: integer("model_generation_round").notNull().default(0),
+  // 360° MP4 rendered by scripts/render_turntable.py — the artefact the
+  // customer actually approves. Meshy returns no turntable video of its own.
+  modelTurntableKey: text("model_turntable_key"),
+  modelTurntableUrl: text("model_turntable_url"),
+  // Capability token for /onay/<token>. Deliberately NOT journeyToken: that one
+  // is printed on the card in the box and cannot be rotated after shipping.
+  modelApprovalToken: text("model_approval_token").unique(),
+  customerModelApprovedAt: timestamp("customer_model_approved_at"),
+  customerModelRevisionNote: text("customer_model_revision_note"),
   isPublic: boolean("is_public").notNull().default(false),
   publicDisplayName: text("public_display_name"),
   publishedAt: timestamp("published_at"),
@@ -1049,7 +1071,17 @@ export const generationAttempts = pgTable("generation_attempts", {
   provider: generationProviderEnum("provider").notNull(),
   providerTaskId: text("provider_task_id"),
   status: generationStatusEnum("status").notNull().default("pending"),
-  inputImageUrl: text("input_image_url").notNull(),
+  // Claimed BEFORE the provider POST. BullMQ marks a job stalled when its lock
+  // cannot be renewed — which is exactly what happens while python saturates
+  // the single vCPU — and re-runs it. `jobId` does not help there (it is the
+  // same job running again); the UNIQUE(order_id, round) below does: the second
+  // run finds this row, re-attaches to provider_task_id, and does not buy a
+  // second 20-credit task.
+  round: integer("round").notNull().default(1),
+  credits: integer("credits"),
+  // Nullable since the auto-3D flow feeds Meshy a base64 data URI rather than a
+  // published URL, so there is no address worth storing.
+  inputImageUrl: text("input_image_url"),
   outputGlbUrl: text("output_glb_url"),
   outputStlUrl: text("output_stl_url"),
   outputObjUrl: text("output_obj_url"),
@@ -1058,7 +1090,9 @@ export const generationAttempts = pgTable("generation_attempts", {
   durationMs: integer("duration_ms"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  uniqueIndex("generation_attempts_order_round_uq").on(t.orderId, t.round),
+]);
 
 export const meshReports = pgTable("mesh_reports", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1077,8 +1111,60 @@ export const meshReports = pgTable("mesh_reports", {
   }>(),
   baseAdded: boolean("base_added").notNull().default(false),
   repairsApplied: jsonb("repairs_applied").$type<string[]>(),
+  // ─── Print gate ──────────────────────────────────────────────────────────
+  // Meshy's free print/analyze, stored raw as a cross-check. It never passes a
+  // mesh on its own: a measured sample came back is_watertight true with 33,314
+  // degenerate faces and Meshy still graded it merely "warning".
+  meshyPrintability: jsonb("meshy_printability"),
+  // p1 catches a single thin splinter; p5 says whether thinness is widespread.
+  // Measured deterministically — a gate whose verdict flips between identical
+  // runs is not a gate.
+  minWallP1Mm: doublePrecision("min_wall_p1_mm"),
+  minWallP5Mm: doublePrecision("min_wall_p5_mm"),
+  mergedComponentCount: integer("merged_component_count"),
+  heightMm: doublePrecision("height_mm"),
+  fillRatio: doublePrecision("fill_ratio"),
+  droppedSignificantComponent: boolean("dropped_significant_component")
+    .notNull()
+    .default(false),
+  verdict: text("verdict"),
+  verdictReasons: jsonb("verdict_reasons").$type<string[]>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// One row per turntable+GLB actually SHOWN to a customer for approval.
+//
+// The legal evidence lives here, not on orders.status: a second generation
+// round overwrites the orders.model* columns, and with it any proof of what
+// the customer approved the first time. The withdrawal-right exclusion is
+// defended with this row.
+export const modelApprovalDecisionEnum = pgEnum("model_approval_decision", [
+  "approved",
+  "revision",
+  "cancelled",
+  "auto_approved",
+]);
+
+export const orderModelApprovals = pgTable(
+  "order_model_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id),
+    revision: integer("revision").notNull(),
+    glbKey: text("glb_key"),
+    turntableKey: text("turntable_key"),
+    channel: text("channel").notNull().default("email"),
+    shownAt: timestamp("shown_at").notNull().defaultNow(),
+    decidedAt: timestamp("decided_at"),
+    decision: modelApprovalDecisionEnum("decision"),
+    note: text("note"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+  },
+  (t) => [index("order_model_approvals_order_idx").on(t.orderId, t.revision)]
+);
 
 export const adminActions = pgTable("admin_actions", {
   id: uuid("id").primaryKey().defaultRandom(),

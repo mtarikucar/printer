@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
-import { orders, manufacturers, orderDrafts, products, workshopRequests, painters } from "@/lib/db/schema";
+import { orders, manufacturers, orderDrafts, products, workshopRequests, painters, waConversations } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { AdminSidebar } from "./sidebar";
 import { AdminRealtimeShell } from "./realtime-shell";
@@ -100,6 +100,18 @@ export default async function AdminLayout({
     .from(orders)
     .where(sql`${orders.painterStatus} = 'qc_pending'`);
 
+  // WhatsApp threads where the customer wrote after our last outbound message.
+  // Nobody marks a thread read here, so "waiting on us" is the honest badge.
+  const [waAwaitingCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(waConversations)
+    .where(
+      sql`${waConversations.mode} <> 'blocked'
+        AND ${waConversations.lastInboundAt} IS NOT NULL
+        AND (${waConversations.lastOutboundAt} IS NULL
+             OR ${waConversations.lastInboundAt} > ${waConversations.lastOutboundAt})`
+    );
+
   return (
     <AdminRealtimeShell>
       <PanelShell
@@ -116,6 +128,7 @@ export default async function AdminLayout({
             workshopPendingCount={workshopPendingCount.count}
             pendingPainterCount={pendingPainterCount.count}
             painterQcPendingCount={painterQcPendingCount.count}
+            waAwaitingReplyCount={waAwaitingCount.count}
           />
         }
       >

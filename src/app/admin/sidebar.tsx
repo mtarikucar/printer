@@ -18,6 +18,7 @@ export function AdminSidebar({
   workshopPendingCount,
   pendingPainterCount,
   painterQcPendingCount,
+  waAwaitingReplyCount,
 }: {
   reviewCount: number;
   unassignedMarketplaceCount: number;
@@ -29,6 +30,7 @@ export function AdminSidebar({
   workshopPendingCount: number;
   pendingPainterCount: number;
   painterQcPendingCount: number;
+  waAwaitingReplyCount: number;
 }) {
   const pathname = usePathname();
   const d = useDictionary();
@@ -158,6 +160,12 @@ export function AdminSidebar({
           label: "Atölye talepleri",
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />,
           badge: workshopPendingCount,
+        },
+        {
+          href: "/admin/whatsapp",
+          label: "WhatsApp",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.5 3.5A10 10 0 003.6 15.2L2.5 21.5l6.4-1.1A10 10 0 1020.5 3.5z" />,
+          badge: waAwaitingReplyCount,
         },
         {
           href: "/admin/disputes",

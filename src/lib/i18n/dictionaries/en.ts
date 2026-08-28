@@ -845,6 +845,10 @@ const en = {
   // Image/likeness rights + KVKK consent (order creation)
   "consent.content.required":
     "Please tick the image-use and KVKK consent boxes to continue.",
+  "api.common.tooManyRequests":
+    "Too many requests. Please try again in a few minutes.",
+  "api.common.inProgress":
+    "This order is already being processed. Please wait a few seconds and try again.",
   "api.order.consentRequired":
     "You must tick the image-use and KVKK consent boxes to continue.",
   "consent.content.box1":

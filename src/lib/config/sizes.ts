@@ -71,6 +71,36 @@ export function presetHeightMm(key: string): number | null {
   return ALL_PRESETS.find((p) => p.key === key)?.heightMm ?? null;
 }
 
+/**
+ * Physical print height in mm for an order's stored size.
+ *
+ * Returns a discriminated result rather than throwing: `figurineSize` has been
+ * free text since migration 0036, so "17,5 cm" is a legitimate stored value
+ * with no preset height. The auto-3D pipeline must fall back to the manual
+ * path for those, not crash — `presetHeightMm` used to carry a non-null
+ * assertion and would have thrown a TypeError on exactly this input.
+ */
+export function resolveTargetHeightMm(
+  size: string | null | undefined
+): { ok: true; heightMm: number } | { ok: false; reason: "unknown_size" } {
+  if (!size) return { ok: false, reason: "unknown_size" };
+
+  const preset = presetHeightMm(size);
+  if (preset != null) return { ok: true, heightMm: preset };
+
+  // A single free-form measurement ("18 cm", "17,5 cm") is printable; a
+  // three-axis bespoke spec ("15×10×22 cm") is not something we can reduce to
+  // one height, so it stays on the manual path.
+  const match = size.trim().match(/^(\d+(?:[.,]\d{1,2})?)\s*cm$/i);
+  if (match) {
+    const cm = Number.parseFloat(match[1].replace(",", "."));
+    if (Number.isFinite(cm) && cm >= 1 && cm <= 100) {
+      return { ok: true, heightMm: Math.round(cm * 10) };
+    }
+  }
+  return { ok: false, reason: "unknown_size" };
+}
+
 /** 80 → "8 cm"; 175 → "17,5 cm" (tr-TR decimal comma, 1 decimal max). */
 export function formatCm(mm: number): string {
   return `${formatCmValue(mm / 10)} cm`;

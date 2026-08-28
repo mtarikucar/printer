@@ -88,6 +88,11 @@ export function startPreviewGenerationWorker() {
       connection: getRedisConnection(),
       concurrency: 3,
       limiter: { max: 5, duration: 60000 },
+      // One job blocks on up to two 120 s fal polls. BullMQ's default 30 s lock
+      // cannot be renewed while the event loop is starved, so the job gets
+      // marked stalled and RE-RUN — which buys the fal calls a second time.
+      lockDuration: 600_000,
+      maxStalledCount: 1,
     },
   );
 

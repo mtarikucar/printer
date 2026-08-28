@@ -35,7 +35,7 @@ export default async function TermsPage() {
               <ul>
                 <li>Kullanıcı tarafından yüklenen fotoğraflardan yapay zeka destekli 3D model oluşturma</li>
                 <li>Oluşturulan 3D modellerin reçine baskı ile fiziksel figürin üretimi</li>
-                <li>Figürin ile birlikte boyama kiti (boyalar, fırçalar, rehber) gönderimi</li>
+                <li>Üretilen figürinin profesyonel el boyaması ile sergilemeye hazır teslimi</li>
                 <li>3D obje oluşturma ve baskı hizmeti</li>
                 <li>Dijital STL dosyası satışı</li>
                 <li>Hediye kartı satış ve kullanım hizmeti</li>

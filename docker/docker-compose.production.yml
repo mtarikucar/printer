@@ -20,6 +20,13 @@ services:
   redis:
     image: redis:7-alpine
     container_name: printer_redis
+    # Without a volume every container recreate wipes the delayed and repeatable
+    # jobs: payment deadlines, SLA sweeps, model-approval reminders. AOF so a
+    # restart replays them instead of losing the ones scheduled since the last
+    # snapshot.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - printer_redis:/data
     networks:
       - printer_network
     restart: unless-stopped
@@ -75,6 +82,10 @@ services:
     environment:
       DATABASE_URL: postgres://printer:printer@postgres:5432/printer
       REDIS_URL: redis://redis:6379
+    # Mesh processing is the most memory-hungry work this system does and it
+    # shares a host with postgres. Without a limit the kernel OOM killer picks
+    # the biggest RSS, which can be the database.
+    mem_limit: 2g
     volumes:
       - printer_uploads:/app/uploads
     networks:
@@ -89,6 +100,7 @@ services:
 volumes:
   printer_pgdata:
   printer_uploads:
+  printer_redis:
 
 networks:
   printer_network:

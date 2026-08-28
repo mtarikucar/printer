@@ -161,3 +161,35 @@ test("emekli boyutlar admin panelinde ham key olarak görünmez", () => {
 
 console.log(`\n${pass}/${pass + fail} passed`);
 if (fail > 0) process.exit(1);
+
+// ─── resolveTargetHeightMm ───────────────────────────────────────────────────
+{
+  const { resolveTargetHeightMm } = require("../src/lib/config/sizes") as {
+    resolveTargetHeightMm: (s: string | null | undefined) => { ok: boolean; heightMm?: number };
+  };
+  const cases: Array<[string | null | undefined, number | null]> = [
+    ["standart", 150],
+    ["orta", 80],
+    ["buyuk", 120],
+    ["kucuk", 60],
+    ["18 cm", 180],
+    ["17,5 cm", 175],
+    ["17.5 cm", 175],
+    ["15×10×22 cm", null],
+    ["", null],
+    [null, null],
+    ["saçmalık", null],
+    ["500 cm", null],
+  ];
+  let localFail = 0;
+  for (const [input, expected] of cases) {
+    const res = resolveTargetHeightMm(input);
+    const got = res.ok ? res.heightMm! : null;
+    if (got !== expected) {
+      localFail++;
+      console.error(`  ✗ resolveTargetHeightMm(${JSON.stringify(input)}) = ${got}, beklenen ${expected}`);
+    }
+  }
+  if (localFail === 0) console.log("  ✓ resolveTargetHeightMm: 12 vaka");
+  else process.exitCode = 1;
+}

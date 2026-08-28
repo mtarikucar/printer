@@ -58,7 +58,7 @@ docker-compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate app worker
 log "Sağlık kontrolü yapılıyor..."
 RETRIES=15
 for i in $(seq 1 $RETRIES); do
-    if curl -sf -o /dev/null http://localhost:3005; then
+    if curl -sf http://localhost:3005/api/health | grep -q '"ok":true'; then
         log "Uygulama çalışıyor! ✓ http://localhost:3005"
         break
     fi

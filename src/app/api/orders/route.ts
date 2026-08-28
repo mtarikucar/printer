@@ -27,6 +27,13 @@ import { effectiveMaxQty } from "@/lib/config/bulk";
 import { priceKindForStyle, getTemplate, DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
 import { resolveOrderLines, type ResolvedOrderLine } from "@/lib/services/product-options";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { getClientIpFromRequest } from "@/lib/utils/request";
+import { rateLimitAsync } from "@/lib/services/rate-limit";
+import {
+  deriveIdempotencyKey,
+  releaseIdempotencyKey,
+  withIdempotency,
+} from "@/lib/services/idempotency";
 import { resolveOrCreateGuestUser } from "@/lib/services/guest-user";
 import { validateGiftCard } from "@/lib/services/gift-card";
 import {
@@ -61,14 +68,92 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplay } from "@/lib/config/sizes";
 import { finishNeedsPainter, paintingPortionKurus } from "@/lib/config/prices";
 
-export async function POST(request: NextRequest) {
+/**
+ * Rate limit + idempotency in front of order creation.
+ *
+ * This is the most permissive write endpoint in the codebase: no auth (guest
+ * checkout is a first-class path), and it creates users rows, drafts,
+ * gift-card reservations, BullMQ jobs and outbound email. A double tap used to
+ * produce two drafts and two PayTR tokens.
+ *
+ * Only 2xx responses are memoised. A 4xx is the caller's input problem — the
+ * claim is released so they can fix it and retry immediately.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const locale = getRequestLocale(request);
+  const d = getDictionary(locale);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Geçersiz istek gövdesi.", code: "bad_json" }, { status: 400 });
+  }
+
+  const ip = getClientIpFromRequest(request);
+  const perIp = await rateLimitAsync(`orders:create:ip:${ip}`, 10, 60 * 60 * 1000);
+  if (!perIp.success) {
+    return NextResponse.json(
+      { error: d["api.common.tooManyRequests"], code: "rate_limited" },
+      { status: 429 }
+    );
+  }
+
+  const email =
+    typeof body?.guestEmail === "string" ? String(body.guestEmail).toLowerCase().trim() : null;
+  if (email) {
+    const perEmail = await rateLimitAsync(`orders:create:email:${email}`, 5, 60 * 60 * 1000);
+    if (!perEmail.success) {
+      return NextResponse.json(
+        { error: d["api.common.tooManyRequests"], code: "rate_limited" },
+        { status: 429 }
+      );
+    }
+  }
+
+  const headerKey = request.headers.get("idempotency-key");
+  const key =
+    headerKey && headerKey.length >= 8 && headerKey.length <= 200
+      ? headerKey
+      : deriveIdempotencyKey(body, email);
+
+  const outcome = await withIdempotency<{ status: number; json: unknown }>({
+    scope: "orders.create",
+    key,
+    ttlSeconds: 600,
+    run: async () => {
+      const res = await handleCreateOrder(request, body);
+      return { status: res.status, json: await res.clone().json().catch(() => null) };
+    },
+  });
+
+  if (outcome.status === "in_progress") {
+    return NextResponse.json(
+      { error: d["api.common.inProgress"], code: "in_progress" },
+      { status: 409 }
+    );
+  }
+
+  const { status, json } = outcome.value;
+  if (status >= 400 && outcome.status === "fresh") {
+    await releaseIdempotencyKey("orders.create", key);
+  }
+  return NextResponse.json(json, { status });
+}
+
+async function handleCreateOrder(
+  request: NextRequest,
+  // Deliberately `any`: this is exactly what `await request.json()` used to
+  // hand this function, and every zod schema below re-validates it anyway.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any
+): Promise<NextResponse> {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
   try {
     const session = await getSessionUser();
-
-    const body = await request.json();
 
     // Marketing attribution captured from first-party cookies (set by middleware)
     // — persisted on the draft and copied to the order on promotion, so every

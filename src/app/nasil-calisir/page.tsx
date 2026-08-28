@@ -171,7 +171,7 @@ export default async function HowItWorksPage() {
                 Upload a photo of a person, pet, or object and our AI-assisted pipeline generates a 3D
                 preview. You pick a <strong>design template</strong> (Realistic, Storybook, Anime, Chibi,
                 or Object). Once you approve, our manufacturing partner prints it, prepares it to your
-                chosen finish, and ships it with a paint kit.
+                chosen finish, hand-paints it, and ships it display-ready.
               </p>
 
               <h3>2. 2D design/logo → product</h3>

@@ -847,6 +847,10 @@ const tr: Dictionary = {
   // Görsel/kişilik hakları + KVKK onayı (sipariş oluşturma)
   "consent.content.required":
     "Devam etmek için görsel kullanım ve KVKK onaylarını işaretleyin.",
+  "api.common.tooManyRequests":
+    "Çok fazla istek gönderildi. Lütfen birkaç dakika sonra tekrar deneyin.",
+  "api.common.inProgress":
+    "Bu sipariş şu anda işleniyor. Lütfen birkaç saniye bekleyip tekrar deneyin.",
   "api.order.consentRequired":
     "Devam etmek için görsel kullanım ve KVKK onaylarını işaretlemelisiniz.",
   "consent.content.box1":

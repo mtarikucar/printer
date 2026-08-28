@@ -10,6 +10,7 @@ import {
   pgEnum,
   uniqueIndex,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { Attribution } from "../analytics/types";
@@ -844,7 +845,10 @@ export const earningStatusEnum = pgEnum("earning_status", [
   "reversed",
 ]);
 export const payoutStatusEnum = pgEnum("payout_status", ["pending", "paid"]);
-export const invoiceStatusEnum = pgEnum("invoice_status", ["draft", "issued"]);
+// `pending` exists because the e-invoice provider is still a stub: a row must
+// never claim "issued" while nothing was actually filed with GİB. Only a real
+// provider reference promotes a row to `issued`.
+export const invoiceStatusEnum = pgEnum("invoice_status", ["draft", "pending", "issued"]);
 
 // One earning row per order, accrued when the manufacturer ships. net = gross −
 // platform commission. Linked into a payout batch when paid; reversed on
@@ -2333,5 +2337,67 @@ export const analyticsEvents = pgTable(
     index("analytics_events_visitor_idx").on(t.visitorId),
     index("analytics_events_channel_idx").on(t.channel),
     index("analytics_events_product_idx").on(t.productId),
+  ]
+);
+
+// ─── Ops spine: flags, spend ledger, idempotency ────────────────────────────
+// These three tables exist so that shipping a money-spending feature is never
+// the same event as enabling it, so a runaway loop hits a ceiling before the
+// money leaves, and so a double-tapped checkout cannot create two orders.
+
+// Runtime on/off switches for anything that spends money or calls a third
+// party. DB-backed rather than env so flipping one is a single click with an
+// audit trail, takes effect across app + worker in <=10s, and needs no deploy.
+// Editing .env and redeploying is not an emergency lever.
+export const platformFlags = pgTable("platform_flags", {
+  key: text("key").primaryKey(),
+  enabled: boolean("enabled").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+});
+
+export const spendStatusEnum = pgEnum("spend_status", ["reserved", "settled", "released"]);
+
+// Every paid provider call reserves BEFORE the call and settles AFTER it, so a
+// ceiling is enforced while the money is still ours. `reservedCents` is the
+// pessimistic estimate; `settledCents` is the truth once the provider answers.
+export const aiSpendLedger = pgTable(
+  "ai_spend_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull(),
+    scopeKind: text("scope_kind").notNull(),
+    scopeId: text("scope_id").notNull(),
+    reservedCents: integer("reserved_cents").notNull(),
+    settledCents: integer("settled_cents"),
+    status: spendStatusEnum("status").notNull().default("reserved"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    settledAt: timestamp("settled_at"),
+  },
+  (t) => [
+    index("ai_spend_ledger_created_idx").on(t.createdAt),
+    index("ai_spend_ledger_scope_idx").on(t.scopeKind, t.scopeId),
+    index("ai_spend_ledger_provider_idx").on(t.provider, t.createdAt),
+  ]
+);
+
+export const idempotencyStatusEnum = pgEnum("idempotency_status", ["in_flight", "done"]);
+
+// A double-tapped checkout must not create two drafts (and two PayTR tokens).
+// The claim is taken before the work runs; a concurrent caller sees `in_flight`
+// and is told to retry rather than racing.
+export const idempotencyKeys = pgTable(
+  "idempotency_keys",
+  {
+    scope: text("scope").notNull(),
+    key: text("key").notNull(),
+    status: idempotencyStatusEnum("status").notNull().default("in_flight"),
+    responseJson: jsonb("response_json"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scope, t.key] }),
+    index("idempotency_keys_expires_idx").on(t.expiresAt),
   ]
 );

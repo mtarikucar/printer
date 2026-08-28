@@ -172,8 +172,16 @@ export async function markPayoutPaid(
   });
 }
 
-// Get-or-create the customer invoice for a paid order (KDV-inclusive). Calls the
-// pluggable e-invoice provider once to obtain a provider reference.
+/**
+ * Get-or-create the customer invoice for a paid order (KDV-inclusive).
+ *
+ * The row is only marked `issued` when the provider hands back a REAL
+ * reference. The provider is currently a stub that files nothing with GİB and
+ * returns `STUB-<invoiceNumber>`; writing `issued` on the back of that made the
+ * database assert an invoice exists — and let the customer download it — when
+ * none had been filed. A `pending` row is the honest state until a real
+ * integrator (Paraşüt/Foriba/Mikro) is wired in.
+ */
 export async function getOrCreateInvoice(order: {
   id: string;
   orderNumber: string;
@@ -203,6 +211,15 @@ export async function getOrCreateInvoice(order: {
     console.error("e-invoice issue failed (non-fatal)", err);
   }
 
+  // A synthetic reference is not an invoice. Anything the stub produces (or a
+  // provider failure that leaves providerRef null) stays `pending`.
+  const reallyIssued = !!providerRef && !providerRef.startsWith("STUB-");
+  if (!reallyIssued) {
+    console.warn(
+      `[invoice] ${invoiceNumber} recorded as pending — no real provider reference`
+    );
+  }
+
   const [row] = await db
     .insert(invoices)
     .values({
@@ -212,8 +229,8 @@ export async function getOrCreateInvoice(order: {
       kdvKurus: k.kdvKurus,
       totalKurus: k.totalKurus,
       kdvRateBps: k.kdvRateBps,
-      status: "issued",
-      providerRef,
+      status: reallyIssued ? "issued" : "pending",
+      providerRef: reallyIssued ? providerRef : null,
     })
     .onConflictDoNothing({ target: invoices.orderId })
     .returning();

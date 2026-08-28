@@ -132,6 +132,17 @@ jobs:
           META_PIXEL_ID: ${{ secrets.META_PIXEL_ID }}
           TIKTOK_PIXEL_ID: ${{ secrets.TIKTOK_PIXEL_ID }}
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
+          # AI providers and the WhatsApp channel. These used to live only as
+          # hand-edited lines in the server .env, which no pipeline reproduced
+          # or documented — `upsert_env` returns early on an empty value, so a
+          # key that is not in this list is never overwritten AND never synced.
+          FAL_API_KEY: ${{ secrets.FAL_API_KEY }}
+          MESHY_API_KEY: ${{ secrets.MESHY_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
@@ -143,7 +154,7 @@ jobs:
           # health-checked) into a red pipeline. Headroom here is cheap; a
           # deploy that is genuinely stuck still fails, just later.
           command_timeout: 20m
-          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH,NEXT_PUBLIC_GTM_ID,NEXT_PUBLIC_GA4_ID,META_PIXEL_ID,TIKTOK_PIXEL_ID,NEXT_PUBLIC_SENTRY_DSN
+          envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH,NEXT_PUBLIC_GTM_ID,NEXT_PUBLIC_GA4_ID,META_PIXEL_ID,TIKTOK_PIXEL_ID,NEXT_PUBLIC_SENTRY_DSN,FAL_API_KEY,MESHY_API_KEY,ANTHROPIC_API_KEY,META_APP_SECRET,WHATSAPP_TOKEN,WHATSAPP_PHONE_NUMBER_ID,WHATSAPP_VERIFY_TOKEN
           script: |
             set -euo pipefail
 
@@ -204,6 +215,13 @@ jobs:
             upsert_env META_PIXEL_ID         "$META_PIXEL_ID"
             upsert_env TIKTOK_PIXEL_ID       "$TIKTOK_PIXEL_ID"
             upsert_env NEXT_PUBLIC_SENTRY_DSN "$NEXT_PUBLIC_SENTRY_DSN"
+            upsert_env FAL_API_KEY           "${FAL_API_KEY:-}"
+            upsert_env MESHY_API_KEY         "${MESHY_API_KEY:-}"
+            upsert_env ANTHROPIC_API_KEY     "${ANTHROPIC_API_KEY:-}"
+            upsert_env META_APP_SECRET       "${META_APP_SECRET:-}"
+            upsert_env WHATSAPP_TOKEN        "${WHATSAPP_TOKEN:-}"
+            upsert_env WHATSAPP_PHONE_NUMBER_ID "${WHATSAPP_PHONE_NUMBER_ID:-}"
+            upsert_env WHATSAPP_VERIFY_TOKEN "${WHATSAPP_VERIFY_TOKEN:-}"
             # Security: enforce signed /api/files access so stored files (PII
             # photos, meshes) can't be fetched by anyone who learns the path.
             upsert_env FILES_REQUIRE_SIGNATURE "1"
@@ -266,7 +284,7 @@ jobs:
             # ─── 6. Health check ─────────────────────────────────────
             log "Saglik kontrolu yapiliyor..."
             for i in $(seq 1 15); do
-                if curl -sf -o /dev/null http://localhost:3005; then
+                if curl -sf http://localhost:3005/api/health | grep -q '"ok":true'; then
                     log "Uygulama calisiyor! http://localhost:3005"
                     break
                 fi

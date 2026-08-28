@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "./instrument";
 import { startEmailWorker } from "../src/lib/queue/workers/email.worker";
 import { startPreviewGenerationWorker } from "../src/lib/queue/workers/preview-generation.worker";
 import { startPreviewCleanupWorker } from "../src/lib/queue/workers/preview-cleanup.worker";

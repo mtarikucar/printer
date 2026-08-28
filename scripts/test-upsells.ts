@@ -5,7 +5,7 @@
 import {
   allocatePaytrBasket,
   calculateUpsellAmount,
-  PRICES_KURUS,
+  FIGURINE_PRICE_KURUS,
   UPSELL_PRICES_KURUS,
   VALID_UPSELLS,
 } from "../src/lib/config/prices";
@@ -136,7 +136,7 @@ const label = (k: string) => `Upsell:${k}`;
 
 // Case A: no upsells → only figurine row
 const caseA = allocatePaytrBasket({
-  paymentAmountKurus: PRICES_KURUS.orta,
+  paymentAmountKurus: FIGURINE_PRICE_KURUS,
   figurineName: "Figurin (Orta)",
   upsellAmountKurus: 0,
   upsellKeys: [],
@@ -145,16 +145,16 @@ const caseA = allocatePaytrBasket({
 check("no upsells → 1 row", caseA.length === 1);
 check(
   "no upsells → figurine = paymentAmount",
-  caseA[0].priceTRY === (PRICES_KURUS.orta / 100).toFixed(2)
+  caseA[0].priceTRY === (FIGURINE_PRICE_KURUS / 100).toFixed(2)
 );
-check("no upsells → sum equals paymentAmount", basketSumKurus(caseA) === PRICES_KURUS.orta);
+check("no upsells → sum equals paymentAmount", basketSumKurus(caseA) === FIGURINE_PRICE_KURUS);
 
 // Case B: figurine + 3 upsells, no gift card
 const upsellTotal =
   UPSELL_PRICES_KURUS.extra_paint +
   UPSELL_PRICES_KURUS.gift_wrap +
   UPSELL_PRICES_KURUS.rush_shipping;
-const fullTotal = PRICES_KURUS.orta + upsellTotal;
+const fullTotal = FIGURINE_PRICE_KURUS + upsellTotal;
 const caseB = allocatePaytrBasket({
   paymentAmountKurus: fullTotal,
   figurineName: "Figurin (Orta)",
@@ -165,7 +165,7 @@ const caseB = allocatePaytrBasket({
 check("3 upsells → 4 rows (figurine + 3)", caseB.length === 4);
 check(
   "3 upsells → figurine row = base price",
-  caseB[0].priceTRY === (PRICES_KURUS.orta / 100).toFixed(2)
+  caseB[0].priceTRY === (FIGURINE_PRICE_KURUS / 100).toFixed(2)
 );
 check("3 upsells → sum equals fullTotal", basketSumKurus(caseB) === fullTotal);
 // Upsells should be sorted largest-first
@@ -254,24 +254,24 @@ check(
 // paymentAmount = figurine base only (no upsell budget left)
 // upsells provided but allocation = 0 each
 const caseF = allocatePaytrBasket({
-  paymentAmountKurus: PRICES_KURUS.kucuk,
+  paymentAmountKurus: FIGURINE_PRICE_KURUS,
   figurineName: "Figurin",
   upsellAmountKurus: UPSELL_PRICES_KURUS.extra_paint,
   upsellKeys: ["extra_paint"],
   upsellLabel: label,
 });
-// figurineGross = kucuk - extra_paint = positive (99900 - 4900 = 95000)
-// figurineRow = 95000
-// upsellBudget = 99900 - 95000 = 4900
+// figurineGross = base - extra_paint = positive (349900 - 4900 = 345000)
+// figurineRow = 345000
+// upsellBudget = 349900 - 345000 = 4900
 // extra_paint allocated = 4900 → row appears
 check(
   "case F: normal flow with upsell (3 row variants tested via sum)",
-  basketSumKurus(caseF) === PRICES_KURUS.kucuk
+  basketSumKurus(caseF) === FIGURINE_PRICE_KURUS
 );
 
 // Case G: unknown upsell key in upsellKeys — should be filtered, not crash
 const caseG = allocatePaytrBasket({
-  paymentAmountKurus: PRICES_KURUS.kucuk + 4900,
+  paymentAmountKurus: FIGURINE_PRICE_KURUS + 4900,
   figurineName: "Figurin",
   upsellAmountKurus: 4900,
   upsellKeys: ["extra_paint", "ghost_addon"],
@@ -279,7 +279,7 @@ const caseG = allocatePaytrBasket({
 });
 check(
   "unknown key dropped: sum still correct",
-  basketSumKurus(caseG) === PRICES_KURUS.kucuk + 4900
+  basketSumKurus(caseG) === FIGURINE_PRICE_KURUS + 4900
 );
 
 // ─── Summary ─────────────────────────────────────────────────────

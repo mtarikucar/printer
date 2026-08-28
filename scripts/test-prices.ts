@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import {
   figurinePriceKurus,
   finishSurchargeKurus,
-  FIGURINE_PRICES_KURUS,
-  PRICES_KURUS,
+  paintingPortionKurus,
+  itemPriceKurus,
+  UnpricedSizeError,
+  FIGURINE_PRICE_KURUS,
+  PAINTING_PORTION_KURUS,
 } from "../src/lib/config/prices";
 
 let passed = 0;
@@ -12,52 +15,61 @@ function test(name: string, fn: () => void) {
   cases.push([name, fn]);
 }
 
-test("resin base prices per size", () => {
-  assert.equal(figurinePriceKurus("kucuk", "resin"), 99900);
-  assert.equal(figurinePriceKurus("orta", "resin"), 139900);
-  assert.equal(figurinePriceKurus("buyuk", "resin"), 179900);
+test("kişiye özel figür tek fiyat: ₺3.499", () => {
+  assert.equal(FIGURINE_PRICE_KURUS, 349900);
+  assert.equal(figurinePriceKurus("standart", "resin"), 349900);
+  // Argümanlar artık fiyatı etkilemiyor — tek ürün.
+  assert.equal(figurinePriceKurus("standart", "filament"), 349900);
 });
 
-test("filament base prices (₺899 floor, +₺300 steps)", () => {
-  assert.equal(figurinePriceKurus("kucuk", "filament"), 89900);
-  assert.equal(figurinePriceKurus("orta", "filament"), 119900);
-  assert.equal(figurinePriceKurus("buyuk", "filament"), 149900);
-  // Resin premium grows with size (resin material cost scales with volume).
-  assert.equal(figurinePriceKurus("kucuk", "resin") - figurinePriceKurus("kucuk", "filament"), 10000);
-  assert.equal(figurinePriceKurus("orta", "resin") - figurinePriceKurus("orta", "filament"), 20000);
-  assert.equal(figurinePriceKurus("buyuk", "resin") - figurinePriceKurus("buyuk", "filament"), 30000);
-});
-
-test("finish surcharges: paint +₺1.000, luxe +₺2.000, raw −₺100", () => {
+test("boyama taban fiyata dahil, bitiş ek ücreti yok", () => {
+  assert.equal(finishSurchargeKurus("hand_painted"), 0);
   assert.equal(finishSurchargeKurus("paintable_kit"), 0);
-  assert.equal(finishSurchargeKurus("hand_painted"), 100000);
-  assert.equal(finishSurchargeKurus("luxe_display"), 200000);
-  assert.equal(finishSurchargeKurus("collector_raw"), -10000);
-  // Ladder sanity: luxe is exactly hand-painted + display extras (+₺1.000).
+  assert.equal(finishSurchargeKurus("luxe_display"), 0);
+  assert.equal(finishSurchargeKurus("collector_raw"), 0);
+  // Uçtan uca: standart figür + hand_painted = tam ₺3.499, ek yok.
   assert.equal(
-    finishSurchargeKurus("luxe_display") - finishSurchargeKurus("hand_painted"),
-    100000
+    itemPriceKurus({ kind: "figure", size: "standart", material: "resin", finish: "hand_painted" }),
+    349900
   );
 });
 
-test("unknown material falls back to resin pricing", () => {
-  assert.equal(figurinePriceKurus("orta", "bogus"), 139900);
-  assert.equal(figurinePriceKurus("orta", ""), 139900);
+test("boyacı payı bitiş ek ücretinden BAĞIMSIZ olarak korunur", () => {
+  // Regresyon koruması: paintingPortionKurus eskiden değeri
+  // FINISH_SURCHARGES_KURUS.hand_painted'tan okuyordu. Boyama taban fiyata
+  // gömülüp o ek ücret 0'a indiği için, açık sabit olmasa boyacılar ₺0 alırdı.
+  assert.equal(PAINTING_PORTION_KURUS, 100000);
+  assert.equal(paintingPortionKurus("hand_painted"), 100000);
+  assert.equal(paintingPortionKurus("luxe_display"), 100000);
+  assert.notEqual(paintingPortionKurus("hand_painted"), finishSurchargeKurus("hand_painted"));
+  // Boyama içermeyen eski bitişler 0 kalır.
+  assert.equal(paintingPortionKurus("paintable_kit"), 0);
+  assert.equal(paintingPortionKurus("collector_raw"), 0);
+  assert.equal(paintingPortionKurus(null), 0);
 });
 
-test("unknown size → 0", () => {
-  assert.equal(figurinePriceKurus("xxl", "resin"), 0);
+test("emekli boyutlar fiyatlanamaz — elle teklife düşer", () => {
+  for (const size of ["kucuk", "orta", "buyuk", "17,5 cm"]) {
+    assert.throws(
+      () => itemPriceKurus({ kind: "figure", size, material: "resin", finish: "hand_painted" }),
+      UnpricedSizeError,
+      `${size} için UnpricedSizeError beklenir`
+    );
+  }
 });
 
-test("PRICES_KURUS stays the resin table (back-compat)", () => {
-  assert.equal(PRICES_KURUS.kucuk, 99900);
-  assert.equal(PRICES_KURUS.orta, 139900);
-  assert.equal(PRICES_KURUS.buyuk, 179900);
-});
-
-test("FIGURINE_PRICES_KURUS exposes both materials", () => {
-  assert.equal(FIGURINE_PRICES_KURUS.resin.buyuk, 179900);
-  assert.equal(FIGURINE_PRICES_KURUS.filament.buyuk, 149900);
+test("Creative Lab düz fiyatları boyuttan etkilenmez", () => {
+  // Creative Lab ürünleri figurineSize'ı nötr "orta" olarak saklıyor; "orta"
+  // artık fiyatlanamaz olduğu için bu erken dönüşün korunması şart.
+  assert.equal(
+    itemPriceKurus({ kind: "keychain", size: "orta", material: "resin" }),
+    14900
+  );
+  assert.equal(
+    itemPriceKurus({ kind: "fridge_magnet", size: "orta", material: "resin" }),
+    12900
+  );
+  assert.equal(itemPriceKurus({ kind: "lamp", size: "orta", material: "resin" }), 39900);
 });
 
 for (const [name, fn] of cases) {

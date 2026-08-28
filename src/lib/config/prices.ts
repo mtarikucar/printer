@@ -19,22 +19,35 @@ export class UnpricedSizeError extends Error {
   }
 }
 
-// Per-material price table (kuruş). Resin is the premium base (+₺400 per size
-// step); filament (FDM) starts at ₺899 and steps +₺300. The resin premium grows
-// with size (₺100/₺200/₺300) because resin material cost scales with volume.
-// Tune values freely — this is the single source.
-export const FIGURINE_PRICES_KURUS: Record<FigurineMaterial, Record<string, number>> = {
-  resin: { kucuk: 99900, orta: 139900, buyuk: 179900 },
-  filament: { kucuk: 89900, orta: 119900, buyuk: 149900 },
-};
+/**
+ * Custom character figurine — ONE product since 2026-08-24: 15 cm, SLA resin,
+ * professionally hand-painted, display-ready, free domestic shipping. No size
+ * tiers, no material choice, no paint-kit variant. A different size or a custom
+ * design is quoted by hand over WhatsApp (see `UnpricedSizeError`).
+ *
+ * Tune freely — this is the single source.
+ */
+export const FIGURINE_PRICE_KURUS = 349900;
 
-// Resin table kept as PRICES_KURUS for back-compat (existing size-only callers).
-export const PRICES_KURUS: Record<string, number> = FIGURINE_PRICES_KURUS.resin;
+/**
+ * The painting share of `FIGURINE_PRICE_KURUS` — the painter partner's earning
+ * base.
+ *
+ * Painting used to be a ₺1.000 `hand_painted` surcharge and
+ * `paintingPortionKurus()` read the number straight out of
+ * `FINISH_SURCHARGES_KURUS`. Now that painting is bundled into the base price
+ * that surcharge is 0, so the share MUST be stated explicitly here. Delete this
+ * constant and every painter earns ₺0 on every order.
+ */
+export const PAINTING_PORTION_KURUS = 100000;
 
-// Price for a (size, material) combo. Unknown material → resin; unknown size → 0.
-export function figurinePriceKurus(size: string, material: string): number {
-  const m: FigurineMaterial = material === "filament" ? "filament" : "resin";
-  return FIGURINE_PRICES_KURUS[m][size] ?? FIGURINE_PRICES_KURUS.resin[size] ?? 0;
+/**
+ * Price of a custom figurine. `size` and `material` are accepted for call-site
+ * compatibility but no longer affect the price — there is one product.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for call-site compatibility
+export function figurinePriceKurus(_size?: string, _material?: string): number {
+  return FIGURINE_PRICE_KURUS;
 }
 
 export type FigurineFinish =
@@ -44,37 +57,30 @@ export type FigurineFinish =
   | "luxe_display";
 
 /**
- * Finish/package surcharge (kuruş), added on top of the (size, material) base.
- * paintable_kit is the default (mini paint kit included, no surcharge).
- * collector_raw is enum-only for now (not surfaced in the create UI). Additive
- * so the base price table is untouched — tune freely.
+ * Finish surcharges — all zero since 2026-08-24. The single product bundles
+ * professional hand painting into `FIGURINE_PRICE_KURUS`, so there is no finish
+ * price axis left. The table is kept (rather than deleted) because `finish` is
+ * still stored per order and rows written before this date reference all four
+ * values; `finishSurchargeKurus` must resolve them to 0 rather than `undefined`.
  */
 export const FINISH_SURCHARGES_KURUS: Record<FigurineFinish, number> = {
-  // Boyanabilir Kit — default: resin print, sanded, primed + a mini paint kit.
-  // Included in the base price (no surcharge).
   paintable_kit: 0,
-  // Collector Raw — unpainted high-detail resin print, no paint kit. For
-  // collectors/DIY who use their own paints; ₺100 less than the kit.
-  collector_raw: -10000,
-  // Hand-Painted — professional hand painting + QC photo + gift box. +₺1.000.
-  hand_painted: 100000,
-  // Luxe Display — premium base + name plate + hard case + full hand paint.
-  // +₺1.000 over hand-painted for the display extras. +₺2.000 total.
-  luxe_display: 200000,
+  collector_raw: 0,
+  hand_painted: 0,
+  luxe_display: 0,
 };
 
 /**
- * The part of a finish surcharge that pays for PROFESSIONAL PAINTING, i.e. the
- * painter partner's earning base.
+ * The part of an order that pays for PROFESSIONAL PAINTING, i.e. the painter
+ * partner's earning base. Reads the explicit `PAINTING_PORTION_KURUS` constant,
+ * NOT the finish surcharge table — the surcharge is 0 now that painting is
+ * bundled into the base price.
  *
- * luxe_display costs ₺2.000, but only ₺1.000 of that is the hand-painting — the
- * rest buys the premium base, the name plate and the hard case, which the
- * platform supplies. Paying the painter on the full ₺2.000 would hand them the
- * cost of goods they never bought.
+ * Legacy orders whose finish never included painting still resolve to 0.
  */
 export function paintingPortionKurus(finish: string | null | undefined): number {
   if (finish === "hand_painted" || finish === "luxe_display") {
-    return FINISH_SURCHARGES_KURUS.hand_painted;
+    return PAINTING_PORTION_KURUS;
   }
   return 0;
 }
@@ -213,9 +219,9 @@ export const KDV_RATE_BPS = 2000; // 20%
 // quantities make a 50-line × 200-unit cart trivially reachable.
 export const MAX_AMOUNT_KURUS = 2_000_000_00;
 
-// Professional painting is NOT a separate add-on price: it is the existing
-// "hand_painted" figurine finish (see FINISH_SURCHARGES_KURUS.hand_painted).
-// Orders with that finish are routed to a painter partner, and its surcharge
+// Professional painting is NOT a separate add-on price: it is bundled into
+// FIGURINE_PRICE_KURUS and marked by the "hand_painted" figurine finish. Orders
+// with that finish are routed to a painter partner, and PAINTING_PORTION_KURUS
 // becomes the painter's earning base — see src/app/api/orders/route.ts.
 
 // ─── Faz 3: customer-uploaded model pricing (geometry-based) ─────────────────

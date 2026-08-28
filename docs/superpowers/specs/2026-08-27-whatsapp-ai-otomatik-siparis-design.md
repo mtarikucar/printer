@@ -141,6 +141,62 @@ reçine güvenli eşik 0,90 mm → GEÇMEZ ⇒ THICKEN turu gerekir
 
 ---
 
+## 3.9 EK ÖLÇÜM — 2026-08-28 prototipi (§4.3 ve Faz 1'i DEĞİŞTİRDİ)
+
+Faz 1'in mesh boru hattı scratchpad'de uçtan uca prototiplendi ve gerçek Meshy çıktısı üzerinde koşuldu.
+Dört tasarım kararı ölçümle değişti; spec'in üst bölümleri bu ekle birlikte okunmalıdır.
+
+### (a) `print/repair` KOŞULLU DEĞİL, ZORUNLU
+Ham meshy-7 GLB'si `split(only_watertight=False)` ile **610 ayrı kabuk** içeriyor; `is_watertight=false`,
+`is_volume=false`. Bu girdide birleştirme boolean union'ı başarısız oluyor ("Not all meshes are volumes!"),
+concatenate fallback'i yüz sayısını 303.626 → 102.252'ye düşürüyor ve `dropped_significant_component`
+bayrağı kalkıyor. Onarılmış GLB ise tek temiz bileşen.
+⇒ Boru hattı: generate → analyze → **repair (her zaman)** → indir → `process_mesh.py`.
+⇒ §4.3'teki koşullu `repair` dalı ve `round===1` şartı **kaldırıldı**. Sipariş başına sabit **30 kredi**.
+
+### (b) OTOMATİK THICKEN TURU TASARIMDAN ÇIKARILDI
+İki uygulaması da ölçüldü, ikisi de mesh'i **kötüleştiriyor**:
+- pymeshlab `generate_resampled_uniform_mesh` (offset 0,15 mm): `is_watertight=false`, **17 bileşen**.
+  Sonrasında `meshing_close_holes` + birleştirme ile kurtarılamadı (`is_volume=false` kaldı).
+- Voksel dilation (scipy + marching cubes): 29–118 saniye, **561k–1,25M yüz** (kendi `MAX_FACES`
+  eşiğimizin üstü), hâlâ 2 bileşen, ve orijinal yüzeyden **ortalama 0,44 mm / maks 2,3 mm** sapma —
+  müşterinin onayladığı 2D görselden görünür ayrılma.
+⇒ Thicken **yok**. Kapı: `fail` < 0,50 mm (reçine), `warn` 0,50–0,90 mm. İnce-ama-basılabilir bir
+insanın kararıdır, bir robotun onarım işi değil. Bu, §4.3'teki `verdict='thicken'` dalını tamamen kaldırır.
+
+### (c) KAPI HÜKMÜ DETERMİNİSTİK OLMAK ZORUNDA
+`estimate_min_wall_thickness_mm` rastgele yüzey örneklemesi kullanıyor; aynı mesh üzerinde arka arkaya
+üç koşu **0,83 / 0,76 / 0,71 mm** verdi (0,117 mm yayılım) — bu, 0,90 mm eşiğinin etrafında hükmü
+koşudan koşuya çevirebilecek bir yayılım. Yüz merkezlerinden eşit adımlı (stride) deterministik
+örneklemeye geçildi: **yayılım 0,000 mm**. Ayrıca `p5` eklendi (tek kıymık ile yaygın inceliği ayırmak için).
+
+### (d) İKİ CANLI HATA DAHA BULUNDU
+1. **Kaide teğet ekleniyor.** `add_base()` silindiri tam `Z=0` düzlemine koyuyor; boolean union iki
+   **ayrık** katı üretiyor (`component_count=2`) — su geçirmez ama benim kapı kuralım #4'ü **her
+   siparişte** tetikler. Düzeltme: silindir modele 0,6 mm **giriyor**. Ayrıca hedef yükseklik artık
+   bitmiş nesnenin (kaide dahil) yüksekliği: gövde `target − 3 mm`'ye ölçekleniyor.
+2. **`decimate_if_needed` su geçirmezliği kırıyor.** `meshing_decimation_quadric_edge_collapse`
+   `preservetopology` bayrağı olmadan çağrılıyor; ölçüm: `wt True → False`, ve sonraki hiçbir onarım
+   filtresi geri getirmiyor. Düzeltme: `preservetopology=True` + `planarquadric=True`. Ayrıca Meshy
+   `target_polycount:300000` ile sınırlandığı için decimation artık bir **güvenlik ağı**, bir aşama değil
+   (`MAX_FACES` 400k, hedef 300k).
+   Bir de: Meshy'nin onardığı mesh zaten temizken `pymeshlab` onarımını koşmak zararlı —
+   `is_watertight && is_volume` ise atlanıyor (`repair_skipped_already_clean`).
+
+### (e) TURNTABLE — pyrender/OSMesa DEĞİL
+`pyrender` bu yığında **derlenmiyor**. matplotlib'in painter algoritması 20k yüzlü mesh'te yırtılıyor.
+Çözüm: **saf numpy z-buffer rasterizer** (`scripts/render_turntable.py`) — 24 kare, 480px, 12k yüze
+decimate edilmiş kopya üzerinde **22 saniye**, çıktı **128 KB** H.264 mp4 (WhatsApp sesli akış istemiyor).
+**Sıfır yeni Python bağımlılığı** (numpy zaten trimesh'in zorunlu bağımlılığı); tek yeni sistem paketi
+`ffmpeg`. `libosmesa6`/`pyrender`/`PyOpenGL` Dockerfile'a **eklenmeyecek**.
+
+### (f) UÇTAN UCA ÖLÇÜLEN SÜRE VE HÜKÜM
+`generate 64 s → analyze 0,5 s → repair 6 s → process_mesh 2,1 s → turntable 22 s` ≈ **95 saniye**.
+Gerçek siparişin gerçek raporu üzerinde kapı hükmü: **`warn`** — "Meshy analizinde uyarı var" +
+"İnce duvar (0,64 mm)". Çıktı: su geçirmez, tek bileşen, tam 150,0 mm, doluluk 0,17, 303.628 yüz.
+
+---
+
 ## 4. Mimari
 
 ### 4.1 Kanal-bağımsız çekirdek

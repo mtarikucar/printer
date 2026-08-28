@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { orders, adminActions, orderModelRevisions } from "@/lib/db/schema";
+import { orders, adminActions } from "@/lib/db/schema";
 import { saveFile, getPublicUrl } from "@/lib/services/storage";
+import { attachOrderModel } from "@/lib/services/order-model";
 import {
   isValidUploadId,
   promoteStagedUpload,
@@ -111,37 +112,20 @@ export async function POST(
     stlUrl = getPublicUrl(stlKey);
   }
 
-  // Preserve every uploaded model as a revision — old files are NEVER deleted,
-  // so the admin can always download an earlier STL. The order's live
-  // modelGlb*/modelStl* columns always point at the latest revision.
-  const [{ maxRev }] = await db
-    .select({ maxRev: sql<number>`coalesce(max(${orderModelRevisions.revision}), 0)::int` })
-    .from(orderModelRevisions)
-    .where(eq(orderModelRevisions.orderId, orderId));
-  let nextRev = (maxRev ?? 0) + 1;
-  // Backfill: an order that already had a model but no revision rows yet (uploaded
-  // before this feature) gets its existing model archived as revision 1 so it
-  // isn't lost when the new one lands.
-  if ((maxRev ?? 0) === 0 && order.modelGlbKey && order.modelGlbUrl) {
-    await db.insert(orderModelRevisions).values({
-      orderId,
-      revision: 1,
-      glbKey: order.modelGlbKey,
-      glbUrl: order.modelGlbUrl,
-      stlKey: order.modelStlKey,
-      stlUrl: order.modelStlUrl,
-      note: "Önceki model (otomatik arşivlendi)",
-      createdAt: order.modelUploadedAt ?? new Date(),
-    });
-    nextRev = 2;
-  }
-  await db.insert(orderModelRevisions).values({
+  // Revision archiving + the order's live model columns are written by
+  // attachOrderModel(), the SAME function the auto-3D worker uses — the two
+  // hands that produce a model must not keep separate copies of this logic.
+  // It deliberately does not touch orders.status; that stays here. It DOES
+  // stamp model_source='admin_upload' and clear model_turntable_*: replacing an
+  // auto-generated model by hand must not leave a 360° video of the old mesh
+  // behind, because that video is what the customer is asked to approve.
+  await attachOrderModel({
     orderId,
-    revision: nextRev,
     glbKey,
     glbUrl,
     stlKey,
     stlUrl,
+    source: "admin_upload",
     uploadedByEmail: a.session.user.email,
   });
 
@@ -150,15 +134,7 @@ export async function POST(
   const newStatus = order.status === "awaiting_model" ? "approved" : order.status;
   await db
     .update(orders)
-    .set({
-      modelGlbKey: glbKey,
-      modelGlbUrl: glbUrl,
-      modelStlKey: stlKey,
-      modelStlUrl: stlUrl,
-      modelUploadedAt: new Date(),
-      status: newStatus,
-      updatedAt: new Date(),
-    })
+    .set({ status: newStatus, updatedAt: new Date() })
     .where(eq(orders.id, orderId));
 
   await db.insert(adminActions).values({

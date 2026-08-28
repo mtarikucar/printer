@@ -12,6 +12,11 @@ import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import {
+  gateMode,
+  requiresOverride,
+  type PrintGateVerdict,
+} from "@/lib/services/print-gate";
+import {
   ensureJourneyToken,
   journeyUrl,
   journeyEligibility,
@@ -202,6 +207,55 @@ export default async function AdminOrderDetailPage({
   );
   const latestReport = latestGeneration?.meshReports?.[0];
 
+  // ─── Print gate ──────────────────────────────────────────────────────────
+  // `mesh_reports` keys on generationId, never on orderId, so the newest report
+  // for this order is found by flattening every attempt's reports rather than
+  // by reading the succeeded attempt alone — a failed-then-retried round still
+  // carries the measurements the admin has to judge.
+  const gateReport =
+    order.generationAttempts
+      .flatMap((a) => a.meshReports ?? [])
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+
+  // Only an automatically produced model gets the gate card: a hand-sculpted or
+  // customer-supplied mesh was never measured, and painting a verdict on it
+  // would be an invention.
+  const gateVerdict = (gateReport?.verdict ?? null) as PrintGateVerdict | null;
+  const bbox = gateReport?.boundingBox;
+  // `volume_cm3` is not a column — it is exactly fillRatio × bounding-box
+  // volume (see scripts/process_mesh.py), so it is derived here instead of
+  // costing a migration. fill_ratio is stored at 4 dp, hence "≈" in the UI.
+  const volumeCm3 =
+    bbox?.size && gateReport?.fillRatio != null
+      ? (bbox.size[0] * bbox.size[1] * bbox.size[2] * gateReport.fillRatio) / 1000
+      : null;
+
+  const printGate =
+    order.modelSource === "meshy_auto"
+      ? {
+          mode: gateMode(),
+          verdict: gateVerdict,
+          reasons: (gateReport?.verdictReasons ?? []) as string[],
+          // The approve route defaults a missing verdict to "pass"; mirror that
+          // here so the button and the API never disagree about the override.
+          requiresOverride: requiresOverride(gateVerdict ?? "pass"),
+          round: order.modelGenerationRound,
+          turntableUrl: normalizeFileUrl(order.modelTurntableUrl),
+          measurements: gateReport
+            ? {
+                heightMm: gateReport.heightMm,
+                volumeCm3,
+                faceCount: gateReport.faceCount,
+                componentCount: gateReport.componentCount,
+                minWallP1Mm: gateReport.minWallP1Mm,
+                minWallP5Mm: gateReport.minWallP5Mm,
+                fillRatio: gateReport.fillRatio,
+                baseAdded: gateReport.baseAdded,
+              }
+            : null,
+        }
+      : null;
+
   // Serialize everything for client component
   const serialized = {
     order: {
@@ -253,7 +307,9 @@ export default async function AdminOrderDetailPage({
       modelStlKey: order.modelStlKey,
       modelStlUrl: normalizeFileUrl(order.modelStlUrl),
       modelUploadedAt: order.modelUploadedAt?.toISOString() ?? null,
+      modelSource: order.modelSource,
     },
+    printGate,
     approvedImageUrl: order.preview
       ? normalizeFileUrl(order.preview.selectedStyledImageUrl)
       : null,

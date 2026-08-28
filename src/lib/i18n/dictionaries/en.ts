@@ -1025,6 +1025,38 @@ const en = {
   "admin.orderDetail.baseAdded": "Base Added",
   "admin.orderDetail.dimensions": "Dimensions (mm)",
   "admin.orderDetail.repairsApplied": "Repairs Applied",
+
+  // ─── Print gate card (auto-generated models) ───
+  "admin.gate.title": "Print gate",
+  "admin.gate.verdict.pass": "Passed",
+  "admin.gate.verdict.warn": "Warning",
+  "admin.gate.verdict.fail": "Rejected",
+  "admin.gate.verdictUnknown": "No verdict",
+  "admin.gate.mode.shadow":
+    "Shadow mode — the gate only reports; it does not block approval.",
+  "admin.gate.mode.enforce":
+    "Enforce mode — a “Rejected” verdict cannot be approved without a written reason.",
+  "admin.gate.round": "Round",
+  "admin.gate.reasons": "Reasons",
+  "admin.gate.noReasons": "The gate found no issues.",
+  "admin.gate.noReport": "No mesh report found for this order.",
+  "admin.gate.turntable": "360° preview",
+  "admin.gate.noTurntable": "The turntable video could not be rendered.",
+  "admin.gate.measurements": "Measurements",
+  "admin.gate.measuredHeight": "Measured height",
+  "admin.gate.volume": "Volume",
+  "admin.gate.faceCount": "Face count",
+  "admin.gate.componentCount": "Component count",
+  "admin.gate.minWallP1": "Min wall (p1)",
+  "admin.gate.minWallP5": "Min wall (p5)",
+  "admin.gate.fillRatio": "Fill ratio",
+  "admin.gate.baseAdded": "Base added",
+  "admin.gate.overrideTitle": "Gate rejected — override reason",
+  "admin.gate.overrideHint":
+    "To approve this model anyway, state your reason; it is written to the admin action log.",
+  "admin.gate.overridePlaceholder":
+    "e.g. thin only at the cape tip, supports will be added at print time",
+  "admin.gate.overrideRequired": "A reason is required to approve.",
   "admin.orderDetail.generationHistory": "Generation History",
   "admin.orderDetail.succeeded": "Succeeded",
   "admin.orderDetail.generationFailed": "Failed",

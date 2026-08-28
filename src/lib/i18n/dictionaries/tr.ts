@@ -1028,6 +1028,38 @@ const tr: Dictionary = {
   "admin.orderDetail.dimensions": "Boyut (mm)",
   "admin.orderDetail.repairsApplied": "Uygulanan Onarımlar",
 
+  // ─── Baskı kapısı kartı (otomatik üretilen modeller) ───
+  "admin.gate.title": "Baskı kapısı",
+  "admin.gate.verdict.pass": "Geçti",
+  "admin.gate.verdict.warn": "Uyarı",
+  "admin.gate.verdict.fail": "Reddedildi",
+  "admin.gate.verdictUnknown": "Hüküm yok",
+  "admin.gate.mode.shadow":
+    "Gölge modu — kapı yalnızca rapor eder, onayı engellemez.",
+  "admin.gate.mode.enforce":
+    "Zorlama modu — “Reddedildi” hükmü, gerekçe yazılmadan onaylanamaz.",
+  "admin.gate.round": "Tur",
+  "admin.gate.reasons": "Gerekçeler",
+  "admin.gate.noReasons": "Kapı hiçbir sorun bulmadı.",
+  "admin.gate.noReport": "Bu sipariş için mesh raporu bulunamadı.",
+  "admin.gate.turntable": "360° önizleme",
+  "admin.gate.noTurntable": "Turntable videosu üretilemedi.",
+  "admin.gate.measurements": "Ölçümler",
+  "admin.gate.measuredHeight": "Ölçülen yükseklik",
+  "admin.gate.volume": "Hacim",
+  "admin.gate.faceCount": "Yüz sayısı",
+  "admin.gate.componentCount": "Bileşen sayısı",
+  "admin.gate.minWallP1": "Min. duvar (p1)",
+  "admin.gate.minWallP5": "Min. duvar (p5)",
+  "admin.gate.fillRatio": "Doluluk oranı",
+  "admin.gate.baseAdded": "Kaide eklendi",
+  "admin.gate.overrideTitle": "Kapı reddetti — geçersiz kılma gerekçesi",
+  "admin.gate.overrideHint":
+    "Bu modeli yine de onaylamak için gerekçenizi yazın; gerekçe yönetici işlem kaydına düşer.",
+  "admin.gate.overridePlaceholder":
+    "Örn. incelik yalnız pelerin ucunda, baskıda destek eklenecek",
+  "admin.gate.overrideRequired": "Onaylamak için gerekçe zorunlu.",
+
   "admin.orderDetail.generationHistory": "Oluşturma Geçmişi",
   "admin.orderDetail.succeeded": "Başarılı",
   "admin.orderDetail.generationFailed": "Başarısız",

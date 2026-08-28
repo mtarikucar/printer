@@ -148,11 +148,38 @@ interface OrderData {
   modelStlKey: string | null;
   modelStlUrl: string | null;
   modelUploadedAt: string | null;
+  modelSource: string | null;
+}
+
+/**
+ * The print gate's ruling on an automatically produced model. Null for every
+ * other kind of order — a hand-sculpted mesh was never measured, so there is
+ * no verdict to show.
+ */
+interface PrintGateData {
+  mode: "shadow" | "enforce";
+  verdict: "pass" | "warn" | "fail" | null;
+  reasons: string[];
+  /** True only in enforce mode on a failing verdict: approving needs a reason. */
+  requiresOverride: boolean;
+  round: number;
+  turntableUrl: string | null;
+  measurements: {
+    heightMm: number | null;
+    volumeCm3: number | null;
+    faceCount: number;
+    componentCount: number;
+    minWallP1Mm: number | null;
+    minWallP5Mm: number | null;
+    fillRatio: number | null;
+    baseAdded: boolean;
+  } | null;
 }
 
 interface Props {
   data: {
     order: OrderData;
+    printGate?: PrintGateData | null;
     approvedImageUrl?: string | null;
     photos: { id: string; originalUrl: string; thumbnailUrl: string | null }[];
     modelRevisions: { id: string; revision: number; glbUrl: string | null; stlUrl: string | null; uploadedByEmail: string | null; note: string | null; createdAt: string }[];
@@ -222,6 +249,47 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "bg-red-50 text-red-700 ring-1 ring-red-200",
 };
 
+/**
+ * Print-gate verdict palette. Green / amber / red, and a neutral slate for the
+ * case where the pipeline produced a model but no report row — that is missing
+ * evidence, not a pass, and must not be painted as one.
+ */
+const GATE_TONE = {
+  pass: {
+    card: "bg-gradient-to-br from-green-50 to-emerald-50 border-green-200",
+    badge: "bg-green-600 text-white",
+    heading: "text-green-900",
+    body: "text-green-800",
+    chip: "bg-white/70 text-green-900 ring-1 ring-green-200",
+  },
+  warn: {
+    card: "bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200",
+    badge: "bg-amber-500 text-white",
+    heading: "text-amber-900",
+    body: "text-amber-800",
+    chip: "bg-white/70 text-amber-900 ring-1 ring-amber-200",
+  },
+  fail: {
+    card: "bg-gradient-to-br from-red-50 to-rose-50 border-red-200",
+    badge: "bg-red-600 text-white",
+    heading: "text-red-900",
+    body: "text-red-800",
+    chip: "bg-white/70 text-red-900 ring-1 ring-red-200",
+  },
+  unknown: {
+    card: "bg-gradient-to-br from-slate-50 to-gray-50 border-gray-200",
+    badge: "bg-gray-500 text-white",
+    heading: "text-gray-900",
+    body: "text-gray-600",
+    chip: "bg-white/70 text-gray-700 ring-1 ring-gray-200",
+  },
+} as const;
+
+/** Millimetre reading, or an em dash when the pipeline could not measure it. */
+function gateMm(value: number | null | undefined, digits: number): string {
+  return value == null ? "—" : `${value.toFixed(digits)} mm`;
+}
+
 const TIMELINE_STEPS = [
   "paid", "awaiting_model", "approved", "printing", "shipped", "delivered",
 ];
@@ -252,7 +320,7 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -321,6 +389,11 @@ export function OrderDetailClient({ data, locale }: Props) {
   // Collapsible sections
   const [messagingOpen, setMessagingOpen] = useState(false);
   const [meshReportOpen, setMeshReportOpen] = useState(false);
+
+  // Print-gate override: in enforce mode a failing verdict may only be approved
+  // with a written reason, which the approve route demands (409
+  // `gate_override_required`) and files into the admin action log.
+  const [gateOverrideReason, setGateOverrideReason] = useState("");
 
   // Detail view tab (Özet / Üretim / İletişim / Geçmiş)
   const [tab, setTab] = useState<"summary" | "production" | "communication" | "history">("summary");
@@ -583,6 +656,9 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   const hasManufacturer = !!manufacturer;
   const canApprove = order.status === "review";
+  // Same source drives the badge and whether the approve button needs a reason.
+  const gateTone = GATE_TONE[printGate?.verdict ?? "unknown"];
+  const gateOverrideNeeded = canApprove && printGate?.requiresOverride === true;
   const canReject = ["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid", "awaiting_model"].includes(order.status);
   const canForceReview = ["paid", "generating", "processing_mesh"].includes(order.status);
   const canStartPrinting = order.status === "approved" && !hasManufacturer;
@@ -873,6 +949,125 @@ export function OrderDetailClient({ data, locale }: Props) {
         </div>
       </div>
 
+      {/* ═══ Print gate card (auto-generated models only) ════════ */}
+      {/* The admin's whole job for an auto model is one click, so this sits
+          directly above the action zone: verdict, why, the 360° video and the
+          measurements that back the ruling — all before the button. */}
+      {printGate && (
+        <div className={`rounded-2xl border p-5 mb-6 ${gateTone.card}`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className={`text-base font-semibold ${gateTone.heading}`}>
+              {d["admin.gate.title"]}
+            </h3>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${gateTone.badge}`}>
+              {printGate.verdict
+                ? d[`admin.gate.verdict.${printGate.verdict}` as keyof typeof d]
+                : d["admin.gate.verdictUnknown"]}
+            </span>
+            {printGate.round > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${gateTone.chip}`}>
+                {d["admin.gate.round"]}: {printGate.round}
+              </span>
+            )}
+          </div>
+          {/* Named explicitly so nobody reads a shadow-mode "fail" as a block. */}
+          <p className={`mt-1 text-sm ${gateTone.body}`}>
+            {printGate.mode === "enforce"
+              ? d["admin.gate.mode.enforce"]
+              : d["admin.gate.mode.shadow"]}
+          </p>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {/* Reasons */}
+            <div>
+              <h4 className={`text-xs font-semibold uppercase tracking-wider ${gateTone.body}`}>
+                {d["admin.gate.reasons"]}
+              </h4>
+              {printGate.reasons.length > 0 ? (
+                <ul className={`mt-2 space-y-1.5 text-sm ${gateTone.heading}`}>
+                  {printGate.reasons.map((reason, i) => (
+                    <li key={`${reason}-${i}`} className="flex gap-2">
+                      <span aria-hidden className="mt-1.5 w-1.5 h-1.5 rounded-full bg-current shrink-0 opacity-60" />
+                      <span>{reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={`mt-2 text-sm ${gateTone.body}`}>
+                  {printGate.measurements
+                    ? d["admin.gate.noReasons"]
+                    : d["admin.gate.noReport"]}
+                </p>
+              )}
+
+              {/* Turntable */}
+              <h4 className={`mt-4 text-xs font-semibold uppercase tracking-wider ${gateTone.body}`}>
+                {d["admin.gate.turntable"]}
+              </h4>
+              {printGate.turntableUrl ? (
+                <video
+                  src={printGate.turntableUrl}
+                  controls
+                  loop
+                  muted
+                  playsInline
+                  className="mt-2 w-full max-w-sm rounded-xl border border-white/60 bg-black/5"
+                />
+              ) : (
+                <p className={`mt-2 text-sm ${gateTone.body}`}>
+                  {d["admin.gate.noTurntable"]}
+                </p>
+              )}
+            </div>
+
+            {/* Measurements */}
+            <div>
+              <h4 className={`text-xs font-semibold uppercase tracking-wider ${gateTone.body}`}>
+                {d["admin.gate.measurements"]}
+              </h4>
+              {printGate.measurements ? (
+                <table className="mt-2 w-full text-sm">
+                  <tbody className={gateTone.heading}>
+                    {[
+                      [d["admin.gate.measuredHeight"], gateMm(printGate.measurements.heightMm, 1)],
+                      [
+                        d["admin.gate.volume"],
+                        printGate.measurements.volumeCm3 == null
+                          ? "—"
+                          : `≈ ${formatNumber(Math.round(printGate.measurements.volumeCm3 * 10) / 10, loc)} cm³`,
+                      ],
+                      [d["admin.gate.faceCount"], formatNumber(printGate.measurements.faceCount, loc)],
+                      [d["admin.gate.componentCount"], String(printGate.measurements.componentCount)],
+                      [d["admin.gate.minWallP1"], gateMm(printGate.measurements.minWallP1Mm, 2)],
+                      [d["admin.gate.minWallP5"], gateMm(printGate.measurements.minWallP5Mm, 2)],
+                      [
+                        d["admin.gate.fillRatio"],
+                        printGate.measurements.fillRatio == null
+                          ? "—"
+                          : printGate.measurements.fillRatio.toFixed(3),
+                      ],
+                      [
+                        d["admin.gate.baseAdded"],
+                        printGate.measurements.baseAdded ? d["common.yes"] : d["common.no"],
+                      ],
+                    ].map(([label, value]) => (
+                      <tr key={label} className="border-b border-white/60 last:border-0">
+                        <th scope="row" className={`py-1.5 pr-3 text-left font-normal ${gateTone.body}`}>
+                          {label}
+                        </th>
+                        <td className="py-1.5 text-right font-medium tabular-nums">{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className={`mt-2 text-sm ${gateTone.body}`}>{d["admin.gate.noReport"]}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ Persistent Action Zone (what do I do now) ═══════════ */}
       {/* Blocks below are mutually exclusive by order state, so at most one shows. */}
       <div className="space-y-3 mb-6">
@@ -943,9 +1138,42 @@ export function OrderDetailClient({ data, locale }: Props) {
                     <h3 className="text-base font-semibold text-green-900">{d["admin.orderDetail.approve"]}</h3>
                     <p className="text-sm text-green-700 mt-0.5">{d["admin.orderDetail.adminNote"]}</p>
                     <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full mt-3 px-3 py-2 bg-white border border-green-200 rounded-xl text-sm placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-300 transition-shadow" placeholder={d["admin.orderDetail.addNote"]} />
-                    <button onClick={() => performAction("approve")} disabled={!!loading} className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm">
+                    {/* Enforce mode + a failing gate: the route answers 409
+                        `gate_override_required` unless the admin says, in
+                        writing, that they looked and want it printed anyway. */}
+                    {gateOverrideNeeded && (
+                      <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3">
+                        <label className="block text-sm font-semibold text-red-900" htmlFor="gate-override-reason">
+                          {d["admin.gate.overrideTitle"]}
+                        </label>
+                        <p className="mt-0.5 text-xs text-red-700">{d["admin.gate.overrideHint"]}</p>
+                        <textarea
+                          id="gate-override-reason"
+                          rows={2}
+                          value={gateOverrideReason}
+                          onChange={(e) => setGateOverrideReason(e.target.value)}
+                          className="w-full mt-2 px-3 py-2 bg-white border border-red-200 rounded-xl text-sm placeholder:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-300 transition-shadow"
+                          placeholder={d["admin.gate.overridePlaceholder"]}
+                        />
+                      </div>
+                    )}
+                    <button
+                      onClick={() =>
+                        performAction(
+                          "approve",
+                          gateOverrideNeeded
+                            ? { overrideGateFail: true, overrideReason: gateOverrideReason.trim() }
+                            : {}
+                        )
+                      }
+                      disabled={!!loading || (gateOverrideNeeded && gateOverrideReason.trim().length === 0)}
+                      className="mt-3 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
+                    >
                       {loading === "approve" ? d["admin.orderDetail.approving"] : d["admin.orderDetail.approve"]}
                     </button>
+                    {gateOverrideNeeded && gateOverrideReason.trim().length === 0 && (
+                      <p className="mt-2 text-xs text-red-700">{d["admin.gate.overrideRequired"]}</p>
+                    )}
                   </div>
                 </div>
               </div>

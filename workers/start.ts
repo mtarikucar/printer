@@ -11,6 +11,8 @@ import { startAnalyticsCleanupWorker } from "../src/lib/queue/workers/analytics-
 import { startAssignmentSlaWorker } from "../src/lib/queue/workers/assignment-sla.worker";
 import { startModelGenerationWorker } from "../src/lib/queue/workers/model-generation.worker";
 import { startMeshProcessingWorker } from "../src/lib/queue/workers/mesh-processing.worker";
+import { startWhatsAppOutboundWorker } from "../src/lib/queue/workers/whatsapp-outbound.worker";
+import { startWaInboundWorker } from "../src/lib/queue/workers/wa-inbound.worker";
 import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-approval-sla.worker";
 import {
   getPreviewCleanupQueue,
@@ -35,6 +37,9 @@ const assignmentSlaWorker = startAssignmentSlaWorker();
 // processing (python, CPU-bound, concurrency 1).
 const modelGenerationWorker = startModelGenerationWorker();
 const meshProcessingWorker = startMeshProcessingWorker();
+// WhatsApp channel. Both are inert until platform_flags.wa_bot_enabled is on.
+const whatsappOutboundWorker = startWhatsAppOutboundWorker();
+const waInboundWorker = startWaInboundWorker();
 // A paid order parked in `awaiting_customer_approval` prints nothing until
 // somebody decides; this sweeper is that somebody.
 const modelApprovalSlaWorker = startModelApprovalSlaWorker();
@@ -89,6 +94,8 @@ console.log("  - analytics-cleanup (repeatable: every 24h)");
 console.log("  - assignment-sla (repeatable: every 1h)");
 console.log("  - model-generation (concurrency: 4, meshy)");
 console.log("  - mesh-processing (concurrency: 1, python)");
+console.log("  - wa-outbound (concurrency: 4, 40/min)");
+console.log("  - wa-inbound (concurrency: 4)");
 console.log("  - model-approval-sla (repeatable: every 6h)");
 
 async function shutdown() {
@@ -105,6 +112,8 @@ async function shutdown() {
     assignmentSlaWorker.close(),
     modelGenerationWorker.close(),
     meshProcessingWorker.close(),
+    whatsappOutboundWorker.close(),
+    waInboundWorker.close(),
     modelApprovalSlaWorker.close(),
   ]);
   console.log("Workers shut down gracefully");

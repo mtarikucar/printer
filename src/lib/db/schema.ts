@@ -641,6 +641,9 @@ export const orders = pgTable("orders", {
   modelApprovalToken: text("model_approval_token").unique(),
   customerModelApprovedAt: timestamp("customer_model_approved_at"),
   customerModelRevisionNote: text("customer_model_revision_note"),
+  // Set when the order was placed through, or linked to, a WhatsApp thread.
+  // Decides whether the model-approval turn goes out over WhatsApp or e-mail.
+  waConversationId: uuid("wa_conversation_id"),
   isPublic: boolean("is_public").notNull().default(false),
   publicDisplayName: text("public_display_name"),
   publishedAt: timestamp("published_at"),
@@ -2492,3 +2495,94 @@ export const idempotencyKeys = pgTable(
     index("idempotency_keys_expires_idx").on(t.expiresAt),
   ]
 );
+
+// ─── WhatsApp Cloud API channel ─────────────────────────────────────────────
+// Inbound is at-least-once: Meta retries a delivery for up to 36 hours until it
+// gets a 200. Everything below is shaped around that.
+
+export const waConversationModeEnum = pgEnum("wa_conversation_mode", [
+  // The bot answers. In Faz 2 that means deterministic replies only.
+  "bot",
+  // A human has taken over and the bot is COMPLETELY silent. Going back to
+  // `bot` is an explicit admin click — never automatic, never on a timer.
+  // Quietly restoring a bot in the middle of a complaint is what turns a
+  // complaint into a consumer-arbitration file.
+  "human",
+  "blocked",
+]);
+
+export const waMessageDirectionEnum = pgEnum("wa_message_direction", ["in", "out"]);
+
+export const waConversations = pgTable(
+  "wa_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // E.164, normalised on write. users.phone is free text with no unique
+    // constraint, so this is the channel's own identity column.
+    phoneE164: text("phone_e164").notNull().unique(),
+    // Meta's own id for the contact (usually the number without '+').
+    waId: text("wa_id"),
+    profileName: text("profile_name"),
+    mode: waConversationModeEnum("mode").notNull().default("bot"),
+    // Free-form flow state; the agent reads it, never the model's own memory.
+    state: jsonb("state").$type<Record<string, unknown>>(),
+    lastInboundAt: timestamp("last_inbound_at"),
+    lastOutboundAt: timestamp("last_outbound_at"),
+    // The 24h customer-service window. Checked at SEND time, not at enqueue
+    // time: an admin approving at 03:00, 30 hours after the customer's last
+    // message, is normal — and is the most likely way this system would
+    // silently hold someone's money.
+    windowExpiresAt: timestamp("window_expires_at"),
+    // Proof that the KVKK art.10 notice was delivered on first contact.
+    kvkkNoticeSentAt: timestamp("kvkk_notice_sent_at"),
+    blockedAt: timestamp("blocked_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("wa_conversations_last_inbound_idx").on(t.lastInboundAt)]
+);
+
+export const waMessages = pgTable(
+  "wa_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => waConversations.id),
+    direction: waMessageDirectionEnum("direction").notNull(),
+    // `wamid...`. Unique so a redelivered webhook cannot double-insert.
+    waMessageId: text("wa_message_id").unique(),
+    type: text("type").notNull().default("text"),
+    body: text("body"),
+    mediaKey: text("media_key"),
+    // Who or what produced an outbound message: admin | bot | agent | system.
+    senderKind: text("sender_kind"),
+    status: text("status"),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("wa_messages_conversation_idx").on(t.conversationId, t.createdAt)]
+);
+
+// Delivery-level dedupe, one layer above wa_messages: a single retried delivery
+// can carry several messages and several status updates, and we want to drop
+// the whole thing without re-parsing it.
+export const waInboundEvents = pgTable(
+  "wa_inbound_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventHash: text("event_hash").notNull().unique(),
+    payload: jsonb("payload"),
+    receivedAt: timestamp("received_at").notNull().defaultNow(),
+  },
+  (t) => [index("wa_inbound_events_received_idx").on(t.receivedAt)]
+);
+
+// Media we uploaded TO Meta. Their ids live 30 days, so re-sending the same
+// turntable or variation costs nothing and never asks Meta to re-fetch our box.
+export const waMediaCache = pgTable("wa_media_cache", {
+  localKey: text("local_key").primaryKey(),
+  metaMediaId: text("meta_media_id").notNull(),
+  mimeType: text("mime_type"),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+});

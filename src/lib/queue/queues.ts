@@ -43,6 +43,42 @@ export interface MeshProcessingJobData {
   printability?: unknown;
 }
 
+export interface WaInboundJobData {
+  waMessageId: string;
+  from?: string;
+  waId?: string;
+  profileName?: string | null;
+  type?: string;
+  text?: string | null;
+  imageId?: string | null;
+  buttonReplyId?: string | null;
+  buttonReplyTitle?: string | null;
+  timestamp?: string | null;
+  /** Delivery-status callbacks reuse the queue with job name "status". */
+  status?: string;
+  errorCode?: number | null;
+}
+
+/**
+ * Everything we say on WhatsApp goes through this queue, so the kill switch,
+ * the 24h window check and the per-recipient rate limit have one home.
+ */
+export interface WaOutboundJobData {
+  conversationId: string;
+  to: string;
+  kind: "text" | "image" | "video" | "buttons" | "template";
+  body?: string;
+  mediaKey?: string;
+  caption?: string;
+  buttons?: Array<{ id: string; title: string }>;
+  headerMediaKey?: string;
+  headerType?: "image" | "video";
+  /** Used when the 24h window has closed and free-form is refused. */
+  templateName?: string;
+  templateParams?: string[];
+  senderKind?: "admin" | "bot" | "agent" | "system";
+}
+
 export interface EmailJobData {
   type:
     | "order_confirmation"
@@ -179,6 +215,41 @@ export function getMeshProcessingQueue(): Queue {
     });
   }
   return meshProcessingQueue;
+}
+
+let waInboundQueue: Queue | null = null;
+let waOutboundQueue: Queue | null = null;
+
+export function getWaInboundQueue(): Queue {
+  if (!waInboundQueue) {
+    waInboundQueue = new Queue("wa-inbound", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 1000 },
+      },
+    });
+  }
+  return waInboundQueue;
+}
+
+export function getWaOutboundQueue(): Queue {
+  if (!waOutboundQueue) {
+    waOutboundQueue = new Queue("wa-outbound", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // Meta error 131056 means we are already sending too fast to this
+        // recipient; a tight retry makes it worse, so back off hard.
+        attempts: 3,
+        backoff: { type: "exponential", delay: 20000 },
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 1000 },
+      },
+    });
+  }
+  return waOutboundQueue;
 }
 
 export function getPreviewCleanupQueue(): Queue {

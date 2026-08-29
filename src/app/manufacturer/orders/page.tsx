@@ -41,9 +41,16 @@ export default async function ManufacturerOrdersPage({
 
   if (
     filterStatus &&
-    ["assigned", "accepted", "printing", "printed", "shipped"].includes(
-      filterStatus
-    )
+    [
+      "assigned",
+      "accepted",
+      "printing",
+      "printed",
+      "qc_pending",
+      "qc_rejected",
+      "qc_approved",
+      "shipped",
+    ].includes(filterStatus)
   ) {
     conditions.push(
       eq(
@@ -53,6 +60,9 @@ export default async function ManufacturerOrdersPage({
           | "accepted"
           | "printing"
           | "printed"
+          | "qc_pending"
+          | "qc_rejected"
+          | "qc_approved"
           | "shipped"
       )
     );

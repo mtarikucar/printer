@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { orders, adminActions, qcPhotos, qcReviews } from "@/lib/db/schema";
+import { orders, adminActions, manufacturers, qcPhotos, qcReviews } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { qcNextStatus, type ManufacturerOrderStatus } from "@/lib/services/qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
@@ -26,6 +26,8 @@ export async function POST(
       manufacturerId: true,
       orderNumber: true,
       userId: true,
+      needsPainting: true,
+      painterStatus: true,
     },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
@@ -70,11 +72,26 @@ export async function POST(
   });
 
   if (order.manufacturerId) {
+    // The next step after QC differs per order, and telling every manufacturer
+    // "artık kargolayabilirsiniz" left painting orders stuck: the ship panel is
+    // hidden for them (only a painter may ship a painting order), so the
+    // instruction pointed at a button that isn't there. Spell out the real next
+    // action instead.
+    const mfr = await db.query.manufacturers.findFirst({
+      where: eq(manufacturers.id, order.manufacturerId),
+      columns: { paintsInHouse: true },
+    });
+    const handsOffToPainter = order.needsPainting && !mfr?.paintsInHouse;
+    const nextStep = handsOffToPainter
+      ? "Sipariş profesyonel boyama içeriyor: kargolamak yerine sipariş sayfasındaki “Boyacıya gönder” bölümünden bir boyacı seçip figürü ona gönderin. Boyacı boyayıp müşteriye kargolayacak."
+      : order.needsPainting
+        ? "Sipariş profesyonel boyama içeriyor: kendiniz boyayıp kargolayabilir ya da sipariş sayfasından bir boyacıya gönderebilirsiniz."
+        : "Artık sipariş sayfasından kargo takip numarasını girip müşteriye gönderebilirsiniz.";
     await notifyManufacturer({
       manufacturerId: order.manufacturerId,
       type: "qc_result",
       subject: `QC onaylandı — ${order.orderNumber}`,
-      body: `${order.orderNumber} numaralı sipariş kalite kontrolden geçti. Artık kargolayabilirsiniz.`,
+      body: `${order.orderNumber} numaralı sipariş kalite kontrolden geçti. ${nextStep}`,
       orderId: id,
     }).catch((e) => console.error("notifyManufacturer qc_approve failed", e));
   }

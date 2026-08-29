@@ -69,7 +69,7 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
   return (
     <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-5">
       <h3 className="text-sm font-semibold text-purple-900 mb-1">
-        Profesyonel boyama gerekiyor
+        Sıradaki adım: boyacıya gönderin
       </h3>
       <p className="text-xs text-purple-700/80 mb-3">
         Bu sipariş için müşteri profesyonel boyama seçti. Kargolamak yerine bir
@@ -78,9 +78,18 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
       {painters === null ? (
         <p className="text-sm text-gray-400">Boyacılar yükleniyor…</p>
       ) : painters.length === 0 ? (
-        <p className="text-sm text-amber-700">
-          Şu an uygun (aktif, kabul açık) boyacı yok. Lütfen daha sonra tekrar deneyin.
-        </p>
+        // A manufacturer that gets here is blocked: it cannot ship a painting
+        // order itself and has nobody to hand it to. "Try again later" left them
+        // with no way to escalate, so point at the admin chat on this page.
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-medium">Şu an uygun (aktif, kabul açık) boyacı yok.</p>
+          <p className="mt-1 text-xs text-amber-800/90">
+            Bu siparişi kendiniz kargolayamazsınız; boyamanın boyacıda yapılması
+            gerekiyor. Figürü paketlenmiş halde bekletin ve bu sayfanın altındaki
+            sohbetten admin ekibine yazın — size bir boyacı atayacaklar. Boyacı
+            listesi açıldığında bu bölüm kendiliğinden dolar.
+          </p>
+        </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <select

@@ -13,10 +13,26 @@ const MFR_STATUS_COLORS: Record<string, string> = {
   accepted: "bg-indigo-100 text-indigo-700",
   printing: "bg-purple-100 text-purple-700",
   printed: "bg-amber-100 text-amber-700",
+  qc_pending: "bg-amber-100 text-amber-700",
+  qc_rejected: "bg-red-100 text-red-700",
+  qc_approved: "bg-emerald-100 text-emerald-700",
   shipped: "bg-emerald-100 text-emerald-700",
 };
 
-const STATUSES = ["all", "assigned", "accepted", "printing", "printed", "shipped"];
+// The QC stages were missing here, so an order that passed quality control had
+// no tab of its own — the one list where a manufacturer looks for "what needs my
+// action next" hid exactly the orders that were waiting on them.
+const STATUSES = [
+  "all",
+  "assigned",
+  "accepted",
+  "printing",
+  "printed",
+  "qc_pending",
+  "qc_rejected",
+  "qc_approved",
+  "shipped",
+];
 
 interface ManufacturerOrdersClientProps {
   orders: Array<{

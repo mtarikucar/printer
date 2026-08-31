@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
+import { submitToIndexNowInBackground } from "@/lib/services/indexnow";
 import { topics } from "@/lib/realtime/events";
 import { generateProductSlug } from "@/lib/services/slug";
 import { countProductFiles } from "@/lib/services/product-spec";
@@ -60,6 +61,14 @@ export async function POST(
   }
 
   await publishRealtime([topics.admin()], { kind: "badge" }).catch(() => {});
+
+  // A newly approved product is live in the shop and in the sitemap. Tell the
+  // IndexNow participants now instead of waiting to be recrawled — Bing is one
+  // of them, and Bing's index is what ChatGPT retrieval reads. Fire-and-forget:
+  // indexing must never fail an admin's approval.
+  if (updated.slug) {
+    submitToIndexNowInBackground([`/shop/${updated.slug}`, "/shop", "/sitemap.xml"]);
+  }
 
   if (updated.manufacturerId) {
     try {

@@ -101,8 +101,8 @@ export default async function TermsPage() {
 
               <h3>4.2 İade</h3>
               <ul>
-                <li>Her figürin özel üretim olduğu için standart iade kabul edilmemektedir.</li>
-                <li>Ürün hasar görmüş veya hatalı olarak teslim edilmişse, teslim tarihinden itibaren 14 gün içinde bizimle iletişime geçiniz.</li>
+                <li>Kişiye özel üretilen figürinler, Mesafeli Sözleşmeler Yönetmeliği m. 15/1-(b) uyarınca 14 günlük cayma hakkı kapsamı dışındadır; bu istisna yalnızca sizin fotoğrafınızdan üretilen, size özgü ürünler için geçerlidir. Mağazadaki hazır ürünler cayma hakkı kapsamındadır.</li>
+                <li>Bu istisna <strong>ayıplı mal haklarınızı etkilemez.</strong> Ürün hasarlı, hatalı veya onayladığınız önizlemeye uygun olmayan şekilde teslim edilmişse, 6502 sayılı Kanun&apos;un ayıplı mal hükümleri uyarınca yasal haklarınız (ücretsiz onarım, yenisiyle değiştirme, bedel iadesi) <strong>iki yıl boyunca</strong> saklıdır. Bize en kısa sürede haber vermenizi rica ederiz; ancak geç bildirim bu haklarınızı ortadan kaldırmaz.</li>
                 <li>Kalite sorunu tespit edilmesi halinde ücretsiz yeniden üretim veya iade yapılır.</li>
                 <li>Ürünün fotoğrafı ve sorunun açıklaması ile birlikte info@figurunica.com adresine başvuru yapılmalıdır.</li>
               </ul>
@@ -326,8 +326,8 @@ export default async function TermsPage() {
 
               <h3>4.2 Returns</h3>
               <ul>
-                <li>Standard returns are not accepted as each figurine is custom-made.</li>
-                <li>If the product is delivered damaged or defective, contact us within 14 days of delivery.</li>
+                <li>Personalised figurines fall outside the 14-day right of withdrawal under art. 15/1-(b) of the Distance Contracts Regulation; this applies only to items made from your own photo. Ready-made shop products are covered by the ordinary right of withdrawal.</li>
+                <li>This exception <strong>does not affect your rights for defective goods.</strong> If the item arrives damaged, faulty, or not matching the preview you approved, your statutory remedies under Law No. 6502 (free repair, replacement, refund) remain available for <strong>two years</strong>. Please tell us as soon as you can; late notice does not extinguish those rights.</li>
                 <li>If a quality issue is confirmed, free reproduction or refund will be provided.</li>
                 <li>Applications should be made to info@figurunica.com with a photo of the product and description of the issue.</li>
               </ul>

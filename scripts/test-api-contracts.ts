@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createOrderSchema } from "../src/lib/validators/order";
+import { reorderBlocked } from "../src/app/api/customer/orders/[orderNumber]/reorder/route";
 
 /**
  * Static contract check between the client and the App Router API.
@@ -207,6 +208,55 @@ check("sipariş doğrulama: yalnızca reçine ve standart boyut kabul edilir", (
   assert.equal(
     createOrderSchema("tr").safeParse({ ...base, figurineSize: "orta" }).success,
     false
+  );
+});
+
+// ─── Reorder-guard contract: object/design must never reach itemPriceKurus ──
+// Regresyon koruması (2026-08-24): reorder route'unun eski guard'ı yalnızca
+// `!isFlatPriced && (!figurineSize || !isPriceableSize(figurineSize))`
+// koşuluna bakıyordu. `figurineSize === "standart"` + kind "object" bu
+// koşulu GEÇERDİ (isPriceableSize("standart") true), guard'ı atlayıp
+// itemPriceKurus'a ulaşırdı — orası artık UnpricedSizeError fırlatıyor ve
+// route'ta bunu yakalayan try/catch yok → yakalanmamış 500. reorderBlocked
+// artık kind "object" olan her siparişi, boyuttan bağımsız, baştan engelliyor.
+check("reorderBlocked: obje/standart artık itemPriceKurus'a hiç ulaşmadan engellenir", () => {
+  assert.equal(
+    reorderBlocked({ orderType: "custom", style: "object", figurineSize: "standart" }),
+    true,
+    "object/standart guard'ı geçip 500'e düşüyor"
+  );
+  // Emekli tier'lı obje siparişleri zaten engelleniyordu — regresyon değil,
+  // ama reorderBlocked'ın hâlâ doğru sonucu verdiğini doğrular.
+  assert.equal(
+    reorderBlocked({ orderType: "custom", style: "object", figurineSize: "orta" }),
+    true
+  );
+});
+
+check("reorderBlocked: figür ve Creative Lab reorder yolu BOZULMADI", () => {
+  assert.equal(
+    reorderBlocked({ orderType: "custom", style: "realistic", figurineSize: "standart" }),
+    false,
+    "satılabilir figür reorder edilemez hale geldi"
+  );
+  assert.equal(
+    reorderBlocked({ orderType: "custom", style: "realistic", figurineSize: "orta" }),
+    true,
+    "emekli boyutlu figür hâlâ engellenmeli"
+  );
+  // Creative Lab: figurineSize nötr "orta" olarak saklanır ve isPriceableSize
+  // için geçersizdir — flat-priced kind olduğu için yine de izin verilmeli.
+  for (const style of ["keychain", "fridge_magnet", "lamp"]) {
+    assert.equal(
+      reorderBlocked({ orderType: "custom", style, figurineSize: "orta" }),
+      false,
+      `${style} Creative Lab reorder'ı yanlışlıkla engellendi`
+    );
+  }
+  assert.equal(
+    reorderBlocked({ orderType: "marketplace", style: "realistic", figurineSize: "standart" }),
+    true,
+    "marketplace siparişleri hâlâ engellenmeli"
   );
 });
 

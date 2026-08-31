@@ -85,9 +85,21 @@ export interface SiteJsonLdGraph {
   "@graph": [OnlineStoreNode, WebSiteNode];
 }
 
-/** Repo geneli desen: env yoksa apex alan adına düş. */
+/**
+ * Repo geneli desen: env yoksa apex alan adına düş.
+ *
+ * `||` (`??` DEĞİL) kasıtlı: `NEXT_PUBLIC_APP_URL=""` boş dizgi de env
+ * "ayarlanmış" sayılır ve `??` bunu geçerli kabul eder — sonuç `url: ""` ve
+ * bozuk bir `@id: "/#organization"` olurdu. Sondaki `/`'ler de kırpılır:
+ * aksi halde `@id: "…com//#organization"` gibi çift eğik çizgili bir kimlik
+ * üretilir. Bu alanlar yayınlanan entity kimliği — bozuk olması arama
+ * motorlarının entity çözümlemesini kırar.
+ */
 export function getAppUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com";
+  return (process.env.NEXT_PUBLIC_APP_URL || "https://figurunica.com").replace(
+    /\/+$/,
+    ""
+  );
 }
 
 /**

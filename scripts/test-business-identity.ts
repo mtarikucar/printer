@@ -21,7 +21,7 @@ import {
   CONTACT_EMAIL,
   CONTACT_PHONE_DISPLAY,
 } from "../src/lib/config/business-identity";
-import { buildOrganizationJsonLd } from "../src/lib/seo/organization";
+import { buildOrganizationJsonLd, getAppUrl } from "../src/lib/seo/organization";
 import { JsonLd, serializeJsonLd } from "../src/lib/seo/jsonld";
 
 let passed = 0;
@@ -154,6 +154,11 @@ test("kimlik alanları tek kaynaktan türetiliyor", () => {
 });
 
 test("uydurma alan yok (kuruluş yılı, çalışan sayısı, sicil no, logo)", () => {
+  // NOT: `logo`/`image` burada "elimizde olmayan alan" olarak listeleniyor
+  // çünkü şu an gerçek bir logo dosyamız yok (bkz. organization.ts başındaki
+  // yorum). Gerçek bir logo dosyası eklenip `organization.ts`'e doğrulanmış
+  // bir `logo` alanı eklendiğinde bu test kırmızıya döner — bu bir regresyon
+  // DEĞİL: `logo`'yu bu listeden çıkarıp testi güncelle.
   for (const forbidden of [
     "foundingDate",
     "numberOfEmployees",
@@ -166,7 +171,7 @@ test("uydurma alan yok (kuruluş yılı, çalışan sayısı, sicil no, logo)", 
   ]) {
     assert.ok(
       !hasKeyDeep(graph, forbidden),
-      `elimizde olmayan alan JSON-LD'ye sızmış: ${forbidden}`
+      `doğrulanmamış alan JSON-LD'ye sızmış: ${forbidden} (logo/image için: gerçek bir dosya eklendiyse bu testi güncelle, bkz. yukarıdaki not)`
     );
   }
 });
@@ -233,6 +238,73 @@ test("JsonLd bileşeni kaçırılmış metni script etiketine basar", () => {
   assert.ok(!html.includes("</script>"), `kaçırılmamış </script>: ${html}`);
   assert.ok(!html.includes("<"), `çıktıda ham '<' var: ${html}`);
   assert.equal(html, serializeJsonLd({ name: "</script><script>alert(1)</script>" }));
+});
+
+// ------------------------------------------------------------ fail-safe koruma
+
+test("serializeJsonLd undefined/null/döngüsel veride fırlatmaz, geçerli JSON döner", () => {
+  assert.equal(serializeJsonLd(undefined), "{}", "undefined boş JSON-LD'ye düşmeli");
+  assert.doesNotThrow(() => JSON.parse(serializeJsonLd(undefined)));
+
+  assert.doesNotThrow(() => JSON.parse(serializeJsonLd(null)));
+  assert.equal(JSON.parse(serializeJsonLd(null)), null);
+
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  let out = "";
+  assert.doesNotThrow(() => {
+    out = serializeJsonLd(circular);
+  }, "döngüsel veri serializeJsonLd'yi fırlatmamalı");
+  assert.doesNotThrow(() => JSON.parse(out), `döngüsel veri geçersiz JSON üretti: ${out}`);
+  assert.equal(out, "{}", "döngüsel veri sessizce boş JSON-LD'ye düşmeli");
+});
+
+test("serializeJsonLd U+2028/U+2029'u kaçırır, round-trip orijinal metni verir", () => {
+  const LS = "\u2028"; // LINE SEPARATOR
+  const PS = "\u2029"; // PARAGRAPH SEPARATOR
+  const payload = { text: `satır${LS}ayırıcı ve paragraf${PS}ayırıcı` };
+  const out = serializeJsonLd(payload);
+  assert.ok(!out.includes(LS), `çıktıda ham U+2028 var: ${out}`);
+  assert.ok(!out.includes(PS), `çıktıda ham U+2029 var: ${out}`);
+  assert.ok(out.includes("\\u2028"), "U+2028 \\u2028 olarak kaçırılmalı");
+  assert.ok(out.includes("\\u2029"), "U+2029 \\u2029 olarak kaçırılmalı");
+  assert.equal(JSON.parse(out).text, payload.text);
+});
+
+// -------------------------------------------------------------------- getAppUrl
+
+test("getAppUrl: boş env apex alan adına düşer, sondaki '/' kırpılır, normal değer aynen geçer", () => {
+  const prev = process.env.NEXT_PUBLIC_APP_URL;
+  try {
+    process.env.NEXT_PUBLIC_APP_URL = "";
+    assert.equal(getAppUrl(), "https://figurunica.com", "boş env apex alan adına düşmeli");
+    assert.equal(
+      buildOrganizationJsonLd()["@graph"][0]["@id"],
+      "https://figurunica.com/#organization",
+      "boş env @id'yi bozmamalı"
+    );
+
+    process.env.NEXT_PUBLIC_APP_URL = "https://staging.example.com/";
+    assert.equal(getAppUrl(), "https://staging.example.com", "sondaki '/' kırpılmalı");
+    assert.equal(
+      buildOrganizationJsonLd()["@graph"][0]["@id"],
+      "https://staging.example.com/#organization",
+      "sondaki '/' @id'de çift eğik çizgi bırakmamalı"
+    );
+
+    process.env.NEXT_PUBLIC_APP_URL = "https://staging.example.com///";
+    assert.equal(
+      getAppUrl(),
+      "https://staging.example.com",
+      "birden çok sondaki '/' de kırpılmalı"
+    );
+
+    process.env.NEXT_PUBLIC_APP_URL = "https://figurunica.com";
+    assert.equal(getAppUrl(), "https://figurunica.com", "normal değer aynen geçmeli");
+  } finally {
+    if (prev === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = prev;
+  }
 });
 
 for (const [name, fn] of cases) {

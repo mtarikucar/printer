@@ -14,8 +14,9 @@
  * ürün başlığı/açıklaması, müşteriler yorum yazıyor; bu metinler ileride
  * Product/Review JSON-LD'sine girecek. HTML ayrıştırıcısı `<script>` gövdesini
  * ham metin olarak okur ve ilk `</script>` dizisinde bloğu KAPATIR — kaçırılmayan
- * tek bir `</script>` stored XSS'tir. `<` JSON içinde `<` ile birebir aynı
- * anlama gelir (JSON.parse aynı metni geri verir), yani kaçış veriyi bozmaz.
+ * tek bir `</script>` stored XSS'tir. Kaçış veriyi bozmaz: `\u003c` JSON dizgi
+ * dilbilgisinde `<` ile birebir aynı karakteri kodlar, JSON.parse aynı metni
+ * geri verir — yalnızca HTML ayrıştırıcısı artık bir etiket sonu görmez.
  */
 export function serializeJsonLd(data: unknown): string {
   return JSON.stringify(data).replace(/</g, "\\u003c");

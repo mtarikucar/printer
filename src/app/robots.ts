@@ -29,7 +29,7 @@ import type { MetadataRoute } from "next";
  * robots.txt block only lands them in Search Console's "Blocked by robots.txt"
  * bucket without ever de-indexing them (Google can't read a `noindex` it isn't
  * allowed to crawl). Instead they stay crawlable and the root layout emits
- * `noindex` for them (see `@/lib/seo` → NOINDEX_PREFIXES), which actually drops
+ * `noindex` for them (see `@/lib/seo/policy` → NOINDEX_PREFIXES), which actually drops
  * them from the index and clears that report.
  */
 

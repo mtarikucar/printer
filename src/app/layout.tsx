@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { Inter, Inter_Tight, Space_Grotesk, JetBrains_Mono, DM_Serif_Display, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { getLocale } from "@/lib/i18n/get-locale";
-import { isNoindexPath } from "@/lib/seo";
+import { isNoindexPath } from "@/lib/seo/policy";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
 import { CartProvider } from "@/lib/cart/cart-context";

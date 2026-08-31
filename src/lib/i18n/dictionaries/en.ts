@@ -864,6 +864,22 @@ const en = {
   "consent.content.kvkkLink": "KVKK Privacy Notice",
   "consent.content.box2b":
     ", which I have read, and I give my explicit consent to this processing/transfer.",
+  "consent.contract.summaryTitle": "Before you pay",
+  "consent.contract.summaryProduct": "Product",
+  "consent.contract.summaryProductFallback": "Order",
+  "create.summary.figurine": "Personalised figurine (standard, 150 mm, resin, hand-painted)",
+  "upload.productName": "Print of your uploaded 3D model",
+  "consent.contract.summaryTotal": "Total (incl. VAT)",
+  "consent.contract.summaryWithdrawal": "Right of withdrawal",
+  "consent.contract.summaryWithdrawalNone": "None (made to order for you)",
+  "consent.contract.summaryWithdrawal14": "14 days",
+  "consent.contract.personalized1": "I have read and understood that the figurine I am ordering is produced solely for me from the photo I uploaded, and that for this reason the 14-day right of withdrawal does not apply to it under art. 15/1-(b) of the Distance Contracts Regulation. ",
+  "consent.contract.personalized2": ". I know that I can cancel my order free of charge for as long as I have not approved the preview, and that my statutory rights if the product turns out to be defective remain available for two years.",
+  "consent.contract.readymade": ". I know that I have a 14-day right of withdrawal for this product from the date of delivery.",
+  "consent.contract.preliminaryLink": "Preliminary Information Form",
+  "consent.contract.contractLink": "Distance Sales Agreement",
+  "consent.contract.and": " and the ",
+  "consent.contract.required": "To continue you must accept the Preliminary Information Form and the Distance Sales Agreement.",
 
   // Payment Success
   "payment.success.title": "Order Confirmed!",
@@ -1341,7 +1357,7 @@ const en = {
   "landing.faq.q6": "What material are figurines made from?",
   "landing.faq.a6": "Our figurines are made from high-quality photopolymer resin using professional SLA 3D printing. They're durable, detailed, and smooth to the touch.",
   "landing.faq.q7": "Can I return or exchange my figurine?",
-  "landing.faq.a7": "Since each figurine is custom-made, we can't accept returns. However, if there's a quality issue, reach out and we'll make it right.",
+  "landing.faq.a7": "Because your figurine is made from your own photo, the statutory 14-day right of withdrawal does not apply to personalised orders; ready-made shop products can still be returned within 14 days. That is why we send you a digital preview before printing — if you are not happy we do one free revision, and until you approve it you can cancel free of charge for a full refund. If the item arrives damaged, defective, or different from the preview you approved, your statutory rights remain available for two years, and we reprint, replace, or refund at no cost.",
   "landing.faq.q8": "Can I see a preview before printing?",
   "landing.faq.a8": "Yes! After our AI generates your 3D model, you'll receive a digital preview. You can approve it before we start printing.",
 

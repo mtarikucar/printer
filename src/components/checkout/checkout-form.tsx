@@ -9,6 +9,8 @@ import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { PhoneInput, phoneInputToE164 } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { ContentConsent } from "@/components/content-consent";
+import { DistanceContractConsent } from "@/components/distance-contract-consent";
+import { consentVariantForOrderType } from "@/lib/config/distance-contract";
 
 // Reusable single-payment checkout. Collects guest identity (when logged out),
 // a Turkish shipping address, and a payment method, then POSTs `orderPayload`
@@ -20,11 +22,14 @@ export function CheckoutForm({
   orderPayload,
   priceKurus,
   submitLabel,
+  productName,
   onSuccess,
 }: {
   orderPayload: Record<string, unknown>;
   priceKurus: number;
   submitLabel?: string;
+  /** Ürünün temel nitelikleri — MSY m.6/2-a özet bloğunun (a) bendi. */
+  productName?: string;
   onSuccess?: () => Promise<void> | void;
 }) {
   const d = useDictionary();
@@ -52,6 +57,14 @@ export function CheckoutForm({
   const needsConsent =
     orderPayload.orderType === "upload" || orderPayload.orderType === "custom";
   const [contentConsentOk, setContentConsentOk] = useState(false);
+  // Mesafeli sözleşme onayı — içerik/KVKK onayının aksine HER sipariş tipinde
+  // istenir (MSY m.6/2-a her mesafeli sözleşmeye uygulanır). Varyant, hazır
+  // üründe "14 gün cayma hakkın var" der; oraya istisna metni koymak yanıltıcı
+  // beyan olur.
+  const consentVariant = consentVariantForOrderType(
+    String(orderPayload.orderType ?? "marketplace")
+  );
+  const [contractConsentOk, setContractConsentOk] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -91,6 +104,15 @@ export function CheckoutForm({
       setError(t("shop.checkout.guestRequired", "Ad ve e-posta zorunludur"));
       return;
     }
+    if (!contractConsentOk) {
+      setError(
+        t(
+          "consent.contract.required",
+          "Devam etmek için Ön Bilgilendirme Formu ve Mesafeli Satış Sözleşmesi onayını işaretlemelisiniz."
+        )
+      );
+      return;
+    }
     if (needsConsent && !contentConsentOk) {
       setError(
         t(
@@ -120,6 +142,7 @@ export function CheckoutForm({
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
           contentConsent: needsConsent ? contentConsentOk : undefined,
+          distanceContractConsent: contractConsentOk,
           analyticsEventId: payEventId,
         }),
       });
@@ -276,11 +299,20 @@ export function CheckoutForm({
         />
       )}
 
+      <DistanceContractConsent
+        variant={consentVariant}
+        productName={productName ?? t("consent.contract.summaryProductFallback", "Sipariş")}
+        priceKurus={priceKurus}
+        onChange={setContractConsentOk}
+      />
+
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       <button
         type="submit"
-        disabled={submitting || (needsConsent && !contentConsentOk)}
+        disabled={
+          submitting || !contractConsentOk || (needsConsent && !contentConsentOk)
+        }
         className="w-full btn-primary py-3 rounded-xl font-medium disabled:opacity-60"
       >
         {submitting

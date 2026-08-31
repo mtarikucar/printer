@@ -49,6 +49,7 @@ export function QuoteClient({ model }: { model: QuoteModel }) {
             <CheckoutForm
               orderPayload={{ orderType: "upload", uploadedModelId: model.id }}
               priceKurus={price}
+              productName={model.fileName ?? "3D model baskısı"}
               submitLabel={d["upload.placeOrder"]}
             />
           </div>

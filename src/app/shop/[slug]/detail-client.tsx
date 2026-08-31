@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDictionary, useLocale } from "@/lib/i18n/locale-context";
 import { formatCurrency } from "@/lib/i18n/format";
+import { DistanceContractConsent } from "@/components/distance-contract-consent";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import {
   PhoneInput,
@@ -130,6 +131,9 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
   );
 
   const [submitting, setSubmitting] = useState(false);
+  // Mesafeli sözleşme onayı (MSY m.6/2-a). Mağaza ürünü HAZIRDIR: cayma hakkı
+  // tam olarak vardır, bu yüzden varyant "readymade".
+  const [contractConsentOk, setContractConsentOk] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -185,6 +189,16 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
       return;
     }
 
+    if (!contractConsentOk) {
+      setError(
+        t(
+          "consent.contract.required",
+          "Devam etmek için Ön Bilgilendirme Formu ve Mesafeli Satış Sözleşmesi onayını işaretlemelisiniz."
+        )
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch("/api/orders", {
@@ -207,6 +221,7 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
           paymentMethod,
           guestEmail: !loggedIn ? guestEmail.trim() : undefined,
           guestName: !loggedIn ? guestName.trim() : undefined,
+          distanceContractConsent: contractConsentOk,
         }),
       });
 
@@ -628,11 +643,18 @@ export function ProductDetailClient({ product }: { product: ProductDetail }) {
               </label>
             </div>
 
+            <DistanceContractConsent
+              variant="readymade"
+              productName={product.title}
+              priceKurus={unitPriceKurus}
+              onChange={setContractConsentOk}
+            />
+
             {error && <p className="text-sm text-red-500">{error}</p>}
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !contractConsentOk}
               className="w-full btn-primary py-3 rounded-xl font-medium disabled:opacity-60"
             >
               {submitting

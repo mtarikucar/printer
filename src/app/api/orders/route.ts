@@ -59,6 +59,11 @@ import {
 import { getClientIp } from "@/lib/utils/request";
 import { CONTENT_CONSENT_VERSION } from "@/lib/config/content-consent";
 import {
+  PRELIMINARY_INFO_VERSION,
+  DISTANCE_CONTRACT_VERSION,
+  consentVariantForOrderType,
+} from "@/lib/config/distance-contract";
+import {
   attributionFromRequest,
   attributionColumns,
 } from "@/lib/analytics/attribution-server";
@@ -204,6 +209,23 @@ async function handleCreateOrder(
           error:
             d["api.order.consentRequired"] ??
             "Devam etmek için görsel kullanım ve KVKK onaylarını işaretlemelisiniz.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Mesafeli sözleşme ön bilgilendirme onayı — TÜM sipariş tiplerinde zorunlu.
+    // İçerik/KVKK onayının aksine bu, marketplace'te de aranır: MSY m.6/2-a her
+    // mesafeli sözleşme için geçerlidir ve m.7 eksik bilgilendirmede sözleşmeyi
+    // "kurulmamış" sayar. Kapıyı burada tutmazsak kişiye özel üründeki cayma
+    // istisnası da birlikte düşer (Yargıtay 13. HD: belge sunulamaması tek
+    // başına bozma sebebi).
+    if (body?.distanceContractConsent !== true) {
+      return NextResponse.json(
+        {
+          error:
+            d["consent.contract.required"] ??
+            "Devam etmek için Ön Bilgilendirme Formu ve Mesafeli Satış Sözleşmesi onayını işaretlemelisiniz.",
         },
         { status: 400 }
       );
@@ -693,6 +715,17 @@ async function handleCreateOrder(
             orderType === "custom" || orderType === "upload"
               ? CONTENT_CONSENT_VERSION
               : null,
+          // Ön bilgilendirme onayının denetim izi. Sürümler, hangi METNİN kabul
+          // edildiğini siparişe sabitler; metin değişince eski siparişler eski
+          // sürümde kalır. IP/UA zorunlu değil ama itirazda onayı güçlendirir.
+          preliminaryInfoAcceptedAt: new Date(),
+          preliminaryInfoVersion: PRELIMINARY_INFO_VERSION,
+          distanceContractVersion: DISTANCE_CONTRACT_VERSION,
+          consentIp:
+            request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+            request.headers.get("x-real-ip") ||
+            null,
+          consentUserAgent: request.headers.get("user-agent")?.slice(0, 500) ?? null,
           isBulk: isBulkOrder,
           productId: orderType === "marketplace" && !isCart ? product!.id : null,
           sellerManufacturerId:

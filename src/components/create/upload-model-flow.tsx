@@ -297,6 +297,7 @@ export function UploadModelFlow() {
                 <CheckoutForm
                   orderPayload={{ orderType: "upload", uploadedModelId: result.id }}
                   priceKurus={result.priceKurus}
+                  productName={d["upload.productName"] || "Yüklediğiniz 3D modelin baskısı"}
                   submitLabel={d["upload.placeOrder"]}
                 />
               ) : (

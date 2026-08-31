@@ -60,8 +60,10 @@ export default async function IadePage() {
               <h2>3. Kişiye Özel Figürinlerde İade</h2>
               <p>
                 Kişiye özel figürinler size özel üretildiği için, 6502 sayılı Tüketicinin Korunması Hakkında Kanun ve
-                Mesafeli Sözleşmeler Yönetmeliği uyarınca standart 14 günlük cayma hakkı kapsamında değildir. Bu nedenle
-                fikir değişikliği veya beğenmeme gerekçesiyle iade kabul edilememektedir.
+                Mesafeli Sözleşmeler Yönetmeliği m.15/1-(b) uyarınca standart 14 günlük cayma hakkı kapsamında değildir.
+                Bu nedenle <strong>fikir değişikliği veya beğenmeme gerekçesiyle</strong> cayma hakkı kullanılamaz.
+                Ürünün ayıplı, hasarlı veya onayladığınız önizlemeden farklı olması hâlindeki haklarınız ise
+                <strong> teslimden itibaren iki yıl</strong> boyunca saklıdır.
               </p>
               <p>Bununla birlikte memnuniyetiniz bizim için esastır:</p>
               <ul>

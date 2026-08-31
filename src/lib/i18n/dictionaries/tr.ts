@@ -866,6 +866,22 @@ const tr: Dictionary = {
   "consent.content.kvkkLink": "KVKK Aydınlatma Metni'ni",
   "consent.content.box2b":
     " okuduğumu ve bu işleme/aktarıma açık rıza verdiğimi beyan ederim.",
+  "consent.contract.summaryTitle": "Ödeme öncesi özet",
+  "consent.contract.summaryProduct": "Ürün",
+  "consent.contract.summaryProductFallback": "Sipariş",
+  "create.summary.figurine": "Kişiye özel figürin (standart, 150 mm, reçine, elle boyalı)",
+  "upload.productName": "Yüklediğiniz 3D modelin baskısı",
+  "consent.contract.summaryTotal": "Toplam (KDV dâhil)",
+  "consent.contract.summaryWithdrawal": "Cayma hakkı",
+  "consent.contract.summaryWithdrawalNone": "Yok (kişiye özel üretim)",
+  "consent.contract.summaryWithdrawal14": "14 gün",
+  "consent.contract.personalized1": "Sipariş ettiğim figürinin yüklediğim fotoğraftan yalnızca bana özel üretildiğini, bu nedenle Mesafeli Sözleşmeler Yönetmeliği m.15/1-(b) uyarınca 14 günlük cayma hakkının bu üründe bulunmadığını okudum ve anladım. ",
+  "consent.contract.personalized2": "'ni okuyup kabul ediyorum. Önizlemeyi onaylamadığım sürece siparişimi ücretsiz iptal edebileceğimi, ürünün ayıplı çıkması hâlindeki yasal haklarımın iki yıl boyunca saklı olduğunu biliyorum.",
+  "consent.contract.readymade": "'ni okudum, kabul ediyorum. Bu üründe teslimden itibaren 14 gün cayma hakkım olduğunu biliyorum.",
+  "consent.contract.preliminaryLink": "Ön Bilgilendirme Formu",
+  "consent.contract.contractLink": "Mesafeli Satış Sözleşmesi",
+  "consent.contract.and": "'nu ve ",
+  "consent.contract.required": "Devam etmek için Ön Bilgilendirme Formu ve Mesafeli Satış Sözleşmesi onayını işaretlemelisiniz.",
 
   // Payment Success
   "payment.success.title": "Sipariş Onaylandı!",
@@ -1348,7 +1364,7 @@ const tr: Dictionary = {
   "landing.faq.q6": "Figürinler hangi malzemeden yapılıyor?",
   "landing.faq.a6": "Figürinlerimiz profesyonel SLA 3D baskı ile yüksek kaliteli fotopolimer reçineden üretilir. Dayanıklı, detaylı ve pürüzsüzdür.",
   "landing.faq.q7": "İade veya değişim yapılabiliyor mu?",
-  "landing.faq.a7": "Her figürin özel üretim olduğu için iade kabul edilmemektedir. Ancak kalite sorunu yaşarsanız bizimle iletişime geçin, çözüm bulalım.",
+  "landing.faq.a7": "Figürininiz yalnızca sizin fotoğrafınızdan üretildiği için kişiye özel ürünlerde yasal 14 günlük cayma hakkı geçerli değildir; mağazamızdaki hazır ürünlerde ise 14 gün içinde iade edebilirsiniz. Bu yüzden üretime başlamadan önce size dijital önizleme gönderiyoruz — beğenmezseniz bir kez ücretsiz revizyon yapıyoruz, onay vermediğiniz sürece siparişinizi ücretsiz iptal edip paranızı tam olarak geri alabilirsiniz. Ürün hasarlı, ayıplı veya onayladığınız önizlemeden farklı gelirse yasal haklarınız iki yıl boyunca saklıdır; bu durumda ücretsiz yeniden üretim, değişim veya bedel iadesi yapıyoruz.",
   "landing.faq.q8": "Baskı öncesi önizleme görebilir miyim?",
   "landing.faq.a8": "Evet! Yapay zekamız 3D modelinizi oluşturduktan sonra dijital bir önizleme alırsınız. Baskıya başlamadan önce onaylayabilirsiniz.",
 

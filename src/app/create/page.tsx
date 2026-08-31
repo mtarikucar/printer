@@ -23,6 +23,7 @@ import { DEFAULT_COUNTRY, type CountryCode } from "@/lib/phone";
 import { CreatePathSelector } from "@/components/create/path-selector";
 import { UploadModelFlow } from "@/components/create/upload-model-flow";
 import { ContentConsent } from "@/components/content-consent";
+import { DistanceContractConsent } from "@/components/distance-contract-consent";
 import { DesignToProductFlow } from "@/components/create/design-to-product-flow";
 import {
   DESIGN_TEMPLATES,
@@ -173,6 +174,9 @@ function CustomCreateFlow() {
   const [marketingConsent, setMarketingConsent] = useState(false);
   // Görsel/kişilik hakları + KVKK onayı — iki kutu da işaretlenmeden sipariş yok.
   const [contentConsentOk, setContentConsentOk] = useState(false);
+  // Mesafeli sözleşme onayı (MSY m.6/2-a). /create daima kişiye özel üretimdir,
+  // varyant sabit "personalized".
+  const [contractConsentOk, setContractConsentOk] = useState(false);
 
   // Loading stage rotation
   const [loadingStage, setLoadingStage] = useState(0);
@@ -853,6 +857,14 @@ function CustomCreateFlow() {
       return;
     }
 
+    if (!contractConsentOk) {
+      setError(
+        d["consent.contract.required"] ||
+          "Devam etmek için Ön Bilgilendirme Formu ve Mesafeli Satış Sözleşmesi onayını işaretlemelisiniz."
+      );
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -876,6 +888,7 @@ function CustomCreateFlow() {
           guestName: !loggedIn ? guestName.trim() : undefined,
           marketingConsent: !loggedIn ? marketingConsent : undefined,
           contentConsent: contentConsentOk,
+          distanceContractConsent: contractConsentOk,
         }),
       });
 
@@ -1966,6 +1979,14 @@ function CustomCreateFlow() {
                 className="mb-4 space-y-2 text-left"
               />
 
+              <DistanceContractConsent
+                variant="personalized"
+                productName={d["create.summary.figurine"] || "Kişiye özel figürin"}
+                priceKurus={FIGURINE_PRICE_KURUS + upsellTotalKurus}
+                onChange={setContractConsentOk}
+                className="mb-4 space-y-3 text-left"
+              />
+
               {(() => {
                 const total = FIGURINE_PRICE_KURUS + upsellTotalKurus;
                 const isFullyCovered = gcApplied && gcApplied.balanceKurus >= total;
@@ -1974,7 +1995,7 @@ function CustomCreateFlow() {
                   <Button
                     type="submit"
                     loading={submitting}
-                    disabled={!contentConsentOk}
+                    disabled={!contentConsentOk || !contractConsentOk}
                     size="lg"
                     fullWidth
                     className="inline-flex items-center justify-center gap-2"

@@ -545,6 +545,13 @@ export const orderDrafts = pgTable("order_drafts", {
   // kopyalanır. İki kutu da işaretliyse damgalanır (denetim izi).
   contentConsentAt: timestamp("content_consent_at"),
   contentConsentVersion: text("content_consent_version"),
+  // Mesafeli sözleşme ön bilgilendirme onayı (MSY m.6/2-a). WhatsApp taslakları
+  // için /pay onayında damgalanır, terfide orders'a kopyalanır.
+  preliminaryInfoAcceptedAt: timestamp("preliminary_info_accepted_at"),
+  preliminaryInfoVersion: text("preliminary_info_version"),
+  distanceContractVersion: text("distance_contract_version"),
+  consentIp: text("consent_ip"),
+  consentUserAgent: text("consent_user_agent"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -741,6 +748,22 @@ export const orders = pgTable("orders", {
   // zorunludur. Version, kabul edilen sözleşme metnini sabitler (denetim izi).
   contentConsentAt: timestamp("content_consent_at"),
   contentConsentVersion: text("content_consent_version"),
+  // Mesafeli sözleşme ön bilgilendirme onayı — MSY m.6/2-a uyarınca ödeme
+  // yükümlülüğünden HEMEN ÖNCE alınır. İspat yükü satıcıdadır (m.5/6, m.10/1);
+  // Yargıtay 13. HD belge sunulamamasını tek başına bozma sebebi sayar. Sürüm
+  // alanları, hangi metnin kabul edildiğini siparişe sabitler.
+  preliminaryInfoAcceptedAt: timestamp("preliminary_info_accepted_at"),
+  preliminaryInfoVersion: text("preliminary_info_version"),
+  distanceContractVersion: text("distance_contract_version"),
+  // Zorunlu değil ama itiraz hâlinde onayı güçlendirir. KVKK: kişisel veridir,
+  // CONSENT_RETENTION_DAYS (3 yıl, MSY m.20/1) sonrası temizlenmelidir.
+  consentIp: text("consent_ip"),
+  consentUserAgent: text("consent_user_agent"),
+  // Müşterinin 2D önizlemeyi onayladığı an. previewId SEÇİLENİ tutar, ONAY ANINI
+  // değil; kişiye özel akışta cayma istisnasının ve "onaydan önce ücretsiz
+  // iptal" taahhüdünün dayanağı bu damgadır. modelUploadedAt admin'in yükleme
+  // anıdır — müşteri onayı customerModelApprovedAt'tedir, bu ondan ayrıdır.
+  previewApprovedAt: timestamp("preview_approved_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

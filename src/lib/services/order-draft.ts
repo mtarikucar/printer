@@ -107,6 +107,21 @@ export async function promoteDraftToOrder(
       // terfide orders'a birebir taşınır (denetim izi).
       contentConsentAt: draft.contentConsentAt,
       contentConsentVersion: draft.contentConsentVersion,
+      // Mesafeli sözleşme ön bilgilendirme onayı (MSY m.6/2-a) — aynı şekilde
+      // birebir taşınır. Bu damga sipariştedir çünkü ispat yükü satıcıdadır ve
+      // draft ödeme sonrası temizlenebilir; kayıt siparişte kalmalıdır.
+      preliminaryInfoAcceptedAt: draft.preliminaryInfoAcceptedAt,
+      preliminaryInfoVersion: draft.preliminaryInfoVersion,
+      distanceContractVersion: draft.distanceContractVersion,
+      consentIp: draft.consentIp,
+      consentUserAgent: draft.consentUserAgent,
+      // Önizleme onayının damgası. previewId SEÇİLENİ tutar, onay ANINI değil —
+      // ama seçim, ödemeyle birlikte taslak yazıldığı anda kesinleşir. Web
+      // akışında müşteri varyasyonu seçip sipariş verir; WhatsApp akışında onay
+      // sohbette DAHA ÖNCE verilir (execute-tool.ts previews.status='approved'),
+      // yani bu damga onay anını asla ERKEN göstermez — en kötü ihtimalle geç
+      // gösterir. İspat açısından güvenli yön budur.
+      previewApprovedAt: draft.previewId ? draft.createdAt : null,
     };
 
     // Cart promotion (Faz 4): fan a multi-seller cart draft out into one order

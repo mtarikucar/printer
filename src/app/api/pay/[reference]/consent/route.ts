@@ -4,6 +4,10 @@ import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
 import { findDraftByReference } from "@/lib/services/order-draft";
 import { CONTENT_CONSENT_VERSION } from "@/lib/config/content-consent";
+import {
+  PRELIMINARY_INFO_VERSION,
+  DISTANCE_CONTRACT_VERSION,
+} from "@/lib/config/distance-contract";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { getClientIp } from "@/lib/utils/request";
 
@@ -21,7 +25,7 @@ import { getClientIp } from "@/lib/utils/request";
  * endpoint can't be used to probe which references exist.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ reference: string }> }
 ) {
   const { reference } = await params;
@@ -55,6 +59,23 @@ export async function POST(
       .set({
         contentConsentAt: new Date(),
         contentConsentVersion: CONTENT_CONSENT_VERSION,
+      })
+      .where(eq(orderDrafts.id, draft.id));
+  }
+
+  // Mesafeli sözleşme ön bilgilendirme onayı (MSY m.6/2-a) — ayrı ve bağımsız
+  // damga. WhatsApp akışında sohbette ön bilgilendirme YAPILAMAZ (m.6 yazılı
+  // ortam ve bütünlük ister); tek geçerli an ödeme sayfasıdır. İçerik onayından
+  // ayrı tutulur ki hangisinin ne zaman alındığı ayrı ayrı ispatlanabilsin.
+  if (!draft.preliminaryInfoAcceptedAt) {
+    await db
+      .update(orderDrafts)
+      .set({
+        preliminaryInfoAcceptedAt: new Date(),
+        preliminaryInfoVersion: PRELIMINARY_INFO_VERSION,
+        distanceContractVersion: DISTANCE_CONTRACT_VERSION,
+        consentIp: ip,
+        consentUserAgent: request.headers.get("user-agent")?.slice(0, 500) ?? null,
       })
       .where(eq(orderDrafts.id, draft.id));
   }

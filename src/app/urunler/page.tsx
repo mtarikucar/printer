@@ -307,6 +307,7 @@ export default function UrunlerPage() {
                 }}
                 priceKurus={priceKurus}
                 submitLabel="Siparişi ver"
+                productName={product}
               />
             </div>
 

@@ -337,6 +337,13 @@
       "when": 1787907648517,
       "tag": "0047_agent_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1788176259652,
+      "tag": "0048_distance_contract_consent",
+      "breakpoints": true
     }
   ]
 }

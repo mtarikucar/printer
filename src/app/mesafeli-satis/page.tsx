@@ -123,8 +123,7 @@ export default async function MesafeliSatisPage() {
                   <strong>Onay alınmadan üretime geçilmesi:</strong> Otomatik baskıya uygunluk denetiminden uyarısız geçen
                   modellerde Satıcı, onay bağlantısının gönderilmesinden <strong>48 saat</strong> sonra ve her hâlükârda
                   14 günlük sürenin sonunda süreci kendi inisiyatifiyle sürdürebilir. Bu, Alıcı&apos;nın onayının yerine
-                  geçmez: <strong>üretim fiilen başlayana kadar sipariş ücretsiz iptal edilebilir</strong> ve Alıcı onay
-                  vermemişse 6. bölümdeki cayma hakkı istisnası uygulanmaz.
+                  geçmez: <strong>üretim fiilen başlayana kadar sipariş ücretsiz iptal edilebilir</strong> (6.3).
                 </li>
               </ul>
 
@@ -155,23 +154,27 @@ export default async function MesafeliSatisPage() {
                 içinde herhangi bir gerekçe göstermeksizin ve cezai şart ödemeksizin cayma hakkına sahiptir.
               </p>
               <p>
-                Ancak; siparişe konu figürinler, Alıcı&apos;nın yüklediği fotoğraflar ve seçimleri doğrultusunda
-                <strong> kişiye özel olarak üretildiğinden</strong>, Mesafeli Sözleşmeler Yönetmeliği&apos;nin 15. maddesi
-                uyarınca &quot;tüketicinin istekleri veya kişisel ihtiyaçları doğrultusunda hazırlanan mallar&quot;
-                kapsamında değerlendirilir ve <strong>cayma hakkı istisnasındadır</strong>. Bu nedenle önizleme onayı verilip
-                üretime başlanan kişiye özel siparişler için cayma hakkı kullanılamaz.
+                <strong>6.2.</strong> Kişiye özel figürinlerde ürün, Alıcı&apos;nın yüklediği fotoğraf doğrultusunda
+                münhasıran Alıcı için üretilen ve başka bir müşteriye satılması mümkün olmayan <strong>özel üretim
+                (siparişe göre üretilen)</strong> bir mal olduğundan, Mesafeli Sözleşmeler Yönetmeliği&apos;nin
+                15/1-(b) maddesi uyarınca &quot;tüketicinin istekleri veya kişisel ihtiyaçları doğrultusunda hazırlanan
+                mallar&quot; kapsamındadır ve bu sözleşmede <strong>baştan itibaren cayma hakkı bulunmamaktadır</strong>.
               </p>
               <p>
-                Önizleme onayı verilmeden ve üretim başlamadan önce sipariş <strong>ücretsiz iptal edilebilir</strong>;
-                tahsil edilen bedel iade edilir. Kişiye özel siparişlerde bu hak, 3.1&apos;de anlatılan onay sayfasındaki
-                <strong> &quot;Vazgeç ve siparişi iptal et&quot;</strong> butonuyla doğrudan kullanılabilir; dilerseniz
-                info@figurunica.com adresine yazarak da kullanabilirsiniz. Cayma hakkı istisnası yalnızca Alıcı
-                önizlemeyi onayladıktan sonra devreye girer.
+                <strong>6.3.</strong> Satıcı, kanunen yükümlü olmadığı hâlde Alıcı&apos;ya şu hakları <strong>ayrıca</strong>
+                tanır: baskı öncesi dijital önizleme, bir kez ücretsiz revizyon ve <strong>önizleme onayı verilmediği sürece
+                siparişi ücretsiz iptal ederek ödenen bedelin tamamının iadesini talep etme</strong> hakkı. Bu hak,
+                3.1&apos;de anlatılan onay sayfasındaki <strong>&quot;Vazgeç ve siparişi iptal et&quot;</strong> butonuyla
+                doğrudan kullanılabilir; dilerseniz info@figurunica.com adresine yazarak da kullanabilirsiniz. Bu haklar
+                Satıcı&apos;nın sözleşmesel taahhüdü olup 6.2&apos;deki yasal durumu değiştirmez.
               </p>
               <p>
-                Ürünün ayıplı/hasarlı teslim edilmesi halinde tüketicinin yasal hakları saklıdır; bu durumda Alıcı,
-                teslim tarihinden itibaren 14 gün içinde ürünün fotoğrafı ve sorunun açıklamasıyla info@figurunica.com
-                adresine başvurabilir. Kalite sorunu teyit edilirse <strong>değişim, ücretsiz yeniden üretim veya iade</strong> sağlanır.
+                <strong>6.4.</strong> Cayma hakkının bulunmaması, ürünün <strong>ayıplı</strong> teslim edilmesi hâlindeki
+                yasal haklarınızı etkilemez. 6502 sayılı Kanun m.8-11 uyarınca <strong>teslimden itibaren iki yıl</strong>
+                boyunca ücretsiz onarım, ayıpsız misli ile değişim, bedelden indirim veya sözleşmeden dönme
+                haklarınızdan dilediğinizi kullanabilirsiniz. Teslim edilen ürünün Alıcı&apos;nın onayladığı önizlemeye
+                uymaması da ayıp sayılır. Başvurularınızı ürünün fotoğrafı ve sorunun açıklamasıyla
+                info@figurunica.com adresine iletebilirsiniz.
               </p>
 
               <h2>7. Genel Hükümler</h2>
@@ -328,23 +331,27 @@ export default async function MesafeliSatisPage() {
                 from the date of delivery, without providing any justification and without paying any penalty.
               </p>
               <p>
-                However, since the figurines subject to the order are <strong>produced specifically for the individual</strong>
-                in line with the photos and choices uploaded by the Buyer, they are considered &quot;goods prepared in line
-                with the consumer&apos;s requests or personal needs&quot; under Article 15 of the Distance Contracts Regulation
-                and are therefore an <strong>exception to the right of withdrawal</strong>. For this reason, the right of
-                withdrawal cannot be exercised for custom-made orders that have been approved at preview and put into production.
+                <strong>6.2.</strong> For personalised figurines, the product is a <strong>made-to-order</strong> good
+                produced exclusively for the Buyer from the photo they uploaded and incapable of being sold to any other
+                customer. It therefore falls under art. 15/1-(b) of the Distance Contracts Regulation (&quot;goods prepared
+                in line with the consumer&apos;s requests or personal needs&quot;), and <strong>this contract carries no
+                right of withdrawal from the outset</strong>.
               </p>
               <p>
-                Before preview approval and the start of production, an order <strong>can be cancelled free of
-                charge</strong> and any amount collected is refunded. For custom-made orders this right can be exercised
-                directly through the <strong>&quot;Cancel my order&quot;</strong> button on the approval page described in
-                section 3.1; you may also exercise it by writing to info@figurunica.com. The exception to the right of
-                withdrawal only takes effect once the Buyer has approved the preview.
+                <strong>6.3.</strong> Although not required by law to do so, the Seller <strong>separately</strong> grants
+                the Buyer the following: a digital preview before printing, one free revision, and the right to
+                <strong> cancel the order free of charge and be refunded in full for as long as the preview has not been
+                approved</strong>. This right can be exercised directly through the <strong>&quot;Cancel my order&quot;</strong>
+                button on the approval page described in section 3.1, or by writing to info@figurunica.com. These are
+                contractual undertakings of the Seller and do not alter the legal position set out in 6.2.
               </p>
               <p>
-                In the event of a defective/damaged delivery, the Consumer&apos;s legal rights are reserved; in such cases the
-                Buyer may apply to info@figurunica.com within 14 days of delivery with a photo of the product and a description
-                of the issue. If a quality issue is confirmed, an <strong>exchange, free reproduction, or refund</strong> is provided.
+                <strong>6.4.</strong> The absence of a right of withdrawal does not affect your rights where the product is
+                delivered <strong>defective</strong>. Under arts. 8-11 of Law No. 6502 you may choose, for
+                <strong> two years from delivery</strong>, between free repair, replacement with a non-defective equivalent,
+                a price reduction, or rescission of the contract. A product that does not match the preview the Buyer
+                approved also counts as defective. Please write to info@figurunica.com with a photo of the product and a
+                description of the issue.
               </p>
 
               <h2>7. General Provisions</h2>

@@ -120,14 +120,35 @@ export default async function OnBilgilendirmePage() {
 
               <h2>6. Cayma Hakkının Kullanılamayacağı Haller</h2>
               <p>
-                Mesafeli Sözleşmeler Yönetmeliği&apos;nin 15. maddesi gereğince, tüketicinin istekleri veya kişisel
-                ihtiyaçları doğrultusunda hazırlanan, kişiselleştirilen mallar cayma hakkı istisnası kapsamındadır.
+                Sipariş ettiğiniz figürin, tarafınızca yüklenen fotoğraf ve yaptığınız seçimler doğrultusunda yalnızca
+                sizin için üretilen, başka bir müşteriye satılması mümkün olmayan <strong>özel üretim</strong> bir
+                üründür. Bu nedenle Mesafeli Sözleşmeler Yönetmeliği m.15/1-(b)&apos;de düzenlenen{" "}
+                <strong>&quot;tüketicinin istekleri veya kişisel ihtiyaçları doğrultusunda hazırlanan mallar&quot;</strong>{" "}
+                istisnası kapsamındadır ve bu üründe <strong>14 günlük cayma hakkı bulunmamaktadır</strong>.
               </p>
-              <ul>
-                <li>Yüklediğiniz fotoğraftan size özel olarak üretilen figürinler kişiselleştirilmiş mal niteliğinde olduğundan cayma hakkı kapsamı dışındadır.</li>
-                <li>Bu nedenle, önizleme onayının verilmesi ve üretimin başlamasının ardından kişiye özel ürünlerde cayma hakkı kullanılamaz.</li>
-                <li>Cayma hakkının kullanılamaması, ürünün ayıplı veya hasarlı teslim edilmesi halinde sahip olduğunuz tüketici haklarını ortadan kaldırmaz; bu haklar saklıdır.</li>
-              </ul>
+              <p>
+                Buna karşılık size sözleşmeyle tanınan haklar saklıdır: baskı öncesi dijital önizleme, bir kez ücretsiz
+                revizyon ve <strong>önizlemeyi onaylamadığınız sürece siparişinizi ücretsiz iptal ederek ödediğiniz
+                bedelin tamamını geri alma</strong> hakkı.
+              </p>
+              <p>
+                Cayma hakkının bulunmaması, ürünün <strong>ayıplı</strong> teslim edilmesi hâlindeki yasal haklarınızı
+                etkilemez. 6502 sayılı Kanun m.8-11 uyarınca <strong>teslimden itibaren iki yıl</strong> boyunca ücretsiz
+                onarım, ayıpsız misli ile değişim, bedelden indirim veya sözleşmeden dönme haklarınızdan
+                <strong> dilediğinizi</strong> kullanabilirsiniz. Teslim edilen ürünün onayladığınız önizlemeye uymaması
+                da ayıp sayılır.
+              </p>
+              <p>
+                <strong>Mağazamızdaki hazır/stok ürünlerde</strong> ise 14 günlük cayma hakkınız tam olarak geçerlidir.
+                Cayma hâlinde ürünü anlaşmalı kargo firmamızla iade edebilirsiniz; <strong>iade kargo bedeli tarafımızca
+                karşılanır</strong>. Bulunduğunuz yerde bu taşıyıcının şubesi yoksa ürünü ek masraf almadan adresinizden
+                aldırırız.
+              </p>
+              <p>
+                Uyuşmazlık hâlinde başvurularınızı <strong>tüketici hakem heyetine</strong> veya 6502 sayılı Kanun
+                m.73/A uyarınca <strong>dava açılmadan önce arabulucuya başvurulması şartıyla</strong> tüketici
+                mahkemesine yapabilirsiniz.
+              </p>
 
               <h2>7. Cayma Bildiriminin Yapılacağı Adres</h2>
               <p>

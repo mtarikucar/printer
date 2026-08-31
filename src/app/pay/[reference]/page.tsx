@@ -167,7 +167,11 @@ export default async function PayPage({
           </Card>
         )}
 
-        <PayConsentGate reference={draft.reference}>
+        <PayConsentGate
+          reference={draft.reference}
+          productName={draft.productTitleSnapshot || "Kişiye özel figürin"}
+          priceKurus={finalAmountKurus}
+        >
         {draft.paymentMethod === "card" && draft.status === "pending" ? (
           <Card className="p-6 sm:p-8 space-y-3">
             <h2 className="text-lg font-serif text-text-primary">Kart ile öde</h2>

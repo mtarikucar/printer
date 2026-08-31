@@ -101,6 +101,11 @@ export function CheckoutClient() {
           }}
           priceKurus={total}
           submitLabel={d["cart.checkout"]}
+          productName={
+            items.length === 1
+              ? items[0].title
+              : `${items.length} ürün (sepet)`
+          }
           onSuccess={async () => {
             await fetch("/api/cart", { method: "DELETE" }).catch(() => {});
             refresh();

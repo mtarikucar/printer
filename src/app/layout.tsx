@@ -13,6 +13,8 @@ import { GrainOverlay } from "@/components/grain-overlay";
 import { DebugConsole } from "@/components/debug-console";
 import { Analytics } from "@/components/analytics/analytics";
 import { WhatsAppFab } from "@/components/whatsapp/whatsapp-fab";
+import { SiteFooter } from "@/components/site-footer";
+import { pickFigurunicaDict } from "@/components/figurunica/dict";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -94,6 +96,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
+  const figDict = pickFigurunicaDict(getDictionary(locale));
 
   return (
     <html lang={locale} style={{ colorScheme: "light" }}>
@@ -108,6 +111,10 @@ export default async function RootLayout({
         <LocaleProvider locale={locale}>
           <CartProvider>
             {children}
+            {/* Footer, iç link grafiğidir: her public sayfada bulunmak
+                zorunda, yoksa oradan bağlanmayan sayfalar (örn. /figur)
+                crawler için erişilemez kalır. */}
+            <SiteFooter dict={figDict} />
             <WhatsAppFab />
             <GrainOverlay />
             <DebugConsole />

@@ -8,7 +8,6 @@ import {
   HowItWorks,
   TrustSignals,
   CtaBand,
-  FigFooter,
   FloatingCta,
 } from "./sections";
 import { ScrollJourney } from "./journey";
@@ -41,7 +40,6 @@ export function FigurunicaLanding({ d }: { d: FigurunicaDict }) {
       <TrustSignals d={d} />
       <FaqSection d={d} />
       <CtaBand d={d} />
-      <FigFooter d={d} />
       <FloatingCta show={showFloat} d={d} />
     </div>
   );

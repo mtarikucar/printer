@@ -624,6 +624,31 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
           </a>
         ))}
       </div>
+      {/* Ürün/bilgi sayfaları. Bunlar footer'a bu commit'te girdi: daha önce
+          footer YALNIZCA iletişim + yasal linkler taşıyordu, dolayısıyla
+          /figur hiçbir yerden bağlanmayan bir yetim sayfaydı ve /nasil-calisir
+          gibi crawler-hedefli sayfalara site içinden yol yoktu. Alıntılayıcı
+          botlar bir sayfayı ancak ona giden bir bağlantı varsa bulur. */}
+      <div className={s("footer-bottom")}>
+        <Link href="/figur" className={s("footer-link")}>
+          {d["landing.fig.footer.nav.figure"]}
+        </Link>
+        <Link href="/nasil-calisir" className={s("footer-link")}>
+          {d["landing.fig.footer.nav.howItWorks"]}
+        </Link>
+        <Link href="/shop" className={s("footer-link")}>
+          {d["landing.fig.footer.nav.shop"]}
+        </Link>
+        <Link href="/urunler" className={s("footer-link")}>
+          {d["landing.fig.footer.nav.products"]}
+        </Link>
+        <Link href="/toplu-siparis" className={s("footer-link")}>
+          {d["landing.fig.footer.nav.bulk"]}
+        </Link>
+        <Link href="/create" className={s("footer-link")}>
+          {d["landing.fig.footer.nav.create"]}
+        </Link>
+      </div>
       <div className={s("footer-bottom")}>
         <Link href="/mesafeli-satis" className={s("footer-link")}>
           {d["landing.fig.footer.legal.distance"]}

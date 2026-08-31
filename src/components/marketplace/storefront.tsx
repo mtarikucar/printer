@@ -1,8 +1,6 @@
 "use client";
 
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { pickFigurunicaDict } from "@/components/figurunica/dict";
-import { FigFooter } from "@/components/figurunica/sections";
 import type { ProductListItem } from "@/components/product-card";
 import { HeroCreate } from "./hero-create";
 import { CategoryRibbon } from "./category-ribbon";
@@ -33,7 +31,6 @@ export function StorefrontHome({
   roots: RootCategory[];
 }) {
   const d = useDictionary();
-  const fig = pickFigurunicaDict(d);
 
   const newest = products.slice(0, 10);
   const populatedRoots = roots.filter((r) =>
@@ -63,7 +60,6 @@ export function StorefrontHome({
         />
       ))}
       <CustomStrip />
-      <FigFooter d={fig} />
     </>
   );
 }

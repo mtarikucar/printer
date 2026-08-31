@@ -1,5 +1,10 @@
 import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
+import { FIGURINE_PRICE_KURUS } from "@/lib/config/prices";
+import {
+  BUSINESS_ADDRESS_FULL,
+  BUSINESS_TAX_ID,
+} from "@/lib/config/business-identity";
 
 export const metadata = {
   title: "Mesafeli Satış Sözleşmesi — Figurunica",
@@ -35,10 +40,11 @@ export default async function MesafeliSatisPage() {
               <p><strong>Satıcı</strong></p>
               <ul>
                 <li>Unvan: Figurunica</li>
+                <li>Vergi Kimlik No (VKN): {BUSINESS_TAX_ID}</li>
                 <li>Web sitesi: figurunica.com</li>
                 <li>E-posta: info@figurunica.com</li>
                 <li>Telefon: +90 850 840 73 03</li>
-                <li>Adres: Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li>Adres: {BUSINESS_ADDRESS_FULL}</li>
               </ul>
               <p><strong>Alıcı (Tüketici)</strong></p>
               <p>
@@ -204,10 +210,11 @@ export default async function MesafeliSatisPage() {
               <p><strong>Seller</strong></p>
               <ul>
                 <li>Name: Figurunica</li>
+                <li>Tax ID (VKN): {BUSINESS_TAX_ID}</li>
                 <li>Website: figurunica.com</li>
                 <li>Email: info@figurunica.com</li>
                 <li>Phone: +90 850 840 73 03</li>
-                <li>Address: Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li>Address: {BUSINESS_ADDRESS_FULL}</li>
               </ul>
               <p><strong>Buyer (Consumer)</strong></p>
               <p>

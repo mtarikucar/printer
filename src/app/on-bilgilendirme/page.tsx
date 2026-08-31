@@ -1,6 +1,10 @@
 import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
 import { FIGURINE_PRICE_KURUS, UPSELL_PRICES_KURUS } from "@/lib/config/prices";
+import {
+  BUSINESS_ADDRESS_FULL,
+  BUSINESS_TAX_ID,
+} from "@/lib/config/business-identity";
 
 export const metadata = {
   title: "Ön Bilgilendirme Formu — Figurunica",
@@ -46,10 +50,11 @@ export default async function OnBilgilendirmePage() {
               <h2>1. Satıcı Bilgileri</h2>
               <ul>
                 <li><strong>Unvan:</strong> Figurunica</li>
+                <li><strong>Vergi Kimlik No (VKN):</strong> {BUSINESS_TAX_ID}</li>
                 <li><strong>Web sitesi:</strong> figurunica.com</li>
                 <li><strong>E-posta:</strong> info@figurunica.com</li>
                 <li><strong>Telefon:</strong> +90 850 840 73 03</li>
-                <li><strong>Adres:</strong> Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li><strong>Adres:</strong> {BUSINESS_ADDRESS_FULL}</li>
               </ul>
 
               <h2>2. Ürünün Temel Nitelikleri ve Fiyatı</h2>
@@ -132,7 +137,7 @@ export default async function OnBilgilendirmePage() {
               </p>
               <ul>
                 <li><strong>E-posta:</strong> info@figurunica.com</li>
-                <li><strong>Adres:</strong> Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li><strong>Adres:</strong> {BUSINESS_ADDRESS_FULL}</li>
               </ul>
 
               <h2>8. Şikayet ve İtiraz Mercii</h2>
@@ -158,10 +163,11 @@ export default async function OnBilgilendirmePage() {
               <h2>1. Seller Information</h2>
               <ul>
                 <li><strong>Name:</strong> Figurunica</li>
+                <li><strong>Tax ID (VKN):</strong> {BUSINESS_TAX_ID}</li>
                 <li><strong>Website:</strong> figurunica.com</li>
                 <li><strong>Email:</strong> info@figurunica.com</li>
                 <li><strong>Phone:</strong> +90 850 840 73 03</li>
-                <li><strong>Address:</strong> Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li><strong>Address:</strong> {BUSINESS_ADDRESS_FULL}</li>
               </ul>
 
               <h2>2. Essential Characteristics and Price of the Product</h2>
@@ -245,7 +251,7 @@ export default async function OnBilgilendirmePage() {
               </p>
               <ul>
                 <li><strong>Email:</strong> info@figurunica.com</li>
-                <li><strong>Address:</strong> Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li><strong>Address:</strong> {BUSINESS_ADDRESS_FULL}</li>
               </ul>
 
               <h2>8. Complaints and Dispute Resolution Authority</h2>

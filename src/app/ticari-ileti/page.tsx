@@ -1,5 +1,9 @@
 import { getLocale } from "@/lib/i18n/get-locale";
 import { SiteHeader } from "@/components/site-header";
+import {
+  BUSINESS_ADDRESS_FULL,
+  BUSINESS_TAX_ID,
+} from "@/lib/config/business-identity";
 
 export const metadata = {
   title: "Ticari Elektronik İleti Onay Metni — Figurunica",
@@ -43,9 +47,10 @@ export default async function CommercialMessageConsentPage() {
               <h2>2. Veri Sorumlusu / Hizmet Sağlayıcı</h2>
               <ul>
                 <li>Unvan: Figurunica</li>
+                <li>Vergi Kimlik No (VKN): {BUSINESS_TAX_ID}</li>
                 <li>E-posta: info@figurunica.com</li>
                 <li>Telefon: +90 850 840 73 03</li>
-                <li>Adres: Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li>Adres: {BUSINESS_ADDRESS_FULL}</li>
               </ul>
 
               <h2>3. Onayın Alınması ve İYS Kaydı</h2>
@@ -103,9 +108,10 @@ export default async function CommercialMessageConsentPage() {
               <h2>2. Data Controller / Service Provider</h2>
               <ul>
                 <li>Name: Figurunica</li>
+                <li>Tax ID (VKN): {BUSINESS_TAX_ID}</li>
                 <li>Email: info@figurunica.com</li>
                 <li>Phone: +90 850 840 73 03</li>
-                <li>Address: Sehit Osman Avci Mahallesi, Akin 688 Sitesi B32, Etimesgut / Ankara</li>
+                <li>Address: {BUSINESS_ADDRESS_FULL}</li>
               </ul>
 
               <h2>3. How Consent Is Collected and the IYS Record</h2>

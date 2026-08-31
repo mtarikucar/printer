@@ -4,6 +4,8 @@ import { Inter, Inter_Tight, Space_Grotesk, JetBrains_Mono, DM_Serif_Display, In
 import "./globals.css";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { isNoindexPath } from "@/lib/seo/policy";
+import { JsonLd } from "@/lib/seo/jsonld";
+import { buildOrganizationJsonLd } from "@/lib/seo/organization";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LocaleProvider } from "@/lib/i18n/locale-context";
 import { CartProvider } from "@/lib/cart/cart-context";
@@ -98,6 +100,11 @@ export default async function RootLayout({
       <body
         className={`${inter.variable} ${interTight.variable} ${instrumentSerif.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${dmSerifDisplay.variable} font-sans antialiased bg-bg-base text-text-primary`}
       >
+        {/* Organization + WebSite JSON-LD. Suspense sınırının DIŞINDA ve
+            children'ın yanında duruyor: sonraki bir stream chunk'ında gelirse JS
+            çalıştırmayan fetcher'lar ilk flush'ta göremez. Site genelinde tam
+            bir kez yayınlanır; sayfa bazlı entity'ler buraya girmez. */}
+        <JsonLd data={buildOrganizationJsonLd()} />
         <LocaleProvider locale={locale}>
           <CartProvider>
             {children}

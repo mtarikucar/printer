@@ -14,6 +14,7 @@ import {
   WHATSAPP_DISPLAY,
   buildWhatsAppUrl,
 } from "@/lib/config/contact";
+import { SOCIAL_LINKS } from "@/lib/config/business-identity";
 
 const s = (key: string) => (styles as Record<string, string>)[key] ?? "";
 const cx = (...names: Array<string | false | null | undefined>) =>
@@ -608,6 +609,20 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
         <Link href="/atolye" className={s("footer-link")}>
           {d["landing.fig.footer.workshopLink"]}
         </Link>
+        {/* Sosyal profiller schema.org sameAs olarak da yayınlanıyor
+            (src/lib/seo/organization.ts); sinyalin karşılığı olması için
+            bağlantıların sitede gerçekten görünür olması gerekiyor. */}
+        {SOCIAL_LINKS.map((link) => (
+          <a
+            key={link.href}
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer me"
+            className={s("footer-link")}
+          >
+            {link.label}
+          </a>
+        ))}
       </div>
       <div className={s("footer-bottom")}>
         <Link href="/mesafeli-satis" className={s("footer-link")}>

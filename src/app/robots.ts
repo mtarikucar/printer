@@ -96,6 +96,14 @@ const DISALLOW = [
   "/yolculuk/",
   "/reset-password/",
   "/verify-email/",
+  // Account and auth surfaces. Nothing here is useful in a search result or an
+  // AI answer, and /account is a private page. They also carry `noindex`
+  // metadata: robots.txt stops crawling, but a URL discovered elsewhere can
+  // still be indexed without the meta tag.
+  "/account",
+  "/login",
+  "/register",
+  "/forgot-password",
 ];
 
 export default function robots(): MetadataRoute.Robots {

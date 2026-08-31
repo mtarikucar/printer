@@ -180,7 +180,8 @@ export default async function MesafeliSatisPage() {
                 <li>Alıcı, yüklediği fotoğraflar üzerinde gerekli haklara sahip olduğunu; üçüncü kişilerin telif, gizlilik veya kişilik haklarını ihlal eden içerik göndermeyeceğini beyan eder.</li>
                 <li>Önizleme nihai ürünün yaklaşık bir temsilidir; reçine baskının doğası gereği renk tonu ve detayda küçük farklılıklar üretim toleransları içinde kabul edilir.</li>
                 <li>Mücbir sebep hallerinde (doğal afet, salgın, grev, kamu kararları, altyapı arızaları vb.) edimlerin ifasındaki gecikme veya imkânsızlıktan Satıcı sorumlu tutulamaz.</li>
-                <li>Satıcı elektronik ticaret faaliyetini ETBİS (Elektronik Ticaret Bilgi Sistemi) kaydı kapsamında yürütmektedir.</li>
+                {/* ETBİS beyanı 2026-08-31'de kaldırıldı: kayıt numarası yok. Kayıt
+                    yapıldığında beyan + footer doğrulama karekodu geri eklenecek. */}
               </ul>
 
               <h2>8. Uyuşmazlık Çözümü</h2>
@@ -352,7 +353,8 @@ export default async function MesafeliSatisPage() {
                 <li>The Buyer declares that they hold the necessary rights over the uploaded photos and will not submit content that infringes the copyright, privacy, or personal rights of third parties.</li>
                 <li>The preview is an approximate representation of the final product; due to the nature of resin printing, minor variations in color tone and detail are accepted within production tolerances.</li>
                 <li>The Seller cannot be held liable for delay or impossibility in performance due to force majeure events (natural disasters, pandemics, strikes, government decisions, infrastructure failures, etc.).</li>
-                <li>The Seller conducts its e-commerce activity within the scope of its ETBİS (Electronic Commerce Information System) registration.</li>
+                {/* ETBİS beyanı 2026-08-31'de kaldırıldı: kayıt numarası yok. Kayıt
+                    yapıldığında beyan + footer doğrulama karekodu geri eklenecek. */}
               </ul>
 
               <h2>8. Dispute Resolution</h2>

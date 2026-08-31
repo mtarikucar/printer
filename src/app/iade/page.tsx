@@ -57,6 +57,17 @@ export default async function IadePage() {
                 tasarlanmıştır.
               </p>
 
+              <h2>2.5 Talep ve Şikâyet Kanalı</h2>
+              <p>
+                Cayma bildirimi, sözleşmenin feshi, bedel iadesi, işlem kayıtlarının
+                iletilmesi ve teslimat şikâyeti taleplerinizi <strong>sipariş takip
+                sayfanızdan</strong> (sipariş numaranız ve siparişteki e-posta adresinizle
+                erişilir) doğrudan iletebilirsiniz. Talebiniz size bir referans numarası ile
+                döner; bu numarayla durumunu takip edebilirsiniz. Mağazadaki üçüncü kişi
+                satıcılara ait ürünlerde talebiniz <strong>satıcıya derhal iletilir</strong>
+                (Mesafeli Sözleşmeler Yönetmeliği m.12/A).
+              </p>
+
               <h2>3. Kişiye Özel Figürinlerde İade</h2>
               <p>
                 Kişiye özel figürinler size özel üretildiği için, 6502 sayılı Tüketicinin Korunması Hakkında Kanun ve

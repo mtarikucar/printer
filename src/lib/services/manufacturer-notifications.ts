@@ -12,7 +12,10 @@ export type ManufacturerNotificationType =
   | "order_cancelled"
   | "admin_message"
   | "system_announcement"
-  | "qc_result";
+  | "qc_result"
+  // Tüketici talebi (MSY m.12/A). Aracı hizmet sağlayıcı olarak talebi
+  // satıcıya DERHAL iletmek zorundayız; bu bildirim o iletimin kendisidir.
+  | "consumer_request";
 
 interface NotifyArgs {
   manufacturerId: string;

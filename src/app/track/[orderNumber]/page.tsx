@@ -8,6 +8,7 @@ import { useRealtimeEvent } from "@/lib/realtime/use-realtime";
 import { OrderStatusTracker } from "@/components/order-status-tracker";
 import { ModelViewer } from "@/components/model-viewer";
 import { PublishToggle } from "@/components/publish-toggle";
+import { ConsumerRequestForm } from "@/components/consumer/consumer-request-form";
 import { SiteHeader } from "@/components/site-header";
 import { BankTransferInstructions } from "@/components/bank-transfer-instructions";
 import { CustomerOrderChat } from "@/components/customer-order-chat";
@@ -799,6 +800,14 @@ function TrackPageInner({ orderNumber }: { orderNumber: string }) {
                 </div>
               </Card>
             )}
+
+            {/* Tüketici talep kanalı (MSY m.12/A). Üçüncü kişi satıcıların
+                ürünlerini listelediğimiz sürece aracı hizmet sağlayıcıyız ve
+                cayma/fesih/iade/kayıt/teslimat taleplerinin kesintisiz
+                iletilebildiği, takip edilebilen bir sistem kurmak zorundayız.
+                Takip sayfasında durur çünkü misafir siparişlerinin de
+                ulaşabildiği tek yer burası. */}
+            <ConsumerRequestForm orderNumber={order.orderNumber} />
 
             {/* Publish toggle */}
             {PUBLISH_ELIGIBLE_STATUSES.includes(order.status) && order.glbUrl && (

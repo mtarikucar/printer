@@ -152,6 +152,14 @@ export default async function OnBilgilendirmePage() {
 
               <h2>7. Cayma Bildiriminin Yapılacağı Adres</h2>
               <p>
+                Cayma bildirimi, sözleşmenin feshi, bedel iadesi, işlem kayıtları ve
+                teslimat şikâyeti taleplerinizi <strong>sipariş takip sayfanızdaki talep
+                formundan</strong> iletebilir ve size verilen referans numarasıyla takip
+                edebilirsiniz. Üçüncü kişi satıcıya ait ürünlerde talebiniz satıcıya
+                derhal iletilir (MSY m.12/A). Dilerseniz aşağıdaki kanalları da
+                kullanabilirsiniz.
+              </p>
+              <p>
                 Cayma hakkına (standart ürünler için) veya ayıplı/hasarlı ürüne ilişkin taleplerinizi aşağıdaki
                 kanallardan iletebilirsiniz. Ayıplı/hasarlı ürün durumunda, ürünün fotoğrafı ve sorunun açıklaması
                 ile başvurmanız sürecin hızlanmasını sağlar.

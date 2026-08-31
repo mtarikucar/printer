@@ -72,6 +72,19 @@ export function ManufacturerSidebar({
       badge: 0,
     },
     {
+      href: "/manufacturer/consumer-requests",
+      label: "Tüketici talepleri",
+      icon: (
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M8 12h8m-8 4h5m4 5l-4-3H6a2 2 0 01-2-2V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2h-1v5z"
+        />
+      ),
+      badge: 0,
+    },
+    {
       href: "/manufacturer/notifications",
       label: "Bildirimler",
       icon: (

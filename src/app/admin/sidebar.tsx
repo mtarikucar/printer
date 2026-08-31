@@ -162,6 +162,12 @@ export function AdminSidebar({
           badge: workshopPendingCount,
         },
         {
+          href: "/admin/consumer-requests",
+          label: "Tüketici talepleri",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h8m-8 4h5m4 5l-4-3H6a2 2 0 01-2-2V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2h-1v5z" />,
+          badge: 0,
+        },
+        {
           href: "/admin/whatsapp",
           label: "WhatsApp",
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.5 3.5A10 10 0 003.6 15.2L2.5 21.5l6.4-1.1A10 10 0 1020.5 3.5z" />,

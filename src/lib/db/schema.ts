@@ -1019,6 +1019,41 @@ export const disputes = pgTable("disputes", {
 // rejected/cancelled). venueType/ageGroup/workshopType are `text` validated
 // against src/lib/workshop/constants.ts (product-defined, likely to evolve);
 // only `status` is a stable pg enum.
+/**
+ * Tüketici talep türleri — MSY m.12/A'nın saydığı BEŞ başlık.
+ *
+ * Aracı hizmet sağlayıcı (üçüncü kişi satıcıların ürünlerini listelediğimiz
+ * için biz oyuz), tüketicinin bu beş talebi kesintisiz iletebileceği ve
+ * TAKİP EDEBİLECEĞİ bir sistem kurmak ve talebi satıcıya DERHAL iletmek
+ * zorundadır. Liste kapalıdır: yeni tür eklemek serbest, çıkarmak değil.
+ */
+export const consumerRequestTypeEnum = pgEnum("consumer_request_type", [
+  // Cayma bildirimi (hazır ürünlerde 14 gün). Kişiye özel üründe cayma hakkı
+  // yoktur ama tüketicinin bildirimi İLETME hakkı vardır — talebi reddetmek
+  // satıcının işidir, formun kabul etmemesi değil.
+  "withdrawal",
+  // Sözleşmenin feshi (teslim edilmeyen/gecikmiş sipariş vb.).
+  "termination",
+  // Bedel iadesi talebi.
+  "refund",
+  // İşlem kayıtları talebi (MSY m.20/1 kapsamındaki bilgi ve belgeler).
+  "records",
+  // Teslimat şikâyeti.
+  "delivery_complaint",
+]);
+
+/**
+ * Talebin yaşam döngüsü. `forwarded`, satıcıya iletildiği andır — m.12/A'nın
+ * "derhal iletme" yükümlülüğünün kanıtı budur ve zaman damgası tutulur.
+ */
+export const consumerRequestStatusEnum = pgEnum("consumer_request_status", [
+  "new",
+  "forwarded",
+  "in_progress",
+  "resolved",
+  "rejected",
+]);
+
 export const workshopRequestStatusEnum = pgEnum("workshop_request_status", [
   "new",
   "reviewing",
@@ -1317,6 +1352,56 @@ export const manufacturerAssignmentEvaluations = pgTable(
 );
 
 // Admin → manufacturer notifications. Email is the delivery channel; this row is the durable record + inbox source.
+/**
+ * Tüketici talepleri — MSY m.12/A uyumu.
+ *
+ * Aracı hizmet sağlayıcı olduğumuz sürece (ownerType 'seller' ürünler
+ * listelendiği sürece) bu sistem zorunludur. Eksikliği 6502 m.48/5 ihlalidir
+ * ve m.77/14 MAKTU idari para cezasına bağlanır — işlem başına değil, tek
+ * denetimde tek seferde.
+ *
+ * Talep, siparişe bağlıdır ve misafir siparişlerinde de açılabilmelidir:
+ * kimlik kanıtı sipariş numarası + e-postadır (guest checkout mevcut).
+ */
+export const consumerRequests = pgTable(
+  "consumer_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Tüketicinin talebini TAKİP EDEBİLMESİ m.12/A'nın açık şartı; referans
+    // bunun taşıyıcısı. Örn. "TT-4K9X2M".
+    reference: text("reference").notNull().unique(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id),
+    // Giriş yapmışsa bağlanır; misafir siparişlerinde null kalır.
+    userId: uuid("user_id").references(() => users.id),
+    // Talebin iletileceği satıcı. Platform ürünlerinde (ownerType 'admin')
+    // null'dır — o durumda muhatap doğrudan biziz, iletme adımı yoktur.
+    sellerManufacturerId: uuid("seller_manufacturer_id").references(
+      () => manufacturers.id
+    ),
+    type: consumerRequestTypeEnum("type").notNull(),
+    status: consumerRequestStatusEnum("status").notNull().default("new"),
+    message: text("message").notNull(),
+    // Tüketiciye geri dönüş için; misafirde sipariş e-postasından kopyalanır.
+    contactEmail: text("contact_email").notNull(),
+    // "Derhal iletme" yükümlülüğünün kanıtı. Bu alan null ise talep satıcıya
+    // ULAŞMAMIŞTIR ve denetimde ihlal olarak okunur.
+    forwardedAt: timestamp("forwarded_at"),
+    forwardFailedReason: text("forward_failed_reason"),
+    // Satıcının/işletmenin yanıtı ve kapanış.
+    resolutionNote: text("resolution_note"),
+    resolvedAt: timestamp("resolved_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("consumer_requests_order_idx").on(t.orderId),
+    index("consumer_requests_seller_idx").on(t.sellerManufacturerId),
+    index("consumer_requests_status_idx").on(t.status),
+  ]
+);
+
 export const manufacturerNotifications = pgTable("manufacturer_notifications", {
   id: uuid("id").primaryKey().defaultRandom(),
   manufacturerId: uuid("manufacturer_id").notNull().references(() => manufacturers.id),

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, desc, count, sql } from "drizzle-orm";
+import { and, eq, count, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productReviews, orders, orderItems, users, products } from "@/lib/db/schema";
+import { productReviews, orders, orderItems, products } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { loadProductReviews } from "@/lib/services/product-reviews";
 
 export const runtime = "nodejs";
 
@@ -12,40 +13,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const rows = await db
-    .select({
-      rating: productReviews.rating,
-      title: productReviews.title,
-      body: productReviews.body,
-      createdAt: productReviews.createdAt,
-      customerName: users.fullName,
-    })
-    .from(productReviews)
-    .innerJoin(users, eq(productReviews.userId, users.id))
-    .where(and(eq(productReviews.productId, id), eq(productReviews.status, "approved")))
-    .orderBy(desc(productReviews.createdAt))
-    .limit(50);
-
-  // avg/count come from the denormalized product aggregate (maintained over ALL
-  // approved reviews on write), so they match the product cards instead of being
-  // computed from only the 50 newest reviews in the list above.
-  const product = await db.query.products.findFirst({
-    where: eq(products.id, id),
-    columns: { ratingAvgX100: true, ratingCount: true },
-  });
-  const count = product?.ratingCount ?? 0;
-  const avg = (product?.ratingAvgX100 ?? 0) / 100;
-  return NextResponse.json({
-    reviews: rows.map((r) => ({
-      rating: r.rating,
-      title: r.title,
-      body: r.body,
-      createdAt: r.createdAt,
-      customerName: (r.customerName ?? "").split(" ")[0] || "Müşteri",
-    })),
-    avg,
-    count,
-  });
+  // Shared with the product page, which renders the same data server-side.
+  const data = await loadProductReviews(id);
+  return NextResponse.json(data);
 }
 
 // POST — leave a review. Gated: the user must have a DELIVERED order containing

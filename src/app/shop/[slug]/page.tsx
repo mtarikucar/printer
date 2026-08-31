@@ -14,6 +14,9 @@ import { sellerNotSuspended } from "@/lib/services/shop-query";
 import { effectiveMaxQty } from "@/lib/config/bulk";
 import { ProductDetailClient } from "./detail-client";
 import { ProductReviews } from "@/components/reviews/product-reviews";
+import { loadProductReviews } from "@/lib/services/product-reviews";
+import { JsonLd } from "@/lib/seo/jsonld";
+import { buildProductJsonLd, buildProductBreadcrumbJsonLd } from "@/lib/seo/product";
 import { ProductRow } from "@/components/marketplace/product-row";
 import { type ProductListItem } from "@/components/product-card";
 
@@ -57,6 +60,10 @@ export default async function ProductDetailPage({
 
   const product = await loadProduct(slug);
   if (!product) notFound();
+
+  // Rendered server-side so the HTML a crawler receives carries the reviews and
+  // the rating, instead of contradicting the card that shows them.
+  const reviewData = await loadProductReviews(product.id);
 
   // Default gallery = images with no option choice (the unpainted set). Images
   // tagged to a choice (e.g. "El boyaması" painted set) are grouped separately
@@ -118,8 +125,33 @@ export default async function ProductDetailPage({
   // emitting the seller-derived GLB would leak printable geometry to buyers.
   const publicSpec = await getProductPublicSpec(product.id);
 
+  const productJsonLd = buildProductJsonLd({
+    slug: product.slug ?? slug,
+    title: product.title,
+    description: product.description,
+    priceKurus: product.priceKurus,
+    images,
+    sellerName: product.manufacturer?.companyName ?? null,
+    material: product.material ?? null,
+    leadTimeDays: product.leadTimeDays ?? null,
+    ratingAvg: reviewData.avg,
+    ratingCount: reviewData.count,
+    categoryName: product.categoryNode?.name ?? null,
+    categoryPath: product.categoryNode?.path ?? null,
+  });
+  const breadcrumbJsonLd = buildProductBreadcrumbJsonLd({
+    slug: product.slug ?? slug,
+    title: product.title,
+    categoryName: product.categoryNode?.name ?? null,
+    categoryPath: product.categoryNode?.path ?? null,
+  });
+
   return (
     <main className="min-h-screen bg-bg-base">
+      {/* Sayfa bazlı entity'ler. Organization/WebSite root layout'ta bir kez
+          yayınlanıyor; burası ürünün kendisi. */}
+      <JsonLd data={productJsonLd} />
+      <JsonLd data={breadcrumbJsonLd} />
       <SiteHeader />
       <div className="max-w-5xl mx-auto px-4 py-10">
         <Link
@@ -150,7 +182,7 @@ export default async function ProductDetailPage({
             bulkLeadTimeDays: product.bulkLeadTimeDays,
           }}
         />
-        <ProductReviews productId={product.id} />
+        <ProductReviews productId={product.id} initial={reviewData} />
         <ProductRow
           title={d["related.title" as keyof typeof d] || "Benzer ürünler"}
           products={related}

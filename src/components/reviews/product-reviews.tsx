@@ -31,11 +31,23 @@ function Stars({ value, onChange }: { value: number; onChange?: (n: number) => v
   );
 }
 
-export function ProductReviews({ productId }: { productId: string }) {
+/**
+ * `initial` is rendered by the SERVER on first paint. Without it the raw HTML
+ * said "Henüz yorum yok." while the listing card beside it showed a rating —
+ * contradictory to a reader, and no basis for rating structured data, which
+ * must reflect content visible on the page.
+ */
+export function ProductReviews({
+  productId,
+  initial,
+}: {
+  productId: string;
+  initial?: { reviews: Review[]; avg: number; count: number };
+}) {
   const d = useDictionary();
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [avg, setAvg] = useState(0);
-  const [count, setCount] = useState(0);
+  const [reviews, setReviews] = useState<Review[]>(initial?.reviews ?? []);
+  const [avg, setAvg] = useState(initial?.avg ?? 0);
+  const [count, setCount] = useState(initial?.count ?? 0);
   const [rating, setRating] = useState(5);
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -54,6 +66,9 @@ export function ProductReviews({ productId }: { productId: string }) {
       });
 
   useEffect(() => {
+    // The server already delivered the first page; re-fetching on mount would
+    // only repaint the same rows. A refetch still happens after a submit.
+    if (initial) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);

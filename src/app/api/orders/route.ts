@@ -552,13 +552,13 @@ async function handleCreateOrder(
       // orders could, so a product sold as painted paid the painter nothing.
       (mpBases !== null && mpBases.paintingKurus > 0) ||
       (orderType === "custom" &&
-      // hand_painted AND luxe_display are both hand-painted by a painter
-      // partner; luxe_display used to fall through and was never routed.
-      finishNeedsPainter(customInput?.finish) &&
-      // These are only real, priced finishes for character figures; on any
-      // other price kind (object / Creative Lab flat items) the surcharge is not
-      // collected, so the order must NOT be flagged for paid painting.
-      priceKindForStyle(customInput!.style) === "figure");
+        // hand_painted AND luxe_display are both hand-painted by a painter
+        // partner; luxe_display used to fall through and was never routed.
+        finishNeedsPainter(customInput?.finish) &&
+        // These are only real, priced finishes for character figures; on any
+        // other price kind (object / Creative Lab flat items) the surcharge is
+        // not collected, so the order must NOT be flagged for paid painting.
+        priceKindForStyle(customInput!.style) === "figure");
     // Only the painting part of the surcharge is the painter's base — the
     // luxe_display extras (base, plate, case) are the platform's cost.
     const paintingPriceKurus = mpBases

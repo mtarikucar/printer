@@ -80,7 +80,7 @@ export function validateTiers(
   const { basePriceKurus, bulkEnabled, bulkMaxQuantity, ownerType } = args;
 
   // v1 scope: a tier on a seller's product would cut their 60% payout without
-  // their consent (commission is a flat 3500bps). That is a partner-contract
+  // their consent (commission is a flat 4000bps). That is a partner-contract
   // decision, so the door stays shut here rather than in the UI only.
   if (ownerType !== "admin" && (bulkEnabled || args.tiers.length > 0)) {
     return { ok: false, error: "not_admin_product" };

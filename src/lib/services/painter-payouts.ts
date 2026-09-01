@@ -1,6 +1,6 @@
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { painterEarnings, painterPayouts } from "@/lib/db/schema";
+import { orders, painterEarnings, painterPayouts } from "@/lib/db/schema";
 import { computeEarning } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 
@@ -12,13 +12,31 @@ import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 /**
  * Accrue the painter's earning for a completed (shipped) painting job.
  * Idempotent on orderId (one painter earning per order).
+ *
+ * The rate comes from `orders.commissionRateBps` — the rate frozen when the
+ * manufacturer accepted — NOT the live constant. This mirrors `accrueEarning`
+ * on the manufacturer side and is what makes the painter agreement's promise
+ * ("komisyon oranı, işi kabul ettiğiniz anda sabitlenir", painter-onboarding.ts)
+ * true. Reading the live constant instead meant a rate change silently repriced
+ * every in-flight painting job at ship time — and `painterEarnings.orderId` is
+ * UNIQUE with onConflictDoNothing, so that first accrual is final.
+ *
+ * A painter hand-off is only reachable from `manufacturerStatus = 'qc_approved'`,
+ * which only the manufacturer accept route can set, so the column is populated
+ * on every painting order; the constant is a fallback for pre-freeze rows.
  */
 export async function accruePainterEarning(
   orderId: string,
   painterId: string,
   grossKurus: number
 ): Promise<void> {
-  const e = computeEarning(grossKurus, PLATFORM_COMMISSION_RATE_BPS);
+  const [row] = await db
+    .select({ rate: orders.commissionRateBps })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  const rateBps = row?.rate ?? PLATFORM_COMMISSION_RATE_BPS;
+  const e = computeEarning(grossKurus, rateBps);
   await db
     .insert(painterEarnings)
     .values({

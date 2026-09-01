@@ -8,6 +8,7 @@ import {
   MAX_TIERS_PER_PRODUCT,
   MIN_TIER_QUANTITY,
 } from "@/lib/config/bulk";
+import { COST_LINE_KINDS } from "@/lib/config/cost-lines";
 
 // Curated product categories. Keep in sync with the `shop.category.*` and
 // `product.category.*` dictionary keys used for the storefront filter + labels.
@@ -21,6 +22,19 @@ export const PRODUCT_CATEGORIES = [
 ] as const;
 
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
+// ─── Kalem (cost-line) kırılımı ─────────────────────────────────────────────
+// Bir ürünün fiyatı iki tür kalemden oluşur; kalem türü o payın kime ait
+// olduğunu söyler (production → üretici, painting → boyacı). Kalemlerin
+// toplamının fiyata eşitliği services/product-cost-lines.ts'te doğrulanır —
+// burada yalnızca şekil kontrolü var (config/bulk.ts / tiers ile aynı ayrım).
+export const costLineSchema = z.object({
+  kind: z.enum(COST_LINE_KINDS),
+  label: z.string().trim().max(120).optional(),
+  amountKurus: z.number().int().min(0).max(100_000_000),
+});
+
+export type CostLineFormInput = z.infer<typeof costLineSchema>;
 
 // Seller/admin product create + edit. priceKurus is the final KDV-inclusive
 // price in kuruş (the client multiplies the TRY input by 100 before posting).
@@ -46,6 +60,10 @@ export function createProductSchema(locale: Locale = defaultLocale) {
     // (DB lookup); a product may attach to any node (root or leaf).
     categoryId: z.string().uuid().optional(),
     leadTimeDays: z.number().int().min(1).max(90).optional().default(7),
+    // Kalem kırılımı. Boş bırakılabilir (kırılımsız ürün → eski hakediş
+    // davranışı); doluysa toplamı priceKurus'a EŞİT olmalı — route bunu
+    // validateCostLines ile doğrular.
+    costLines: z.array(costLineSchema).max(20).optional(),
   });
 }
 

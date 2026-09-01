@@ -462,7 +462,13 @@ export const orderDrafts = pgTable("order_drafts", {
       { groupName: string; choiceName: string; priceDeltaKurus: number }[]
     >(),
   selectedAddons:
-    jsonb("selected_addons").$type<{ name: string; priceKurus: number }[]>(),
+    jsonb("selected_addons").$type<
+      // `kind` is the kalem type on ADMIN MANUAL orders (production /
+      // painting), which is where these rows double as the order's line
+      // items. Absent on marketplace add-on rows and on rows written
+      // before the kalem model.
+      { name: string; priceKurus: number; kind?: string }[]
+    >(),
   itemImageKey: text("item_image_key"),
   locale: text("locale").notNull().default("tr"),
   amountKurus: integer("amount_kurus").notNull(),
@@ -484,6 +490,11 @@ export const orderDrafts = pgTable("order_drafts", {
   // Professional-painting add-on selection (carried to the promoted order).
   needsPainting: boolean("needs_painting").notNull().default(false),
   paintingPriceKurus: integer("painting_price_kurus").notNull().default(0),
+  // Kalem (cost-line) breakdown: the manufacturer's earning base, i.e. the
+  // 'production' share of amountKurus. NULL = a draft created before the kalem
+  // model — services/earning-base.ts then falls back to the legacy rule.
+  // Together with paintingPriceKurus this always sums to amountKurus.
+  productionBaseKurus: integer("production_base_kurus"),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
   status: orderDraftStatusEnum("status").notNull().default("pending"),
   // PayTR
@@ -602,7 +613,13 @@ export const orders = pgTable("orders", {
       { groupName: string; choiceName: string; priceDeltaKurus: number }[]
     >(),
   selectedAddons:
-    jsonb("selected_addons").$type<{ name: string; priceKurus: number }[]>(),
+    jsonb("selected_addons").$type<
+      // `kind` is the kalem type on ADMIN MANUAL orders (production /
+      // painting), which is where these rows double as the order's line
+      // items. Absent on marketplace add-on rows and on rows written
+      // before the kalem model.
+      { name: string; priceKurus: number; kind?: string }[]
+    >(),
   itemImageKey: text("item_image_key"),
   status: orderStatusEnum("status").notNull().default("paid"),
   locale: text("locale").notNull().default("tr"),
@@ -698,16 +715,25 @@ export const orders = pgTable("orders", {
   // reassignment service to skip them on retry and to cap the reassign
   // count (3 declines → admin manual queue).
   declinedManufacturerIds: jsonb("declined_manufacturer_ids").$type<string[]>(),
-  // ─── Professional painting (optional paid add-on) ──────────────────────────
-  // needsPainting is set when the customer buys the painting add-on at checkout;
-  // paintingPriceKurus is the add-on price (part of orders.amountKurus). After
-  // QC the manufacturer hands the figurine to a painter, who paints + ships.
+  // ─── Professional painting + kalem (cost-line) split ───────────────────────
+  // The order's price is broken into two earning bases by the kalem model
+  // (config/cost-lines.ts): `productionBaseKurus` (manufacturer) and
+  // `paintingPriceKurus` (painter). They ALWAYS sum to amountKurus, which is
+  // what makes it impossible for the partner payouts to exceed the price.
+  //
+  // needsPainting is derived from `paintingPriceKurus > 0` and gates the whole
+  // painter pipeline (send-to-painter / assign-painter both refuse without it).
   needsPainting: boolean("needs_painting").notNull().default(false),
   // Platform commission frozen when the manufacturer accepted this order.
   // Without it a later rate change would retroactively repay orders accepted
-  // under the old rate — the partnership agreement promises it will not.
+  // under the old rate — the partnership agreement promises it will not. Read
+  // by BOTH accrueEarning and accruePainterEarning.
   commissionRateBps: integer("commission_rate_bps"),
   paintingPriceKurus: integer("painting_price_kurus").notNull().default(0),
+  // The manufacturer's earning base. NULL = an order placed before the kalem
+  // model; services/earning-base.ts then applies the legacy rule
+  // (amountKurus − paintingPriceKurus) so historical earnings never move.
+  productionBaseKurus: integer("production_base_kurus"),
   painterId: uuid("painter_id").references(() => painters.id),
   painterStatus: painterOrderStatusEnum("painter_status"),
   assignedToPainterAt: timestamp("assigned_to_painter_at"),
@@ -1853,6 +1879,35 @@ export const productComponents = pgTable(
   })
 );
 
+// Kalem kırılımı — what the product's price is MADE OF, and therefore who is
+// paid for it. `kind` is 'production' (manufacturer's earning base) or
+// 'painting' (painter's). Σ amountKurus MUST equal products.priceKurus; the
+// API refuses to save a breakdown that doesn't (services/product-cost-lines.ts).
+//
+// Distinct from productComponents, which is a physical bill of materials (LED,
+// screw…) carrying no money. Admin/seller-only — buyers never see this.
+export const productCostLines = pgTable(
+  "product_cost_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    // 'production' | 'painting' — see config/cost-lines.ts COST_LINE_KINDS.
+    // Kept as text (not a pg enum) so adding a third kind later needs no
+    // enum migration; the zod validator is the gate.
+    kind: text("kind").notNull(),
+    // Optional free-text detail ("Reçine baskı + destek temizliği").
+    label: text("label"),
+    amountKurus: integer("amount_kurus").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byProduct: index("product_cost_lines_product_idx").on(t.productId, t.sortOrder),
+  })
+);
+
 // Assembly recipe — ordered steps with an optional photo (imageKey under
 // product-files/). Manufacturer/admin-only.
 export const productAssemblySteps = pgTable(
@@ -1949,6 +2004,13 @@ export const orderItems = pgTable(
     // and is the sole source for the order's isBulk flag at promotion.
     listUnitPriceKurus: integer("list_unit_price_kurus"),
     appliedTierMinQuantity: integer("applied_tier_min_quantity"),
+    // Kalem (cost-line) split of lineTotalKurus, SNAPSHOTTED at checkout — the
+    // product's breakdown can be edited later, and the earning bases must
+    // reflect what was true when the customer paid. The painting share is
+    // `lineTotalKurus − productionBaseKurus`, so the two always reconcile.
+    // A product with no breakdown gets the whole line total as production,
+    // which is exactly the pre-kalem behaviour. NULL only on pre-migration rows.
+    productionBaseKurus: integer("production_base_kurus"),
     // True when this line was bought as part of an anahtarlık kutusu, so its
     // price came from the box ladder (total pieces across designs) rather than
     // the product's own. Production reads the per-design lines either way; this
@@ -1960,7 +2022,13 @@ export const orderItems = pgTable(
         { groupName: string; choiceName: string; priceDeltaKurus: number }[]
       >(),
     selectedAddons:
-      jsonb("selected_addons").$type<{ name: string; priceKurus: number }[]>(),
+      jsonb("selected_addons").$type<
+      // `kind` is the kalem type on ADMIN MANUAL orders (production /
+      // painting), which is where these rows double as the order's line
+      // items. Absent on marketplace add-on rows and on rows written
+      // before the kalem model.
+      { name: string; priceKurus: number; kind?: string }[]
+    >(),
     // Resolved (painted/unpainted) image for this line, snapshotted at purchase.
     itemImageKey: text("item_image_key"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -2309,6 +2377,7 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   images: many(productImages),
   files: many(productFiles),
   components: many(productComponents),
+  costLines: many(productCostLines),
   assemblySteps: many(productAssemblySteps),
   optionGroups: many(productOptionGroups),
   addons: many(productAddons),
@@ -2378,6 +2447,16 @@ export const productComponentsRelations = relations(
   ({ one }) => ({
     product: one(products, {
       fields: [productComponents.productId],
+      references: [products.id],
+    }),
+  })
+);
+
+export const productCostLinesRelations = relations(
+  productCostLines,
+  ({ one }) => ({
+    product: one(products, {
+      fields: [productCostLines.productId],
       references: [products.id],
     }),
   })

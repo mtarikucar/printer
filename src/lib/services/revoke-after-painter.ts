@@ -7,6 +7,7 @@ import {
   manufacturerEarnings,
 } from "@/lib/db/schema";
 import { reverseEarning, accrueEarning } from "@/lib/services/payouts";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 
 /**
  * Admin pulls a painting order all the way back from the painter to the
@@ -110,10 +111,16 @@ export async function revokeAfterPainterHandoff(args: {
   const prevPainterId = order.painterId;
   const prevManufacturerStatus = order.manufacturerStatus;
   const prevPainterStatus = order.painterStatus;
-  const printBaseKurus = Math.max(
-    0,
-    order.amountKurus - order.paintingPriceKurus
-  );
+  // The print portion the previous manufacturer earned at hand-off. `painterId`
+  // is still set at this point (we have not detached yet), so this resolves to
+  // the production kalem total — the painting share stays the painter's.
+  const printBaseKurus = manufacturerBaseKurus({
+    amountKurus: order.amountKurus,
+    productionBaseKurus: order.productionBaseKurus,
+    paintingPriceKurus: order.paintingPriceKurus,
+    painterId: prevPainterId,
+    paintsInHouse: false,
+  });
 
   // ── Money reconciliation BEFORE the detach ──────────────────────────────
   // Reverse the manufacturer's print-portion earning (accrued at send-to-painter)

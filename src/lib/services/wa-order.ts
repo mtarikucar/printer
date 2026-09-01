@@ -3,7 +3,14 @@ import { db } from "@/lib/db";
 import { agentOrderSpecs, orderDrafts, waConversations } from "@/lib/db/schema";
 import { buildDraftReference } from "./order-draft";
 import { resolveOrCreateGuestUser } from "./guest-user";
-import { itemPriceKurus, calculateUpsellAmount, MAX_AMOUNT_KURUS } from "@/lib/config/prices";
+import {
+  itemPriceKurus,
+  calculateUpsellAmount,
+  MAX_AMOUNT_KURUS,
+  finishNeedsPainter,
+  paintingPortionKurus,
+} from "@/lib/config/prices";
+import { orderNeedsPainting } from "@/lib/services/earning-base";
 import { priceKindForStyle } from "@/lib/create/design-templates";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { CONTENT_CONSENT_VERSION } from "@/lib/config/content-consent";
@@ -174,6 +181,18 @@ export async function createWhatsAppDraft(
   const reference = buildDraftReference();
   const havaleDiscountKurus = calculateHavaleDiscount(amountKurus);
 
+  // Kalem tabanları. The agent only ever sells the catalogue figure, whose
+  // painting share is the fixed PAINTING_PORTION_KURUS — but the columns were
+  // never written here at all, so a `hand_painted` WhatsApp order promoted with
+  // needsPainting=false: no painter could ever be assigned (send-to-painter and
+  // assign-painter both refuse without the flag) and the manufacturer accrued
+  // on the FULL amount, absorbing the painter's share.
+  const finishValue = (spec.finish as OrderFinish | undefined) ?? "hand_painted";
+  const paintingPriceKurus = finishNeedsPainter(finishValue)
+    ? paintingPortionKurus(finishValue)
+    : 0;
+  const productionBaseKurus = Math.max(0, amountKurus - paintingPriceKurus);
+
   const [draft] = await db
     .insert(orderDrafts)
     .values({
@@ -193,7 +212,10 @@ export async function createWhatsAppDraft(
       // The finish column is an enum; the spec holds free text from the model,
       // so anything unrecognised falls back to the catalogue default rather
       // than being written through.
-      finish: (spec.finish as OrderFinish | undefined) ?? "hand_painted",
+      finish: finishValue,
+      paintingPriceKurus,
+      productionBaseKurus,
+      needsPainting: orderNeedsPainting(paintingPriceKurus),
       upsells: spec.upsells ?? [],
       upsellAmountKurus: calculateUpsellAmount(spec.upsells ?? []),
       previewId: spec.previewId!,

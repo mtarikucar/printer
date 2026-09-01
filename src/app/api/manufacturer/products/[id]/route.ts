@@ -4,6 +4,11 @@ import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { createProductSchema } from "@/lib/validators/product";
+import {
+  validateCostLines,
+  replaceCostLines,
+  getCostLines,
+} from "@/lib/services/product-cost-lines";
 import { resolveProductCategoryId } from "@/lib/services/categories";
 import { hardDeleteOwnedProduct } from "@/lib/services/product-delete";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
@@ -76,21 +81,37 @@ export async function PATCH(
       existing.status === "active" ? ("pending_review" as const) : existing.status;
     const reEnteredReview = nextStatus !== existing.status;
 
-    const [updated] = await db
-      .update(products)
-      .set({
-        title: input.title,
-        description: input.description,
-        priceKurus: input.priceKurus,
-        material: input.material ?? null,
-        categoryId,
-        leadTimeDays: input.leadTimeDays,
-        status: nextStatus,
-        submittedAt: reEnteredReview ? new Date() : existing.submittedAt,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, id))
-      .returning();
+    // Kalem kırılımı fiyatı OLUŞTURUR. İstek kırılım göndermediyse (kısmi
+    // düzenleme) mevcut kırılım YENİ fiyata karşı doğrulanır — aksi hâlde tek
+    // başına bir fiyat düzenlemesi kırılımı sessizce tutarsız bırakır ve iki
+    // hakediş tabanının toplamı sipariş tutarını tutmaz.
+    const nextCostLines = input.costLines ?? (await getCostLines(id));
+    const costLineError = validateCostLines(nextCostLines, input.priceKurus);
+    if (costLineError) {
+      return NextResponse.json({ error: costLineError }, { status: 400 });
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(products)
+        .set({
+          title: input.title,
+          description: input.description,
+          priceKurus: input.priceKurus,
+          material: input.material ?? null,
+          categoryId,
+          leadTimeDays: input.leadTimeDays,
+          status: nextStatus,
+          submittedAt: reEnteredReview ? new Date() : existing.submittedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, id))
+        .returning();
+      if (row && input.costLines) {
+        await replaceCostLines(id, input.costLines, tx);
+      }
+      return row;
+    });
 
     if (reEnteredReview) {
       await publishRealtime([topics.admin()], { kind: "badge" }).catch(() => {});

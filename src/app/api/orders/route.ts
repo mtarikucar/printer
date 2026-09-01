@@ -73,6 +73,10 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplay } from "@/lib/config/sizes";
 import { finishNeedsPainter, paintingPortionKurus } from "@/lib/config/prices";
+import {
+  loadCostLineBases,
+  basesForLineTotal,
+} from "@/lib/services/product-cost-lines";
 
 /**
  * Rate limit + idempotency in front of order creation.
@@ -305,6 +309,8 @@ async function handleCreateOrder(
       isBoxItem: boolean;
       quantity: number;
       lineTotalKurus: number;
+      /** Kalem kırılımının bu satıra düşen üretim payı (boyama = kalan). */
+      productionBaseKurus: number;
       selectedOptions: ResolvedOrderLine["selectedOptions"];
       selectedAddons: ResolvedOrderLine["selectedAddons"];
       itemImageKey: string | null;
@@ -366,10 +372,26 @@ async function handleCreateOrder(
           box: item.box && byId.get(item.productId)!.boxEligible,
         }))
       );
+      // Kalem kırılımları, satır tutarına ölçeklenmek üzere tek sorguda gelir.
+      // Ürünün kırılımı sonradan düzenlenebildiği için taban satır bazında
+      // DONDURULUR (fiyatların zaten donduruğu gibi) — hakediş, müşterinin
+      // ödediği anda geçerli olan kırılımı yansıtmalı.
+      const cartCostBases = await loadCostLineBases(
+        cartInput!.items.map((item) => item.productId)
+      );
       cartInput!.items.forEach((item, i) => {
         const p = byId.get(item.productId)!;
         const r = resolved[i];
+        const lineTotalKurus = r.unitPriceKurus * item.quantity;
+        // Kırılımı olmayan ürün: tutarın tamamı üretim payıdır — kalem
+        // modelinden önceki davranışın aynısı.
+        const lineBases =
+          basesForLineTotal(cartCostBases.get(p.id), lineTotalKurus) ?? {
+            productionKurus: lineTotalKurus,
+            paintingKurus: 0,
+          };
         cartLines.push({
+          productionBaseKurus: lineBases.productionKurus,
           productId: p.id,
           sellerManufacturerId: p.manufacturerId ?? null,
           titleSnapshot: p.title,
@@ -378,7 +400,7 @@ async function handleCreateOrder(
           appliedTierMinQuantity: r.appliedTierMinQuantity,
           isBoxItem: r.isBoxItem,
           quantity: item.quantity,
-          lineTotalKurus: r.unitPriceKurus * item.quantity,
+          lineTotalKurus,
           selectedOptions: r.selectedOptions,
           selectedAddons: r.selectedAddons,
           itemImageKey: r.itemImageKey,
@@ -508,26 +530,55 @@ async function handleCreateOrder(
               material: customInput!.material,
               finish: customInput!.finish,
             });
+    // Marketplace (single product): the seller's kalem breakdown, scaled to the
+    // line total actually charged. NULL when the product has no breakdown —
+    // then the whole amount is the production base, i.e. the pre-kalem rule.
+    const mpBases =
+      orderType === "marketplace" && !isCart
+        ? basesForLineTotal(
+            (await loadCostLineBases([product!.id])).get(product!.id),
+            itemAmountKurus
+          )
+        : null;
+
     // Professional painting: the "hand_painted" figurine finish is fulfilled by
     // a PAINTER partner, not the manufacturer. Its surcharge is ALREADY part of
     // itemAmountKurus (finishSurchargeKurus), so we do NOT add it again — we only
     // flag the order and record the portion that becomes the painter's earning
     // base (the manufacturer's earning is amountKurus − paintingPriceKurus).
     const needsPainting =
-      orderType === "custom" &&
+      // A marketplace product with a painting kalem routes to a painter just
+      // like a custom figure does — before the kalem model only `custom`
+      // orders could, so a product sold as painted paid the painter nothing.
+      (mpBases !== null && mpBases.paintingKurus > 0) ||
+      (orderType === "custom" &&
       // hand_painted AND luxe_display are both hand-painted by a painter
       // partner; luxe_display used to fall through and was never routed.
       finishNeedsPainter(customInput?.finish) &&
       // These are only real, priced finishes for character figures; on any
       // other price kind (object / Creative Lab flat items) the surcharge is not
       // collected, so the order must NOT be flagged for paid painting.
-      priceKindForStyle(customInput!.style) === "figure";
+      priceKindForStyle(customInput!.style) === "figure");
     // Only the painting part of the surcharge is the painter's base — the
     // luxe_display extras (base, plate, case) are the platform's cost.
-    const paintingPriceKurus = needsPainting
-      ? paintingPortionKurus(customInput!.finish)
-      : 0;
+    const paintingPriceKurus = mpBases
+      ? mpBases.paintingKurus
+      : needsPainting
+        ? paintingPortionKurus(customInput!.finish)
+        : 0;
     const amountKurus = itemAmountKurus + upsellAmountKurus;
+    // The manufacturer's earning base, written explicitly so no downstream
+    // caller has to re-derive it. production + painting === amountKurus by
+    // construction, which is what makes the partner payouts unable to exceed
+    // the price. Upsells sit on the production side (the workshop fulfils
+    // gift wrap / extra paint / rush), matching the pre-kalem behaviour where
+    // they were inside the manufacturer's base.
+    // A cart draft fans out into one order PER SELLER, and each sub-order
+    // derives its own base from its own order_items rows at promotion — this
+    // draft-level total is the whole-cart figure, never an accrual base.
+    const productionBaseKurus = isCart
+      ? cartLines.reduce((sum, l) => sum + l.productionBaseKurus, 0) + upsellAmountKurus
+      : Math.max(0, amountKurus - paintingPriceKurus);
     // Every money column is pg int4. Bulk quantities make a total past that
     // ceiling reachable, and overflowing it surfaces as an opaque 500 mid-
     // checkout instead of a fixable error. Guard both the whole order and each
@@ -758,6 +809,7 @@ async function handleCreateOrder(
           upsellAmountKurus,
           needsPainting,
           paintingPriceKurus,
+          productionBaseKurus,
           paymentMethod: finalPaymentMethod,
           status: "pending",
           paytrMerchantOid,
@@ -789,6 +841,7 @@ async function handleCreateOrder(
             isBoxItem: l.isBoxItem,
             quantity: l.quantity,
             lineTotalKurus: l.lineTotalKurus,
+            productionBaseKurus: l.productionBaseKurus,
             selectedOptions: l.selectedOptions.length > 0 ? l.selectedOptions : null,
             selectedAddons: l.selectedAddons.length > 0 ? l.selectedAddons : null,
             itemImageKey: l.itemImageKey,

@@ -4,6 +4,11 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { createProductSchema } from "@/lib/validators/product";
+import {
+  validateCostLines,
+  replaceCostLines,
+  getCostLines,
+} from "@/lib/services/product-cost-lines";
 import { resolveProductCategoryId } from "@/lib/services/categories";
 import { hardDeleteProduct } from "@/lib/services/product-delete";
 import { basePriceConflictsWithTiers } from "@/lib/services/product-tiers";
@@ -55,19 +60,38 @@ export async function PATCH(
         { status: 400 }
       );
     }
-    const [updated] = await db
-      .update(products)
-      .set({
-        title: input.title,
-        description: input.description,
-        priceKurus: input.priceKurus,
-        material: input.material ?? null,
-        categoryId,
-        leadTimeDays: input.leadTimeDays,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, id))
-      .returning();
+    // Kalem kırılımı fiyatı OLUŞTURUR. İstek kırılım göndermediyse (kısmi
+    // düzenleme) mevcut kırılım YENİ fiyata karşı doğrulanır — aksi hâlde tek
+    // başına bir fiyat düzenlemesi kırılımı sessizce tutarsız bırakır ve iki
+    // hakediş tabanının toplamı sipariş tutarını tutmaz.
+    const nextCostLines = input.costLines ?? (await getCostLines(id));
+    const costLineError = validateCostLines(nextCostLines, input.priceKurus);
+    if (costLineError) {
+      return NextResponse.json({ error: costLineError }, { status: 400 });
+    }
+
+    // Fiyat ve kırılım TEK transaction'da değişir; arada fiyatla kırılımın
+    // uyuşmadığı bir pencere kalmamalı (o pencerede verilen bir sipariş yanlış
+    // taban yazardı).
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(products)
+        .set({
+          title: input.title,
+          description: input.description,
+          priceKurus: input.priceKurus,
+          material: input.material ?? null,
+          categoryId,
+          leadTimeDays: input.leadTimeDays,
+          updatedAt: new Date(),
+        })
+        .where(eq(products.id, id))
+        .returning();
+      if (row && input.costLines) {
+        await replaceCostLines(id, input.costLines, tx);
+      }
+      return row;
+    });
     if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ product: updated });
   } catch (error) {

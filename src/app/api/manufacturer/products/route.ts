@@ -6,6 +6,10 @@ import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { createProductSchema } from "@/lib/validators/product";
 import { resolveProductCategoryId } from "@/lib/services/categories";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
+import {
+  validateCostLines,
+  replaceCostLines,
+} from "@/lib/services/product-cost-lines";
 
 /**
  * Seller product management. Only `active` (KYC-complete) manufacturers may
@@ -38,6 +42,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const input = createProductSchema(locale).parse(body);
 
+    const costLineError = validateCostLines(input.costLines ?? [], input.priceKurus);
+    if (costLineError) {
+      return NextResponse.json({ error: costLineError }, { status: 400 });
+    }
+
     let categoryId: string | null;
     try {
       categoryId = await resolveProductCategoryId(input.categoryId);
@@ -59,6 +68,10 @@ export async function POST(request: NextRequest) {
         status: "draft",
       })
       .returning();
+
+    if (input.costLines?.length) {
+      await replaceCostLines(created.id, input.costLines);
+    }
 
     return NextResponse.json({ product: created });
   } catch (error) {

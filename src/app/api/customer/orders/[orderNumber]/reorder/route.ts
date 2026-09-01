@@ -224,6 +224,10 @@ export async function POST(
         amountKurus,
         needsPainting,
         paintingPriceKurus,
+        // Kalem tabanı: yeniden sipariş katalog figürünü BUGÜNKÜ fiyattan
+        // yeniden fiyatlıyor, kırılım da o fiyattan türetilir. İkisinin
+        // toplamı amountKurus.
+        productionBaseKurus: Math.max(0, amountKurus - paintingPriceKurus),
         havaleDiscountKurus,
         paymentMethod,
         status: "pending",

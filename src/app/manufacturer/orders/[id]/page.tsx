@@ -21,6 +21,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { ManufacturerOrderDetailClient } from "./client";
 
 export default async function ManufacturerOrderDetailPage({
@@ -323,13 +324,27 @@ export default async function ManufacturerOrderDetailPage({
       productTitleSnapshot: order.productTitleSnapshot,
       // Earnings preview. The manufacturer has 24 hours to accept or decline
       // and could not see what the job pays — the contract now promises this.
-      // Painting orders accrue on the print portion only, unless the
-      // manufacturer paints in house (then the full amount is theirs).
-      grossKurus:
-        order.needsPainting && !manufacturer.paintsInHouse
-          ? Math.max(0, order.amountKurus - order.paintingPriceKurus)
-          : order.amountKurus,
-      commissionRateBps: PLATFORM_COMMISSION_RATE_BPS,
+      //
+      // The base is derived from the ORDER's real state (`painterId`), not from
+      // the manufacturer's `paintsInHouse` profile flag. Reading the flag meant
+      // a "kendim boyarım" manufacturer who then handed the job to a painter
+      // kept seeing the full amount here — the same painting share the painter
+      // was being promised on their own panel. One shared derivation, so the
+      // card can no longer drift from what actually accrues.
+      grossKurus: manufacturerBaseKurus({
+        amountKurus: order.amountKurus,
+        productionBaseKurus: order.productionBaseKurus,
+        paintingPriceKurus: order.paintingPriceKurus,
+        painterId: order.painterId,
+        paintsInHouse: manufacturer.paintsInHouse,
+      }),
+      // The rate frozen at accept, so the preview matches what will be paid.
+      // Before accept the column is NULL — fall back to the live rate.
+      commissionRateBps: order.commissionRateBps ?? PLATFORM_COMMISSION_RATE_BPS,
+      // True once the job is with a painter: the card must stop promising the
+      // painting share and stop saying "accrues when you ship" (shipping such
+      // an order is blocked by the ship gate's isNull(painterId)).
+      handedToPainter: order.painterId != null,
       // Manual/WhatsApp orders carry no product row — their contents live here
       // as {name, priceKurus} line items. Without this the manufacturer has no
       // idea what was ordered.

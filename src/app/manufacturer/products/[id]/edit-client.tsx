@@ -6,6 +6,13 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { CategoryPicker } from "@/components/category-picker";
+import {
+  CostLinesEditor,
+  costLinesTotal,
+  emptyCostLine,
+  toCostLinePayload,
+  type CostLineRow,
+} from "@/components/products/cost-lines-editor";
 import { ProductOptionsEditor } from "@/components/products/product-options-editor";
 import {
   ProductSpecEditor,
@@ -26,6 +33,7 @@ interface EditProduct {
   title: string;
   description: string;
   priceKurus: number;
+  costLines: CostLineRow[];
   material: string | null;
   categoryId: string | null;
   leadTimeDays: number | null;
@@ -82,8 +90,18 @@ export function EditProductClient({
 
   const [title, setTitle] = useState(product.title);
   const [description, setDescription] = useState(product.description);
-  const [priceTry, setPriceTry] = useState(
-    (product.priceKurus / 100).toString()
+  // Kırılımı olmayan (kalem modelinden önceki) ürün, fiyatının tamamı tek bir
+  // üretim kalemi olacak şekilde açılır — kaydedilene kadar davranış aynı.
+  const [costLines, setCostLines] = useState<CostLineRow[]>(
+    product.costLines.length > 0
+      ? product.costLines
+      : [
+          {
+            kind: "production" as const,
+            label: "",
+            amountTry: (product.priceKurus / 100).toFixed(2).replace(".", ","),
+          },
+        ]
   );
   const [material, setMaterial] = useState(product.material ?? "");
   const [categoryId, setCategoryId] = useState<string | null>(product.categoryId);
@@ -105,12 +123,17 @@ export function EditProductClient({
     setError(null);
     setSaveMsg(null);
 
-    const priceNum = Number(priceTry.replace(",", "."));
-    if (!Number.isFinite(priceNum) || priceNum <= 0) {
-      setError(t("product.error.price", "Geçerli bir fiyat girin."));
+    const priceKurus = costLinesTotal(costLines);
+    const costLinePayload = toCostLinePayload(costLines);
+    if (!costLinePayload || Number.isNaN(priceKurus) || priceKurus < 100) {
+      setError(
+        t(
+          "product.error.costLines",
+          "Her kalem için geçerli bir tutar girin (toplam en az ₺1)."
+        )
+      );
       return;
     }
-    const priceKurus = Math.round(priceNum * 100);
     const leadNum = Number(leadTimeDays) || 7;
 
     setSaving(true);
@@ -122,6 +145,7 @@ export function EditProductClient({
           title,
           description,
           priceKurus,
+          costLines: costLinePayload,
           material: material || undefined,
           categoryId: categoryId || undefined,
           leadTimeDays: leadNum,
@@ -296,18 +320,21 @@ export function EditProductClient({
           />
         </FormField>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label={t("product.field.price", "Fiyat (₺)")} required>
-            <Input
-              type="number"
-              min={1}
-              step="0.01"
-              value={priceTry}
-              onChange={(e) => setPriceTry(e.target.value)}
-              required
-            />
-          </FormField>
+        <div>
+          <span className="block text-sm font-medium text-text-secondary mb-1.5">
+            {t("product.field.costLines", "Fiyat kalemleri")}
+            <span className="text-error ml-0.5">*</span>
+          </span>
+          <p className="mb-2 text-xs text-gray-500">
+            {t(
+              "product.hint.costLines",
+              "Ürünün fiyatı bu kalemlerin toplamıdır. Kalem türü, o payın üreticiye mi boyacıya mı hakediş olarak yazılacağını belirler."
+            )}
+          </p>
+          <CostLinesEditor rows={costLines} onChange={setCostLines} />
+        </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField label={t("product.field.leadTime", "Üretim süresi (gün)")}>
             <Input
               type="number"

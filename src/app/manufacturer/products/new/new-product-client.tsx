@@ -6,6 +6,13 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { CategoryPicker } from "@/components/category-picker";
+import {
+  CostLinesEditor,
+  costLinesTotal,
+  emptyCostLine,
+  toCostLinePayload,
+  type CostLineRow,
+} from "@/components/products/cost-lines-editor";
 
 export function NewProductClient() {
   const d = useDictionary();
@@ -16,7 +23,10 @@ export function NewProductClient() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priceTry, setPriceTry] = useState("");
+  // Fiyat kalemlerden hesaplanır — kalem türü hakediş tabanını belirler.
+  const [costLines, setCostLines] = useState<CostLineRow[]>([
+    emptyCostLine("production"),
+  ]);
   const [material, setMaterial] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [leadTimeDays, setLeadTimeDays] = useState("7");
@@ -27,12 +37,17 @@ export function NewProductClient() {
     e.preventDefault();
     setError(null);
 
-    const priceNum = Number(priceTry.replace(",", "."));
-    if (!Number.isFinite(priceNum) || priceNum <= 0) {
-      setError(t("product.error.price", "Geçerli bir fiyat girin."));
+    const priceKurus = costLinesTotal(costLines);
+    const costLinePayload = toCostLinePayload(costLines);
+    if (!costLinePayload || Number.isNaN(priceKurus) || priceKurus < 100) {
+      setError(
+        t(
+          "product.error.costLines",
+          "Her kalem için geçerli bir tutar girin (toplam en az ₺1)."
+        )
+      );
       return;
     }
-    const priceKurus = Math.round(priceNum * 100);
     const leadNum = Number(leadTimeDays) || 7;
 
     setSaving(true);
@@ -44,6 +59,7 @@ export function NewProductClient() {
           title,
           description,
           priceKurus,
+          costLines: costLinePayload,
           material: material || undefined,
           categoryId: categoryId || undefined,
           leadTimeDays: leadNum,
@@ -113,18 +129,21 @@ export function NewProductClient() {
           />
         </FormField>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FormField label={t("product.field.price", "Fiyat (₺)")} required>
-            <Input
-              type="number"
-              min={1}
-              step="0.01"
-              value={priceTry}
-              onChange={(e) => setPriceTry(e.target.value)}
-              required
-            />
-          </FormField>
+        <div>
+          <span className="block text-sm font-medium text-text-secondary mb-1.5">
+            {t("product.field.costLines", "Fiyat kalemleri")}
+            <span className="text-error ml-0.5">*</span>
+          </span>
+          <p className="mb-2 text-xs text-gray-500">
+            {t(
+              "product.hint.costLines",
+              "Ürünün fiyatı bu kalemlerin toplamıdır. Kalem türü, o payın üreticiye mi boyacıya mı hakediş olarak yazılacağını belirler."
+            )}
+          </p>
+          <CostLinesEditor rows={costLines} onChange={setCostLines} />
+        </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField
             label={t("product.field.leadTime", "Üretim süresi (gün)")}
           >

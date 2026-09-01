@@ -7,6 +7,7 @@ import { manufacturers, products } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
+import { getCostLines } from "@/lib/services/product-cost-lines";
 import { EditProductClient } from "./edit-client";
 
 export default async function EditProductPage({
@@ -54,11 +55,18 @@ export default async function EditProductPage({
     imageUrl: s.imageUrl,
   }));
 
+  const costLines = await getCostLines(product.id);
+
   const serialized = {
     id: product.id,
     title: product.title,
     description: product.description,
     priceKurus: product.priceKurus,
+    costLines: costLines.map((c) => ({
+      kind: c.kind,
+      label: c.label ?? "",
+      amountTry: (c.amountKurus / 100).toFixed(2).replace(".", ","),
+    })),
     material: product.material,
     categoryId: product.categoryId,
     leadTimeDays: product.leadTimeDays,

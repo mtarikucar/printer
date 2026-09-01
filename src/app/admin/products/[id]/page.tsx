@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
+import { getCostLines } from "@/lib/services/product-cost-lines";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { EditProductClient, type EditableProduct } from "./edit-client";
 
@@ -24,6 +25,7 @@ export default async function AdminEditProductPage({
   if (!product) notFound();
 
   const spec = await getProductSpec(product.id);
+  const costLines = await getCostLines(product.id);
   const initialComponents = spec.components.map((c) => ({
     name: c.name,
     quantity: c.quantity,
@@ -48,6 +50,13 @@ export default async function AdminEditProductPage({
     status: product.status,
     rejectionReason: product.rejectionReason,
     sellerName: product.manufacturer?.companyName ?? "Platform",
+    // Kalem kırılımı. Boş dizi = kırılımsız (eski) ürün; form o zaman fiyatı
+    // tek bir üretim kalemine dönüştürerek başlar.
+    costLines: costLines.map((c) => ({
+      kind: c.kind,
+      label: c.label ?? "",
+      amountTry: (c.amountKurus / 100).toFixed(2).replace(".", ","),
+    })),
     images: (product.images ?? [])
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((img) => ({

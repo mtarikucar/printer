@@ -246,7 +246,7 @@ export const UPLOAD_MODEL_PER_CM3_KURUS: Record<FigurineMaterial, number> = {
   filament: 900, // ₺9 / cm³
 };
 // Floors must at least cover packaging + free shipping (Yurtiçi ~₺100) on top
-// of the manufacturer's 70% share — a ₺99 print order would ship at a loss.
+// of the manufacturer's 60% share — a ₺99 print order would ship at a loss.
 export const UPLOAD_MODEL_MIN_KURUS: Record<FigurineMaterial, number> = {
   resin: 19900, // ₺199 floor
   filament: 14900, // ₺149 floor

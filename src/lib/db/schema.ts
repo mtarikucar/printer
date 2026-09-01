@@ -1639,7 +1639,7 @@ export const products = pgTable(
     // When true the product is sellable in bulk: the cart lets the buyer go past
     // the normal 20-unit ceiling and productPriceTiers rows kick in. Restricted
     // to ownerType='admin' products in v1 — putting a tier on a SELLER's product
-    // would cut their 65% payout without their consent (commission is a flat
+    // would cut their 60% payout without their consent (commission is a flat
     // 3500bps), which is a partner-contract decision, not a pricing knob.
     bulkEnabled: boolean("bulk_enabled").notNull().default(false),
     // Per-product line ceiling. NULL → BULK_DEFAULT_MAX_QTY from config/bulk.ts.

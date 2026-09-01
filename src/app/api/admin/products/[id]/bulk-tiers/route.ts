@@ -13,7 +13,7 @@ import {
 } from "@/lib/services/product-tiers";
 
 // Toplu sipariş settings + the volume ladder for one product. Admin-only by
-// design: a tier cuts the seller's 65% payout, so in v1 only platform-owned
+// design: a tier cuts the seller's 60% payout, so in v1 only platform-owned
 // (ownerType='admin') products may carry one — enforced in validateTiers, not
 // just hidden in the UI.
 

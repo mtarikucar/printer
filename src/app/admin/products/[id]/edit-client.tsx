@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { CategoryPicker } from "@/components/category-picker";
+import {
+  CostLinesEditor,
+  costLinesTotal,
+  toCostLinePayload,
+  type CostLineRow,
+} from "@/components/products/cost-lines-editor";
 import { ProductOptionsEditor } from "@/components/products/product-options-editor";
 import { ProductBulkTiersEditor } from "@/components/products/product-bulk-tiers-editor";
 import {
@@ -27,6 +33,7 @@ export interface EditableProduct {
   title: string;
   description: string;
   priceKurus: number;
+  costLines: CostLineRow[];
   material: "resin" | "filament" | null;
   categoryId: string | null;
   leadTimeDays: number | null;
@@ -56,7 +63,20 @@ export function EditProductClient({
 
   const [title, setTitle] = useState(product.title);
   const [description, setDescription] = useState(product.description);
-  const [priceTry, setPriceTry] = useState((product.priceKurus / 100).toString());
+  // Fiyat kalemlerden hesaplanır. Kırılımı olmayan (kalem modelinden önceki)
+  // bir ürün, fiyatının tamamı tek bir üretim kalemi olacak şekilde açılır —
+  // kaydedilene kadar hiçbir şey değişmez, davranış da aynı kalır.
+  const [costLines, setCostLines] = useState<CostLineRow[]>(
+    product.costLines.length > 0
+      ? product.costLines
+      : [
+          {
+            kind: "production" as const,
+            label: "",
+            amountTry: (product.priceKurus / 100).toFixed(2).replace(".", ","),
+          },
+        ]
+  );
   const [material, setMaterial] = useState(product.material ?? "");
   const [categoryId, setCategoryId] = useState<string | null>(product.categoryId);
   const [leadTimeDays, setLeadTimeDays] = useState(
@@ -75,21 +95,19 @@ export function EditProductClient({
     setError(null);
     setSaved(false);
 
-    const price = parseFloat(priceTry.replace(",", "."));
-    if (!Number.isFinite(price) || price <= 0) {
-      setError(
-        d["admin.products.priceInvalid" as keyof typeof d] ||
-          "Geçerli bir fiyat girin."
-      );
+    const priceKurus = costLinesTotal(costLines);
+    const costLinePayload = toCostLinePayload(costLines);
+    if (!costLinePayload || Number.isNaN(priceKurus) || priceKurus < 100) {
+      setError("Her kalem için geçerli bir tutar girin (toplam en az ₺1).");
       return;
     }
-    const priceKurus = Math.round(price * 100);
     const lead = parseInt(leadTimeDays, 10);
 
     const body: Record<string, unknown> = {
       title,
       description,
       priceKurus,
+      costLines: costLinePayload,
     };
     if (material) body.material = material;
     if (categoryId) body.categoryId = categoryId;
@@ -355,19 +373,16 @@ export function EditProductClient({
           />
         </FormField>
 
-        <FormField
-          label={d["admin.products.fieldPrice" as keyof typeof d] || "Fiyat (₺)"}
-          required
-        >
-          <Input
-            type="number"
-            step="0.01"
-            min="1"
-            value={priceTry}
-            onChange={(e) => setPriceTry(e.target.value)}
-            required
-          />
-        </FormField>
+        <div>
+          <span className="block text-sm font-medium text-text-secondary mb-1.5">
+            Fiyat kalemleri<span className="text-error ml-0.5">*</span>
+          </span>
+          <p className="mb-2 text-xs text-gray-500">
+            Ürünün fiyatı bu kalemlerin toplamıdır. Kalem türü, o payın
+            üreticiye mi boyacıya mı hakediş olarak yazılacağını belirler.
+          </p>
+          <CostLinesEditor rows={costLines} onChange={setCostLines} />
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField

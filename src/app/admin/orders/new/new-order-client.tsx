@@ -16,11 +16,23 @@ import {
   normalizeSizeInput,
   sizeDisplayTr,
 } from "@/lib/config/sizes";
+import {
+  COST_LINE_OPTIONS,
+  splitCostLines,
+  type CostLineKind,
+} from "@/lib/config/cost-lines";
+import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 
 interface LineItem {
   description: string;
   unitPriceTry: string;
   quantity: string;
+  /**
+   * Kalem türü — bu satırın parasının kime ait olduğunu belirler:
+   * üretim → üreticinin hakediş tabanı, boyama → boyacınınki.
+   * Boyama kalemi olmayan bir sipariş boyacıya hiç yönlendirilmez.
+   */
+  kind: CostLineKind;
 }
 
 /** Free-form spec row (Renk, Kaide, Yazı…) carried to the manufacturer. */
@@ -60,7 +72,12 @@ interface CreateResult {
   amountKurus: number;
 }
 
-const emptyLine = (): LineItem => ({ description: "", unitPriceTry: "", quantity: "1" });
+const emptyLine = (): LineItem => ({
+  description: "",
+  unitPriceTry: "",
+  quantity: "1",
+  kind: "production",
+});
 
 export function NewOrderClient({ locale: _locale }: { locale: string }) {
   void _locale;
@@ -140,6 +157,32 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
     }, 0);
   }, [lineItems]);
 
+  // Kalem türlerine göre iki hakediş tabanı + platform payı. İkisinin toplamı
+  // sipariş tutarına eşit olduğu için partner payları tutarı geçemez.
+  const shareSummary = useMemo(() => {
+    const bases = splitCostLines(
+      lineItems.map((li) => {
+        const price = parseFloat(li.unitPriceTry.replace(",", "."));
+        const qty = parseInt(li.quantity, 10);
+        const amountKurus =
+          Number.isFinite(price) && Number.isFinite(qty)
+            ? Math.round(price * 100) * qty
+            : 0;
+        return { kind: li.kind, amountKurus };
+      })
+    );
+    const net = (gross: number) =>
+      gross - Math.round((gross * PLATFORM_COMMISSION_RATE_BPS) / 10000);
+    const total = bases.productionKurus + bases.paintingKurus;
+    return {
+      total,
+      manufacturerNet: net(bases.productionKurus),
+      painterNet: net(bases.paintingKurus),
+      platform: total - net(bases.productionKurus) - net(bases.paintingKurus),
+      hasPainting: bases.paintingKurus > 0,
+    };
+  }, [lineItems]);
+
   const updateLine = (idx: number, patch: Partial<LineItem>) => {
     setLineItems((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   };
@@ -179,6 +222,7 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
       description: li.description.trim(),
       unitPriceTry: parseFloat(li.unitPriceTry.replace(",", ".")),
       quantity: parseInt(li.quantity, 10),
+      kind: li.kind,
     }));
     if (
       parsedLines.some(
@@ -379,8 +423,25 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
                     </button>
                   )}
                 </div>
+                {/* Kalem türü hakediş tabanını belirler: üretim payı üreticiye,
+                    boyama payı boyacıya yazılır. Boyama kalemi olmayan bir
+                    sipariş hiçbir boyacıya yönlendirilemez. */}
+                <FormField label="Kalem türü">
+                  <Select
+                    value={li.kind}
+                    onChange={(e) =>
+                      updateLine(idx, { kind: e.target.value as CostLineKind })
+                    }
+                  >
+                    {COST_LINE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label} — {o.payee}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
                 {/* Açıklama tam satır: dar ekranda da yazılanın tamamı görünsün. */}
-                <FormField label="Ürün / açıklama">
+                <FormField label="Ürün / açıklama" className="mt-3">
                   <Input
                     placeholder="örn. çift kişilik özel figür"
                     value={li.description}
@@ -416,6 +477,45 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           <p className="mt-2 text-right text-sm font-semibold text-gray-900">
             Toplam: ₺{totalTry.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
           </p>
+          {/* Kalemlerin kime ne ödediğini sipariş oluşturulmadan ÖNCE göster —
+              admin boyama kalemi girmeyi unutursa boyacı payı hiç oluşmaz. */}
+          {shareSummary.total > 0 && (
+            <dl className="mt-2 space-y-1 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
+              <div className="flex justify-between text-gray-600">
+                <dt>Üretici net payı</dt>
+                <dd>
+                  ₺
+                  {(shareSummary.manufacturerNet / 100).toLocaleString("tr-TR", {
+                    minimumFractionDigits: 2,
+                  })}
+                </dd>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <dt>Boyacı net payı</dt>
+                <dd>
+                  ₺
+                  {(shareSummary.painterNet / 100).toLocaleString("tr-TR", {
+                    minimumFractionDigits: 2,
+                  })}
+                </dd>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <dt>Platform hizmet bedeli (%{PLATFORM_COMMISSION_RATE_BPS / 100})</dt>
+                <dd>
+                  ₺
+                  {(shareSummary.platform / 100).toLocaleString("tr-TR", {
+                    minimumFractionDigits: 2,
+                  })}
+                </dd>
+              </div>
+              {!shareSummary.hasPainting && (
+                <p className="pt-1 text-xs text-gray-500">
+                  Boyama kalemi yok — bu sipariş bir boyacıya yönlendirilemez,
+                  tutarın tamamı üretim payıdır.
+                </p>
+              )}
+            </dl>
+          )}
         </div>
 
         {/* Teknik özellikler — üreticinin basmak için ihtiyaç duyduğu her şey.

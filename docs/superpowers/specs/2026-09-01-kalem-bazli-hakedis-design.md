@@ -292,3 +292,35 @@ havale indiriminin `/pay`'de gösterilip PayTR'de tahsil edilmemesi, sepet
 upsell'lerinin alt siparişlere düşmemesi, ödenmiş payout sonrası iade clawback'i,
 `revoke-after-painter` yarış koşulları. Bunlar bu dalda **değiştirilmez**;
 ayrıca raporlanır.
+
+---
+
+## 8. Uygulamada tasarımdan sapanlar (2026-09-01, düşmanca inceleme sonrası)
+
+Tasarım onaylandıktan sonra 29 ajanlı düşmanca inceleme dört ek düzeltmeyi
+zorunlu kıldı. Hepsi bu dalda kapatıldı:
+
+1. **Türkçe sayı ayrıştırma.** Naif `parseFloat(s.replace(",", "."))` binlik
+   ayracını ondalık nokta sanıyordu: `"2.400"` → **₺2,40**. `"1.2345"` → ₺1,23.
+   Ayrıştırma `config/cost-lines.ts:parseTryToKurus`'a taşındı, dilbilgisi
+   katılaştırıldı (bozuk gruplama ve 2 haneden uzun ondalık reddedilir) ve
+   kuruşa çevirme float yerine tam sayı aritmetiğine geçti.
+2. **WhatsApp yolunda fiyat türü kapısı.** `wa-order.ts` boyama payını
+   `priceKindForStyle === "figure"` kapısından geçirmiyordu; ₺149'luk bir
+   anahtarlığa ₺1.000 boyama payı yazılıp iki taban toplamı sipariş tutarını
+   aşıyordu. Ayrıca yüzey artık `coerceFinishForStyle` ile fiyat türüne
+   kısıtlanıyor — WA yolu `createOrderSchema`'yı atladığı için modelin yazdığı
+   yüzeye güvenilemez.
+3. **Sözleşme sürümü.** Komisyon maddesi maddi olarak değiştiği için
+   `MANUFACTURER_CONTRACT_VERSION` / `PAINTER_CONTRACT_VERSION` 2.0 → **3.0**,
+   metin başlığındaki yürürlük tarihi **16 Eylül 2026** (15 günlük bildirim
+   şartı). Partnerler panelde "sözleşme güncellendi" uyarısı görür.
+4. **Düzenleme guard'ının kapsamı.** İlk hâli "mevcut duruma" bakıyor ve kalem
+   modelinden önceki her `hand_painted` + boyama payı sıfır siparişi kalıcı
+   olarak düzenlenemez hâle getiriyordu. Artık yalnızca yüzeyi GERÇEKTEN
+   değiştiren düzenleme engelleniyor.
+
+Ayrıca eklendi: tahakkuk anında invariant tripwire'ı (loglar, fırlatmaz),
+manuel siparişte sunucu tarafı finish↔kalem çapraz kontrolü, zod v4 `.issues`
+düzeltmesi (ürün doğrulama hataları istemciye ulaşmıyordu), migration'a
+`lock_timeout` ve down'ın KAYIPLI olduğunun dürüst belgelenmesi.

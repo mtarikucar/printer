@@ -5,6 +5,7 @@ import {
   COST_LINE_OPTIONS,
   COST_LINE_LABELS_TR,
   splitCostLines,
+  parseTryToKurus,
   type CostLineKind,
 } from "@/lib/config/cost-lines";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
@@ -34,18 +35,12 @@ export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow =>
   amountTry: "",
 });
 
-/** "1.250,50" → 125050. Geçersizse NaN. */
-export function costLineKurus(amountTry: string): number {
-  const raw = amountTry.trim();
-  if (!raw) return NaN;
-  // Türkçe biçim: binlik nokta, ondalık virgül. "1.250,50" → "1250.50"
-  const normalized = raw.includes(",")
-    ? raw.replace(/\./g, "").replace(",", ".")
-    : raw;
-  const n = parseFloat(normalized);
-  if (!Number.isFinite(n) || n < 0) return NaN;
-  return Math.round(n * 100);
-}
+/**
+ * "1.250,50" → 125050. Geçersizse NaN.
+ * Ayrıştırma saf modüldedir (config/cost-lines.ts) — bunu yanlış yapmak
+ * doğrudan DB'ye yanlış fiyat yazar, o yüzden birim testi var.
+ */
+export const costLineKurus = parseTryToKurus;
 
 /** Toplam kuruş; herhangi bir satır geçersizse NaN. */
 export function costLinesTotal(rows: readonly CostLineRow[]): number {

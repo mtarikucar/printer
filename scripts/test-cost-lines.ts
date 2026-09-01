@@ -5,6 +5,7 @@ import {
   splitCostLines,
   allocateBases,
   costLinesTotalKurus,
+  parseTryToKurus,
 } from "../src/lib/config/cost-lines";
 import {
   manufacturerBaseKurus,
@@ -327,6 +328,56 @@ test("platform komisyonu %40, partner net payı %60", () => {
 test("donmuş eski oran (%35) korunur — geriye dönük uygulanmaz", () => {
   const r = computeEarning(100000, 3500);
   assert.equal(r.netKurus, 65000);
+});
+
+// ─── Türkçe para girişi ─────────────────────────────────────────────────────
+// Bu fonksiyonu yanlış yapmak DOĞRUDAN DB'ye yanlış fiyat yazar. Naif
+// parseFloat(s.replace(",", ".")) yaklaşımı "2.400"ü ₺2,40 olarak okuyordu.
+
+test("binlik ayracı ondalık sanılmaz: 2.400 → ₺2.400", () => {
+  assert.equal(parseTryToKurus("2.400"), 240000);
+  assert.equal(parseTryToKurus("1.250"), 125000);
+  assert.equal(parseTryToKurus("3.499"), 349900);
+  assert.equal(parseTryToKurus("1.234.567"), 123456700);
+});
+
+test("virgül ondalık ayracıdır", () => {
+  assert.equal(parseTryToKurus("1.250,50"), 125050);
+  assert.equal(parseTryToKurus("1250,5"), 125050);
+  assert.equal(parseTryToKurus("0,05"), 5);
+  assert.equal(parseTryToKurus("1,5"), 150);
+  assert.equal(parseTryToKurus("1.234.567,89"), 123456789);
+});
+
+test("1–2 haneli son grup ondalık noktadır", () => {
+  assert.equal(parseTryToKurus("1.50"), 150);
+  assert.equal(parseTryToKurus("1250.50"), 125050);
+  assert.equal(parseTryToKurus("0.5"), 50);
+});
+
+test("düz sayılar", () => {
+  assert.equal(parseTryToKurus("12"), 1200);
+  assert.equal(parseTryToKurus("0"), 0);
+  assert.equal(parseTryToKurus("349900"), 34990000);
+});
+
+test("boşluklar yok sayılır, sessizce kırpılmaz", () => {
+  assert.equal(parseTryToKurus(" 1 250 "), 125000);
+  assert.equal(parseTryToKurus("1 250,50"), 125050);
+});
+
+test("geçersiz giriş NaN döner — asla uydurma bir sayı değil", () => {
+  for (const bad of ["", "   ", "abc", "-5", "1,2,3", ".5", ",5", "1.2.3,4,5", "₺100", "1e3"]) {
+    assert.ok(
+      Number.isNaN(parseTryToKurus(bad)),
+      `"${bad}" NaN dönmeliydi, ${parseTryToKurus(bad)} döndü`
+    );
+  }
+});
+
+test("kuruşa yuvarlar, taşmaz", () => {
+  assert.equal(parseTryToKurus("1,005"), 101); // 1,005 → 100,5 kuruş → 101
+  assert.equal(parseTryToKurus("1,004"), 100);
 });
 
 for (const [name, fn] of cases) {

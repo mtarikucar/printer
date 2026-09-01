@@ -122,3 +122,55 @@ export function allocateBases(args: {
     paintingKurus: total - productionShare,
   };
 }
+
+/**
+ * Türkçe biçimli para girişini kuruşa çevirir. Geçersizse `NaN`.
+ *
+ * Saf modülde, çünkü bunu YANLIŞ yapmak doğrudan DB'ye yanlış fiyat yazar ve
+ * test edilebilir olması gerekir. Naif `parseFloat(s.replace(",", "."))`
+ * yaklaşımı Türkçe binlik ayracını ondalık nokta sanıyordu: bir admin ₺2.400
+ * için "2.400" yazdığında ürün **₺2,40** olarak kaydediliyordu.
+ *
+ * Kabul edilen biçimler:
+ *   "1234" · "1234.56" · "1234,56"        → düz
+ *   "1.234" · "1.234.567" · "1.234,56"    → binlik ayraçlı (TR)
+ * Nokta ayracının anlamı son grubun uzunluğundan çözülür: tam 3 haneli son grup
+ * binlik ayracıdır ("2.400" → 2400), 1–2 haneli ise ondalıktır ("1.50" → 1,50).
+ * Türkçe fiyat girişinde bu ayrım pratikte belirsizlik bırakmaz.
+ */
+export function parseTryToKurus(input: string): number {
+  const raw = input.trim().replace(/\s+/g, "");
+  if (!raw) return NaN;
+  // Yalnızca rakam, nokta ve virgül; en fazla bir virgül.
+  if (!/^\d[\d.]*(,\d+)?$/.test(raw)) return NaN;
+
+  let normalized: string;
+  if (raw.includes(",")) {
+    // Virgül varsa ondalık ayracı odur; noktalar binlik ayracıdır.
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else {
+    const parts = raw.split(".");
+    if (parts.length === 1) {
+      normalized = raw;
+    } else if (parts.length > 2 || parts[parts.length - 1].length === 3) {
+      // "1.234.567" ya da "2.400" → binlik ayracı.
+      normalized = parts.join("");
+    } else {
+      // "1.50" → ondalık nokta.
+      normalized = raw;
+    }
+  }
+
+  // Kuruşa çevirmeyi float üzerinden YAPMA: `parseFloat("1,005") * 100`
+  // IEEE754'te 100.4999… verir ve ₺1,005 sessizce 100 kuruşa yuvarlanır.
+  // Tam sayı aritmetiğiyle tam ve öngörülebilir olur.
+  const [intStr, fracStr = ""] = normalized.split(".");
+  if (intStr.length > 12) return NaN; // saçma uzunluk — güvenli tam sayı sınırı
+  const intPart = parseInt(intStr || "0", 10);
+  if (!Number.isInteger(intPart)) return NaN;
+  const kurusFrac = parseInt((fracStr + "00").slice(0, 2), 10);
+  if (!Number.isInteger(kurusFrac)) return NaN;
+  const thirdDigit = fracStr.charCodeAt(2) - 48;
+  const roundUp = thirdDigit >= 5 && thirdDigit <= 9 ? 1 : 0;
+  return intPart * 100 + kurusFrac + roundUp;
+}

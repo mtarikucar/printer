@@ -13,7 +13,7 @@
  */
 export const MANUFACTURER_ONBOARDING_TR = `# Üretici Ortaklık Sözleşmesi ve Bilgilendirme
 
-**Sürüm: 2.0 — Yürürlük tarihi: 1 Eylül 2026**
+**Sürüm: 3.0 — Yürürlük tarihi: 16 Eylül 2026**
 
 Bu metin, **Figurunica** platformu ("Platform") ile üretici ağına başvuran ve
 başvuruyu onaylayarak ("Üretici") aşağıdaki şartlar altında hizmet vermeyi
@@ -533,9 +533,13 @@ Platform bu istisnayı yazılı bildirimle her zaman sona erdirebilir.
 
 - Her sipariş için Üreticiye **net üretici payı** ödenir. Net pay, sipariş
   tutarından **Platform hizmet bedeli (komisyon)** düşülerek hesaplanır.
-  **Güncel Platform komisyonu %35, üreticinin net payı ise %65'tir.**
-- **Hak ediş tabanı:** Net pay, panelinizde o sipariş için gösterilen **sipariş
-  tutarı** üzerinden hesaplanır. Bu tutar **KDV dâhil** perakende tutardır;
+  **Güncel Platform komisyonu %40, üreticinin net payı ise %60'tır.**
+- **Hak ediş tabanı:** Ürünün fiyatı, türü belirtilmiş kalemlerden oluşur —
+  **üretim** kalemleri Üreticinin, **boyama** kalemleri boyacının hak ediş
+  tabanıdır ve iki tabanın toplamı sipariş tutarına eşittir. Net payınız,
+  panelinizde o sipariş için gösterilen **hak ediş tabanı** üzerinden
+  hesaplanır; boyama içermeyen siparişlerde bu taban sipariş tutarının
+  tamamıdır. Bu tutar **KDV dâhil** perakende tutardır;
   ayrıca bir KDV eklenmez veya düşülmez. Hediye kartı, havale indirimi veya
   kampanya uygulanan siparişlerde taban, **indirim öncesi sipariş tutarıdır**;
   indirimi Platform karşılar ve net payınızdan düşülmez. Birden çok satıcıdan

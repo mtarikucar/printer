@@ -16,6 +16,7 @@ import {
 } from "@/lib/upload-with-progress";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import { uploadLargeFile } from "@/lib/upload-large-file";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import {
   SIZE_PRESETS_CM,
   SIZE_TEXT_MAX,
@@ -35,6 +36,7 @@ import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
 interface PaintingData {
   needsPainting: boolean;
   paintingPriceKurus: number;
+  productionBaseKurus: number | null;
   painterStatus: string | null;
   qcRound: number;
   assignedAt: string | null;
@@ -117,6 +119,7 @@ interface OrderData {
   painterStatus: string | null;
   needsPainting: boolean;
   paintingPriceKurus: number;
+  productionBaseKurus: number | null;
   productTitleSnapshot: string | null;
   email: string;
   customerName: string;
@@ -2017,7 +2020,20 @@ export function OrderDetailClient({ data, locale }: Props) {
             <p className="mt-2 rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-900">
               ⚠ Bu işlem hem <strong>boyacıyı</strong> hem <strong>üreticiyi</strong> çıkarır ve
               sipariş tekrar atama kuyruğuna (onaylı) döner. Üreticinin baskı hakedişi
-              {" "}(<strong>{formatCurrency(Math.max(0, order.amountKurus - order.paintingPriceKurus), loc)}</strong>
+              {" "}(<strong>
+                {formatCurrency(
+                  manufacturerBaseKurus({
+                    amountKurus: order.amountKurus,
+                    productionBaseKurus: order.productionBaseKurus,
+                    paintingPriceKurus: order.paintingPriceKurus,
+                    // Bu kart yalnızca sipariş bir boyacıdayken gösteriliyor,
+                    // yani taban her zaman üretim payıdır.
+                    painterId: "handed-off",
+                    paintsInHouse: false,
+                  }),
+                  loc
+                )}
+              </strong>
               {" "}brüt) geri alınır; yeni bir üretici sıfırdan basar. Hakediş zaten
               ödenmişse (payout kapanmış) işlem reddedilir — iade akışını kullanın.
             </p>

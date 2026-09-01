@@ -8,7 +8,7 @@
  */
 export const PAINTER_ONBOARDING_TR = `# Boyacı Ortaklık Sözleşmesi ve Bilgilendirme
 
-**Sürüm: 2.0 — Yürürlük tarihi: 1 Eylül 2026**
+**Sürüm: 3.0 — Yürürlük tarihi: 16 Eylül 2026**
 
 Bu metin, **Figurunica** platformu ("Platform") ile boyacı ağına başvuran ve
 başvuruyu onaylayarak ("Boyacı") aşağıdaki şartlar altında **profesyonel figürin
@@ -129,9 +129,13 @@ edersiniz; yanlış/yanıltıcı beyan, hesabın askıya alınması veya feshi s
 
 - Boyacının hak edişi, siparişteki **boyama bedeli (profesyonel boyama payı)**
   üzerinden hesaplanır; baskı payı üreticiye, boyama payı ise Boyacıya aittir.
+- **Boyama bedeli nasıl belirlenir:** Ürünün fiyatı, türü belirtilmiş kalemlerden
+  oluşur — **üretim** kalemleri üreticinin, **boyama** kalemleri Boyacının hak
+  ediş tabanıdır. İki taban toplamı sipariş tutarına eşittir; hak ediş tabanınız,
+  işi kabul etmeden önce sipariş detay ekranında gösterilir.
 - Her tamamlanan iş için, boyama bedelinden **Platform hizmet bedeli (komisyon)**
-  düşülerek **net boyacı payı** ödenir. **Güncel Platform komisyonu %35, boyacının
-  net payı ise %65'tir.** Komisyon oranı ve her işin net payı panelde şeffaf
+  düşülerek **net boyacı payı** ödenir. **Güncel Platform komisyonu %40, boyacının
+  net payı ise %60'tır.** Komisyon oranı ve her işin net payı panelde şeffaf
   biçimde gösterilir; oran değişirse önceden bildirilir.
 - Net payınız, işi **QC onayından geçirip müşteriye kargoladığınızda** tahakkuk
   eder.

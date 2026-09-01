@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orders, manufacturers, painters, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { accrueEarning } from "@/lib/services/payouts";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
@@ -52,7 +53,8 @@ export async function POST(
     where: and(eq(orders.id, id), eq(orders.manufacturerId, session.manufacturerId)),
     columns: {
       id: true, orderNumber: true, userId: true, amountKurus: true,
-      paintingPriceKurus: true, needsPainting: true, manufacturerStatus: true,
+      paintingPriceKurus: true, productionBaseKurus: true,
+      needsPainting: true, manufacturerStatus: true,
       painterStatus: true,
     },
   });
@@ -121,7 +123,15 @@ export async function POST(
     .catch((e) => console.error("manufacturerActions send_to_painter failed", e));
 
   // Manufacturer's earning accrues now on the print portion (idempotent).
-  const printBaseKurus = Math.max(0, order.amountKurus - order.paintingPriceKurus);
+  // `painterId` is set (we just handed off), so the base is the production
+  // kalem total — never the painting share, which is the painter's.
+  const printBaseKurus = manufacturerBaseKurus({
+    amountKurus: order.amountKurus,
+    productionBaseKurus: order.productionBaseKurus,
+    paintingPriceKurus: order.paintingPriceKurus,
+    painterId: painter.id,
+    paintsInHouse: false,
+  });
   await accrueEarning(order.id, session.manufacturerId, printBaseKurus).catch(
     (e) => console.error("accrueEarning (print portion) failed (non-fatal)", e)
   );

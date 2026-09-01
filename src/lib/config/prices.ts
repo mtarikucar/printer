@@ -201,11 +201,20 @@ export function allocatePaytrBasket(args: {
 }
 
 // ─── Finance (Faz 2) ────────────────────────────────────────────────────────
-// Platform commission: the share of each paid order the platform keeps; the
-// manufacturer/painter is paid the remainder. Basis points (3500 = 35%). Tune
-// freely — but keep the manufacturer + painter onboarding agreements in sync
-// (they state the rate explicitly).
-export const PLATFORM_COMMISSION_RATE_BPS = 3500;
+// Platform commission: the share of each partner's EARNING BASE the platform
+// keeps; the manufacturer/painter is paid the remainder. Basis points
+// (4000 = 40%, partner net 60%).
+//
+// Since the kalem (cost-line) model the two bases are explicit and always sum
+// to the order total (config/cost-lines.ts), so the platform's take is exactly
+// this rate of the order — and the partners' combined net can never exceed it.
+//
+// Changing this is a PARTNER CONTRACT change: keep manufacturer-onboarding.ts +
+// painter-onboarding.ts in sync (they state the rate explicitly), and note the
+// manufacturer agreement promises 15 days' advance notice. In-flight orders are
+// protected by the rate frozen on `orders.commissionRateBps` at accept — read
+// by BOTH accrueEarning and accruePainterEarning.
+export const PLATFORM_COMMISSION_RATE_BPS = 4000;
 
 // Turkish VAT (KDV) applied to customer invoices. Catalogue prices are
 // KDV-inclusive, so the invoice breaks the paid total into base + KDV.
@@ -237,7 +246,7 @@ export const UPLOAD_MODEL_PER_CM3_KURUS: Record<FigurineMaterial, number> = {
   filament: 900, // ₺9 / cm³
 };
 // Floors must at least cover packaging + free shipping (Yurtiçi ~₺100) on top
-// of the manufacturer's 70% share — a ₺99 print order would ship at a loss.
+// of the manufacturer's 60% share — a ₺99 print order would ship at a loss.
 export const UPLOAD_MODEL_MIN_KURUS: Record<FigurineMaterial, number> = {
   resin: 19900, // ₺199 floor
   filament: 14900, // ₺149 floor

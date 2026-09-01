@@ -251,7 +251,7 @@ export function computeSelectionPrice(
   return {
     // Floor at 0: a negative option-choice delta must never drive a line price
     // below zero. Otherwise one line would net DOWN the collected cart total
-    // while its seller's sub-order (and 65% payout) is still booked at its own
+    // while its seller's sub-order (and 60% payout) is still booked at its own
     // amount — a cross-seller subsidy where the platform pays out more than it
     // collected. A cheaper option is fine; a negative-priced line is not.
     unitPriceKurus: Math.max(0, total),

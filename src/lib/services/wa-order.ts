@@ -3,8 +3,16 @@ import { db } from "@/lib/db";
 import { agentOrderSpecs, orderDrafts, waConversations } from "@/lib/db/schema";
 import { buildDraftReference } from "./order-draft";
 import { resolveOrCreateGuestUser } from "./guest-user";
-import { itemPriceKurus, calculateUpsellAmount, MAX_AMOUNT_KURUS } from "@/lib/config/prices";
+import {
+  itemPriceKurus,
+  calculateUpsellAmount,
+  MAX_AMOUNT_KURUS,
+  finishNeedsPainter,
+  paintingPortionKurus,
+} from "@/lib/config/prices";
+import { orderNeedsPainting } from "@/lib/services/earning-base";
 import { priceKindForStyle } from "@/lib/create/design-templates";
+import { coerceFinishForStyle } from "@/lib/validators/order";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { CONTENT_CONSENT_VERSION } from "@/lib/config/content-consent";
 
@@ -174,6 +182,32 @@ export async function createWhatsAppDraft(
   const reference = buildDraftReference();
   const havaleDiscountKurus = calculateHavaleDiscount(amountKurus);
 
+  // Kalem tabanları. Bu kolonlar burada HİÇ yazılmıyordu: bir `hand_painted`
+  // WhatsApp siparişi needsPainting=false ile promote oluyor, hiçbir boyacıya
+  // atanamıyor (send-to-painter ve assign-painter bayrak olmadan reddediyor) ve
+  // üretici tutarın TAMAMI üzerinden tahakkuk ederek boyacının payını yutuyordu.
+  //
+  // Fiyat türü kapısı /api/orders ile birebir aynı olmak ZORUNDA: sabit fiyatlı
+  // Creative Lab ürünlerinde (anahtarlık ₺149) boyama payı tahsil edilmiyor.
+  // `finish` varsayılanı "hand_painted" olduğu için bu kapı olmadan ₺149'luk bir
+  // siparişe ₺1.000 boyama payı yazılır — iki taban toplamı sipariş tutarını
+  // aşar ve boyacıya ₺600 ödenir.
+  // Yüzeyi fiyat türüne göre KISITLA. Bu yol createOrderSchema'yı atladığı için
+  // modelin yazdığı yüzeye güvenilemez: figüre "paintable_kit" yazılırsa boyama
+  // payı üreticinin tabanına gömülür (müşteri ₺3.499'a boyamayı ödemiştir),
+  // sabit fiyatlı bir anahtarlığa "hand_painted" yazılırsa tahsil edilmemiş bir
+  // boyacı payı doğar. Web ile aynı tek kaynak: FINISHES_BY_KIND.
+  const finishValue = coerceFinishForStyle(
+    spec.style!,
+    spec.finish
+  ) as OrderFinish;
+  const needsPainting =
+    finishNeedsPainter(finishValue) && priceKindForStyle(spec.style!) === "figure";
+  const paintingPriceKurus = needsPainting
+    ? Math.min(paintingPortionKurus(finishValue), amountKurus)
+    : 0;
+  const productionBaseKurus = Math.max(0, amountKurus - paintingPriceKurus);
+
   const [draft] = await db
     .insert(orderDrafts)
     .values({
@@ -193,7 +227,10 @@ export async function createWhatsAppDraft(
       // The finish column is an enum; the spec holds free text from the model,
       // so anything unrecognised falls back to the catalogue default rather
       // than being written through.
-      finish: (spec.finish as OrderFinish | undefined) ?? "hand_painted",
+      finish: finishValue,
+      paintingPriceKurus,
+      productionBaseKurus,
+      needsPainting: orderNeedsPainting(paintingPriceKurus),
       upsells: spec.upsells ?? [],
       upsellAmountKurus: calculateUpsellAmount(spec.upsells ?? []),
       previewId: spec.previewId!,

@@ -8,6 +8,8 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { normalizePhone } from "@/lib/phone";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { normalizeSizeInput, sizeDisplayTr } from "@/lib/config/sizes";
+import { finishNeedsPainter } from "@/lib/config/prices";
+import { orderNeedsPainting } from "@/lib/services/earning-base";
 
 export async function POST(
   request: NextRequest,
@@ -106,8 +108,43 @@ export async function POST(
     if (!FINISHES.includes(body.finish)) {
       return NextResponse.json({ error: "Geçersiz yüzey" }, { status: 400 });
     }
+    // `finish` is a SPEC field; the money split lives in the kalem columns
+    // (productionBaseKurus / paintingPriceKurus), frozen when the customer
+    // paid. This route must never move money on a paid order — but it also
+    // must not leave the two contradicting each other, which is exactly what
+    // it used to do: setting "El Boyaması" on an order carrying no painting
+    // share left it unroutable to any painter (send-to-painter and
+    // assign-painter both refuse without needsPainting) while the manufacturer
+    // accrued the whole amount.
+    const wantsPainter = finishNeedsPainter(body.finish);
+    const changingFinish = body.finish !== order.finish;
+    // Yalnızca yüzeyi GERÇEKTEN değiştiren bir düzenleme engellenir. Guard'ı
+    // "mevcut duruma" bakarak kurmak, kalem modelinden ÖNCE yazılmış her
+    // hand_painted + boyama payı sıfır siparişi (eski WhatsApp ve manuel
+    // siparişlerin tamamı) kalıcı olarak düzenlenemez hâle getiriyordu —
+    // admin artık adres ya da boyut bile düzeltemezdi.
+    if (changingFinish && wantsPainter && order.paintingPriceKurus <= 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Bu sipariş boyama kalemi olmadan satıldı; yüzeyi el boyamasına çevirmek boyacı payı oluşturmaz. Boyama bedeli için siparişi boyama kalemiyle yeniden oluşturun.",
+        },
+        { status: 400 }
+      );
+    }
+    if (changingFinish && !wantsPainter && order.painterId) {
+      return NextResponse.json(
+        {
+          error:
+            "Sipariş bir boyacıya devredilmiş durumda; yüzey boyamasız bir seçeneğe çevrilemez. Önce boyacıdan geri alın.",
+        },
+        { status: 400 }
+      );
+    }
     updates.finish = body.finish;
     changedFields.push("finish");
+    // Keep the routing flag in lockstep with the money it is derived from.
+    updates.needsPainting = orderNeedsPainting(order.paintingPriceKurus);
   }
   if (body.attributes !== undefined) {
     if (!Array.isArray(body.attributes) || body.attributes.length > 12) {

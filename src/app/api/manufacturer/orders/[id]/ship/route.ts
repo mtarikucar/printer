@@ -6,6 +6,7 @@ import { createShipOrderSchema } from "@/lib/validators/order";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { accrueEarning } from "@/lib/services/payouts";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { sendSms } from "@/lib/services/sms";
 import { emitOrderChanged } from "@/lib/realtime/emit";
@@ -84,7 +85,21 @@ export async function POST(
 
     // Faz 2: accrue the manufacturer's earning for this completed order
     // (idempotent on orderId; non-fatal if it fails).
-    await accrueEarning(order.id, session.manufacturerId, order.amountKurus).catch(
+    //
+    // The ship gate above guarantees one of two shapes, and the kalem base
+    // resolves each correctly: an order with no painting share (base = the
+    // production total = the whole amount), or one this manufacturer painted
+    // in house without handing off (base = production + painting = the whole
+    // amount). It is never the full amount on an order a painter is doing —
+    // `isNull(orders.painterId)` in the gate makes that unreachable.
+    const earningBaseKurus = manufacturerBaseKurus({
+      amountKurus: order.amountKurus,
+      productionBaseKurus: order.productionBaseKurus,
+      paintingPriceKurus: order.paintingPriceKurus,
+      painterId: order.painterId,
+      paintsInHouse: manufacturer.paintsInHouse,
+    });
+    await accrueEarning(order.id, session.manufacturerId, earningBaseKurus).catch(
       (e) => console.error("accrueEarning failed (non-fatal)", e)
     );
 

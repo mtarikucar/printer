@@ -84,6 +84,7 @@ export default async function PainterJobsPage({
         modifiers: true,
         painterStatus: true,
         paintingPriceKurus: true,
+        commissionRateBps: true,
         assignedToPainterAt: true,
         // The painter holds the physical figure and ships it themselves, yet had
         // none of the brief: no colour spec, no reference image, no note, and no
@@ -153,7 +154,11 @@ export default async function PainterJobsPage({
           paintingPriceKurus: o.paintingPriceKurus,
           assignedAt: o.assignedToPainterAt?.toISOString() ?? null,
           material: o.material,
-          commissionRateBps: PLATFORM_COMMISSION_RATE_BPS,
+          // The rate frozen on the order, not the live constant — the painter
+          // agreement promises the rate is fixed at accept and that changes are
+          // not retroactive. Showing the live rate silently repriced in-flight
+          // jobs on screen. NULL only on pre-freeze rows.
+          commissionRateBps: o.commissionRateBps ?? PLATFORM_COMMISSION_RATE_BPS,
           handoffCarrier: o.painterHandoffCarrier,
           handoffTrackingNumber: o.painterHandoffTrackingNumber,
           receivedAt: o.receivedByPainterAt?.toISOString() ?? null,

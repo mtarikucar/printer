@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, painterActions, painters } from "@/lib/db/schema";
 import { accrueEarning } from "@/lib/services/payouts";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
@@ -52,6 +53,7 @@ export async function POST(
       userId: true,
       amountKurus: true,
       paintingPriceKurus: true,
+      productionBaseKurus: true,
       needsPainting: true,
       manufacturerId: true,
       manufacturerStatus: true,
@@ -185,10 +187,13 @@ export async function POST(
   // re-assignment after a decline does not double-pay; the revoke path deletes
   // the reversed row first, so a genuine re-accrual still lands.
   if (order.manufacturerId) {
-    const printBaseKurus = Math.max(
-      0,
-      order.amountKurus - order.paintingPriceKurus
-    );
+    const printBaseKurus = manufacturerBaseKurus({
+      amountKurus: order.amountKurus,
+      productionBaseKurus: order.productionBaseKurus,
+      paintingPriceKurus: order.paintingPriceKurus,
+      painterId: painter.id,
+      paintsInHouse: false,
+    });
     await accrueEarning(order.id, order.manufacturerId, printBaseKurus).catch(
       (e) => console.error("accrueEarning (print portion) failed (non-fatal)", e)
     );

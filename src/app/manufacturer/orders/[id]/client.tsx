@@ -52,6 +52,7 @@ interface OrderData {
   status: string;
   manufacturerStatus: string | null;
   needsPainting: boolean;
+  handedToPainter: boolean;
   painterStatus: string | null;
   paintsInHouse: boolean;
   qcRound: number;
@@ -632,16 +633,20 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   minimumFractionDigits: 2,
                 })}
                 )
-                {order.needsPainting && !order.paintsInHouse
+                {order.needsPainting && (order.handedToPainter || !order.paintsInHouse)
                   ? " · boyama bedeli hariç (baskı payı)"
                   : ""}
               </p>
               <p className="mt-1 text-xs text-emerald-800/60">
-                Hak ediş, siparişi kargoladığınızda
-                {order.needsPainting && !order.paintsInHouse
-                  ? " (boyamalı siparişlerde boyacıya devrettiğinizde)"
-                  : ""}{" "}
-                tahakkuk eder.
+                {/* Once the job is with a painter the manufacturer can no longer
+                    ship it (the ship gate blocks any order with a painterId), so
+                    "accrues when you ship" would be false — the print portion
+                    already accrued at hand-off. */}
+                {order.handedToPainter
+                  ? "Baskı payınız, işi boyacıya devrettiğinizde tahakkuk etti."
+                  : order.needsPainting && !order.paintsInHouse
+                    ? "Hak ediş, işi boyacıya devrettiğinizde tahakkuk eder."
+                    : "Hak ediş, siparişi kargoladığınızda tahakkuk eder."}
               </p>
             </div>
           )}

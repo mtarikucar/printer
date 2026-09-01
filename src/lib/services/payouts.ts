@@ -15,11 +15,36 @@ export async function accrueEarning(
   // Use the rate frozen when the manufacturer accepted the order; fall back to
   // the current rate for orders accepted before the column existed.
   const [row] = await db
-    .select({ rate: orders.commissionRateBps })
+    .select({
+      rate: orders.commissionRateBps,
+      amountKurus: orders.amountKurus,
+      productionBaseKurus: orders.productionBaseKurus,
+      paintingPriceKurus: orders.paintingPriceKurus,
+    })
     .from(orders)
     .where(eq(orders.id, orderId))
     .limit(1);
   const rateBps = row?.rate ?? PLATFORM_COMMISSION_RATE_BPS;
+
+  // Money tripwire. The kalem model's whole guarantee is that the two earning
+  // bases sum to the order total; if that ever stops holding, partner payouts
+  // can drift past the price again — the exact failure this model replaced.
+  // Loud log, never a throw: refusing to accrue would leave a shipped order
+  // unpaid, which is worse than an over/under-payment we can see and correct.
+  if (row?.productionBaseKurus != null) {
+    const split = row.productionBaseKurus + row.paintingPriceKurus;
+    if (split !== row.amountKurus) {
+      console.error(
+        `[kalem] order ${orderId}: production(${row.productionBaseKurus}) + painting(${row.paintingPriceKurus}) = ${split} ≠ amount(${row.amountKurus})`
+      );
+    }
+    if (grossKurus > row.amountKurus) {
+      console.error(
+        `[kalem] order ${orderId}: manufacturer gross ${grossKurus} exceeds order amount ${row.amountKurus}`
+      );
+    }
+  }
+
   const e = computeEarning(grossKurus, rateBps);
   await db
     .insert(manufacturerEarnings)

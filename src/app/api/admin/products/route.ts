@@ -7,6 +7,10 @@ import { createProductSchema } from "@/lib/validators/product";
 import { resolveProductCategoryId } from "@/lib/services/categories";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { generateProductSlug } from "@/lib/services/slug";
+import {
+  validateCostLines,
+  replaceCostLines,
+} from "@/lib/services/product-cost-lines";
 
 // List products, optionally filtered by ?status=pending_review (moderation
 // queue) or any product status.
@@ -36,6 +40,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const input = createProductSchema(locale).parse(body);
+
+    // Kalem kırılımı fiyatı OLUŞTURUR: toplamı fiyata eşit olmak zorunda.
+    // Eşit değilse iki hakediş tabanı tutarı tutmaz ve partner payları
+    // fiyattan sapar — bu yüzden ürün hiç yazılmadan reddediliyor.
+    const costLineError = validateCostLines(input.costLines ?? [], input.priceKurus);
+    if (costLineError) {
+      return NextResponse.json({ error: costLineError }, { status: 400 });
+    }
+
     const slug = await generateProductSlug(input.title);
 
     let categoryId: string | null;
@@ -64,11 +77,23 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
+    if (input.costLines?.length) {
+      await replaceCostLines(created.id, input.costLines);
+    }
+
     return NextResponse.json({ product: created });
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      const errors = (error as Error & { errors?: unknown }).errors;
-      return NextResponse.json({ error: errors }, { status: 400 });
+      // zod v4 sorunları `.issues`'ta tutar; `.errors` undefined'dır — bu yüzden
+      // doğrulama hatası istemciye boş dönüyor ve kullanıcı neyin yanlış
+      // olduğunu asla göremiyordu (yalnızca genel "kaydedilemedi").
+      const issues = (error as Error & {
+        issues?: Array<{ path?: (string | number)[]; message?: string }>;
+      }).issues;
+      const message =
+        issues?.map((i) => i.message).filter(Boolean).join(" · ") ||
+        "Gönderilen bilgiler geçersiz.";
+      return NextResponse.json({ error: message, issues }, { status: 400 });
     }
     console.error("Admin product create failed:", error);
     return NextResponse.json({ error: "Product create failed" }, { status: 500 });

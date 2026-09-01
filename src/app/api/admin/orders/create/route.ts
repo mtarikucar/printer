@@ -11,6 +11,8 @@ import {
 } from "@/lib/config/sizes";
 import { buildDraftReference } from "@/lib/services/order-draft";
 import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
+import { COST_LINE_KINDS, splitCostLines } from "@/lib/config/cost-lines";
+import { orderNeedsPainting } from "@/lib/services/earning-base";
 
 /**
  * Admin creates an order on a customer's behalf (e.g. an order negotiated over
@@ -26,6 +28,11 @@ const lineItemSchema = z.object({
   description: z.string().trim().min(1).max(120),
   unitPriceTry: z.number().positive().max(1_000_000),
   quantity: z.number().int().min(1).max(999),
+  // Kalem türü — bu satırın parasının kime ait olduğunu söyler:
+  // production → üreticinin hakediş tabanı, painting → boyacınınki.
+  // Eski istemciler (ve /pay linki paylaşılmış eski taslaklar) tür göndermez;
+  // varsayılan 'production', yani kalem modelinden önceki davranış.
+  kind: z.enum(COST_LINE_KINDS).optional().default("production"),
 });
 
 const addressSchema = z.object({
@@ -148,8 +155,38 @@ export async function POST(request: NextRequest) {
   const lineItems = input.lineItems.map((li) => ({
     name: li.quantity > 1 ? `${li.description} × ${li.quantity}` : li.description,
     priceKurus: Math.round(li.unitPriceTry * 100) * li.quantity,
+    kind: li.kind,
   }));
   const amountKurus = lineItems.reduce((s, li) => s + li.priceKurus, 0);
+
+  // Kalem türlerinden iki hakediş tabanı. Toplamları TANIM GEREĞİ amountKurus'a
+  // eşit (ikisi de aynı kalem listesinden geliyor), bu yüzden partner payları
+  // sipariş tutarını geçemez. Bu, manuel siparişleri ilk kez boyacı hattına
+  // sokan şey: önceden needsPainting hiç yazılmıyordu, o yüzden "El Boyaması"
+  // seçilse bile sipariş boyacıya devredilemiyor ve boyama payı üreticinin
+  // tabanına gömülüyordu.
+  const { productionKurus, paintingKurus } = splitCostLines(
+    lineItems.map((li) => ({ kind: li.kind, amountKurus: li.priceKurus }))
+  );
+
+  // Yüzey el boyaması ise boyama kalemi ZORUNLU. İstemci de kontrol ediyor ama
+  // istemci kontrolü atlanabilir; boyacı payı olmadan yazılan bir el boyaması
+  // siparişi hiçbir boyacıya yönlendirilemez (send-to-painter ve assign-painter
+  // boyama payı olmayanı reddeder) ve müşterinin ödediği boyama parası
+  // üreticinin tabanına gömülür. Bu, kalem modelinin kapatmak için var olduğu
+  // hatanın ta kendisi — sunucuda da kapatılmalı.
+  if (
+    (input.finish === "hand_painted" || input.finish === "luxe_display") &&
+    paintingKurus <= 0
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Yüzey el boyaması seçildi ama boyama kalemi yok. Boyacının hakediş tabanı oluşmaz — bir 'Boyama' kalemi ekleyin ya da yüzeyi değiştirin.",
+      },
+      { status: 400 }
+    );
+  }
   // Upper bound keeps the total within Postgres int4 (amount_kurus column) and
   // turns an otherwise opaque "integer out of range" 500 into a clear 400.
   // Shared with customer checkout via config/prices.ts so the two can't drift.
@@ -237,6 +274,9 @@ export async function POST(request: NextRequest) {
     photoKeys: input.photoKeys && input.photoKeys.length > 0 ? input.photoKeys : null,
     shippingAddress: input.shippingAddress,
     amountKurus,
+    productionBaseKurus: productionKurus,
+    paintingPriceKurus: paintingKurus,
+    needsPainting: orderNeedsPainting(paintingKurus),
     paymentMethod: input.paymentMethod,
     status: "pending",
     bankTransferDeadline,

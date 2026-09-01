@@ -6,6 +6,13 @@ import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { CategoryPicker } from "@/components/category-picker";
+import {
+  CostLinesEditor,
+  costLinesTotal,
+  emptyCostLine,
+  toCostLinePayload,
+  type CostLineRow,
+} from "@/components/products/cost-lines-editor";
 
 export function NewProductClient({ locale: _locale }: { locale: string }) {
   void _locale;
@@ -14,7 +21,11 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priceTry, setPriceTry] = useState("");
+  // Fiyat ayrı bir alan değil: kalemlerin toplamı. Kalem türü (üretim /
+  // boyama) o payın üreticiye mi boyacıya mı ait olduğunu belirler.
+  const [costLines, setCostLines] = useState<CostLineRow[]>([
+    emptyCostLine("production"),
+  ]);
   const [material, setMaterial] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [leadTimeDays, setLeadTimeDays] = useState("7");
@@ -25,21 +36,19 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
     e.preventDefault();
     setError(null);
 
-    const price = parseFloat(priceTry.replace(",", "."));
-    if (!Number.isFinite(price) || price <= 0) {
-      setError(
-        d["admin.products.priceInvalid" as keyof typeof d] ||
-          "Geçerli bir fiyat girin."
-      );
+    const priceKurus = costLinesTotal(costLines);
+    const costLinePayload = toCostLinePayload(costLines);
+    if (!costLinePayload || Number.isNaN(priceKurus) || priceKurus < 100) {
+      setError("Her kalem için geçerli bir tutar girin (toplam en az ₺1).");
       return;
     }
-    const priceKurus = Math.round(price * 100);
     const lead = parseInt(leadTimeDays, 10);
 
     const body: Record<string, unknown> = {
       title,
       description,
       priceKurus,
+      costLines: costLinePayload,
     };
     if (material) body.material = material;
     if (categoryId) body.categoryId = categoryId;
@@ -120,21 +129,16 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
           />
         </FormField>
 
-        <FormField
-          label={
-            d["admin.products.fieldPrice" as keyof typeof d] || "Fiyat (₺)"
-          }
-          required
-        >
-          <Input
-            type="number"
-            step="0.01"
-            min="1"
-            value={priceTry}
-            onChange={(e) => setPriceTry(e.target.value)}
-            required
-          />
-        </FormField>
+        <div>
+          <span className="block text-sm font-medium text-text-secondary mb-1.5">
+            Fiyat kalemleri<span className="text-error ml-0.5">*</span>
+          </span>
+          <p className="mb-2 text-xs text-gray-500">
+            Ürünün fiyatı bu kalemlerin toplamıdır. Kalem türü, o payın
+            üreticiye mi boyacıya mı hakediş olarak yazılacağını belirler.
+          </p>
+          <CostLinesEditor rows={costLines} onChange={setCostLines} disabled={submitting} />
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField

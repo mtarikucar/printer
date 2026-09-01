@@ -6,6 +6,10 @@ import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { createProductSchema } from "@/lib/validators/product";
 import { resolveProductCategoryId } from "@/lib/services/categories";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
+import {
+  validateCostLines,
+  replaceCostLines,
+} from "@/lib/services/product-cost-lines";
 
 /**
  * Seller product management. Only `active` (KYC-complete) manufacturers may
@@ -38,6 +42,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const input = createProductSchema(locale).parse(body);
 
+    const costLineError = validateCostLines(input.costLines ?? [], input.priceKurus);
+    if (costLineError) {
+      return NextResponse.json({ error: costLineError }, { status: 400 });
+    }
+
     let categoryId: string | null;
     try {
       categoryId = await resolveProductCategoryId(input.categoryId);
@@ -60,11 +69,23 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
+    if (input.costLines?.length) {
+      await replaceCostLines(created.id, input.costLines);
+    }
+
     return NextResponse.json({ product: created });
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      const errors = (error as Error & { errors?: unknown }).errors;
-      return NextResponse.json({ error: errors }, { status: 400 });
+      // zod v4 sorunları `.issues`'ta tutar; `.errors` undefined'dır — bu yüzden
+      // doğrulama hatası istemciye boş dönüyor ve kullanıcı neyin yanlış
+      // olduğunu asla göremiyordu (yalnızca genel "kaydedilemedi").
+      const issues = (error as Error & {
+        issues?: Array<{ path?: (string | number)[]; message?: string }>;
+      }).issues;
+      const message =
+        issues?.map((i) => i.message).filter(Boolean).join(" · ") ||
+        "Gönderilen bilgiler geçersiz.";
+      return NextResponse.json({ error: message, issues }, { status: 400 });
     }
     console.error("Product create failed:", error);
     return NextResponse.json({ error: "Product create failed" }, { status: 500 });

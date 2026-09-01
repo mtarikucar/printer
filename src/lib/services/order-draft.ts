@@ -213,6 +213,17 @@ export async function promoteDraftToOrder(
         const sellerId = groupItems[0].sellerManufacturerId;
         const groupAmount = groupAmounts[gi];
         const groupQty = groupItems.reduce((s, it) => s + it.quantity, 0);
+        // Kalem tabanları, THIS seller's own lines'tan. Satır bazında checkout
+        // anında dondurulduğu için ürünün kırılımı sonradan değişse bile
+        // hakediş müşterinin ödediği ana göre hesaplanır. Kırılımı olmayan
+        // satır (NULL) tutarının tamamını üretim payı sayar — kalem
+        // modelinden önceki davranış. İkisinin toplamı groupAmount'a EŞİT,
+        // yani alt siparişte de partner payları tutarı geçemez.
+        const groupProductionBase = groupItems.reduce(
+          (sum, it) => sum + (it.productionBaseKurus ?? it.lineTotalKurus),
+          0
+        );
+        const groupPainting = Math.max(0, groupAmount - groupProductionBase);
         const groupGiftCard = gcShares[gi];
         const groupHavale = havaleShares[gi];
         const title =
@@ -237,6 +248,9 @@ export async function promoteDraftToOrder(
             paymentMethod: draft.paymentMethod,
             paymentStatus: "succeeded",
             amountKurus: groupAmount,
+            productionBaseKurus: groupProductionBase,
+            paintingPriceKurus: groupPainting,
+            needsPainting: groupPainting > 0,
             giftCardAmountKurus: groupGiftCard,
             havaleDiscountKurus: groupHavale,
             paidAt: new Date(),
@@ -372,6 +386,7 @@ export async function promoteDraftToOrder(
         // the manufacturer knows to hand off to a painter after QC.
         needsPainting: draft.needsPainting,
         paintingPriceKurus: draft.paintingPriceKurus,
+        productionBaseKurus: draft.productionBaseKurus,
         paidAt: new Date(),
         // Marketplace fields copied from the draft.
         orderType: draft.orderType,

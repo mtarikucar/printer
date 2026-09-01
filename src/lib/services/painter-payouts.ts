@@ -31,11 +31,25 @@ export async function accruePainterEarning(
   grossKurus: number
 ): Promise<void> {
   const [row] = await db
-    .select({ rate: orders.commissionRateBps })
+    .select({
+      rate: orders.commissionRateBps,
+      amountKurus: orders.amountKurus,
+      paintingPriceKurus: orders.paintingPriceKurus,
+    })
     .from(orders)
     .where(eq(orders.id, orderId))
     .limit(1);
   const rateBps = row?.rate ?? PLATFORM_COMMISSION_RATE_BPS;
+
+  // Mirror of the manufacturer-side tripwire: the painter's base can never
+  // exceed the order, and must be the painting kalem total. Log, never throw —
+  // a shipped-but-unpaid painting job is worse than a visible mis-amount.
+  if (row && grossKurus > row.amountKurus) {
+    console.error(
+      `[kalem] order ${orderId}: painter gross ${grossKurus} exceeds order amount ${row.amountKurus}`
+    );
+  }
+
   const e = computeEarning(grossKurus, rateBps);
   await db
     .insert(painterEarnings)

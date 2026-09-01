@@ -46,6 +46,29 @@ const FINISHES_BY_KIND: Record<string, string[]> = {
  * the per-kind refine for the others. The figure default is `hand_painted` —
  * the finish the ₺3.499 base price actually pays for.
  */
+/**
+ * The finishes a given price kind may legitimately carry. Exported so the
+ * NON-web order writers (the WhatsApp agent, which never runs
+ * `createOrderSchema`) can enforce the same rule instead of trusting whatever
+ * the model wrote — a figure with `paintable_kit` silently buries the painting
+ * share in the manufacturer's base, and a flat Creative Lab item with
+ * `hand_painted` charges a painter share the customer never paid.
+ */
+export function allowedFinishesForStyle(style: unknown): string[] {
+  const slug =
+    typeof style === "string" && isValidTemplateSlug(style) ? style : DEFAULT_TEMPLATE_SLUG;
+  return FINISHES_BY_KIND[priceKindForStyle(slug)] ?? FIGURE_FINISHES;
+}
+
+/**
+ * Coerce a (possibly untrusted) finish to one this price kind allows, falling
+ * back to that kind's default. Same rule the web validator enforces.
+ */
+export function coerceFinishForStyle(style: unknown, finish: unknown): string {
+  const allowed = allowedFinishesForStyle(style);
+  return typeof finish === "string" && allowed.includes(finish) ? finish : allowed[0];
+}
+
 function defaultFinishForStyle(style: unknown): string {
   const slug = typeof style === "string" && isValidTemplateSlug(style) ? style : DEFAULT_TEMPLATE_SLUG;
   return (FINISHES_BY_KIND[priceKindForStyle(slug)] ?? FIGURE_FINISHES)[0];

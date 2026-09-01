@@ -12,6 +12,7 @@ import {
 } from "@/lib/config/prices";
 import { orderNeedsPainting } from "@/lib/services/earning-base";
 import { priceKindForStyle } from "@/lib/create/design-templates";
+import { coerceFinishForStyle } from "@/lib/validators/order";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { CONTENT_CONSENT_VERSION } from "@/lib/config/content-consent";
 
@@ -191,7 +192,15 @@ export async function createWhatsAppDraft(
   // `finish` varsayılanı "hand_painted" olduğu için bu kapı olmadan ₺149'luk bir
   // siparişe ₺1.000 boyama payı yazılır — iki taban toplamı sipariş tutarını
   // aşar ve boyacıya ₺600 ödenir.
-  const finishValue = (spec.finish as OrderFinish | undefined) ?? "hand_painted";
+  // Yüzeyi fiyat türüne göre KISITLA. Bu yol createOrderSchema'yı atladığı için
+  // modelin yazdığı yüzeye güvenilemez: figüre "paintable_kit" yazılırsa boyama
+  // payı üreticinin tabanına gömülür (müşteri ₺3.499'a boyamayı ödemiştir),
+  // sabit fiyatlı bir anahtarlığa "hand_painted" yazılırsa tahsil edilmemiş bir
+  // boyacı payı doğar. Web ile aynı tek kaynak: FINISHES_BY_KIND.
+  const finishValue = coerceFinishForStyle(
+    spec.style!,
+    spec.finish
+  ) as OrderFinish;
   const needsPainting =
     finishNeedsPainter(finishValue) && priceKindForStyle(spec.style!) === "figure";
   const paintingPriceKurus = needsPainting

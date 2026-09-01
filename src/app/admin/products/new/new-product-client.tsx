@@ -137,7 +137,7 @@ export function NewProductClient({ locale: _locale }: { locale: string }) {
             Ürünün fiyatı bu kalemlerin toplamıdır. Kalem türü, o payın
             üreticiye mi boyacıya mı hakediş olarak yazılacağını belirler.
           </p>
-          <CostLinesEditor rows={costLines} onChange={setCostLines} />
+          <CostLinesEditor rows={costLines} onChange={setCostLines} disabled={submitting} />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

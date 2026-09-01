@@ -6,6 +6,13 @@
 -- sipariş, eski hakediş kuralı aynen sürer (services/earning-base.ts).
 --
 -- Idempotent: bir kez uygulanmış bir veritabanında yeniden çalıştırılabilir.
+--
+-- ADD COLUMN ... (NULL, DEFAULT'suz) PG11+'ta tablo yeniden yazmaz; yine de
+-- kısa süreli ACCESS EXCLUSIVE kilit ister. Canlıda `orders` sürekli okunuyor:
+-- kilit hemen alınamazsa deploy'u dakikalarca bekletmek yerine hızlı başarısız
+-- olsun, operatör yoğunluk dışında yeniden denesin.
+SET lock_timeout = '5s';
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "product_cost_lines" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"product_id" uuid NOT NULL,

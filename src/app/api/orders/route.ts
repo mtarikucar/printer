@@ -575,9 +575,17 @@ async function handleCreateOrder(
     // they were inside the manufacturer's base.
     // A cart draft fans out into one order PER SELLER, and each sub-order
     // derives its own base from its own order_items rows at promotion — this
-    // draft-level total is the whole-cart figure, never an accrual base.
-    const productionBaseKurus = isCart
+    // draft-level pair is the whole-cart figure, never an accrual base. It is
+    // still kept internally consistent (production + painting === amountKurus)
+    // so the draft can't be read as a mis-split order.
+    const cartProductionBase = isCart
       ? cartLines.reduce((sum, l) => sum + l.productionBaseKurus, 0) + upsellAmountKurus
+      : 0;
+    const draftPaintingKurus = isCart
+      ? Math.max(0, amountKurus - cartProductionBase)
+      : paintingPriceKurus;
+    const productionBaseKurus = isCart
+      ? cartProductionBase
       : Math.max(0, amountKurus - paintingPriceKurus);
     // Every money column is pg int4. Bulk quantities make a total past that
     // ceiling reachable, and overflowing it surfaces as an opaque 500 mid-
@@ -807,8 +815,10 @@ async function handleCreateOrder(
           havaleDiscountKurus,
           upsells: upsellKeys.length > 0 ? upsellKeys : null,
           upsellAmountKurus,
-          needsPainting,
-          paintingPriceKurus,
+          // Cart: the draft mirrors the sum of its lines so the pair reconciles;
+          // each sub-order re-derives its own at promotion.
+          needsPainting: isCart ? draftPaintingKurus > 0 : needsPainting,
+          paintingPriceKurus: draftPaintingKurus,
           productionBaseKurus,
           paymentMethod: finalPaymentMethod,
           status: "pending",

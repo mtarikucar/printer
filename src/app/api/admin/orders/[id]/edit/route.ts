@@ -117,7 +117,13 @@ export async function POST(
     // assign-painter both refuse without needsPainting) while the manufacturer
     // accrued the whole amount.
     const wantsPainter = finishNeedsPainter(body.finish);
-    if (wantsPainter && order.paintingPriceKurus <= 0) {
+    const changingFinish = body.finish !== order.finish;
+    // Yalnızca yüzeyi GERÇEKTEN değiştiren bir düzenleme engellenir. Guard'ı
+    // "mevcut duruma" bakarak kurmak, kalem modelinden ÖNCE yazılmış her
+    // hand_painted + boyama payı sıfır siparişi (eski WhatsApp ve manuel
+    // siparişlerin tamamı) kalıcı olarak düzenlenemez hâle getiriyordu —
+    // admin artık adres ya da boyut bile düzeltemezdi.
+    if (changingFinish && wantsPainter && order.paintingPriceKurus <= 0) {
       return NextResponse.json(
         {
           error:
@@ -126,7 +132,7 @@ export async function POST(
         { status: 400 }
       );
     }
-    if (!wantsPainter && order.painterId) {
+    if (changingFinish && !wantsPainter && order.painterId) {
       return NextResponse.json(
         {
           error:

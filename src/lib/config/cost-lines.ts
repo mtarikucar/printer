@@ -131,46 +131,51 @@ export function allocateBases(args: {
  * yaklaşımı Türkçe binlik ayracını ondalık nokta sanıyordu: bir admin ₺2.400
  * için "2.400" yazdığında ürün **₺2,40** olarak kaydediliyordu.
  *
- * Kabul edilen biçimler:
- *   "1234" · "1234.56" · "1234,56"        → düz
- *   "1.234" · "1.234.567" · "1.234,56"    → binlik ayraçlı (TR)
- * Nokta ayracının anlamı son grubun uzunluğundan çözülür: tam 3 haneli son grup
- * binlik ayracıdır ("2.400" → 2400), 1–2 haneli ise ondalıktır ("1.50" → 1,50).
- * Türkçe fiyat girişinde bu ayrım pratikte belirsizlik bırakmaz.
+ * Kabul edilen biçimler — dilbilgisi KATI, çünkü bu alanın tek tehlikeli
+ * davranışı "bir şey anlamış gibi yapıp yanlış sayı üretmek":
+ *
+ *   1234        1234,56        → düz (virgül ondalık)
+ *   1234.56                    → düz (nokta ondalık, en fazla 2 hane)
+ *   1.234       1.234.567,89   → binlik ayraçlı (her grup TAM 3 hane)
+ *
+ * Bozuk gruplama ("1.2345", "10.20.30") ve 2 haneden uzun ondalık REDDEDİLİR —
+ * eskiden "1.2345" sessizce ₺1,23 oluyordu, ₺12.345 yazmak isteyen için
+ * 10.000 kat hata. Belirsiz girdide kullanıcı yeniden yazar; sessiz yanlış
+ * sayı üretmek her zaman daha kötüdür.
+ *
+ * Nokta, tam 3 haneli son grupta binlik ayracıdır ("2.400" → 2400); 1–2 haneli
+ * son grupta ondalıktır ("1.50" → 1,50). Türkçe fiyat girişinde bu ayrım
+ * pratikte belirsizlik bırakmaz.
  */
 export function parseTryToKurus(input: string): number {
   const raw = input.trim().replace(/\s+/g, "");
   if (!raw) return NaN;
-  // Yalnızca rakam, nokta ve virgül; en fazla bir virgül.
-  if (!/^\d[\d.]*(,\d+)?$/.test(raw)) return NaN;
 
-  let normalized: string;
-  if (raw.includes(",")) {
-    // Virgül varsa ondalık ayracı odur; noktalar binlik ayracıdır.
-    normalized = raw.replace(/\./g, "").replace(",", ".");
+  // Binlik ayraçlı ya da düz tam sayı, isteğe bağlı virgüllü ondalık.
+  const grouped = /^(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/.exec(raw);
+  // Düz sayı, nokta ondalıklı ("12.50"). Gruplama kuralı yukarıda önceliklidir.
+  const dotDecimal = /^(\d+)\.(\d{1,2})$/.exec(raw);
+
+  let intStr: string;
+  let fracStr: string;
+  if (grouped) {
+    intStr = grouped[1].replace(/\./g, "");
+    fracStr = grouped[2] ?? "";
+  } else if (dotDecimal) {
+    intStr = dotDecimal[1];
+    fracStr = dotDecimal[2];
   } else {
-    const parts = raw.split(".");
-    if (parts.length === 1) {
-      normalized = raw;
-    } else if (parts.length > 2 || parts[parts.length - 1].length === 3) {
-      // "1.234.567" ya da "2.400" → binlik ayracı.
-      normalized = parts.join("");
-    } else {
-      // "1.50" → ondalık nokta.
-      normalized = raw;
-    }
+    return NaN;
   }
 
-  // Kuruşa çevirmeyi float üzerinden YAPMA: `parseFloat("1,005") * 100`
-  // IEEE754'te 100.4999… verir ve ₺1,005 sessizce 100 kuruşa yuvarlanır.
-  // Tam sayı aritmetiğiyle tam ve öngörülebilir olur.
-  const [intStr, fracStr = ""] = normalized.split(".");
-  if (intStr.length > 12) return NaN; // saçma uzunluk — güvenli tam sayı sınırı
-  const intPart = parseInt(intStr || "0", 10);
+  // Güvenli tam sayı sınırı — saçma uzunluktaki girdi sessizce taşmasın.
+  if (intStr.length > 12) return NaN;
+
+  // Kuruşa çevirmeyi float üzerinden YAPMA: `parseFloat("1.005") * 100`
+  // IEEE754'te 100.4999… verir. Tam sayı aritmetiği tam ve öngörülebilirdir.
+  const intPart = parseInt(intStr, 10);
   if (!Number.isInteger(intPart)) return NaN;
   const kurusFrac = parseInt((fracStr + "00").slice(0, 2), 10);
   if (!Number.isInteger(kurusFrac)) return NaN;
-  const thirdDigit = fracStr.charCodeAt(2) - 48;
-  const roundUp = thirdDigit >= 5 && thirdDigit <= 9 ? 1 : 0;
-  return intPart * 100 + kurusFrac + roundUp;
+  return intPart * 100 + kurusFrac;
 }

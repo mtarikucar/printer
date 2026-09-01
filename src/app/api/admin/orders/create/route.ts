@@ -168,6 +168,25 @@ export async function POST(request: NextRequest) {
   const { productionKurus, paintingKurus } = splitCostLines(
     lineItems.map((li) => ({ kind: li.kind, amountKurus: li.priceKurus }))
   );
+
+  // Yüzey el boyaması ise boyama kalemi ZORUNLU. İstemci de kontrol ediyor ama
+  // istemci kontrolü atlanabilir; boyacı payı olmadan yazılan bir el boyaması
+  // siparişi hiçbir boyacıya yönlendirilemez (send-to-painter ve assign-painter
+  // boyama payı olmayanı reddeder) ve müşterinin ödediği boyama parası
+  // üreticinin tabanına gömülür. Bu, kalem modelinin kapatmak için var olduğu
+  // hatanın ta kendisi — sunucuda da kapatılmalı.
+  if (
+    (input.finish === "hand_painted" || input.finish === "luxe_display") &&
+    paintingKurus <= 0
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Yüzey el boyaması seçildi ama boyama kalemi yok. Boyacının hakediş tabanı oluşmaz — bir 'Boyama' kalemi ekleyin ya da yüzeyi değiştirin.",
+      },
+      { status: 400 }
+    );
+  }
   // Upper bound keeps the total within Postgres int4 (amount_kurus column) and
   // turns an otherwise opaque "integer out of range" 500 into a clear 400.
   // Shared with customer checkout via config/prices.ts so the two can't drift.

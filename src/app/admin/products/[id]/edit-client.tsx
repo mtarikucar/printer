@@ -8,6 +8,7 @@ import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { CategoryPicker } from "@/components/category-picker";
 import {
   CostLinesEditor,
+  costLineRowFromKurus,
   costLinesTotal,
   toCostLinePayload,
   type CostLineRow,
@@ -70,11 +71,10 @@ export function EditProductClient({
     product.costLines.length > 0
       ? product.costLines
       : [
-          {
-            kind: "production" as const,
-            label: "",
-            amountTry: (product.priceKurus / 100).toFixed(2).replace(".", ","),
-          },
+          costLineRowFromKurus({
+            kind: "production",
+            amountKurus: product.priceKurus,
+          }),
         ]
   );
   const [material, setMaterial] = useState(product.material ?? "");
@@ -381,7 +381,7 @@ export function EditProductClient({
             Ürünün fiyatı bu kalemlerin toplamıdır. Kalem türü, o payın
             üreticiye mi boyacıya mı hakediş olarak yazılacağını belirler.
           </p>
-          <CostLinesEditor rows={costLines} onChange={setCostLines} />
+          <CostLinesEditor rows={costLines} onChange={setCostLines} disabled={saving} />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

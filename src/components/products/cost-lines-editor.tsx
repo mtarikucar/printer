@@ -27,12 +27,33 @@ export interface CostLineRow {
   label: string;
   /** Serbest metin: kullanıcı "1.250,50" da yazabilir, "1250.5" da. */
   amountTry: string;
+  /**
+   * Kararlı React anahtarı. Satırları indeksle anahtarlamak, ortadan bir satır
+   * silindiğinde alttaki satırların girdi durumunu yukarı kaydırıyordu.
+   */
+  uid: string;
 }
+
+let uidSeq = 0;
+const nextUid = () => `cl-${uidSeq++}`;
 
 export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow => ({
   kind,
   label: "",
   amountTry: "",
+  uid: nextUid(),
+});
+
+/** Kayıtlı bir kalemi (kuruş) forma yüklenebilir satıra çevirir. */
+export const costLineRowFromKurus = (line: {
+  kind: CostLineKind;
+  label?: string | null;
+  amountKurus: number;
+}): CostLineRow => ({
+  kind: line.kind,
+  label: line.label ?? "",
+  amountTry: (line.amountKurus / 100).toFixed(2).replace(".", ","),
+  uid: nextUid(),
 });
 
 /**
@@ -70,6 +91,9 @@ export function toCostLinePayload(
   return out;
 }
 
+/** Sunucudaki `costLineSchema` üst sınırı (validators/product.ts). */
+export const MAX_COST_LINES = 20;
+
 const fmt = (kurus: number) =>
   (kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2 });
 
@@ -85,13 +109,24 @@ export function CostLinesEditor({
   const update = (i: number, patch: Partial<CostLineRow>) =>
     onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const remove = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
-  const add = (kind: CostLineKind) => onChange([...rows, emptyCostLine(kind)]);
+  const atLimit = rows.length >= MAX_COST_LINES;
+  const add = (kind: CostLineKind) => {
+    if (atLimit) return;
+    onChange([...rows, emptyCostLine(kind)]);
+  };
 
-  const total = costLinesTotal(rows);
-  const valid = !Number.isNaN(total);
+  // Henüz yazılmamış (boş) bir satır özeti kırmızıya çevirmemeli — kullanıcı
+  // "+ Boyama"ya bastığı anda tüm pay dökümünün hataya dönüşmesi kafa karıştırır.
+  // Yalnızca DOLU ama GEÇERSİZ satır hata sayılır.
+  const filled = rows.filter((r) => r.amountTry.trim() !== "");
+  const invalidRows = filled.filter((r) => Number.isNaN(costLineKurus(r.amountTry)));
+  const valid = invalidRows.length === 0;
+  const total = valid
+    ? filled.reduce((sum, r) => sum + costLineKurus(r.amountTry), 0)
+    : NaN;
   const bases = valid
     ? splitCostLines(
-        rows.map((r) => ({ kind: r.kind, amountKurus: costLineKurus(r.amountTry) }))
+        filled.map((r) => ({ kind: r.kind, amountKurus: costLineKurus(r.amountTry) }))
       )
     : null;
 
@@ -106,7 +141,7 @@ export function CostLinesEditor({
       <div className="space-y-2">
         {rows.map((r, i) => (
           <div
-            key={i}
+            key={r.uid}
             className="rounded-xl border border-gray-200 bg-white p-3 space-y-2"
           >
             <div className="grid grid-cols-12 gap-2">
@@ -179,20 +214,36 @@ export function CostLinesEditor({
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="secondary" onClick={() => add("production")} disabled={disabled}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => add("production")}
+          disabled={disabled || atLimit}
+        >
           + {COST_LINE_LABELS_TR.production}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => add("painting")} disabled={disabled}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => add("painting")}
+          disabled={disabled || atLimit}
+        >
           + {COST_LINE_LABELS_TR.painting}
         </Button>
+        {atLimit && (
+          <span className="text-xs text-gray-500">
+            En fazla {MAX_COST_LINES} kalem eklenebilir.
+          </span>
+        )}
       </div>
 
       {/* Kırılımın özeti: fiyat, iki taban ve platformun payı. */}
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
         {!valid ? (
           <p className="text-red-600">
-            Her kalem için geçerli bir tutar girin.
+            Geçersiz tutar. Fiyatı <strong>2400</strong> ya da{" "}
+            <strong>2.400,00</strong> biçiminde yazın.
           </p>
         ) : (
           <dl className="space-y-1">

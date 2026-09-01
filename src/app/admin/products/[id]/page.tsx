@@ -7,6 +7,7 @@ import { products } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
 import { getCostLines } from "@/lib/services/product-cost-lines";
+import { costLineRowFromKurus } from "@/components/products/cost-lines-editor";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { EditProductClient, type EditableProduct } from "./edit-client";
 
@@ -52,11 +53,7 @@ export default async function AdminEditProductPage({
     sellerName: product.manufacturer?.companyName ?? "Platform",
     // Kalem kırılımı. Boş dizi = kırılımsız (eski) ürün; form o zaman fiyatı
     // tek bir üretim kalemine dönüştürerek başlar.
-    costLines: costLines.map((c) => ({
-      kind: c.kind,
-      label: c.label ?? "",
-      amountTry: (c.amountKurus / 100).toFixed(2).replace(".", ","),
-    })),
+    costLines: costLines.map(costLineRowFromKurus),
     images: (product.images ?? [])
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((img) => ({

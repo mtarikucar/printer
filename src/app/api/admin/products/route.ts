@@ -84,8 +84,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ product: created });
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      const errors = (error as Error & { errors?: unknown }).errors;
-      return NextResponse.json({ error: errors }, { status: 400 });
+      // zod v4 sorunları `.issues`'ta tutar; `.errors` undefined'dır — bu yüzden
+      // doğrulama hatası istemciye boş dönüyor ve kullanıcı neyin yanlış
+      // olduğunu asla göremiyordu (yalnızca genel "kaydedilemedi").
+      const issues = (error as Error & {
+        issues?: Array<{ path?: (string | number)[]; message?: string }>;
+      }).issues;
+      const message =
+        issues?.map((i) => i.message).filter(Boolean).join(" · ") ||
+        "Gönderilen bilgiler geçersiz.";
+      return NextResponse.json({ error: message, issues }, { status: 400 });
     }
     console.error("Admin product create failed:", error);
     return NextResponse.json({ error: "Product create failed" }, { status: 500 });

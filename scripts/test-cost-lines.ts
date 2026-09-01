@@ -375,9 +375,29 @@ test("geçersiz giriş NaN döner — asla uydurma bir sayı değil", () => {
   }
 });
 
-test("kuruşa yuvarlar, taşmaz", () => {
-  assert.equal(parseTryToKurus("1,005"), 101); // 1,005 → 100,5 kuruş → 101
-  assert.equal(parseTryToKurus("1,004"), 100);
+test("bozuk gruplama REDDEDİLİR — sessizce yanlış sayı üretilmez", () => {
+  // "1.2345" eskiden ₺1,23 oluyordu; ₺12.345 yazmak isteyen için 10.000× hata.
+  for (const bad of ["1.2345", "1.23.456", "12.3456", "10.20.30", "1.2.3"]) {
+    assert.ok(
+      Number.isNaN(parseTryToKurus(bad)),
+      `"${bad}" reddedilmeliydi, ${parseTryToKurus(bad)} döndü`
+    );
+  }
+});
+
+test("2 haneden uzun ondalık reddedilir", () => {
+  // Bir fiyat alanında "1,005" büyük olasılıkla "1.005" (₺1.005) yanlış
+  // yazımıdır; sessizce ₺1,01'e yuvarlamak yerine kullanıcı yeniden yazsın.
+  assert.ok(Number.isNaN(parseTryToKurus("1,005")));
+  assert.ok(Number.isNaN(parseTryToKurus("1.005,123")));
+  assert.equal(parseTryToKurus("1,00"), 100);
+  assert.equal(parseTryToKurus("1,0"), 100);
+});
+
+test("binlik grupları TAM 3 hane olmalı", () => {
+  assert.equal(parseTryToKurus("1.234.567"), 123456700);
+  assert.ok(Number.isNaN(parseTryToKurus("1.23.456")));
+  assert.ok(Number.isNaN(parseTryToKurus("1234.5678")));
 });
 
 for (const [name, fn] of cases) {

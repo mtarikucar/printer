@@ -181,15 +181,21 @@ export async function createWhatsAppDraft(
   const reference = buildDraftReference();
   const havaleDiscountKurus = calculateHavaleDiscount(amountKurus);
 
-  // Kalem tabanları. The agent only ever sells the catalogue figure, whose
-  // painting share is the fixed PAINTING_PORTION_KURUS — but the columns were
-  // never written here at all, so a `hand_painted` WhatsApp order promoted with
-  // needsPainting=false: no painter could ever be assigned (send-to-painter and
-  // assign-painter both refuse without the flag) and the manufacturer accrued
-  // on the FULL amount, absorbing the painter's share.
+  // Kalem tabanları. Bu kolonlar burada HİÇ yazılmıyordu: bir `hand_painted`
+  // WhatsApp siparişi needsPainting=false ile promote oluyor, hiçbir boyacıya
+  // atanamıyor (send-to-painter ve assign-painter bayrak olmadan reddediyor) ve
+  // üretici tutarın TAMAMI üzerinden tahakkuk ederek boyacının payını yutuyordu.
+  //
+  // Fiyat türü kapısı /api/orders ile birebir aynı olmak ZORUNDA: sabit fiyatlı
+  // Creative Lab ürünlerinde (anahtarlık ₺149) boyama payı tahsil edilmiyor.
+  // `finish` varsayılanı "hand_painted" olduğu için bu kapı olmadan ₺149'luk bir
+  // siparişe ₺1.000 boyama payı yazılır — iki taban toplamı sipariş tutarını
+  // aşar ve boyacıya ₺600 ödenir.
   const finishValue = (spec.finish as OrderFinish | undefined) ?? "hand_painted";
-  const paintingPriceKurus = finishNeedsPainter(finishValue)
-    ? paintingPortionKurus(finishValue)
+  const needsPainting =
+    finishNeedsPainter(finishValue) && priceKindForStyle(spec.style!) === "figure";
+  const paintingPriceKurus = needsPainting
+    ? Math.min(paintingPortionKurus(finishValue), amountKurus)
     : 0;
   const productionBaseKurus = Math.max(0, amountKurus - paintingPriceKurus);
 

@@ -19,6 +19,7 @@ import {
 import {
   COST_LINE_OPTIONS,
   splitCostLines,
+  parseTryToKurus,
   type CostLineKind,
 } from "@/lib/config/cost-lines";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
@@ -148,26 +149,29 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
   const [result, setResult] = useState<CreateResult | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const totalTry = useMemo(() => {
-    return lineItems.reduce((sum, li) => {
-      const price = parseFloat(li.unitPriceTry.replace(",", "."));
-      const qty = parseInt(li.quantity, 10);
-      if (!Number.isFinite(price) || !Number.isFinite(qty)) return sum;
-      return sum + price * qty;
-    }, 0);
-  }, [lineItems]);
+  // Tutarlar parseTryToKurus ile okunur: naif parseFloat Türkçe binlik ayracını
+  // ondalık nokta sanıyordu ("2.400" → ₺2,40) ve sipariş 1000 kat ucuza
+  // yazılabiliyordu. Kuruş üzerinden toplanır, float birikmesi olmaz.
+  const totalKurus = useMemo(
+    () =>
+      lineItems.reduce((sum, li) => {
+        const unit = parseTryToKurus(li.unitPriceTry);
+        const qty = parseInt(li.quantity, 10);
+        if (Number.isNaN(unit) || !Number.isFinite(qty)) return sum;
+        return sum + unit * qty;
+      }, 0),
+    [lineItems]
+  );
 
   // Kalem türlerine göre iki hakediş tabanı + platform payı. İkisinin toplamı
   // sipariş tutarına eşit olduğu için partner payları tutarı geçemez.
   const shareSummary = useMemo(() => {
     const bases = splitCostLines(
       lineItems.map((li) => {
-        const price = parseFloat(li.unitPriceTry.replace(",", "."));
+        const unit = parseTryToKurus(li.unitPriceTry);
         const qty = parseInt(li.quantity, 10);
         const amountKurus =
-          Number.isFinite(price) && Number.isFinite(qty)
-            ? Math.round(price * 100) * qty
-            : 0;
+          !Number.isNaN(unit) && Number.isFinite(qty) ? unit * qty : 0;
         return { kind: li.kind, amountKurus };
       })
     );
@@ -218,12 +222,17 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
     e.preventDefault();
     setError(null);
 
-    const parsedLines = lineItems.map((li) => ({
-      description: li.description.trim(),
-      unitPriceTry: parseFloat(li.unitPriceTry.replace(",", ".")),
-      quantity: parseInt(li.quantity, 10),
-      kind: li.kind,
-    }));
+    const parsedLines = lineItems.map((li) => {
+      const unitKurus = parseTryToKurus(li.unitPriceTry);
+      return {
+        description: li.description.trim(),
+        // API kuruş değil TL bekliyor; kuruştan geri çevirmek, ekranda gösterilen
+        // toplamla gönderilen tutarın aynı ayrıştırmadan gelmesini garanti eder.
+        unitPriceTry: Number.isNaN(unitKurus) ? NaN : unitKurus / 100,
+        quantity: parseInt(li.quantity, 10),
+        kind: li.kind,
+      };
+    });
     if (
       parsedLines.some(
         (l) =>
@@ -234,7 +243,21 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
           l.quantity < 1
       )
     ) {
-      setError("Her kalem için açıklama, geçerli fiyat ve adet girin.");
+      setError(
+        "Her kalem için açıklama, geçerli fiyat ve adet girin. Fiyatı 2400 ya da 2.400,00 biçiminde yazın."
+      );
+      return;
+    }
+    // Yüzey "El Boyaması" ise boyama kalemi ZORUNLU: aksi hâlde sipariş hiçbir
+    // boyacıya yönlendirilemez (send-to-painter ve assign-painter boyama payı
+    // olmayan siparişi reddeder) ve boyama parası üreticinin tabanına gömülür.
+    if (
+      (finish === "hand_painted" || finish === "luxe_display") &&
+      !parsedLines.some((l) => l.kind === "painting")
+    ) {
+      setError(
+        "Yüzey el boyaması seçildi ama boyama kalemi yok. Boyacının hakediş tabanı oluşmaz — bir 'Boyama' kalemi ekleyin."
+      );
       return;
     }
 
@@ -451,11 +474,10 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <FormField label="Birim fiyat (₺)">
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
                       inputMode="decimal"
                       placeholder="0,00"
+                      aria-label={`Kalem ${idx + 1} birim fiyatı`}
                       value={li.unitPriceTry}
                       onChange={(e) => updateLine(idx, { unitPriceTry: e.target.value })}
                     />
@@ -475,7 +497,10 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
             ))}
           </div>
           <p className="mt-2 text-right text-sm font-semibold text-gray-900">
-            Toplam: ₺{totalTry.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}
+            Toplam: ₺
+            {(totalKurus / 100).toLocaleString("tr-TR", {
+              minimumFractionDigits: 2,
+            })}
           </p>
           {/* Kalemlerin kime ne ödediğini sipariş oluşturulmadan ÖNCE göster —
               admin boyama kalemi girmeyi unutursa boyacı payı hiç oluşmaz. */}

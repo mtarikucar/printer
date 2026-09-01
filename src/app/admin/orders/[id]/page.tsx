@@ -267,9 +267,10 @@ export default async function AdminOrderDetailPage({
       sellerManufacturerId: order.sellerManufacturerId,
       painterStatus: order.painterStatus,
       // Painting economics — the "revoke from painter" panel warns which
-      // print-portion earning (amountKurus − paintingPriceKurus) gets reversed.
+      // print-portion earning (the stored kalem production base) gets reversed.
       needsPainting: order.needsPainting,
       paintingPriceKurus: order.paintingPriceKurus,
+      productionBaseKurus: order.productionBaseKurus,
       productTitleSnapshot: order.productTitleSnapshot,
       email: order.email,
       customerName: order.customerName,
@@ -393,6 +394,7 @@ export default async function AdminOrderDetailPage({
     painting: {
       needsPainting: order.needsPainting,
       paintingPriceKurus: order.paintingPriceKurus,
+      productionBaseKurus: order.productionBaseKurus,
       painterStatus: order.painterStatus,
       qcRound: order.painterQcRound,
       assignedAt: order.assignedToPainterAt?.toISOString() ?? null,

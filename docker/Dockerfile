@@ -145,6 +145,10 @@ ENV HOME=/home/nextjs
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --chown=nextjs:nodejs package.json ./
 COPY --chown=nextjs:nodejs tsconfig.json ./
+# `workers/instrument.ts` imports this from the repo root (Sentry configs live
+# there by convention, next to sentry.server/edge.config.ts). Without it the
+# worker dies at startup with MODULE_NOT_FOUND and crash-loops forever.
+COPY --chown=nextjs:nodejs sentry.worker.config.ts ./
 COPY --chown=nextjs:nodejs workers ./workers
 COPY --chown=nextjs:nodejs scripts ./scripts
 COPY --chown=nextjs:nodejs src ./src

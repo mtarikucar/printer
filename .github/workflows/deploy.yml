@@ -292,6 +292,30 @@ jobs:
                 sleep 2
             done
 
+            # ─── 6b. Worker liveness ─────────────────────────────────
+            # The app's /api/health says nothing about the BullMQ worker: it is a
+            # separate container with no HTTP surface. A worker that dies at
+            # import time (a missing file, a bad env) crash-loops silently while
+            # this deploy reports success — which is how e-mail, previews,
+            # payment deadlines and WhatsApp jobs stayed dead for hours without
+            # a single red build.
+            # Sampled TWICE: a crash-looping container is "running" for a moment
+            # on each retry, so one lucky sample proves nothing. A restart
+            # counter that climbs between the two samples does.
+            log "Worker kontrol ediliyor..."
+            worker_state()    { docker inspect printer_worker --format '{{.State.Status}}' 2>/dev/null || echo "missing"; }
+            worker_restarts() { docker inspect printer_worker --format '{{.RestartCount}}' 2>/dev/null || echo 0; }
+            sleep 15
+            WORKER_R1=$(worker_restarts)
+            sleep 10
+            WORKER_STATE=$(worker_state)
+            WORKER_R2=$(worker_restarts)
+            if [ "$WORKER_STATE" != "running" ] || [ "$WORKER_R2" -gt "$WORKER_R1" ]; then
+                docker logs printer_worker --tail 40 2>&1 || true
+                err "Worker ayakta degil (durum: $WORKER_STATE, restart: $WORKER_R1 -> $WORKER_R2)!"
+            fi
+            log "Worker calisiyor (restart: $WORKER_R2)."
+
             # ─── 7. Cleanup ──────────────────────────────────────────
             # Housekeeping AFTER the health check must never decide whether the
             # deploy passed — the new code is already serving by this point.

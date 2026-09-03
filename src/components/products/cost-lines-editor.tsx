@@ -34,10 +34,8 @@ export interface CostLineRow {
   uid: string;
 }
 
-// Moved to lib/config/cost-line-row.ts
-import { emptyCostLineRow, costLineRowFromKurus, type CostLineRow } from "@/lib/config/cost-line-row";
-// let uidSeq = 0;
-// const nextUid = () => `cl-${uidSeq++}`;
+let uidSeq = 0;
+const nextUid = () => `cl-${uidSeq++}`;
 
 export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow => ({
   kind,
@@ -284,4 +282,3 @@ export function CostLinesEditor({
     </div>
   );
 }
-export { emptyCostLineRow, costLineRowFromKurus, type CostLineRow } from "@/lib/config/cost-line-row";

@@ -15,7 +15,7 @@ let uidSeq = 0;
 const nextUid = () => `cl-${uidSeq++}`;
 
 export const emptyCostLineRow = (): CostLineRow => ({
-  kind: "printing",
+  kind: "production",
   label: "",
   amountTry: "",
   uid: nextUid(),

@@ -1,15 +1,5 @@
 "use client";
 
-import { Button, Input, Select } from "@/components/ui";
-import {
-  COST_LINE_OPTIONS,
-  COST_LINE_LABELS_TR,
-  splitCostLines,
-  parseTryToKurus,
-  type CostLineKind,
-} from "@/lib/config/cost-lines";
-import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
-
 /**
  * Kalem kırılımı editörü — ürünün fiyatının neyden oluştuğunu ve dolayısıyla
  * kimin ne kadar hakedeceğini girer.
@@ -22,39 +12,20 @@ import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
  * bileşeni kullanır — kalem türü listesi ve pay hesabı tek yerde kalsın diye.
  */
 
-export interface CostLineRow {
-  kind: CostLineKind;
-  label: string;
-  /** Serbest metin: kullanıcı "1.250,50" da yazabilir, "1250.5" da. */
-  amountTry: string;
-  /**
-   * Kararlı React anahtarı. Satırları indeksle anahtarlamak, ortadan bir satır
-   * silindiğinde alttaki satırların girdi durumunu yukarı kaydırıyordu.
-   */
-  uid: string;
-}
-
-let uidSeq = 0;
-const nextUid = () => `cl-${uidSeq++}`;
-
-export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow => ({
-  kind,
-  label: "",
-  amountTry: "",
-  uid: nextUid(),
-});
-
-/** Kayıtlı bir kalemi (kuruş) forma yüklenebilir satıra çevirir. */
-// export const costLineRowFromKurus = (line: {
-//   kind: CostLineKind;
-//   label?: string | null;
-//   amountKurus: number;
-// }): CostLineRow => ({
-//   kind: line.kind,
-//   label: line.label ?? "",
-//   amountTry: (line.amountKurus / 100).toFixed(2).replace(".", ","),
-//   uid: nextUid(),
-// });
+import { Button, Input, Select } from "@/components/ui";
+import {
+  COST_LINE_OPTIONS,
+  COST_LINE_LABELS_TR,
+  splitCostLines,
+  parseTryToKurus,
+  type CostLineKind,
+} from "@/lib/config/cost-lines";
+import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
+// Satır tipi ve fabrikaları config/cost-line-row.ts'te — sunucudaki ürün
+// sayfaları da onları çağırıyor. Buradan YENİDEN dışa aktarma: iki makul import
+// yolu bırakmak, dört körlemesine düzeltme commit'ini doğuran karışıklığın ta
+// kendisiydi.
+import { emptyCostLine, type CostLineRow } from "@/lib/config/cost-line-row";
 
 /**
  * "1.250,50" → 125050. Geçersizse NaN.
@@ -63,10 +34,22 @@ export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow =>
  */
 export const costLineKurus = parseTryToKurus;
 
-/** Toplam kuruş; herhangi bir satır geçersizse NaN. */
+/**
+ * Tutarı henüz yazılmamış satırlar formun HER yerinde yok sayılır.
+ *
+ * Özet kutusu bunu zaten yapıyordu — "+ Boyama"ya basar basmaz tüm pay
+ * dökümünün kırmızıya dönmesi kafa karıştırıcı. Kaydetme yolu yapmıyordu:
+ * özet yeşil yeşil "Ürün fiyatı ₺650,00" derken kaydet, hangi satırdan
+ * bahsettiğini söylemeyen bir hatayla reddediyordu. Tek tanım, tek davranış —
+ * ekranda gördüğün toplam, kaydedilen toplamdır.
+ */
+const filledRows = (rows: readonly CostLineRow[]) =>
+  rows.filter((r) => r.amountTry.trim() !== "");
+
+/** Dolu satırların toplamı kuruş; DOLU ama geçersiz bir satır varsa NaN. */
 export function costLinesTotal(rows: readonly CostLineRow[]): number {
   let total = 0;
-  for (const r of rows) {
+  for (const r of filledRows(rows)) {
     const k = costLineKurus(r.amountTry);
     if (Number.isNaN(k)) return NaN;
     total += k;
@@ -74,12 +57,12 @@ export function costLinesTotal(rows: readonly CostLineRow[]): number {
   return total;
 }
 
-/** API gövdesine giren şekil. Geçersiz satır varsa null. */
+/** API gövdesine giren şekil. Dolu ama geçersiz satır varsa null. */
 export function toCostLinePayload(
   rows: readonly CostLineRow[]
 ): Array<{ kind: CostLineKind; label?: string; amountKurus: number }> | null {
   const out: Array<{ kind: CostLineKind; label?: string; amountKurus: number }> = [];
-  for (const r of rows) {
+  for (const r of filledRows(rows)) {
     const amountKurus = costLineKurus(r.amountTry);
     if (Number.isNaN(amountKurus)) return null;
     out.push({
@@ -117,8 +100,9 @@ export function CostLinesEditor({
 
   // Henüz yazılmamış (boş) bir satır özeti kırmızıya çevirmemeli — kullanıcı
   // "+ Boyama"ya bastığı anda tüm pay dökümünün hataya dönüşmesi kafa karıştırır.
-  // Yalnızca DOLU ama GEÇERSİZ satır hata sayılır.
-  const filled = rows.filter((r) => r.amountTry.trim() !== "");
+  // Yalnızca DOLU ama GEÇERSİZ satır hata sayılır. Kaydetme yolu da aynı
+  // `filledRows` tanımını kullanır; özet ile kaydedilen tutar hep aynıdır.
+  const filled = filledRows(rows);
   const invalidRows = filled.filter((r) => Number.isNaN(costLineKurus(r.amountTry)));
   const valid = invalidRows.length === 0;
   const total = valid

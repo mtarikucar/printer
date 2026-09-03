@@ -54,24 +54,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "invalid category" }, { status: 400 });
     }
 
-    const [created] = await db
-      .insert(products)
-      .values({
-        ownerType: "seller",
-        manufacturerId: guard.manufacturerId,
-        title: input.title,
-        description: input.description,
-        priceKurus: input.priceKurus,
-        material: input.material ?? null,
-        categoryId,
-        leadTimeDays: input.leadTimeDays,
-        status: "draft",
-      })
-      .returning();
-
-    if (input.costLines?.length) {
-      await replaceCostLines(created.id, input.costLines);
-    }
+    // Ürün ve kırılımı TEK transaction'da — düzenleme yolundaki ile aynı gerekçe:
+    // ayrı yazıldığında araya giren bir hata, fiyatı olan ama hiç kalemi olmayan
+    // bir ürün bırakır ve o satır "kırılımsız eski ürün"den ayırt edilemez.
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(products)
+        .values({
+          ownerType: "seller",
+          manufacturerId: guard.manufacturerId,
+          title: input.title,
+          description: input.description,
+          priceKurus: input.priceKurus,
+          material: input.material ?? null,
+          categoryId,
+          leadTimeDays: input.leadTimeDays,
+          status: "draft",
+        })
+        .returning();
+      if (input.costLines?.length) {
+        await replaceCostLines(row.id, input.costLines, tx);
+      }
+      return row;
+    });
 
     return NextResponse.json({ product: created });
   } catch (error) {

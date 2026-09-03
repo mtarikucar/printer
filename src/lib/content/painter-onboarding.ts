@@ -8,7 +8,7 @@
  */
 export const PAINTER_ONBOARDING_TR = `# Boyacı Ortaklık Sözleşmesi ve Bilgilendirme
 
-**Sürüm: 3.0 — Yürürlük tarihi: 16 Eylül 2026**
+**Sürüm: 3.0 — Yürürlük tarihi: 3 Eylül 2026**
 
 Bu metin, **Figurunica** platformu ("Platform") ile boyacı ağına başvuran ve
 başvuruyu onaylayarak ("Boyacı") aşağıdaki şartlar altında **profesyonel figürin

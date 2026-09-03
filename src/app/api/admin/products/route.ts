@@ -58,28 +58,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "invalid category" }, { status: 400 });
     }
 
-    const [created] = await db
-      .insert(products)
-      .values({
-        ownerType: "admin",
-        manufacturerId: null,
-        title: input.title,
-        description: input.description,
-        priceKurus: input.priceKurus,
-        material: input.material ?? null,
-        categoryId,
-        leadTimeDays: input.leadTimeDays,
-        status: "active",
-        slug,
-        createdByAdminEmail: a.session.user.email,
-        reviewedByEmail: a.session.user.email,
-        reviewedAt: new Date(),
-      })
-      .returning();
-
-    if (input.costLines?.length) {
-      await replaceCostLines(created.id, input.costLines);
-    }
+    // Ürün ve kırılımı TEK transaction'da yazılır — düzenleme yolunda olduğu
+    // gibi. İkisi ayrı yazıldığında araya giren bir hata (constraint, havuz
+    // zaman aşımı, iptal edilen istek) fiyatı olan ama HİÇ kalemi olmayan bir
+    // ürün bırakıyordu. O satır "kırılımsız eski ürün"den ayırt edilemez:
+    // boyacı payı sessizce sıfırlanır ve tutarın tamamı üretim sayılır.
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(products)
+        .values({
+          ownerType: "admin",
+          manufacturerId: null,
+          title: input.title,
+          description: input.description,
+          priceKurus: input.priceKurus,
+          material: input.material ?? null,
+          categoryId,
+          leadTimeDays: input.leadTimeDays,
+          status: "active",
+          slug,
+          createdByAdminEmail: a.session.user.email,
+          reviewedByEmail: a.session.user.email,
+          reviewedAt: new Date(),
+        })
+        .returning();
+      if (input.costLines?.length) {
+        await replaceCostLines(row.id, input.costLines, tx);
+      }
+      return row;
+    });
 
     return NextResponse.json({ product: created });
   } catch (error) {

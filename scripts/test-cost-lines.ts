@@ -13,6 +13,10 @@ import {
 } from "../src/lib/services/earning-base";
 import { computeEarning } from "../src/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS } from "../src/lib/config/prices";
+import {
+  emptyCostLine,
+  costLineRowFromKurus,
+} from "../src/lib/config/cost-line-row";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -398,6 +402,41 @@ test("binlik grupları TAM 3 hane olmalı", () => {
   assert.equal(parseTryToKurus("1.234.567"), 123456700);
   assert.ok(Number.isNaN(parseTryToKurus("1.23.456")));
   assert.ok(Number.isNaN(parseTryToKurus("1234.5678")));
+});
+
+// ─── Satır uid'leri ─────────────────────────────────────────────────────────
+
+test("kayıtlı ve yeni satırların uid'leri çakışmaz", () => {
+  // Gerçek senaryo: sunucu kayıtlı iki kalemi forma basar, kullanıcı "+ Boyama"
+  // ile üçüncüyü ekler. İki fabrika ORTAK bir "cl-" ön eki kullandığında ilk
+  // kayıtlı satır ile ilk eklenen satır aynı React anahtarını alıyordu; tam da
+  // uid alanının önlemek için var olduğu hata.
+  const uids = [
+    costLineRowFromKurus({ kind: "production", amountKurus: 150000 }).uid,
+    costLineRowFromKurus({ kind: "painting", amountKurus: 500000 }).uid,
+    emptyCostLine("painting").uid,
+    emptyCostLine("production").uid,
+  ];
+  assert.equal(new Set(uids).size, uids.length, `uid çakıştı: ${uids.join(", ")}`);
+});
+
+test("aynı fabrikanın ardışık satırları da benzersizdir", () => {
+  const many = Array.from({ length: 20 }, () => emptyCostLine().uid);
+  assert.equal(new Set(many).size, 20);
+});
+
+test("costLineRowFromKurus kuruşu Türkçe ondalıkla forma yazar", () => {
+  const row = costLineRowFromKurus({
+    kind: "painting",
+    label: null,
+    amountKurus: 150000,
+  });
+  assert.equal(row.amountTry, "1500,00");
+  assert.equal(row.label, "");
+  assert.equal(row.kind, "painting");
+  // Forma yazılan metin, geri okunduğunda aynı kuruşu vermeli — aksi hâlde
+  // kaydet'e basmak fiyatı sessizce değiştirirdi.
+  assert.equal(parseTryToKurus(row.amountTry), 150000);
 });
 
 for (const [name, fn] of cases) {

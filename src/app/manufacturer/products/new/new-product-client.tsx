@@ -9,10 +9,9 @@ import { CategoryPicker } from "@/components/category-picker";
 import {
   CostLinesEditor,
   costLinesTotal,
-  emptyCostLine,
   toCostLinePayload,
-  type CostLineRow,
 } from "@/components/products/cost-lines-editor";
+import { emptyCostLine, type CostLineRow } from "@/lib/config/cost-line-row";
 
 export function NewProductClient() {
   const d = useDictionary();

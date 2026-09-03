@@ -10,9 +10,11 @@ import {
   CostLinesEditor,
   costLinesTotal,
   toCostLinePayload,
-  type CostLineRow,
 } from "@/components/products/cost-lines-editor";
-import { costLineRowFromKurus } from "@/lib/config/cost-line-row";
+import {
+  costLineRowFromKurus,
+  type CostLineRow,
+} from "@/lib/config/cost-line-row";
 import { ProductOptionsEditor } from "@/components/products/product-options-editor";
 import { ProductBulkTiersEditor } from "@/components/products/product-bulk-tiers-editor";
 import {

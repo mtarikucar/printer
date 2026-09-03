@@ -7,7 +7,7 @@ import { products } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
 import { getCostLines } from "@/lib/services/product-cost-lines";
-import { costLineRowFromKurus } from "@/components/products/cost-lines-editor";
+import { costLineRowFromKurus } from "@/lib/config/cost-line-row";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { EditProductClient, type EditableProduct } from "./edit-client";
 

@@ -34,8 +34,10 @@ export interface CostLineRow {
   uid: string;
 }
 
-let uidSeq = 0;
-const nextUid = () => `cl-${uidSeq++}`;
+// Moved to lib/config/cost-line-row.ts
+import { emptyCostLineRow, costLineRowFromKurus, type CostLineRow } from "@/lib/config/cost-line-row";
+// let uidSeq = 0;
+// const nextUid = () => `cl-${uidSeq++}`;
 
 export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow => ({
   kind,
@@ -45,16 +47,16 @@ export const emptyCostLine = (kind: CostLineKind = "production"): CostLineRow =>
 });
 
 /** Kayıtlı bir kalemi (kuruş) forma yüklenebilir satıra çevirir. */
-export const costLineRowFromKurus = (line: {
-  kind: CostLineKind;
-  label?: string | null;
-  amountKurus: number;
-}): CostLineRow => ({
-  kind: line.kind,
-  label: line.label ?? "",
-  amountTry: (line.amountKurus / 100).toFixed(2).replace(".", ","),
-  uid: nextUid(),
-});
+// export const costLineRowFromKurus = (line: {
+//   kind: CostLineKind;
+//   label?: string | null;
+//   amountKurus: number;
+// }): CostLineRow => ({
+//   kind: line.kind,
+//   label: line.label ?? "",
+//   amountTry: (line.amountKurus / 100).toFixed(2).replace(".", ","),
+//   uid: nextUid(),
+// });
 
 /**
  * "1.250,50" → 125050. Geçersizse NaN.
@@ -282,3 +284,4 @@ export function CostLinesEditor({
     </div>
   );
 }
+export { emptyCostLineRow, costLineRowFromKurus, type CostLineRow } from "@/lib/config/cost-line-row";

@@ -8,7 +8,7 @@ import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
 import { getCostLines } from "@/lib/services/product-cost-lines";
-import { costLineRowFromKurus } from "@/components/products/cost-lines-editor";
+import { costLineRowFromKurus } from "@/lib/config/cost-line-row";
 import { EditProductClient } from "./edit-client";
 
 export default async function EditProductPage({

@@ -48,11 +48,24 @@ export async function PATCH(
     }
   }
 
+  // createSession de aynı şartı koyar: kapanışı geçmişe taşımak, hiç
+  // açılamayacak ölü bir link üretir. Burada da reddedilir.
+  let joinClosesAt: Date | undefined;
+  if (data.joinClosesAt !== undefined) {
+    joinClosesAt = new Date(data.joinClosesAt);
+    if (joinClosesAt.getTime() <= Date.now()) {
+      return NextResponse.json(
+        { error: "Katılım kapanışı geçmişte olamaz. Daha ileri bir tarih seçin." },
+        { status: 400 }
+      );
+    }
+  }
+
   const set: Partial<typeof workshopSessions.$inferInsert> = { updatedAt: new Date() };
   if (data.status !== undefined) set.status = data.status;
   if (data.capacity !== undefined) set.capacity = data.capacity;
   if (data.manufacturerId !== undefined) set.manufacturerId = data.manufacturerId;
-  if (data.joinClosesAt !== undefined) set.joinClosesAt = new Date(data.joinClosesAt);
+  if (joinClosesAt !== undefined) set.joinClosesAt = joinClosesAt;
   if (data.adminNotes !== undefined) set.adminNotes = data.adminNotes || null;
 
   const [row] = await db

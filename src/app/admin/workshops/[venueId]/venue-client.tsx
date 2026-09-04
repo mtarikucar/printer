@@ -225,6 +225,7 @@ export function VenueClient({
                       <th className="py-2 pr-3 font-medium">Üretici</th>
                       <th className="py-2 pr-3 font-medium">Durum</th>
                       <th className="py-2 pr-3 font-medium"></th>
+                      <th className="py-2 pr-3 font-medium"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -270,6 +271,14 @@ export function VenueClient({
                           >
                             {copiedId === s.id ? "Kopyalandı ✓" : "Katılım linkini kopyala"}
                           </button>
+                        </td>
+                        <td className="py-2 pr-3 text-right">
+                          <Link
+                            href={`/admin/workshops/sessions/${s.id}`}
+                            className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                          >
+                            Detay →
+                          </Link>
                         </td>
                       </tr>
                     ))}

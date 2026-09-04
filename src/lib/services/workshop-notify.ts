@@ -9,7 +9,7 @@
 import { eq } from "drizzle-orm";
 import { sendRawEmail, escHtml } from "./email";
 import { db } from "@/lib/db";
-import { workshopSessions } from "@/lib/db/schema";
+import { workshopSessions, workshopParticipants } from "@/lib/db/schema";
 import type { workshopRequests } from "@/lib/db/schema";
 import { WORKSHOP_SEAT_HOLD_HOURS } from "@/lib/config/workshop";
 import { sessionJoinUrl } from "@/lib/services/workshop-session";
@@ -257,4 +257,57 @@ export async function sendWorkshopSeatReleasedEmail(
     subject: `Atölye koltuğunuz serbest bırakıldı — ${session.venue.name}`,
     html,
   });
+}
+
+/**
+ * Parti mekana yola çıktığında (toplu sevk anında) katılımcılara gider.
+ *
+ * Kargo takip maili DEĞİLDİR: katılımcı figürü seansta ELDEN alacak, evine
+ * hiçbir şey gelmeyecek. Standart "kargoya verildi, takip no …" şablonu bu
+ * yüzden burada bilerek KULLANILMAZ — bir atölye katılımcısı için yanlış ve
+ * kafa karıştırıcı olurdu.
+ *
+ * `cancelled` katılımcılar atlanır: koltuğu iptal edilmiş biri hiç sipariş
+ * vermedi (bkz. workshop-seat.ts → releaseSeatForDraft), elinde bekleyen bir
+ * figür yok.
+ *
+ * Bir katılımcının `session`/`venue` ilişkisi okunamazsa (örn. tutarsız bir
+ * satır) o kişi sessizce atlanır — geri kalan partiye giden mailleri
+ * `Promise.allSettled` zaten birbirinden bağımsız tutuyor.
+ */
+export async function notifyWorkshopParticipantsReady(sessionId: string): Promise<void> {
+  const rows = await db.query.workshopParticipants.findMany({
+    where: eq(workshopParticipants.sessionId, sessionId),
+    with: { session: { with: { venue: true } } },
+  });
+
+  await Promise.allSettled(
+    rows
+      .filter((p) => p.status !== "cancelled")
+      .map(async (p) => {
+        const session = p.session;
+        if (!session || !session.venue) return;
+        const venue = session.venue;
+
+        await sendRawEmail({
+          to: p.email,
+          subject: "Figürün atölyede seni bekliyor",
+          html: wrap(`
+            <h1 style="color:#1a1a1a;font-size:20px;">Figürün hazır!</h1>
+            <p>Merhaba ${escHtml(p.fullName)},</p>
+            <p>Figürün hazır ve <strong>${escHtml(venue.name)}</strong>'da seni bekliyor.
+               Kargoyla bir şey göndermiyoruz — figürünü seansta elinle teslim
+               alacak ve orada boyayacaksın.</p>
+            <table style="border-collapse:collapse;margin:16px 0;">
+              ${row("Tarih", formatDateTime(session.startsAt))}
+              ${row(
+                "Adres",
+                `${venue.address.adres} (${venue.address.ilce}/${venue.address.il})`
+              )}
+            </table>
+            <p>Boyama malzemeleri atölyede hazır olacak. Görüşmek üzere!</p>
+          `),
+        });
+      })
+  );
 }

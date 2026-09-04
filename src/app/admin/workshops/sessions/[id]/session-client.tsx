@@ -1,0 +1,381 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Input, Select } from "@/components/ui";
+import {
+  WORKSHOP_SESSION_STATUS_LABELS,
+  WORKSHOP_PARTICIPANT_STATUS_LABELS,
+} from "@/lib/config/workshop";
+
+interface SessionData {
+  id: string;
+  venueName: string;
+  venueAddress: { adres: string; ilce: string; il: string };
+  startsAt: string;
+  durationMinutes: number;
+  capacity: number;
+  bookedCount: number;
+  pricePerSeatKurus: number;
+  manufacturerName: string | null;
+  commissionRateBps: number | null;
+  status: string;
+  batchCarrier: string | null;
+  batchTrackingNumber: string | null;
+  batchShippedAt: string | null;
+  batchDeliveredAt: string | null;
+  joinClosesAt: string;
+  deliverBy: string;
+  adminNotes: string | null;
+}
+
+interface ParticipantRow {
+  id: string;
+  fullName: string;
+  email: string;
+  status: string;
+  orderId: string | null;
+  orderNumber: string | null;
+  modelReady: boolean;
+}
+
+// Aynı desen: admin/workshops/[venueId]/venue-client.tsx'teki SESSION_STATUS_BADGE
+// ile birebir aynı renk sözlüğü (her ekran kendi kopyasını tutar).
+const SESSION_STATUS_BADGE: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-600",
+  open: "bg-green-100 text-green-700",
+  closed: "bg-amber-100 text-amber-700",
+  in_production: "bg-blue-100 text-blue-700",
+  shipped: "bg-indigo-100 text-indigo-700",
+  delivered: "bg-teal-100 text-teal-700",
+  completed: "bg-emerald-100 text-emerald-700",
+  cancelled: "bg-gray-200 text-gray-600",
+};
+
+const PARTICIPANT_STATUS_BADGE: Record<string, string> = {
+  pending_payment: "bg-gray-100 text-gray-600",
+  paid: "bg-blue-100 text-blue-700",
+  model_ready: "bg-indigo-100 text-indigo-700",
+  in_production: "bg-blue-100 text-blue-700",
+  delivered: "bg-teal-100 text-teal-700",
+  cancelled: "bg-gray-200 text-gray-600",
+};
+
+// jobs-client.tsx'teki (painter panel) aynı sözlük — merkezi bir kaynağı yok,
+// her ekran kendi kopyasını tutuyor.
+const CARRIER_LABELS: Record<string, string> = {
+  yurtici: "Yurtiçi",
+  aras: "Aras",
+  mng: "MNG",
+  ptt: "PTT",
+  surat: "Sürat",
+  other: "Diğer",
+  elden: "Elden",
+};
+
+function formatKurus(kurus: number): string {
+  return `₺${(kurus / 100).toLocaleString("tr-TR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function sessionStatusLabel(status: string): string {
+  return (WORKSHOP_SESSION_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+function participantStatusLabel(status: string): string {
+  return (WORKSHOP_PARTICIPANT_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+export function SessionClient({
+  session,
+  participants,
+  readyCount,
+  totalCount,
+  missingNames,
+  netTotalKurus,
+  daysUntilSession,
+}: {
+  session: SessionData;
+  participants: ParticipantRow[];
+  readyCount: number;
+  totalCount: number;
+  missingNames: string[];
+  netTotalKurus: number | null;
+  daysUntilSession: number;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // ─── Toplu sevk formu ───────────────────────────────────────────────────
+  const [carrier, setCarrier] = useState("yurtici");
+  const [trackingNumber, setTrackingNumber] = useState("");
+
+  const statusBadge =
+    SESSION_STATUS_BADGE[session.status] ?? "bg-gray-100 text-gray-700";
+  const sharePercent =
+    session.commissionRateBps != null ? (10000 - session.commissionRateBps) / 100 : null;
+
+  // Sevk henüz yapılmadıysa formu göster; sonrasında salt okunur sevk
+  // bilgisine geç. `draft`/`open` seansta henüz fiyatlanmış/üretilmiş bir
+  // parti olmadığı için sevk butonu da hiç anlamlı değil.
+  const canShowShipAction =
+    !["draft", "open", "shipped", "delivered", "completed", "cancelled"].includes(
+      session.status
+    );
+  const canShowDeliverAction = session.status === "shipped";
+
+  const submitShip = async () => {
+    setError(null);
+    if (carrier !== "elden" && !trackingNumber.trim()) {
+      setError("Kargoyla sevkte takip numarası zorunludur.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/workshops/sessions/${session.id}/ship`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          carrier,
+          trackingNumber: trackingNumber.trim() || undefined,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(payload.error || "Toplu sevk başarısız.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitDeliver = async () => {
+    if (!confirm("Parti mekana teslim edildi mi? Bu işlem geri alınamaz.")) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/workshops/sessions/${session.id}/deliver`, {
+        method: "POST",
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(payload.error || "Toplu teslim başarısız.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-4 sm:p-8 max-w-5xl">
+      <Link href="/admin/workshops" className="text-sm text-gray-500 hover:text-gray-800">
+        ← Atölyeler
+      </Link>
+
+      <div className="mt-3 mb-6 flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-bold text-gray-900">{session.venueName}</h1>
+        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${statusBadge}`}>
+          {sessionStatusLabel(session.status)}
+        </span>
+        {session.status !== "delivered" &&
+          session.status !== "completed" &&
+          session.status !== "cancelled" && (
+            <span className="text-xs text-gray-500">
+              {daysUntilSession > 0
+                ? `Seansa ${daysUntilSession} gün var`
+                : daysUntilSession === 0
+                  ? "Seans bugün"
+                  : "Seans tarihi geçti"}
+            </span>
+          )}
+      </div>
+
+      <p className="text-sm text-gray-600 mb-6">
+        {formatDateTime(session.startsAt)} · {session.durationMinutes} dk ·{" "}
+        {session.venueAddress.adres} ({session.venueAddress.ilce}/{session.venueAddress.il})
+      </p>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Model hazırlığı — sistemin çözemediği tek darboğaz burada görünür */}
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-indigo-800">
+            Model hazırlığı
+          </h3>
+          <p className="mt-2 text-2xl font-bold text-indigo-900">
+            {readyCount}/{totalCount} model hazır
+          </p>
+          {missingNames.length > 0 && (
+            <p className="mt-1 text-xs text-indigo-800/80">
+              Eksik: {missingNames.join(", ")}
+            </p>
+          )}
+          {totalCount === 0 && (
+            <p className="mt-1 text-xs text-indigo-800/80">Bu seansta henüz ödenmiş sipariş yok.</p>
+          )}
+        </div>
+
+        {/* Komisyon */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Komisyon
+          </h3>
+          <p className="mt-2 text-sm text-gray-700">
+            {totalCount} sipariş · Üretici:{" "}
+            {session.manufacturerName ?? <span className="text-gray-400">atanmadı</span>}
+          </p>
+          {sharePercent != null ? (
+            <>
+              <p className="mt-1 text-sm text-gray-700">Üretici payı: %{sharePercent}</p>
+              <p className="mt-2 text-2xl font-bold text-gray-900">
+                {netTotalKurus != null ? formatKurus(netTotalKurus) : "—"}
+              </p>
+              <p className="text-xs text-gray-400">üreticinin toplam net payı (donmuş oran)</p>
+            </>
+          ) : (
+            <p className="mt-1 text-xs text-gray-400">
+              Oran henüz donmadı — seans kapanmadan komisyon belirlenmez.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Toplu sevk / teslim */}
+      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Sevkiyat</h3>
+
+        {session.batchShippedAt && (
+          <p className="text-sm text-gray-700 mb-2">
+            Sevk edildi: {formatDateTime(session.batchShippedAt)} ·{" "}
+            {session.batchCarrier ? CARRIER_LABELS[session.batchCarrier] ?? session.batchCarrier : "—"}
+            {session.batchTrackingNumber ? ` · Takip: ${session.batchTrackingNumber}` : ""}
+          </p>
+        )}
+        {session.batchDeliveredAt && (
+          <p className="text-sm text-gray-700 mb-2">
+            Mekana teslim edildi: {formatDateTime(session.batchDeliveredAt)}
+          </p>
+        )}
+
+        {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+
+        {canShowShipAction && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Kargo</label>
+              <Select value={carrier} onChange={(e) => setCarrier(e.target.value)}>
+                {Object.entries(CARRIER_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Takip numarası{carrier === "elden" ? " (gerekmez)" : ""}
+              </label>
+              <Input
+                value={trackingNumber}
+                onChange={(e) => setTrackingNumber(e.target.value)}
+                disabled={carrier === "elden"}
+                placeholder={carrier === "elden" ? "Elden teslimde gerekmez" : "Takip numarası"}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={submitShip}
+              disabled={busy}
+              className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {busy ? "Sevk ediliyor…" : "Toplu sevk"}
+            </button>
+          </div>
+        )}
+
+        {canShowDeliverAction && (
+          <button
+            type="button"
+            onClick={submitDeliver}
+            disabled={busy}
+            className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50"
+          >
+            {busy ? "Teslim ediliyor…" : "Toplu teslim"}
+          </button>
+        )}
+
+        {!canShowShipAction && !canShowDeliverAction && !session.batchShippedAt && (
+          <p className="text-xs text-gray-400">
+            Seans henüz üretime girmedi; sevk işlemi kapanış + üretici ataması sonrası açılır.
+          </p>
+        )}
+      </div>
+
+      {/* Katılımcılar */}
+      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Katılımcılar</h3>
+        {participants.length === 0 ? (
+          <p className="text-sm text-gray-500">Bu seansa henüz katılım yok.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="text-left text-xs uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="py-2 pr-3 font-medium">Ad</th>
+                  <th className="py-2 pr-3 font-medium">E-posta</th>
+                  <th className="py-2 pr-3 font-medium">Durum</th>
+                  <th className="py-2 pr-3 font-medium">Sipariş</th>
+                  <th className="py-2 pr-3 font-medium">Model</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {participants.map((p) => (
+                  <tr key={p.id}>
+                    <td className="py-2 pr-3 text-gray-900">{p.fullName}</td>
+                    <td className="py-2 pr-3 text-gray-700">{p.email}</td>
+                    <td className="py-2 pr-3">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                          PARTICIPANT_STATUS_BADGE[p.status] ?? "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {participantStatusLabel(p.status)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-gray-700">
+                      {p.orderNumber ?? <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {!p.orderId ? (
+                        <span className="text-gray-400">—</span>
+                      ) : p.modelReady ? (
+                        <span className="text-emerald-700">Hazır</span>
+                      ) : (
+                        <span className="text-amber-700">Bekliyor</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {session.adminNotes && (
+        <p className="mt-4 text-xs text-gray-500">İç not: {session.adminNotes}</p>
+      )}
+    </div>
+  );
+}

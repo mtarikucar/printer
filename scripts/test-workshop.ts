@@ -13,6 +13,7 @@ import {
   coerceFinishForKind,
   coerceFinishForStyle,
 } from "../src/lib/validators/order";
+import { assessSessionRisk } from "../src/lib/services/workshop-session";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -129,6 +130,32 @@ test("tarih türetme girdiyi değiştirmez", () => {
   const before = startsAt.toISOString();
   deriveSessionDates(startsAt);
   assert.equal(startsAt.toISOString(), before, "startsAt mutasyona uğradı");
+});
+
+// ─── Seans risk hesabı ──────────────────────────────────────────────────────
+// Saf fonksiyon: DB'ye gitmez, girdi hesaplanıp verilir. Kapasite dolu →
+// önce o kontrol eder; değilse teslim tarihine kalan gün üreticinin ortalama
+// baskı süresiyle karşılaştırılır. ASLA engellemez, sadece uyarır.
+
+test("risk: bol süre → ok", () => {
+  const r = assessSessionRisk({ daysUntilSession: 21, avgPrintDays: 5, currentLoad: 1, maxConcurrentOrders: 5 });
+  assert.equal(r.level, "ok");
+});
+
+test("risk: süre üreticinin ortalamasına yakın → warn", () => {
+  const r = assessSessionRisk({ daysUntilSession: 7, avgPrintDays: 6, currentLoad: 2, maxConcurrentOrders: 5 });
+  assert.equal(r.level, "warn");
+});
+
+test("risk: süre ortalamadan AZ → danger", () => {
+  const r = assessSessionRisk({ daysUntilSession: 4, avgPrintDays: 7, currentLoad: 1, maxConcurrentOrders: 5 });
+  assert.equal(r.level, "danger");
+  assert.ok(r.message.length > 0, "uyarı metni boş olamaz");
+});
+
+test("risk: kapasitesi dolu üretici → danger", () => {
+  const r = assessSessionRisk({ daysUntilSession: 30, avgPrintDays: 3, currentLoad: 5, maxConcurrentOrders: 5 });
+  assert.equal(r.level, "danger");
 });
 
 for (const [name, fn] of cases) {

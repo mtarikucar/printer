@@ -77,6 +77,54 @@ export function deriveSessionDates(startsAt: Date): {
   };
 }
 
+/**
+ * Seçilen üreticinin bu tarihe yetişip yetişemeyeceğine dair uyarı.
+ *
+ * ENGELLEMEZ — admin bilerek riskli bir seans açabilir (üreticiyle telefonda
+ * anlaşmış olabilir). Saf fonksiyon: girdi hesaplanıp verilir, DB'ye gitmez,
+ * test edilebilir.
+ *
+ * Bu modülde yaşar (workshop-session.ts'te DEĞİL) çünkü `server-only`suz ve
+ * DB'siz olmak zorunda: admin'in "Seans aç" formu üretici/tarih SEÇİLDİKÇE bu
+ * fonksiyonu TARAYICIDA çağırır. workshop-session.ts `@/lib/db`'yi (dolayısıyla
+ * `pg`'yi) import ettiği için o dosyadan bir client component'e değer importu
+ * yapmak build'i kırar — bu yüzden saf risk mantığı oradan buraya taşındı;
+ * workshop-session.ts geriye dönük uyumluluk için bunu yeniden export eder.
+ */
+export function assessSessionRisk(args: {
+  daysUntilSession: number;
+  /** Üreticinin son işlerindeki ortalama atama→baskı süresi (gün). */
+  avgPrintDays: number;
+  currentLoad: number;
+  maxConcurrentOrders: number;
+}): { level: "ok" | "warn" | "danger"; message: string } {
+  const { daysUntilSession, avgPrintDays, currentLoad, maxConcurrentOrders } = args;
+
+  if (currentLoad >= maxConcurrentOrders) {
+    return {
+      level: "danger",
+      message: `Bu üreticinin kapasitesi dolu (${currentLoad}/${maxConcurrentOrders}). Parti sıraya girer.`,
+    };
+  }
+
+  // Parti mekana seanstan WORKSHOP_DELIVER_DAYS_BEFORE gün önce teslim
+  // edilmek zorunda; üreticinin fiilen basmak için kullanabileceği süre budur.
+  const usableDays = daysUntilSession - WORKSHOP_DELIVER_DAYS_BEFORE;
+  if (usableDays < avgPrintDays) {
+    return {
+      level: "danger",
+      message: `Seansa ${daysUntilSession} gün var; bu üreticinin ortalama baskı süresi ${avgPrintDays} gün. Yetişmeyebilir.`,
+    };
+  }
+  if (usableDays < avgPrintDays * 1.5) {
+    return {
+      level: "warn",
+      message: `Seansa ${daysUntilSession} gün var; ortalama baskı süresi ${avgPrintDays} gün. Pay dar.`,
+    };
+  }
+  return { level: "ok", message: "Süre yeterli görünüyor." };
+}
+
 export const WORKSHOP_SESSION_STATUSES = [
   "draft",
   "open",

@@ -4,9 +4,15 @@ import { db } from "@/lib/db";
 import { workshopSessions, workshopVenues } from "@/lib/db/schema";
 import {
   deriveSessionDates,
-  WORKSHOP_DELIVER_DAYS_BEFORE,
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
 } from "@/lib/config/workshop";
+
+// Geriye dönük uyumluluk: assessSessionRisk artık config/workshop.ts'te yaşıyor
+// (DB'siz, server-only'siz — admin'in "Seans aç" formu bunu TARAYICIDA çağırır;
+// bu dosya @/lib/db import ettiği için client component'e buradan değer importu
+// yapılamaz). Mevcut çağıranlar (bkz. scripts/test-workshop.ts) bu yoldan
+// değişmeden çalışmaya devam eder.
+export { assessSessionRisk } from "@/lib/config/workshop";
 
 /** Katılım token'ı: 12 karakter × 64 sembol ≈ 72 bit. Ev kuralı (order-journey). */
 const TOKEN_LENGTH = 12;
@@ -75,47 +81,6 @@ export async function createSession(
     .returning({ id: workshopSessions.id, joinToken: workshopSessions.joinToken });
 
   return { sessionId: row.id, joinToken: row.joinToken };
-}
-
-/**
- * Seçilen üreticinin bu tarihe yetişip yetişemeyeceğine dair uyarı.
- *
- * ENGELLEMEZ — admin bilerek riskli bir seans açabilir (üreticiyle telefonda
- * anlaşmış olabilir). Saf fonksiyon: girdi hesaplanıp verilir, DB'ye gitmez,
- * test edilebilir.
- */
-export function assessSessionRisk(args: {
-  daysUntilSession: number;
-  /** Üreticinin son işlerindeki ortalama atama→baskı süresi (gün). */
-  avgPrintDays: number;
-  currentLoad: number;
-  maxConcurrentOrders: number;
-}): { level: "ok" | "warn" | "danger"; message: string } {
-  const { daysUntilSession, avgPrintDays, currentLoad, maxConcurrentOrders } = args;
-
-  if (currentLoad >= maxConcurrentOrders) {
-    return {
-      level: "danger",
-      message: `Bu üreticinin kapasitesi dolu (${currentLoad}/${maxConcurrentOrders}). Parti sıraya girer.`,
-    };
-  }
-
-  // Parti mekana seanstan WORKSHOP_DELIVER_DAYS_BEFORE gün önce teslim
-  // edilmek zorunda; üreticinin fiilen basmak için kullanabileceği süre budur.
-  const usableDays = daysUntilSession - WORKSHOP_DELIVER_DAYS_BEFORE;
-  if (usableDays < avgPrintDays) {
-    return {
-      level: "danger",
-      message: `Seansa ${daysUntilSession} gün var; bu üreticinin ortalama baskı süresi ${avgPrintDays} gün. Yetişmeyebilir.`,
-    };
-  }
-  if (usableDays < avgPrintDays * 1.5) {
-    return {
-      level: "warn",
-      message: `Seansa ${daysUntilSession} gün var; ortalama baskı süresi ${avgPrintDays} gün. Pay dar.`,
-    };
-  }
-  return { level: "ok", message: "Süre yeterli görünüyor." };
 }
 
 /** Kapanış zamanı geçmiş, hâlâ açık seanslar (kapanış worker'ı için). */

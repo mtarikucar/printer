@@ -6,6 +6,7 @@ import {
   deriveSessionDates,
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
   WORKSHOP_DELIVER_DAYS_BEFORE,
+  assessSessionRisk,
 } from "../src/lib/config/workshop";
 import { itemPriceKurus } from "../src/lib/config/prices";
 import {
@@ -13,7 +14,6 @@ import {
   coerceFinishForKind,
   coerceFinishForStyle,
 } from "../src/lib/validators/order";
-import { assessSessionRisk } from "../src/lib/services/workshop-session";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];

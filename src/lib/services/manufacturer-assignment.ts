@@ -228,6 +228,57 @@ async function onTimeDeliveryScoreFor(manufacturerId: string): Promise<number> {
   return Math.round(totalPctSum / rows.length);
 }
 
+/** Platform's stated assign→print target, expressed in days (not ms). */
+const OTD_PRINT_TARGET_DAYS = OTD_PRINT_TARGET_MS / (24 * 60 * 60 * 1000);
+
+/**
+ * Average assign→print span (in days) over a manufacturer's last N
+ * completed orders. Same lookback window and "completed" definition as
+ * `onTimeDeliveryScoreFor` (assigned + printed + shipped all set), so the
+ * two signals can never disagree about which orders count as history.
+ *
+ * Exported for the workshop admin UI: it feeds `assessSessionRisk` (see
+ * config/workshop.ts) to warn whether a chosen manufacturer can realistically
+ * print a batch before a session's delivery deadline. That function stays
+ * pure and DB-free, so the query lives here instead, next to the other
+ * "last N orders" OTD logic it shares a convention with.
+ *
+ * Falls back to the platform's own stated target (OTD_PRINT_TARGET_MS, in
+ * days) when the manufacturer has no usable print history yet — a brand
+ * new partner is assumed neither instantly fast nor permanently slow.
+ */
+export async function averagePrintDaysFor(manufacturerId: string): Promise<number> {
+  const rows = await db
+    .select({
+      assignedAt: orders.assignedToManufacturerAt,
+      printedAt: orders.manufacturerPrintedAt,
+    })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.manufacturerId, manufacturerId),
+        isNotNull(orders.shippedAt),
+        isNotNull(orders.assignedToManufacturerAt),
+        isNotNull(orders.manufacturerPrintedAt)
+      )
+    )
+    .orderBy(desc(orders.shippedAt))
+    .limit(OTD_LOOKBACK);
+
+  if (rows.length < 3) return OTD_PRINT_TARGET_DAYS; // not enough signal, neutral
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  let totalDays = 0;
+  let counted = 0;
+  for (const r of rows) {
+    if (!r.assignedAt || !r.printedAt) continue;
+    totalDays += (r.printedAt.getTime() - r.assignedAt.getTime()) / DAY_MS;
+    counted++;
+  }
+  if (counted === 0) return OTD_PRINT_TARGET_DAYS;
+  return Math.round((totalDays / counted) * 10) / 10;
+}
+
 /**
  * Action strings as written by the manufacturer routes — keep in sync with
  * `manufacturerActions.action` inserts (accept / start_printing /

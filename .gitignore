@@ -67,3 +67,6 @@ next-env.d.ts
 # pazarlama dokümanları ara çıktısı
 docs/pazarlama/.build/
 __pycache__/
+
+# SDD çalışma alanı — plan ilerleme defteri ve inceleme paketleri (geçici)
+.superpowers/

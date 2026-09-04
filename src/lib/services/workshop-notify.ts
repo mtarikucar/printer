@@ -305,7 +305,7 @@ export async function notifyWorkshopParticipantsReady(orderIds: string[]): Promi
             <p>Merhaba ${escHtml(p.fullName)},</p>
             <p>Figürünüz hazır ve <strong>${escHtml(venue.name)}</strong> mekânında
                sizi bekliyor. Kargoyla herhangi bir şey göndermiyoruz —
-               figürünüzü seansta elden teslim alacak ve orada
+               figürünüzü seansta elden teslim alıp orada
                boyayacaksınız.</p>
             <table style="border-collapse:collapse;margin:16px 0;">
               ${row("Tarih", formatDateTime(session.startsAt))}

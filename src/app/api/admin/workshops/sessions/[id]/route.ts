@@ -12,6 +12,16 @@ import { notifyManufacturerSessionOpened } from "@/lib/services/workshop-manufac
  * `draft → open` geçişi bir üretici seçilmiş olmasını ŞART koşar: seans
  * açıldığı anda üretici taahhüt eder, böylece 5 günlük katılım penceresi
  * kapanınca parti soğuk atama beklemeden doğrudan ona düşer.
+ *
+ * FİYATLANMIŞ bir seans yeniden `open` YAPILAMAZ. Bu, `closeSession`'ın
+ * `commission_rate_bps IS NULL` koşuluyla aynı deliği KAPATMAZ; ikisi ayrı iş
+ * yapar ve ikisi de gerekli:
+ *   - oradaki koşul PARAYI korur — bir seans ömrü boyunca yalnızca bir kez
+ *     fiyatlanır, hangi route ne izin verirse versin;
+ *   - buradaki kontrol OPERATÖRÜ korur — o koşul yüzünden yeniden açılan seans
+ *     bir daha asla kapanamaz: açık görünür, katılım alır, ödeme alır ve
+ *     siparişleri hiçbir partiye girmez. Sessizce sipariş yutan bir seans,
+ *     admin'in "bir kişi daha ekleyeyim" refleksinin bedeli olmamalı.
  */
 export async function PATCH(
   request: NextRequest,
@@ -37,10 +47,22 @@ export async function PATCH(
   if (data.status === "open") {
     const s = await db.query.workshopSessions.findFirst({
       where: eq(workshopSessions.id, id),
-      columns: { manufacturerId: true, status: true },
+      columns: { manufacturerId: true, status: true, commissionRateBps: true },
     });
     if (!s) {
       return NextResponse.json({ error: "Seans bulunamadı" }, { status: 404 });
+    }
+    // Fiyatlanmış seans bir daha açılamaz (gerekçe: doc yorumu).
+    if (s.commissionRateBps !== null) {
+      return NextResponse.json(
+        {
+          error:
+            "Bu seans kapanmış ve fiyatlanmış (komisyon oranı donduruldu); " +
+            "yeniden katılıma açılamaz — açılsaydı bir daha kapanamaz, aldığı " +
+            "siparişler hiçbir partiye giremezdi. Yeni bir seans açın.",
+        },
+        { status: 409 }
+      );
     }
     // Bu istekte manufacturerId de gönderiliyorsa onu, yoksa mevcut kayıttakini esas al.
     const effectiveManufacturerId =

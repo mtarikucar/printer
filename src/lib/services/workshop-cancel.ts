@@ -151,6 +151,10 @@ export async function cancelWorkshopSession(input: {
   const alreadyRefunded: string[] = [];
   const alreadyShipped: string[] = [];
   const failed: string[] = [];
+  // `failed` iki farklı hatayı taşır: iadesi tutmayan SİPARİŞ ve kapatılamayan
+  // ödemesiz TASLAK. Üreticinin kuyruğunda yalnızca birincisi durur — ikincisi
+  // hiç sipariş olmadı. Üreticiye giden sayı bu yüzden ayrı tutulur.
+  let refundFailedCount = 0;
   /** Bilgilendirme e-postası gidecekler — YALNIZCA bu çağrıda iptal edilenler. */
   const notify: Array<{ participantId: string; refunded: boolean }> = [];
 
@@ -205,6 +209,7 @@ export async function cancelWorkshopSession(input: {
 
     if (!res.ok && res.reason !== "already_refunded") {
       failed.push(r.fullName);
+      refundFailedCount += 1;
       continue;
     }
 
@@ -243,10 +248,13 @@ export async function cancelWorkshopSession(input: {
   // Üretici bu tarih için kapasite ayırmıştı; haber vermemek ona gerçek slot
   // kaybettirir. Yalnızca ön rezerve bir üretici varsa gider ve kendi hatasını
   // yutar.
-  if (session.manufacturerId) {
+  // Yalnızca seansı GERÇEKTEN bu çağrı iptal ettiyse. Bu uç aynı zamanda
+  // başarısız iadelerin yeniden deneme yolu; her denemede üreticiye yeni bir
+  // panel satırı + e-posta göndermek onu aynı iptalle defalarca rahatsız eder.
+  if (session.manufacturerId && session.status !== "cancelled") {
     await notifyManufacturerSessionCancelled(id, {
       refundedCount: refunded.length + alreadyRefunded.length,
-      leftWithManufacturerCount: alreadyShipped.length + failed.length,
+      leftWithManufacturerCount: alreadyShipped.length + refundFailedCount,
     });
   }
 

@@ -140,7 +140,9 @@ async function run() {
   const { cancelWorkshopSession, cancelWorkshopParticipant } = await import(
     "../src/lib/services/workshop-cancel"
   );
-  const { promoteDraftToOrder } = await import("../src/lib/services/order-draft");
+  const { promoteDraftToOrder, expireDraft } = await import(
+    "../src/lib/services/order-draft"
+  );
   const { accrueEarning } = await import("../src/lib/services/payouts");
   const { eq } = await import("drizzle-orm");
 
@@ -627,6 +629,43 @@ async function run() {
     "başka seansın katılımcısı bu seanstan iptal edilemez",
     !wrongSession.ok && wrongSession.reason === "not_found",
     wrongSession
+  );
+
+  // 7) `expireDraft`'ın VARSAYILANLARI.
+  //
+  // İptal yolu bu fonksiyona üç opsiyonel parametre ekledi. Fonksiyonu ayrıca
+  // ödeme-süresi worker'ı, atölye kapanış worker'ı ve admin force-expire rotası
+  // ÇIPLAK çağırıyor — yani canlıda gerçek müşterilerin ödenmemiş siparişlerine
+  // ne olduğu bu varsayılanlara bağlı. Buradaki iddialar o üç çağrıyı korur:
+  // varsayılanlar kayarsa test kırılır, canlı davranış sessizce değişmez.
+  console.log("\n7) expireDraft varsayılanları (canlı ödeme yollarını korur)");
+
+  const s7 = await seedSession("open", 1);
+  const bare = await seedParticipant(s7.id, "Sinem Aydin", { withDraft: true });
+
+  await expireDraft(bare.draftId!);
+
+  const bareDraft = await db.query.orderDrafts.findFirst({
+    where: eq(orderDrafts.id, bare.draftId!),
+  });
+  ok("çıplak çağrı taslağı `expired` yapar", bareDraft?.status === "expired");
+  ok(
+    "kart taslağının varsayılan hata metni korunur",
+    bareDraft?.paytrFailureReason === "Kart ödeme süresi doldu",
+    bareDraft?.paytrFailureReason
+  );
+
+  const bareParticipant = await db.query.workshopParticipants.findFirst({
+    where: eq(workshopParticipants.id, bare.participant.id),
+  });
+  ok(
+    "varsayılan iptal gerekçesi korunur",
+    bareParticipant?.cancelReason === "Ödeme süresi doldu",
+    bareParticipant?.cancelReason
+  );
+  ok(
+    "çıplak çağrı koltuğu bırakır (bookedCount 1 → 0)",
+    (await sessionRow(s7.id))?.bookedCount === 0
   );
 }
 

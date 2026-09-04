@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { workshopRequests } from "@/lib/db/schema";
+import { workshopRequests, workshopVenues } from "@/lib/db/schema";
 import { WorkshopRequestDetailClient } from "./client";
 
 export default async function AdminWorkshopRequestDetailPage({
@@ -18,10 +18,18 @@ export default async function AdminWorkshopRequestDetailPage({
   });
   if (!req) notFound();
 
+  // Bu talepten daha önce mekan yaratıldı mı? "Mekana dönüştür" butonu bunu
+  // gizler — aynı talepten ikinci kez mekan yaratılmaz (bkz. workshop-venue.ts).
+  const venue = await db.query.workshopVenues.findFirst({
+    where: eq(workshopVenues.requestId, id),
+    columns: { id: true },
+  });
+
   return (
     <WorkshopRequestDetailClient
       data={{
         id: req.id,
+        venueId: venue?.id ?? null,
         reference: req.reference,
         status: req.status,
         contactName: req.contactName,

@@ -12,6 +12,7 @@ import {
 
 interface DetailData {
   id: string;
+  venueId: string | null;
   reference: string;
   status: string;
   contactName: string;
@@ -66,6 +67,18 @@ export function WorkshopRequestDetailClient({ data }: { data: DetailData }) {
     data.scheduledAt ? data.scheduledAt.slice(0, 10) : ""
   );
 
+  // Talep → mekan dönüşümü. Başvuru formu mahalle ve posta kodu toplamıyor;
+  // sipariş adresi /^\d{5}$/ şartı koyduğundan admin bu iki alanı burada
+  // tamamlar (bkz. IMPLEMENTER-CONTEXT: "posta kodu gap'i").
+  const [convertOpen, setConvertOpen] = useState(false);
+  const [venueName, setVenueName] = useState(
+    data.organizationName || data.contactName
+  );
+  const [mahalle, setMahalle] = useState("");
+  const [postaKodu, setPostaKodu] = useState("");
+  const [converting, setConverting] = useState(false);
+  const [convertError, setConvertError] = useState<string | null>(null);
+
   const meta = workshopStatusMeta(data.status);
 
   const priceKurus = () => {
@@ -115,6 +128,44 @@ export function WorkshopRequestDetailClient({ data }: { data: DetailData }) {
       rejectionReason,
       ...commonFields(),
     });
+  };
+
+  const convert = async () => {
+    setConvertError(null);
+    setConverting(true);
+    try {
+      const res = await fetch(
+        `/api/admin/workshop-requests/${data.id}/convert-to-venue`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: venueName,
+            contactName: data.contactName,
+            contactEmail: data.contactEmail,
+            contactPhone: data.contactPhone,
+            address: {
+              adres: data.addressLine,
+              mahalle,
+              ilce: data.district,
+              il: data.city,
+              postaKodu,
+              telefon: data.contactPhone,
+            },
+          }),
+        }
+      );
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConvertError(payload.error || "Mekana dönüştürülemedi.");
+        return;
+      }
+      // Panel kabuğunda dönüşüm sonrası bir mekan gösterge sayfasına geçiliyor;
+      // TAM navigasyon gerekir, router.push değil (panel-shell responsive notu).
+      window.location.href = `/admin/workshops/${payload.venueId}`;
+    } finally {
+      setConverting(false);
+    }
   };
 
   return (
@@ -257,6 +308,16 @@ export function WorkshopRequestDetailClient({ data }: { data: DetailData }) {
               >
                 Tamamlandı olarak işaretle
               </button>
+              {!data.venueId && (
+                <button
+                  type="button"
+                  onClick={() => setConvertOpen(true)}
+                  disabled={busy !== null}
+                  className="w-full px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Mekana dönüştür
+                </button>
+              )}
             </div>
 
             <div className="border-t border-gray-100 pt-4 space-y-2">
@@ -288,6 +349,85 @@ export function WorkshopRequestDetailClient({ data }: { data: DetailData }) {
           </div>
         </div>
       </div>
+
+      {convertOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Mekana dönüştür
+            </h3>
+            <p className="mt-1 text-xs text-gray-500">
+              Seans siparişleri bu adrese gönderilir. İl / ilçe / açık adres
+              başvurudan gelir; mahalle ve posta kodu başvuruda toplanmadığı
+              için burada tamamlanmalı.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Mekan adı
+                </label>
+                <input
+                  type="text"
+                  value={venueName}
+                  onChange={(e) => setVenueName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Mahalle
+                </label>
+                <input
+                  type="text"
+                  value={mahalle}
+                  onChange={(e) => setMahalle(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Posta kodu
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={5}
+                  value={postaKodu}
+                  onChange={(e) => setPostaKodu(e.target.value)}
+                  placeholder="örn. 34000"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                />
+              </div>
+              <Row label="İl / İlçe" value={`${data.city} / ${data.district}`} />
+              <Row label="Açık adres" value={data.addressLine} />
+            </div>
+
+            {convertError && (
+              <p className="mt-3 text-sm text-red-600">{convertError}</p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConvertOpen(false)}
+                disabled={converting}
+                className="px-4 py-2 bg-gray-50 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-100 disabled:opacity-50"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={convert}
+                disabled={converting}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {converting ? "Dönüştürülüyor…" : "Mekana dönüştür"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

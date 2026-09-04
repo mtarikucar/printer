@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, workshopSessions, workshopParticipants, adminActions } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { batchShipSchema } from "@/lib/validators/workshop";
-import { WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES } from "@/lib/config/workshop";
+import { batchShipPending } from "@/lib/services/workshop-session";
 import { notifyWorkshopParticipantsReady } from "@/lib/services/workshop-notify";
 import { accrueEarning } from "@/lib/services/payouts";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
@@ -18,23 +18,11 @@ interface LeftBehindRow {
 
 /**
  * Bir siparişin partide HÂLÂ sevk edilmeyi beklediğini söyleyen tanım —
- * seansa bağlı ve henüz sevk/teslim/red edilmemiş.
- *
- * Bilerek üretici ataması (`manufacturerId`) ARANMAZ: üreticisiz bir sipariş
- * de partiye aittir, yalnızca sevk EDİLEMEZ (aşağıdaki UPDATE'te ayrıca
- * süzülür). `manufacturerId`yi bu tanıma da koymak (round 1'in hatası) böyle
- * bir siparişi hem UPDATE'ten hem `leftBehind` raporundan düşürürdü —
- * `pendingRows.length === 0` yanlışlıkla `true` olur, seans `shipped`e
- * geçer, admin'e "geride kalan yok" denir ve `adoptOrphanBatchOrders`ın
- * tam olarak onarmak için var olduğu o sipariş hiçbir yerde görünmez hâle
- * gelirdi (bkz. task-12a-report.md fix round 2, "Finding 1").
+ * `workshop-session.ts`teki `batchShipPending`. Rota kendi kopyasını TUTMAZ:
+ * yüklem hem "partiye ait mi" (reddedilmemiş VE iade edilmemiş) hem "hâlâ
+ * bekliyor mu" ayaklarını taşıyor ve DB'li test onu doğrudan çağırıyor.
  */
-function batchPending(sessionId: string) {
-  return and(
-    eq(orders.workshopSessionId, sessionId),
-    notInArray(orders.status, [...WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES])
-  );
-}
+const batchPending = batchShipPending;
 
 /**
  * Seansın sevke hazır (QC onaylı) siparişlerini TEK konsinye olarak mekana
@@ -62,11 +50,12 @@ function batchPending(sessionId: string) {
  * ikinci bir çağrı (kendi takip numarasıyla, ikinci bir konsinye olarak)
  * onları toplar.
  *
- * Seansın toplu durumu partinin TAMAMI (rejected hariç, sevk/teslim
+ * Seansın toplu durumu partinin TAMAMI (partiden düşenler hariç, sevk/teslim
  * edilmemiş sipariş kalmadığında) sevk edilmiş sayıldığında `shipped`e
  * döner — BU ÇAĞRININ bir şey sevk edip etmediğinden BAĞIMSIZ: parti daha
- * önceki bir çağrıda kısmen sevk edildiyse ve geride kalanlar sonradan
- * `rejected` olduysa (iade), bu çağrı hiçbir şey sevk etmese bile parti artık
+ * önceki bir çağrıda kısmen sevk edildiyse ve geride kalanlar sonradan iade
+ * edildiyse (`payment_status = 'refunded'`; `orders.status` DEĞİŞMEZ — bkz.
+ * order-refund.ts) ya da reddedildiyse, bu çağrı hiçbir şey sevk etmese bile parti artık
  * tamamdır ve seans bunu yansıtmalı — aksi hâlde teslim butonu asla
  * görünmez ve o sevkiyat sonsuza dek "üretimde" görünen bir hayalete
  * dönüşür (bkz. fix round 2, "Finding 3"). Kısmi bir sevkte seans durumu
@@ -162,9 +151,9 @@ export async function POST(
 
     if (shippedRows.length > 0) {
       // Sevkiyat damgaları YALNIZCA bu çağrı gerçekten bir şey sevk ettiyse
-      // yazılır — geride kalanlar sonradan iade edildiği için parti
-      // tamamlanan bir çağrıda (aşağıdaki `batchNowComplete` dalı) BU
-      // ÇAĞRININ taşımadığı bir kargo bilgisini uydurmamak için.
+      // yazılır — geride kalanlar sonradan partiden düştüğü için (iade ya da
+      // red) parti tamamlanan bir çağrıda (aşağıdaki `batchNowComplete` dalı)
+      // BU ÇAĞRININ taşımadığı bir kargo bilgisini uydurmamak için.
       await tx
         .update(workshopSessions)
         .set({
@@ -177,8 +166,8 @@ export async function POST(
         .where(eq(workshopSessions.id, id));
     } else if (batchNowComplete) {
       // Bu çağrı hiçbir şey sevk etmedi ama parti artık tamam: geride kalan
-      // siparişler bu aralıkta `rejected` oldu (iade). Seans durumu bunu
-      // yansıtmalı, aksi hâlde teslim butonu asla görünmez.
+      // siparişler bu aralıkta partiden düştü (iade edildi ya da reddedildi).
+      // Seans durumu bunu yansıtmalı, aksi hâlde teslim butonu asla görünmez.
       await tx
         .update(workshopSessions)
         .set({ status: "shipped", updatedAt: now })

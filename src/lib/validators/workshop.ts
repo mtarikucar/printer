@@ -81,6 +81,14 @@ export const joinSessionSchema = z.object({
   }),
 });
 
+/**
+ * Üreticisiz kapanmış bir partinin toplu devri. Yalnızca üretici kimliği
+ * alınır: hedef durum ve donmuş oran seanstan okunur, istemciden ASLA.
+ */
+export const assignBatchManufacturerSchema = z.object({
+  manufacturerId: z.string().uuid("Bir üretici seçin"),
+});
+
 export const batchShipSchema = z.object({
   carrier: z.enum(["yurtici", "aras", "mng", "ptt", "surat", "other", "elden"]),
   trackingNumber: z.string().trim().max(60).optional(),

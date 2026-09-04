@@ -35,6 +35,23 @@ export const WORKSHOP_DELIVER_DAYS_BEFORE = 1;
  */
 export const WORKSHOP_SEAT_HOLD_HOURS = 6;
 
+/**
+ * TASLAKSIZ bir koltuk tutması kaç gün boyunca süpürmeye düşer.
+ *
+ * `findStaleSeatHolds`in döndürdüğü her satır saatlik worker'da işlenir.
+ * Taslaklı olanlar `expireDraft` ile kapanır ve bir daha görünmez. TASLAKSIZ
+ * olanı (elle eklenmiş ya da bozuk bir katılımcı satırı) kapatacak güvenli bir
+ * otomatik yol YOK — worker onu yalnızca `console.error` ile bildirir. Sınır
+ * olmadan bu satır her saat, sonsuza kadar aynı hatayı basar ve zamanla gerçek
+ * uyarıları log'da gömer.
+ *
+ * Bu pencere, "admin'in görmesi için makul süre" ile "sonsuza kadar bağırma"
+ * arasındaki ayardır: bir hafta boyunca saatte bir bildirilir, sonra susar.
+ * Taslaklı tutmalar bu sınırdan ETKİLENMEZ — onların her turda denenmesi
+ * gerekiyor.
+ */
+export const WORKSHOP_ORPHAN_HOLD_REPORT_DAYS = 7;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -207,8 +224,58 @@ export const WORKSHOP_PARTICIPANT_STATUS_LABELS: Record<
 };
 
 /**
+ * PARTİYE AİT OLMANIN tek tanımı — iki kümeden oluşur ve ikisi de gereklidir.
+ *
+ * `orders.status = 'rejected'`: admin siparişi reddetti/iptal etti.
+ *
+ * `orders.payment_status = 'refunded'`: sipariş iade edildi. Bu ayak `rejected`
+ * kadar ZORUNLUDUR ve uzun süre eksikti: `refundOrder` (order-refund.ts)
+ * `payment_status`ü `refunded` yapar, `manufacturer_id`/`painter_id`yi koparır
+ * ve hakedişi ters çevirir — ama `orders.status`e HİÇ DOKUNMAZ. `rejected`
+ * yazan tek yer admin'in sipariş red rotasıdır ve iade yolları oradan geçmez.
+ * Yani yalnızca `status <> 'rejected'` bakan bir yüklem iade edilmiş siparişi
+ * partide TUTAR: merdiveni şişirir (2 gerçek sipariş 3'lük kademeden fiyatlanır),
+ * `batchAssignmentSet` üreticiyi geri yapıştırır (iadenin az önce kopardığı
+ * bağı sessizce geri alır), sevkte iade edilmiş sipariş için gerçek hakediş
+ * tahakkuk eder ve o sipariş sevk kuyruğundan hiç düşmediği için seans asla
+ * `shipped`e ulaşamaz.
+ *
+ * Neden `refundOrder`'ın kendisi düzeltilmedi: ona `status = 'rejected'`
+ * yazdırmak PLATFORMDAKİ HER iadenin (atölye dışı dâhil) anlamını değiştirirdi.
+ * Doğru yer, partiyi tanımlayan yüklemlerdir.
+ *
+ * İki dizi de TEK kaynaktır: SQL tarafı workshop-session.ts'teki
+ * `batchOrderFilter`, JS tarafı aşağıdaki `orderInBatch` — ikisi de buradan
+ * okur, bir gün altıncı bir çağrı yeri eklenirse kendi kopyasını yazamaz.
+ */
+export const WORKSHOP_BATCH_EXCLUDED_STATUSES = ["rejected"] as const;
+export const WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES = ["refunded"] as const;
+
+/**
+ * Bir sipariş satırı partiye giriyor mu? SQL yazamayan çağıranlar için (admin
+ * seans detay sayfası zaten yüklediği katılımcı satırlarını JS'te süzüyor).
+ * `batchOrderFilter`'ın birebir aynı kuralı — aynı iki diziden okur.
+ */
+export function orderInBatch(row: {
+  status: string | null;
+  paymentStatus: string | null;
+}): boolean {
+  if ((WORKSHOP_BATCH_EXCLUDED_STATUSES as readonly string[]).includes(row.status ?? "")) {
+    return false;
+  }
+  return !(WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES as readonly string[]).includes(
+    row.paymentStatus ?? ""
+  );
+}
+
+/**
  * Toplu sevk ucunun ("ship/route.ts") "bu sipariş partide hâlâ sevk edilmeyi
  * bekliyor mu" sorusunu yanıtlarken HARİÇ TUTTUĞU durumlar.
+ *
+ * Bu dizi YALNIZCA `orders.status` eksenidir; "partiye ait olmak"ın ödeme ayağı
+ * (iade edilmiş sipariş partide değildir) ayrı durur ve uç, bu diziyi
+ * `batchOrderFilter` ile BİRLİKTE kullanır. `rejected` burada bilerek kalır:
+ * yüklem tek başına okunduğunda da doğru olmalı.
  *
  * `delivered` burada bilerek `shipped`in yanında durur — yalnızca
  * `!= 'shipped'` kullanılsaydı, zaten `delivered`e geçmiş bir sipariş
@@ -232,6 +299,10 @@ export const WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES = [
  * tam tersi): bir sipariş `shipped` olduğu sürece teslim edilmeyi
  * BEKLEMEKTEDİR; yalnızca `delivered`e geçtiğinde ya da `rejected`
  * olduğunda bu bekleme listesinden çıkar.
+ *
+ * Ship'teki dizide olduğu gibi bu da yalnızca `orders.status` eksenidir; iade
+ * edilmiş sipariş partiye hiç ait olmadığı için uç bunu `batchOrderFilter` ile
+ * birlikte kullanır.
  */
 export const WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES = [
   "delivered",

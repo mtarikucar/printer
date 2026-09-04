@@ -140,11 +140,21 @@ async function run() {
   const { cancelWorkshopSession, cancelWorkshopParticipant } = await import(
     "../src/lib/services/workshop-cancel"
   );
+  const {
+    adoptOrphanBatchOrders,
+    assignBatchManufacturer,
+    batchDeliverPending,
+    batchOrderFilter,
+    batchShipPending,
+    closeSession,
+    countBatchOrders,
+  } = await import("../src/lib/services/workshop-session");
+  const { refundOrder } = await import("../src/lib/services/order-refund");
   const { promoteDraftToOrder, expireDraft } = await import(
     "../src/lib/services/order-draft"
   );
   const { accrueEarning } = await import("../src/lib/services/payouts");
-  const { eq } = await import("drizzle-orm");
+  const { and, eq, isNotNull } = await import("drizzle-orm");
 
   const ADMIN = "test-admin@figurunica.test";
   const ADDRESS = {
@@ -185,7 +195,11 @@ async function run() {
     .returning();
 
   let orderSeq = 0;
-  async function seedSession(status: "open" | "closed" | "in_production", bookedCount: number) {
+  async function seedSession(
+    status: "open" | "closed" | "in_production",
+    bookedCount: number,
+    opts: { withoutManufacturer?: boolean } = {}
+  ) {
     const startsAt = new Date(Date.now() + 20 * 24 * 3600 * 1000);
     const [s] = await db
       .insert(workshopSessions)
@@ -198,7 +212,7 @@ async function run() {
         joinClosesAt: new Date(startsAt.getTime() - 5 * 24 * 3600 * 1000),
         deliverBy: new Date(startsAt.getTime() - 24 * 3600 * 1000),
         pricePerSeatKurus: 135000,
-        manufacturerId: mfg.id,
+        manufacturerId: opts.withoutManufacturer ? null : mfg.id,
         status,
       })
       .returning();
@@ -228,7 +242,17 @@ async function run() {
   async function seedParticipant(
     sessionId: string,
     fullName: string,
-    opts: { orderStatus?: string; participantStatus?: string; withDraft?: boolean } = {}
+    opts: {
+      orderStatus?: string;
+      participantStatus?: string;
+      withDraft?: boolean;
+      /**
+       * KAPANIŞ ÖNCESİ sipariş: üreticisi ve donmuş oranı YOK. Varsayılan seed
+       * kapanış SONRASI hâli taklit ediyor (mfg + 4000bps); merdiven ve atama
+       * testleri gerçek başlangıç durumundan başlamak zorunda.
+       */
+      preClose?: boolean;
+    } = {}
   ) {
     let orderId: string | null = null;
     const draft = opts.withDraft ? await seedDraft() : null;
@@ -247,10 +271,10 @@ async function run() {
           productionBaseKurus: 135000,
           paintingPriceKurus: 0,
           status: opts.orderStatus as "paid",
-          manufacturerId: mfg.id,
-          manufacturerStatus: "accepted",
+          manufacturerId: opts.preClose ? null : mfg.id,
+          manufacturerStatus: opts.preClose ? "unassigned" : "accepted",
           workshopSessionId: sessionId,
-          commissionRateBps: 4000,
+          commissionRateBps: opts.preClose ? null : 4000,
         })
         .returning();
       orderId = o.id;
@@ -301,10 +325,21 @@ async function run() {
         columns: { orderId: true },
       })
     )?.orderId ?? null;
+  const orderRow = async (id: string) =>
+    await db.query.orders.findFirst({
+      where: eq(orders.id, id),
+      columns: {
+        status: true,
+        paymentStatus: true,
+        manufacturerId: true,
+        manufacturerStatus: true,
+        commissionRateBps: true,
+      },
+    });
   const sessionRow = async (id: string) =>
     await db.query.workshopSessions.findFirst({
       where: eq(workshopSessions.id, id),
-      columns: { status: true, bookedCount: true },
+      columns: { status: true, bookedCount: true, commissionRateBps: true },
     });
 
   // ── 1) Seans iptali: 2 ödenmiş + 1 sevk edilmiş + 1 ödemesiz ─────────────
@@ -666,6 +701,342 @@ async function run() {
   ok(
     "çıplak çağrı koltuğu bırakır (bookedCount 1 → 0)",
     (await sessionRow(s7.id))?.bookedCount === 0
+  );
+
+  // ── 8) İADE EDİLMİŞ SİPARİŞ PARTİDEN DÜŞER ───────────────────────────────
+  //
+  // Kapatılan açık: `refundOrder` `payment_status`ü `refunded` yapıyor ama
+  // `orders.status`e HİÇ dokunmuyor. Parti yüklemleri yalnızca
+  // `status <> 'rejected'` baktığı sürece iade edilmiş sipariş partide KALIYOR
+  // ve dört ayrı yerde para/işleyiş bozuluyordu:
+  //   1. merdiven şişiyor  — 2 gerçek sipariş 3'lük kademeden fiyatlanıyor,
+  //      yanlış oran partideki HER siparişe donuyor;
+  //   2. `batchAssignmentSet` üreticiyi geri yapıştırıyor — iadenin az önce
+  //      kopardığı bağ sessizce geri geliyor, üretici iade edilmiş figürü basıyor;
+  //   3. toplu sevk o sipariş için GERÇEK hakediş tahakkuk ettiriyor;
+  //   4. sipariş sevk kuyruğundan hiç düşmediği için seans asla `shipped`
+  //      olamıyor, dolayısıyla teslim butonu HİÇ görünmüyor.
+  //
+  // Aşağısı dördünü de gerçek DB üzerinde sürüyor. Sevk/teslim yüklemleri
+  // rotanın KENDİ fonksiyonlarıdır (`batchShipPending` / `batchDeliverPending`,
+  // workshop-session.ts'ten export) — testin kopyası değil.
+  console.log("\n8) İade edilmiş sipariş partiden düşer (kapanış öncesi iade)");
+
+  const s8 = await seedSession("open", 3);
+  const w1 = await seedParticipant(s8.id, "Nehir Ates", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+  const w2 = await seedParticipant(s8.id, "Onur Kilic", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+  const w3 = await seedParticipant(s8.id, "Pelin Yavuz", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+
+  // Kapanıştan ÖNCE iade: sipariş `refunded`, `orders.status` DEĞİŞMEZ.
+  const refundRes = await refundOrder({
+    orderId: w3.orderId!,
+    reason: "Test — kapanış öncesi iade",
+    adminEmail: ADMIN,
+  });
+  ok("kapanış öncesi iade işlendi", refundRes.ok, refundRes);
+  const w3AfterRefund = await orderRow(w3.orderId!);
+  ok(
+    "iade `orders.status`e DOKUNMAZ (açığın kaynağı)",
+    w3AfterRefund?.paymentStatus === "refunded" && w3AfterRefund?.status !== "rejected",
+    w3AfterRefund
+  );
+
+  ok(
+    "parti sayımı iadeli siparişi SAYMAZ (3 katılımcı → 2 sipariş)",
+    (await countBatchOrders(s8.id)) === 2,
+    await countBatchOrders(s8.id)
+  );
+
+  const close8 = await closeSession(s8.id);
+  ok("kapanış başarılı", !("error" in close8), close8);
+  ok(
+    "merdiven 2 siparişten hesaplanır: 4000bps (3 sipariş olsaydı 4500 olurdu)",
+    !("error" in close8) && close8.orderCount === 2 && close8.commissionRateBps === 4000,
+    close8
+  );
+  ok(
+    "seansa donan oran da 4000bps",
+    (await sessionRow(s8.id))?.commissionRateBps === 4000,
+    (await sessionRow(s8.id))?.commissionRateBps
+  );
+
+  const w3AfterClose = await orderRow(w3.orderId!);
+  ok(
+    "iadeli sipariş üreticiye GERİ YAPIŞTIRILMADI",
+    w3AfterClose?.manufacturerId === null &&
+      w3AfterClose?.manufacturerStatus === "unassigned",
+    w3AfterClose
+  );
+  ok(
+    "iadeli siparişe oran DONDURULMADI",
+    w3AfterClose?.commissionRateBps === null,
+    w3AfterClose
+  );
+  const w1AfterClose = await orderRow(w1.orderId!);
+  const w2AfterClose = await orderRow(w2.orderId!);
+  ok(
+    "gerçek siparişlerin İKİSİ de üreticiye atandı ve 4000bps taşıyor",
+    [w1AfterClose, w2AfterClose].every(
+      (r) =>
+        r?.manufacturerId === mfg.id &&
+        r?.manufacturerStatus === "accepted" &&
+        r?.commissionRateBps === 4000
+    ),
+    { w1AfterClose, w2AfterClose }
+  );
+
+  // Sevk kuyruğu — rotanın kendi yüklemi.
+  const pending8 = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(batchShipPending(s8.id));
+  ok(
+    "sevk kuyruğunda yalnızca 2 gerçek sipariş var (iadeli YOK)",
+    pending8.length === 2 && !pending8.some((r) => r.id === w3.orderId),
+    pending8
+  );
+
+  // Rotanın sevk UPDATE'i (QC kapısı + üretici şartıyla birebir).
+  await db
+    .update(orders)
+    .set({ manufacturerStatus: "qc_approved" })
+    .where(eq(orders.workshopSessionId, s8.id));
+  const shippedRows = await db
+    .update(orders)
+    .set({ status: "shipped", manufacturerStatus: "shipped", shippedAt: new Date() })
+    .where(
+      and(
+        batchShipPending(s8.id),
+        isNotNull(orders.manufacturerId),
+        eq(orders.manufacturerStatus, "qc_approved")
+      )
+    )
+    .returning({ id: orders.id });
+  ok(
+    "sevk yalnızca 2 gerçek siparişi kapsar",
+    shippedRows.length === 2 && !shippedRows.some((r) => r.id === w3.orderId),
+    shippedRows
+  );
+
+  // Rotanın hakediş döngüsü: YALNIZCA sevk edilen satırlar için.
+  for (const r of shippedRows) {
+    await accrueEarning(r.id, mfg.id, 135000);
+  }
+  const w3Earnings = await db
+    .select()
+    .from(manufacturerEarnings)
+    .where(eq(manufacturerEarnings.orderId, w3.orderId!));
+  ok("iadeli sipariş için hakediş TAHAKKUK ETMEDİ", w3Earnings.length === 0, w3Earnings);
+
+  const pendingAfterShip = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(batchShipPending(s8.id));
+  ok(
+    "sevkten sonra kuyruk BOŞ — seans `shipped`e ulaşabilir",
+    pendingAfterShip.length === 0,
+    pendingAfterShip
+  );
+
+  // Rotanın teslim UPDATE'i + kuyruğu.
+  const deliveredRows = await db
+    .update(orders)
+    .set({ status: "delivered", deliveredAt: new Date() })
+    .where(and(batchOrderFilter(s8.id), eq(orders.status, "shipped")))
+    .returning({ id: orders.id });
+  ok("teslim 2 siparişi kapsar", deliveredRows.length === 2, deliveredRows);
+  const deliverPendingAfter = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(batchDeliverPending(s8.id));
+  ok(
+    "teslimden sonra kuyruk BOŞ — seans `delivered`a ulaşabilir",
+    deliverPendingAfter.length === 0,
+    deliverPendingAfter
+  );
+
+  // Mühürlenmiş seanstaki iadeli sipariş SAATLİK "öksüz" gürültüsü üretmez.
+  await db
+    .update(workshopSessions)
+    .set({ status: "delivered" })
+    .where(eq(workshopSessions.id, s8.id));
+  const adoptions = await adoptOrphanBatchOrders();
+  ok(
+    "iadeli sipariş öksüz sahiplenmeye DÜŞMEZ (saatlik hata gürültüsü yok)",
+    adoptions.every((a) => !a.orderIds.includes(w3.orderId!)),
+    adoptions
+  );
+  ok(
+    "iadeli sipariş hâlâ üreticisiz",
+    (await orderRow(w3.orderId!))?.manufacturerId === null
+  );
+
+  // ── 8b) KAPANIŞTAN SONRA iade: parti yine tamamlanabilmeli ───────────────
+  console.log("\n8b) Kapanıştan sonra iade");
+  const s9 = await seedSession("open", 2);
+  const v1 = await seedParticipant(s9.id, "Rana Coskun", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+  const v2 = await seedParticipant(s9.id, "Sinan Toprak", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+  const close9 = await closeSession(s9.id);
+  ok(
+    "2 siparişli parti 4000bps ile kapandı",
+    !("error" in close9) && close9.orderCount === 2 && close9.commissionRateBps === 4000,
+    close9
+  );
+
+  await refundOrder({
+    orderId: v2.orderId!,
+    reason: "Test — kapanış sonrası iade",
+    adminEmail: ADMIN,
+  });
+  const v2After = await orderRow(v2.orderId!);
+  ok(
+    "kapanış sonrası iade üreticiyi koparır, donmuş oranı BIRAKIR",
+    v2After?.manufacturerId === null && v2After?.commissionRateBps === 4000,
+    v2After
+  );
+
+  const pending9 = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(batchShipPending(s9.id));
+  ok(
+    "sevk kuyruğunda yalnızca kalan 1 sipariş var",
+    pending9.length === 1 && pending9[0].id === v1.orderId,
+    pending9
+  );
+
+  await db
+    .update(orders)
+    .set({ manufacturerStatus: "qc_approved" })
+    .where(eq(orders.id, v1.orderId!));
+  const shipped9 = await db
+    .update(orders)
+    .set({ status: "shipped", manufacturerStatus: "shipped", shippedAt: new Date() })
+    .where(
+      and(
+        batchShipPending(s9.id),
+        isNotNull(orders.manufacturerId),
+        eq(orders.manufacturerStatus, "qc_approved")
+      )
+    )
+    .returning({ id: orders.id });
+  ok("kalan sipariş sevk edildi", shipped9.length === 1, shipped9);
+  const pending9After = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(batchShipPending(s9.id));
+  ok(
+    "kuyruk BOŞ — kapanış sonrası iadeye rağmen seans `shipped`e ulaşır",
+    pending9After.length === 0,
+    pending9After
+  );
+
+  // ── 9) Boş seans ÖMÜR BOYU kilitlenmez ───────────────────────────────────
+  //
+  // `closeSession` oranı sipariş SAYISINDAN bağımsız donduruyordu; PATCH ucunun
+  // "fiyatlanmış seans yeniden açılamaz" kapısı da `commission_rate_bps IS NOT
+  // NULL`e bakıyor. Sonuç: kimsenin katılmadığı bir seans bir daha asla
+  // katılıma açılamıyordu — korunacak para olmadığı hâlde.
+  console.log("\n9) Boş seans kapanışı oranı DONDURMAZ");
+  const s10 = await seedSession("open", 0);
+  const close10 = await closeSession(s10.id);
+  ok(
+    "boş parti kapanır ve seans iptal olur",
+    !("error" in close10) && close10.orderCount === 0,
+    close10
+  );
+  const s10Row = await sessionRow(s10.id);
+  ok("boş seans `cancelled`", s10Row?.status === "cancelled", s10Row);
+  ok(
+    "boş seansa oran DONDURULMADI (yeniden açılabilir)",
+    s10Row?.commissionRateBps === null,
+    s10Row
+  );
+
+  // ── 10) Üreticisiz kapanmış partinin KURTARMA yolu ────────────────────────
+  //
+  // Ön rezerve üreticisi olmadan kapanan seans `closed`da kalıyor: oran donmuş,
+  // siparişler ödenmiş, kimse basmıyor. Admin'e giden e-posta "bir üretici
+  // atayın ve siparişleri elle devredin" diyordu ama ikisinin de arayüzü yoktu
+  // ve seans hiçbir yoldan ilerleyemiyordu (PATCH→open fiyatlanmış diye
+  // reddediyor, öksüz sahiplenme mühürlü seansı atlıyor, toplu sevk sipariş
+  // başına üretici arıyor). `assignBatchManufacturer` o çıkışı açar.
+  console.log("\n10) Üreticisiz kapanmış partiye üretici atama");
+  const s11 = await seedSession("open", 2, { withoutManufacturer: true });
+  const u1 = await seedParticipant(s11.id, "Tuna Ergin", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+  const u2 = await seedParticipant(s11.id, "Umut Balci", {
+    orderStatus: "approved",
+    preClose: true,
+  });
+  const close11 = await closeSession(s11.id);
+  ok(
+    "üreticisiz parti kapanır ama `in_production` OLMAZ",
+    !("error" in close11) && close11.orderCount === 2,
+    close11
+  );
+  ok("seans `closed`da bekler", (await sessionRow(s11.id))?.status === "closed");
+  ok(
+    "oran donduruldu ama sipariş üreticisiz",
+    (await sessionRow(s11.id))?.commissionRateBps === 4000 &&
+      (await orderRow(u1.orderId!))?.manufacturerId === null
+  );
+
+  const assign = await assignBatchManufacturer({
+    sessionId: s11.id,
+    manufacturerId: mfg.id,
+  });
+  ok("toplu devir başarılı", assign.ok && assign.orderCount === 2, assign);
+  ok("seans `in_production`a geçti", (await sessionRow(s11.id))?.status === "in_production");
+  for (const [name, o] of [
+    ["u1", u1],
+    ["u2", u2],
+  ] as const) {
+    const row = await orderRow(o.orderId!);
+    ok(
+      `${name} üreticiye "kabul edildi" olarak düştü, DONMUŞ oranla`,
+      row?.manufacturerId === mfg.id &&
+        row?.manufacturerStatus === "accepted" &&
+        row?.commissionRateBps === 4000,
+      row
+    );
+  }
+
+  const assignAgain = await assignBatchManufacturer({
+    sessionId: s11.id,
+    manufacturerId: mfg.id,
+  });
+  ok(
+    "üreticisi olan seansa ikinci devir REDDEDİLİR",
+    !assignAgain.ok,
+    assignAgain
+  );
+
+  const assignSealed = await assignBatchManufacturer({
+    sessionId: s8.id,
+    manufacturerId: mfg.id,
+  });
+  ok(
+    "sevk edilmiş/teslim edilmiş seansa devir REDDEDİLİR",
+    !assignSealed.ok,
+    assignSealed
   );
 }
 

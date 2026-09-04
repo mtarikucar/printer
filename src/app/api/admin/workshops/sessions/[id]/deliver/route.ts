@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, workshopSessions, workshopParticipants, adminActions } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES } from "@/lib/config/workshop";
+import { batchDeliverPending, batchOrderFilter } from "@/lib/services/workshop-session";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
 /**
- * Bir siparişin partide HÂLÂ teslim edilmeyi beklediğini söyleyen tanım.
- * `shipped` burada HARİÇ TUTULMAZ (ship'in `batchPending`inin tam tersi):
- * `shipped` olan bir sipariş tam olarak bu bekleme listesindeki sipariştir.
+ * Bir siparişin partide HÂLÂ teslim edilmeyi beklediğini söyleyen tanım —
+ * `workshop-session.ts`teki `batchDeliverPending`. `shipped` orada HARİÇ
+ * TUTULMAZ (ship'in tam tersi): sevk edilmiş sipariş tam olarak teslim bekleyen
+ * sipariştir. Rota kendi kopyasını tutmaz; DB'li test aynı yüklemi çağırır.
  */
-function deliverPending(sessionId: string) {
-  return and(
-    eq(orders.workshopSessionId, sessionId),
-    notInArray(orders.status, [...WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES])
-  );
-}
+const deliverPending = batchDeliverPending;
 
 /**
  * Seansın sevk edilmiş siparişlerini TEK işlemde mekana teslim edilmiş
@@ -28,9 +24,10 @@ function deliverPending(sessionId: string) {
  * bir sipariş kargolanmadan teslim edilmiş sayılırsa iş akışı yalan söyler.
  *
  * Seansın toplu durumu ship ucundaki AYNI ilkeyle `delivered`e döner: yalnızca
- * partide (rejected hariç) teslim edilmemiş sipariş KALMADIĞINDA — bu
+ * partide (partiden düşenler hariç) teslim edilmemiş sipariş KALMADIĞINDA — bu
  * çağrının bir şey teslim edip etmediğinden BAĞIMSIZ. Örnek: parti kısmen
- * teslim edildi, kalan sipariş(ler) sonradan iade edilip `rejected` oldu;
+ * teslim edildi, kalan sipariş(ler) sonradan iade edildi (`payment_status`
+ * `refunded`; `orders.status` DEĞİŞMEZ) ya da reddedildi;
  * sonraki bir "Toplu teslim" çağrısı hiçbir yeni satır güncellemese bile
  * parti artık tamamdır ve seans bunu yansıtmalı (bkz. fix round 2, "Finding
  * 2" — ship ucundaki aynı düzeltmenin ("Finding 3") burada aynalanmış hâli).
@@ -55,7 +52,10 @@ export async function POST(
     const rows = await tx
       .update(orders)
       .set({ status: "delivered", deliveredAt: now, updatedAt: now })
-      .where(and(eq(orders.workshopSessionId, id), eq(orders.status, "shipped")))
+      // `batchOrderFilter` burada da: sevk edildikten SONRA iade edilmiş bir
+      // siparişi "mekana teslim edildi" diye damgalamak, parası geri verilmiş
+      // bir figürü katılımcıya teslim etmiş gibi göstermek olurdu.
+      .where(and(batchOrderFilter(id), eq(orders.status, "shipped")))
       .returning({
         id: orders.id,
         orderNumber: orders.orderNumber,

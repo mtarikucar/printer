@@ -1,7 +1,8 @@
-import { and, eq, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
+  manufacturers,
   orders,
   workshopParticipants,
   workshopSessions,
@@ -10,8 +11,13 @@ import {
 import {
   deriveSessionDates,
   workshopCommissionRateBps,
+  WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES,
+  WORKSHOP_BATCH_EXCLUDED_STATUSES,
+  WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES,
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
+  WORKSHOP_ORPHAN_HOLD_REPORT_DAYS,
   WORKSHOP_SEAT_HOLD_HOURS,
+  WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES,
 } from "@/lib/config/workshop";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
@@ -105,19 +111,70 @@ export async function findSessionsDueToClose(now: Date) {
 }
 
 /**
- * `rejected` siparişler her yerde partinin DIŞINDADIR: admin onları iade etti.
- * Bir iadeli siparişi merdivende saymak partiyi olduğundan büyük gösterir ve
- * daha da kötüsü, o siparişi üreticiye BASILMAK ÜZERE atar.
+ * Partinin DIŞINDA kalan siparişler — İKİ eksende.
+ *
+ * `rejected`: admin siparişi reddetti.
+ * `payment_status = 'refunded'`: sipariş iade edildi. `refundOrder`
+ * `orders.status`e dokunmadığı için bu ayak olmadan iadeli sipariş partide
+ * kalır — gerekçenin tamamı `config/workshop.ts`teki
+ * `WORKSHOP_BATCH_EXCLUDED_*` yorumunda.
+ *
+ * Dizi hâlinde tutulur ki SQL (burası) ve JS (`orderInBatch`) tarafı aynı
+ * kaynaktan okusun.
  */
-const NOT_REJECTED = ne(orders.status, "rejected");
+const NOT_EXCLUDED_STATUS = notInArray(orders.status, [
+  ...WORKSHOP_BATCH_EXCLUDED_STATUSES,
+]);
+const NOT_REFUNDED = notInArray(orders.paymentStatus, [
+  ...WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES,
+]);
 
 /**
- * Partiye giren siparişler: seansa bağlı ve reddedilmemiş olanlar. Aynı yüklem
- * hem sayımda hem atamada kullanılır; ikisi ayrışırsa üretici, oranı
- * hesaplanmayan bir figür basar.
+ * Partiye giren siparişler: seansa bağlı, reddedilmemiş ve iadesi yapılmamış
+ * olanlar. Aynı yüklem sayımda, atamada, toplu sevkte ve toplu teslimde
+ * kullanılır; biri ayrışırsa üretici oranı hesaplanmayan (ya da parası geri
+ * verilmiş) bir figür basar.
+ *
+ * EXPORT EDİLİR: ship/deliver uçları da bunu kullanır, kendi kopyalarını
+ * yazmaz. Uçlar bunu kendi `orders.status` dizileriyle (`WORKSHOP_*_PENDING_
+ * EXCLUDED_STATUSES`) BİRLEŞTİRİR — o diziler "hâlâ bekliyor mu", bu yüklem
+ * "partiye ait mi" sorusunu yanıtlar.
  */
-function batchOrderFilter(sessionId: string) {
-  return and(eq(orders.workshopSessionId, sessionId), NOT_REJECTED);
+export function batchOrderFilter(sessionId: string) {
+  return and(eq(orders.workshopSessionId, sessionId), NOT_EXCLUDED_STATUS, NOT_REFUNDED);
+}
+
+/**
+ * Partide HÂLÂ sevk edilmeyi bekleyen sipariş — toplu sevk ucunun tanımı.
+ *
+ * Rotadan buraya taşındı ki DB'li test aynı yüklemi çağırabilsin: "iade edilmiş
+ * sipariş sevk kuyruğundan düşer" iddiası ancak rotanın GERÇEK yüklemiyle
+ * doğrulanırsa bir şey ifade eder; testin kendi kopyası bir gün ayrışır ve
+ * yeşil kalarak yalan söyler.
+ *
+ * Üretici ataması (`manufacturerId`) BİLEREK aranmaz: üreticisiz bir sipariş de
+ * partiye aittir, yalnızca sevk edilemez (rota UPDATE'inde ayrıca süzülür).
+ * Bunu yükleme koymak, böyle bir siparişi hem UPDATE'ten hem `leftBehind`
+ * raporundan düşürür; `pending` yanlışlıkla boşalır, seans `shipped` olur ve
+ * admin'e "geride kalan yok" denir (bkz. task-12a-report.md, fix round 2).
+ */
+export function batchShipPending(sessionId: string) {
+  return and(
+    batchOrderFilter(sessionId),
+    notInArray(orders.status, [...WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES])
+  );
+}
+
+/**
+ * Partide HÂLÂ teslim edilmeyi bekleyen sipariş — toplu teslim ucunun tanımı.
+ * `shipped` burada HARİÇ TUTULMAZ (ship'in tam tersi): sevk edilmiş sipariş tam
+ * olarak teslim bekleyen sipariştir.
+ */
+export function batchDeliverPending(sessionId: string) {
+  return and(
+    batchOrderFilter(sessionId),
+    notInArray(orders.status, [...WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES])
+  );
 }
 
 /**
@@ -207,10 +264,24 @@ type CloseOutcome =
  *     tutarını değiştirirdi. Garanti route'un iznine değil, YAPIYA bağlanmalı:
  *     bir seans ömrü boyunca yalnızca BİR kez fiyatlanır.
  *
- * Kilit sırası: seans → siparişler. Katılım işlemi de seansı önce kilitler
- * (seans → taslak → katılımcı), koltuk bırakma ise katılımcı → seans yönünde
- * ve ÇAĞIRANIN işleminin dışında ilerler. Burada mevcut bir taslağı/katılımcıyı
- * kilitleyip sonra seansa dönmek döngüyü kapatır — yapılmamalıdır.
+ * Kilit sırası — kod NE YAPIYORSA o yazılıdır, dilek değil:
+ *   - burası (kapanış):    seans → siparişler
+ *   - katılım:             seans → taslak → katılımcı
+ *   - koltuk bırakma:      katılımcı → seans (ÇAĞIRANIN işleminin dışında)
+ *   - toplu sevk/teslim:   siparişler → seans (TERS yön)
+ *
+ * Sevk/teslim uçları bilerek ters sırada ilerliyor (önce partiyi güncelleyip
+ * sonra seans damgasını atmak, "kaç sipariş sevk edildi" ile "seans durumu"nun
+ * aynı işlemde tutarlı kalmasının en doğal yolu). Bu bir kilit döngüsü DEĞİL,
+ * çünkü iki tarafın dokunduğu seans durumları AYRIK: kapanış yalnızca
+ * `status = 'open'` bir seansı sahiplenir, sevk/teslim ise yalnızca kapanmış
+ * (`in_production`/`shipped`) bir partide iş yapar — ikisi aynı seans satırında
+ * asla aynı anda çalışmaz. Bu ayrıklık bozulursa (ör. bir gün açık seansta da
+ * sevk edilebilirse) yönlerden biri düzeltilmek ZORUNDA.
+ *
+ * Buna karşılık BURADA mevcut bir taslağı/katılımcıyı kilitleyip sonra seansa
+ * dönmek gerçek bir döngü açar (katılım yolu tam tersini yapıyor) —
+ * yapılmamalıdır.
  */
 export async function closeSession(
   sessionId: string
@@ -281,9 +352,24 @@ export async function closeSession(
         ? "in_production"
         : "closed";
 
+    // Oran YALNIZCA gerçekten fiyatlanacak bir parti varsa DONAR.
+    //
+    // Boş seansta dondurmak, hiçbir şeyi korumadığı gibi seansı KALICI OLARAK
+    // ölü bırakıyordu: PATCH ucunun "fiyatlanmış seans yeniden açılamaz" kapısı
+    // `commission_rate_bps IS NOT NULL`e bakıyor, yani kimsenin katılmadığı bir
+    // seans bir daha katılıma açılamıyordu. Korunacak para yok — partide sipariş
+    // yok — ama admin'in tek çıkışı yeni bir seans yaratmak oluyordu.
+    //
+    // Kapanışın idempotensi bundan ETKİLENMEZ: boş seans `cancelled` olur ve
+    // sahiplenme koşulunun ilk ayağı (`status = 'open'`) ikinci bir kapanışı
+    // zaten reddeder.
     await tx
       .update(workshopSessions)
-      .set({ commissionRateBps, status: nextStatus, updatedAt: closedAt })
+      .set({
+        ...(orderCount > 0 ? { commissionRateBps } : {}),
+        status: nextStatus,
+        updatedAt: closedAt,
+      })
       .where(eq(workshopSessions.id, sessionId));
 
     if (orderCount > 0) {
@@ -334,6 +420,174 @@ export async function closeSession(
   }
 
   return { orderCount: outcome.orderCount, commissionRateBps: outcome.commissionRateBps };
+}
+
+/**
+ * Üreticisiz kapanmış bir seansın partisini SONRADAN bir üreticiye devreder.
+ *
+ * Neden var: `closeSession` seansta ön rezerve üretici yoksa oranı dondurur ama
+ * hiçbir siparişe üretici yazmaz. O noktadan sonra seans KÖR NOKTAYA düşer —
+ * PATCH ile `open`a çekilemez (fiyatlanmış), `adoptOrphanBatchOrders` mühürlü
+ * seansları atlar, toplu sevk ise sipariş başına üretici arar. Admin'e giden
+ * e-posta "bir üretici atayın ve siparişleri elle devredin" diyordu; ne birinin
+ * ne diğerinin arayüzü vardı. Bu, o kurtarmanın gerçek yoludur.
+ *
+ * Atama `batchAssignmentSet` ile yazılır — `closeSession` ve
+ * `adoptOrphanBatchOrders` ile AYNI tanım. Üçüncü bir yazım biçimi, bir gün
+ * kabul damgası ya da donmuş oran eksik yazılan bir parti demektir.
+ *
+ * Kapılar:
+ *  - üretici aktif olmalı,
+ *  - seans `closed` ya da `in_production` olmalı (yola çıkmış partiyi devretmek
+ *    kutuda olmayan bir figüre üretici atamaktır),
+ *  - seansın üreticisi GERÇEKTEN boş olmalı — bu bir kurtarma yolu, sessiz bir
+ *    devir aracı değil. Sahiplenme koşullu UPDATE'tir: iki admin aynı anda
+ *    farklı üretici seçerse ikincisi 0 satır günceller ve reddedilir.
+ *
+ * Kilit sırası closeSession ile aynı: seans → siparişler.
+ */
+export type AssignBatchManufacturerResult =
+  | { ok: true; orderCount: number; commissionRateBps: number | null }
+  | { ok: false; error: string };
+
+const BATCH_ASSIGNABLE_SESSION_STATUSES = ["closed", "in_production"] as const;
+
+export async function assignBatchManufacturer(input: {
+  sessionId: string;
+  manufacturerId: string;
+}): Promise<AssignBatchManufacturerResult> {
+  const { sessionId, manufacturerId } = input;
+
+  const manufacturer = await db.query.manufacturers.findFirst({
+    where: eq(manufacturers.id, manufacturerId),
+    columns: { id: true, status: true },
+  });
+  if (!manufacturer || manufacturer.status !== "active") {
+    return { ok: false, error: "Seçilen üretici bulunamadı ya da aktif değil." };
+  }
+
+  const session = await db.query.workshopSessions.findFirst({
+    where: eq(workshopSessions.id, sessionId),
+    columns: { id: true, status: true, manufacturerId: true, commissionRateBps: true },
+  });
+  if (!session) return { ok: false, error: "Seans bulunamadı" };
+  if (session.manufacturerId) {
+    return {
+      ok: false,
+      error:
+        "Bu seansın zaten bir üreticisi var. Devir gerekiyorsa siparişleri " +
+        "tek tek atama ekranından taşıyın — toplu devir yalnızca üreticisiz " +
+        "kalmış bir parti için vardır.",
+    };
+  }
+  if (
+    !(BATCH_ASSIGNABLE_SESSION_STATUSES as readonly string[]).includes(session.status)
+  ) {
+    return {
+      ok: false,
+      error:
+        "Yalnızca kapanmış ama henüz sevk edilmemiş bir partiye üretici " +
+        `atanabilir (bu seans: ${session.status}).`,
+    };
+  }
+
+  /** İşlem içi sonuç: ya sahiplenilemedi ya da parti devredildi. */
+  type AssignOutcome =
+    | { error: string }
+    | {
+        batch: { id: string; orderNumber: string; userId: string | null; status: string }[];
+        commissionRateBps: number | null;
+      };
+
+  const at = new Date();
+  const outcome = await db.transaction(async (tx): Promise<AssignOutcome> => {
+    const [claimed] = await tx
+      .update(workshopSessions)
+      .set({ manufacturerId, updatedAt: at })
+      .where(
+        and(
+          eq(workshopSessions.id, sessionId),
+          isNull(workshopSessions.manufacturerId),
+          inArray(workshopSessions.status, [...BATCH_ASSIGNABLE_SESSION_STATUSES])
+        )
+      )
+      .returning({ commissionRateBps: workshopSessions.commissionRateBps });
+    if (!claimed) {
+      return {
+        error:
+          "Seansın durumu bu arada değişti (başka bir atama araya girmiş " +
+          "olabilir). Sayfayı yenileyip tekrar bakın.",
+      };
+    }
+
+    const batch = await tx
+      .select({
+        id: orders.id,
+        orderNumber: orders.orderNumber,
+        userId: orders.userId,
+        status: orders.status,
+      })
+      .from(orders)
+      .where(and(batchOrderFilter(sessionId), isNull(orders.manufacturerId)));
+
+    // Oran kapanışta donmuştu; yoksa bu parti hiç fiyatlanmamış demektir ve
+    // üretici hangi payı aldığını bilmeden basmaya başlamamalı.
+    if (batch.length > 0 && claimed.commissionRateBps === null) {
+      throw new Error(
+        "WORKSHOP_BATCH_UNPRICED: seans donmuş komisyon oranı taşımıyor"
+      );
+    }
+
+    if (batch.length > 0) {
+      await tx
+        .update(orders)
+        .set(
+          batchAssignmentSet({
+            manufacturerId,
+            commissionRateBps: claimed.commissionRateBps!,
+            at,
+          })
+        )
+        .where(and(batchOrderFilter(sessionId), isNull(orders.manufacturerId)));
+
+      // Parti artık gerçekten basılıyor: durum bunu söylemeli. `closed`,
+      // "ödendi ama kimse basmıyor"un adıydı.
+      await tx
+        .update(workshopSessions)
+        .set({ status: "in_production", updatedAt: at })
+        .where(
+          and(eq(workshopSessions.id, sessionId), eq(workshopSessions.status, "closed"))
+        );
+    }
+
+    return { batch, commissionRateBps: claimed.commissionRateBps } as const;
+  });
+
+  if ("error" in outcome) return { ok: false, error: outcome.error };
+
+  // Yan etkiler COMMIT'ten SONRA (closeSession'daki aynı ilke).
+  if (outcome.batch.length > 0) {
+    await notifyManufacturerSessionClosed(sessionId, {
+      orderCount: outcome.batch.length,
+      commissionRateBps: outcome.commissionRateBps!,
+    });
+  }
+  for (const order of outcome.batch) {
+    await emitOrderChanged({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      userId: order.userId,
+      manufacturerId,
+      status: order.status,
+      manufacturerStatus: "accepted",
+    }).catch(() => {});
+  }
+
+  return {
+    ok: true,
+    orderCount: outcome.batch.length,
+    commissionRateBps: outcome.commissionRateBps,
+  };
 }
 
 /** Düzeltilen bir koltuk sayacı: `from` → `to`. */
@@ -510,7 +764,14 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
       and(
         isNull(orders.manufacturerId),
         isNull(orders.commissionRateBps),
-        NOT_REJECTED,
+        NOT_EXCLUDED_STATUS,
+        // İADE EDİLMİŞ sipariş öksüz DEĞİLDİR. `refundOrder`
+        // `manufacturer_id`yi NULL'a çeker; kapanıştan ÖNCE iade edilmiş bir
+        // siparişte `commission_rate_bps` de zaten NULL'dır — yani yukarıdaki
+        // iki NULL koşulu onu tam olarak "öksüz" gibi gösterir. Bu ayak
+        // olmadan mühürlenmiş bir seanstaki iadeli sipariş her saat
+        // "sahiplenilemedi" diye loglanır, sonsuza kadar.
+        NOT_REFUNDED,
         inArray(workshopSessions.status, [
           ...ADOPTABLE_SESSION_STATUSES,
           ...SEALED_SESSION_STATUSES,
@@ -555,13 +816,7 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
     const assigned = await db
       .selectDistinct({ manufacturerId: orders.manufacturerId })
       .from(orders)
-      .where(
-        and(
-          eq(orders.workshopSessionId, sessionId),
-          isNotNull(orders.manufacturerId),
-          NOT_REJECTED
-        )
-      );
+      .where(and(batchOrderFilter(sessionId), isNotNull(orders.manufacturerId)));
     const batchManufacturerId = assigned.length === 1 ? assigned[0].manufacturerId : null;
     if (!batchManufacturerId) {
       console.error(
@@ -651,9 +906,24 @@ export interface StaleSeatHold {
  * `workshop-notify.ts`'i, o da bu dosyayı import ediyor — döngü olurdu. Bu
  * yüzden bulma burada, eylem worker'da (aynı `findSessionsDueToClose` +
  * `closeSession` ayrımı).
+ *
+ * TASLAKSIZ tutmalar SINIRLIDIR (`WORKSHOP_ORPHAN_HOLD_REPORT_DAYS`).
+ * Gerekçesi: taslaklı bir tutma `expireDraft` ile kapanır ve bir daha bu
+ * sorguya düşmez, ama taslaksız olanı (elle eklenmiş ya da bozulmuş bir
+ * katılımcı satırı) kapatacak güvenli bir otomatik yol yok — worker onu
+ * yalnızca `console.error` ile bildirebiliyor. Sınır olmadan aynı satır her
+ * saat, sonsuza kadar hata basar ve gerçek uyarıları gömer. Bir hafta boyunca
+ * bildirilir, sonra susar; koltuk zaten kapanmış bir seansta anlamsızdır ve
+ * açık seansta `reconcileOpenSessionSeats` sayaç sapmasını ayrıca raporlar.
+ *
+ * TASLAKLI tutmalar bu sınırdan ETKİLENMEZ: onların her turda denenmesi
+ * gerekir (`expireDraft` geçici bir hatayla patlamış olabilir).
  */
 export async function findStaleSeatHolds(now: Date): Promise<StaleSeatHold[]> {
   const cutoff = new Date(now.getTime() - WORKSHOP_SEAT_HOLD_HOURS * 3600 * 1000);
+  const reportFloor = new Date(
+    now.getTime() - WORKSHOP_ORPHAN_HOLD_REPORT_DAYS * 24 * 3600 * 1000
+  );
   return db
     .select({
       participantId: workshopParticipants.id,
@@ -666,7 +936,11 @@ export async function findStaleSeatHolds(now: Date): Promise<StaleSeatHold[]> {
     .where(
       and(
         eq(workshopParticipants.status, "pending_payment"),
-        lte(workshopParticipants.createdAt, cutoff)
+        lte(workshopParticipants.createdAt, cutoff),
+        or(
+          isNotNull(workshopParticipants.draftId),
+          gt(workshopParticipants.createdAt, reportFloor)
+        )
       )
     );
 }

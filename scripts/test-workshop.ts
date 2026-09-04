@@ -17,6 +17,10 @@ import {
   sessionCancellable,
   WORKSHOP_SESSION_UNCANCELLABLE_STATUSES,
   WORKSHOP_SESSION_STATUSES,
+  WORKSHOP_BATCH_EXCLUDED_STATUSES,
+  WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES,
+  WORKSHOP_ORPHAN_HOLD_REPORT_DAYS,
+  orderInBatch,
 } from "../src/lib/config/workshop";
 import { MANUFACTURER_ONBOARDING_TR } from "../src/lib/content/manufacturer-onboarding";
 import { MANUFACTURER_CONTRACT_VERSION } from "../src/lib/config/contract-versions";
@@ -316,6 +320,49 @@ test("toplu teslim bekleme listesi yalnızca delivered+rejected'i hariç tutar (
     (WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES as readonly string[]).includes("shipped"),
     false
   );
+});
+
+// ─── Partiye ait olmanın tanımı: İADE EDİLMİŞ sipariş partide DEĞİLDİR ─────
+// Bu, canlıda para kaybettiren gerçek bir açıktı: `refundOrder`
+// `payment_status`ü `refunded` yapıyor ama `orders.status`e HİÇ DOKUNMUYOR
+// (`rejected` yazan tek yer admin'in sipariş red rotası ve iade yolları oradan
+// geçmiyor). Yalnızca `status <> 'rejected'` bakan yüklemler iade edilmiş
+// siparişi partide TUTUYORDU: merdiven şişiyor, üretici geri yapıştırılıyor,
+// sevkte gerçek hakediş tahakkuk ediyor ve seans asla `shipped`e ulaşamıyordu.
+//
+// Aşağıdakiler tanımın İKİ ayağını da pinler. Biri `orderInBatch`ten ödeme
+// kontrolünü çıkarırsa (ya da diziyi boşaltırsa) burası patlar. SQL tarafının
+// aynı diziden okuduğu `batchOrderFilter` DB'li testte doğrulanıyor
+// (scripts/test-workshop-cancel.ts, bölüm 8).
+
+test("iade edilmiş sipariş partiye GİRMEZ (payment_status ayağı)", () => {
+  assert.equal(
+    orderInBatch({ status: "approved", paymentStatus: "refunded" }),
+    false
+  );
+  assert.equal(orderInBatch({ status: "shipped", paymentStatus: "refunded" }), false);
+});
+
+test("reddedilmiş sipariş partiye GİRMEZ (status ayağı)", () => {
+  assert.equal(orderInBatch({ status: "rejected", paymentStatus: "succeeded" }), false);
+});
+
+test("normal ödenmiş sipariş partiye GİRER", () => {
+  assert.equal(orderInBatch({ status: "approved", paymentStatus: "succeeded" }), true);
+  assert.equal(orderInBatch({ status: "shipped", paymentStatus: "succeeded" }), true);
+  assert.equal(orderInBatch({ status: "delivered", paymentStatus: "succeeded" }), true);
+});
+
+test("parti dışı kümeler beklenen değerleri taşır", () => {
+  assert.deepEqual([...WORKSHOP_BATCH_EXCLUDED_STATUSES], ["rejected"]);
+  assert.deepEqual([...WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES], ["refunded"]);
+});
+
+// Taslaksız koltuk tutmalarının saatlik hata log'u sonsuza kadar tekrarlanmasın
+// diye sınırlandı; pencere ne 0 (hiç bildirilmez) ne de ayları bulmalı.
+test("taslaksız koltuk tutması raporlama penceresi makul", () => {
+  assert.ok(WORKSHOP_ORPHAN_HOLD_REPORT_DAYS >= 1);
+  assert.ok(WORKSHOP_ORPHAN_HOLD_REPORT_DAYS <= 30);
 });
 
 // ─── İptal kararları (Görev 12b) ────────────────────────────────────────────

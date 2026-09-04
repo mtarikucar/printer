@@ -48,6 +48,21 @@ export interface WorkshopSessionCancelReport {
   alreadyShipped: string[];
   /** Çıkışı kapatılamayan katılımcılar — `cancelled` YAPILMADILAR, tekrar denenir. */
   failed: string[];
+  /**
+   * `refunded` ile aynı kişiler, ama SİPARİŞ NUMARASI ve TUTARLA.
+   *
+   * Neden ayrı bir alan: bu kod tabanında PayTR iade API'si YOK. `refundOrder`
+   * defter durumunu yazar ve müşteriye "iadeniz işleme alındı" der; parayı
+   * gerçekten geri gönderen adım, admin'in PayTR panelinde ELLE yaptığı
+   * işlemdir. Tek siparişlik iadede bu görünür bir yük değil; 20 koltukluk bir
+   * seansın toplu iptali ise tek tıkla 20 kişiye söz verip ~₺27.000'lik bir
+   * yükümlülük yaratıyor. Ekranın bu listeyi KOPYALANABİLİR biçimde vermesi
+   * için isim yetmez — PayTR'de aranacak şey sipariş numarasıdır.
+   *
+   * `refunded` (yalnız isim) BIRAKILDI: mevcut çağıranlar ve testler onu
+   * okuyor, kırılmasının bir faydası yok.
+   */
+  refundedOrders: Array<{ fullName: string; orderNumber: string; amountKurus: number }>;
 }
 
 export type CancelWorkshopSessionResult =
@@ -69,6 +84,8 @@ interface CancelRow {
   participantStatus: string;
   draftId: string | null;
   orderId: string | null;
+  orderNumber: string | null;
+  orderAmountKurus: number | null;
   orderStatus: string | null;
 }
 
@@ -141,6 +158,8 @@ export async function cancelWorkshopSession(input: {
       participantStatus: workshopParticipants.status,
       draftId: workshopParticipants.draftId,
       orderId: orders.id,
+      orderNumber: orders.orderNumber,
+      orderAmountKurus: orders.amountKurus,
       orderStatus: orders.status,
     })
     .from(workshopParticipants)
@@ -148,6 +167,7 @@ export async function cancelWorkshopSession(input: {
     .where(eq(workshopParticipants.sessionId, id));
 
   const refunded: string[] = [];
+  const refundedOrders: WorkshopSessionCancelReport["refundedOrders"] = [];
   const alreadyRefunded: string[] = [];
   const alreadyShipped: string[] = [];
   const failed: string[] = [];
@@ -217,8 +237,17 @@ export async function cancelWorkshopSession(input: {
       releaseSeat: false,
     });
     if (changed) notify.push({ participantId: r.participantId, refunded: true });
-    if (res.ok) refunded.push(r.fullName);
-    else alreadyRefunded.push(r.fullName);
+    if (res.ok) {
+      refunded.push(r.fullName);
+      // PayTR tarafında ELLE yapılacak iadenin iş listesi. Yalnızca BU çağrıda
+      // gerçekten iade işlenenler: `alreadyRefunded` bir önceki çağrıda zaten
+      // raporlanmıştı, ikinci kez yükümlülük gibi göstermek yanlış olurdu.
+      refundedOrders.push({
+        fullName: r.fullName,
+        orderNumber: r.orderNumber ?? "—",
+        amountKurus: r.orderAmountKurus ?? 0,
+      });
+    } else alreadyRefunded.push(r.fullName);
   }
 
   await db
@@ -258,7 +287,10 @@ export async function cancelWorkshopSession(input: {
     });
   }
 
-  return { ok: true, report: { refunded, alreadyRefunded, alreadyShipped, failed } };
+  return {
+    ok: true,
+    report: { refunded, alreadyRefunded, alreadyShipped, failed, refundedOrders },
+  };
 }
 
 /**

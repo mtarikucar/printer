@@ -58,6 +58,10 @@ async function processJob(job: Job) {
         // Taslaksız bir katılımcının koltuğunu bırakmanın güvenli yolu yok:
         // `releaseSeatForDraft` taslak üzerinden yürüyor, elle düşürmek ise
         // ikinci bir sayaç yolu açardı. Admin'e bırakılır.
+        //
+        // Bu satır SONSUZA KADAR tekrarlanmaz: `findStaleSeatHolds` taslaksız
+        // tutmaları `WORKSHOP_ORPHAN_HOLD_REPORT_DAYS` ile sınırlıyor (bkz. o
+        // fonksiyonun yorumu) — bir hafta bildirilir, sonra susar.
         console.error(
           `[workshop-close] katılımcı ${hold.participantId} (seans ${hold.sessionId}) ` +
             `taslaksız ve ${hold.heldSince.toISOString()}'ten beri ödeme bekliyor — ` +

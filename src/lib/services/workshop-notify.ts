@@ -265,7 +265,7 @@ export async function sendWorkshopSeatReleasedEmail(
  * Kasıtlı olarak `sessionId` DEĞİL, `orderIds` alır: toplu sevk KISMİ
  * olabilir (bazı siparişler QC onayı beklerken geride kalabilir — bkz.
  * ship/route.ts). Seansın TÜM katılımcılarına gitseydi, figürü henüz
- * basılmamış geride kalan biri "atölyede seni bekliyor" mailini yanlışlıkla
+ * basılmamış geride kalan biri "atölyede sizi bekliyor" mailini yanlışlıkla
  * alırdı. Çağıran yalnızca bu çağrıda sevk edilen sipariş id'lerini geçer.
  *
  * Kargo takip maili DEĞİLDİR: katılımcı figürü seansta ELDEN alacak, evine
@@ -299,13 +299,14 @@ export async function notifyWorkshopParticipantsReady(orderIds: string[]): Promi
 
         await sendRawEmail({
           to: p.email,
-          subject: "Figürün atölyede seni bekliyor",
+          subject: "Figürünüz atölyede sizi bekliyor",
           html: wrap(`
-            <h1 style="color:#1a1a1a;font-size:20px;">Figürün hazır!</h1>
+            <h1 style="color:#1a1a1a;font-size:20px;">Figürünüz hazır!</h1>
             <p>Merhaba ${escHtml(p.fullName)},</p>
-            <p>Figürün hazır ve <strong>${escHtml(venue.name)}</strong>'da seni bekliyor.
-               Kargoyla bir şey göndermiyoruz — figürünü seansta elinle teslim
-               alacak ve orada boyayacaksın.</p>
+            <p>Figürünüz hazır ve <strong>${escHtml(venue.name)}</strong> mekânında
+               sizi bekliyor. Kargoyla herhangi bir şey göndermiyoruz —
+               figürünüzü seansta elden teslim alacak ve orada
+               boyayacaksınız.</p>
             <table style="border-collapse:collapse;margin:16px 0;">
               ${row("Tarih", formatDateTime(session.startsAt))}
               ${row(

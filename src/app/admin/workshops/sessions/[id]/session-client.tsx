@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Input, Select } from "@/components/ui";
+import { FormField, Input, Select } from "@/components/ui";
 import {
   WORKSHOP_SESSION_STATUS_LABELS,
   WORKSHOP_PARTICIPANT_STATUS_LABELS,
@@ -37,6 +37,13 @@ interface ParticipantRow {
   status: string;
   orderId: string | null;
   orderNumber: string | null;
+  /**
+   * Siparişin KENDİ `status` kolonu (sunucudan) — bir "Toplu sevk" çağrısının
+   * `leftBehind` yanıtı yalnızca CLIENT state'tir ve sayfa yenilendiğinde
+   * kaybolur. Bu alan kaybolmaz: kısmi bir partinin "kim gerçekten sevk
+   * edildi" sorusunun TEK kalıcı görünümü budur.
+   */
+  orderStatus: string | null;
   modelReady: boolean;
 }
 
@@ -99,6 +106,14 @@ function participantStatusLabel(status: string): string {
   return (WORKSHOP_PARTICIPANT_STATUS_LABELS as Record<string, string>)[status] ?? status;
 }
 
+/** "Sevkiyat" kolonu — siparişin KENDİ durumundan türetilir, client state'e bağlı değildir. */
+function ShipmentCell({ orderId, orderStatus }: { orderId: string | null; orderStatus: string | null }) {
+  if (!orderId) return <span className="text-gray-400">—</span>;
+  if (orderStatus === "delivered") return <span className="text-teal-700">Teslim edildi</span>;
+  if (orderStatus === "shipped") return <span className="text-indigo-700">Sevk edildi</span>;
+  return <span className="text-amber-700">Sevk bekliyor</span>;
+}
+
 export function SessionClient({
   session,
   participants,
@@ -121,7 +136,8 @@ export function SessionClient({
   const [error, setError] = useState<string | null>(null);
   // Son "Toplu sevk" çağrısının QC onayı bekleyen, dokunulmadan bırakılan
   // satırları — bir sayı yetmez, admin İSİMLE görmeli (bkz. task-12a-report.md
-  // "Finding 1" düzeltmesi).
+  // "Finding 1" düzeltmesi). Bu, yalnızca son işlemin ANLIK yanıtıdır; kalıcı
+  // görünüm katılımcı tablosundaki "Sevkiyat" kolonudur (orderStatus).
   const [leftBehind, setLeftBehind] = useState<LeftBehindRow[]>([]);
 
   // ─── Toplu sevk formu ───────────────────────────────────────────────────
@@ -167,6 +183,11 @@ export function SessionClient({
         return;
       }
       router.refresh();
+    } catch {
+      // fetch'in kendisi reddedilirse (ağ hatası) `res` hiç dönmez —
+      // catch olmadan `finally` yine de busy'yi kapatır ama hata mesajı
+      // hiç görünmez, admin buton neden pasifleşti anlamaz.
+      setError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
     } finally {
       setBusy(false);
     }
@@ -186,6 +207,8 @@ export function SessionClient({
         return;
       }
       router.refresh();
+    } catch {
+      setError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
     } finally {
       setBusy(false);
     }
@@ -303,8 +326,7 @@ export function SessionClient({
 
         {canShowShipAction && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Kargo</label>
+            <FormField label="Kargo">
               <Select value={carrier} onChange={(e) => setCarrier(e.target.value)}>
                 {Object.entries(CARRIER_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -312,18 +334,15 @@ export function SessionClient({
                   </option>
                 ))}
               </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Takip numarası{carrier === "elden" ? " (gerekmez)" : ""}
-              </label>
+            </FormField>
+            <FormField label={`Takip numarası${carrier === "elden" ? " (gerekmez)" : ""}`}>
               <Input
                 value={trackingNumber}
                 onChange={(e) => setTrackingNumber(e.target.value)}
                 disabled={carrier === "elden"}
                 placeholder={carrier === "elden" ? "Elden teslimde gerekmez" : "Takip numarası"}
               />
-            </div>
+            </FormField>
             <button
               type="button"
               onClick={submitShip}
@@ -360,7 +379,7 @@ export function SessionClient({
           <p className="text-sm text-gray-500">Bu seansa henüz katılım yok.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="text-left text-xs uppercase tracking-wide text-gray-500">
                 <tr>
                   <th className="py-2 pr-3 font-medium">Ad</th>
@@ -368,6 +387,7 @@ export function SessionClient({
                   <th className="py-2 pr-3 font-medium">Durum</th>
                   <th className="py-2 pr-3 font-medium">Sipariş</th>
                   <th className="py-2 pr-3 font-medium">Model</th>
+                  <th className="py-2 pr-3 font-medium">Sevkiyat</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -395,6 +415,9 @@ export function SessionClient({
                       ) : (
                         <span className="text-amber-700">Bekliyor</span>
                       )}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <ShipmentCell orderId={p.orderId} orderStatus={p.orderStatus} />
                     </td>
                   </tr>
                 ))}

@@ -205,3 +205,35 @@ export const WORKSHOP_PARTICIPANT_STATUS_LABELS: Record<
   delivered: "Teslim edildi",
   cancelled: "İptal",
 };
+
+/**
+ * Toplu sevk ucunun ("ship/route.ts") "bu sipariş partide hâlâ sevk edilmeyi
+ * bekliyor mu" sorusunu yanıtlarken HARİÇ TUTTUĞU durumlar.
+ *
+ * `delivered` burada bilerek `shipped`in yanında durur — yalnızca
+ * `!= 'shipped'` kullanılsaydı, zaten `delivered`e geçmiş bir sipariş
+ * "sevk edilmemiş" sanılıp tekrar `shipped`e GERİ ALINIRDI (takip numarasını
+ * ezer, hakedişi anlamsızca yeniden dener, teslim almış katılımcıya "seni
+ * bekliyor" mailini ikinci kez atar). Bu, Task 12a'nın scratch
+ * doğrulamasında yakalanan GERÇEK bir regresyondu — bkz. task-12a-report.md
+ * "Bug found". Dizi burada TEK kaynak olarak durur ki bir gün biri
+ * `notInArray`ı tekrar `ne(orders.status, "shipped")`e gevşetirse
+ * `scripts/test-workshop.ts`teki pin testi bunu yakalasın.
+ */
+export const WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES = [
+  "shipped",
+  "delivered",
+  "rejected",
+] as const;
+
+/**
+ * Toplu teslim ucunun ("deliver/route.ts") aynı sorusu — hâlâ teslim
+ * edilmeyi bekleyen sipariş hangisi. `shipped` burada HARİÇ TUTULMAZ (ship'in
+ * tam tersi): bir sipariş `shipped` olduğu sürece teslim edilmeyi
+ * BEKLEMEKTEDİR; yalnızca `delivered`e geçtiğinde ya da `rejected`
+ * olduğunda bu bekleme listesinden çıkar.
+ */
+export const WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES = [
+  "delivered",
+  "rejected",
+] as const;

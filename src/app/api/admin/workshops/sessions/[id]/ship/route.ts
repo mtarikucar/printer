@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNotNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, workshopSessions, workshopParticipants, adminActions } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { batchShipSchema } from "@/lib/validators/workshop";
+import { WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES } from "@/lib/config/workshop";
 import { notifyWorkshopParticipantsReady } from "@/lib/services/workshop-notify";
 import { accrueEarning } from "@/lib/services/payouts";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
@@ -16,32 +17,29 @@ interface LeftBehindRow {
 }
 
 /**
- * Bir siparişin partiye ait sayılması için ortak yüklem:
- * seansa bağlı, üreticiye atanmış, henüz sevk/teslim edilmemiş ve
- * reddedilmemiş. `workshop-session.ts`'teki `batchOrderFilter` ile aynı
- * tanımı taşır (o fonksiyon export edilmediği için burada tekrarlanır).
+ * Bir siparişin partide HÂLÂ sevk edilmeyi beklediğini söyleyen tanım —
+ * seansa bağlı ve henüz sevk/teslim/red edilmemiş.
  *
- * `status NOT IN (shipped, delivered, rejected)` — sadece `!= 'shipped'`
- * DEĞİL: bir seans zaten `delivered`e geçtikten SONRA bu uç yanlışlıkla
- * tekrar çağrılırsa (çift tıklama, eski bir sekme), `!= 'shipped'` tek
- * başına `delivered` siparişleri de "sevk edilmemiş" sanıp onları `shipped`e
- * GERİ ALIRDI — takip numarasını ezer, hakedişi (idempotent olsa da)
- * anlamsızca tekrar dener ve figürünü çoktan teslim almış katılımcıya
- * "atölyede seni bekliyor" mailini İKİNCİ kez atardı. Scratch doğrulamasında
- * yakalandı (bkz. task-12a-report.md, "Bug found").
+ * Bilerek üretici ataması (`manufacturerId`) ARANMAZ: üreticisiz bir sipariş
+ * de partiye aittir, yalnızca sevk EDİLEMEZ (aşağıdaki UPDATE'te ayrıca
+ * süzülür). `manufacturerId`yi bu tanıma da koymak (round 1'in hatası) böyle
+ * bir siparişi hem UPDATE'ten hem `leftBehind` raporundan düşürürdü —
+ * `pendingRows.length === 0` yanlışlıkla `true` olur, seans `shipped`e
+ * geçer, admin'e "geride kalan yok" denir ve `adoptOrphanBatchOrders`ın
+ * tam olarak onarmak için var olduğu o sipariş hiçbir yerde görünmez hâle
+ * gelirdi (bkz. task-12a-report.md fix round 2, "Finding 1").
  */
-function batchEligible(sessionId: string) {
+function batchPending(sessionId: string) {
   return and(
     eq(orders.workshopSessionId, sessionId),
-    notInArray(orders.status, ["shipped", "delivered", "rejected"]),
-    isNotNull(orders.manufacturerId)
+    notInArray(orders.status, [...WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES])
   );
 }
 
 /**
  * Seansın sevke hazır (QC onaylı) siparişlerini TEK konsinye olarak mekana
- * sevk eder; QC onayı bekleyen siparişler dokunulmadan bırakılır ve isimle
- * raporlanır.
+ * sevk eder; QC onayı bekleyen ya da üretici ataması olmayan siparişler
+ * dokunulmadan bırakılır ve isimle raporlanır.
  *
  * Bugün her sevk tek siparişliktir ve takip numarası zorunludur; atölye
  * partisinde N koli tek irsaliyeyle gider (ya da elden teslim edilir), bu
@@ -54,18 +52,29 @@ function batchEligible(sessionId: string) {
  * sevk edilseydi, HİÇ BASILMAMIŞ bir figür için üreticiye ödeme yapılmış
  * olurdu — parti `accepted` durumunda üreticiye düşer (bkz.
  * workshop-session.ts closeSession), `qc_approved`a kadar hiçbir ara adım
- * onu bu uçtan ayırmazdı.
+ * onu bu uçtan ayırmazdı. `isNotNull(manufacturerId)` ayrıca ZORUNLU —
+ * üreticisiz bir siparişe hakediş tahakkuk ettirilecek kimse yok.
  *
  * KISMİ SEVK bilerek desteklenir, tüm-ya-da-hiç DEĞİL: kutu mekana bir kez
  * gider ama bir katılımcının figürü QC'den geçmediği için on dokuz kişininkini
  * bloke etmek yanlış olurdu. Bu yüzden bu uç zaten sevk edilmiş siparişleri
- * atlıyor — geride kalanlar QC'yi geçtiğinde ikinci bir çağrı (kendi takip
- * numarasıyla, ikinci bir konsinye olarak) onları toplar. Seansın toplu
- * durumu yalnızca partinin TAMAMI sevk edildiğinde `shipped`e döner; kısmi
- * bir sevkte seans durumu SABİT kalır ki "yola çıktı" yazısı geride kalan
- * figürleri de kapsıyormuş gibi yalan söylemesin — sevkiyat damgaları
- * (carrier/tracking/shippedAt) yine de bu son sevkiyatı yansıtacak şekilde
- * yazılır.
+ * atlıyor — geride kalanlar QC'yi geçtiğinde (ya da bir üretici atandığında)
+ * ikinci bir çağrı (kendi takip numarasıyla, ikinci bir konsinye olarak)
+ * onları toplar.
+ *
+ * Seansın toplu durumu partinin TAMAMI (rejected hariç, sevk/teslim
+ * edilmemiş sipariş kalmadığında) sevk edilmiş sayıldığında `shipped`e
+ * döner — BU ÇAĞRININ bir şey sevk edip etmediğinden BAĞIMSIZ: parti daha
+ * önceki bir çağrıda kısmen sevk edildiyse ve geride kalanlar sonradan
+ * `rejected` olduysa (iade), bu çağrı hiçbir şey sevk etmese bile parti artık
+ * tamamdır ve seans bunu yansıtmalı — aksi hâlde teslim butonu asla
+ * görünmez ve o sevkiyat sonsuza dek "üretimde" görünen bir hayalete
+ * dönüşür (bkz. fix round 2, "Finding 3"). Kısmi bir sevkte seans durumu
+ * SABİT kalır ki "yola çıktı" yazısı geride kalan figürleri de
+ * kapsıyormuş gibi yalan söylemesin — sevkiyat damgaları
+ * (carrier/tracking/shippedAt) yalnızca BU ÇAĞRI gerçekten bir şey sevk
+ * ettiyse yazılır (aksi hâlde hiç yola çıkmamış bir "sevkiyat" uydurulmuş
+ * olurdu).
  */
 export async function POST(
   request: NextRequest,
@@ -98,7 +107,7 @@ export async function POST(
   // "kaç sipariş sevk edildi" ile "kimler geride kaldı" asla birbirinden
   // ayrı düşmemeli — aradaki bir yarış, sevk edilmiş bir siparişi yanlışlıkla
   // "geride kaldı" listesine düşürebilirdi.
-  const { shipped, leftBehind } = await db.transaction(async (tx) => {
+  const { shipped, leftBehind, sessionNowShipped } = await db.transaction(async (tx) => {
     const shippedRows = await tx
       .update(orders)
       .set({
@@ -109,7 +118,13 @@ export async function POST(
         shippedAt: now,
         updatedAt: now,
       })
-      .where(and(batchEligible(id), eq(orders.manufacturerStatus, "qc_approved")))
+      .where(
+        and(
+          batchPending(id),
+          isNotNull(orders.manufacturerId),
+          eq(orders.manufacturerStatus, "qc_approved")
+        )
+      )
       .returning({
         id: orders.id,
         orderNumber: orders.orderNumber,
@@ -124,10 +139,8 @@ export async function POST(
       });
 
     // Partiye ait olup HÂLÂ sevk edilmemiş siparişler: yukarıdaki UPDATE'ten
-    // SONRA okunduğu için, bu satırlar yalnızca "QC onaylı değildi, o yüzden
-    // güncellenmedi" olabilir — ayrıca bir "manufacturerStatus != qc_approved"
-    // şartı yazmaya gerek yok, aynı `batchEligible` yüklemi UPDATE'in
-    // dokunmadığı satırları doğal olarak verir.
+    // SONRA, ve manufacturerId ARANMADAN okunur — üreticisiz bir sipariş de
+    // burada görünmek ZORUNDA (bkz. yukarıdaki fonksiyon yorumu).
     const pendingRows = await tx
       .select({
         orderNumber: orders.orderNumber,
@@ -135,18 +148,23 @@ export async function POST(
       })
       .from(orders)
       .leftJoin(workshopParticipants, eq(workshopParticipants.orderId, orders.id))
-      .where(batchEligible(id));
+      .where(batchPending(id));
+
+    // Partide (bu çağrıdan ÖNCE ya da bu çağrıyla) sevk edilmiş EN AZ bir
+    // sipariş var mı? UPDATE'ten SONRA okunduğu için bu çağrının kendi
+    // sevkiyatını da doğal olarak sayar.
+    const anyShippedRows = await tx
+      .select({ id: orders.id })
+      .from(orders)
+      .where(and(eq(orders.workshopSessionId, id), inArray(orders.status, ["shipped", "delivered"])))
+      .limit(1);
+    const batchNowComplete = pendingRows.length === 0 && anyShippedRows.length > 0;
 
     if (shippedRows.length > 0) {
-      // Sevkiyat damgaları HER zaman bu çağrının bilgisini yansıtır (kısmi
-      // sevkte bile) — geride kalanlar için ikinci bir konsinye geldiğinde bu
-      // alanlar o çağrıyla tekrar güncellenir, tek gerçek kaynak siparişlerin
-      // KENDİ carrier/trackingNumber kolonlarıdır.
-      //
-      // Seans durumu YALNIZCA parti tamamen boşaldığında (`pendingRows.length
-      // === 0`) `shipped`e döner — kısmi bir sevkte SABİT kalır, aksi hâlde
-      // "yola çıktı" durumu geride kalan figürleri de kapsıyormuş gibi
-      // yanlış beyan ederdi.
+      // Sevkiyat damgaları YALNIZCA bu çağrı gerçekten bir şey sevk ettiyse
+      // yazılır — geride kalanlar sonradan iade edildiği için parti
+      // tamamlanan bir çağrıda (aşağıdaki `batchNowComplete` dalı) BU
+      // ÇAĞRININ taşımadığı bir kargo bilgisini uydurmamak için.
       await tx
         .update(workshopSessions)
         .set({
@@ -154,15 +172,27 @@ export async function POST(
           batchTrackingNumber: trackingValue,
           batchShippedAt: now,
           updatedAt: now,
-          ...(pendingRows.length === 0 ? { status: "shipped" as const } : {}),
+          ...(batchNowComplete ? { status: "shipped" as const } : {}),
         })
+        .where(eq(workshopSessions.id, id));
+    } else if (batchNowComplete) {
+      // Bu çağrı hiçbir şey sevk etmedi ama parti artık tamam: geride kalan
+      // siparişler bu aralıkta `rejected` oldu (iade). Seans durumu bunu
+      // yansıtmalı, aksi hâlde teslim butonu asla görünmez.
+      await tx
+        .update(workshopSessions)
+        .set({ status: "shipped", updatedAt: now })
         .where(eq(workshopSessions.id, id));
     }
 
-    return { shipped: shippedRows, leftBehind: pendingRows as LeftBehindRow[] };
+    return {
+      shipped: shippedRows,
+      leftBehind: pendingRows as LeftBehindRow[],
+      sessionNowShipped: batchNowComplete,
+    };
   });
 
-  if (shipped.length === 0) {
+  if (shipped.length === 0 && !sessionNowShipped) {
     return NextResponse.json(
       {
         error:
@@ -221,11 +251,11 @@ export async function POST(
     }).catch(() => {});
   }
 
-  // Katılımcı "kargoya verildi, takip no …" DEĞİL, "atölyede seni bekliyor"
+  // Katılımcı "kargoya verildi, takip no …" DEĞİL, "atölyede sizi bekliyor"
   // maili alır — figürü kendisi teslim almayacak, seansta elden alacak.
   // YALNIZCA bu çağrıda GERÇEKTEN sevk edilen siparişlerin katılımcılarına
-  // gider (`shipped` id'leri) — kısmi sevkte geride kalan biri "figürün seni
-  // bekliyor" mailini, figürü daha basılmamışken almamalı.
+  // gider (`shipped` id'leri) — kısmi sevkte geride kalan biri "figürünüz
+  // sizi bekliyor" mailini, figürü daha basılmamışken almamalı.
   await notifyWorkshopParticipantsReady(shipped.map((o) => o.id)).catch((e) =>
     console.error("notifyWorkshopParticipantsReady failed", e)
   );

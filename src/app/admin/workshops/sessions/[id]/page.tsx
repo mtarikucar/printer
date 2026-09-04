@@ -37,6 +37,7 @@ export default async function AdminWorkshopSessionPage({
           modelGlbUrl: true,
           amountKurus: true,
           productionBaseKurus: true,
+          commissionRateBps: true,
         },
       },
     },
@@ -49,21 +50,24 @@ export default async function AdminWorkshopSessionPage({
   const missing = batch.filter((p) => !p.order!.modelGlbUrl);
   const readyCount = batch.length - missing.length;
 
-  // Üreticinin toplam net payı DONMUŞ orandan hesaplanır, merdivenden asla
-  // yeniden türetilmez (bkz. IMPLEMENTER-CONTEXT). Seans henüz fiyatlanmadıysa
-  // (commissionRateBps NULL) gösterecek bir şey yok.
-  const netTotalKurus =
-    session.commissionRateBps != null
-      ? batch.reduce(
-          (sum, p) =>
-            sum +
-            computeEarning(
-              p.order!.productionBaseKurus ?? p.order!.amountKurus,
-              session.commissionRateBps!
-            ).netKurus,
-          0
-        )
-      : null;
+  // Üreticinin toplam net payı her SİPARİŞİN KENDİ donmuş oranından
+  // toplanır — session.commissionRateBps'ten DEĞİL. Bugün ikisi aynı değeri
+  // taşır (closeSession partiye TEK oranı aynı anda yazar), ama gerçekten
+  // ÖDENEN para siparişin kendi kolonundan hesaplanır (bkz. accrueEarning);
+  // ekranın gösterdiği sayı, hangi kolon okunursa okunsun DEĞİL, parayı
+  // üreten kolonu okuyarak doğru olmalı. Henüz oranı olmayan (seans kapanmadan
+  // önce görüntülenen) bir sipariş toplama sıfır katkı yapar.
+  const netTotalKurus = batch.reduce((sum, p) => {
+    const rate = p.order!.commissionRateBps;
+    if (rate == null) return sum;
+    return (
+      sum + computeEarning(p.order!.productionBaseKurus ?? p.order!.amountKurus, rate).netKurus
+    );
+  }, 0);
+  // Ekranda hâlâ "oran henüz donmadı" mesajını session seviyesinde
+  // göstermek için: seans hiç kapanmadıysa (commissionRateBps NULL) parti
+  // siparişlerinin de oranı yoktur — bu durumda toplam anlamsız, gösterilmez.
+  const netTotalDisplayKurus = session.commissionRateBps != null ? netTotalKurus : null;
 
   // `new Date().getTime()` yerine bilerek `Date.now()` KULLANILMAZ: eslint
   // react-hooks/purity kuralı `Date.now()`u render gövdesinde "saf olmayan
@@ -109,12 +113,17 @@ export default async function AdminWorkshopSessionPage({
         status: p.status,
         orderId: p.order?.id ?? null,
         orderNumber: p.order?.orderNumber ?? null,
+        // Siparişin KENDİ durumu — sayfa yeniden yüklendiğinde bile hangi
+        // katılımcının fiilen sevk edildiğini gösteren TEK kalıcı kaynak;
+        // "geride kalanlar" client state'i (leftBehind) bir sayfa
+        // yenilemesinde kaybolur, bu alan kaybolmaz.
+        orderStatus: p.order?.status ?? null,
         modelReady: Boolean(p.order?.modelGlbUrl),
       }))}
       readyCount={readyCount}
       totalCount={batch.length}
       missingNames={missing.map((p) => p.fullName)}
-      netTotalKurus={netTotalKurus}
+      netTotalKurus={netTotalDisplayKurus}
       daysUntilSession={daysUntilSession}
     />
   );

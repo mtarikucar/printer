@@ -9,6 +9,8 @@ import {
   WORKSHOP_DELIVER_DAYS_BEFORE,
   WORKSHOP_SEAT_HOLD_HOURS,
   assessSessionRisk,
+  WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES,
+  WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES,
 } from "../src/lib/config/workshop";
 import { CARD_DEADLINE_HOURS } from "../src/lib/config/payment";
 import { itemPriceKurus } from "../src/lib/config/prices";
@@ -276,6 +278,36 @@ test("dizin çıkışı (..) reddedilir", () => {
   assert.equal(isSafePhotoKey("photos/../dekont/odeme.pdf"), false);
   assert.equal(isSafePhotoKey("photos/..%2Fx.jpg"), false);
   assert.equal(isSafePhotoKey("../photos/x.jpg"), false);
+});
+
+// ─── Toplu sevk/teslim: bekleme listesi PIN'i ──────────────────────────────
+// Round 1'in scratch doğrulamasında yakalanan gerçek regresyon: ship/route.ts
+// bir zamanlar yalnızca `ne(orders.status, "shipped")` kullanıyordu — bu,
+// zaten `delivered`e geçmiş bir siparişi "sevk edilmemiş" sanıp tekrar
+// `shipped`e GERİ ALIYORDU (takip numarasını eziyor, hakedişi anlamsızca
+// yeniden deniyor, teslim almış katılımcıya "seni bekliyor" mailini ikinci
+// kez atıyordu). Bu testler o listenin GERİ GEVŞETİLMEDİĞİNİ pinler: biri
+// `WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES`i `["shipped"]`e indirgerse (ya da
+// `delivered`i çıkarırsa) burada patlar.
+
+test("toplu sevk bekleme listesi shipped+delivered+rejected'i hariç tutar (round-1 regresyonu)", () => {
+  assert.deepEqual(
+    [...WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES].sort(),
+    ["delivered", "rejected", "shipped"]
+  );
+});
+
+test("toplu teslim bekleme listesi yalnızca delivered+rejected'i hariç tutar (shipped HÂLÂ bekliyor demektir)", () => {
+  assert.deepEqual(
+    [...WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES].sort(),
+    ["delivered", "rejected"]
+  );
+  // Ship'in tam tersi: 'shipped' burada YOK, çünkü 'shipped' bir sipariş
+  // tam olarak "teslim edilmeyi bekliyor" demektir.
+  assert.equal(
+    (WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES as readonly string[]).includes("shipped"),
+    false
+  );
 });
 
 for (const [name, fn] of cases) {

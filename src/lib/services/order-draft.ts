@@ -15,7 +15,11 @@ import { getPublicUrl } from "@/lib/services/storage";
 // Seat accounting lives in its own module: workshop-participant.ts imports
 // `buildDraftReference` from here, so importing the release helpers from there
 // would form a cycle. workshop-seat.ts depends only on db + schema.
-import { releaseSeatForDraft } from "@/lib/services/workshop-seat";
+import {
+  findParticipantSeatByDraft,
+  releaseSeatForDraft,
+  type ReleasedSeat,
+} from "@/lib/services/workshop-seat";
 import { sendWorkshopSeatReleasedEmail } from "@/lib/services/workshop-notify";
 import {
   kickOffOrderProcessing,
@@ -663,14 +667,15 @@ export async function expireDraft(draftId: string): Promise<void> {
   // only guard that matters, so on a promoted draft (participant already
   // `paid`) it is a no-op anyway. Placing it BEFORE the early return means a
   // retry of a job that crashed after the transaction can still recover the
-  // seat. A non-null result also identifies this as a WORKSHOP draft, which
+  // seat. The outcome also tells us whether this is a WORKSHOP draft, which
   // selects the expiry email below.
-  const releasedSeat = await releaseSeatForDraft(draftId, "Ödeme süresi doldu").catch(
-    (e) => {
-      console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e);
-      return null;
-    }
-  );
+  const release = await releaseSeatForDraft(draftId, "Ödeme süresi doldu");
+  if (release.status === "error") {
+    console.error(
+      `workshop releaseSeatForDraft failed for draft ${draftId}`,
+      release.error
+    );
+  }
 
   if (!result) return;
   void SYSTEM_ADMIN_EMAIL;
@@ -683,12 +688,36 @@ export async function expireDraft(draftId: string): Promise<void> {
   // and the reminder would otherwise still fire 24h later.
   await cancelHavaleJobs(draftId);
 
-  if (releasedSeat) {
-    // Workshop participant: the shared `payment_expired` copy would tell them
-    // their HAVALE payment missed a 72-hour window and send them to /create.
-    // All three are wrong here — it was a card, the hold was
-    // WORKSHOP_SEAT_HOLD_HOURS, and where they wanted to go is the session.
-    await sendWorkshopSeatReleasedEmail(releasedSeat).catch((e) =>
+  // Which expiry email? The shared `payment_expired` copy tells the reader
+  // their HAVALE payment missed a 72-hour window and offers a /create button.
+  // For a workshop participant all three are wrong — it was a card, the hold
+  // was WORKSHOP_SEAT_HOLD_HOURS, and where they wanted to go is the session —
+  // so sending it to one is worse than sending nothing: it misdirects them to a
+  // far pricier product and quotes terms that were never theirs.
+  //
+  // `released` and `not_held` answer the question outright. `error` does NOT:
+  // the release blew up, so a real workshop draft is indistinguishable from a
+  // plain one at that point. Settle it with a cheap guard-free read rather than
+  // assuming — and if even that read fails, send NOTHING.
+  let workshopSeat: ReleasedSeat | null = null;
+  if (release.status === "released") {
+    workshopSeat = release.seat;
+  } else if (release.status === "error") {
+    try {
+      workshopSeat = await findParticipantSeatByDraft(draftId);
+    } catch (e) {
+      console.error(
+        `[expireDraft] cannot tell whether draft ${draftId} is a workshop draft ` +
+          `(release AND lookup both failed) — sending NO expiry email rather ` +
+          `than risk the misleading one`,
+        e
+      );
+      return;
+    }
+  }
+
+  if (workshopSeat) {
+    await sendWorkshopSeatReleasedEmail(workshopSeat).catch((e) =>
       console.error(`workshop seat-released email failed for draft ${draftId}`, e)
     );
     return;
@@ -743,10 +772,15 @@ export async function failDraft(
   // the draft and then deletes the backstop job via `cancelHavaleJobs`. Unless
   // the seat is released here there is no other route back for it.
   // Outside the transaction + unconditional — see `expireDraft` for why.
-  // No email: the customer just watched the payment fail on screen.
-  await releaseSeatForDraft(draftId, "Ödeme başarısız").catch((e) =>
-    console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e)
-  );
+  // No email on this path (the customer just watched the payment fail on
+  // screen), so the outcome is only worth logging when it actually broke.
+  const release = await releaseSeatForDraft(draftId, "Ödeme başarısız");
+  if (release.status === "error") {
+    console.error(
+      `workshop releaseSeatForDraft failed for draft ${draftId}`,
+      release.error
+    );
+  }
 
   // Draft moved to `failed` — refresh the admin drafts badge.
   if (failed) {

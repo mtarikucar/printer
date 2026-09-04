@@ -47,15 +47,57 @@ export async function releaseSeat(sessionId: string): Promise<void> {
 }
 
 /**
- * `releaseSeatForDraft` gerçekten bir koltuk bıraktığında döndürdüğü bağlam.
- * Hepsi zaten güncellenen katılımcı satırından gelir — ek sorgu yoktur.
- * Çağıran bunu iki şey için kullanır: (a) taslağın bir ATÖLYE taslağı olduğunu
- * anlamak, (b) katılımcıya doğru e-postayı göndermek.
+ * Bir atölye koltuğunun kime ait olduğunu söyleyen asgari bağlam. Çağıran bunu
+ * iki şey için kullanır: (a) taslağın bir ATÖLYE taslağı olduğunu anlamak,
+ * (b) katılımcıya doğru e-postayı göndermek.
  */
 export interface ReleasedSeat {
   sessionId: string;
   fullName: string;
   email: string;
+}
+
+/**
+ * `releaseSeatForDraft`'in ÜÇ ayrı sonucu. Ayrı tutulmaları şart: "koltuk yok"
+ * ile "bırakma patladı" tek bir `null`a indirgenirse, bırakması hata veren
+ * GERÇEK bir atölye taslağı, çağıran tarafından atölye-olmayan sanılır ve
+ * katılımcıya yanlış e-posta (havale / 72 saat / `/create`) gider.
+ *
+ *  - `released`    — koltuk gerçekten bırakıldı; `seat` katılımcıyı tanımlar.
+ *  - `not_held`    — bu taslak için `pending_payment` bir katılımcı yok.
+ *                    Pratikte "atölye taslağı değil" demektir: ödemiş
+ *                    (`paid`) ya da zaten iptal edilmiş bir katılımcının
+ *                    taslağı, taslak durumu kapısına zaten takılır.
+ *  - `error`       — işlem patladı. Koltuk hâlâ tutuluyor (rollback), taslağın
+ *                    atölye taslağı olup olmadığı BURADAN bilinemez; çağıran
+ *                    karar vermek için `findParticipantSeatByDraft`'i kullanır.
+ */
+export type ReleaseSeatOutcome =
+  | { status: "released"; seat: ReleasedSeat }
+  | { status: "not_held" }
+  | { status: "error"; error: unknown };
+
+/**
+ * Ucuz, KORUMASIZ okuma: bu taslak bir atölye katılımcısına mı ait?
+ *
+ * `releaseSeatForDraft` hata verdiğinde çağıranın hangi e-postayı göndereceğine
+ * karar vermesi için vardır. Bilerek koşulsuz (`status` filtresi yok) ve
+ * bilerek salt-okunur: burada amaç koltuğu bırakmak değil, KİMLİK tespiti.
+ * `workshop_participants_draft_idx` üzerinden tek indeksli okuma.
+ */
+export async function findParticipantSeatByDraft(
+  draftId: string
+): Promise<ReleasedSeat | null> {
+  const [row] = await db
+    .select({
+      sessionId: workshopParticipants.sessionId,
+      fullName: workshopParticipants.fullName,
+      email: workshopParticipants.email,
+    })
+    .from(workshopParticipants)
+    .where(eq(workshopParticipants.draftId, draftId))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -78,7 +120,7 @@ export async function releaseSeatForDraft(
   draftId: string,
   /** Katılımcı satırında ve admin ekranında görünür — çağıran bilerek seçer. */
   cancelReason: string
-): Promise<ReleasedSeat | null> {
+): Promise<ReleaseSeatOutcome> {
   // Koltuğu bırakmanın iki adımı (katılımcıyı iptal et + sayacı düşür) TEK
   // işlemdedir. Ayrı ayrı yazılsalardı, aradaki bir çökme katılımcıyı
   // `cancelled` bırakır ama sayacı düşürmezdi; koşullu UPDATE bir daha asla
@@ -88,28 +130,37 @@ export async function releaseSeatForDraft(
   // Bu, katılım yoluyla deadlock döngüsü YARATMAZ: yön hâlâ katılımcı → seans
   // ve bu işlem, çağıranın (taslağı güncelleyen) işlemi COMMIT ettikten sonra,
   // ondan bağımsız olarak açılır.
-  return db.transaction(async (tx) => {
-    const [participant] = await tx
-      .update(workshopParticipants)
-      .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
-      .where(
-        and(
-          eq(workshopParticipants.draftId, draftId),
-          eq(workshopParticipants.status, "pending_payment")
+  //
+  // Hata FIRLATILMAZ, `error` sonucu olarak döndürülür: çağıranın bunu
+  // "atölye taslağı değil" ile karıştırmaması bu sözleşmenin bütün amacı
+  // (bkz. ReleaseSeatOutcome).
+  try {
+    const seat = await db.transaction(async (tx) => {
+      const [participant] = await tx
+        .update(workshopParticipants)
+        .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
+        .where(
+          and(
+            eq(workshopParticipants.draftId, draftId),
+            eq(workshopParticipants.status, "pending_payment")
+          )
         )
-      )
-      .returning({
-        sessionId: workshopParticipants.sessionId,
-        fullName: workshopParticipants.fullName,
-        email: workshopParticipants.email,
-      });
-    if (!participant) return null;
+        .returning({
+          sessionId: workshopParticipants.sessionId,
+          fullName: workshopParticipants.fullName,
+          email: workshopParticipants.email,
+        });
+      if (!participant) return null;
 
-    await tx
-      .update(workshopSessions)
-      .set(decrementBookedCount())
-      .where(eq(workshopSessions.id, participant.sessionId));
+      await tx
+        .update(workshopSessions)
+        .set(decrementBookedCount())
+        .where(eq(workshopSessions.id, participant.sessionId));
 
-    return participant;
-  });
+      return participant;
+    });
+    return seat ? { status: "released", seat } : { status: "not_held" };
+  } catch (error) {
+    return { status: "error", error };
+  }
 }

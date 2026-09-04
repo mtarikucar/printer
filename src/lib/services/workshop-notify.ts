@@ -6,7 +6,7 @@
 // Every send is the caller's responsibility to wrap in `.catch()` so a mail
 // failure never rolls back the DB write (mirrors the rest of the codebase).
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { sendRawEmail, escHtml } from "./email";
 import { db } from "@/lib/db";
 import { workshopSessions, workshopParticipants } from "@/lib/db/schema";
@@ -260,24 +260,32 @@ export async function sendWorkshopSeatReleasedEmail(
 }
 
 /**
- * Parti mekana yola çıktığında (toplu sevk anında) katılımcılara gider.
+ * Siparişleri GERÇEKTEN sevk edilmiş katılımcılara gider.
+ *
+ * Kasıtlı olarak `sessionId` DEĞİL, `orderIds` alır: toplu sevk KISMİ
+ * olabilir (bazı siparişler QC onayı beklerken geride kalabilir — bkz.
+ * ship/route.ts). Seansın TÜM katılımcılarına gitseydi, figürü henüz
+ * basılmamış geride kalan biri "atölyede seni bekliyor" mailini yanlışlıkla
+ * alırdı. Çağıran yalnızca bu çağrıda sevk edilen sipariş id'lerini geçer.
  *
  * Kargo takip maili DEĞİLDİR: katılımcı figürü seansta ELDEN alacak, evine
  * hiçbir şey gelmeyecek. Standart "kargoya verildi, takip no …" şablonu bu
  * yüzden burada bilerek KULLANILMAZ — bir atölye katılımcısı için yanlış ve
  * kafa karıştırıcı olurdu.
  *
- * `cancelled` katılımcılar atlanır: koltuğu iptal edilmiş biri hiç sipariş
- * vermedi (bkz. workshop-seat.ts → releaseSeatForDraft), elinde bekleyen bir
- * figür yok.
+ * `cancelled` katılımcılar atlanır (ek güvenlik — pratikte `orderId` sevk
+ * edilmiş bir siparişe eşleniyorsa katılımcı zaten `paid` olmak zorunda):
+ * koltuğu iptal edilmiş biri hiç sipariş vermedi (bkz. workshop-seat.ts →
+ * releaseSeatForDraft), elinde bekleyen bir figür yok.
  *
  * Bir katılımcının `session`/`venue` ilişkisi okunamazsa (örn. tutarsız bir
  * satır) o kişi sessizce atlanır — geri kalan partiye giden mailleri
  * `Promise.allSettled` zaten birbirinden bağımsız tutuyor.
  */
-export async function notifyWorkshopParticipantsReady(sessionId: string): Promise<void> {
+export async function notifyWorkshopParticipantsReady(orderIds: string[]): Promise<void> {
+  if (orderIds.length === 0) return;
   const rows = await db.query.workshopParticipants.findMany({
-    where: eq(workshopParticipants.sessionId, sessionId),
+    where: inArray(workshopParticipants.orderId, orderIds),
     with: { session: { with: { venue: true } } },
   });
 

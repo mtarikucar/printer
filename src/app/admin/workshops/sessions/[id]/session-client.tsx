@@ -40,6 +40,12 @@ interface ParticipantRow {
   modelReady: boolean;
 }
 
+/** Ship ucunun döndürdüğü, henüz QC onayı almadığı için sevk edilmeyen satır. */
+interface LeftBehindRow {
+  orderNumber: string;
+  participantName: string | null;
+}
+
 // Aynı desen: admin/workshops/[venueId]/venue-client.tsx'teki SESSION_STATUS_BADGE
 // ile birebir aynı renk sözlüğü (her ekran kendi kopyasını tutar).
 const SESSION_STATUS_BADGE: Record<string, string> = {
@@ -113,6 +119,10 @@ export function SessionClient({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Son "Toplu sevk" çağrısının QC onayı bekleyen, dokunulmadan bırakılan
+  // satırları — bir sayı yetmez, admin İSİMLE görmeli (bkz. task-12a-report.md
+  // "Finding 1" düzeltmesi).
+  const [leftBehind, setLeftBehind] = useState<LeftBehindRow[]>([]);
 
   // ─── Toplu sevk formu ───────────────────────────────────────────────────
   const [carrier, setCarrier] = useState("yurtici");
@@ -149,6 +159,9 @@ export function SessionClient({
         }),
       });
       const payload = await res.json().catch(() => ({}));
+      // Kısmi sevkte bile (200 dönse de) geride kalanlar var olabilir —
+      // hem başarı hem hata dalında aynı alanı okuyoruz.
+      setLeftBehind(Array.isArray(payload.leftBehind) ? payload.leftBehind : []);
       if (!res.ok) {
         setError(payload.error || "Toplu sevk başarısız.");
         return;
@@ -269,6 +282,24 @@ export function SessionClient({
         )}
 
         {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+
+        {leftBehind.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <p className="font-medium">
+              QC onayı bekleyen {leftBehind.length} sipariş sevk EDİLMEDİ:
+            </p>
+            <p className="mt-0.5">
+              {leftBehind
+                .map((r) => `${r.participantName ?? "—"} (${r.orderNumber})`)
+                .join(", ")}
+            </p>
+            <p className="mt-0.5 text-amber-700/80">
+              Üretici QC onayını verdiğinde &quot;Toplu sevk&quot;i tekrar çalıştırın —
+              yalnızca bunlar (kendi takip numarasıyla, ikinci bir konsinye
+              olarak) sevk edilir.
+            </p>
+          </div>
+        )}
 
         {canShowShipAction && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">

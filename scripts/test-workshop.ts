@@ -14,6 +14,8 @@ import {
   WORKSHOP_CANCEL_SHIPPED_STATUSES,
   participantCancelDisposition,
   seatReturnsToPool,
+  sessionCancellable,
+  WORKSHOP_SESSION_UNCANCELLABLE_STATUSES,
   WORKSHOP_SESSION_STATUSES,
 } from "../src/lib/config/workshop";
 import { MANUFACTURER_ONBOARDING_TR } from "../src/lib/content/manufacturer-onboarding";
@@ -367,6 +369,26 @@ test("koltuk YALNIZCA seans hâlâ open iken havuza döner", () => {
     if (st === "open") continue;
     assert.equal(seatReturnsToPool(st), false, `${st} seansında koltuk bırakılmamalı`);
   }
+});
+
+test("teslim edilmiş/tamamlanmış seans iptal EDİLEMEZ", () => {
+  // Parti mekana ulaşmış ve hakediş tahakkuk etmişse `cancelled` damgası
+  // hiçbir parayı geri getirmez, yalnızca olan biteni yalanlar. Aynı fonksiyonu
+  // hem uç hem admin butonu okur — ayrışamasınlar.
+  assert.deepEqual(
+    [...WORKSHOP_SESSION_UNCANCELLABLE_STATUSES].sort(),
+    ["completed", "delivered"]
+  );
+  for (const st of WORKSHOP_SESSION_UNCANCELLABLE_STATUSES) {
+    assert.equal(sessionCancellable(st), false, `${st} iptal edilebilir görünüyor`);
+  }
+  for (const st of WORKSHOP_SESSION_STATUSES) {
+    if ((WORKSHOP_SESSION_UNCANCELLABLE_STATUSES as readonly string[]).includes(st)) continue;
+    assert.equal(sessionCancellable(st), true, `${st} iptal edilebilmeliydi`);
+  }
+  // Zaten `cancelled` bir seans YİNE iptal edilebilir olmalı: bu uç aynı
+  // zamanda başarısız kalan iade/taslak çıkışlarının yeniden deneme yoludur.
+  assert.equal(sessionCancellable("cancelled"), true);
 });
 
 // ─── Sözleşme metni ↔ merdiven (Görev 12b) ─────────────────────────────────

@@ -135,11 +135,12 @@ async function cleanupTestRedis() {
 async function run() {
   const { db } = await import("../src/lib/db");
   const schema = await import("../src/lib/db/schema");
-  const { users, manufacturers, orders, workshopVenues, workshopSessions, workshopParticipants, manufacturerEarnings, adminActions } =
+  const { users, manufacturers, manufacturerNotifications, orders, orderDrafts, workshopVenues, workshopSessions, workshopParticipants, manufacturerEarnings, adminActions } =
     schema;
   const { cancelWorkshopSession, cancelWorkshopParticipant } = await import(
     "../src/lib/services/workshop-cancel"
   );
+  const { promoteDraftToOrder } = await import("../src/lib/services/order-draft");
   const { accrueEarning } = await import("../src/lib/services/payouts");
   const { eq } = await import("drizzle-orm");
 
@@ -202,12 +203,33 @@ async function run() {
     return s;
   }
 
+  let draftSeq = 0;
+  /** Ödemesi SÜREN katılımcının taslağı — iptalin kapatmak zorunda olduğu çıkış. */
+  async function seedDraft() {
+    draftSeq++;
+    const [d] = await db
+      .insert(orderDrafts)
+      .values({
+        reference: `WSD-${Date.now()}-${draftSeq}`,
+        userId: user.id,
+        email: `d${draftSeq}@example.test`,
+        customerName: "Taslak Sahibi",
+        shippingAddress: ADDRESS,
+        amountKurus: 135000,
+        paymentMethod: "card",
+        status: "pending",
+      })
+      .returning();
+    return d;
+  }
+
   async function seedParticipant(
     sessionId: string,
     fullName: string,
-    opts: { orderStatus?: string; participantStatus?: string } = {}
+    opts: { orderStatus?: string; participantStatus?: string; withDraft?: boolean } = {}
   ) {
     let orderId: string | null = null;
+    const draft = opts.withDraft ? await seedDraft() : null;
     if (opts.orderStatus) {
       orderSeq++;
       const [o] = await db
@@ -236,6 +258,7 @@ async function run() {
       .values({
         sessionId,
         orderId,
+        draftId: draft?.id ?? null,
         fullName,
         email: `${fullName.toLowerCase().replace(/\s+/g, ".")}@example.test`,
         phone: "+905000000003",
@@ -245,7 +268,7 @@ async function run() {
         status: opts.participantStatus ?? (orderId ? "paid" : "pending_payment"),
       })
       .returning();
-    return { participant: p, orderId };
+    return { participant: p, orderId, draftId: draft?.id ?? null };
   }
 
   const participantStatus = async (id: string) =>
@@ -262,6 +285,20 @@ async function run() {
         columns: { paymentStatus: true },
       })
     )?.paymentStatus;
+  const draftStatus = async (id: string) =>
+    (
+      await db.query.orderDrafts.findFirst({
+        where: eq(orderDrafts.id, id),
+        columns: { status: true },
+      })
+    )?.status;
+  const participantOrderId = async (id: string) =>
+    (
+      await db.query.workshopParticipants.findFirst({
+        where: eq(workshopParticipants.id, id),
+        columns: { orderId: true },
+      })
+    )?.orderId ?? null;
   const sessionRow = async (id: string) =>
     await db.query.workshopSessions.findFirst({
       where: eq(workshopSessions.id, id),
@@ -270,11 +307,16 @@ async function run() {
 
   // ── 1) Seans iptali: 2 ödenmiş + 1 sevk edilmiş + 1 ödemesiz ─────────────
   console.log("\n1) Seans iptali");
-  const s1 = await seedSession("in_production", 4);
+  const s1 = await seedSession("in_production", 5);
   const paidA = await seedParticipant(s1.id, "Ayse Yilmaz", { orderStatus: "approved" });
   const paidB = await seedParticipant(s1.id, "Burak Demir", { orderStatus: "approved" });
   const shipped = await seedParticipant(s1.id, "Ceren Kaya", { orderStatus: "shipped" });
-  const unpaid = await seedParticipant(s1.id, "Deniz Ak");
+  // Ödemesi SÜREN katılımcı: taslağı `pending`, koltuğu tutuluyor. Bu, iptalin
+  // kapatmak ZORUNDA olduğu çıkış — taslak açık kalırsa geciken bir PayTR
+  // webhook'u iptal edilmiş seansa gerçek bir sipariş bağlar.
+  const pendingDraft = await seedParticipant(s1.id, "Deniz Ak", { withDraft: true });
+  // Taslaksız katılımcı (elle eklenmiş / bozuk satır) — geri düşüş yolu.
+  const unpaid = await seedParticipant(s1.id, "Emre Sonmez");
 
   // Üreticinin hakedişi tahakkuk etmiş olsun ki iade onu geri alsın.
   await accrueEarning(paidA.orderId!, mfg.id, 135000);
@@ -293,7 +335,12 @@ async function run() {
     r1.report.alreadyShipped.length === 1 && r1.report.alreadyShipped[0] === "Ceren Kaya",
     r1.report
   );
-  ok("başarısız iade yok", r1.report.failed.length === 0, r1.report);
+  ok("başarısız çıkış yok", r1.report.failed.length === 0, r1.report);
+  ok(
+    "ilk çağrıda 'zaten iade edilmiş' kimse yok",
+    r1.report.alreadyRefunded.length === 0,
+    r1.report
+  );
   ok(
     "sevk edilmiş siparişin ödemesi ELLENMEDİ",
     (await orderPayment(shipped.orderId!)) === "succeeded"
@@ -303,8 +350,22 @@ async function run() {
     (await participantStatus(shipped.participant.id)) !== "cancelled"
   );
   ok(
-    "ödemesiz katılımcı `cancelled`",
+    "taslaksız ödemesiz katılımcı `cancelled`",
     (await participantStatus(unpaid.participant.id)) === "cancelled"
+  );
+  ok(
+    "ödemesi süren katılımcı `cancelled`",
+    (await participantStatus(pendingDraft.participant.id)) === "cancelled"
+  );
+  ok(
+    "ödemesi süren katılımcının TASLAĞI `expired` (çıkış kapandı)",
+    (await draftStatus(pendingDraft.draftId!)) === "expired",
+    await draftStatus(pendingDraft.draftId!)
+  );
+  ok(
+    "taslak sonlandırılırken koltuk BİR kez bırakıldı (bookedCount 5 → 4)",
+    (await sessionRow(s1.id))?.bookedCount === 4,
+    { bookedCount: (await sessionRow(s1.id))?.bookedCount }
   );
   ok(
     "iade edilen katılımcılar `cancelled`",
@@ -317,6 +378,51 @@ async function run() {
       (await orderPayment(paidB.orderId!)) === "refunded"
   );
   ok("seans `cancelled`", (await sessionRow(s1.id))?.status === "cancelled");
+
+  // Üretici haber aldı mı? İade her siparişin `manufacturerId`sini NULL yapar,
+  // yani parti üreticinin kuyruğundan sessizce buharlaşır; kapasitesini
+  // serbest bırakabilmesi için bildirim ZORUNLU.
+  const mfgNotes = await db
+    .select()
+    .from(manufacturerNotifications)
+    .where(eq(manufacturerNotifications.manufacturerId, mfg.id));
+  ok(
+    "üreticiye seans iptal bildirimi gitti",
+    mfgNotes.some(
+      (n) => n.type === "workshop_session" && n.subject.includes("iptal edildi")
+    ),
+    mfgNotes.map((n) => n.subject)
+  );
+
+  // ── 1b) ASIL KAPATILAN AÇIK: iptalden SONRA gelen ödeme reddedilir ────────
+  // Bu, düzeltmenin var oluş sebebi. Taslak `pending` kalsaydı
+  // `promoteDraftToOrder` yalnızca taslağın durumuna bakar, katılımcıyı
+  // SÜZGEÇSİZ `paid` yapar ve iptal edilmiş seansa gerçek bir sipariş bağlardı.
+  console.log("\n1b) İptalden sonra gelen ödeme");
+  let promotionError: string | null = null;
+  try {
+    await promoteDraftToOrder(pendingDraft.draftId!);
+  } catch (e) {
+    promotionError = (e as Error).message;
+  }
+  ok(
+    "iptalden sonra terfi REDDEDİLDİ (DRAFT_NOT_PROMOTABLE)",
+    promotionError !== null && promotionError.startsWith("DRAFT_NOT_PROMOTABLE"),
+    promotionError
+  );
+  ok(
+    "katılımcı diriltilmedi — hâlâ `cancelled`",
+    (await participantStatus(pendingDraft.participant.id)) === "cancelled"
+  );
+  ok(
+    "katılımcıya sipariş BAĞLANMADI",
+    (await participantOrderId(pendingDraft.participant.id)) === null
+  );
+  ok(
+    "koltuk ikinci kez sayılmadı (bookedCount hâlâ 4)",
+    (await sessionRow(s1.id))?.bookedCount === 4,
+    { bookedCount: (await sessionRow(s1.id))?.bookedCount }
+  );
 
   // ── 2) İkinci çağrı idempotent: çift ters kayıt YOK ───────────────────────
   console.log("\n2) İkinci çağrı (idempotens)");
@@ -332,9 +438,16 @@ async function run() {
   const r2 = await cancelWorkshopSession({ sessionId: s1.id, adminEmail: ADMIN });
   assert.ok(r2.ok);
   ok(
-    "`already_refunded` BAŞARI sayılır (aynı 2 isim yine `refunded`)",
-    r2.report.refunded.length === 2 && r2.report.failed.length === 0,
+    "`already_refunded` BAŞARI sayılır ama YENİ iade olarak raporlanmaz",
+    r2.report.refunded.length === 0 &&
+      r2.report.alreadyRefunded.length === 2 &&
+      r2.report.failed.length === 0,
     r2.report
+  );
+  ok(
+    "ikinci çağrı taslağı yeniden sonlandırmaya kalkıp koltuğu düşürmedi",
+    (await sessionRow(s1.id))?.bookedCount === 4,
+    { bookedCount: (await sessionRow(s1.id))?.bookedCount }
   );
 
   const earningsAfter = await db
@@ -419,6 +532,50 @@ async function run() {
   );
   ok("iptal başarılıysa `seatReleased` false", r4.ok && r4.seatReleased === false, r4);
 
+  // ── 4b) Katılımcı iptali — ödemesi SÜREN katılımcı ───────────────────────
+  console.log("\n4b) Katılımcı iptali (ödemesi süren)");
+  const s4b = await seedSession("open", 2);
+  const pendingP = await seedParticipant(s4b.id, "Hakan Er", { withDraft: true });
+  const r4b = await cancelWorkshopParticipant({
+    sessionId: s4b.id,
+    participantId: pendingP.participant.id,
+    adminEmail: ADMIN,
+  });
+  ok("ödemesi süren katılımcı iptal edildi", r4b.ok, r4b);
+  ok(
+    "taslak `expired` — geciken ödeme artık sipariş yaratamaz",
+    (await draftStatus(pendingP.draftId!)) === "expired"
+  );
+  ok(
+    "katılımcı `cancelled`",
+    (await participantStatus(pendingP.participant.id)) === "cancelled"
+  );
+  ok("koltuk BİR kez bırakıldı (bookedCount 2 → 1)", (await sessionRow(s4b.id))?.bookedCount === 1, {
+    bookedCount: (await sessionRow(s4b.id))?.bookedCount,
+  });
+  let promo4b: string | null = null;
+  try {
+    await promoteDraftToOrder(pendingP.draftId!);
+  } catch (e) {
+    promo4b = (e as Error).message;
+  }
+  ok(
+    "iptalden sonra terfi REDDEDİLDİ",
+    promo4b !== null && promo4b.startsWith("DRAFT_NOT_PROMOTABLE"),
+    promo4b
+  );
+  const r4bAgain = await cancelWorkshopParticipant({
+    sessionId: s4b.id,
+    participantId: pendingP.participant.id,
+    adminEmail: ADMIN,
+  });
+  ok("ikinci çağrı da başarılı (idempotent)", r4bAgain.ok, r4bAgain);
+  ok(
+    "koltuk İKİNCİ kez bırakılmadı (bookedCount hâlâ 1)",
+    (await sessionRow(s4b.id))?.bookedCount === 1,
+    { bookedCount: (await sessionRow(s4b.id))?.bookedCount }
+  );
+
   // ── 5) Sevk edilmiş katılımcı reddedilir (rota 409'a eşler) ───────────────
   console.log("\n5) Sevk edilmiş katılımcı");
   const s5 = await seedSession("in_production", 1);
@@ -443,6 +600,24 @@ async function run() {
     adminEmail: ADMIN,
   });
   ok("olmayan seans → not_found", !missing.ok && missing.reason === "not_found", missing);
+  for (const st of ["delivered", "completed"] as const) {
+    const done = await seedSession("closed", 1);
+    await db
+      .update(workshopSessions)
+      .set({ status: st })
+      .where(eq(workshopSessions.id, done.id));
+    const res = await cancelWorkshopSession({ sessionId: done.id, adminEmail: ADMIN });
+    ok(
+      `${st} seans iptal edilemez (not_cancellable → 409)`,
+      !res.ok && res.reason === "not_cancellable",
+      res
+    );
+    ok(
+      `${st} seansın durumu DEĞİŞMEDİ`,
+      (await sessionRow(done.id))?.status === st
+    );
+  }
+
   const wrongSession = await cancelWorkshopParticipant({
     sessionId: s5.id,
     participantId: closedP.participant.id, // başka seansın katılımcısı

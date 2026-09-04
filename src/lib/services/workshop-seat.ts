@@ -14,7 +14,7 @@
  * commit'e bağlı. Bu dosyadaki iki fonksiyon ise tam tersine, çağıranın işlemi
  * COMMIT ettikten SONRA `db` üzerinden çalışır (gerekçe aşağıda).
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { workshopParticipants, workshopSessions } from "@/lib/db/schema";
 
@@ -32,18 +32,68 @@ function decrementBookedCount() {
 }
 
 /**
- * Rezervasyonu geri alır. Katılım akışının kendisi buna İHTİYAÇ DUYMAZ (orada
- * rollback yeterli); ödeme gelmediğinde koltuğu bırakan yol için vardır.
+ * Sayacı tek başına bir azaltır — katılımcı satırına DOKUNMAZ.
  *
- * Katılımcı satırı zaten terminal durumdayken (örn. ödemiş bir katılımcının
- * admin tarafından iptali) doğrudan çağrılır; taslaktan yürüyen yol için
- * `releaseSeatForDraft`'i kullanın.
+ * YENİ ÇAĞRI EKLEMEYİN. Katılımcıyı iptal edip koltuğunu bırakmanın doğru yolu
+ * `cancelParticipantSeat` (admin iptali) ya da `releaseSeatForDraft` (ödeme
+ * gelmeyen taslak): ikisi de iki adımı TEK işleme alır. Bu fonksiyon iki adımı
+ * ayırdığı için aradaki bir çökmede koltuğu kalıcı olarak kaybettirebilir.
+ * Yalnızca katılımcı satırı olmayan (elle DB müdahalesiyle bozulmuş) bir seansı
+ * onarmak için duruyor.
  */
 export async function releaseSeat(sessionId: string): Promise<void> {
   await db
     .update(workshopSessions)
     .set(decrementBookedCount())
     .where(eq(workshopSessions.id, sessionId));
+}
+
+/**
+ * Bir katılımcıyı `cancelled` yapar ve — istenirse — koltuğunu AYNI İŞLEMDE
+ * havuza döndürür. Admin'in elle iptal yolu (`workshop-cancel.ts`) bunu
+ * kullanır; taslaktan yürüyen yol `releaseSeatForDraft`'i kullanır.
+ *
+ * İki adımın (katılımcıyı iptal et + sayacı düşür) TEK işlemde olması ŞARTTIR
+ * — `releaseSeatForDraft`'teki gerekçenin aynısı: ayrı ayrı yazılsalardı,
+ * aradaki bir çökme katılımcıyı `cancelled` bırakır ama sayacı düşürmezdi;
+ * koşullu UPDATE bir daha asla eşleşmeyeceği için o koltuk KALICI olarak
+ * kaybolurdu.
+ *
+ * Koşullu UPDATE (`status <> 'cancelled'`) aynı zamanda çift düşürmeye karşı
+ * tek korumadır: aynı katılımcıya ikinci kez basıldığında 0 satır döner,
+ * sayaç ikinci kez düşmez ve dönüş `false` olur. Çağıran bu değeri "bu çağrı
+ * gerçekten iptal etti mi" (dolayısıyla bilgilendirme maili gitmeli mi)
+ * sorusunda kullanır.
+ *
+ * Yön katılımcı → seans; `releaseSeatForDraft` ile aynı, katılım işleminin
+ * (seans → taslak) tersi. Bu yüzden çağıranın işleminin İÇİNDE çağrılmamalı.
+ */
+export async function cancelParticipantSeat(
+  participantId: string,
+  cancelReason: string,
+  opts: { releaseSeat: boolean }
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [participant] = await tx
+      .update(workshopParticipants)
+      .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
+      .where(
+        and(
+          eq(workshopParticipants.id, participantId),
+          ne(workshopParticipants.status, "cancelled")
+        )
+      )
+      .returning({ sessionId: workshopParticipants.sessionId });
+    if (!participant) return false;
+
+    if (opts.releaseSeat) {
+      await tx
+        .update(workshopSessions)
+        .set(decrementBookedCount())
+        .where(eq(workshopSessions.id, participant.sessionId));
+    }
+    return true;
+  });
 }
 
 /**

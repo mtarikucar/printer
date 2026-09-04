@@ -173,6 +173,56 @@ export async function notifyManufacturerSessionClosed(
 }
 
 /**
+ * Seans admin tarafından İPTAL edildiğinde üreticiye gider.
+ *
+ * Zorunlu, çünkü iade her siparişin `manufacturerId`sini NULL yapıyor (bkz.
+ * order-refund.ts): parti üreticinin kuyruğundan hiçbir iz bırakmadan
+ * kayboluyor. Üretici o tarih için kapasite ayırmıştı — sessiz kalmak ona
+ * gerçek slot kaybettirir. `notifyManufacturerSessionClosed`'ın "parti boş"
+ * hâlinin elle iptal karşılığıdır.
+ *
+ * `leftWithManufacturerCount` sıfır değilse partide üreticiyi hâlâ ilgilendiren
+ * sipariş var (figürü sevk edilmiş ya da iadesi tamamlanamamış); "her şeyi
+ * bırakabilirsiniz" demek o durumda yanlış olurdu.
+ */
+export async function notifyManufacturerSessionCancelled(
+  sessionId: string,
+  result: { refundedCount: number; leftWithManufacturerCount: number }
+): Promise<void> {
+  try {
+    const session = await loadCommittedSession(sessionId);
+    if (!session) return;
+
+    const tail =
+      result.leftWithManufacturerCount > 0
+        ? `\n\nDikkat: partideki ${result.leftWithManufacturerCount} sipariş bu iptalin\n` +
+          `DIŞINDA kaldı (figürü sevk edilmiş ya da iadesi tamamlanamamış) ve\n` +
+          `panelinizde durmaya devam edebilir. Bunlar için sizinle ayrıca\n` +
+          `iletişime geçeceğiz.`
+        : "";
+
+    await notifyManufacturer({
+      manufacturerId: session.manufacturerId,
+      type: "workshop_session",
+      subject: `Atölye seansı iptal edildi — ${session.venue.name}, ${formatDateTime(session.startsAt)}`,
+      body:
+        `${venueLine(session)}\n` +
+        `Seans tarihi: ${formatDateTime(session.startsAt)}\n` +
+        `İptal edilen sipariş: ${result.refundedCount}\n\n` +
+        `Bu seans iptal edildi ve ödemesi alınmış katılımcıların parası iade\n` +
+        `edildi. İptal edilen siparişler panelinizden düştü; bu tarih için\n` +
+        `ayırdığınız kapasiteyi serbest bırakabilirsiniz.` +
+        tail,
+    });
+  } catch (err) {
+    console.error(
+      `[workshop] seans iptal bildirimi gönderilemedi (session ${sessionId})`,
+      err
+    );
+  }
+}
+
+/**
  * Kapanmış bir partiye SONRADAN düşen siparişler üreticiye bildirilir.
  *
  * Sipariş üreticinin panelinde zaten `accepted` olarak belirir, ama partiyi

@@ -281,3 +281,18 @@ export function participantCancelDisposition(row: {
 export function seatReturnsToPool(sessionStatus: string): boolean {
   return sessionStatus === "open";
 }
+
+/**
+ * Seansın ARTIK iptal edilemeyeceği durumlar.
+ *
+ * `delivered`/`completed` bir seansta parti mekana ulaşmış, üreticinin
+ * hakedişi tahakkuk etmiş ve iş bitmiştir; bu satırı `cancelled`a çevirmek
+ * hiçbir parayı geri getirmez, yalnızca olan biteni yalanlar. Admin ekranı
+ * butonu zaten gizler; kapı burada durur ki doğrudan bir POST da aynı yanıtı
+ * alsın (arayüz ile uç asla ayrışmasın).
+ */
+export const WORKSHOP_SESSION_UNCANCELLABLE_STATUSES = ["delivered", "completed"] as const;
+
+export function sessionCancellable(status: string): boolean {
+  return !(WORKSHOP_SESSION_UNCANCELLABLE_STATUSES as readonly string[]).includes(status);
+}

@@ -616,10 +616,37 @@ export async function promoteDraftToOrder(
 }
 
 /**
- * Expire a pending bank-transfer draft after the deadline. Refunds any held gift-card
- * balance and emails the customer. Idempotent.
+ * Ödemesi gelmemiş bir taslağı sonlandırmanın TEK yolu. Tuttuğu hediye kartı
+ * bakiyesini iade eder, atölye koltuğunu havuza döndürür ve müşteriyi
+ * bilgilendirir. İdempotenttir.
+ *
+ * `opts` YALNIZCA "taslak neden sonlandı" sorusunu değiştirir; atomik
+ * adımların hiçbirini atlatmaz. Varsayılanlar bugünkü davranışın birebir
+ * aynısıdır, bu yüzden mevcut çağıranların (payment-deadline worker'ı,
+ * workshop-close worker'ı, admin force-expire ucu) hiçbiri değişmez.
+ *
+ * Atölye iptalleri (`workshop-cancel.ts`) bu üç düğmeyi kullanır: koltuğu
+ * sonlandıran şey ödeme süresi DEĞİL admin'in iptali olduğu için gerekçe
+ * metinleri farklıdır ve "koltuğunuz serbest bırakıldı, tekrar katılabilirsiniz"
+ * maili iptal edilmiş bir seansa davet anlamına geleceği için susturulur —
+ * onun yerine iptal maili gider.
  */
-export async function expireDraft(draftId: string): Promise<void> {
+export async function expireDraft(
+  draftId: string,
+  opts: {
+    /** `order_drafts.paytr_failure_reason`. Varsayılan: ödeme süresi doldu. */
+    failureReason?: string;
+    /** `workshop_participants.cancel_reason`. Varsayılan: "Ödeme süresi doldu". */
+    cancelReason?: string;
+    /** Atölye katılımcısına "koltuğunuz serbest bırakıldı" maili gitsin mi? */
+    notifySeatReleased?: boolean;
+  } = {}
+): Promise<void> {
+  const {
+    failureReason,
+    cancelReason = "Ödeme süresi doldu",
+    notifySeatReleased = true,
+  } = opts;
   const SYSTEM_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "system@figurunica.com";
 
   const result = await db.transaction(async (tx) => {
@@ -644,6 +671,7 @@ export async function expireDraft(draftId: string): Promise<void> {
       .set({
         status: "expired",
         paytrFailureReason:
+          failureReason ??
           draft.paytrFailureReason ??
           (draft.paymentMethod === "card"
             ? "Kart ödeme süresi doldu"
@@ -669,7 +697,7 @@ export async function expireDraft(draftId: string): Promise<void> {
   // retry of a job that crashed after the transaction can still recover the
   // seat. The outcome also tells us whether this is a WORKSHOP draft, which
   // selects the expiry email below.
-  const release = await releaseSeatForDraft(draftId, "Ödeme süresi doldu");
+  const release = await releaseSeatForDraft(draftId, cancelReason);
   if (release.status === "error") {
     console.error(
       `workshop releaseSeatForDraft failed for draft ${draftId}`,
@@ -717,9 +745,14 @@ export async function expireDraft(draftId: string): Promise<void> {
   }
 
   if (workshopSeat) {
-    await sendWorkshopSeatReleasedEmail(workshopSeat).catch((e) =>
-      console.error(`workshop seat-released email failed for draft ${draftId}`, e)
-    );
+    // `notifySeatReleased: false` → çağıran katılımcıya KENDİ mailini
+    // gönderiyor (bkz. atölye iptali). Yine de burada dönülür: bu bir atölye
+    // taslağıdır ve aşağıdaki `payment_expired` maili ona hâlâ yanlıştır.
+    if (notifySeatReleased) {
+      await sendWorkshopSeatReleasedEmail(workshopSeat).catch((e) =>
+        console.error(`workshop seat-released email failed for draft ${draftId}`, e)
+      );
+    }
     return;
   }
 

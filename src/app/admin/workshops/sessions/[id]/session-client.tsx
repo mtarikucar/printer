@@ -8,6 +8,7 @@ import {
   WORKSHOP_SESSION_STATUS_LABELS,
   WORKSHOP_PARTICIPANT_STATUS_LABELS,
   WORKSHOP_CANCEL_SHIPPED_STATUSES,
+  sessionCancellable,
 } from "@/lib/config/workshop";
 
 interface SessionData {
@@ -61,9 +62,17 @@ interface LeftBehindRow {
  */
 interface CancelReport {
   refunded: string[];
+  alreadyRefunded: string[];
   alreadyShipped: string[];
   failed: string[];
 }
+
+/** Seans iptal ucunun makine okunur hata kodları → admin'e Türkçe karşılık. */
+const SESSION_CANCEL_ERRORS: Record<string, string> = {
+  not_found: "Seans bulunamadı.",
+  not_cancellable:
+    "Parti mekana teslim edilmiş; bu seans artık iptal edilemez. Tek tek iade gerekiyorsa siparişlerin kendi iade ekranını kullanın.",
+};
 
 /** Katılımcı iptal ucunun makine okunur hata kodları → admin'e Türkçe karşılık. */
 const PARTICIPANT_CANCEL_ERRORS: Record<string, string> = {
@@ -72,6 +81,8 @@ const PARTICIPANT_CANCEL_ERRORS: Record<string, string> = {
     "Bu katılımcının figürü sevk edilmiş; otomatik iade edilmez. Normal iade ekranından tek tek halledin.",
   refund_failed:
     "İade işlenemedi — katılımcı İPTAL EDİLMEDİ. Tekrar deneyin ya da normal iade ekranını kullanın.",
+  expire_failed:
+    "Ödeme taslağı sonlandırılamadı — katılımcı İPTAL EDİLMEDİ (ödemesi hâlâ tamamlanabilirdi). Tekrar deneyin.",
 };
 
 // Aynı desen: admin/workshops/[venueId]/venue-client.tsx'teki SESSION_STATUS_BADGE
@@ -198,11 +209,12 @@ export function SessionClient({
       session.status
     );
   const canShowDeliverAction = session.status === "shipped";
-  // Tamamlanmış bir seansta iptal anlamsız (parti teslim edildi, hakediş
-  // ödendi). Zaten `cancelled` seansta buton DURUR: uç aynı zamanda başarısız
-  // iadelerin yeniden deneme yoludur.
-  const canCancelSession =
-    session.status !== "completed" && session.status !== "delivered";
+  // Teslim edilmiş/tamamlanmış seansta iptal anlamsız (parti mekanda, hakediş
+  // tahakkuk etti). Kural `sessionCancellable`dan OKUNUR, burada tekrar
+  // yazılmaz: uç da aynı fonksiyonu çağırıyor, böylece buton ile 409 asla
+  // ayrışamaz. Zaten `cancelled` seansta buton DURUR: uç aynı zamanda
+  // başarısız çıkışların yeniden deneme yoludur.
+  const canCancelSession = sessionCancellable(session.status);
   const isCancelled = session.status === "cancelled";
 
   const submitShip = async () => {
@@ -278,11 +290,18 @@ export function SessionClient({
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setCancelError(payload.error || "Seans iptali başarısız.");
+        setCancelError(
+          SESSION_CANCEL_ERRORS[payload.error] ||
+            payload.error ||
+            "Seans iptali başarısız."
+        );
         return;
       }
       setCancelReport({
         refunded: Array.isArray(payload.refunded) ? payload.refunded : [],
+        alreadyRefunded: Array.isArray(payload.alreadyRefunded)
+          ? payload.alreadyRefunded
+          : [],
         alreadyShipped: Array.isArray(payload.alreadyShipped) ? payload.alreadyShipped : [],
         failed: Array.isArray(payload.failed) ? payload.failed : [],
       });
@@ -517,6 +536,19 @@ export function SessionClient({
                   <p className="mt-0.5">{cancelReport.refunded.join(", ")}</p>
                 </div>
               )}
+              {cancelReport.alreadyRefunded.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700">
+                  <p className="font-medium">
+                    {cancelReport.alreadyRefunded.length} katılımcının parası zaten
+                    DAHA ÖNCE iade edilmişti:
+                  </p>
+                  <p className="mt-0.5">{cancelReport.alreadyRefunded.join(", ")}</p>
+                  <p className="mt-0.5 text-gray-500">
+                    Bu çağrıda yeni bir para hareketi olmadı; yalnızca katılımları
+                    kapatıldı.
+                  </p>
+                </div>
+              )}
               {cancelReport.alreadyShipped.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
                   <p className="font-medium">
@@ -533,8 +565,8 @@ export function SessionClient({
               {cancelReport.failed.length > 0 && (
                 <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-red-800">
                   <p className="font-medium">
-                    {cancelReport.failed.length} katılımcının iadesi BAŞARISIZ — parası
-                    hâlâ bizde:
+                    {cancelReport.failed.length} katılımcının çıkışı BAŞARISIZ — parası
+                    hâlâ bizde (ya da ödemesi hâlâ tamamlanabilir):
                   </p>
                   <p className="mt-0.5">{cancelReport.failed.join(", ")}</p>
                   <p className="mt-0.5 text-red-700/80">
@@ -544,6 +576,7 @@ export function SessionClient({
                 </div>
               )}
               {cancelReport.refunded.length === 0 &&
+                cancelReport.alreadyRefunded.length === 0 &&
                 cancelReport.alreadyShipped.length === 0 &&
                 cancelReport.failed.length === 0 && (
                   <p className="text-gray-500">

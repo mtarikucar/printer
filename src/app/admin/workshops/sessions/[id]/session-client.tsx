@@ -65,6 +65,21 @@ interface CancelReport {
   alreadyRefunded: string[];
   alreadyShipped: string[];
   failed: string[];
+  /**
+   * PayTR'de ELLE yapılacak iadelerin iş listesi (isim + sipariş no + tutar).
+   * Bu kod tabanında PayTR iade API'si yok: `refundOrder` defteri yazıp
+   * müşteriye "iadeniz işleme alındı" der, parayı gerçekten gönderen adım
+   * admin'in panelde yaptığı işlemdir. Yirmi kişilik bir seansta bu yükümlülük
+   * ekrandan KOPYALANABİLİR biçimde çıkmalı, yoksa kimse listeyi tutamaz.
+   */
+  refundedOrders: Array<{ fullName: string; orderNumber: string; amountKurus: number }>;
+}
+
+/** Seans detayında toplu devir için seçilebilecek üretici. */
+interface ManufacturerOption {
+  id: string;
+  companyName: string;
+  acceptingOrders: boolean;
 }
 
 /** Seans iptal ucunun makine okunur hata kodları → admin'e Türkçe karşılık. */
@@ -167,6 +182,7 @@ export function SessionClient({
   missingNames,
   netTotalKurus,
   daysUntilSession,
+  manufacturerOptions,
 }: {
   session: SessionData;
   participants: ParticipantRow[];
@@ -175,6 +191,12 @@ export function SessionClient({
   missingNames: string[];
   netTotalKurus: number | null;
   daysUntilSession: number;
+  /**
+   * BOŞ DEĞİLSE bu seans üreticisiz kapanmıştır ve toplu devir kartı gösterilir.
+   * Kararı sunucu verir (bkz. page.tsx `needsManufacturerPick`): liste yalnızca
+   * gerçekten gerektiğinde yüklenir, istemci ayrıca durum yorumlamaz.
+   */
+  manufacturerOptions: ManufacturerOption[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -191,10 +213,18 @@ export function SessionClient({
   // bastığı butonun yanında görmeli, üç kart yukarıda değil.
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [participantError, setParticipantError] = useState<string | null>(null);
+  // Katılım durumu (taslak ↔ açık) kendi hata alanını taşır: admin hatayı
+  // bastığı butonun yanında görmeli.
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // ─── Toplu sevk formu ───────────────────────────────────────────────────
   const [carrier, setCarrier] = useState("yurtici");
   const [trackingNumber, setTrackingNumber] = useState("");
+
+  // ─── Üretici devri (üreticisiz kapanmış parti) ──────────────────────────
+  const [assignManufacturerId, setAssignManufacturerId] = useState("");
 
   const statusBadge =
     SESSION_STATUS_BADGE[session.status] ?? "bg-gray-100 text-gray-700";
@@ -216,6 +246,99 @@ export function SessionClient({
   // başarısız çıkışların yeniden deneme yoludur.
   const canCancelSession = sessionCancellable(session.status);
   const isCancelled = session.status === "cancelled";
+
+  // Katılım anahtarı. `createSession` her seansı `draft` yazar; `open`ı yazan
+  // TEK yer PATCH ucudur, yani bu iki buton olmadan seans hiç açılamaz.
+  // Kapanmış/iptal edilmiş seansta anlamsız: kartı hiç göstermiyoruz, uç da
+  // aynı geçişleri zaten reddeder (fiyatlanmış seans yeniden açılamaz).
+  const canOpen = session.status === "draft";
+  const canDraft = session.status === "open";
+
+  /**
+   * Seansın katılım durumunu değiştirir (`draft` ↔ `open`).
+   *
+   * Bu, akışın AÇMA anahtarıdır: `createSession` her seansı `draft` yazar ve
+   * `open`ı yazan tek yer bu PATCH ucudur. Buton olmadığında seans hiç
+   * açılamıyordu — katılım sayfası "katılıma kapalı" diyor, koltuk rezerve
+   * edilemiyor, kapanış süpürmesi (yalnızca `open` seansları tarar) seansı hiç
+   * görmüyor ve üreticiye giden 5 günlük taahhüt çağrısı hiç gitmiyordu.
+   *
+   * Uç zaten üç kapıyı taşıyor (fiyatlanmış seans yeniden açılamaz, siparişli
+   * seans taslağa çekilemez, kapanış seans tarihinin ötesine taşınamaz) ve
+   * gerekçeli TÜRKÇE metin döndürüyor — burada yeniden yazılmaz, olduğu gibi
+   * gösterilir. Ship/cancel handler'larıyla aynı kalıp: ağ hatası ayrı dalda.
+   */
+  const submitStatus = async (status: "open" | "draft") => {
+    if (
+      status === "draft" &&
+      !confirm(
+        "Seans taslağa çekilsin mi? Katılım linki kapanır ve yeni kimse " +
+          "katılamaz. (Ödenmiş siparişi olan seans taslağa çekilemez.)"
+      )
+    )
+      return;
+    setStatusError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/workshops/sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatusError(
+          payload.error ||
+            (status === "open" ? "Seans katılıma açılamadı." : "Seans taslağa çekilemedi.")
+        );
+        return;
+      }
+      router.refresh();
+    } catch {
+      setStatusError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Üreticisiz kapanmış partiyi topluca bir üreticiye devreder. */
+  const submitAssignManufacturer = async () => {
+    if (!assignManufacturerId) {
+      setAssignError("Bir üretici seçin.");
+      return;
+    }
+    const picked = manufacturerOptions.find((m) => m.id === assignManufacturerId);
+    if (
+      !confirm(
+        `Bu seansın tüm partisi ${picked?.companyName ?? "seçilen üretici"} üzerine ` +
+          "aktarılsın mı? Siparişler doğrudan \"kabul edildi\" olarak düşer ve " +
+          "üreticiye bildirim gider."
+      )
+    )
+      return;
+    setAssignError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/admin/workshops/sessions/${session.id}/assign-manufacturer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ manufacturerId: assignManufacturerId }),
+        }
+      );
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAssignError(payload.error || "Üretici atanamadı.");
+        return;
+      }
+      router.refresh();
+    } catch {
+      setAssignError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submitShip = async () => {
     setError(null);
@@ -278,7 +401,13 @@ export function SessionClient({
       !confirm(
         isCancelled
           ? "Bu seans zaten iptal. Yalnızca iadesi başarısız kalan katılımcılar yeniden denenecek. Devam edilsin mi?"
-          : "Seans iptal edilsin mi? Ödemiş katılımcıların parası iade edilir, seans \"İptal edildi\" olur. Bu işlem geri alınamaz."
+          : "Seans iptal edilsin mi?\n\n" +
+              "• Ödemiş katılımcılara \"iadeniz işleme alındı\" e-postası GİDER.\n" +
+              "• Parayı PayTR panelinden GERİ GÖNDERMEK SİZE DÜŞER — bu ekran " +
+              "iade emrini PayTR'ye iletmez.\n" +
+              "• İşlem sonunda iade edilecek kişilerin listesi (sipariş no + " +
+              "tutar) burada gösterilir; kopyalayıp PayTR'de tek tek işleyin.\n\n" +
+              "Bu işlem geri alınamaz. Devam edilsin mi?"
       )
     )
       return;
@@ -297,6 +426,7 @@ export function SessionClient({
         );
         return;
       }
+      setCopied(false);
       setCancelReport({
         refunded: Array.isArray(payload.refunded) ? payload.refunded : [],
         alreadyRefunded: Array.isArray(payload.alreadyRefunded)
@@ -304,12 +434,47 @@ export function SessionClient({
           : [],
         alreadyShipped: Array.isArray(payload.alreadyShipped) ? payload.alreadyShipped : [],
         failed: Array.isArray(payload.failed) ? payload.failed : [],
+        refundedOrders: Array.isArray(payload.refundedOrders)
+          ? payload.refundedOrders
+          : [],
       });
       router.refresh();
     } catch {
       setCancelError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * PayTR'de elle işlenecek iadelerin toplamı — admin'in üstlendiği
+   * yükümlülüğün büyüklüğü ekranda bir sayı olarak durmalı.
+   */
+  const refundObligationKurus = (cancelReport?.refundedOrders ?? []).reduce(
+    (sum, r) => sum + r.amountKurus,
+    0
+  );
+
+  /**
+   * İade iş listesini panoya kopyalar. Yükümlülük ekrandan ÇIKMALI: sayfa
+   * yenilendiğinde bu rapor kaybolur (client state) ve geriye yalnızca
+   * "iadeniz işleme alındı" e-postasını almış N kişi kalır.
+   */
+  const copyRefundWorklist = async () => {
+    const rows = cancelReport?.refundedOrders ?? [];
+    if (rows.length === 0) return;
+    const text = [
+      `Atölye seansı iptali — PayTR'de elle iade edilecekler (${session.venueName}, ${formatDateTime(session.startsAt)})`,
+      ...rows.map((r) => `${r.orderNumber}\t${r.fullName}\t${formatKurus(r.amountKurus)}`),
+      `TOPLAM\t${rows.length} iade\t${formatKurus(refundObligationKurus)}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // Pano izni yoksa (ya da güvensiz bağlamda) sessiz kalmak yerine
+      // listeyi zaten ekranda gösteriyoruz; buton "kopyalandı" demez.
+      setCopied(false);
     }
   };
 
@@ -417,6 +582,100 @@ export function SessionClient({
         </div>
       </div>
 
+      {/* Katılım durumu — seansın AÇMA anahtarı */}
+      {(canOpen || canDraft) && (
+        <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">Katılım</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            {session.status === "draft" ? (
+              <>
+                Seans <strong>taslak</strong>: katılım linki &quot;katılıma
+                kapalı&quot; gösterir, kimse koltuk alamaz ve kapanış süpürmesi bu
+                seansı hiç görmez. Katılıma açıldığında üreticiye tarih taahhüdü
+                çağrısı gider. Katılım {formatDateTime(session.joinClosesAt)}{" "}
+                tarihinde otomatik kapanır.
+              </>
+            ) : (
+              <>
+                Seans <strong>katılıma açık</strong>: {session.bookedCount}/
+                {session.capacity} koltuk dolu. Katılım{" "}
+                {formatDateTime(session.joinClosesAt)} tarihinde otomatik kapanır
+                ve parti üreticiye düşer.
+              </>
+            )}
+          </p>
+          {statusError && <p className="text-xs text-red-600 mb-2">{statusError}</p>}
+          <div className="flex flex-wrap gap-2">
+            {canOpen && (
+              <button
+                type="button"
+                onClick={() => submitStatus("open")}
+                disabled={busy}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {busy ? "İşleniyor…" : "Katılıma aç"}
+              </button>
+            )}
+            {canDraft && (
+              <button
+                type="button"
+                onClick={() => submitStatus("draft")}
+                disabled={busy}
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                {busy ? "İşleniyor…" : "Taslağa çek"}
+              </button>
+            )}
+          </div>
+          {canOpen && !session.manufacturerName && (
+            <p className="mt-2 text-xs text-amber-700">
+              Bu seansta üretici seçilmemiş; katılıma açmadan önce mekan
+              ekranından bir üretici atayın — parti kapanışta ona düşecek.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Üreticisiz kapanmış parti — kurtarma yolu */}
+      {manufacturerOptions.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50/60 p-5">
+          <h3 className="text-sm font-semibold text-amber-900 mb-1">
+            Bu partinin üreticisi yok
+          </h3>
+          <p className="text-xs text-amber-800/90 mb-3">
+            Seans kapandı ve komisyon oranı donduruldu, ama parti hiçbir
+            üreticiye düşmedi — kimse basmıyor. Bir üretici seçin: seansın tüm
+            partisi ona aktarılır, siparişler &quot;kabul edildi&quot; olarak
+            panelinde belirir ve donmuş oranla bildirim gider. Oran DEĞİŞMEZ.
+          </p>
+          {assignError && <p className="text-xs text-red-600 mb-2">{assignError}</p>}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <FormField label="Üretici">
+              <Select
+                value={assignManufacturerId}
+                onChange={(e) => setAssignManufacturerId(e.target.value)}
+              >
+                <option value="">— Seçilmedi —</option>
+                {manufacturerOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.companyName}
+                    {!m.acceptingOrders ? " — sipariş almıyor" : ""}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <button
+              type="button"
+              onClick={submitAssignManufacturer}
+              disabled={busy || !assignManufacturerId}
+              className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50"
+            >
+              {busy ? "Atanıyor…" : "Partiyi bu üreticiye ver"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Toplu sevk / teslim */}
       <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Sevkiyat</h3>
@@ -506,11 +765,22 @@ export function SessionClient({
       {canCancelSession && (
         <div className="mt-6 rounded-2xl border border-red-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Seans iptali</h3>
-          <p className="text-xs text-gray-500 mb-3">
-            Ödemiş katılımcıların parası iade edilir, ödemeye hiç gelmemişler
-            iptal edilir ve seans &quot;İptal edildi&quot; olur. Figürü zaten
-            sevk edilmiş katılımcılar otomatik iade EDİLMEZ — aşağıda isimle
-            raporlanır, onları normal iade ekranından tek tek halledin.
+          <p className="text-xs text-gray-500 mb-2">
+            Ödemiş katılımcıların siparişi iade işaretlenir, ödemeye hiç
+            gelmemişler iptal edilir ve seans &quot;İptal edildi&quot; olur.
+            Figürü zaten sevk edilmiş katılımcılar otomatik iade EDİLMEZ —
+            aşağıda isimle raporlanır, onları normal iade ekranından tek tek
+            halledin.
+          </p>
+          {/* Bu uyarı süs değil: kod tabanında PayTR iade API'si YOK. */}
+          <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <strong>Para PayTR&apos;den otomatik geri gitmez.</strong> Bu işlem
+            siparişleri iade olarak kaydeder ve katılımcılara &quot;iadeniz
+            işleme alındı&quot; e-postası gönderir; parayı geri gönderme adımı
+            PayTR panelinde SİZİN yapacağınız işlemdir. Bir seansın toplu
+            iptali, kişi başı {formatKurus(session.pricePerSeatKurus)} olmak
+            üzere aynı anda birden çok iade yükümlülüğü doğurur — aşağıdaki
+            listeyi kopyalayıp PayTR&apos;de tek tek işleyin.
           </p>
           {cancelError && <p className="text-xs text-red-600 mb-2">{cancelError}</p>}
           <button
@@ -531,9 +801,33 @@ export function SessionClient({
               {cancelReport.refunded.length > 0 && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
                   <p className="font-medium">
-                    {cancelReport.refunded.length} katılımcının iadesi işleme alındı:
+                    {cancelReport.refunded.length} katılımcının iadesi işleme alındı
+                    {refundObligationKurus > 0
+                      ? ` — PayTR'de iade edilecek toplam ${formatKurus(refundObligationKurus)}:`
+                      : ":"}
                   </p>
-                  <p className="mt-0.5">{cancelReport.refunded.join(", ")}</p>
+                  {/* İş listesi: PayTR'de aranacak şey İSİM değil sipariş
+                      numarasıdır, o yüzden satır satır ve kopyalanabilir. */}
+                  {cancelReport.refundedOrders.length > 0 ? (
+                    <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
+                      {cancelReport.refundedOrders.map((r) => (
+                        <li key={r.orderNumber}>
+                          {r.orderNumber} · {r.fullName} · {formatKurus(r.amountKurus)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-0.5">{cancelReport.refunded.join(", ")}</p>
+                  )}
+                  {cancelReport.refundedOrders.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={copyRefundWorklist}
+                      className="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+                    >
+                      {copied ? "Kopyalandı ✓" : "İade listesini kopyala"}
+                    </button>
+                  )}
                 </div>
               )}
               {cancelReport.alreadyRefunded.length > 0 && (

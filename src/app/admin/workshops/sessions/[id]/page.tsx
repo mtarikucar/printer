@@ -3,7 +3,8 @@ export const dynamic = "force-dynamic";
 import { asc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { workshopSessions, workshopParticipants } from "@/lib/db/schema";
+import { manufacturers, workshopSessions, workshopParticipants } from "@/lib/db/schema";
+import { orderInBatch } from "@/lib/config/workshop";
 import { computeEarning } from "@/lib/services/finance";
 import { SessionClient } from "./session-client";
 
@@ -34,6 +35,7 @@ export default async function AdminWorkshopSessionPage({
           id: true,
           orderNumber: true,
           status: true,
+          paymentStatus: true,
           modelGlbUrl: true,
           amountKurus: true,
           productionBaseKurus: true,
@@ -43,10 +45,12 @@ export default async function AdminWorkshopSessionPage({
     },
   });
 
-  // Parti: seansa bağlı, İADE EDİLMEMİŞ siparişi olan katılımcılar. Aynı
-  // tanım workshop-session.ts'teki batchOrderFilter ile birebir aynı — iadeli
-  // bir sipariş ne model sayacında ne komisyon toplamında sayılmamalı.
-  const batch = participants.filter((p) => p.order && p.order.status !== "rejected");
+  // Parti: seansa bağlı, reddedilmemiş ve İADE EDİLMEMİŞ siparişi olan
+  // katılımcılar. Kural `orderInBatch`ten OKUNUR — `batchOrderFilter`ın SQL
+  // hâliyle aynı iki diziden beslenir, burada elle tekrarlanmaz. İade edilmiş
+  // bir sipariş ne model sayacında ne komisyon toplamında görünmeli: ekran,
+  // partinin gerçekte kaç figür olduğunu söylemek zorunda.
+  const batch = participants.filter((p) => p.order && orderInBatch(p.order));
   const missing = batch.filter((p) => !p.order!.modelGlbUrl);
   const readyCount = batch.length - missing.length;
 
@@ -77,6 +81,25 @@ export default async function AdminWorkshopSessionPage({
   const daysUntilSession = Math.ceil(
     (session.startsAt.getTime() - new Date().getTime()) / DAY_MS
   );
+
+  // Üretici listesi YALNIZCA gerçekten gerektiğinde yüklenir: seans üreticisiz
+  // ve hâlâ atanabilir durumda. Ekranın geri kalanı (her seans görüntülemesi)
+  // bu sorgunun bedelini ödememeli.
+  const needsManufacturerPick =
+    !session.manufacturerId && ["closed", "in_production"].includes(session.status);
+  const manufacturerOptions = needsManufacturerPick
+    ? (
+        await db.query.manufacturers.findMany({
+          where: eq(manufacturers.status, "active"),
+          orderBy: [asc(manufacturers.companyName)],
+          columns: { id: true, companyName: true, acceptingOrders: true },
+        })
+      ).map((m) => ({
+        id: m.id,
+        companyName: m.companyName,
+        acceptingOrders: m.acceptingOrders,
+      }))
+    : [];
 
   return (
     <SessionClient
@@ -125,6 +148,7 @@ export default async function AdminWorkshopSessionPage({
       missingNames={missing.map((p) => p.fullName)}
       netTotalKurus={netTotalDisplayKurus}
       daysUntilSession={daysUntilSession}
+      manufacturerOptions={manufacturerOptions}
     />
   );
 }

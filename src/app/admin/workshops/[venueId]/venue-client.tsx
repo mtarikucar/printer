@@ -349,7 +349,10 @@ export function VenueClient({
               />
             </FormField>
 
-            <FormField label="Üretici" hint="Seçilmezse seans taslak kalır; katılım açılmadan önce atanmalı.">
+            <FormField
+              label="Üretici"
+              hint='Her seans TASLAK doğar. Katılıma açmak ayrı bir adımdır: seans detayında "Katılıma aç". Üretici seçilmeden açılamaz — parti kapanışta ona düşecek.'
+            >
               <Select
                 value={manufacturerId}
                 onChange={(e) => setManufacturerId(e.target.value)}

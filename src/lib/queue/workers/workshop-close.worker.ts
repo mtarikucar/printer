@@ -1,20 +1,29 @@
 /**
  * Atölye seansı kapanış süpürmesi — saatte bir.
  *
- * İki iş yapar, bu sırayla:
+ * Dört iş yapar, bu sırayla:
  *
- *  1. MUTABAKAT — açık seansların koltuk sayacını gerçek katılımcı satırlarından
- *     yeniden kurar. Koltuk rezervasyonu ile katılımcı satırı tek işlemde doğuyor
- *     (Task 8), ama koltuğu geri veren yol Redis'e bağlı: süre dolumu işi hiç
- *     kuyruğa yazılamazsa o koltuk kimsenin kurtaramayacağı şekilde tutulu kalır.
- *     Kapanıştan ÖNCE koşar ki kapanan seans doğru sayaçla tarihe geçsin.
+ *  1. SÜRESİ DOLMUŞ KOLTUK TUTMALARI — ödemesi `WORKSHOP_SEAT_HOLD_HOURS`
+ *     içinde gelmemiş rezervasyonları `expireDraft` ile sonlandırır (Task 10'un
+ *     bırakma yolu; ikinci bir sayaç düşürme YOK). Koltuk sızıntısının gerçek
+ *     kurtarması budur: katılım, süre dolumu işini işlemden SONRA kuyruğa alır
+ *     ve Redis erişilemezse katılımı yine de başarılı sayar — o iş hiç
+ *     yazılmazsa koltuğu geri verecek başka hiçbir şey yoktur. Sayaç mutabakatı
+ *     bunu göremez, çünkü katılımcı satırı `pending_payment` olarak durduğu için
+ *     sayaç zaten "doğru"dur.
  *
- *  2. KAPANIŞ — katılım penceresi dolmuş seansları kapatır: sipariş adedi
+ *  2. MUTABAKAT — açık seansların koltuk sayacını katılımcı satırlarıyla
+ *     karşılaştırır. Yukarıdaki sızıntıyı DEĞİL, iki tarafı ayrı ayrı yazan
+ *     yolların (elle DB müdahalesi, katılımcıyı iptal etmeden sayacı düşüren bir
+ *     çağrı, ileride eklenecek bir yol) açtığı sapmayı kapatır. Tutmalardan
+ *     SONRA, kapanıştan ÖNCE koşar: kapanan seans doğru sayaçla tarihe geçsin.
+ *
+ *  3. KAPANIŞ — katılım penceresi dolmuş seansları kapatır: sipariş adedi
  *     sabitlenir, komisyon oranı merdivenden hesaplanıp DONDURULUR ve parti ön
  *     rezerve üreticiye düşer. Kimse izlemezse seans sonsuza kadar açık kalır ve
  *     ödenmiş siparişler üretime hiç girmez.
  *
- *  3. ÖKSÜZ SAHİPLENME — kapanıştan SONRA ödemesi tamamlanan siparişleri hâlâ
+ *  4. ÖKSÜZ SAHİPLENME — kapanıştan SONRA ödemesi tamamlanan siparişleri hâlâ
  *     üretimdeki partiye alır. Koltuk kapanışa kadar rezerve edilebildiği ve
  *     taslak 6 saat yaşadığı için bu pencere gerçek: sahiplenilmezse müşteri
  *     ödemiş ama figürü hiç basılmamış olur. Kapanıştan SONRA koşar ki bu turda
@@ -30,11 +39,47 @@ import {
   adoptOrphanBatchOrders,
   closeSession,
   findSessionsDueToClose,
+  findStaleSeatHolds,
   reconcileOpenSessionSeats,
 } from "../../services/workshop-session";
+import { expireDraft } from "../../services/order-draft";
 
 async function processJob(job: Job) {
   const failures: string[] = [];
+
+  // Süresi dolmuş tutmalar. `expireDraft` idempotenttir (taslak `pending`
+  // değilse erken döner) ve koltuğu Task 10'un koşullu UPDATE'i üzerinden
+  // bırakır — süre dolumu işi çoktan çalışmışsa ikinci bir düşürme OLMAZ.
+  let expiredHolds = 0;
+  try {
+    const stale = await findStaleSeatHolds(new Date());
+    for (const hold of stale) {
+      if (!hold.draftId) {
+        // Taslaksız bir katılımcının koltuğunu bırakmanın güvenli yolu yok:
+        // `releaseSeatForDraft` taslak üzerinden yürüyor, elle düşürmek ise
+        // ikinci bir sayaç yolu açardı. Admin'e bırakılır.
+        console.error(
+          `[workshop-close] katılımcı ${hold.participantId} (seans ${hold.sessionId}) ` +
+            `taslaksız ve ${hold.heldSince.toISOString()}'ten beri ödeme bekliyor — ` +
+            `koltuk elle bırakılmalı`
+        );
+        continue;
+      }
+      try {
+        await expireDraft(hold.draftId);
+        expiredHolds++;
+        await job.log(`stale seat hold expired: draft ${hold.draftId} (seans ${hold.sessionId})`);
+      } catch (err) {
+        const message = (err as Error).message;
+        console.error(`[workshop-close] taslak ${hold.draftId} sonlandırılamadı: ${message}`);
+        failures.push(`taslak ${hold.draftId}: ${message}`);
+      }
+    }
+  } catch (err) {
+    const message = (err as Error).message;
+    console.error(`[workshop-close] süresi dolmuş tutmalar taranamadı: ${message}`);
+    failures.push(`tutma taraması: ${message}`);
+  }
 
   // Mutabakat kapanışı ENGELLEMEZ: sayaç düzeltmesi başarısız olsa bile
   // kapanmayı bekleyen seanslar kapanmalı.
@@ -51,7 +96,16 @@ async function processJob(job: Job) {
     failures.push(`koltuk mutabakatı: ${message}`);
   }
 
-  const due = await findSessionsDueToClose(new Date());
+  // Bu adım da kendi try/catch'inde: geçici bir DB hatası işi burada
+  // düşürürse öksüz sahiplenme hiç koşmaz ve "her adım bağımsız" sözü bozulur.
+  let due: Awaited<ReturnType<typeof findSessionsDueToClose>> = [];
+  try {
+    due = await findSessionsDueToClose(new Date());
+  } catch (err) {
+    const message = (err as Error).message;
+    console.error(`[workshop-close] kapanacak seanslar taranamadı: ${message}`);
+    failures.push(`kapanış taraması: ${message}`);
+  }
   let closed = 0;
 
   for (const session of due) {
@@ -91,8 +145,8 @@ async function processJob(job: Job) {
 
   await job.log(
     `swept ${due.length} due session(s): ${closed} closed, ` +
-      `${reconciled} seat count(s) reconciled, ${adopted} orphan order(s) adopted, ` +
-      `${failures.length} failed`
+      `${expiredHolds} stale seat hold(s) expired, ${reconciled} seat count(s) reconciled, ` +
+      `${adopted} orphan order(s) adopted, ${failures.length} failed`
   );
 
   // Her seans işlendikten SONRA bildirilir: hata kuyrukta görünsün ama
@@ -103,7 +157,7 @@ async function processJob(job: Job) {
     );
   }
 
-  return { scanned: due.length, closed, reconciled, adopted };
+  return { scanned: due.length, closed, expiredHolds, reconciled, adopted };
 }
 
 export function startWorkshopCloseWorker(): Worker {

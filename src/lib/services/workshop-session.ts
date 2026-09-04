@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -11,6 +11,7 @@ import {
   deriveSessionDates,
   workshopCommissionRateBps,
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
+  WORKSHOP_SEAT_HOLD_HOURS,
 } from "@/lib/config/workshop";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
@@ -155,6 +156,16 @@ export interface CloseSessionResult {
   commissionRateBps: number;
 }
 
+/** `closeSession`'ın işlem içi sonucu: ya sahiplenilemedi ya da parti yazıldı. */
+type CloseOutcome =
+  | { reason: string }
+  | {
+      manufacturerId: string | null;
+      orderCount: number;
+      commissionRateBps: number;
+      batch: { id: string; orderNumber: string; userId: string; status: string }[];
+    };
+
 /**
  * Seansı kapatır: sipariş adedini sabitler, komisyon oranını merdivenden
  * hesaplayıp DONDURUR ve tüm partiyi ön rezerve üreticiye düşürür.
@@ -164,11 +175,22 @@ export interface CloseSessionResult {
  * soğuk atama + 24 saat kabul beklemesi yoktur; bu, 5 günlük pencereyi
  * gerçekçi kılan şeydir.
  *
- * İDEMPOTENT: kapanış talebi `WHERE status = 'open'` koşullu UPDATE'i ile
- * SAHİPLENİLİR. İkinci bir süpürme (ya da elle çağrı) 0 satır günceller ve
- * `{ error }` döner — oran bir daha hesaplanmaz. Bu koşul oku-sonra-yaz'a
- * çevrilmemelidir: iki süpürme aynı anda koşarsa ikisi de "açık" görüp oranı
- * iki kez yazabilir ve ödeme oranı yarıştan çıkan değere göre değişir.
+ * İDEMPOTENT: kapanış talebi koşullu UPDATE ile SAHİPLENİLİR. İkinci bir
+ * süpürme (ya da elle çağrı) 0 satır günceller ve `{ error }` döner. Bu koşul
+ * oku-sonra-yaz'a çevrilmemelidir: iki süpürme aynı anda koşarsa ikisi de
+ * "açık" görüp oranı iki kez yazabilir ve ödeme oranı yarıştan çıkan değere
+ * göre değişir.
+ *
+ * Koşulun İKİ ayağı var ve ikincisi paranın kendisidir:
+ *   - `status = 'open'` — çifte kapanışı durdurur;
+ *   - `commission_rate_bps IS NULL` — YENİDEN kapanışı durdurur. Admin PATCH
+ *     ucu geçiş kontrolü yapmıyor: kapanmış bir seansı tekrar `open` yapmak
+ *     mümkün. O ayak olmasaydı, bir sonraki süpürme oranı o günkü sipariş
+ *     adedine göre YENİDEN hesaplayıp seansa ve partideki her siparişe
+ *     yazardı — hakedişi çoktan işlenmiş siparişler dâhil. `accrueEarning` ve
+ *     `accruePainterEarning` oranı siparişten okuduğu için bu doğrudan ödeme
+ *     tutarını değiştirirdi. Garanti route'un iznine değil, YAPIYA bağlanmalı:
+ *     bir seans ömrü boyunca yalnızca BİR kez fiyatlanır.
  *
  * Kilit sırası: seans → siparişler. Katılım işlemi de seansı önce kilitler
  * (seans → taslak → katılımcı), koltuk bırakma ise katılımcı → seans yönünde
@@ -180,16 +202,41 @@ export async function closeSession(
 ): Promise<CloseSessionResult | { error: string }> {
   const closedAt = new Date();
 
-  const outcome = await db.transaction(async (tx) => {
+  const outcome = await db.transaction(async (tx): Promise<CloseOutcome> => {
     const [claimed] = await tx
       .update(workshopSessions)
       .set({ status: "closed", updatedAt: closedAt })
       .where(
-        and(eq(workshopSessions.id, sessionId), eq(workshopSessions.status, "open"))
+        and(
+          eq(workshopSessions.id, sessionId),
+          eq(workshopSessions.status, "open"),
+          // Bir kez fiyatlanmış seans bir daha fiyatlanmaz — bkz. doc yorumu.
+          isNull(workshopSessions.commissionRateBps)
+        )
       )
       .returning({ manufacturerId: workshopSessions.manufacturerId });
-    // Seans açık değildi: ya çoktan kapandı ya da hiç açılmadı. Oran YAZILMAZ.
-    if (!claimed) return null;
+    // Seans açık değil ya da zaten bir kez fiyatlandı. Oran YAZILMAZ.
+    //
+    // Hangisi olduğunu SÖYLEMEK gerekiyor: yeniden `open` yapılmış, bir kez
+    // fiyatlanmış bir seans her saat başı bu yoldan geçer ve log'da "açık
+    // değil" yazması admin'i şaşırtır — seans gerçekten açıktır, kapanamayan
+    // şey fiyatlamadır.
+    if (!claimed) {
+      const [row] = await tx
+        .select({
+          status: workshopSessions.status,
+          commissionRateBps: workshopSessions.commissionRateBps,
+        })
+        .from(workshopSessions)
+        .where(eq(workshopSessions.id, sessionId));
+      if (!row) return { reason: "Seans bulunamadı" };
+      return {
+        reason:
+          row.commissionRateBps !== null
+            ? "Seans zaten fiyatlandı — komisyon oranı bir kez donar"
+            : "Seans açık değil",
+      };
+    }
 
     // Adet, seans satırı kilitliyken sayılır: bu noktadan sonra `reserveSeat`
     // (status = 'open' şartı) yeni koltuk veremez, yani sayı gerçekten kesindir.
@@ -240,7 +287,7 @@ export async function closeSession(
     return { manufacturerId: claimed.manufacturerId, orderCount, commissionRateBps, batch };
   });
 
-  if (!outcome) return { error: "Seans açık değil" };
+  if ("reason" in outcome) return { error: outcome.reason };
 
   if (outcome.orderCount > 0 && !outcome.manufacturerId) {
     // Ödenmiş siparişleri olan bir seans üreticisiz kapandı: PATCH ucu seansı
@@ -284,16 +331,23 @@ export interface SeatReconciliation {
 /**
  * AÇIK seansların koltuk sayacını gerçek katılımcı satırlarından yeniden kurar.
  *
- * Neden gerekli: koltuk rezervasyonu ile katılımcı insert'i tek işlemde (Task 8),
- * ama koltuğu GERİ veren yollar öyle değil. Süre dolumu işi Redis'e hiç
- * yazılamazsa (katılım anında Redis erişilemez) ya da süreç rezervasyon ile
- * bırakma arasında ölürse, koltuk hiçbir yeniden denemenin kurtaramayacağı
- * şekilde tutulu kalır. Tek tek yamamak yerine sayaç saatlik olarak
- * MUTABAKATA getirilir.
+ * NE YAPMAZ: ödemesi hiç gelmeyen koltuğu geri vermez. Katılım, koltuğu ve
+ * katılımcı satırını TEK işlemde yazıp süre dolumu işini ondan SONRA kuyruğa
+ * aldığı (ve Redis erişilemezse bile başarılı saydığı) için, "işi hiç
+ * planlanamamış" bir koltuğun `pending_payment` katılımcı satırı DURUYORDUR:
+ * sayaç ile satırlar birbirini tutar, burada düzeltilecek bir sapma yoktur ve
+ * koltuk sonsuza kadar tutulu kalırdı. Onu geri veren şey `findStaleSeatHolds`
+ * + `expireDraft` yoludur (bkz. aşağısı ve workshop-close worker'ı).
  *
- * Doğruluk dayanağı: rezervasyon ve katılımcı satırı aynı commit'te doğduğu
- * için, meşru olarak tutulan her koltuğun bir katılımcı satırı VARDIR. `cancelled`
- * olmayan katılımcı sayısı bu yüzden koltuk sayacının doğru değeridir.
+ * NE YAPAR: iki tarafı ayrı ayrı yazan HERHANGİ bir yolun açtığı sapmayı
+ * kapatır — elle DB müdahalesi, `releaseSeat(sessionId)`'i katılımcıyı iptal
+ * etmeden çağıran (ya da tersini yapan) bir çağrı ve gelecekte ikisini birlikte
+ * güncellemeyi unutan yeni bir yol. Bu, "koltuk sayacı doğrudur" iddiasının
+ * tek denetimidir; kaldırılırsa sapma sessizce büyür.
+ *
+ * Doğru değerin tanımı: rezervasyon ve katılımcı satırı aynı commit'te doğduğu
+ * için, meşru olarak tutulan her koltuğun bir katılımcı satırı vardır —
+ * `cancelled` olmayan katılımcı sayısı koltuk sayacının doğru değeridir.
  *
  * Yalnızca `open` seanslar: kapanmış bir seansın sayacı tarihsel kayıttır ve
  * geriye dönük düzeltilmesi, kapanış anındaki tabloyu bozar.
@@ -413,6 +467,18 @@ const SEALED_SESSION_STATUSES = [
  * Atama alanları `batchAssignmentSet` ile yazılır — `closeSession` ile aynı
  * tanım, iki yer ayrışamaz. UPDATE aynı NULL koşullarını tekrar taşır: eşzamanlı
  * bir admin ataması araya girerse 0 satır döner ve sahiplenme sessizce iptal olur.
+ *
+ * Üretici, seansın O ANKİ `manufacturer_id`'sinden DEĞİL, PARTİNİN KENDİSİNDEN
+ * okunur: admin PATCH ucu seansın üreticisini kapanıştan sonra değiştirebiliyor
+ * ve o hâlde geç gelen sipariş, partinin geri kalanından BAŞKA bir üreticiye
+ * düşerdi — tek kutu, iki üretici. Partinin taşıdığı üretici, atamanın
+ * donduğu andaki üreticidir; admin partiyi topluca devrettiyse de doğru cevabı
+ * verir. Birden fazla (ya da hiç) üretici görülürse parti bölünmüş demektir:
+ * sahiplenme yapılmaz, gürültülü loglanır.
+ *
+ * Oran seanstan okunur ve bu güvenlidir: `closeSession`'ın
+ * `commission_rate_bps IS NULL` koşulu onu ömür boyu bir kez yazılabilir kılar
+ * ve hiçbir route bu alanı güncellemez.
  */
 export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
   const orphans = await db
@@ -421,7 +487,6 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
       orderNumber: orders.orderNumber,
       sessionId: workshopSessions.id,
       sessionStatus: workshopSessions.status,
-      manufacturerId: workshopSessions.manufacturerId,
       commissionRateBps: workshopSessions.commissionRateBps,
     })
     .from(orders)
@@ -450,7 +515,7 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
   const at = new Date();
 
   for (const [sessionId, rows] of bySession) {
-    const { sessionStatus, manufacturerId, commissionRateBps } = rows[0];
+    const { sessionStatus, commissionRateBps } = rows[0];
     const orderNumbers = rows.map((r) => r.orderNumber).join(", ");
 
     if (sessionStatus !== "in_production") {
@@ -461,19 +526,40 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
       );
       continue;
     }
-    if (!manufacturerId || commissionRateBps === null) {
-      // Üreticisi ya da donmuş oranı olmayan bir partiye bağlanmak, öksüzü
-      // "iptal edilmiş atama" gibi göstererek bir daha bulunamaz hâle getirirdi.
+    if (commissionRateBps === null) {
+      // Donmuş oranı olmayan bir partiye bağlanmak, öksüzü "iptal edilmiş
+      // atama" gibi göstererek bir daha bulunamaz hâle getirirdi.
       console.error(
-        `[workshop] seans ${sessionId} üretici/oran taşımıyor — ${rows.length} öksüz ` +
+        `[workshop] seans ${sessionId} donmuş oran taşımıyor — ${rows.length} öksüz ` +
           `sipariş sahiplenilemedi: ${orderNumbers}`
+      );
+      continue;
+    }
+
+    // Partinin GERÇEKTEN atandığı üretici (seansın o anki alanı değil).
+    const assigned = await db
+      .selectDistinct({ manufacturerId: orders.manufacturerId })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.workshopSessionId, sessionId),
+          isNotNull(orders.manufacturerId),
+          NOT_REJECTED
+        )
+      );
+    const batchManufacturerId = assigned.length === 1 ? assigned[0].manufacturerId : null;
+    if (!batchManufacturerId) {
+      console.error(
+        `[workshop] seans ${sessionId} partisi tek bir üreticiye ait değil ` +
+          `(${assigned.length} üretici) — ${rows.length} öksüz sipariş ` +
+          `sahiplenilemedi: ${orderNumbers}`
       );
       continue;
     }
 
     const updated = await db
       .update(orders)
-      .set(batchAssignmentSet({ manufacturerId, commissionRateBps, at }))
+      .set(batchAssignmentSet({ manufacturerId: batchManufacturerId, commissionRateBps, at }))
       .where(
         and(
           inArray(
@@ -495,7 +581,7 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
     for (const order of updated) {
       console.warn(
         `[workshop] sipariş ${order.orderNumber} (${order.id}) seans ${sessionId} ` +
-          `partisine sonradan alındı — oran ${commissionRateBps}bps, üretici ${manufacturerId}`
+          `partisine sonradan alındı — oran ${commissionRateBps}bps, üretici ${batchManufacturerId}`
       );
     }
 
@@ -505,13 +591,13 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
       commissionRateBps,
     });
 
-    await notifyManufacturerOrdersAdopted(sessionId, updated.length);
+    await notifyManufacturerOrdersAdopted(sessionId, batchManufacturerId, updated.length);
     for (const order of updated) {
       await emitOrderChanged({
         orderId: order.id,
         orderNumber: order.orderNumber,
         userId: order.userId,
-        manufacturerId,
+        manufacturerId: batchManufacturerId,
         status: order.status,
         manufacturerStatus: "accepted",
       }).catch(() => {});
@@ -519,4 +605,53 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
   }
 
   return adopted;
+}
+
+/** Süresi dolmuş bir koltuk tutması — süpürmenin geri alacağı rezervasyon. */
+export interface StaleSeatHold {
+  participantId: string;
+  sessionId: string;
+  draftId: string | null;
+  fullName: string;
+  heldSince: Date;
+}
+
+/**
+ * `WORKSHOP_SEAT_HOLD_HOURS`'ı aşmış, hâlâ ödeme bekleyen koltuk tutmaları.
+ *
+ * Bu, koltuk sızıntısının GERÇEK kurtarma yoludur. Katılım akışı süre dolumu
+ * işini işlem COMMIT ettikten SONRA kuyruğa alır ve Redis erişilemezse katılımı
+ * yine de başarılı sayar (müşteriyi ödeme sayfasına hiç götürmemenin bedeli
+ * daha ağır) — o iş hiç yazılmazsa koltuğu geri verecek başka hiçbir mekanizma
+ * yoktu. Sayaç mutabakatı bunu YAKALAYAMAZ: katılımcı satırı `pending_payment`
+ * olarak durduğu için sayaç ile satırlar zaten tutarlıdır.
+ *
+ * Seans durumuna göre SÜZÜLMEZ. Tutma süresi katılım anından işler; kapanmış
+ * bir seansta bile ödenmemiş bir tutmayı sonlandırmak doğrudur — hem sayacı
+ * gerçeğe yaklaştırır hem de taslağı `expired` yaparak kapanıştan SONRA ödenip
+ * partiye giremeyen "öksüz sipariş"in bir kaynağını kurutur.
+ *
+ * Yalnızca ADAYLARI döndürür; iptal `expireDraft` üzerinden yürür (Task 10'un
+ * bırakma yolu). Bu modül `order-draft.ts`'i import ETMEZ: o modül
+ * `workshop-notify.ts`'i, o da bu dosyayı import ediyor — döngü olurdu. Bu
+ * yüzden bulma burada, eylem worker'da (aynı `findSessionsDueToClose` +
+ * `closeSession` ayrımı).
+ */
+export async function findStaleSeatHolds(now: Date): Promise<StaleSeatHold[]> {
+  const cutoff = new Date(now.getTime() - WORKSHOP_SEAT_HOLD_HOURS * 3600 * 1000);
+  return db
+    .select({
+      participantId: workshopParticipants.id,
+      sessionId: workshopParticipants.sessionId,
+      draftId: workshopParticipants.draftId,
+      fullName: workshopParticipants.fullName,
+      heldSince: workshopParticipants.createdAt,
+    })
+    .from(workshopParticipants)
+    .where(
+      and(
+        eq(workshopParticipants.status, "pending_payment"),
+        lte(workshopParticipants.createdAt, cutoff)
+      )
+    );
 }

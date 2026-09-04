@@ -181,14 +181,20 @@ export async function notifyManufacturerSessionClosed(
  */
 export async function notifyManufacturerOrdersAdopted(
   sessionId: string,
+  /**
+   * PARTİNİN atandığı üretici — seansın o anki `manufacturerId`'si DEĞİL.
+   * Admin kapanıştan sonra seansın üreticisini değiştirmiş olabilir; haber
+   * gitmesi gereken, kutuyu gerçekten hazırlayan taraftır.
+   */
+  manufacturerId: string,
   adoptedCount: number
 ): Promise<void> {
   try {
-    const session = await loadCommittedSession(sessionId);
+    const session = await loadSessionWithVenue(sessionId);
     if (!session) return;
 
     await notifyManufacturer({
-      manufacturerId: session.manufacturerId,
+      manufacturerId,
       type: "workshop_session",
       subject: `Atölye partisine ${adoptedCount} figür eklendi — ${session.venue.name}`,
       body:

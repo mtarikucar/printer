@@ -14,6 +14,13 @@ import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
  * döner ama İLK taahhüdün zamanını korur. Taahhüdün ne zaman verildiği bir
  * kayıttır; her tıklamada tazelenirse anlamını kaybeder.
  *
+ * Zaman ISO METİN olarak bağlanır, `Date` nesnesi olarak DEĞİL: `sql``` içine
+ * konan parametre Drizzle'ın kolon eşleyicisini atlar (eşleyici `toISOString()`
+ * kullanır), node-postgres ise `Date`'i YEREL saat + offset ile yazar ve
+ * Postgres `timestamp without time zone`'a çevirirken offset'i atar. Sonuç:
+ * aynı satırdaki `updated_at` UTC iken `manufacturer_committed_at` +03:00
+ * kayardı.
+ *
  * Yalnızca `draft`/`open` seanslar taahhüt edilebilir: kapanmış ya da iptal
  * edilmiş bir seans için taahhüt kaydı, olmayan bir işi kabul etmiş gibi
  * görünür.
@@ -40,7 +47,7 @@ export async function POST(
   const [updated] = await db
     .update(workshopSessions)
     .set({
-      manufacturerCommittedAt: sql`COALESCE(${workshopSessions.manufacturerCommittedAt}, ${now})`,
+      manufacturerCommittedAt: sql`COALESCE(${workshopSessions.manufacturerCommittedAt}, ${now.toISOString()}::timestamp)`,
       updatedAt: now,
     })
     .where(

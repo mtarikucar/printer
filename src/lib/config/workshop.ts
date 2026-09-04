@@ -237,3 +237,47 @@ export const WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES = [
   "delivered",
   "rejected",
 ] as const;
+
+/**
+ * İPTALDE sevk edilmiş sayılan sipariş durumları — figür fiziksel olarak var
+ * ve yola çıktı. Bu siparişler otomatik iade EDİLMEZ (bedava ürün vermek
+ * olurdu): seans iptalinde isimleriyle raporlanır, tek katılımcı iptalinde
+ * 409 ile reddedilir; admin onları normal iade ekranından tek tek halleder.
+ */
+export const WORKSHOP_CANCEL_SHIPPED_STATUSES = ["shipped", "delivered"] as const;
+
+/**
+ * Bir katılımcının iptalde nasıl ele alınacağı — saf karar, DB'siz.
+ *
+ *  - `no_payment`      — `orderId` yok: ödemeye hiç gelmemiş, iade edilecek
+ *                        para da yok. `orderId` yalnızca sipariş terfisinde
+ *                        yazılır, bu yüzden "bu kişi gerçekten ödedi mi"
+ *                        sorusunun TEK işareti budur.
+ *  - `already_shipped` — bkz. WORKSHOP_CANCEL_SHIPPED_STATUSES.
+ *  - `refund`          — parası alınmış, figür daha yola çıkmamış: iade edilir.
+ */
+export type ParticipantCancelDisposition = "no_payment" | "already_shipped" | "refund";
+
+export function participantCancelDisposition(row: {
+  orderId: string | null;
+  orderStatus: string | null;
+}): ParticipantCancelDisposition {
+  if (!row.orderId) return "no_payment";
+  if ((WORKSHOP_CANCEL_SHIPPED_STATUSES as readonly string[]).includes(row.orderStatus ?? "")) {
+    return "already_shipped";
+  }
+  return "refund";
+}
+
+/**
+ * Tek bir katılımcı iptal edildiğinde koltuk havuza DÖNER Mİ?
+ *
+ * Yalnızca seans hâlâ `open` iken. `releaseSeat` `bookedCount`u düşürür;
+ * kapanmış bir seansta bunu yapmak, partinin DONMUŞ komisyon oranıyla (parti
+ * büyüklüğüne göre belirlendi) gerçek sipariş sayısını çelişkiye düşürür ve
+ * üretici zaten o büyüklükteki partiyi taahhüt etmiştir. Kapalı seansta
+ * katılımcı iade edilir ve `cancelled` olur, ama koltuk havuza dönmez.
+ */
+export function seatReturnsToPool(sessionStatus: string): boolean {
+  return sessionStatus === "open";
+}

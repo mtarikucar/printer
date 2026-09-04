@@ -11,7 +11,13 @@ import {
   assessSessionRisk,
   WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES,
   WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES,
+  WORKSHOP_CANCEL_SHIPPED_STATUSES,
+  participantCancelDisposition,
+  seatReturnsToPool,
+  WORKSHOP_SESSION_STATUSES,
 } from "../src/lib/config/workshop";
+import { MANUFACTURER_ONBOARDING_TR } from "../src/lib/content/manufacturer-onboarding";
+import { MANUFACTURER_CONTRACT_VERSION } from "../src/lib/config/contract-versions";
 import { CARD_DEADLINE_HOURS } from "../src/lib/config/payment";
 import { itemPriceKurus } from "../src/lib/config/prices";
 import {
@@ -307,6 +313,140 @@ test("toplu teslim bekleme listesi yalnızca delivered+rejected'i hariç tutar (
   assert.equal(
     (WORKSHOP_DELIVER_PENDING_EXCLUDED_STATUSES as readonly string[]).includes("shipped"),
     false
+  );
+});
+
+// ─── İptal kararları (Görev 12b) ────────────────────────────────────────────
+// Seans/katılımcı iptalinin ÜÇ ayrı davranışı saf bir karar fonksiyonunda
+// toplanır: rota da servis de aynı yerden okur, testi DB'siz çalışır.
+
+test("ödemeye hiç gelmemiş katılımcıda iade edilecek para yoktur", () => {
+  // `orderId` yalnızca sipariş terfisinde yazılır — "bu kişi gerçekten ödedi
+  // mi" sorusunun tek işareti budur.
+  assert.equal(
+    participantCancelDisposition({ orderId: null, orderStatus: null }),
+    "no_payment"
+  );
+  // Sipariş yoksa siparişin durumu ne olursa olsun sonuç değişmez.
+  assert.equal(
+    participantCancelDisposition({ orderId: null, orderStatus: "shipped" }),
+    "no_payment"
+  );
+});
+
+test("sevk edilmiş/teslim edilmiş sipariş OTOMATİK iade edilmez", () => {
+  // Figür fiziksel olarak var ve yola çıktı; otomatik iade ürünü bedava
+  // vermek olurdu. Seans iptalinde isimle raporlanır, tek katılımcı
+  // iptalinde 409 döner.
+  for (const st of WORKSHOP_CANCEL_SHIPPED_STATUSES) {
+    assert.equal(
+      participantCancelDisposition({ orderId: "o1", orderStatus: st }),
+      "already_shipped",
+      `${st} durumu sevk edilmiş sayılmalıydı`
+    );
+  }
+  assert.deepEqual([...WORKSHOP_CANCEL_SHIPPED_STATUSES].sort(), ["delivered", "shipped"]);
+});
+
+test("ödenmiş ama yola çıkmamış sipariş iade edilir", () => {
+  for (const st of ["paid", "approved", "printing", "awaiting_model", "qc_pending", null]) {
+    assert.equal(
+      participantCancelDisposition({ orderId: "o1", orderStatus: st }),
+      "refund",
+      `${st} durumunda iade beklenirdi`
+    );
+  }
+});
+
+test("koltuk YALNIZCA seans hâlâ open iken havuza döner", () => {
+  // Kapanmış bir seansta bookedCount'u düşürmek, partinin DONMUŞ komisyon
+  // oranıyla (parti büyüklüğünden hesaplandı) gerçek sipariş sayısını
+  // çelişkiye düşürür; üretici zaten o büyüklükteki partiyi taahhüt etti.
+  assert.equal(seatReturnsToPool("open"), true);
+  for (const st of WORKSHOP_SESSION_STATUSES) {
+    if (st === "open") continue;
+    assert.equal(seatReturnsToPool(st), false, `${st} seansında koltuk bırakılmamalı`);
+  }
+});
+
+// ─── Sözleşme metni ↔ merdiven (Görev 12b) ─────────────────────────────────
+// Sözleşmedeki hacim merdiveni üreticiye VERİLEN bir taahhüttür. Metin ile
+// WORKSHOP_COMMISSION_TIERS ayrışırsa üreticiye yanlış oran vaat etmiş
+// oluruz — bu testler ikisini birbirine çiviler.
+
+/** Sözleşme metnindeki atölye merdivenini ayrıştırır. */
+function contractLadder(): Array<{ from: number; to: number | null; sharePercent: number }> {
+  const flat = MANUFACTURER_ONBOARDING_TR.replace(/\s+/g, " ");
+  const m = flat.match(/net payınız hacme göre kademelenir: ([^.]+)\./);
+  if (!m) throw new Error("Sözleşmede atölye komisyon merdiveni bulunamadı");
+  return m[1].split(",").map((part) => {
+    const text = part.trim();
+    const share = text.match(/%(\d+)/);
+    if (!share) throw new Error(`Kademe yüzdesi okunamadı: ${text}`);
+    const open = text.match(/^(\d+) ve üzeri/);
+    if (open) return { from: Number(open[1]), to: null, sharePercent: Number(share[1]) };
+    const closed = text.match(/^(\d+)–(\d+)/);
+    if (closed) {
+      return {
+        from: Number(closed[1]),
+        to: Number(closed[2]),
+        sharePercent: Number(share[1]),
+      };
+    }
+    const single = text.match(/^(\d+)/);
+    if (!single) throw new Error(`Kademe aralığı okunamadı: ${text}`);
+    return { from: Number(single[1]), to: Number(single[1]), sharePercent: Number(share[1]) };
+  });
+}
+
+test("sözleşmedeki merdiven kademe SAYISI ve sınırları koda eşit", () => {
+  const ladder = contractLadder();
+  assert.equal(
+    ladder.length,
+    WORKSHOP_COMMISSION_TIERS.length,
+    `sözleşmede ${ladder.length}, kodda ${WORKSHOP_COMMISSION_TIERS.length} kademe var`
+  );
+  WORKSHOP_COMMISSION_TIERS.forEach((tier, i) => {
+    assert.equal(ladder[i].from, tier.minOrders, `${i}. kademenin başlangıcı tutmuyor`);
+    const next = WORKSHOP_COMMISSION_TIERS[i + 1];
+    assert.equal(
+      ladder[i].to,
+      next ? next.minOrders - 1 : null,
+      `${i}. kademenin bitişi tutmuyor`
+    );
+  });
+});
+
+test("sözleşmedeki her yüzde, o adette kodun döndürdüğü NET payla aynı", () => {
+  for (const step of contractLadder()) {
+    const atStart = (10000 - workshopCommissionRateBps(step.from)) / 100;
+    assert.equal(
+      step.sharePercent,
+      atStart,
+      `${step.from} siparişte sözleşme %${step.sharePercent} diyor, kod %${atStart} veriyor`
+    );
+    if (step.to !== null) {
+      // Aralığın SONU da aynı oranda olmalı, bir fazlası ise olmamalı —
+      // aksi hâlde metindeki üst sınır yalan söylüyordur.
+      const atEnd = (10000 - workshopCommissionRateBps(step.to)) / 100;
+      assert.equal(step.sharePercent, atEnd, `${step.to} siparişte oran kaymış`);
+      const beyond = (10000 - workshopCommissionRateBps(step.to + 1)) / 100;
+      assert.notEqual(
+        beyond,
+        step.sharePercent,
+        `${step.to + 1} siparişte hâlâ %${beyond} — sözleşmedeki üst sınır yanlış`
+      );
+    }
+  }
+});
+
+test("sözleşme sürümü, metnin başlığındaki sürümle aynı", () => {
+  // Kabul edilen sürüm `onboarding_version`a yazılır; metnin başlığı ile
+  // sabit ayrışırsa hangi metnin imzalandığı bilinemez hâle gelir.
+  assert.equal(MANUFACTURER_CONTRACT_VERSION, "3.1");
+  assert.ok(
+    MANUFACTURER_ONBOARDING_TR.includes(`**Sürüm: ${MANUFACTURER_CONTRACT_VERSION} —`),
+    "sözleşme metnindeki sürüm satırı MANUFACTURER_CONTRACT_VERSION ile aynı değil"
   );
 });
 

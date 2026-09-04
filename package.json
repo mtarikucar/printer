@@ -21,6 +21,7 @@
     "test:bulk-pricing": "tsx scripts/test-bulk-pricing.ts",
     "test:cost-lines": "tsx scripts/test-cost-lines.ts",
     "test:workshop": "tsx scripts/test-workshop.ts",
+    "test:workshop-cancel": "npx tsx scripts/test-workshop-cancel.ts",
     "test:business-identity": "npx tsx scripts/test-business-identity.ts",
     "test:capability": "tsx scripts/test-capability.ts",
     "test:carriers": "tsx scripts/test-carriers.ts",

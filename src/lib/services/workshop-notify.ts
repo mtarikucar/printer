@@ -320,3 +320,59 @@ export async function notifyWorkshopParticipantsReady(orderIds: string[]): Promi
       })
   );
 }
+
+/**
+ * Seans iptal edildiğinde katılımcıya giden bilgilendirme.
+ *
+ * YALNIZCA iadesi başarıyla işlenen ve parası hiç alınmamış katılımcılara
+ * gönderilir — sevk edilmiş figürü olan ya da iadesi patlayan kişiye
+ * gönderilmez, onların durumu farklıdır ve admin'in eliyle çözülür
+ * (bkz. workshop-cancel.ts).
+ *
+ * "İadeniz hesabınıza geçti" DEMEZ: PayTR iadesinin karta yansıması 3–7 iş
+ * günü sürer, o cümle gönderildiği an yanlış olurdu. Söylediğimiz tek şey
+ * iadenin İŞLEME ALINDIĞIdır.
+ *
+ * Mekan/kişi adlarına Türkçe hâl eki EKLENMEZ (ünlü uyumu kırılır); ad
+ * geçen yerler ek almayan bir kalıba ya da tabloya alınmıştır.
+ */
+export async function sendWorkshopSessionCancelledEmail(input: {
+  sessionId: string;
+  fullName: string;
+  email: string;
+  /** Parası iade edilenle hiç tahsilat yapılmayan farklı cümle görür. */
+  refunded: boolean;
+}): Promise<void> {
+  const session = await db.query.workshopSessions.findFirst({
+    where: eq(workshopSessions.id, input.sessionId),
+    with: { venue: true },
+  });
+  if (!session || !session.venue) return;
+
+  const moneyLine = input.refunded
+    ? `<p><strong>Ödemenizin iadesi işleme alındı.</strong> Tutarın kartınıza
+         yansıması, bankanızın işlem süresine bağlı olarak genellikle 3–7 iş
+         günü sürer.</p>`
+    : `<p><strong>Sizden herhangi bir tahsilat yapılmadı.</strong></p>`;
+
+  const html = wrap(`
+    <h1 style="color:#1a1a1a;font-size:20px;">Atölye seansı iptal edildi</h1>
+    <p>Merhaba ${escHtml(input.fullName)},</p>
+    <p>Kaydolduğunuz atölye seansı maalesef iptal edildi; etkinlik
+       gerçekleşmeyecek.</p>
+    <table style="border-collapse:collapse;margin:16px 0;">
+      ${row("Atölye", session.venue.name)}
+      ${row("Tarih", formatDateTime(session.startsAt))}
+      ${row("Adres", `${session.venue.address.adres} (${session.venue.address.ilce}/${session.venue.address.il})`)}
+    </table>
+    ${moneyLine}
+    <p>Bu aksaklık için özür dileriz. Sorularınız için bu e-postayı
+       yanıtlayabilirsiniz.</p>
+  `);
+
+  await sendRawEmail({
+    to: input.email,
+    subject: `Atölye seansı iptal edildi — ${session.venue.name}`,
+    html,
+  });
+}

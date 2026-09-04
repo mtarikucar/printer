@@ -13,7 +13,7 @@
  */
 export const MANUFACTURER_ONBOARDING_TR = `# Üretici Ortaklık Sözleşmesi ve Bilgilendirme
 
-**Sürüm: 3.0 — Yürürlük tarihi: 3 Eylül 2026**
+**Sürüm: 3.1 — Yürürlük tarihi: 5 Eylül 2026**
 
 Bu metin, **Figurunica** platformu ("Platform") ile üretici ağına başvuran ve
 başvuruyu onaylayarak ("Üretici") aşağıdaki şartlar altında hizmet vermeyi
@@ -534,6 +534,12 @@ Platform bu istisnayı yazılı bildirimle her zaman sona erdirebilir.
 - Her sipariş için Üreticiye **net üretici payı** ödenir. Net pay, sipariş
   tutarından **Platform hizmet bedeli (komisyon)** düşülerek hesaplanır.
   **Güncel Platform komisyonu %40, üreticinin net payı ise %60'tır.**
+- **Atölye partileri:** Bir atölye seansının tüm figürleri tek partide basılır.
+  Parti büyüdükçe birim maliyet düştüğü için net payınız hacme göre kademelenir:
+  1–2 sipariş %60, 3–5 %55, 6–10 %50, 11–15 %45, 16 ve üzeri %40. Uygulanacak
+  kademe, katılım kapandığında sipariş sayısı kesinleşince belirlenir ve
+  **partinin tamamına aynı oran** uygulanır. Merdiven, seansı taahhüt
+  etmenizden ÖNCE panelinizde gösterilir.
 - **Hak ediş tabanı:** Ürünün fiyatı, türü belirtilmiş kalemlerden oluşur —
   **üretim** kalemleri Üreticinin, **boyama** kalemleri boyacının hak ediş
   tabanıdır ve iki tabanın toplamı sipariş tutarına eşittir. Net payınız,

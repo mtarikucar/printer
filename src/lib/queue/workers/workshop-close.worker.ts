@@ -14,6 +14,12 @@
  *     rezerve üreticiye düşer. Kimse izlemezse seans sonsuza kadar açık kalır ve
  *     ödenmiş siparişler üretime hiç girmez.
  *
+ *  3. ÖKSÜZ SAHİPLENME — kapanıştan SONRA ödemesi tamamlanan siparişleri hâlâ
+ *     üretimdeki partiye alır. Koltuk kapanışa kadar rezerve edilebildiği ve
+ *     taslak 6 saat yaşadığı için bu pencere gerçek: sahiplenilmezse müşteri
+ *     ödemiş ama figürü hiç basılmamış olur. Kapanıştan SONRA koşar ki bu turda
+ *     kapanan seansların siparişleri zaten atanmış olsun.
+ *
  * Dayanıklılık: bir seansın patlaması süpürmenin geri kalanına mal olmamalı —
  * her seans kendi try/catch'inde işlenir, biriken hatalar sonunda TEK seferde
  * bildirilir (model-approval-sla süpürmesinin aynı kalıbı).
@@ -21,6 +27,7 @@
 import { Worker, Job } from "bullmq";
 import { getRedisConnection } from "../connection";
 import {
+  adoptOrphanBatchOrders,
   closeSession,
   findSessionsDueToClose,
   reconcileOpenSessionSeats,
@@ -66,9 +73,26 @@ async function processJob(job: Job) {
     }
   }
 
+  // Sahiplenme de kapanışı ENGELLEMEZ: kapanmış partiler zaten yazıldı.
+  let adopted = 0;
+  try {
+    const adoptions = await adoptOrphanBatchOrders();
+    adopted = adoptions.reduce((n, a) => n + a.orderIds.length, 0);
+    for (const a of adoptions) {
+      await job.log(
+        `orphan adopt ${a.sessionId}: ${a.orderIds.length} sipariş, komisyon ${a.commissionRateBps}bps`
+      );
+    }
+  } catch (err) {
+    const message = (err as Error).message;
+    console.error(`[workshop-close] öksüz sipariş sahiplenme başarısız: ${message}`);
+    failures.push(`öksüz sahiplenme: ${message}`);
+  }
+
   await job.log(
     `swept ${due.length} due session(s): ${closed} closed, ` +
-      `${reconciled} seat count(s) reconciled, ${failures.length} failed`
+      `${reconciled} seat count(s) reconciled, ${adopted} orphan order(s) adopted, ` +
+      `${failures.length} failed`
   );
 
   // Her seans işlendikten SONRA bildirilir: hata kuyrukta görünsün ama
@@ -79,7 +103,7 @@ async function processJob(job: Job) {
     );
   }
 
-  return { scanned: due.length, closed, reconciled };
+  return { scanned: due.length, closed, reconciled, adopted };
 }
 
 export function startWorkshopCloseWorker(): Worker {

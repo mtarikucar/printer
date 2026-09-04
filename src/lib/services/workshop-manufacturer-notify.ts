@@ -12,6 +12,10 @@
  * kuyruğuna iş atar. Gövde DÜZ METİNDİR — e-posta şablonu (`escHtml`) kaçışı
  * kendisi yapar, panel `whitespace-pre-line` ile satır sonlarını korur.
  *
+ * Üretici bulunamadığında muhatap ADMİN'dir; o tek istisna da burada yaşıyor
+ * (`notifyAdminSessionWithoutManufacturer`) — aynı seans verisini okuyor ve
+ * ayrı bir modüle bölmek yalnızca aynı yükleyiciyi kopyalamak olurdu.
+ *
  * Hiçbiri FIRLATMAZ: bir bildirim hatası, kapanış işleminin kendisini (paranın
  * dondurulduğu adım) asla geri almamalı.
  */
@@ -20,6 +24,7 @@ import { db } from "@/lib/db";
 import { workshopSessions } from "@/lib/db/schema";
 import { workshopCommissionLadderLines } from "@/lib/config/workshop";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { getEmailQueue } from "@/lib/queue/queues";
 
 /**
  * `workshop-notify.ts` de aynı biçimlendiricileri tutuyor; oradan import etmek
@@ -42,19 +47,26 @@ function formatKurus(kurus: number): string {
   })}`;
 }
 
-/** Seans + mekan; üreticisi olmayan seans bildirim üretmez. */
-async function loadCommittedSession(sessionId: string) {
+/** Seans + mekan. Mekansız seans olamaz; yoksa bildirim üretilmez. */
+async function loadSessionWithVenue(sessionId: string) {
   const session = await db.query.workshopSessions.findFirst({
     where: eq(workshopSessions.id, sessionId),
     with: { venue: true },
   });
-  if (!session || !session.venue || !session.manufacturerId) return null;
-  return { ...session, manufacturerId: session.manufacturerId, venue: session.venue };
+  if (!session || !session.venue) return null;
+  return { ...session, venue: session.venue };
 }
 
-type CommittedSession = NonNullable<Awaited<ReturnType<typeof loadCommittedSession>>>;
+/** Üreticiye bildirim ancak ön rezerve bir üretici varsa gider. */
+async function loadCommittedSession(sessionId: string) {
+  const session = await loadSessionWithVenue(sessionId);
+  if (!session || !session.manufacturerId) return null;
+  return { ...session, manufacturerId: session.manufacturerId };
+}
 
-function venueLine(session: CommittedSession): string {
+type SessionWithVenue = NonNullable<Awaited<ReturnType<typeof loadSessionWithVenue>>>;
+
+function venueLine(session: SessionWithVenue): string {
   const a = session.venue.address;
   return `${session.venue.name} — ${a.adres} (${a.ilce}/${a.il})`;
 }
@@ -155,6 +167,84 @@ export async function notifyManufacturerSessionClosed(
   } catch (err) {
     console.error(
       `[workshop] seans kapanış bildirimi gönderilemedi (session ${sessionId})`,
+      err
+    );
+  }
+}
+
+/**
+ * Kapanmış bir partiye SONRADAN düşen siparişler üreticiye bildirilir.
+ *
+ * Sipariş üreticinin panelinde zaten `accepted` olarak belirir, ama partiyi
+ * "5 figür" diye duyurup altıncıyı sessizce eklemek, üreticinin beşini basıp
+ * göndermesi demektir: geç ödeyen katılımcı seans günü figürsüz kalır.
+ */
+export async function notifyManufacturerOrdersAdopted(
+  sessionId: string,
+  adoptedCount: number
+): Promise<void> {
+  try {
+    const session = await loadCommittedSession(sessionId);
+    if (!session) return;
+
+    await notifyManufacturer({
+      manufacturerId: session.manufacturerId,
+      type: "workshop_session",
+      subject: `Atölye partisine ${adoptedCount} figür eklendi — ${session.venue.name}`,
+      body:
+        `${venueLine(session)}\n` +
+        `Seans tarihi: ${formatDateTime(session.startsAt)}\n` +
+        `Eklenen: ${adoptedCount} figür\n` +
+        `Mekana teslim: ${formatDateTime(session.deliverBy)}\n\n` +
+        `Ödemesi parti kapandıktan sonra tamamlanan ${adoptedCount} katılımcı daha\n` +
+        `var. Siparişleri panelinize "kabul edildi" olarak eklendi ve partinin\n` +
+        `donmuş oranını taşıyorlar.\n\n` +
+        `Lütfen sevkiyattan önce parti adedini panelden tekrar kontrol edin.`,
+    });
+  } catch (err) {
+    console.error(
+      `[workshop] parti ekleme bildirimi gönderilemedi (session ${sessionId})`,
+      err
+    );
+  }
+}
+
+/**
+ * Ödenmiş siparişi olan bir seans ÜRETİCİSİZ kapandığında admin'e gider.
+ *
+ * Bu seans `in_production`'a geçmez, `closed`'da bekler: kimse basmıyor. Tek
+ * uyarı kanalı sunucu log'u olsaydı, ödenmiş bir yığın sipariş kimsenin
+ * bakmadığı bir durumda kalırdı.
+ */
+export async function notifyAdminSessionWithoutManufacturer(
+  sessionId: string,
+  orderCount: number
+): Promise<void> {
+  try {
+    const session = await loadSessionWithVenue(sessionId);
+    if (!session) return;
+
+    await getEmailQueue().add("workshop-session-no-manufacturer", {
+      type: "admin_custom",
+      to: process.env.ADMIN_EMAIL || "system@figurunica.com",
+      orderNumber: "",
+      customerName: "Admin",
+      customSubject: `Atölye partisi üreticisiz kapandı — ${session.venue.name} (${orderCount} sipariş)`,
+      customBody:
+        `${venueLine(session)}\n` +
+        `Seans tarihi: ${formatDateTime(session.startsAt)}\n` +
+        `Mekana teslim: ${formatDateTime(session.deliverBy)}\n` +
+        `Ödenmiş sipariş: ${orderCount}\n\n` +
+        `Katılım linki kapandı ama seansta ön rezerve üretici yok; parti kimseye\n` +
+        `atanmadı. Seans "Katılım kapandı" durumunda bekliyor ve HİÇ KİMSE\n` +
+        `basmıyor. Komisyon oranı dondu, siparişler ödendi.\n\n` +
+        `Yapılması gereken: seansa bir üretici atayın ve siparişleri elle\n` +
+        `üreticiye verin.`,
+      locale: "tr",
+    });
+  } catch (err) {
+    console.error(
+      `[workshop] üreticisiz kapanış admin bildirimi gönderilemedi (session ${sessionId})`,
       err
     );
   }

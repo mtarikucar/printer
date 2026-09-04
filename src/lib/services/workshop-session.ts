@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -13,7 +13,11 @@ import {
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
 } from "@/lib/config/workshop";
 import { emitOrderChanged } from "@/lib/realtime/emit";
-import { notifyManufacturerSessionClosed } from "@/lib/services/workshop-manufacturer-notify";
+import {
+  notifyAdminSessionWithoutManufacturer,
+  notifyManufacturerOrdersAdopted,
+  notifyManufacturerSessionClosed,
+} from "@/lib/services/workshop-manufacturer-notify";
 
 // Geriye dönük uyumluluk: assessSessionRisk artık config/workshop.ts'te yaşıyor
 // (DB'siz, server-only'siz — admin'in "Seans aç" formu bunu TARAYICIDA çağırır;
@@ -100,18 +104,50 @@ export async function findSessionsDueToClose(now: Date) {
 }
 
 /**
- * Partiye giren siparişler: seansa bağlı ve REDDEDİLMEMİŞ olanlar.
- *
- * `rejected` siparişler dışarıda kalır çünkü admin onları iade etti — bir iadeli
- * siparişi merdivende saymak partiyi olduğundan büyük gösterir ve daha da kötüsü,
- * o siparişi üreticiye BASILMAK ÜZERE atar. Aynı yüklem hem sayımda hem atamada
- * kullanılır; ikisi ayrışırsa üretici, oranı hesaplanmayan bir figür basar.
+ * `rejected` siparişler her yerde partinin DIŞINDADIR: admin onları iade etti.
+ * Bir iadeli siparişi merdivende saymak partiyi olduğundan büyük gösterir ve
+ * daha da kötüsü, o siparişi üreticiye BASILMAK ÜZERE atar.
+ */
+const NOT_REJECTED = ne(orders.status, "rejected");
+
+/**
+ * Partiye giren siparişler: seansa bağlı ve reddedilmemiş olanlar. Aynı yüklem
+ * hem sayımda hem atamada kullanılır; ikisi ayrışırsa üretici, oranı
+ * hesaplanmayan bir figür basar.
  */
 function batchOrderFilter(sessionId: string) {
-  return and(
-    eq(orders.workshopSessionId, sessionId),
-    ne(orders.status, "rejected")
-  );
+  return and(eq(orders.workshopSessionId, sessionId), NOT_REJECTED);
+}
+
+/**
+ * Bir siparişi partiye bağlayan alanların TEK tanımı.
+ *
+ * Hem kapanış (`closeSession`) hem sonradan gelen öksüz siparişin sahiplenilmesi
+ * (`adoptOrphanBatchOrders`) bunu kullanır: "partiye atanmış olmak" iki yerde
+ * ayrı ayrı tarif edilirse, geç ödeyen katılımcı bir gün kabul damgası ya da
+ * donmuş oranı eksik alır ve fark ancak ödeme gününde görülür.
+ *
+ * Üretici yoksa YALNIZCA oran yazılır: oran, `accrueEarning`/`accruePainterEarning`
+ * tarafından siparişten okunduğu için üreticisiz bir seansta bile donmuş olmalı —
+ * sonradan değişen bir sabit geçmişi yeniden fiyatlamamalı.
+ */
+function batchAssignmentSet(args: {
+  manufacturerId: string | null;
+  commissionRateBps: number;
+  at: Date;
+}): Partial<typeof orders.$inferInsert> {
+  const set: Partial<typeof orders.$inferInsert> = {
+    commissionRateBps: args.commissionRateBps,
+    updatedAt: args.at,
+  };
+  if (args.manufacturerId) {
+    set.manufacturerId = args.manufacturerId;
+    // Üretici seansı açılışta taahhüt etti: kabul beklemesi yok.
+    set.manufacturerStatus = "accepted";
+    set.assignedToManufacturerAt = args.at;
+    set.manufacturerAcceptedAt = args.at;
+  }
+  return set;
 }
 
 export interface CloseSessionResult {
@@ -170,34 +206,35 @@ export async function closeSession(
     const orderCount = batch.length;
     const commissionRateBps = workshopCommissionRateBps(orderCount);
 
+    // Boş parti üretime GİRMEZ; `in_production` yazmak mekana gitmeyecek bir
+    // sevkiyatı bekliyor gibi gösterirdi.
+    //
+    // Ödenmiş siparişi olup üreticisi olmayan seans da `in_production` OLMAZ:
+    // "üretimde" görünen ama kimsenin bakmadığı bir ödenmiş sipariş yığını,
+    // durumun kendisinin yalan söylemesidir. `closed` dürüst hâldir ve admin'e
+    // haber verilir (aşağıda).
+    const nextStatus = orderCount === 0
+      ? "cancelled"
+      : claimed.manufacturerId
+        ? "in_production"
+        : "closed";
+
     await tx
       .update(workshopSessions)
-      .set({
-        commissionRateBps,
-        // Boş parti üretime GİRMEZ; `in_production` yazmak mekana gitmeyecek
-        // bir sevkiyatı bekliyor gibi gösterirdi.
-        status: orderCount > 0 ? "in_production" : "cancelled",
-        updatedAt: closedAt,
-      })
+      .set({ commissionRateBps, status: nextStatus, updatedAt: closedAt })
       .where(eq(workshopSessions.id, sessionId));
 
     if (orderCount > 0) {
-      // Oran partideki HER siparişe yazılır; üretici ataması yalnızca ön
-      // rezerve üretici varsa. `accrueEarning`/`accruePainterEarning` oranı
-      // siparişten okuduğu için, üreticisiz bir seansta bile oranın donmuş
-      // olması gerekir — sonradan değişen bir sabit geçmişi yeniden fiyatlamaz.
-      const set: Partial<typeof orders.$inferInsert> = {
-        commissionRateBps,
-        updatedAt: closedAt,
-      };
-      if (claimed.manufacturerId) {
-        set.manufacturerId = claimed.manufacturerId;
-        // Üretici seansı açılışta taahhüt etti: kabul beklemesi yok.
-        set.manufacturerStatus = "accepted";
-        set.assignedToManufacturerAt = closedAt;
-        set.manufacturerAcceptedAt = closedAt;
-      }
-      await tx.update(orders).set(set).where(batchOrderFilter(sessionId));
+      await tx
+        .update(orders)
+        .set(
+          batchAssignmentSet({
+            manufacturerId: claimed.manufacturerId,
+            commissionRateBps,
+            at: closedAt,
+          })
+        )
+        .where(batchOrderFilter(sessionId));
     }
 
     return { manufacturerId: claimed.manufacturerId, orderCount, commissionRateBps, batch };
@@ -208,10 +245,11 @@ export async function closeSession(
   if (outcome.orderCount > 0 && !outcome.manufacturerId) {
     // Ödenmiş siparişleri olan bir seans üreticisiz kapandı: PATCH ucu seansı
     // açarken üretici şart koşuyor, demek ki sonradan kaldırılmış. Parti kimseye
-    // düşmedi; admin elle atamak zorunda.
+    // düşmedi ve seans `closed`'da bekliyor; admin elle atamak zorunda.
     console.error(
       `[workshop] seans ${sessionId} üreticisiz kapandı — ${outcome.orderCount} sipariş atanmadı`
     );
+    await notifyAdminSessionWithoutManufacturer(sessionId, outcome.orderCount);
   }
 
   // Yan etkiler işlem COMMIT ettikten SONRA: bir e-posta/Redis hatası paranın
@@ -317,4 +355,168 @@ export async function reconcileOpenSessionSeats(): Promise<SeatReconciliation[]>
     corrections.push({ sessionId: session.id, from: session.bookedCount, to: actual });
   }
   return corrections;
+}
+
+/**
+ * Kapanmış bir partiye SONRADAN katılan sipariş.
+ *
+ * Nasıl doğuyor: koltuk `joinClosesAt`'e kadar rezerve edilebiliyor ve taslak
+ * `WORKSHOP_SEAT_HOLD_HOURS` boyunca yaşıyor; süpürme ise saatlik. Kapanıştan
+ * sonra tamamlanan bir ödeme, seansa bağlı ama üreticisiz ve oransız bir sipariş
+ * üretir: partiye girmez, kimseye atanmaz, üretime hiç düşmez. Müşteri ₺1.350
+ * öder ve seans günü figürsüz kalır.
+ */
+export interface OrphanAdoption {
+  sessionId: string;
+  orderIds: string[];
+  commissionRateBps: number;
+}
+
+/**
+ * Öksüz sipariş sahiplenmenin yapılabildiği TEK seans durumu: parti hâlâ
+ * üretimde, yani kutuya bir figür daha eklenebilir.
+ */
+const ADOPTABLE_SESSION_STATUSES = ["in_production"] as const;
+
+/**
+ * Partisi ARTIK açılamayan seanslar: sevkiyat yola çıktı (ya da hiç olmadı).
+ * Bunlara sessizce sipariş eklemek, kutuda olmayan bir figürü söz vermektir —
+ * sahiplenilmez, GÜRÜLTÜLÜ loglanır ve karar admin'e bırakılır.
+ *
+ * `cancelled` de buradadır: üreticiye "parti yok" denmişti; sonradan gelen tek
+ * ödeme bunu geri almaz, bu bir insan kararıdır.
+ *
+ * `closed` da buradadır ve tek anlamı vardır: seans ödenmiş siparişlerle ama
+ * ÜRETİCİSİZ kapandı (kapanış işlemi içindeki geçici `closed` dışarıdan hiç
+ * görülmez). Bağlanacak bir üretici ve donmuş oran yok; o seans zaten admin'e
+ * bildirildi, geç gelen sipariş de aynı yerde görünmeli.
+ */
+const SEALED_SESSION_STATUSES = [
+  "closed",
+  "shipped",
+  "delivered",
+  "completed",
+  "cancelled",
+] as const;
+
+/**
+ * Kapanıştan sonra ödemesi tamamlanan sipariş(ler)i partiye alır.
+ *
+ * Ayrım noktası — sahiplenilecek öksüz ile admin'in BİLEREK aldığı sipariş
+ * birbirine karışmamalı:
+ *   - `manufacturer-revoke` / `revoke-after-painter` atamayı geri alırken
+ *     `manufacturerId`'yi NULL'a çeker ama `commissionRateBps`'i BIRAKIR.
+ *   - Partiye hiç girememiş öksüzde İKİSİ DE NULL'dır.
+ * Bu yüzden koşul `manufacturer_id IS NULL AND commission_rate_bps IS NULL`:
+ * admin'in elinden aldığı bir siparişi süpürme her saat geri kapamaz.
+ *
+ * Atama alanları `batchAssignmentSet` ile yazılır — `closeSession` ile aynı
+ * tanım, iki yer ayrışamaz. UPDATE aynı NULL koşullarını tekrar taşır: eşzamanlı
+ * bir admin ataması araya girerse 0 satır döner ve sahiplenme sessizce iptal olur.
+ */
+export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
+  const orphans = await db
+    .select({
+      orderId: orders.id,
+      orderNumber: orders.orderNumber,
+      sessionId: workshopSessions.id,
+      sessionStatus: workshopSessions.status,
+      manufacturerId: workshopSessions.manufacturerId,
+      commissionRateBps: workshopSessions.commissionRateBps,
+    })
+    .from(orders)
+    .innerJoin(workshopSessions, eq(workshopSessions.id, orders.workshopSessionId))
+    .where(
+      and(
+        isNull(orders.manufacturerId),
+        isNull(orders.commissionRateBps),
+        NOT_REJECTED,
+        inArray(workshopSessions.status, [
+          ...ADOPTABLE_SESSION_STATUSES,
+          ...SEALED_SESSION_STATUSES,
+        ])
+      )
+    );
+  if (orphans.length === 0) return [];
+
+  const bySession = new Map<string, typeof orphans>();
+  for (const row of orphans) {
+    const list = bySession.get(row.sessionId) ?? [];
+    list.push(row);
+    bySession.set(row.sessionId, list);
+  }
+
+  const adopted: OrphanAdoption[] = [];
+  const at = new Date();
+
+  for (const [sessionId, rows] of bySession) {
+    const { sessionStatus, manufacturerId, commissionRateBps } = rows[0];
+    const orderNumbers = rows.map((r) => r.orderNumber).join(", ");
+
+    if (sessionStatus !== "in_production") {
+      // Parti kapandı ve yola çıktı: sipariş ödenmiş ama bu partiye giremez.
+      console.error(
+        `[workshop] seans ${sessionId} (${sessionStatus}) kapandıktan sonra ödenen ` +
+          `${rows.length} sipariş partiye ALINMADI — elle karar gerekiyor: ${orderNumbers}`
+      );
+      continue;
+    }
+    if (!manufacturerId || commissionRateBps === null) {
+      // Üreticisi ya da donmuş oranı olmayan bir partiye bağlanmak, öksüzü
+      // "iptal edilmiş atama" gibi göstererek bir daha bulunamaz hâle getirirdi.
+      console.error(
+        `[workshop] seans ${sessionId} üretici/oran taşımıyor — ${rows.length} öksüz ` +
+          `sipariş sahiplenilemedi: ${orderNumbers}`
+      );
+      continue;
+    }
+
+    const updated = await db
+      .update(orders)
+      .set(batchAssignmentSet({ manufacturerId, commissionRateBps, at }))
+      .where(
+        and(
+          inArray(
+            orders.id,
+            rows.map((r) => r.orderId)
+          ),
+          isNull(orders.manufacturerId),
+          isNull(orders.commissionRateBps)
+        )
+      )
+      .returning({
+        id: orders.id,
+        orderNumber: orders.orderNumber,
+        userId: orders.userId,
+        status: orders.status,
+      });
+    if (updated.length === 0) continue;
+
+    for (const order of updated) {
+      console.warn(
+        `[workshop] sipariş ${order.orderNumber} (${order.id}) seans ${sessionId} ` +
+          `partisine sonradan alındı — oran ${commissionRateBps}bps, üretici ${manufacturerId}`
+      );
+    }
+
+    adopted.push({
+      sessionId,
+      orderIds: updated.map((o) => o.id),
+      commissionRateBps,
+    });
+
+    await notifyManufacturerOrdersAdopted(sessionId, updated.length);
+    for (const order of updated) {
+      await emitOrderChanged({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        userId: order.userId,
+        manufacturerId,
+        status: order.status,
+        manufacturerStatus: "accepted",
+      }).catch(() => {});
+    }
+  }
+
+  return adopted;
 }

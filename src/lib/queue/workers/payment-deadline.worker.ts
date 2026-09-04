@@ -75,9 +75,14 @@ async function processJob(job: Job<PaymentDeadlineJobData>) {
 
   // Both havale and card use the same terminal expiry: release any reserved
   // gift-card balance and move the draft to `expired`. For card this is the
-  // backstop that stops an abandoned checkout from holding the credit forever.
+  // backstop that stops an abandoned checkout from holding the credit forever —
+  // and, for a workshop join, from holding the SEAT forever.
   // expireDraft is idempotent and only acts on still-pending/awaiting_review
   // drafts, so a promoted (paid) card draft is unaffected.
+  //
+  // The workshop seat is released inside expireDraft, not here: the admin
+  // force-expire route calls expireDraft directly too, and a seat released in
+  // only one of the two callers would leak on the other.
   if (type === "havale_expire" || type === "card_expire") {
     await expireDraft(draftId);
     job.log(`Draft ${reference} expired and refunded`);

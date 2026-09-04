@@ -20,6 +20,21 @@ export const WORKSHOP_JOIN_CLOSES_DAYS_BEFORE = 5;
 /** Parti mekana seanstan kaç gün önce teslim edilir. */
 export const WORKSHOP_DELIVER_DAYS_BEFORE = 1;
 
+/**
+ * Ödeme başlatıldıktan sonra koltuk en çok bu kadar tutulur. Süre dolduğunda
+ * taslak `expired` olur ve koltuk havuza geri döner.
+ *
+ * `CARD_DEADLINE_HOURS` (72 saat) BİLEREK kullanılmaz: katılım penceresinin
+ * tamamı 5 gün. 72 saatlik tutma, ilk gün terk edilen bir koltuğu dördüncü güne
+ * kadar ölü bırakır; ~20 kişilik bir seansta bu, kontenjanı fiilen yok eder.
+ *
+ * Ayar düğmesi budur. Dengesi: yarıda kalan bir mobil ödemenin (banka
+ * uygulamasına geçip dönmek, 3D Secure SMS'ini beklemek, ağı kaybedip tekrar
+ * denemek) tamamlanabilmesi için yeterince UZUN; terk edilen koltuğun aynı iş
+ * günü içinde havuza dönmesi için yeterince KISA.
+ */
+export const WORKSHOP_SEAT_HOLD_HOURS = 6;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**

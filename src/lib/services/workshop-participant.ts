@@ -5,6 +5,8 @@ import {
   workshopParticipants,
   workshopSessions,
 } from "@/lib/db/schema";
+import { WORKSHOP_SEAT_HOLD_HOURS } from "@/lib/config/workshop";
+import { cardExpireJobId, getPaymentDeadlineQueue } from "@/lib/queue/queues";
 import { resolveOrCreateGuestUser } from "@/lib/services/guest-user";
 import { buildDraftReference } from "@/lib/services/order-draft";
 import { buildMerchantOid } from "@/lib/services/paytr";
@@ -92,11 +94,49 @@ export async function releaseSeat(sessionId: string): Promise<void> {
 }
 
 /**
+ * Taslak ÖDENMEDEN sonlandığında (süre doldu / ödeme reddedildi) koltuğu
+ * havuza döndürür.
+ *
+ * Koşullu UPDATE tek koruma noktasıdır ve oku-sonra-yaz'a çevrilmemelidir:
+ *  - iki kez çalışan bir çağrı sayacı iki kez düşüremez (ikinci UPDATE 0 satır),
+ *  - terfi ile yarışırsa katılımcı çoktan `paid` olduğu için yine 0 satır döner;
+ *    ödemiş birinin koltuğu asla geri alınmaz.
+ * Bu yüzden çağıranın ayrıca "acaba hâlâ bekliyor mu" diye okumasına gerek yok.
+ *
+ * Taslağı ZATEN güncellemiş bir işlemin İÇİNDE çağrılmamalıdır. Katılım işlemi
+ * kilitleri seans → taslak sırasıyla alır; burası ters yönde (taslak → seans)
+ * ilerler. İkisi tek işlemde birleşirse döngü kapanır ve eşzamanlı katılımlarda
+ * deadlock olur. Bu yüzden `tx` değil `db` üzerinden, çağıranın işlemi COMMIT
+ * ettikten SONRA çalışır.
+ */
+export async function releaseSeatForDraft(
+  draftId: string,
+  /** Katılımcı satırında ve admin ekranında görünür — çağıran bilerek seçer. */
+  cancelReason: string
+): Promise<void> {
+  const [participant] = await db
+    .update(workshopParticipants)
+    .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
+    .where(
+      and(
+        eq(workshopParticipants.draftId, draftId),
+        eq(workshopParticipants.status, "pending_payment")
+      )
+    )
+    .returning({ sessionId: workshopParticipants.sessionId });
+  if (!participant) return;
+  await releaseSeat(participant.sessionId);
+}
+
+/**
  * Public katılım: koltuğu rezerve eder, ödeme taslağını yazar ve katılımcıyı
  * kaydeder. Dönen `payUrl` müşteriyi mevcut `/pay/<reference>` akışına götürür.
  *
  * Üçü de TEK işlemdedir: ya koltuk + taslak + katılımcı birlikte vardır, ya da
  * hiçbiri yoktur. Kontenjan sızıntısı da hayalet taslak da bu yüzden imkânsız.
+ *
+ * İşlem commit ettikten sonra koltuk tutma süresinin destek işi kuyruğa alınır
+ * (`WORKSHOP_SEAT_HOLD_HOURS`); ödeme gelmezse koltuğu havuza döndüren şey odur.
  */
 export async function joinSession(
   token: string,
@@ -160,55 +200,92 @@ export async function joinSession(
     telefon: input.phone,
   };
 
-  return db.transaction(async (tx): Promise<JoinResult> => {
-    if (!(await reserveSeat(tx, session.id))) {
-      // Hiçbir satır yazılmadı; boş işlem commit edilir.
-      return {
-        error: "Kontenjan doldu ya da katılım kapandı.",
-        status: 409,
-        code: "capacity_full",
-      };
-    }
+  const outcome = await db.transaction(
+    async (tx): Promise<{ capacityFull: true } | { draftId: string }> => {
+      if (!(await reserveSeat(tx, session.id))) {
+        // Hiçbir satır yazılmadı; boş işlem commit edilir.
+        return { capacityFull: true };
+      }
 
-    const [draft] = await tx
-      .insert(orderDrafts)
-      .values({
-        reference,
-        userId: guest.user.id,
+      const [draft] = await tx
+        .insert(orderDrafts)
+        .values({
+          reference,
+          userId: guest.user.id,
+          email,
+          customerName: input.fullName,
+          phone: input.phone,
+          shippingAddress,
+          orderType: "custom",
+          amountKurus,
+          // Kalem modeli: boyama seansın KENDİSİDİR, boyacı payı yoktur —
+          // productionBaseKurus + paintingPriceKurus === amountKurus.
+          productionBaseKurus: amountKurus,
+          paintingPriceKurus: 0,
+          needsPainting: false,
+          finish: coerceFinishForKind("workshop_figure", "paintable_kit") as "paintable_kit",
+          photoKeys: [input.photoKey],
+          paymentMethod: "card",
+          status: "pending",
+          paytrMerchantOid: buildMerchantOid(reference),
+          productTitleSnapshot: `Atölye figürü — ${venue.name}`,
+          attributionChannel: "workshop",
+        })
+        .returning({ id: orderDrafts.id });
+
+      await tx.insert(workshopParticipants).values({
+        sessionId: session.id,
+        draftId: draft.id,
+        fullName: input.fullName,
         email,
-        customerName: input.fullName,
         phone: input.phone,
-        shippingAddress,
-        orderType: "custom",
-        amountKurus,
-        // Kalem modeli: boyama seansın KENDİSİDİR, boyacı payı yoktur —
-        // productionBaseKurus + paintingPriceKurus === amountKurus.
-        productionBaseKurus: amountKurus,
-        paintingPriceKurus: 0,
-        needsPainting: false,
-        finish: coerceFinishForKind("workshop_figure", "paintable_kit") as "paintable_kit",
-        photoKeys: [input.photoKey],
-        paymentMethod: "card",
-        status: "pending",
-        paytrMerchantOid: buildMerchantOid(reference),
-        productTitleSnapshot: `Atölye figürü — ${venue.name}`,
-        attributionChannel: "workshop",
-      })
-      .returning({ id: orderDrafts.id });
+        photoKey: input.photoKey,
+        kvkkConsentAt: new Date(),
+        contentConsentAt: new Date(),
+        status: "pending_payment",
+      });
 
-    await tx.insert(workshopParticipants).values({
-      sessionId: session.id,
-      draftId: draft.id,
-      fullName: input.fullName,
-      email,
-      phone: input.phone,
-      photoKey: input.photoKey,
-      kvkkConsentAt: new Date(),
-      contentConsentAt: new Date(),
-      status: "pending_payment",
-    });
+      return { draftId: draft.id };
+    }
+  );
 
-    const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com").replace(/\/$/, "");
-    return { reference, payUrl: `${base}/pay/${reference}` };
-  });
+  if ("capacityFull" in outcome) {
+    return {
+      error: "Kontenjan doldu ya da katılım kapandı.",
+      status: 409,
+      code: "capacity_full",
+    };
+  }
+
+  // Koltuk, ödeme BAŞLARKEN rezerve edilir; ödeme hiç gelmezse geri
+  // bırakılmalıdır, yoksa ödemeyen biri koltuğu süresiz tutar ve kontenjan
+  // sızar. Kart taslakları normalde bu destek işini planlamaz (bkz.
+  // /api/orders: "nothing is locked up") — atölyede KİLİTLENEN bir şey var,
+  // o yüzden burada planlanır. Terfi/başarısızlık/süre dolumu anında
+  // `cancelHavaleJobs` işi siler; süre dolarsa `expireDraft` koltuğu bırakır.
+  //
+  // İşlem COMMIT ettikten SONRA sıraya girer: rollback'te var olmayan bir
+  // taslağın işi Redis'te kalmasın.
+  //
+  // Redis'e ulaşılamazsa katılım YİNE DE başarılı sayılır: müşteriyi ödeme
+  // sayfasına hiç götürmemenin bedeli, koltuğun geç dönmesinden ağırdır.
+  // Kayıp, admin'in elle düzeltebilmesi için log'a düşer.
+  await getPaymentDeadlineQueue()
+    .add(
+      "card-expire",
+      { draftId: outcome.draftId, reference, type: "card_expire" },
+      {
+        jobId: cardExpireJobId(outcome.draftId),
+        delay: WORKSHOP_SEAT_HOLD_HOURS * 3600 * 1000,
+      }
+    )
+    .catch((e) =>
+      console.error(
+        `workshop seat-hold expiry could not be scheduled for draft ${outcome.draftId}`,
+        e
+      )
+    );
+
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com").replace(/\/$/, "");
+  return { reference, payUrl: `${base}/pay/${reference}` };
 }

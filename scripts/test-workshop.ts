@@ -6,8 +6,10 @@ import {
   deriveSessionDates,
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
   WORKSHOP_DELIVER_DAYS_BEFORE,
+  WORKSHOP_SEAT_HOLD_HOURS,
   assessSessionRisk,
 } from "../src/lib/config/workshop";
+import { CARD_DEADLINE_HOURS } from "../src/lib/config/payment";
 import { itemPriceKurus } from "../src/lib/config/prices";
 import {
   allowedFinishesForKind,
@@ -62,6 +64,36 @@ test("atölye siparişi kalem invariantını korur", () => {
 
 test("atölye figürü ₺1.350", () => {
   assert.equal(WORKSHOP_FIGURE_PRICE_KURUS, 135000);
+});
+
+// ─── Koltuk tutma süresi ────────────────────────────────────────────────────
+// Ödeme başlatıldıktan sonra koltuğun tutulduğu süre. Bu, ödeme gelmezse
+// koltuğu havuza döndüren destek işinin gecikmesidir.
+
+test("koltuk tutma süresi 6 saattir", () => {
+  assert.equal(WORKSHOP_SEAT_HOLD_HOURS, 6);
+});
+
+test("koltuk tutma süresi kart taslağının süresini KULLANMAZ", () => {
+  // CARD_DEADLINE_HOURS 72 saat. Katılım penceresi toplamda 5 gün olduğu için
+  // 72 saatlik tutma, ilk gün terk edilen koltuğu dördüncü güne kadar ölü
+  // bırakır — ~20 kişilik bir seansta kontenjanı fiilen yok eder.
+  assert.ok(
+    WORKSHOP_SEAT_HOLD_HOURS < CARD_DEADLINE_HOURS,
+    "atölye koltuğu kart taslağından önce serbest kalmalı"
+  );
+  // Terk edilen koltuk AYNI iş günü içinde havuza dönmeli…
+  assert.ok(WORKSHOP_SEAT_HOLD_HOURS <= 12);
+  // …ama yarıda kalan bir mobil ödemeyi kesecek kadar kısa olmamalı.
+  assert.ok(WORKSHOP_SEAT_HOLD_HOURS >= 1);
+});
+
+test("koltuk tutma süresi katılım penceresinin küçük bir dilimidir", () => {
+  const joinWindowHours = WORKSHOP_JOIN_CLOSES_DAYS_BEFORE * 24;
+  assert.ok(
+    WORKSHOP_SEAT_HOLD_HOURS * 4 < joinWindowHours,
+    "tutma süresi katılım penceresinin dörtte birinden kısa olmalı"
+  );
 });
 
 // ─── Komisyon merdiveni ─────────────────────────────────────────────────────

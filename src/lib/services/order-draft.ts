@@ -9,8 +9,13 @@ import {
   products,
   giftCards,
   giftCardRedemptions,
+  workshopParticipants,
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
+// Döngüsel import (workshop-participant.ts buradan `buildDraftReference` alır)
+// ama modül YÜKLENİRKEN atıl: iki taraf da yalnızca hoist edilen `function`
+// bildirimleri export eder, modül gövdesinde karşılıklı okuma yoktur.
+import { releaseSeatForDraft } from "@/lib/services/workshop-participant";
 import {
   kickOffOrderProcessing,
   kickOffMarketplaceOrder,
@@ -416,6 +421,32 @@ export async function promoteDraftToOrder(
       })
       .returning();
 
+    // Atölye katılımcısıysa siparişi seansa bağla. Katılımcı kaydı taslak
+    // üzerinden bulunur; `orders` satırı = ödenmiş sipariş olduğu için burası
+    // katılımcının "ödedi" anıdır. Sepet taslağı hiç uğramaz — atölye taslağı
+    // asla `parentReference` taşımaz (tek koltuk, tek satıcı).
+    //
+    // Terfi işleminin İÇİNDE olması şart: koltuğu geri bırakan yol
+    // (`releaseSeatForDraft`) "katılımcı hâlâ pending_payment mi" koşuluna
+    // dayanıyor, dolayısıyla `paid` damgası taslağın `confirmed` damgasıyla
+    // AYNI commit'te görünür olmalı. Aksi hâlde araya giren bir süre dolumu
+    // ödemiş birinin koltuğunu geri alabilirdi.
+    //
+    // `workshop_sessions` satırına DOKUNULMAZ: katılım işlemi kilitleri
+    // seans → taslak sırasıyla alıyor; burada taslak kilidi zaten elde
+    // olduğundan seansı da kilitlemek döngüyü kapatır ve deadlock üretirdi.
+    const [participant] = await tx
+      .update(workshopParticipants)
+      .set({ orderId: order.id, status: "paid", updatedAt: new Date() })
+      .where(eq(workshopParticipants.draftId, draft.id))
+      .returning({ sessionId: workshopParticipants.sessionId });
+    if (participant) {
+      await tx
+        .update(orders)
+        .set({ workshopSessionId: participant.sessionId, updatedAt: new Date() })
+        .where(eq(orders.id, order.id));
+    }
+
     // Custom orders carry the customer's input photo into order_photos so
     // generation can pick it up. Marketplace orders have no input photo.
     if (!isMarketplace && draft.photoKey) {
@@ -618,6 +649,20 @@ export async function expireDraft(draftId: string): Promise<void> {
     return draft;
   });
 
+  // Atölye koltuğu: taslak ödenmeden sonlandıysa koltuk havuza dönmelidir,
+  // yoksa ödemeyen biri onu süresiz tutar ve kontenjan sızar.
+  //
+  // İşlemin DIŞINDA: bu çağrı taslaktan seansa doğru ilerliyor, katılım işlemi
+  // ise seanstan taslağa; ikisi tek işlemde birleşirse döngü kapanır (deadlock).
+  //
+  // KOŞULSUZ: `releaseSeatForDraft`'in koşullu UPDATE'i tek koruma noktası,
+  // dolayısıyla terfi etmiş taslakta (katılımcı `paid`) zaten no-op. Buraya
+  // erken `return`dan ÖNCE konması, ilk denemesi işlemden sonra çöken bir
+  // işin tekrarında koltuğun yine de kurtarılmasını sağlar.
+  await releaseSeatForDraft(draftId, "Ödeme süresi doldu").catch((e) =>
+    console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e)
+  );
+
   if (!result) return;
   void SYSTEM_ADMIN_EMAIL;
 
@@ -671,6 +716,16 @@ export async function failDraft(
 
     return true;
   });
+
+  // Ödeme reddedildi → taslak `failed`. PayTR webhook'u başarısızlıkta taslağı
+  // `pending` bırakıp süre dolumuna güveniyor, ama bu yol (müşterinin ödeme
+  // sayfasındaki doğrulama ve admin'in verify-paytr'ı) taslağı GERÇEKTEN
+  // sonlandırıyor ve hemen ardından `cancelHavaleJobs` destek işini siliyor.
+  // Koltuk burada bırakılmazsa geri dönebileceği başka bir yol kalmaz.
+  // İşlemin dışında + koşulsuz — gerekçesi için bkz. `expireDraft`.
+  await releaseSeatForDraft(draftId, "Ödeme başarısız").catch((e) =>
+    console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e)
+  );
 
   // Draft moved to `failed` — refresh the admin drafts badge.
   if (failed) {

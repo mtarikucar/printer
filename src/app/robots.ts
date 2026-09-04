@@ -94,6 +94,7 @@ const DISALLOW = [
   "/havale/",
   "/quote/",
   "/yolculuk/",
+  "/atolye/katil/",
   "/reset-password/",
   "/verify-email/",
   // Account and auth surfaces. Nothing here is useful in a search result or an

@@ -12,10 +12,10 @@ import {
   workshopParticipants,
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
-// Döngüsel import (workshop-participant.ts buradan `buildDraftReference` alır)
-// ama modül YÜKLENİRKEN atıl: iki taraf da yalnızca hoist edilen `function`
-// bildirimleri export eder, modül gövdesinde karşılıklı okuma yoktur.
-import { releaseSeatForDraft } from "@/lib/services/workshop-participant";
+// Koltuk muhasebesi kendi modülünde: workshop-participant.ts buradan
+// `buildDraftReference` aldığı için, bırakma fonksiyonlarını oradan import
+// etmek döngü yaratırdı. workshop-seat.ts yalnızca db + şemaya bağlıdır.
+import { releaseSeatForDraft } from "@/lib/services/workshop-seat";
 import {
   kickOffOrderProcessing,
   kickOffMarketplaceOrder,

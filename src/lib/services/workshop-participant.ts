@@ -60,6 +60,9 @@ export type JoinResult =
  * Bedeli, seans satırının kilidinin iki insert boyunca tutulması: AYNI seansa
  * eşzamanlı katılımlar sıraya girer. Kapasite ≤ 200 ve iki hızlı insert için
  * kabul edilebilir; doğruluk birkaç milisaniyeden önemli.
+ *
+ * Karşılığı olan bırakma fonksiyonları `@/lib/services/workshop-seat`'te:
+ * onlar çağıranın işleminin DIŞINDA çalışmak zorunda, bu ise İÇİNDE.
  */
 async function reserveSeat(tx: JoinTx, sessionId: string): Promise<boolean> {
   const rows = await tx
@@ -75,57 +78,6 @@ async function reserveSeat(tx: JoinTx, sessionId: string): Promise<boolean> {
     )
     .returning({ bookedCount: workshopSessions.bookedCount });
   return rows.length > 0;
-}
-
-/**
- * Rezervasyonu geri alır. Katılım akışının kendisi buna İHTİYAÇ DUYMAZ (orada
- * rollback yeterli); ödeme süresi dolduğunda koltuğu bırakan Task 10 için
- * export edilmiştir.
- */
-export async function releaseSeat(sessionId: string): Promise<void> {
-  await db
-    .update(workshopSessions)
-    .set({
-      // GREATEST(0, ...) — sayaç asla negatife düşmesin.
-      bookedCount: sql`GREATEST(0, ${workshopSessions.bookedCount} - 1)`,
-      updatedAt: new Date(),
-    })
-    .where(eq(workshopSessions.id, sessionId));
-}
-
-/**
- * Taslak ÖDENMEDEN sonlandığında (süre doldu / ödeme reddedildi) koltuğu
- * havuza döndürür.
- *
- * Koşullu UPDATE tek koruma noktasıdır ve oku-sonra-yaz'a çevrilmemelidir:
- *  - iki kez çalışan bir çağrı sayacı iki kez düşüremez (ikinci UPDATE 0 satır),
- *  - terfi ile yarışırsa katılımcı çoktan `paid` olduğu için yine 0 satır döner;
- *    ödemiş birinin koltuğu asla geri alınmaz.
- * Bu yüzden çağıranın ayrıca "acaba hâlâ bekliyor mu" diye okumasına gerek yok.
- *
- * Taslağı ZATEN güncellemiş bir işlemin İÇİNDE çağrılmamalıdır. Katılım işlemi
- * kilitleri seans → taslak sırasıyla alır; burası ters yönde (taslak → seans)
- * ilerler. İkisi tek işlemde birleşirse döngü kapanır ve eşzamanlı katılımlarda
- * deadlock olur. Bu yüzden `tx` değil `db` üzerinden, çağıranın işlemi COMMIT
- * ettikten SONRA çalışır.
- */
-export async function releaseSeatForDraft(
-  draftId: string,
-  /** Katılımcı satırında ve admin ekranında görünür — çağıran bilerek seçer. */
-  cancelReason: string
-): Promise<void> {
-  const [participant] = await db
-    .update(workshopParticipants)
-    .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
-    .where(
-      and(
-        eq(workshopParticipants.draftId, draftId),
-        eq(workshopParticipants.status, "pending_payment")
-      )
-    )
-    .returning({ sessionId: workshopParticipants.sessionId });
-  if (!participant) return;
-  await releaseSeat(participant.sessionId);
 }
 
 /**

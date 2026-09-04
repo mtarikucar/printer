@@ -19,18 +19,43 @@ import { db } from "@/lib/db";
 import { workshopParticipants, workshopSessions } from "@/lib/db/schema";
 
 /**
+ * Sayacı bir azaltan TEK ifade. Hem tek başına `releaseSeat` hem de
+ * `releaseSeatForDraft`'in işlemi bunu kullanır; kural (negatife düşmeme) iki
+ * yere kopyalanmaz.
+ */
+function decrementBookedCount() {
+  return {
+    // GREATEST(0, ...) — sayaç asla negatife düşmesin.
+    bookedCount: sql`GREATEST(0, ${workshopSessions.bookedCount} - 1)`,
+    updatedAt: new Date(),
+  };
+}
+
+/**
  * Rezervasyonu geri alır. Katılım akışının kendisi buna İHTİYAÇ DUYMAZ (orada
  * rollback yeterli); ödeme gelmediğinde koltuğu bırakan yol için vardır.
+ *
+ * Katılımcı satırı zaten terminal durumdayken (örn. ödemiş bir katılımcının
+ * admin tarafından iptali) doğrudan çağrılır; taslaktan yürüyen yol için
+ * `releaseSeatForDraft`'i kullanın.
  */
 export async function releaseSeat(sessionId: string): Promise<void> {
   await db
     .update(workshopSessions)
-    .set({
-      // GREATEST(0, ...) — sayaç asla negatife düşmesin.
-      bookedCount: sql`GREATEST(0, ${workshopSessions.bookedCount} - 1)`,
-      updatedAt: new Date(),
-    })
+    .set(decrementBookedCount())
     .where(eq(workshopSessions.id, sessionId));
+}
+
+/**
+ * `releaseSeatForDraft` gerçekten bir koltuk bıraktığında döndürdüğü bağlam.
+ * Hepsi zaten güncellenen katılımcı satırından gelir — ek sorgu yoktur.
+ * Çağıran bunu iki şey için kullanır: (a) taslağın bir ATÖLYE taslağı olduğunu
+ * anlamak, (b) katılımcıya doğru e-postayı göndermek.
+ */
+export interface ReleasedSeat {
+  sessionId: string;
+  fullName: string;
+  email: string;
 }
 
 /**
@@ -53,17 +78,38 @@ export async function releaseSeatForDraft(
   draftId: string,
   /** Katılımcı satırında ve admin ekranında görünür — çağıran bilerek seçer. */
   cancelReason: string
-): Promise<void> {
-  const [participant] = await db
-    .update(workshopParticipants)
-    .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
-    .where(
-      and(
-        eq(workshopParticipants.draftId, draftId),
-        eq(workshopParticipants.status, "pending_payment")
+): Promise<ReleasedSeat | null> {
+  // Koltuğu bırakmanın iki adımı (katılımcıyı iptal et + sayacı düşür) TEK
+  // işlemdedir. Ayrı ayrı yazılsalardı, aradaki bir çökme katılımcıyı
+  // `cancelled` bırakır ama sayacı düşürmezdi; koşullu UPDATE bir daha asla
+  // eşleşmeyeceği için o koltuk KALICI olarak kaybolurdu — hiçbir tekrar
+  // deneme kurtaramazdı.
+  //
+  // Bu, katılım yoluyla deadlock döngüsü YARATMAZ: yön hâlâ katılımcı → seans
+  // ve bu işlem, çağıranın (taslağı güncelleyen) işlemi COMMIT ettikten sonra,
+  // ondan bağımsız olarak açılır.
+  return db.transaction(async (tx) => {
+    const [participant] = await tx
+      .update(workshopParticipants)
+      .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
+      .where(
+        and(
+          eq(workshopParticipants.draftId, draftId),
+          eq(workshopParticipants.status, "pending_payment")
+        )
       )
-    )
-    .returning({ sessionId: workshopParticipants.sessionId });
-  if (!participant) return;
-  await releaseSeat(participant.sessionId);
+      .returning({
+        sessionId: workshopParticipants.sessionId,
+        fullName: workshopParticipants.fullName,
+        email: workshopParticipants.email,
+      });
+    if (!participant) return null;
+
+    await tx
+      .update(workshopSessions)
+      .set(decrementBookedCount())
+      .where(eq(workshopSessions.id, participant.sessionId));
+
+    return participant;
+  });
 }

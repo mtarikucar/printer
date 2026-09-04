@@ -6,8 +6,14 @@
 // Every send is the caller's responsibility to wrap in `.catch()` so a mail
 // failure never rolls back the DB write (mirrors the rest of the codebase).
 
+import { eq } from "drizzle-orm";
 import { sendRawEmail, escHtml } from "./email";
+import { db } from "@/lib/db";
+import { workshopSessions } from "@/lib/db/schema";
 import type { workshopRequests } from "@/lib/db/schema";
+import { WORKSHOP_SEAT_HOLD_HOURS } from "@/lib/config/workshop";
+import { sessionJoinUrl } from "@/lib/services/workshop-session";
+import type { ReleasedSeat } from "@/lib/services/workshop-seat";
 import {
   venueTypeLabel,
   ageGroupLabel,
@@ -39,6 +45,16 @@ function formatDate(value?: Date | string | null): string {
   } catch {
     return String(value);
   }
+}
+
+function formatDateTime(value: Date): string {
+  return value.toLocaleString("tr-TR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function row(label: string, value?: string | null): string {
@@ -192,4 +208,53 @@ export async function sendWorkshopStatusEmail(
     subject,
     html: wrap(inner),
   }).catch((e) => console.error("workshop status email failed (non-fatal)", e));
+}
+
+/**
+ * Sent to a participant whose seat was released because payment never arrived.
+ *
+ * Why NOT the shared `payment_expired` template: it says the HAVALE payment
+ * missed a 72-hour window and points at `/create` (a ₺3.499 custom figure).
+ * All three are wrong for a workshop participant — the payment was by CARD,
+ * the hold was `WORKSHOP_SEAT_HOLD_HOURS`, and the place they wanted to reach
+ * is the session they were trying to join.
+ *
+ * The join link is included unconditionally: the join page already shows the
+ * session's live state (closed / full), so re-checking it here would be both
+ * redundant and stale by the time the customer clicks.
+ */
+export async function sendWorkshopSeatReleasedEmail(
+  seat: ReleasedSeat
+): Promise<void> {
+  const session = await db.query.workshopSessions.findFirst({
+    where: eq(workshopSessions.id, seat.sessionId),
+    with: { venue: true },
+  });
+  if (!session || !session.venue) return;
+
+  const joinUrl = sessionJoinUrl(session.joinToken);
+  const html = wrap(`
+    <h1 style="color:#1a1a1a;font-size:20px;">Koltuğunuz serbest bırakıldı</h1>
+    <p>Merhaba ${escHtml(seat.fullName)},</p>
+    <p><strong>${escHtml(session.venue.name)}</strong> atölyesi için ayırdığımız
+       koltuk, ödeme ${WORKSHOP_SEAT_HOLD_HOURS} saat içinde tamamlanmadığı için
+       serbest bırakıldı ve yeniden kontenjana eklendi.
+       <strong>Sizden herhangi bir tahsilat yapılmadı.</strong></p>
+    <table style="border-collapse:collapse;margin:16px 0;">
+      ${row("Atölye", session.venue.name)}
+      ${row("Tarih", formatDateTime(session.startsAt))}
+      ${row("Adres", `${session.venue.address.adres} (${session.venue.address.ilce}/${session.venue.address.il})`)}
+    </table>
+    <p>Hâlâ katılmak istiyorsanız aşağıdaki bağlantıdan tekrar deneyebilirsiniz;
+       kontenjan dolmadıysa yeni bir koltuk ayırabilirsiniz.</p>
+    <p><a href="${joinUrl}" style="display:inline-block;background:#16a34a;color:white;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;">Atölyeye katıl</a></p>
+    <p style="color:#6b7280;font-size:13px;">Katılım bağlantısı
+       ${formatDateTime(session.joinClosesAt)} tarihinde kapanır.</p>
+  `);
+
+  await sendRawEmail({
+    to: seat.email,
+    subject: `Atölye koltuğunuz serbest bırakıldı — ${session.venue.name}`,
+    html,
+  });
 }

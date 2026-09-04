@@ -12,10 +12,11 @@ import {
   workshopParticipants,
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
-// Koltuk muhasebesi kendi modülünde: workshop-participant.ts buradan
-// `buildDraftReference` aldığı için, bırakma fonksiyonlarını oradan import
-// etmek döngü yaratırdı. workshop-seat.ts yalnızca db + şemaya bağlıdır.
+// Seat accounting lives in its own module: workshop-participant.ts imports
+// `buildDraftReference` from here, so importing the release helpers from there
+// would form a cycle. workshop-seat.ts depends only on db + schema.
 import { releaseSeatForDraft } from "@/lib/services/workshop-seat";
+import { sendWorkshopSeatReleasedEmail } from "@/lib/services/workshop-notify";
 import {
   kickOffOrderProcessing,
   kickOffMarketplaceOrder,
@@ -421,20 +422,21 @@ export async function promoteDraftToOrder(
       })
       .returning();
 
-    // Atölye katılımcısıysa siparişi seansa bağla. Katılımcı kaydı taslak
-    // üzerinden bulunur; `orders` satırı = ödenmiş sipariş olduğu için burası
-    // katılımcının "ödedi" anıdır. Sepet taslağı hiç uğramaz — atölye taslağı
-    // asla `parentReference` taşımaz (tek koltuk, tek satıcı).
+    // Workshop participant: bind the order to its session. The participant is
+    // found through the draft, and an `orders` row means a PAID order, so this
+    // is the participant's "has paid" moment. A cart draft never gets here — a
+    // workshop draft never carries `parentReference` (one seat, one seller).
     //
-    // Terfi işleminin İÇİNDE olması şart: koltuğu geri bırakan yol
-    // (`releaseSeatForDraft`) "katılımcı hâlâ pending_payment mi" koşuluna
-    // dayanıyor, dolayısıyla `paid` damgası taslağın `confirmed` damgasıyla
-    // AYNI commit'te görünür olmalı. Aksi hâlde araya giren bir süre dolumu
-    // ödemiş birinin koltuğunu geri alabilirdi.
+    // This MUST live inside the promotion transaction: the seat-release path
+    // (`releaseSeatForDraft`) keys off "is the participant still
+    // pending_payment", so the `paid` stamp has to become visible in the SAME
+    // commit as the draft's `confirmed` stamp. Otherwise an expiry slipping in
+    // between could take the seat away from someone who has paid.
     //
-    // `workshop_sessions` satırına DOKUNULMAZ: katılım işlemi kilitleri
-    // seans → taslak sırasıyla alıyor; burada taslak kilidi zaten elde
-    // olduğundan seansı da kilitlemek döngüyü kapatır ve deadlock üretirdi.
+    // The `workshop_sessions` row is deliberately NOT touched: the join
+    // transaction takes locks in session → draft order, and we already hold the
+    // draft lock here, so locking the session too would close the cycle and
+    // deadlock.
     const [participant] = await tx
       .update(workshopParticipants)
       .set({ orderId: order.id, status: "paid", updatedAt: new Date() })
@@ -649,18 +651,25 @@ export async function expireDraft(draftId: string): Promise<void> {
     return draft;
   });
 
-  // Atölye koltuğu: taslak ödenmeden sonlandıysa koltuk havuza dönmelidir,
-  // yoksa ödemeyen biri onu süresiz tutar ve kontenjan sızar.
+  // Workshop seat: a draft that ended without payment must return its seat to
+  // the pool, otherwise someone who never paid holds it forever and capacity
+  // leaks away.
   //
-  // İşlemin DIŞINDA: bu çağrı taslaktan seansa doğru ilerliyor, katılım işlemi
-  // ise seanstan taslağa; ikisi tek işlemde birleşirse döngü kapanır (deadlock).
+  // OUTSIDE the transaction: this call walks draft → session while the join
+  // transaction walks session → draft; merging them into one transaction would
+  // close that cycle and deadlock.
   //
-  // KOŞULSUZ: `releaseSeatForDraft`'in koşullu UPDATE'i tek koruma noktası,
-  // dolayısıyla terfi etmiş taslakta (katılımcı `paid`) zaten no-op. Buraya
-  // erken `return`dan ÖNCE konması, ilk denemesi işlemden sonra çöken bir
-  // işin tekrarında koltuğun yine de kurtarılmasını sağlar.
-  await releaseSeatForDraft(draftId, "Ödeme süresi doldu").catch((e) =>
-    console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e)
+  // UNCONDITIONAL: the conditional UPDATE inside `releaseSeatForDraft` is the
+  // only guard that matters, so on a promoted draft (participant already
+  // `paid`) it is a no-op anyway. Placing it BEFORE the early return means a
+  // retry of a job that crashed after the transaction can still recover the
+  // seat. A non-null result also identifies this as a WORKSHOP draft, which
+  // selects the expiry email below.
+  const releasedSeat = await releaseSeatForDraft(draftId, "Ödeme süresi doldu").catch(
+    (e) => {
+      console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e);
+      return null;
+    }
   );
 
   if (!result) return;
@@ -673,6 +682,17 @@ export async function expireDraft(draftId: string): Promise<void> {
   // bullmq job that's redundant, but it's also called from admin force-expire
   // and the reminder would otherwise still fire 24h later.
   await cancelHavaleJobs(draftId);
+
+  if (releasedSeat) {
+    // Workshop participant: the shared `payment_expired` copy would tell them
+    // their HAVALE payment missed a 72-hour window and send them to /create.
+    // All three are wrong here — it was a card, the hold was
+    // WORKSHOP_SEAT_HOLD_HOURS, and where they wanted to go is the session.
+    await sendWorkshopSeatReleasedEmail(releasedSeat).catch((e) =>
+      console.error(`workshop seat-released email failed for draft ${draftId}`, e)
+    );
+    return;
+  }
 
   const locale: Locale = result.locale === "en" ? "en" : "tr";
   await getEmailQueue().add("send-email", {
@@ -717,12 +737,13 @@ export async function failDraft(
     return true;
   });
 
-  // Ödeme reddedildi → taslak `failed`. PayTR webhook'u başarısızlıkta taslağı
-  // `pending` bırakıp süre dolumuna güveniyor, ama bu yol (müşterinin ödeme
-  // sayfasındaki doğrulama ve admin'in verify-paytr'ı) taslağı GERÇEKTEN
-  // sonlandırıyor ve hemen ardından `cancelHavaleJobs` destek işini siliyor.
-  // Koltuk burada bırakılmazsa geri dönebileceği başka bir yol kalmaz.
-  // İşlemin dışında + koşulsuz — gerekçesi için bkz. `expireDraft`.
+  // Payment rejected → draft `failed`. The PayTR webhook leaves a failed draft
+  // in `pending` and relies on expiry, but this path (the customer's own
+  // verification on the pay page, and the admin's verify-paytr) genuinely ends
+  // the draft and then deletes the backstop job via `cancelHavaleJobs`. Unless
+  // the seat is released here there is no other route back for it.
+  // Outside the transaction + unconditional — see `expireDraft` for why.
+  // No email: the customer just watched the payment fail on screen.
   await releaseSeatForDraft(draftId, "Ödeme başarısız").catch((e) =>
     console.error(`workshop releaseSeatForDraft failed for draft ${draftId}`, e)
   );

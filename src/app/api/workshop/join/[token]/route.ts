@@ -73,7 +73,14 @@ export async function POST(
       photoKey: parsed.data.photoKey,
     });
     if ("error" in result) {
-      return NextResponse.json({ error: result.error }, { status: result.status });
+      // `code` makine-okunabilir ayrım taşır (bkz. workshop-participant.ts'teki
+      // JoinErrorCode doc yorumu) — client "kayıtlı e-posta" özel UI'ını mesaj
+      // METNİNE değil bu koda göre tetikler, metin bir ifade düzeltmesiyle
+      // değişse bile ayrım kırılmaz.
+      return NextResponse.json(
+        { error: result.error, code: result.code },
+        { status: result.status }
+      );
     }
     return NextResponse.json(result);
   } catch (err) {

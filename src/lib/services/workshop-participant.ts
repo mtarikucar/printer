@@ -23,9 +23,23 @@ export interface JoinInput {
   photoKey: string;
 }
 
+/**
+ * Makine-okunabilir hata ayrımı. `route.ts` bunu JSON gövdesinde `error`
+ * metniyle birlikte iletir; `join-client.tsx` "kayıtlı e-posta" özel UI'ını
+ * (giriş bağlantısı) bu koda göre tetikler — Türkçe mesaj metnine göre DEĞİL.
+ * Sebep: mesaj metni bir yazım/ifade düzeltmesiyle değişebilir, kod değişmez.
+ */
+export type JoinErrorCode =
+  | "session_not_found"
+  | "session_closed"
+  | "invalid_photo"
+  | "email_registered"
+  | "guest_creation_failed"
+  | "capacity_full";
+
 export type JoinResult =
   | { reference: string; payUrl: string }
-  | { error: string; status: number };
+  | { error: string; status: number; code: JoinErrorCode };
 
 /**
  * Koltuğu ATOMİK olarak rezerve eder. Oku-sonra-yaz DEĞİL: iki kişi son
@@ -89,18 +103,21 @@ export async function joinSession(
   input: JoinInput
 ): Promise<JoinResult> {
   // Savunma amaçlı uzunluk sınırı, DB'ye gitmeden (bkz. workshop-join.ts).
-  if (!token || token.length > 64) return { error: "Seans bulunamadı", status: 404 };
+  if (!token || token.length > 64)
+    return { error: "Seans bulunamadı", status: 404, code: "session_not_found" };
 
   const session = await db.query.workshopSessions.findFirst({
     where: eq(workshopSessions.joinToken, token),
     with: { venue: true },
   });
-  if (!session || !session.venue) return { error: "Seans bulunamadı", status: 404 };
-  if (session.status !== "open") return { error: "Bu seans katılıma kapalı.", status: 409 };
+  if (!session || !session.venue)
+    return { error: "Seans bulunamadı", status: 404, code: "session_not_found" };
+  if (session.status !== "open")
+    return { error: "Bu seans katılıma kapalı.", status: 409, code: "session_closed" };
   const venue = session.venue;
 
   if (!isSafePhotoKey(input.photoKey)) {
-    return { error: "Geçersiz fotoğraf.", status: 400 };
+    return { error: "Geçersiz fotoğraf.", status: 400, code: "invalid_photo" };
   }
 
   // Kimlik e-postası her yerde aynı normalleştirilmiş biçimde saklanır:
@@ -118,13 +135,18 @@ export async function joinSession(
   });
   if (!guest.ok) {
     // ResolveGuestResult: { ok: false; code: "email_registered" } — alan adı
-    // `code`, `error` DEĞİL.
+    // `code`, `error` DEĞİL. `JoinErrorCode`'un `email_registered` değeri
+    // buradaki `guest.code` ile aynı adı bilerek taşır — client bu koda göre
+    // "giriş yap" bağlantısını gösterir (bkz. JoinErrorCode doc yorumu).
+    const code: JoinErrorCode =
+      guest.code === "email_registered" ? "email_registered" : "guest_creation_failed";
     return {
       error:
-        guest.code === "email_registered"
+        code === "email_registered"
           ? "Bu e-posta ile kayıtlı bir hesap var. Lütfen giriş yapıp tekrar deneyin."
           : "Kayıt oluşturulamadı.",
       status: 409,
+      code,
     };
   }
 
@@ -141,7 +163,11 @@ export async function joinSession(
   return db.transaction(async (tx): Promise<JoinResult> => {
     if (!(await reserveSeat(tx, session.id))) {
       // Hiçbir satır yazılmadı; boş işlem commit edilir.
-      return { error: "Kontenjan doldu ya da katılım kapandı.", status: 409 };
+      return {
+        error: "Kontenjan doldu ya da katılım kapandı.",
+        status: 409,
+        code: "capacity_full",
+      };
     }
 
     const [draft] = await tx

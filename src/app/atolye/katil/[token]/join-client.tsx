@@ -28,16 +28,6 @@ function formatDeadline(iso: string): string {
 const ACCEPTED_PHOTO_TYPES = ["image/jpeg", "image/png"];
 
 /**
- * `joinSession()`'ın (src/lib/services/workshop-participant.ts) e-posta zaten
- * kayıtlıyken döndürdüğü sabit mesaj — `resolveOrCreateGuestUser`'ın
- * `email_registered` dalı. Ayrı bir hata kodu alanı olmadığı için metinle
- * eşleştiriyoruz: bu durum diğer 409'lar (kontenjan doldu, seans kapandı) gibi
- * genel bir hata değil, "giriş yap" bağlantılı özel bir mesajı hak ediyor.
- */
-const REGISTERED_EMAIL_ERROR =
-  "Bu e-posta ile kayıtlı bir hesap var. Lütfen giriş yapıp tekrar deneyin.";
-
-/**
  * Public katılım sayfasının gövdesi.
  *
  * Seans kapalıysa yalnızca kapanış nedenini gösterir. Açık seansta bilgi
@@ -67,6 +57,11 @@ export function JoinClient({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [consentOk, setConsentOk] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sunucunun makine-okunabilir hata kodu (bkz. workshop-participant.ts'teki
+  // JoinErrorCode) — "kayıtlı e-posta" özel UI'ı BUNA göre dallanır, Türkçe
+  // mesaj metnine göre DEĞİL: metin bir ifade düzeltmesiyle değişebilir, kod
+  // değişmez.
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const turnstileRef = useRef<TurnstileRef>(null);
@@ -131,7 +126,15 @@ export function JoinClient({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Savunma amaçlı ikinci kilit: buton `disabled`'ı çift tıklamayı ve Enter
+    // ile örtük gönderimi normalde zaten engeller, ama bu satır o varsayıma
+    // bağımlı KALMAZ — form yine de ikinci kez submit edilirse (bir tarayıcı
+    // kenar durumu, gelecekte eklenecek başka bir tetikleyici) ikinci bir
+    // koltuk rezervasyonu / taslak açılmaz. Bir koltuk burada gerçek bir
+    // maliyettir.
+    if (submitting) return;
     setError(null);
+    setErrorCode(null);
 
     const phoneE164 = phoneInputToE164(phoneCountry, phone);
     if (!phoneE164) {
@@ -176,6 +179,7 @@ export function JoinClient({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || "Katılım kaydedilemedi. Lütfen tekrar deneyin.");
+        setErrorCode(typeof data.code === "string" ? data.code : null);
         setSubmitting(false);
         return;
       }
@@ -291,6 +295,12 @@ export function JoinClient({
               error={photoError}
             >
               <label className="block cursor-pointer rounded-xl border border-dashed border-bg-subtle bg-bg-elevated p-4 text-center transition hover:border-green-500/50">
+                {/* Kasıtlı olarak `required` YOK: bu input `hidden` (görsel
+                    olarak gizli), ve görsel olarak gizli bir alana `required`
+                    koymak tarayıcının "unfocusable element" doğrulama hatası
+                    fırlatmasına yol açar — submit sessizce hiçbir şey
+                    yapmaz. Eksiklik `handleSubmit`'teki `!photoFile` kontrolü
+                    ve `photoError` ile JS tarafında karşılanıyor. */}
                 <input
                   type="file"
                   accept="image/jpeg,image/png"
@@ -315,7 +325,7 @@ export function JoinClient({
 
             <ContentConsent onChange={setConsentOk} />
 
-            {error === REGISTERED_EMAIL_ERROR ? (
+            {errorCode === "email_registered" ? (
               <p
                 role="alert"
                 aria-live="assertive"

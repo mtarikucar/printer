@@ -151,6 +151,21 @@ function batchAssignmentSet(args: {
   return set;
 }
 
+/**
+ * Bu seansa bağlı, reddedilmemiş sipariş adedi.
+ *
+ * Admin ucu "bu seansı geri taslağa çekmek sipariş ortada bırakır mı?" sorusunu
+ * bununla yanıtlar. Ayrı bir sorgu yazmak yerine burada durur ki "partiye giren
+ * sipariş" tanımı (iade edilmiş sipariş sayılmaz) tek yerde kalsın.
+ */
+export async function countBatchOrders(sessionId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(batchOrderFilter(sessionId));
+  return row?.count ?? 0;
+}
+
 export interface CloseSessionResult {
   orderCount: number;
   commissionRateBps: number;

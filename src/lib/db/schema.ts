@@ -1385,6 +1385,15 @@ export const workshopVenues = pgTable(
   },
   (t) => ({
     byStatus: index("workshop_venues_status_idx").on(t.status, t.createdAt),
+    // Bir talepten yalnızca BİR mekan doğabilir — uygulama katmanındaki
+    // findFirst-sonra-insert kontrolü aynı isteğe eşzamanlı iki POST karşısında
+    // yarış içerir (ikisi de kilitsiz SELECT'te "yok" görüp ikisi de insert
+    // edebilir). Kısmi indeks bunu DB'de yapısal olarak imkânsız kılar.
+    // Kısmi: requestId'siz (admin'in doğrudan eklediği) mekanlar için NULL
+    // birden çok kez geçerli olmalı — tam unique constraint bunu kırardı.
+    oneVenuePerRequest: uniqueIndex("workshop_venues_request_id_unique_idx")
+      .on(t.requestId)
+      .where(sql`${t.requestId} IS NOT NULL`),
   })
 );
 

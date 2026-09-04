@@ -9132,6 +9132,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "workshop_venues_request_id_unique_idx": {
+          "name": "workshop_venues_request_id_unique_idx",
+          "columns": [
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"workshop_venues\".\"request_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {

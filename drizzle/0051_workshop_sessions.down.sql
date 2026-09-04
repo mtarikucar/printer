@@ -10,5 +10,6 @@ SET lock_timeout = '5s';
 ALTER TABLE "orders" DROP COLUMN IF EXISTS "workshop_session_id";
 DROP TABLE IF EXISTS "workshop_participants";
 DROP TABLE IF EXISTS "workshop_sessions";
+DROP INDEX IF EXISTS "workshop_venues_request_id_unique_idx";
 DROP TABLE IF EXISTS "workshop_venues";
 DROP TYPE IF EXISTS "workshop_session_status";

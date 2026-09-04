@@ -106,6 +106,7 @@ CREATE INDEX IF NOT EXISTS "workshop_participants_draft_idx" ON "workshop_partic
 CREATE INDEX IF NOT EXISTS "workshop_sessions_venue_idx" ON "workshop_sessions" USING btree ("venue_id","starts_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "workshop_sessions_status_idx" ON "workshop_sessions" USING btree ("status","join_closes_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "workshop_venues_status_idx" ON "workshop_venues" USING btree ("status","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "workshop_venues_request_id_unique_idx" ON "workshop_venues" USING btree ("request_id") WHERE "request_id" IS NOT NULL;--> statement-breakpoint
 DO $$ BEGIN
   ALTER TABLE "orders" ADD CONSTRAINT "orders_workshop_session_id_workshop_sessions_id_fk" FOREIGN KEY ("workshop_session_id") REFERENCES "public"."workshop_sessions"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION WHEN duplicate_object THEN NULL;

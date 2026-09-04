@@ -21,7 +21,9 @@ export function createVenueSchema(locale: Locale = defaultLocale) {
 }
 
 export const updateVenueStatusSchema = z.object({
-  status: z.enum(["active", "paused", "archived"]),
+  status: z.enum(["active", "paused", "archived"], {
+    message: "Geçersiz durum",
+  }),
 });
 
 /**

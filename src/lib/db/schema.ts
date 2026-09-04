@@ -270,6 +270,11 @@ export const carrierEnum = pgEnum("carrier", [
   "ptt",
   "surat",
   "other",
+  // Atölye partileri elden teslim edilebilir (üretici mekana getirir ya da
+  // mekan seansta dağıtır). Bu değer üretici→boyacı bacağında zaten
+  // kullanılıyordu (orders.painterHandoffCarrier, düz text); müşteri bacağına
+  // taşınıyor ki kargosuz teslimat sahte takip numarası gerektirmesin.
+  "elden",
 ]);
 
 // Faz 3: IBAN change review gate. 'pending' means a new IBAN is parked in
@@ -734,6 +739,13 @@ export const orders = pgTable("orders", {
   // model; services/earning-base.ts then applies the legacy rule
   // (amountKurus − paintingPriceKurus) so historical earnings never move.
   productionBaseKurus: integer("production_base_kurus"),
+  // Atölye siparişi ise bağlı olduğu seans. NULL = normal sipariş, davranış
+  // hiç değişmez. Parti sorguları, toplu sevk ve "bu bir atölye siparişi mi"
+  // kararı bunun üstünden yürür.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  workshopSessionId: uuid("workshop_session_id").references(
+    (): any => workshopSessions.id
+  ),
   painterId: uuid("painter_id").references(() => painters.id),
   painterStatus: painterOrderStatusEnum("painter_status"),
   assignedToPainterAt: timestamp("assigned_to_painter_at"),
@@ -1335,6 +1347,131 @@ export const manufacturers = pgTable("manufacturers", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// ─── Atölye seansları: mekan, seans, katılımcı ───────────────────────────────
+export const workshopSessionStatusEnum = pgEnum("workshop_session_status", [
+  "draft",
+  "open",
+  "closed",
+  "in_production",
+  "shipped",
+  "delivered",
+  "completed",
+  "cancelled",
+]);
+
+/**
+ * Kalıcı atölye mekanı. `workshopRequests` bir LEAD'dir (tek seferlik talep);
+ * bu ise defalarca seans açılabilen bir partner kaydıdır. Onaylı bir talepten
+ * doğar (requestId) ya da admin doğrudan ekler (requestId NULL).
+ */
+export const workshopVenues = pgTable(
+  "workshop_venues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id").references(() => workshopRequests.id),
+    name: text("name").notNull(),
+    contactName: text("contact_name").notNull(),
+    contactEmail: text("contact_email").notNull(),
+    contactPhone: text("contact_phone").notNull(), // E.164
+    // Sipariş adresiyle AYNI tipte (orders.shippingAddress) — seans siparişlerine
+    // birebir kopyalanır, dönüşüm gerekmez. Posta kodu ZORUNLU: sipariş adresi
+    // /^\d{5}$/ şartı koyuyor, başvuru formu ise posta kodu toplamıyor.
+    address: jsonb("address").notNull().$type<TurkishAddress>(),
+    status: text("status").notNull().default("active"), // active | paused | archived
+    notes: text("notes"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byStatus: index("workshop_venues_status_idx").on(t.status, t.createdAt),
+  })
+);
+
+/**
+ * Bir mekandaki bir gün+saat. `joinToken` public katılım linkinin adresidir.
+ *
+ * `joinClosesAt` / `deliverBy` HESAPLANIP SAKLANIR (config/workshop.ts'ten
+ * türetilir), her okumada yeniden hesaplanmaz: admin tek bir seansta
+ * kaydırabilmeli ve geçmiş seansların kuralı sonradan değişen bir sabitle
+ * bozulmamalı.
+ */
+export const workshopSessions = pgTable(
+  "workshop_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    venueId: uuid("venue_id")
+      .notNull()
+      .references(() => workshopVenues.id, { onDelete: "restrict" }),
+    startsAt: timestamp("starts_at").notNull(),
+    durationMinutes: integer("duration_minutes").notNull().default(120),
+    capacity: integer("capacity").notNull(),
+    // Koşullu UPDATE ile artar (booked_count < capacity), oku-sonra-yaz DEĞİL:
+    // iki kişi son koltuğu aynı anda kapayabilir.
+    bookedCount: integer("booked_count").notNull().default(0),
+    joinToken: text("join_token").notNull().unique(),
+    joinClosesAt: timestamp("join_closes_at").notNull(),
+    deliverBy: timestamp("deliver_by").notNull(),
+    pricePerSeatKurus: integer("price_per_seat_kurus").notNull(),
+    // Seans AÇILIŞINDA ön rezerve edilir; link kapanınca soğuk atama + 24 saat
+    // kabul beklemesi olmadan parti bu üreticiye düşer. 5 günlük pencereyi
+    // gerçekçi kılan şey budur.
+    manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id),
+    manufacturerCommittedAt: timestamp("manufacturer_committed_at"),
+    // Kapanışta, parti büyüklüğüne göre donar (config/workshop.ts merdiveni) ve
+    // seansın TÜM siparişlerine aynı değerle yazılır. Erken katılan %60, geç
+    // katılan %40 almaz.
+    commissionRateBps: integer("commission_rate_bps"),
+    batchCarrier: carrierEnum("batch_carrier"),
+    batchTrackingNumber: text("batch_tracking_number"),
+    batchShippedAt: timestamp("batch_shipped_at"),
+    batchDeliveredAt: timestamp("batch_delivered_at"),
+    status: workshopSessionStatusEnum("status").notNull().default("draft"),
+    adminNotes: text("admin_notes"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byVenue: index("workshop_sessions_venue_idx").on(t.venueId, t.startsAt),
+    byStatus: index("workshop_sessions_status_idx").on(t.status, t.joinClosesAt),
+  })
+);
+
+/**
+ * Public linkten katılan kişi. Ödeme öncesi yalnızca `draftId` doludur —
+ * bu sistemde sipariş = ödenmiş sipariş demektir (promoteDraftToOrder
+ * status:"paid" sabitler), ödenmemiş niyet orderDrafts'ta yaşar.
+ */
+export const workshopParticipants = pgTable(
+  "workshop_participants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => workshopSessions.id, { onDelete: "cascade" }),
+    draftId: uuid("draft_id").references(() => orderDrafts.id),
+    orderId: uuid("order_id").references(() => orders.id),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone").notNull(), // E.164
+    photoKey: text("photo_key").notNull(), // photos/<nanoid>.jpg
+    // KVKK açık rıza + içerik hakları (fotoğraftaki kişi çocuksa velisinin
+    // rızası dâhil). Doğum günü ve okul etkinlikleri çocuk fotoğrafı demektir.
+    kvkkConsentAt: timestamp("kvkk_consent_at").notNull(),
+    contentConsentAt: timestamp("content_consent_at").notNull(),
+    status: text("status").notNull().default("pending_payment"),
+    cancelReason: text("cancel_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    bySession: index("workshop_participants_session_idx").on(
+      t.sessionId,
+      t.createdAt
+    ),
+    byDraft: index("workshop_participants_draft_idx").on(t.draftId),
+  })
+);
 
 export const manufacturerActions = pgTable("manufacturer_actions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -2299,6 +2436,43 @@ export const workshopRequestsRelations = relations(workshopRequests, ({ one }) =
     references: [users.id],
   }),
 }));
+
+export const workshopVenuesRelations = relations(workshopVenues, ({ one, many }) => ({
+  request: one(workshopRequests, {
+    fields: [workshopVenues.requestId],
+    references: [workshopRequests.id],
+  }),
+  sessions: many(workshopSessions),
+}));
+
+export const workshopSessionsRelations = relations(
+  workshopSessions,
+  ({ one, many }) => ({
+    venue: one(workshopVenues, {
+      fields: [workshopSessions.venueId],
+      references: [workshopVenues.id],
+    }),
+    manufacturer: one(manufacturers, {
+      fields: [workshopSessions.manufacturerId],
+      references: [manufacturers.id],
+    }),
+    participants: many(workshopParticipants),
+  })
+);
+
+export const workshopParticipantsRelations = relations(
+  workshopParticipants,
+  ({ one }) => ({
+    session: one(workshopSessions, {
+      fields: [workshopParticipants.sessionId],
+      references: [workshopSessions.id],
+    }),
+    order: one(orders, {
+      fields: [workshopParticipants.orderId],
+      references: [orders.id],
+    }),
+  })
+);
 
 export const customerNotificationsRelations = relations(customerNotifications, ({ one }) => ({
   user: one(users, {

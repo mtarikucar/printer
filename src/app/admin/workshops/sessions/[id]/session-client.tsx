@@ -201,7 +201,8 @@ export function SessionClient({
   // Tamamlanmış bir seansta iptal anlamsız (parti teslim edildi, hakediş
   // ödendi). Zaten `cancelled` seansta buton DURUR: uç aynı zamanda başarısız
   // iadelerin yeniden deneme yoludur.
-  const canCancelSession = session.status !== "completed";
+  const canCancelSession =
+    session.status !== "completed" && session.status !== "delivered";
   const isCancelled = session.status === "cancelled";
 
   const submitShip = async () => {

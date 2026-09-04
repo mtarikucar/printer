@@ -13,7 +13,7 @@
  */
 export const MANUFACTURER_ONBOARDING_TR = `# Üretici Ortaklık Sözleşmesi ve Bilgilendirme
 
-**Sürüm: 3.1 — Yürürlük tarihi: 5 Eylül 2026**
+**Sürüm: 3.1 — Yürürlük tarihi: 20 Eylül 2026**
 
 Bu metin, **Figurunica** platformu ("Platform") ile üretici ağına başvuran ve
 başvuruyu onaylayarak ("Üretici") aşağıdaki şartlar altında hizmet vermeyi

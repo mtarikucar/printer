@@ -7,12 +7,54 @@ import {
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
   WORKSHOP_DELIVER_DAYS_BEFORE,
 } from "../src/lib/config/workshop";
+import { itemPriceKurus } from "../src/lib/config/prices";
+import {
+  allowedFinishesForKind,
+  coerceFinishForKind,
+  coerceFinishForStyle,
+} from "../src/lib/validators/order";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
 function test(name: string, fn: () => void) {
   cases.push([name, fn]);
 }
+
+// ─── workshop_figure fiyat türü ─────────────────────────────────────────────
+
+test("workshop_figure düz fiyatlıdır: boyut/malzeme/yüzey etkilemez", () => {
+  const a = itemPriceKurus({ kind: "workshop_figure", material: "resin" });
+  const b = itemPriceKurus({
+    kind: "workshop_figure",
+    material: "filament",
+    size: "her ne ise",
+    finish: "paintable_kit",
+  });
+  assert.equal(a, WORKSHOP_FIGURE_PRICE_KURUS);
+  assert.equal(b, WORKSHOP_FIGURE_PRICE_KURUS);
+});
+
+test("workshop_figure yüzeyi paintable_kit'tir ve KORUNUR", () => {
+  assert.deepEqual(allowedFinishesForKind("workshop_figure"), ["paintable_kit"]);
+  assert.equal(coerceFinishForKind("workshop_figure", "paintable_kit"), "paintable_kit");
+  // Yanlış yüzey gelirse türün varsayılanına düşer, hand_painted'e KAÇMAZ.
+  assert.equal(coerceFinishForKind("workshop_figure", "hand_painted"), "paintable_kit");
+  assert.equal(coerceFinishForKind("workshop_figure", undefined), "paintable_kit");
+});
+
+test("normal figür davranışı DEĞİŞMEDİ (regresyon)", () => {
+  // Bu, atölye türünün mevcut tek ürün kuralını kırmadığının kanıtı.
+  assert.deepEqual(allowedFinishesForKind("figure"), ["hand_painted"]);
+  assert.equal(coerceFinishForStyle("realistic", "paintable_kit"), "hand_painted");
+});
+
+test("atölye siparişi kalem invariantını korur", () => {
+  const amountKurus = itemPriceKurus({ kind: "workshop_figure", material: "resin" });
+  const paintingPriceKurus = 0; // boyama seansın kendisi, boyacı payı yok
+  const productionBaseKurus = amountKurus - paintingPriceKurus;
+  assert.equal(productionBaseKurus + paintingPriceKurus, amountKurus);
+  assert.equal(productionBaseKurus, 135000);
+});
 
 // ─── Fiyat ──────────────────────────────────────────────────────────────────
 

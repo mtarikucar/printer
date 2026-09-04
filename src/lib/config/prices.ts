@@ -1,4 +1,5 @@
 import { isSizePreset, type SizePresetKey } from "./sizes";
+import { WORKSHOP_FIGURE_PRICE_KURUS } from "./workshop";
 
 export type FigurineMaterial = "resin" | "filament";
 
@@ -28,6 +29,16 @@ export class UnpricedSizeError extends Error {
  * Tune freely — this is the single source.
  */
 export const FIGURINE_PRICE_KURUS = 349900;
+
+/**
+ * Atölye figürü — BOYANMAMIŞ kişiye özel figür. Boyama işi atölye seansının
+ * kendisidir ve mekanda yapılır, bu yüzden boyacı partneri bu akışa hiç girmez
+ * ve siparişin boyama kalemi sıfırdır (tamamı üretim kalemi).
+ *
+ * Tek kaynak config/workshop.ts'tedir; buradan yalnızca yeniden ihraç edilir ki
+ * `itemPriceKurus` tek bir fiyat dağıtıcısı olarak kalsın.
+ */
+export { WORKSHOP_FIGURE_PRICE_KURUS };
 
 /**
  * The painting share of `FIGURINE_PRICE_KURUS` — the painter partner's earning
@@ -368,6 +379,7 @@ export function isFlatPricedKind(kind: string): boolean {
 // ─── Dispatcher: one trusted entry point for a bespoke item's base+finish ────
 export type ItemKind =
   | "figure"
+  | "workshop_figure"
   | "object"
   | "design"
   | "upload"
@@ -383,6 +395,12 @@ export function itemPriceKurus(args: {
   if (isFlatPricedKind(kind)) {
     // Flat price — size/material/finish do not apply to these products.
     return creativeLabPriceKurus(kind);
+  }
+  if (kind === "workshop_figure") {
+    // Düz fiyat: atölye figüründe boyut/malzeme/yüzey ekseni yoktur. Boyut
+    // kontrolünden ÖNCE dönmeli — atölye siparişi katalog boyut anahtarı
+    // taşımaz ve UnpricedSizeError'a düşmemeli.
+    return WORKSHOP_FIGURE_PRICE_KURUS;
   }
   if (kind === "upload") {
     return uploadModelPriceKurus(volumeMm3 ?? 0, material) + objectFinishSurchargeKurus(finish);

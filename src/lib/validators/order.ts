@@ -34,6 +34,9 @@ const OBJECT_FINISHES = ["raw", "smoothed", "painted"];
 const FLAT_FINISHES = ["paintable_kit"];
 const FINISHES_BY_KIND: Record<string, string[]> = {
   figure: FIGURE_FINISHES,
+  // Atölye figürü boyanmamış satılır; boyama seansın kendisidir. Bu yüzden
+  // `figure`'ın hand_painted zorunluluğu buraya UYGULANMAZ.
+  workshop_figure: ["paintable_kit"],
   object: OBJECT_FINISHES,
   keychain: FLAT_FINISHES,
   fridge_magnet: FLAT_FINISHES,
@@ -41,23 +44,30 @@ const FINISHES_BY_KIND: Record<string, string[]> = {
 };
 
 /**
- * Default finish when the client omits one. It MUST depend on the price kind:
- * a single flat default would be valid for one kind and instantly rejected by
- * the per-kind refine for the others. The figure default is `hand_painted` —
- * the finish the ₺3.499 base price actually pays for.
- */
-/**
- * The finishes a given price kind may legitimately carry. Exported so the
- * NON-web order writers (the WhatsApp agent, which never runs
+ * Bir FİYAT TÜRÜNÜN taşıyabileceği yüzeyler. Style-tabanlı sürüm bunu sarar.
+ * Atölye akışı bir tasarım şablonu taşımaz (DesignTemplate.priceKind dar bir
+ * birleşimdir ve workshop_figure oraya girmez), bu yüzden türü doğrudan verir.
+ *
+ * Exported so the NON-web order writers (the WhatsApp agent, which never runs
  * `createOrderSchema`) can enforce the same rule instead of trusting whatever
  * the model wrote — a figure with `paintable_kit` silently buries the painting
  * share in the manufacturer's base, and a flat Creative Lab item with
  * `hand_painted` charges a painter share the customer never paid.
  */
+export function allowedFinishesForKind(kind: string): string[] {
+  return FINISHES_BY_KIND[kind] ?? FIGURE_FINISHES;
+}
+
+/** Güvenilmeyen bir yüzeyi türün izin verdiğine daraltır. */
+export function coerceFinishForKind(kind: string, finish: unknown): string {
+  const allowed = allowedFinishesForKind(kind);
+  return typeof finish === "string" && allowed.includes(finish) ? finish : allowed[0];
+}
+
 export function allowedFinishesForStyle(style: unknown): string[] {
   const slug =
     typeof style === "string" && isValidTemplateSlug(style) ? style : DEFAULT_TEMPLATE_SLUG;
-  return FINISHES_BY_KIND[priceKindForStyle(slug)] ?? FIGURE_FINISHES;
+  return allowedFinishesForKind(priceKindForStyle(slug));
 }
 
 /**
@@ -69,6 +79,12 @@ export function coerceFinishForStyle(style: unknown, finish: unknown): string {
   return typeof finish === "string" && allowed.includes(finish) ? finish : allowed[0];
 }
 
+/**
+ * Default finish when the client omits one. It MUST depend on the price kind:
+ * a single flat default would be valid for one kind and instantly rejected by
+ * the per-kind refine for the others. The figure default is `hand_painted` —
+ * the finish the ₺3.499 base price actually pays for.
+ */
 function defaultFinishForStyle(style: unknown): string {
   const slug = typeof style === "string" && isValidTemplateSlug(style) ? style : DEFAULT_TEMPLATE_SLUG;
   return (FINISHES_BY_KIND[priceKindForStyle(slug)] ?? FIGURE_FINISHES)[0];

@@ -15,12 +15,14 @@ import { startWhatsAppOutboundWorker } from "../src/lib/queue/workers/whatsapp-o
 import { startWaInboundWorker } from "../src/lib/queue/workers/wa-inbound.worker";
 import { startWaAgentWorker } from "../src/lib/queue/workers/wa-agent.worker";
 import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-approval-sla.worker";
+import { startWorkshopCloseWorker } from "../src/lib/queue/workers/workshop-close.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
   getAnalyticsCleanupQueue,
   getAssignmentSlaQueue,
   getModelApprovalSlaQueue,
+  getWorkshopCloseQueue,
 } from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
@@ -46,6 +48,10 @@ const waAgentWorker = startWaAgentWorker();
 // A paid order parked in `awaiting_customer_approval` prints nothing until
 // somebody decides; this sweeper is that somebody.
 const modelApprovalSlaWorker = startModelApprovalSlaWorker();
+// Katılım penceresi kapanan atölye seanslarını kapatan, komisyon oranını
+// donduran ve partiyi üreticiye düşüren süpürme. Aynı iş, açık seansların
+// koltuk sayacını katılımcı satırlarıyla mutabakata getirir.
+const workshopCloseWorker = startWorkshopCloseWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -85,6 +91,13 @@ getModelApprovalSlaQueue().upsertJobScheduler(
   { name: "model-approval-sla" }
 );
 
+// Kapanış zamanı geçen seansları saatlik kapat, oranı dondur, partiyi ata.
+getWorkshopCloseQueue().upsertJobScheduler(
+  "workshop-close-hourly",
+  { every: 3600000 },
+  { name: "workshop-close" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -101,6 +114,7 @@ console.log("  - wa-outbound (concurrency: 4, 40/min)");
 console.log("  - wa-inbound (concurrency: 4)");
 console.log("  - wa-agent (concurrency: 4, 30/min, attempts: 1)");
 console.log("  - model-approval-sla (repeatable: every 6h)");
+console.log("  - workshop-close (repeatable: every 1h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -120,6 +134,7 @@ async function shutdown() {
     waInboundWorker.close(),
     waAgentWorker.close(),
     modelApprovalSlaWorker.close(),
+    workshopCloseWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

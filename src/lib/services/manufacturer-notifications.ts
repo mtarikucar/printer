@@ -15,7 +15,11 @@ export type ManufacturerNotificationType =
   | "qc_result"
   // Tüketici talebi (MSY m.12/A). Aracı hizmet sağlayıcı olarak talebi
   // satıcıya DERHAL iletmek zorundayız; bu bildirim o iletimin kendisidir.
-  | "consumer_request";
+  | "consumer_request"
+  // Atölye seansı: açılışta tarih taahhüdü çağrısı, kapanışta partinin
+  // atanması ya da iptali. Tek bir siparişe bağlı değildir — bir seansın
+  // TAMAMINA aittir, o yüzden `order_assigned` değil.
+  | "workshop_session";
 
 interface NotifyArgs {
   manufacturerId: string;

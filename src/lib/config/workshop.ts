@@ -76,6 +76,26 @@ export function workshopCommissionRateBps(paidOrderCount: number): number {
 }
 
 /**
+ * Merdiveni üreticiye gösterilecek satırlara çevirir ("1–2 sipariş → üretici
+ * payı %60"). Kademe metinleri `WORKSHOP_COMMISSION_TIERS`'ten ÜRETİLİR, elle
+ * yazılmaz: seans açılış bildiriminin gövdesindeki tablo, oranlar değiştiği gün
+ * sessizce yalan söyleyemez. Üreticiye gösterilen sayı komisyon değil, kendi
+ * NET payıdır (`10000 − bps`) — sözleşmede gördüğü sayı budur.
+ */
+export function workshopCommissionLadderLines(): string[] {
+  return WORKSHOP_COMMISSION_TIERS.map((tier, i) => {
+    const next = WORKSHOP_COMMISSION_TIERS[i + 1];
+    const range = !next
+      ? `${tier.minOrders}+`
+      : next.minOrders - tier.minOrders === 1
+        ? `${tier.minOrders}`
+        : `${tier.minOrders}–${next.minOrders - 1}`;
+    const sharePercent = (10000 - tier.commissionRateBps) / 100;
+    return `${range} sipariş → üretici payı %${sharePercent}`;
+  });
+}
+
+/**
  * Seansın başlangıcından katılım kapanışı ve teslim tarihini türetir.
  * Sonuç DB'ye YAZILIR, her okumada yeniden türetilmez: admin tek bir seansta
  * kaydırabilmeli ve geçmiş seansların kuralı sonradan değişen bir sabitle

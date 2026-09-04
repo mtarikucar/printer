@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { workshopSessions } from "@/lib/db/schema";
 import { updateSessionSchema } from "@/lib/validators/workshop";
+import { notifyManufacturerSessionOpened } from "@/lib/services/workshop-manufacturer-notify";
 
 /**
  * Seans durumu/kontenjanı/üreticisi/notları güncellenir.
@@ -29,10 +30,14 @@ export async function PATCH(
   }
   const data = parsed.data;
 
+  // Açılış bildirimi yalnızca GERÇEK bir draft → open geçişinde gider; zaten
+  // açık bir seansın kontenjanını güncellemek üreticiye ikinci bir çağrı
+  // göndermemeli.
+  let opensNow = false;
   if (data.status === "open") {
     const s = await db.query.workshopSessions.findFirst({
       where: eq(workshopSessions.id, id),
-      columns: { manufacturerId: true },
+      columns: { manufacturerId: true, status: true },
     });
     if (!s) {
       return NextResponse.json({ error: "Seans bulunamadı" }, { status: 404 });
@@ -46,6 +51,7 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    opensNow = s.status !== "open";
   }
 
   // createSession de aynı şartı koyar: kapanışı geçmişe taşımak, hiç
@@ -77,5 +83,13 @@ export async function PATCH(
   if (!row) {
     return NextResponse.json({ error: "Seans bulunamadı" }, { status: 404 });
   }
+
+  // Üretici tarihi burada öğrenir ve taahhüt eder: gövdede tarih, kontenjan,
+  // kişi başı fiyat ve komisyon merdiveni var. Bildirim kendi hatasını yutar —
+  // bir e-posta hatası seansın açılmasını geri almamalı.
+  if (opensNow) {
+    await notifyManufacturerSessionOpened(id);
+  }
+
   return NextResponse.json({ success: true });
 }

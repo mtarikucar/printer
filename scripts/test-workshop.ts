@@ -3,6 +3,7 @@ import {
   WORKSHOP_FIGURE_PRICE_KURUS,
   WORKSHOP_COMMISSION_TIERS,
   workshopCommissionRateBps,
+  workshopCommissionLadderLines,
   deriveSessionDates,
   WORKSHOP_JOIN_CLOSES_DAYS_BEFORE,
   WORKSHOP_DELIVER_DAYS_BEFORE,
@@ -136,6 +137,43 @@ test("sıfır ve negatif sipariş en düşük komisyona düşer", () => {
   // Parti yoksa merdivenin ilk basamağı geçerlidir; üreticiyi cezalandırmaz.
   assert.equal(workshopCommissionRateBps(0), 4000);
   assert.equal(workshopCommissionRateBps(-1), 4000);
+});
+
+// Üreticiye gönderilen bildirimdeki merdiven tablosu. Elle yazılmış bir tablo,
+// WORKSHOP_COMMISSION_TIERS değiştiği gün sessizce yalan söyler; bu yüzden metin
+// merdivenden ÜRETİLİR ve testi merdivenin kendisiyle karşılaştırılır.
+
+test("merdiven tablosu üreticinin payını satır satır yazar", () => {
+  assert.deepEqual(workshopCommissionLadderLines(), [
+    "1–2 sipariş → üretici payı %60",
+    "3–5 sipariş → üretici payı %55",
+    "6–10 sipariş → üretici payı %50",
+    "11–15 sipariş → üretici payı %45",
+    "16+ sipariş → üretici payı %40",
+  ]);
+});
+
+test("tablodaki her satır merdivenin gerçek oranını gösterir", () => {
+  const lines = workshopCommissionLadderLines();
+  assert.equal(lines.length, WORKSHOP_COMMISSION_TIERS.length);
+  WORKSHOP_COMMISSION_TIERS.forEach((tier, i) => {
+    // Satırdaki yüzde, o kademenin ilk sipariş adedinde merdivenin döndürdüğü
+    // orandan hesaplanan üretici payı olmalı.
+    const share = (10000 - workshopCommissionRateBps(tier.minOrders)) / 100;
+    assert.ok(
+      lines[i].includes(`%${share}`),
+      `${i}. satır ${share} payını göstermiyordu: ${lines[i]}`
+    );
+    assert.ok(lines[i].startsWith(String(tier.minOrders)), lines[i]);
+  });
+});
+
+test("son kademe açık uçludur, aradakiler kapalı aralık", () => {
+  const lines = workshopCommissionLadderLines();
+  assert.ok(lines[lines.length - 1].startsWith("16+"), lines[lines.length - 1]);
+  for (const line of lines.slice(0, -1)) {
+    assert.ok(line.includes("–"), `kapalı aralık bekleniyordu: ${line}`);
+  }
 });
 
 test("merdiven tanımı artan sırada ve boşluksuz", () => {

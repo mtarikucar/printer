@@ -171,6 +171,7 @@ let notificationQueue: Queue | null = null;
 let analyticsCleanupQueue: Queue | null = null;
 let assignmentSlaQueue: Queue | null = null;
 let modelApprovalSlaQueue: Queue | null = null;
+let workshopCloseQueue: Queue | null = null;
 
 export function getPreviewGenerationQueue(): Queue {
   if (!previewGenerationQueue) {
@@ -365,6 +366,27 @@ export function getModelApprovalSlaQueue(): Queue {
     });
   }
   return modelApprovalSlaQueue;
+}
+
+/**
+ * Saatlik süpürme: kapanış zamanı geçmiş atölye seanslarını kapatır, komisyon
+ * oranını dondurur ve partiyi ön rezerve üreticiye düşürür. Aynı süpürme, açık
+ * seansların koltuk sayacını gerçek katılımcı satırlarıyla mutabakata getirir.
+ * Kimse izlemezse seans açık kalır ve siparişler üretime hiç girmez.
+ */
+export function getWorkshopCloseQueue(): Queue {
+  if (!workshopCloseQueue) {
+    workshopCloseQueue = new Queue("workshop-close", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // Tek deneme: süpürme idempotent ve bir saat sonra tekrar koşuyor.
+        attempts: 1,
+        removeOnComplete: { count: 20 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return workshopCloseQueue;
 }
 
 export function getAnalyticsCleanupQueue(): Queue {

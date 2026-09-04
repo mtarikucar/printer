@@ -315,6 +315,10 @@ export default async function ManufacturerOrderDetailPage({
       status: order.status,
       manufacturerStatus: order.manufacturerStatus,
       needsPainting: order.needsPainting,
+      // Atölye partisine ait sipariş: tek tek kargolanamaz (ship ucu 409
+      // döner). Ekran bunu SÖYLEMELİ, yoksa üretici QC onayından sonra
+      // kargolamayı dener ve neden reddedildiğini anlamaz.
+      isWorkshop: order.workshopSessionId != null,
       painterStatus: order.painterStatus,
       // Manufacturer-level flag surfaced on the order so the client can offer
       // the in-house "paint + ship" path instead of a forced painter hand-off.

@@ -83,6 +83,9 @@ export default async function ManufacturerOrdersPage({
         quantity: true,
         needsPainting: true,
         upsells: true,
+        // Atölye partisine ait siparişler tek tek kargolanmaz (uç 409 döner);
+        // üreticinin bunu listede GÖRMESİ gerekiyor ki denemesin.
+        workshopSessionId: true,
       },
     }),
   ]);
@@ -110,6 +113,7 @@ export default async function ManufacturerOrdersPage({
           quantity: o.quantity,
           needsPainting: o.needsPainting,
           rushShipping: ((o.upsells ?? []) as string[]).includes("rush_shipping"),
+          isWorkshop: o.workshopSessionId != null,
         }))}
         total={totalCount}
         page={page}

@@ -52,6 +52,8 @@ interface OrderData {
   status: string;
   manufacturerStatus: string | null;
   needsPainting: boolean;
+  /** Atölye partisine ait — kargo Figurünica'nın toplu sevkiyle gider. */
+  isWorkshop: boolean;
   handedToPainter: boolean;
   painterStatus: string | null;
   paintsInHouse: boolean;
@@ -361,7 +363,12 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   // assigned, only the hand-off pipeline applies.
   const notHandedOff = !order.painterStatus || order.painterStatus === "unassigned";
   const inHousePaint = order.needsPainting && order.paintsInHouse && notHandedOff;
-  const canShipDirect = canShip && (!order.needsPainting || inHousePaint);
+  // Atölye siparişinde kargo formu HİÇ gösterilmez: parti mekana Figurünica'nın
+  // toplu sevkiyle gider ve sunucu ucu (manufacturer/orders/[id]/ship) tekil
+  // sevki 409 ile reddediyor. Formu göstermek üreticiyi doğrudan o duvara
+  // yollamak olurdu; yerine ne olacağını anlatan bir kart konur (aşağıda).
+  const canShipDirect =
+    canShip && !order.isWorkshop && (!order.needsPainting || inHousePaint);
   const isShipped = order.manufacturerStatus === "shipped";
   const canCancel = [
     "accepted",
@@ -445,6 +452,11 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           {order.upsells.includes("rush_shipping") && (
             <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
               ⚡ HIZLI KARGO
+            </span>
+          )}
+          {order.isWorkshop && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
+              ATÖLYE PARTİSİ — TOPLU SEVK
             </span>
           )}
           {/* What was ordered — the snapshot was serialized but never shown. */}
@@ -1218,6 +1230,20 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 boyayıp müşteriye kargolayacak.
               </div>
             )}
+
+          {/* Atölye partisi: sevkiyat üreticinin işi DEĞİL. */}
+          {order.isWorkshop && canShip && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 text-sm text-amber-900">
+              <p className="font-semibold">Bu sipariş bir atölye partisine ait</p>
+              <p className="mt-1 text-amber-900/80">
+                Tek tek kargolamayın — parti, seans mekanına Figurünica
+                tarafından TEK sevkiyatla gönderilir ve katılımcılar figürlerini
+                atölyede elden alır. Sizden beklenen basmak ve QC onayına
+                göndermek; gerisini biz hallederiz. Hakedişiniz parti sevk
+                edildiğinde tahakkuk eder.
+              </p>
+            </div>
+          )}
 
           {canShipDirect && (
             <div className="rounded-2xl shadow-sm border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-5">

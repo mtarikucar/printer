@@ -34,6 +34,8 @@ interface ManufacturerOrdersClientProps {
     quantity: number;
     needsPainting: boolean;
     rushShipping: boolean;
+    /** Atölye partisine ait — tek tek kargolanamaz, parti admin panelinden gider. */
+    isWorkshop: boolean;
   }>;
   total: number;
   page: number;
@@ -193,6 +195,17 @@ export function ManufacturerOrdersClient({
                     {order.needsPainting && (
                       <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[11px] font-semibold text-purple-700">
                         Boyamalı
+                      </span>
+                    )}
+                    {/* Bu siparişin kargosu SİZE ait değil: parti mekana tek
+                        sevkiyatla gider. Rozet olmadan üretici QC sonrası
+                        kargolamayı dener ve 409 duvarına çarpar. */}
+                    {order.isWorkshop && (
+                      <span
+                        className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800"
+                        title="Atölye partisi — tek tek kargolanmaz, parti mekana toplu gönderilir"
+                      >
+                        Atölye
                       </span>
                     )}
                   </span>

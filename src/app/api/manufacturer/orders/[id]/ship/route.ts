@@ -38,6 +38,31 @@ export async function POST(
     const body = await request.json();
     const validated = createShipOrderSchema().parse(body);
 
+    // Atölye siparişi TEK TEK kargolanmaz.
+    //
+    // Bir atölye partisi mekana TEK sevkiyatla gider ve katılımcı figürünü
+    // seansta elden alır. Bu uçtan kargolanırsa müşteriye standart "kargoya
+    // verildi, takip no …" e-postası gider (bkz. aşağısı) ve katılımcı,
+    // atölyede teslim alacağı bir koli için günlerce takip numarası kovalar;
+    // ayrıca hakediş atölye toplu sevkinin dışında tahakkuk eder ve seans
+    // hiçbir zaman `shipped`e ulaşamaz. Kapı ÖNCE burada (anlaşılır Türkçe
+    // mesajla), sonra aşağıdaki koşullu UPDATE'te (yarışa karşı) durur.
+    const workshopRow = await db.query.orders.findFirst({
+      where: and(eq(orders.id, id), eq(orders.manufacturerId, session.manufacturerId)),
+      columns: { workshopSessionId: true },
+    });
+    if (workshopRow?.workshopSessionId) {
+      return NextResponse.json(
+        {
+          error:
+            "Bu sipariş bir atölye partisine ait ve tek tek kargolanamaz. " +
+            "Parti, seans mekanına Figurünica tarafından tek sevkiyatla " +
+            "gönderilir; siz yalnızca basıp QC onayına gönderin.",
+        },
+        { status: 409 }
+      );
+    }
+
     // Atomic status transition: printed -> shipped
     const [order] = await db
       .update(orders)
@@ -55,6 +80,9 @@ export async function POST(
           eq(orders.manufacturerId, session.manufacturerId),
           // Ship gate: only orders that passed admin QC approval may ship.
           eq(orders.manufacturerStatus, "qc_approved"),
+          // Workshop batches ship from the admin panel, never one by one. The
+          // readable refusal is above; this is the race-proof half.
+          isNull(orders.workshopSessionId),
           // Painting orders: a manufacturer that paints in-house may ship one it
           // did NOT hand off (earning the full amount); everyone else must hand
           // off to a painter. `isNull(painterId)` blocks shipping any order

@@ -47,6 +47,21 @@ function formatKurus(kurus: number): string {
   })}`;
 }
 
+/**
+ * Üreticinin seansı görüp TAAHHÜT edeceği panel adresi.
+ *
+ * `sessionJoinUrl` ile aynı taban kuralı, ama bu modül `workshop-session.ts`'i
+ * import ETMEZ (dosya başlığındaki döngü gerekçesi) — bu yüzden birkaç satır
+ * bilerek kopyadır.
+ */
+function manufacturerSessionUrl(sessionId: string): string {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com").replace(
+    /\/$/,
+    ""
+  );
+  return `${base}/manufacturer/workshop-sessions/${sessionId}`;
+}
+
 /** Seans + mekan. Mekansız seans olamaz; yoksa bildirim üretilmez. */
 async function loadSessionWithVenue(sessionId: string) {
   const session = await db.query.workshopSessions.findFirst({
@@ -79,6 +94,11 @@ function venueLine(session: SessionWithVenue): string {
  * soğuk atama ve 24 saatlik kabul beklemesi olmadan doğrudan ona düşer. 5 günlük
  * pencereyi gerçekçi kılan şey budur — bu yüzden bu bildirim bir "sipariş atandı"
  * bildirimi değil, bir TAKVİM taahhüdü talebidir.
+ *
+ * Gövde, taahhüt ekranının BAĞLANTISINI taşır. Taşımadığı sürece taahhüt ucu
+ * (`POST /api/manufacturer/workshop-sessions/[id]/commit`) hiçbir yerden
+ * çağrılmıyordu: `manufacturer_committed_at` her seansta NULL kalıyor, yani
+ * "üretici açılışta taahhüt etti" dayanağının kaydı hiç tutulmuyordu.
  */
 export async function notifyManufacturerSessionOpened(
   sessionId: string
@@ -107,7 +127,9 @@ export async function notifyManufacturerSessionOpened(
         `etmeniz gerekmez; siparişler panelinize doğrudan "kabul edildi" olarak düşer.\n\n` +
         `Payınız parti büyüklüğüne göre belirlenir ve kapanışta DONAR — partideki\n` +
         `her sipariş aynı oranı taşır:\n${ladder}\n\n` +
-        `Tarihi tutamayacaksanız kapanıştan önce bize haber verin.`,
+        `Bu tarihi tutabiliyorsanız aşağıdaki bağlantıdan TAAHHÜT EDİN:\n` +
+        `${manufacturerSessionUrl(sessionId)}\n\n` +
+        `Tarihi tutamayacaksanız taahhüt etmeyin ve kapanıştan önce bize haber verin.`,
     });
   } catch (err) {
     console.error(

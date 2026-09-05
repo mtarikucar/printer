@@ -23,6 +23,11 @@ export interface JoinInput {
   /** E.164 — `joinSessionSchema` normalize eder. */
   phone: string;
   photoKey: string;
+  /**
+   * Giriş yapmış müşterinin oturumdaki e-postası (yoksa null). Kayıtlı hesap
+   * kilidini YALNIZCA forma yazılan e-postayla birebir eşleştiğinde açar.
+   */
+  authedEmail?: string | null;
 }
 
 /**
@@ -120,10 +125,19 @@ export async function joinSession(
   // Public guest checkout: allowExistingAccount ASLA verilmez. E-postası kayıtlı
   // birinin siparişini bir yabancının başkasının hesabına iliştirmesini
   // engelleyen şey budur.
+  // Kayıtlı hesap kilidi yalnızca KİŞİNİN KENDİSİ için açılır: oturumdaki
+  // e-posta forma yazılanla birebir aynıysa. Giriş yapmamış birine asla
+  // açılmaz — onu açmak, bir e-postayı bilen yabancının başkasının hesabına
+  // sipariş iliştirmesi demek olurdu (bkz. guest-user.ts'teki güvenlik notu).
+  // Bu olmadan kayıtlı müşteri seansa HİÇ katılamıyordu: `email_registered`
+  // hatası "giriş yapıp tekrar deneyin" diyor ama giriş yapmak bu uçta
+  // hiçbir şeyi değiştirmediği için çıkışsız bir döngüydü.
+  const authedEmail = input.authedEmail?.trim().toLowerCase() || null;
   const guest = await resolveOrCreateGuestUser({
     email,
     name: input.fullName,
     phone: input.phone,
+    allowExistingAccount: authedEmail !== null && authedEmail === email,
   });
   if (!guest.ok) {
     // ResolveGuestResult: { ok: false; code: "email_registered" } — alan adı

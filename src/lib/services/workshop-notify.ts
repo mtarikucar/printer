@@ -48,7 +48,11 @@ function formatDate(value?: Date | string | null): string {
 }
 
 function formatDateTime(value: Date): string {
+  // Saat dilimi AÇIKÇA yazılır: sunucu/konteyner UTC'de koşuyor ve bu değer bir
+  // FİZİKSEL RANDEVU saati. Belirtilmezse katılımcıya seansın saati 3 saat
+  // geride gider ve insanlar atölyeye yanlış saatte gelir.
   return value.toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     day: "2-digit",
     month: "long",
     year: "numeric",

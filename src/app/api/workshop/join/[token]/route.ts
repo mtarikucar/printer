@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { joinSessionSchema } from "@/lib/validators/workshop";
 import { joinSession } from "@/lib/services/workshop-participant";
+import { getSessionUser } from "@/lib/services/customer-auth";
 
 /**
  * Public atölye katılımı: `/atolye/katil/<token>` formunun gönderim ucu.
@@ -66,11 +67,16 @@ export async function POST(
   }
 
   try {
+    // Giriş yapmış müşteri kendi e-postasıyla katılabilsin diye oturum
+    // okunur. Uç hâlâ kimlik doğrulaması İSTEMEZ (token linkin kendisidir);
+    // oturum yalnızca kayıtlı hesap kilidini kişinin kendisi için açar.
+    const authed = await getSessionUser();
     const result = await joinSession(token, {
       fullName: parsed.data.fullName,
       email,
       phone: parsed.data.phone,
       photoKey: parsed.data.photoKey,
+      authedEmail: authed?.email ?? null,
     });
     if ("error" in result) {
       // `code` makine-okunabilir ayrım taşır (bkz. workshop-participant.ts'teki

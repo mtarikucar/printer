@@ -229,11 +229,22 @@ jobs:
             log ".env senkronize edildi (600 izinleri)."
 
             # ─── 1. Pre-deploy DB Backup ─────────────────────────────
+            # ESKI yedekler yeni yedegi ALMADAN once silinir. Tersi yapilirsa
+            # (disk temizligi adiminda) glob az once yazilan dosyayi da siler ve
+            # migration geri donusu olmayan bir DB uzerinde calisir.
+            log "Eski yedekler temizleniyor..."
+            rm -f "$PROJECT_DIR"/backup_predeploy_*.sql 2>/dev/null || true
+
             log "Veritabani yedegi aliniyor..."
             if docker ps --format '{{.Names}}' | grep -q printer_postgres; then
-                docker exec printer_postgres pg_dump -U printer -d printer > "$BACKUP_FILE" 2>/dev/null && \
-                    log "Yedek alindi: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))" || \
-                    warn "Yedek alinamadi, devam ediliyor..."
+                if docker exec printer_postgres pg_dump -U printer -d printer > "$BACKUP_FILE" 2>/dev/null \
+                   && [ -s "$BACKUP_FILE" ]; then
+                    log "Yedek alindi: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+                else
+                    # Bos/yarim dosyayi BIRAKMA: yedek gibi gorunur ama degildir.
+                    rm -f "$BACKUP_FILE"
+                    warn "Yedek ALINAMADI - bu deploy'un geri donus noktasi YOK."
+                fi
             else
                 warn "Postgres container calismiyor, yedek atlaniyor."
             fi
@@ -243,7 +254,6 @@ jobs:
             log "Disk temizleniyor..."
             docker image prune -af --filter "until=12h" > /dev/null 2>&1 || true
             docker builder prune -af > /dev/null 2>&1 || true
-            rm -f "$PROJECT_DIR"/backup_predeploy_*.sql 2>/dev/null || true
             log "Disk temizlendi: $(df -h / | tail -1 | awk '{ print $4 }') bos"
             log "Image'lar cekiliyor..."
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin

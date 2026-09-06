@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -112,6 +113,7 @@ function formatDeadline(iso?: string, locale: Locale = "tr"): string {
   if (!iso) return "";
   try {
     return new Date(iso).toLocaleString(locale === "tr" ? "tr-TR" : "en-US", {
+      timeZone: APP_TIME_ZONE,
       dateStyle: "long",
       timeStyle: "short",
     });

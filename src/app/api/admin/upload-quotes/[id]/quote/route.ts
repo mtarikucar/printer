@@ -5,6 +5,7 @@ import { uploadedModels } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { sendEmail } from "@/lib/services/email";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 
 export const runtime = "nodejs";
 
@@ -62,7 +63,7 @@ export async function POST(
       orderNumber: id.slice(0, 8),
       customerName: "",
       customSubject: "3D model baskı teklifin hazır",
-      customBody: `Yüklediğin "${row.fileName}" modeli için baskı fiyatı: ₺${priceTRY}.\n\nSiparişe çevirmek ve ödemek için: ${link}\n\nTeklif ${expiresAt.toLocaleDateString("tr-TR")} tarihine kadar geçerlidir.`,
+      customBody: `Yüklediğin "${row.fileName}" modeli için baskı fiyatı: ₺${priceTRY}.\n\nSiparişe çevirmek ve ödemek için: ${link}\n\nTeklif ${expiresAt.toLocaleDateString("tr-TR", { timeZone: APP_TIME_ZONE })} tarihine kadar geçerlidir.`,
     }).catch((e) => console.error("quote email failed (non-fatal)", e));
   }
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   pending: { label: "Beklemede", cls: "bg-amber-100 text-amber-700" },
@@ -143,7 +144,9 @@ export default async function AdminDraftsPage({
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {d.bankTransferReceiptUploadedAt
-                        ? new Date(d.bankTransferReceiptUploadedAt).toLocaleString("tr-TR")
+                        ? new Date(d.bankTransferReceiptUploadedAt).toLocaleString("tr-TR", {
+                          timeZone: APP_TIME_ZONE,
+                        })
                         : "—"}
                     </td>
                     <td className="px-4 py-3 text-right">

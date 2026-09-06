@@ -14,6 +14,7 @@ import type { workshopRequests } from "@/lib/db/schema";
 import { WORKSHOP_SEAT_HOLD_HOURS } from "@/lib/config/workshop";
 import { sessionJoinUrl } from "@/lib/services/workshop-session";
 import type { ReleasedSeat } from "@/lib/services/workshop-seat";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 import {
   venueTypeLabel,
   ageGroupLabel,
@@ -38,6 +39,7 @@ function formatDate(value?: Date | string | null): string {
   if (!value) return "";
   try {
     return new Date(value).toLocaleDateString("tr-TR", {
+      timeZone: APP_TIME_ZONE,
       day: "2-digit",
       month: "long",
       year: "numeric",
@@ -52,7 +54,7 @@ function formatDateTime(value: Date): string {
   // FİZİKSEL RANDEVU saati. Belirtilmezse katılımcıya seansın saati 3 saat
   // geride gider ve insanlar atölyeye yanlış saatte gelir.
   return value.toLocaleString("tr-TR", {
-    timeZone: "Europe/Istanbul",
+    timeZone: APP_TIME_ZONE,
     day: "2-digit",
     month: "long",
     year: "numeric",

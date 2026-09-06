@@ -25,6 +25,7 @@ import { workshopSessions } from "@/lib/db/schema";
 import { workshopCommissionLadderLines } from "@/lib/config/workshop";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 
 /**
  * `workshop-notify.ts` de aynı biçimlendiricileri tutuyor; oradan import etmek
@@ -35,7 +36,7 @@ function formatDateTime(value: Date): string {
   // FİZİKSEL RANDEVU saati. Belirtilmezse katılımcıya seansın saati 3 saat
   // geride gider ve insanlar atölyeye yanlış saatte gelir.
   return value.toLocaleString("tr-TR", {
-    timeZone: "Europe/Istanbul",
+    timeZone: APP_TIME_ZONE,
     day: "2-digit",
     month: "long",
     year: "numeric",

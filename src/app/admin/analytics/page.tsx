@@ -4,6 +4,7 @@ import Link from "next/link";
 import { sql, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderDrafts, analyticsEvents, products } from "@/lib/db/schema";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 
 // ── formatting helpers ──────────────────────────────────────────────────────
 const fmt = (k: number) =>
@@ -211,7 +212,7 @@ export default async function AdminAnalyticsPage({
                 <div
                   className="bg-green-500/80 rounded-t hover:bg-green-500 transition-colors"
                   style={{ height: `${Math.max((t.rev / maxRev) * 100, 2)}%` }}
-                  title={`${t.day.toLocaleDateString("tr-TR")}: ${fmtFull(t.rev)} · ${t.c} sipariş`}
+                  title={`${t.day.toLocaleDateString("tr-TR", { timeZone: APP_TIME_ZONE })}: ${fmtFull(t.rev)} · ${t.c} sipariş`}
                 />
               </div>
             ))}

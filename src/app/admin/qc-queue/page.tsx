@@ -7,6 +7,7 @@ import { orders } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplayTr } from "@/lib/config/sizes";
+import { APP_TIME_ZONE } from "@/lib/config/timezone";
 
 /**
  * Admin QC queue — orders whose manufacturer has uploaded finished-product
@@ -64,7 +65,8 @@ export default async function AdminQcQueuePage() {
                   <span className="font-mono text-sm text-amber-600">{it.orderNumber}</span>
                   <span className="text-xs text-gray-400">
                     {new Date(it.updatedAt).toLocaleDateString(
-                      locale === "tr" ? "tr-TR" : "en-US"
+                      locale === "tr" ? "tr-TR" : "en-US",
+                      { timeZone: APP_TIME_ZONE }
                     )}
                   </span>
                 </div>

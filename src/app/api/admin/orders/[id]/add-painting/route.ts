@@ -9,6 +9,8 @@ import { finishNeedsPainter } from "@/lib/config/prices";
 import { carvePaintingShare, manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 /**
  * Boyama kalemi olmadan satılmış bir siparişe boyama payı ekler; ardından
@@ -81,10 +83,17 @@ export async function POST(
       manufacturerStatus: true,
       shippedAt: true,
       workshopSessionId: true,
+      paymentStatus: true,
     },
   });
   if (!order) {
     return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+  }
+  // İade kararı (refund-end-state): iade edilen sipariş ileri gitmez. Boyama
+  // payı ayırmak, parası müşteriye dönmüş bir iş için boyacı hattını (ve bir
+  // boyacı hakedişini) açmak olurdu.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
   }
   if (order.needsPainting || order.paintingPriceKurus > 0) {
     return NextResponse.json(
@@ -170,6 +179,8 @@ export async function POST(
         isNull(orders.painterId),
         isNull(orders.shippedAt),
         isNull(orders.workshopSessionId),
+        // Okuma ile yazma arasında gelen bir iade de kazansın.
+        notRefundedGuard(),
         sql`NOT EXISTS (SELECT 1 FROM ${manufacturerEarnings} WHERE ${manufacturerEarnings.orderId} = ${orders.id} AND ${manufacturerEarnings.status} <> 'reversed')`
       )
     )

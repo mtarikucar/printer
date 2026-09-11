@@ -17,6 +17,8 @@ interface PainterOption {
     il: string;
     postaKodu: string;
   } | null;
+  /** Already refused this order (declinedPainterIds): shown, but not pickable. */
+  declined?: boolean;
 }
 
 // Shown on a manufacturer's order detail when the order carries the
@@ -32,11 +34,13 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/manufacturer/painters")
+    // orderId lets the API mark painters who already refused THIS job, so they
+    // show greyed out here instead of failing with a 409 on send.
+    fetch(`/api/manufacturer/painters?orderId=${encodeURIComponent(orderId)}`)
       .then((r) => (r.ok ? r.json() : { painters: [] }))
       .then((d) => setPainters(d.painters ?? []))
       .catch(() => setPainters([]));
-  }, []);
+  }, [orderId]);
 
   const send = async () => {
     if (!selected) {
@@ -77,9 +81,11 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
       </p>
       {painters === null ? (
         <p className="text-sm text-gray-400">Boyacılar yükleniyor…</p>
-      ) : painters.length === 0 ? (
+      ) : painters.every((p) => p.declined) ? (
         <p className="text-sm text-amber-700">
-          Şu an uygun (aktif, kabul açık) boyacı yok. Lütfen daha sonra tekrar deneyin.
+          {painters.length === 0
+            ? "Şu an uygun (aktif, kabul açık) boyacı yok. Lütfen daha sonra tekrar deneyin."
+            : "Uygun boyacıların hepsi bu işi daha önce reddetti. Lütfen admin ekibiyle iletişime geçin."}
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
@@ -90,9 +96,10 @@ export function SendToPainterPanel({ orderId }: { orderId: string }) {
           >
             <option value="">Boyacı seçin</option>
             {painters.map((p) => (
-              <option key={p.id} value={p.id}>
+              <option key={p.id} value={p.id} disabled={p.declined}>
                 {p.companyName}
                 {p.il ? ` — ${p.il}` : ""}
+                {p.declined ? " (bu işi reddetti)" : ""}
               </option>
             ))}
           </select>

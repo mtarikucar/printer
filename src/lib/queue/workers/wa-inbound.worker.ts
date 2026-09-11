@@ -25,6 +25,7 @@ import {
 } from "../../services/whatsapp-conversation";
 import { downloadInboundImage } from "../../services/whatsapp-media";
 import { decideModelApproval } from "../../services/model-approval";
+import { isRefunded } from "../../config/order-status-policy";
 import { isFlagEnabled } from "../../services/flags";
 import { scheduleAgentTurn } from "./wa-agent.worker";
 
@@ -105,6 +106,7 @@ async function handleApprovalButton(
       id: orders.id,
       orderNumber: orders.orderNumber,
       modelApprovalToken: orders.modelApprovalToken,
+      paymentStatus: orders.paymentStatus,
     })
     .from(orders)
     .where(
@@ -132,14 +134,23 @@ async function handleApprovalButton(
     userAgent: "whatsapp",
   });
 
-  const reply =
-    result.alreadyDecided
+  // `refunded` comes with `alreadyDecided` (decideModelApproval refuses
+  // approval and revision on a refunded order), so it is checked first:
+  // "kararınızı zaten almıştık" was untrue there, no decision was taken and the
+  // money had already gone back. A cancellation still closes a refunded order,
+  // but promising to get in touch about a refund that already happened was
+  // untrue too. A refund is terminal, so the read above settles that case.
+  const reply = result.refunded
+    ? `${order.orderNumber} numaralı siparişinizin ödemesi size iade edildi. Bu yüzden onay ya da değişiklik talebi artık alınmıyor; yapmanız gereken başka bir işlem yok. Sorunuz varsa "temsilci" yazabilirsiniz.`
+    : result.alreadyDecided
       ? "Bu sipariş için kararınızı zaten almıştık, tekrar bir işlem yapmanıza gerek yok."
       : decision === "approved"
         ? `Onayınızı aldık — ${order.orderNumber} numaralı figürünüz baskıya giriyor. Teşekkürler!`
         : decision === "revision"
           ? "Değişiklik talebinizi aldık. Ekibimiz en kısa sürede size dönecek."
-          : "Siparişinizi iptal talebine aldık. İadeniz için sizinle iletişime geçeceğiz.";
+          : isRefunded(order)
+            ? "Siparişinizi iptal ettik. Ödemeniz zaten iade edilmişti; ek bir işlem yapmanıza gerek yok."
+            : "Siparişinizi iptal talebine aldık. İadeniz için sizinle iletişime geçeceğiz.";
 
   await enqueueText(conversationId, from, reply);
 

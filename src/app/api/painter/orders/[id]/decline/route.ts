@@ -5,11 +5,17 @@ import { orders, painterActions, manufacturerEarnings } from "@/lib/db/schema";
 import { requireActivePainter } from "@/lib/services/painter-guard";
 import { reverseEarning } from "@/lib/services/payouts";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { isRefunded } from "@/lib/config/order-status-policy";
 
 // Painter declines an assigned job: the order reverts to the manufacturer's
 // post-QC state (status 'quality_check', painter cleared) so the manufacturer
 // can send it to another painter. The decliner is recorded so a later
 // reassignment can skip them.
+//
+// A decline is cleanup, so it is never refused on a refunded job. Only the
+// manufacturer's notice changes there: a refunded order cannot be sent to
+// another painter (send-to-painter answers 409), so asking them to do it
+// would send them into a refusal.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -53,10 +59,13 @@ export async function POST(
         eq(orders.painterStatus, "assigned")
       )
     )
-    .returning({ id: orders.id });
+    // paymentStatus as of this write, not the earlier read: a refund landing in
+    // between must still change the notice below.
+    .returning({ id: orders.id, paymentStatus: orders.paymentStatus });
   if (!order) {
     return NextResponse.json({ error: "İşlem başarısız" }, { status: 400 });
   }
+  const refunded = isRefunded(order);
 
   // The manufacturer's PRINT-portion earning was accrued at hand-off
   // (send-to-painter). The hand-off just bounced, so back it out and clear the
@@ -85,13 +94,20 @@ export async function POST(
     .values({ orderId: id, painterId: g.painterId, action: "decline", notes: reason })
     .catch((e) => console.error("painterActions decline failed", e));
 
-  // Tell the manufacturer their painting hand-off bounced back for re-send.
+  // Tell the manufacturer their painting hand-off bounced back for re-send, or,
+  // on a refunded order, that nothing more is needed.
   if (existing.manufacturerId) {
     await notifyManufacturer({
       manufacturerId: existing.manufacturerId,
       type: "system_announcement",
-      subject: "Boyacı işi reddetti",
-      body: `${existing.orderNumber} numaralı sipariş için gönderdiğiniz boyama işi reddedildi. Lütfen başka bir boyacıya gönderin.`,
+      subject: refunded
+        ? `Boyacı işi reddetti — sipariş iade edildi (${existing.orderNumber})`
+        : "Boyacı işi reddetti",
+      body: refunded
+        ? `${existing.orderNumber} numaralı sipariş için gönderdiğiniz boyama işi reddedildi. ` +
+          `Sipariş müşteriye iade edildiği için başka bir boyacıya göndermeniz gerekmiyor; ` +
+          `bu sipariş için yapmanız gereken başka bir işlem yok.`
+        : `${existing.orderNumber} numaralı sipariş için gönderdiğiniz boyama işi reddedildi. Lütfen başka bir boyacıya gönderin.`,
       orderId: id,
     }).catch((e) => console.error("notifyManufacturer (painter decline) failed", e));
   }

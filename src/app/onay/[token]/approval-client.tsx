@@ -15,12 +15,25 @@ type Choice = "approved" | "revision" | "cancelled";
  * starts — and this page IS that window. Leaving the cancel button out would
  * turn a contractual right into a support ticket.
  */
-export function ApprovalClient({ token, view }: { token: string; view: ApprovalView }) {
+export function ApprovalClient({
+  token,
+  view,
+  refunded,
+}: {
+  token: string;
+  view: ApprovalView;
+  /** The order's payment went back to the customer; nothing is decided here any more. */
+  refunded: boolean;
+}) {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Choice | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The server's answer when it changed nothing: a refund or another decision
+  // landed after this page loaded.
+  const [refundedNow, setRefundedNow] = useState(false);
+  const [decidedNow, setDecidedNow] = useState(false);
 
   async function submit(decision: Choice) {
     setBusy(true);
@@ -32,7 +45,15 @@ export function ApprovalClient({ token, view }: { token: string; view: ApprovalV
         body: JSON.stringify({ decision, note: decision === "revision" ? note : undefined }),
       });
       if (!res.ok) throw new Error(await res.text());
-      setDone(decision);
+      const j = (await res.json().catch(() => ({}))) as {
+        refunded?: unknown;
+        alreadyDecided?: unknown;
+      };
+      // Thanking the customer for a decision the server did not record would be
+      // untrue, so only a real transition reaches the "Teşekkürler" screen.
+      if (j.refunded === true) setRefundedNow(true);
+      else if (j.alreadyDecided === true) setDecidedNow(true);
+      else setDone(decision);
     } catch {
       setError("Kaydedemedik. Lütfen birkaç saniye sonra tekrar deneyin.");
     } finally {
@@ -40,7 +61,25 @@ export function ApprovalClient({ token, view }: { token: string; view: ApprovalV
     }
   }
 
-  if (view.decided && !done) {
+  // First, and without any control: approving or revising a refunded order is
+  // refused, and cancelling one would promise a refund that already happened.
+  if (refunded || refundedNow) {
+    return (
+      <main className="mx-auto max-w-2xl px-4 py-16 text-center">
+        <h1 className="text-2xl font-semibold">Bu sipariş iade edildi</h1>
+        <p className="mt-3 text-text-secondary">
+          {view.orderNumber} numaralı siparişinizin ödemesi size iade edildi. Bu yüzden 3D
+          model için onay ya da değişiklik talebi artık alınmıyor; yapmanız gereken başka
+          bir işlem yok.
+        </p>
+        <Link href={`/track/${view.orderNumber}`} className="mt-6 inline-block underline">
+          Siparişimi takip et
+        </Link>
+      </main>
+    );
+  }
+
+  if ((view.decided || decidedNow) && !done) {
     return (
       <main className="mx-auto max-w-2xl px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold">Bu model için kararınızı almıştık</h1>

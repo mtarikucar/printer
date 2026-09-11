@@ -9,7 +9,10 @@ export interface BulkProductGroup {
   title: string;
   imageUrl: string | null;
   totalUnits: number;
-  unassignedUnits: number;
+  /** Units in orders that can be assigned now (AWAITING_MANUFACTURER, the header's set). */
+  assignableUnits: number;
+  /** Units in orders with no manufacturer that cannot be assigned yet. */
+  notYetAssignableUnits: number;
   orders: Array<{
     orderId: string;
     orderNumber: string;
@@ -17,6 +20,8 @@ export interface BulkProductGroup {
     createdAt: string;
     manufacturerName: string | null;
     unassigned: boolean;
+    /** In AWAITING_MANUFACTURER: the assign service will take it. */
+    assignable: boolean;
   }>;
   byManufacturer: Array<{ name: string; units: number }>;
 }
@@ -35,13 +40,19 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  // `reasons`: one line per distinct skip reason the assign API sent back.
+  const [message, setMessage] = useState<{ text: string; reasons: string[] } | null>(
+    null
+  );
 
   const assignAll = async (group: BulkProductGroup) => {
     const manufacturerId = picked[group.productId];
     if (!manufacturerId) return;
+    // Only orders the assign service accepts. An unassigned order that is not
+    // approved yet would only come back as "skipped", and the button's count
+    // would not match the header's "üretici bekliyor".
     const orderIds = [
-      ...new Set(group.orders.filter((o) => o.unassigned).map((o) => o.orderId)),
+      ...new Set(group.orders.filter((o) => o.assignable).map((o) => o.orderId)),
     ];
     if (orderIds.length === 0) return;
 
@@ -55,16 +66,39 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMessage(d.error || "Atama başarısız");
+        setMessage({ text: d.error || "Atama başarısız", reasons: [] });
         return;
       }
-      // A partial result is normal (someone else may have grabbed an order in
-      // the meantime) — say so instead of silently showing a smaller number.
-      const skipped = (d.skipped ?? []).length;
+      // A partial result is normal. Each skipped order comes back with the
+      // assign service's own Turkish message (ASSIGN_FAILURE_MESSAGES: a
+      // refunded order, one assigned in the meantime, nothing printable, an
+      // inactive manufacturer), so show those instead of guessing "someone
+      // else assigned it". Identical messages are merged, with their orders.
+      const skippedList: Array<{ orderId?: string; message?: string }> = Array.isArray(
+        d.skipped
+      )
+        ? d.skipped
+        : [];
+      const numberOf = new Map(group.orders.map((o) => [o.orderId, o.orderNumber]));
+      const byMessage = new Map<string, string[]>();
+      for (const s of skippedList) {
+        const text =
+          typeof s.message === "string" && s.message.trim()
+            ? s.message.trim()
+            : "Sebep bildirilmedi.";
+        const list = byMessage.get(text) ?? [];
+        if (s.orderId) list.push(numberOf.get(s.orderId) ?? s.orderId);
+        byMessage.set(text, list);
+      }
       setMessage(
-        skipped > 0
-          ? `${d.assignedCount} sipariş atandı, ${skipped} tanesi atlandı (araya başka bir atama girmiş olabilir).`
-          : `${d.assignedCount} sipariş atandı.`
+        skippedList.length > 0
+          ? {
+              text: `${d.assignedCount} sipariş atandı, ${skippedList.length} tanesi atlandı:`,
+              reasons: [...byMessage.entries()].map(([text, nums]) =>
+                nums.length > 0 ? `${text} (${nums.join(", ")})` : text
+              ),
+            }
+          : { text: `${d.assignedCount} sipariş atandı.`, reasons: [] }
       );
       router.refresh();
     } finally {
@@ -84,12 +118,19 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
     <div className="mt-6 space-y-4">
       {message && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          {message}
+          <p>{message.text}</p>
+          {message.reasons.length > 0 && (
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {message.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
       {groups.map((g) => {
-        const unassignedOrders = g.orders.filter((o) => o.unassigned);
+        const assignableOrders = g.orders.filter((o) => o.assignable);
         const isOpen = expanded === g.productId;
         return (
           <div
@@ -112,9 +153,20 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
                 <p className="truncate font-medium text-gray-900">{g.title}</p>
                 <p className="mt-0.5 text-sm text-gray-600">
                   <strong>{g.totalUnits} adet</strong> · {g.orders.length} sipariş
-                  {g.unassignedUnits > 0 && (
-                    <span className="ml-2 rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700">
-                      {g.unassignedUnits} adet üretici bekliyor
+                  {g.assignableUnits > 0 && (
+                    <span
+                      className="ml-2 rounded bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700"
+                      title="Onaylı, şu an atanabilir ve henüz üreticisi olmayan siparişlerdeki adet"
+                    >
+                      {g.assignableUnits} adet üretici bekliyor
+                    </span>
+                  )}
+                  {g.notYetAssignableUnits > 0 && (
+                    <span
+                      className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600"
+                      title="Üreticisi yok ama sipariş atanabilir durumda değil (ör. üretici atanmadan baskıya ya da kalite kontrole geçmiş)"
+                    >
+                      {g.notYetAssignableUnits} adet henüz atanamaz
                     </span>
                   )}
                 </p>
@@ -127,7 +179,7 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
                 )}
               </div>
 
-              {unassignedOrders.length > 0 && (
+              {assignableOrders.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={picked[g.productId] ?? ""}
@@ -152,7 +204,7 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
                   >
                     {busy === g.productId
                       ? "Atanıyor…"
-                      : `${unassignedOrders.length} siparişi ata`}
+                      : `${assignableOrders.length} siparişi ata`}
                   </button>
                 </div>
               )}
@@ -192,9 +244,14 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
                         </td>
                         <td className="py-1.5">{o.units}</td>
                         <td className="py-1.5">
-                          {o.manufacturerName ?? (
-                            <span className="text-orange-700">Atanmadı</span>
-                          )}
+                          {o.manufacturerName ??
+                            (o.assignable ? (
+                              <span className="text-orange-700">Atanmadı</span>
+                            ) : (
+                              <span className="text-gray-500">
+                                Atanmadı · henüz atanamaz
+                              </span>
+                            ))}
                         </td>
                       </tr>
                     ))}

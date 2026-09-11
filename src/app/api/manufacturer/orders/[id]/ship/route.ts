@@ -10,6 +10,9 @@ import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { sendSms } from "@/lib/services/sms";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 export async function POST(
   request: NextRequest,
@@ -47,11 +50,17 @@ export async function POST(
     // ayrıca hakediş atölye toplu sevkinin dışında tahakkuk eder ve seans
     // hiçbir zaman `shipped`e ulaşamaz. Kapı ÖNCE burada (anlaşılır Türkçe
     // mesajla), sonra aşağıdaki koşullu UPDATE'te (yarışa karşı) durur.
-    const workshopRow = await db.query.orders.findFirst({
+    const current = await db.query.orders.findFirst({
       where: and(eq(orders.id, id), eq(orders.manufacturerId, session.manufacturerId)),
-      columns: { workshopSessionId: true },
+      columns: { workshopSessionId: true, paymentStatus: true },
     });
-    if (workshopRow?.workshopSessionId) {
+    // A refunded order never ships, workshop or not: the customer has their
+    // money back, so no "shipped" mail and no fresh earning. This is the
+    // readable refusal; the race-proof half is notRefundedGuard() below.
+    if (current && isRefunded(current)) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
+    if (current?.workshopSessionId) {
       return NextResponse.json(
         {
           error:
@@ -83,6 +92,9 @@ export async function POST(
           // Workshop batches ship from the admin panel, never one by one. The
           // readable refusal is above; this is the race-proof half.
           isNull(orders.workshopSessionId),
+          // Refund-end-state (see the pre-read above): a refund landing
+          // between that read and this write still wins.
+          notRefundedGuard(),
           // Painting orders: a manufacturer that paints in-house may ship one it
           // did NOT hand off (earning the full amount); everyone else must hand
           // off to a painter. `isNull(painterId)` blocks shipping any order
@@ -98,6 +110,9 @@ export async function POST(
       .returning();
 
     if (!order) {
+      if (await isPartnerOrderRefunded(id, { manufacturerId: session.manufacturerId })) {
+        return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+      }
       return NextResponse.json(
         { error: "Order not found or not approved for shipping (QC required)" },
         { status: 400 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
@@ -24,6 +24,16 @@ import { OrderModelUploader } from "@/components/admin/order-model-uploader";
 import { formatModelSize } from "@/lib/config/order-model";
 import { parseTryToKurus } from "@/lib/config/cost-lines";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
+import { REJECTABLE_STATUSES, isRefunded } from "@/lib/config/order-status-policy";
+import type { Dictionary } from "@/lib/i18n/dictionaries";
+import {
+  MONEY_LINE_KIND_LABELS_TR,
+  cashCollectedKurus,
+  type OrderMoneyBreakdown,
+  type MoneyLine,
+  type PartyShare,
+  type PartnerEarningRow,
+} from "@/lib/config/order-money";
 
 /**
  * Everything the painting leg of an order is doing. Populated only for orders
@@ -214,6 +224,11 @@ interface Props {
       acceptingOrders: boolean;
     } | null;
     painting?: PaintingData;
+    /**
+     * Para dökümü, built server-side by buildOrderMoneyBreakdown. Null when the
+     * loader failed: the card says so instead of taking the whole page down.
+     */
+    money?: OrderMoneyBreakdown | null;
     journey?: {
       eligible: boolean;
       blockedBy: "no_photo" | "no_model" | null;
@@ -249,20 +264,38 @@ interface Props {
   locale: string;
 }
 
+// Each status keeps the hue it has in the orders list (orders-client.tsx), in
+// this page's lighter ring style, so an order reads the same colour on both
+// screens.
 const STATUS_COLORS: Record<string, string> = {
   paid: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
   awaiting_model: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   generating: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   processing_mesh: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
   review: "bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200",
+  awaiting_customer_approval: "bg-cyan-50 text-cyan-800 ring-1 ring-cyan-200",
   approved: "bg-green-50 text-green-700 ring-1 ring-green-200",
   printing: "bg-purple-50 text-purple-700 ring-1 ring-purple-200",
+  quality_check: "bg-orange-50 text-orange-700 ring-1 ring-orange-200",
+  painting: "bg-fuchsia-50 text-fuchsia-700 ring-1 ring-fuchsia-200",
   shipped: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
   delivered: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
   failed_generation: "bg-red-50 text-red-700 ring-1 ring-red-200",
   failed_mesh: "bg-red-50 text-red-700 ring-1 ring-red-200",
   rejected: "bg-red-50 text-red-700 ring-1 ring-red-200",
 };
+
+// Module level, not inside the page component, because the money card labels
+// its cart sibling orders with the same words as the header and the stepper.
+/** admin.status.<status>; the readable enum only for a status tr.ts lacks. */
+function orderStatusLabel(d: Dictionary, status: string): string {
+  return d[`admin.status.${status}` as keyof Dictionary] || status.replace(/_/g, " ");
+}
+
+/** admin.payment.status.<status>; the raw value only for a status tr.ts lacks. */
+function paymentStatusLabel(d: Dictionary, status: string): string {
+  return d[`admin.payment.status.${status}` as keyof Dictionary] || status;
+}
 
 /**
  * Print-gate verdict palette. Green / amber / red, and a neutral slate for the
@@ -314,6 +347,13 @@ const TIMELINE_STEPS = [
   "awaiting_customer_approval",
   "approved",
   "printing",
+  // The manufacturer's QC gate (printed, QC photos, admin approval). The order
+  // sits at quality_check through all of it; before this step existed such
+  // orders fell off the stepper and were drawn as "paid".
+  "quality_check",
+  // The painter's leg. Only orders that go to a painter show it (filtered per
+  // order in the component), so a plain print job keeps a short stepper.
+  "painting",
   "shipped",
   "delivered",
 ];
@@ -336,6 +376,11 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
       return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>;
     case "printing":
       return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>;
+    case "quality_check":
+      // A checked badge: photos are being inspected before anything moves on.
+      return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>;
+    case "painting":
+      return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" /></svg>;
     case "shipped":
       return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>;
     case "delivered":
@@ -345,12 +390,732 @@ function StepIcon({ step, className = "w-4 h-4" }: { step: string; className?: s
   }
 }
 
+// ─── Para dökümü ─────────────────────────────────────────────
+// Everything below only DISPLAYS numbers that buildOrderMoneyBreakdown derived
+// through earning-base / cost-lines. No share is computed in this file: a
+// second hand-rolled copy of the commission math is exactly the drift the kalem
+// model was introduced to end.
+
+// Only the colours live here. The kind names come from MONEY_LINE_KIND_LABELS_TR,
+// next to the MoneyLine type, so this badge cannot drift from what the module
+// that emits the lines calls them.
+const MONEY_KIND_TONE: Record<MoneyLine["kind"], string> = {
+  production: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+  painting: "bg-fuchsia-50 text-fuchsia-700 ring-1 ring-fuchsia-200",
+  addon: "bg-teal-50 text-teal-700 ring-1 ring-teal-200",
+  discount: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  // A price row is part of the customer's price build-up and is shared between
+  // production and painting (its split sits under it). Blue or fuchsia would
+  // hand the whole row to one party, so it stays neutral.
+  price: "bg-gray-100 text-gray-700 ring-1 ring-gray-200",
+};
+
+const PARTY_LABEL: Record<PartyShare["party"], string> = {
+  manufacturer: "Üretici",
+  painter: "Boyacı",
+};
+
+/**
+ * A manufacturer who paints in house earns the painting kalem as well, and the
+ * derivation then emits no painter share at all. The label has to say so, or
+ * the admin reads a base that looks too big and goes looking for a painter.
+ */
+function partyLabel(s: PartyShare): string {
+  const base = PARTY_LABEL[s.party] ?? s.party;
+  return s.party === "manufacturer" && s.includesPainting ? `${base} (boyama dahil)` : base;
+}
+
+// earning_status: pending = accrued but not paid out yet.
+const EARNING_STATUS_LABEL: Record<string, string> = {
+  pending: "Ödenmedi",
+  paid: "Ödendi",
+  reversed: "Geri alındı",
+};
+
+const EARNING_STATUS_TONE: Record<string, string> = {
+  pending: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  paid: "bg-green-50 text-green-700 ring-1 ring-green-200",
+  reversed: "bg-gray-100 text-gray-600 ring-1 ring-gray-200",
+};
+
+const PAYOUT_STATUS_LABEL: Record<string, string> = {
+  pending: "Ödeme partisinde, havale bekliyor",
+  paid: "Ödendi",
+};
+
+const MONEY_SECTION_HEADING =
+  "text-[11px] font-semibold uppercase tracking-wider text-gray-500";
+
+/** "%40", "%37,5": Turkish writes the sign before the number. */
+function formatRateBps(bps: number): string {
+  return `%${(bps / 100).toLocaleString("tr-TR", { maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * True for an earning a refund will NOT claw back. reverseEarning and
+ * reversePainterEarning skip rows already marked paid (that money has left the
+ * platform). Rows merely batched into a still-pending payout ARE reversed and
+ * deducted from that payout, so they do not count here.
+ */
+function isPaidOut(e: PartnerEarningRow | null): boolean {
+  return !!e && (e.status === "paid" || e.payout?.status === "paid");
+}
+
+const VOIDED_MUTED = "bg-gray-100 text-gray-600 ring-1 ring-gray-200";
+const VOIDED_ALERT = "bg-red-50 text-red-700 ring-1 ring-red-200";
+
+/**
+ * A partner share on a refunded order (PartyShare.voided). No expected figure
+ * applies any more, so only the earning row itself is left to report: the
+ * refund reverses unpaid rows and cannot touch paid ones. A row still pending
+ * here escaped the reversal (it accrued after the refund, say) and would be
+ * paid out, so it is flagged instead of muted.
+ */
+function voidedShareState(e: PartnerEarningRow | null): {
+  badge: string;
+  accrual: string;
+  tone: string;
+  note: string;
+} {
+  if (!e) {
+    return {
+      badge: "Hakediş yok",
+      accrual: "İade nedeniyle tahakkuk olmayacak",
+      tone: VOIDED_MUTED,
+      note: "İade edildi — hakediş oluşmaz.",
+    };
+  }
+  if (e.status === "reversed") {
+    return {
+      badge: "Geri alındı",
+      accrual: "Geri alındı",
+      tone: VOIDED_MUTED,
+      note: "İade edildi — hakediş oluşmaz; tahakkuk etmiş satır geri alındı.",
+    };
+  }
+  if (isPaidOut(e)) {
+    return {
+      badge: "Ödenmiş, geri alınmadı",
+      accrual: "Ödenmiş, geri alınmadı",
+      tone: VOIDED_ALERT,
+      note: "İade edildi ama bu hakediş zaten ödenmişti. Sistem geri almaz; tutar platform zararı olarak kalır.",
+    };
+  }
+  return {
+    badge: "Geri alınmadı",
+    accrual: "Tahakkuk etti, geri alınmadı",
+    tone: VOIDED_ALERT,
+    note: "İade edildi ama bu hakediş geri alınmadı; ödeme partisine girerse partnere ödenir. Elle kontrol edilmeli.",
+  };
+}
+
+/** One label/amount line of a money list. Must sit directly inside a <dl>. */
+function MoneyRow({
+  label,
+  value,
+  strong = false,
+  divider = false,
+  valueClass,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  strong?: boolean;
+  divider?: boolean;
+  valueClass?: string;
+}) {
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-3 ${
+        strong ? "font-semibold text-gray-900" : ""
+      } ${divider ? "border-t border-gray-100 pt-1.5" : ""}`}
+    >
+      <dt className={strong ? "" : "text-gray-500"}>{label}</dt>
+      <dd className={`text-right tabular-nums ${valueClass ?? (strong ? "" : "text-gray-800")}`}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+/** The earning row that really accrued: gross, commission, net and payout. */
+function EarningRows({ e, loc }: { e: PartnerEarningRow; loc: Locale }) {
+  const fc = (k: number) => formatCurrency(k, loc);
+  return (
+    <dl className="mt-1 space-y-1 text-sm">
+      <MoneyRow label="Brüt" value={fc(e.grossKurus)} />
+      <MoneyRow label="Komisyon oranı" value={formatRateBps(e.rateBps)} />
+      <MoneyRow label="Komisyon" value={`−${fc(e.commissionKurus)}`} />
+      <MoneyRow label="Net" value={fc(e.netKurus)} strong divider />
+      <MoneyRow
+        label="Ödeme"
+        value={
+          e.payout ? (
+            <span className="text-xs">
+              <Link href="/admin/payouts" className="text-blue-700 hover:underline">
+                {PAYOUT_STATUS_LABEL[e.payout.status] ?? e.payout.status}
+              </Link>
+              {e.payout.reference && (
+                <span className="block font-mono text-[11px] text-gray-500">
+                  {e.payout.reference}
+                </span>
+              )}
+              {e.payout.paidAt && (
+                <span className="block text-[11px] text-gray-500">
+                  {formatDateTime(e.payout.paidAt, loc)}
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-500">Ödeme partisine girmedi</span>
+          )
+        }
+      />
+    </dl>
+  );
+}
+
+/** Expected share (from the stored bases) next to the earning row that really accrued. */
+function PartyShareBlock({ share: s, loc }: { share: PartyShare; loc: Locale }) {
+  const fc = (k: number) => formatCurrency(k, loc);
+  const e = s.earning;
+
+  // Refunded: the expected base, rate and net read as money still on its way
+  // to the partner, while the Platform block and the warnings on the same card
+  // already treat the order as closed. Only the real earning row, if any, is
+  // left to show.
+  if (s.voided) {
+    const v = voidedShareState(e);
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-gray-500">
+            {partyLabel(s)}
+            <span className="ml-1 font-normal text-gray-400">· {s.partnerName ?? "atanmadı"}</span>
+          </p>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${v.tone}`}>
+            {v.badge}
+          </span>
+        </div>
+        <p className="mt-1.5 text-xs text-gray-500">{v.note}</p>
+        {e && (
+          <div className={`mt-2 ${e.status === "reversed" ? "opacity-60" : ""}`}>
+            <p className="text-[11px] font-medium text-gray-400">Gerçekleşen</p>
+            <EarningRows e={e} loc={loc} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // A reversed row is history (refund, revoke); comparing it with today's
+  // expectation would only raise false alarms.
+  const differs =
+    !!e &&
+    e.status !== "reversed" &&
+    (e.grossKurus !== s.baseKurus || e.netKurus !== s.expectedNetKurus);
+  return (
+    <div className="rounded-xl border border-gray-200 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-900">
+          {partyLabel(s)}
+          <span className="ml-1 font-normal text-gray-500">· {s.partnerName ?? "atanmadı"}</span>
+        </p>
+        {e ? (
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              EARNING_STATUS_TONE[e.status] ?? "bg-gray-100 text-gray-700"
+            }`}
+          >
+            {EARNING_STATUS_LABEL[e.status] ?? e.status}
+          </span>
+        ) : (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+            Hakediş satırı yok
+          </span>
+        )}
+      </div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <div>
+          <p className="text-[11px] font-medium text-gray-400">Beklenen</p>
+          <dl className="mt-1 space-y-1 text-sm">
+            <MoneyRow label="Taban" value={fc(s.baseKurus)} />
+            <MoneyRow
+              label="Komisyon oranı"
+              value={
+                <span className="inline-flex items-center gap-1.5">
+                  {formatRateBps(s.rateBps)}
+                  {s.rateIsEstimate ? (
+                    <span
+                      title="Oran siparişe henüz sabitlenmedi; bugünkü oran gösteriliyor."
+                      className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200"
+                    >
+                      tahmini
+                    </span>
+                  ) : (
+                    <span
+                      title="Siparişe sabitlenmiş oran"
+                      className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600"
+                    >
+                      sabit
+                    </span>
+                  )}
+                </span>
+              }
+            />
+            <MoneyRow label="Komisyon" value={`−${fc(s.expectedCommissionKurus)}`} />
+            <MoneyRow label="Net" value={fc(s.expectedNetKurus)} strong divider />
+          </dl>
+        </div>
+        <div>
+          <p className="text-[11px] font-medium text-gray-400">Gerçekleşen</p>
+          {e ? (
+            <EarningRows e={e} loc={loc} />
+          ) : (
+            <p className="mt-1 text-xs text-gray-500">Henüz tahakkuk etmedi.</p>
+          )}
+        </div>
+      </div>
+      {differs && e && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+          Gerçekleşen hakediş beklenenden farklı: brüt {fc(e.grossKurus)} (beklenen{" "}
+          {fc(s.baseKurus)}), net {fc(e.netKurus)} (beklenen {fc(s.expectedNetKurus)}).
+          Tahakkuktan sonra kalemler ya da oran değişmiş olabilir; tahakkuk eden satır
+          kendiliğinden düzelmez.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Para dökümü: every line of the order and its value, what was collected, who
+ * gets what, and what has accrued or been paid out. Read-only; rows rebuilt from
+ * today's constants (no frozen copy on the order) are marked as such.
+ */
+function MoneyBreakdownCard({
+  money,
+  loc,
+}: {
+  money: OrderMoneyBreakdown | null | undefined;
+  loc: Locale;
+}) {
+  const d = useDictionary();
+  // Fold negative zero, and only that: formatCurrency prints its sign, so a
+  // refunded order's platform net of −0 read as "-₺0,00". `k || 0` also turned
+  // NaN into ₺0,00, which would hide a broken figure behind a plausible one.
+  const fc = (k: number) => formatCurrency(Object.is(k, -0) ? 0 : k, loc);
+
+  if (!money) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Para dökümü</h3>
+        <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
+          Para dökümü hesaplanamadı (hata sunucu günlüğünde). Siparişin diğer işlemleri
+          etkilenmez.
+        </p>
+      </div>
+    );
+  }
+
+  const { lines, totals, collection, shares: allShares, platform, warnings } = money;
+  const recomputedCount = lines.filter((l) => l.recomputed).length;
+  const hasPriceRows = lines.some((l) => l.kind === "price");
+  // C2'' emits no painter share when the manufacturer paints in house; this
+  // only guards the display. A painter share with a ₺0 base, nobody assigned
+  // and no earning row would render as "Boyacı · atanmadı" plus a pending
+  // accrual that can never happen.
+  const inHousePainting = allShares.some((s) => s.party === "manufacturer" && s.includesPainting);
+  const shares = inHousePainting
+    ? allShares.filter(
+        (s) => s.party !== "painter" || s.earning !== null || s.partnerName !== null || s.baseKurus !== 0
+      )
+    : allShares;
+  const refunded = isRefunded(collection);
+  const paymentMethodLabel =
+    collection.paymentMethod === "card"
+      ? d["admin.payment.method.card"]
+      : collection.paymentMethod === "bank_transfer"
+        ? d["admin.payment.method.bankTransfer"]
+        : collection.paymentMethod === "gift_card_full"
+          ? d["admin.payment.method.giftCardFull"]
+          : collection.paymentMethod ?? "—";
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Para dökümü</h3>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {totals.legacySplit && (
+            <span
+              title="Sipariş kalem modelinden önce açıldı: üretim tabanı siparişe yazılmamış, eski kurala göre (tutar eksi boyama payı) türetildi."
+              className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-700 ring-1 ring-gray-200"
+            >
+              kalem öncesi sipariş
+            </span>
+          )}
+          {recomputedCount > 0 && (
+            <span
+              title="Bu satırlar siparişte saklanmadı; bugünkü fiyat sabitlerinden yeniden hesaplandı ve satış anındaki değerden farklı olabilir."
+              className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200"
+            >
+              {recomputedCount} satır yeniden hesaplandı
+            </span>
+          )}
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-gray-500">
+        Salt okunur: satırlar, tahsilat, kim ne alır, ne tahakkuk etti ve ne ödendi.
+      </p>
+
+      {warnings.length > 0 && (
+        <ul className="mt-3 space-y-1 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {warnings.map((w, i) => (
+            <li key={`${i}-${w}`} className="flex gap-2">
+              <span aria-hidden>⚠</span>
+              <span>{w}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Kalemler */}
+      <section className="mt-5">
+        <h4 className={MONEY_SECTION_HEADING}>Kalemler</h4>
+        {!totals.splitMatches && (
+          <p
+            role="alert"
+            className="mt-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900"
+          >
+            <strong>Kalem toplamı sipariş tutarını tutmuyor.</strong> Üretim{" "}
+            {fc(totals.productionBaseKurus)} + boyama {fc(totals.paintingPriceKurus)}, sipariş
+            tutarı ise {fc(totals.amountKurus)}. Partner hakediş tabanları bu ikisinden
+            türediği için elle düzeltilmesi gerekir.
+          </p>
+        )}
+        {lines.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-400">Bu sipariş için kalem bulunamadı.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-gray-100">
+            {lines.map((l, i) => {
+              const badgeLabel = MONEY_LINE_KIND_LABELS_TR[l.kind] ?? l.kind;
+              const badgeCls = MONEY_KIND_TONE[l.kind] ?? "bg-gray-100 text-gray-700";
+              const isDiscount = l.kind === "discount";
+              // "qty × unit" only where it IS the row's amount. A row carrying one
+              // party's share of a line (or a remainder) used to print "2 × ₺450"
+              // next to ₺522,22, which reads as an arithmetic error.
+              const unitShown =
+                l.qty != null && l.unitKurus != null && l.qty * l.unitKurus === l.amountKurus
+                  ? { qty: l.qty, unitKurus: l.unitKurus }
+                  : null;
+              return (
+                <li key={`${l.kind}-${i}`} className="flex items-start justify-between gap-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${badgeCls}`}
+                      >
+                        {badgeLabel}
+                      </span>
+                      <span className="text-sm text-gray-900">{l.label}</span>
+                      {l.recomputed && (
+                        <span
+                          title="Siparişte saklanmadı; bugünkü sabitlerden yeniden hesaplandı."
+                          className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200"
+                        >
+                          yeniden hesaplandı
+                        </span>
+                      )}
+                    </div>
+                    {unitShown ? (
+                      <p className="mt-0.5 text-xs text-gray-500 tabular-nums">
+                        {unitShown.qty} × {fc(unitShown.unitKurus)}
+                      </p>
+                    ) : l.qty != null && l.qty !== 1 ? (
+                      <p className="mt-0.5 text-xs text-gray-500">{l.qty} adet</p>
+                    ) : null}
+                    {l.split && (
+                      <p className="mt-0.5 flex flex-wrap gap-x-1.5 text-[11px] tabular-nums text-gray-500">
+                        <span>
+                          Üretim <span className="text-blue-700">{fc(l.split.productionKurus)}</span>
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span>
+                          Boyama <span className="text-fuchsia-700">{fc(l.split.paintingKurus)}</span>
+                        </span>
+                      </p>
+                    )}
+                    {l.note && <p className="mt-0.5 text-xs text-gray-500">{l.note}</p>}
+                  </div>
+                  <span
+                    className={`shrink-0 text-sm font-medium tabular-nums ${
+                      isDiscount ? "text-amber-700" : "text-gray-900"
+                    }`}
+                  >
+                    {isDiscount ? `−${fc(Math.abs(l.amountKurus))}` : fc(l.amountKurus)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {/* Pay dağılımı: where the rows above land. Production, add-on and the
+            production part of every price row add up to the production base;
+            painting rows and painting parts add up to the painting base. */}
+        <div className="mt-2 rounded-xl bg-gray-50 px-3 py-2">
+          <p className="text-[11px] font-medium text-gray-500">Pay dağılımı</p>
+          <dl className="mt-1 space-y-1 text-sm">
+            <MoneyRow label="Üretim tabanı" value={fc(totals.productionBaseKurus)} />
+            <MoneyRow label="Boyama tabanı" value={fc(totals.paintingPriceKurus)} />
+            <MoneyRow label="Sipariş tutarı" value={fc(totals.amountKurus)} strong divider />
+          </dl>
+          {hasPriceRows && (
+            <p className="mt-1 text-[11px] text-gray-500">
+              Her fiyat satırının altındaki üretim / boyama payı bu iki tabana eklenir.
+            </p>
+          )}
+        </div>
+        {totals.splitMatches && (
+          <p className="mt-1 text-[11px] text-green-700">✓ Üretim + boyama sipariş tutarına eşit.</p>
+        )}
+      </section>
+
+      {/* Tahsilat */}
+      <section className="mt-5 border-t border-gray-100 pt-4">
+        <h4 className={MONEY_SECTION_HEADING}>Tahsilat</h4>
+        <dl className="mt-2 space-y-1.5 text-sm">
+          <MoneyRow label="Sipariş tutarı" value={fc(collection.amountKurus)} />
+          {collection.giftCardKurus > 0 && (
+            <MoneyRow
+              label="Hediye kartı"
+              value={`−${fc(collection.giftCardKurus)}`}
+              valueClass="text-green-700"
+            />
+          )}
+          {collection.havaleDiscountKurus > 0 && (
+            <MoneyRow
+              label="Havale indirimi"
+              value={`−${fc(collection.havaleDiscountKurus)}`}
+              valueClass="text-amber-700"
+            />
+          )}
+          <MoneyRow
+            label="Tahsil edilen (nakit)"
+            value={fc(collection.cashCollectedKurus)}
+            strong
+            divider
+          />
+          {/* C3: cash counts as revenue only while the payment stands, so a
+              refund drops revenueKurus to 0 while the cash above stays what was
+              taken. Shown only when the two differ; otherwise it would repeat the
+              row above. */}
+          {collection.revenueKurus !== collection.cashCollectedKurus && (
+            <MoneyRow
+              label="Ciroya sayılan"
+              value={fc(collection.revenueKurus)}
+              valueClass={refunded ? "text-red-700" : undefined}
+            />
+          )}
+          <MoneyRow label="Ödeme yöntemi" value={paymentMethodLabel} />
+          <MoneyRow
+            label="Ödeme durumu"
+            value={
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  refunded
+                    ? "bg-red-600 text-white"
+                    : "bg-green-50 text-green-700 ring-1 ring-green-200"
+                }`}
+              >
+                {paymentStatusLabel(d, collection.paymentStatus)}
+              </span>
+            }
+          />
+        </dl>
+        {collection.siblings.length > 0 && (
+          <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2">
+            <p className="text-xs font-medium text-gray-600">Aynı sepetin diğer siparişleri</p>
+            <ul className="mt-1 divide-y divide-gray-200">
+              {collection.siblings.map((sib) => (
+                <li key={sib.id} className="py-1.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Link
+                        href={`/admin/orders/${sib.id}`}
+                        className="font-mono text-blue-700 hover:underline"
+                      >
+                        {sib.orderNumber}
+                      </Link>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          STATUS_COLORS[sib.status] || "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {orderStatusLabel(d, sib.status)}
+                      </span>
+                      {isRefunded(sib) && (
+                        <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                          {paymentStatusLabel(d, sib.paymentStatus)}
+                        </span>
+                      )}
+                    </div>
+                    <span className="tabular-nums text-gray-700">{fc(sib.amountKurus)}</span>
+                  </div>
+                  <p className="mt-0.5 flex flex-wrap justify-end gap-x-3 tabular-nums text-[11px] text-gray-500">
+                    {sib.giftCardKurus > 0 && <span>Hediye kartı −{fc(sib.giftCardKurus)}</span>}
+                    {sib.havaleDiscountKurus > 0 && (
+                      <span>Havale indirimi −{fc(sib.havaleDiscountKurus)}</span>
+                    )}
+                    <span className="font-medium text-gray-700">
+                      Nakit {fc(sib.cashCollectedKurus)}
+                    </span>
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-[11px] text-gray-500">
+              Tek sepet ödemesi satıcıya göre alt siparişlere bölündü. Hediye kartı, havale
+              indirimi ve nakit her alt siparişin kendi kaydından okunur.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Kim ne alır */}
+      <section className="mt-5 border-t border-gray-100 pt-4">
+        <h4 className={MONEY_SECTION_HEADING}>Kim ne alır</h4>
+        <div className="mt-2 space-y-3">
+          {shares.length === 0 && (
+            <p className="text-sm text-gray-400">Bu siparişte partner payı yok.</p>
+          )}
+          {shares.map((s) => (
+            <PartyShareBlock key={s.party} share={s} loc={loc} />
+          ))}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-sm font-semibold text-gray-900">Platform</p>
+            {refunded ? (
+              // Refunded: nothing counts as revenue and pending earnings were
+              // reversed, so the platform is left with only the paid-out,
+              // unrecoverable partner earnings (as a loss).
+              <>
+                <dl className="mt-2 space-y-1 text-sm">
+                  <MoneyRow
+                    label="Platform net (iade)"
+                    value={fc(platform.netKurus)}
+                    strong
+                    valueClass={platform.netKurus < 0 ? "text-red-700" : undefined}
+                  />
+                </dl>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  İadede tahsilat ciroya sayılmaz; geriye yalnız ödenmiş ve geri alınamayan partner
+                  hakedişi platform zararı olarak kalır.
+                </p>
+              </>
+            ) : (
+              <dl className="mt-2 space-y-1 text-sm">
+                <MoneyRow label="Partner komisyonları" value={fc(platform.commissionKurus)} />
+                {/* Shown whenever non-zero: a negative value means partner
+                    earnings exceed the order total and must be looked at. */}
+                {platform.unassignedBaseKurus !== 0 && (
+                  <MoneyRow
+                    label="Partneri olmayan taban"
+                    value={fc(platform.unassignedBaseKurus)}
+                    valueClass={platform.unassignedBaseKurus < 0 ? "text-red-700" : undefined}
+                  />
+                )}
+                {collection.giftCardKurus > 0 && (
+                  <MoneyRow label="Hediye kartı" value={`−${fc(collection.giftCardKurus)}`} />
+                )}
+                {collection.havaleDiscountKurus > 0 && (
+                  <MoneyRow
+                    label="Havale indirimi"
+                    value={`−${fc(collection.havaleDiscountKurus)}`}
+                  />
+                )}
+                <MoneyRow
+                  label="Platform net"
+                  value={fc(platform.netKurus)}
+                  strong
+                  divider
+                  valueClass={platform.netKurus < 0 ? "text-red-700" : undefined}
+                />
+              </dl>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Tahakkuk */}
+      <section className="mt-5 border-t border-gray-100 pt-4">
+        <h4 className={MONEY_SECTION_HEADING}>Tahakkuk</h4>
+        {shares.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-400">Tahakkuk edecek partner yok.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {shares.map((s) => {
+              // Refunded: "Henüz tahakkuk etmedi" would promise an accrual the
+              // refund has ruled out; an existing row reports its own state.
+              const voided = s.voided ? voidedShareState(s.earning) : null;
+              return (
+              <li key={s.party} className="flex flex-wrap items-start justify-between gap-2 text-sm">
+                <div className="min-w-0">
+                  <p className={`font-medium ${voided ? "text-gray-500" : "text-gray-900"}`}>
+                    {partyLabel(s)}
+                    {s.partnerName && (
+                      <span className="ml-1 font-normal text-gray-500">· {s.partnerName}</span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-500">{s.accrualEvent}</p>
+                </div>
+                {voided ? (
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${voided.tone}`}>
+                    {voided.accrual}
+                  </span>
+                ) : s.accrualMissing ? (
+                  <span className="rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                    tahakkuk eksik
+                  </span>
+                ) : s.earning ? (
+                  s.earning.status === "reversed" ? (
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                      Tahakkuk geri alındı
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700 ring-1 ring-green-200">
+                      Tahakkuk etti
+                    </span>
+                  )
+                ) : (
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                    Henüz tahakkuk etmedi
+                  </span>
+                )}
+              </li>
+              );
+            })}
+          </ul>
+        )}
+        {shares.some((s) => s.accrualMissing) && (
+          <p
+            role="alert"
+            className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900"
+          >
+            Sipariş kargolandı ya da boyacıya devredildi ama hakediş satırı yok. Tahakkuk
+            arka planda sessizce başarısız olmuş olabilir; bu satır olmadan partner bu iş için
+            ödeme partisine girmez. Elle düzeltilmesi gerekir.
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, printGate, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates, money } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
+  const statusLabel = (status: string): string => orderStatusLabel(d, status);
 
   const [loading, setLoading] = useState<string | null>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
@@ -377,6 +1142,9 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [journeyCopied, setJourneyCopied] = useState(false);
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
+  // Refund card: collapsed by default; opens to the warning + reason field.
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundReason, setRefundReason] = useState("");
 
 
   // Edit state
@@ -423,6 +1191,18 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [tab, setTab] = useState<"summary" | "production" | "communication" | "history">("summary");
 
   // ─── Actions ─────────────────────────────────────────────
+  /**
+   * A refused action usually means the order changed under this page: refunded
+   * in another tab, re-assigned, shipped by the partner. Showing only the error
+   * left the stale page offering the same button again (a refund answered 409
+   * "Sipariş zaten iade edilmiş." and still showed "İade et"), so every failure
+   * also reloads the server data.
+   */
+  const reportFailure = (message: string) => {
+    alert(message);
+    router.refresh();
+  };
+
   const performAction = async (action: string, body: Record<string, any> = {}) => {
     setLoading(action);
     try {
@@ -432,8 +1212,8 @@ export function OrderDetailClient({ data, locale }: Props) {
         body: JSON.stringify({ ...body, notes: notes || undefined }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || `${action} ${d["admin.orderDetail.actionFailed"]}`);
+        const data = await res.json().catch(() => ({}));
+        reportFailure(data.error || `${action} ${d["admin.orderDetail.actionFailed"]}`);
         return;
       }
       router.refresh();
@@ -449,6 +1229,9 @@ export function OrderDetailClient({ data, locale }: Props) {
     setPhotoBusy(true);
     try {
       const keys: string[] = [];
+      // A refused upload used to be dropped silently. The first reason is kept;
+      // the rest of a batch almost always fails for the same one.
+      let failure: string | null = null;
       for (const file of Array.from(files)) {
         const fd = new FormData();
         fd.append("file", file);
@@ -458,15 +1241,21 @@ export function OrderDetailClient({ data, locale }: Props) {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.key) keys.push(data.key);
+        else failure ??= data.error || d["admin.orderDetail.actionFailed"];
       }
       if (keys.length > 0) {
-        await fetch(`/api/admin/orders/${order.id}/photos`, {
+        const res = await fetch(`/api/admin/orders/${order.id}/photos`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ photoKeys: keys }),
         });
-        router.refresh();
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          failure = data.error || d["admin.orderDetail.actionFailed"];
+        }
       }
+      if (failure) reportFailure(failure);
+      else if (keys.length > 0) router.refresh();
     } finally {
       setPhotoBusy(false);
     }
@@ -474,11 +1263,16 @@ export function OrderDetailClient({ data, locale }: Props) {
   const removeOrderPhoto = async (photoId: string) => {
     setPhotoBusy(true);
     try {
-      await fetch(`/api/admin/orders/${order.id}/photos`, {
+      const res = await fetch(`/api/admin/orders/${order.id}/photos`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoId }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
+        return;
+      }
       router.refresh();
     } finally {
       setPhotoBusy(false);
@@ -506,7 +1300,7 @@ export function OrderDetailClient({ data, locale }: Props) {
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
       }
     } finally {
       setLoading(null);
@@ -554,7 +1348,7 @@ export function OrderDetailClient({ data, locale }: Props) {
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
       }
     } finally {
       setLoading(null);
@@ -598,7 +1392,7 @@ export function OrderDetailClient({ data, locale }: Props) {
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
       }
     } finally {
       setMsgSending(false);
@@ -616,14 +1410,22 @@ export function OrderDetailClient({ data, locale }: Props) {
   const latestStlParts = (modelRevisions[0]?.files ?? []).filter((f) => f.kind === "stl");
 
   const hasManufacturer = !!manufacturer;
-  const canApprove = order.status === "review";
+  // A refunded order keeps its status (decision refund-end-state), so the status
+  // alone would still offer approval, model upload, printing, shipping and
+  // assignment. Every forward card below checks this, and the routes behind them
+  // refuse a refunded order with a 409. Deliver and reject stay: they close the
+  // order instead of pushing it forward.
+  const refunded = isRefunded(order);
+  const canApprove = order.status === "review" && !refunded;
   // Same source drives the badge and whether the approve button needs a reason.
   const gateTone = GATE_TONE[printGate?.verdict ?? "unknown"];
   const gateOverrideNeeded = canApprove && printGate?.requiresOverride === true;
-  const canReject = ["review", "approved", "failed_generation", "failed_mesh", "generating", "processing_mesh", "paid", "awaiting_model"].includes(order.status);
+  // One list for this button and the reject route (order-status-policy). The
+  // button used to offer awaiting_model while the route refused it with a 400.
+  const canReject = REJECTABLE_STATUSES.includes(order.status);
   const canForceReview = ["paid", "generating", "processing_mesh"].includes(order.status);
-  const canStartPrinting = order.status === "approved" && !hasManufacturer;
-  const canShip = order.status === "printing" && !hasManufacturer;
+  const canStartPrinting = order.status === "approved" && !hasManufacturer && !refunded;
+  const canShip = order.status === "printing" && !hasManufacturer && !refunded;
   const canDeliver = order.status === "shipped";
   // Mirror the API's own gate (assign-manufacturer route): marketplace orders
   // are assignable straight from "paid".
@@ -631,7 +1433,43 @@ export function OrderDetailClient({ data, locale }: Props) {
     order.status === "approved" ||
     (order.status === "paid" && order.orderType === "marketplace");
   const canAssignManufacturer =
+    !refunded &&
     statusAssignable && (!manufacturerStatus || manufacturerStatus === "unassigned");
+  // Refund is possible at every stage the money is still with us. It used to sit
+  // in the reject/force-review row and vanished once an order was printing, in
+  // QC, painting, awaiting the customer, shipped or delivered.
+  const canRefund = order.paymentStatus === "succeeded";
+  // Cash that actually came in: amount − gift card − havale discount, through the
+  // pure helper the money breakdown uses too (C3). The dashboard and analytics
+  // compute the same figure in SQL with its twin, CASH_COLLECTED_KURUS
+  // (src/lib/services/admin-order-sql.ts); the two must stay identical.
+  // Computed here instead of read from `money` because the details card and the
+  // refund dialog must still work when the breakdown loader failed. (The old
+  // "Kalan" line ignored the havale discount.)
+  const collectedKurus = cashCollectedKurus(order);
+  // Partner earnings as the refund service will treat them: paid-out rows stay
+  // paid (silently, before this card), rows batched into a still-pending payout
+  // are reversed and deducted from it.
+  const moneyShares = money?.shares ?? [];
+  // The manufacturer paints in house: the painting kalem is in its earning, and
+  // no painter accrual will ever happen (C2'' includesPainting).
+  const paintsInHouseShare = moneyShares.some(
+    (s) => s.party === "manufacturer" && s.includesPainting
+  );
+  const paidOutShares = moneyShares.filter((s) => isPaidOut(s.earning));
+  const batchedShares = moneyShares.filter(
+    (s) =>
+      !!s.earning &&
+      s.earning.status === "pending" &&
+      s.earning.payout?.status === "pending"
+  );
+  // The admin action that refunded it (adminActions arrive newest first). The
+  // refund row wins; a reject only counts when there is none, because rejecting
+  // a paid order refunds it too, while a reject AFTER a refund is not the refund.
+  const refundRecord = refunded
+    ? adminActions.find((a) => a.action === "refund") ??
+      adminActions.find((a) => a.action === "reject")
+    : undefined;
   // Taking an order back is safe up to and INCLUDING qc_approved, as long as it
   // has not shipped and has not been handed to a painter — the manufacturer's
   // earning only attaches at ship / send-to-painter (see manufacturer-revoke.ts).
@@ -662,9 +1500,14 @@ export function OrderDetailClient({ data, locale }: Props) {
   // Model upload shows for awaiting_model, and also for admin-fulfilled WhatsApp
   // orders (marketplace, no seller) still sitting at "paid" — so the admin can
   // attach a model, reach "approved", and assign a manufacturer.
+  // A refunded order gets neither uploader: an upload moves the order toward
+  // "approved", the assignable shape the refund guard exists to stop, and the
+  // upload route refuses it with a 409.
   const canUploadModel =
-    order.status === "awaiting_model" ||
-    (order.status === "paid" && order.orderType === "marketplace" && !hasManufacturer);
+    !refunded &&
+    (order.status === "awaiting_model" ||
+      (order.status === "paid" && order.orderType === "marketplace" && !hasManufacturer));
+  const canUploadRevision = !refunded && ["approved", "review"].includes(order.status);
   const addr = order.shippingAddress;
 
   const assignManufacturer = async (manufacturerId?: string) => {
@@ -682,7 +1525,7 @@ export function OrderDetailClient({ data, locale }: Props) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
       router.refresh();
@@ -707,24 +1550,36 @@ export function OrderDetailClient({ data, locale }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reason: revokeReason.trim(),
-          strike: revokeStrike,
+          // The strike box is hidden on a refunded order; a tick made before a
+          // refund arrived live must not ride along with the cleanup.
+          strike: !refunded && revokeStrike,
           blocklist: revokeBlocklist,
           ...(targetManufacturerId ? { targetManufacturerId } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
-      if (data.prevStatus && data.prevStatus !== "assigned") {
+      // One message for the whole outcome. A refunded order is never
+      // re-assigned: the route answers reason "refunded" (also when a refund
+      // landed while this page was open). The old text blamed a race ("başkası
+      // tarafından alındı") and invited a retry that can only fail.
+      const tookOver = !!data.prevStatus && data.prevStatus !== "assigned";
+      const outcome =
+        data.reason === "refunded" || refunded
+          ? "Üretici siparişten ayrıldı. Sipariş iade edildiği için yeniden atanmadı; atama kuyruğuna da dönmez."
+          : targetManufacturerId && data.reassigned === false
+            ? "Atama geri alındı ancak yeni üreticiye devredilemedi (sipariş bu sırada başkası tarafından alındı). Listeden tekrar seçin."
+            : tookOver
+              ? "Atama geri alındı."
+              : null;
+      if (outcome) {
         alert(
-          `Atama geri alındı. Not: üretici bu sırada siparişi "${data.prevStatus}" durumuna almıştı.`
-        );
-      }
-      if (targetManufacturerId && data.reassigned === false) {
-        alert(
-          "Atama geri alındı ancak yeni üreticiye devredilemedi (sipariş bu sırada başkası tarafından alındı). Listeden tekrar seçin."
+          tookOver
+            ? `${outcome}\nNot: üretici bu sırada siparişi "${data.prevStatus}" durumuna almıştı.`
+            : outcome
         );
       }
       setRevokeReason("");
@@ -756,7 +1611,7 @@ export function OrderDetailClient({ data, locale }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
       setRevokePainterReason("");
@@ -810,7 +1665,10 @@ export function OrderDetailClient({ data, locale }: Props) {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Inline, next to the amount; the refresh shows the state the route
+        // refused against (e.g. the earning accrued meanwhile).
         setAddPaintingError(body.error ?? "Boyama kalemi eklenemedi.");
+        router.refresh();
         return;
       }
       setPaintingAmount("");
@@ -835,7 +1693,7 @@ export function OrderDetailClient({ data, locale }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
       setPainterPick("");
@@ -845,6 +1703,54 @@ export function OrderDetailClient({ data, locale }: Props) {
     } finally {
       setLoading(null);
     }
+  };
+
+  // ─── Refund ──────────────────────────────────────────────
+  // There is no PayTR refund integration: the button only marks the order
+  // refunded, detaches the partners, reverses UNPAID earnings and restores the
+  // gift card. Both the card and the confirm dialog say so, and name every
+  // partner earning that is already paid out and will therefore stay paid.
+  const refundMoneyInstruction =
+    order.paymentMethod === "bank_transfer"
+      ? `Tahsil edilen ${formatCurrency(collectedKurus, loc)} müşteriye bankadan elle havale edilmeli.`
+      : order.paymentMethod === "gift_card_full"
+        ? "Nakit tahsilat yok; ödemenin tamamı hediye kartıyla yapıldı."
+        : `Tahsil edilen ${formatCurrency(collectedKurus, loc)} PayTR panelinden elle iade edilmeli.`;
+
+  const describeEarning = (s: PartyShare): string => {
+    const e = s.earning;
+    if (!e) return "";
+    const who = `${partyLabel(s)}${s.partnerName ? ` (${s.partnerName})` : ""}`;
+    const ref = e.payout?.reference ? `, ref ${e.payout.reference}` : "";
+    const when = e.payout?.paidAt ? `, ${formatDateTime(e.payout.paidAt, loc)}` : "";
+    return `• ${who}: net ${formatCurrency(e.netKurus, loc)}${ref}${when}`;
+  };
+
+  const handleRefund = async () => {
+    const text = [
+      `${order.orderNumber} iade edildi olarak işaretlenecek.`,
+      "",
+      "PARA OTOMATİK İADE EDİLMEZ.",
+      refundMoneyInstruction,
+      ...(order.giftCardAmountKurus > 0
+        ? [`Hediye kartından karşılanan ${formatCurrency(order.giftCardAmountKurus, loc)} karta otomatik geri yüklenir.`]
+        : []),
+      "",
+      ...(paidOutShares.length > 0
+        ? ["Zaten ödenmiş, GERİ ALINMAYACAK hakedişler:", ...paidOutShares.map(describeEarning), ""]
+        : []),
+      ...(batchedShares.length > 0
+        ? ["Bekleyen ödeme partisinden düşülecek hakedişler:", ...batchedShares.map(describeEarning), ""]
+        : []),
+      ...(money
+        ? []
+        : ["Partner hakediş durumu yüklenemedi; iadeden önce Ödemeler sayfasını kontrol edin.", ""]),
+      "Üretici ve boyacı siparişten ayrılır, ödenmemiş hakedişler geri alınır. Sipariş durumu korunur ama ileri işlemler kapanır.",
+      "",
+      "Devam edilsin mi?",
+    ].join("\n");
+    if (!window.confirm(text)) return;
+    await performAction("refund", { reason: refundReason.trim() || "Admin iadesi" });
   };
 
   // ─── Timeline ────────────────────────────────────────────
@@ -859,8 +1765,12 @@ export function OrderDetailClient({ data, locale }: Props) {
     failed_mesh: "awaiting_model",
     rejected: "approved",
   };
+  // The painting step only exists for orders that go to a painter.
+  const timelineSteps = TIMELINE_STEPS.filter(
+    (s) => s !== "painting" || order.needsPainting || order.status === "painting"
+  );
   const effectiveStatus = LEGACY_STEP_MAP[order.status] || order.status;
-  const rawStepIndex = TIMELINE_STEPS.indexOf(effectiveStatus);
+  const rawStepIndex = timelineSteps.indexOf(effectiveStatus);
   // Guard: any unmapped/unknown status returns -1 — fall back to the first step
   // so the stepper never crashes.
   const currentStepIndex = rawStepIndex === -1 ? 0 : rawStepIndex;
@@ -891,8 +1801,13 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {order.orderNumber}
               </h1>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLORS[order.status] || "bg-gray-100 text-gray-700"}`}>
-                {d[`admin.status.${order.status}` as keyof typeof d] || order.status.replace(/_/g, " ")}
+                {statusLabel(order.status)}
               </span>
+              {refunded && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-600 text-white">
+                  {paymentStatusLabel(d, order.paymentStatus)}
+                </span>
+              )}
             </div>
             <p className="text-sm text-gray-500 mt-0.5">{order.customerName} &middot; {order.email}</p>
           </div>
@@ -923,10 +1838,59 @@ export function OrderDetailClient({ data, locale }: Props) {
         </div>
       </div>
 
+      {/* ─── İade edildi ─────────────────────────────────────
+          A refunded order keeps its status, so without this the page read as a
+          live job. The forward cards below are hidden and their routes refuse a
+          refunded order as well. */}
+      {refunded && (
+        <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-gradient-to-br from-red-50 to-rose-50 p-5">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15v-1a4 4 0 00-4-4H8m0 0l3 3m-3-3l3-3m9 14V5a2 2 0 00-2-2H6a2 2 0 00-2 2v16l4-2 4 2 4-2 4 2z" /></svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-semibold text-red-900">
+                {paymentStatusLabel(d, order.paymentStatus)}
+              </h2>
+              <p className="mt-0.5 text-sm text-red-800">
+                Bu siparişin ödemesi iade edildi. Durumu ({statusLabel(order.status)}) kayıt için
+                korunur; onay, model yükleme, üretici atama, baskı, kargo, boyacı atama ve boyama
+                ekleme kapalıdır. Teslim ve ret açık kalır.
+              </p>
+              {refundRecord && (
+                <p className="mt-2 text-xs text-red-700">
+                  {formatDateTime(refundRecord.createdAt, loc)} · {refundRecord.adminEmail}
+                  {refundRecord.notes ? ` · ${refundRecord.notes}` : ""}
+                </p>
+              )}
+              {paidOutShares.length > 0 && (
+                <div className="mt-3 rounded-xl border border-red-200 bg-white/70 px-3 py-2 text-xs text-red-900">
+                  <p className="font-semibold">Zaten ödenmiş, geri alınmamış hakediş</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {paidOutShares.map((s) => (
+                      <li key={s.party}>
+                        {partyLabel(s)}
+                        {s.partnerName ? ` (${s.partnerName})` : ""}: net{" "}
+                        {formatCurrency(s.earning?.netKurus ?? 0, loc)}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-red-700">Bu tutar partnerde kaldı; sistem geri almaz.</p>
+                </div>
+              )}
+              <p className="mt-2 text-xs text-red-700">
+                Bu panel parayı geri göndermez: kartla ödemede PayTR panelinden, havalede bankadan
+                elle iade edildiğini doğrulayın.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Horizontal Stepper Timeline ────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-5">
         <div className="flex items-center justify-between overflow-x-auto">
-          {TIMELINE_STEPS.map((step, i) => {
+          {timelineSteps.map((step, i) => {
             const isActive = i < currentStepIndex;
             const isCurrent = step === effectiveStatus;
             const isFailedStep = isCurrent && isFailed;
@@ -954,10 +1918,10 @@ export function OrderDetailClient({ data, locale }: Props) {
                     isActive ? "text-green-700 font-medium" :
                     "text-gray-400"
                   }`}>
-                    {d[`admin.status.${step}` as keyof typeof d] || step.replace(/_/g, " ")}
+                    {statusLabel(step)}
                   </span>
                 </div>
-                {i < TIMELINE_STEPS.length - 1 && (
+                {i < timelineSteps.length - 1 && (
                   <div className="flex-1 mx-1 h-0.5 min-w-[16px]">
                     <div className={`h-full rounded-full transition-colors duration-300 ${i < currentStepIndex ? "bg-green-400" : "bg-gray-200"}`} />
                   </div>
@@ -1270,11 +2234,6 @@ export function OrderDetailClient({ data, locale }: Props) {
                     {loading === "reject" ? d["admin.orderDetail.rejecting"] : d["admin.orderDetail.reject"]}
                   </button>
                 )}
-                {order.paymentStatus === "succeeded" && (
-                  <button onClick={() => { if (confirm("İade işlemini onayla? Ödeme iade edilir ve üretici kazancı geri alınır.")) performAction("refund", { reason: notes || "Admin iadesi" }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
-                    {loading === "refund" ? "İade ediliyor…" : "İade et"}
-                  </button>
-                )}
               </div>
             )}
           </div>
@@ -1415,9 +2374,11 @@ export function OrderDetailClient({ data, locale }: Props) {
         {canRevokeManufacturer && (
           <div
             className={`rounded-2xl border p-5 ${
-              isStaleAssignment
-                ? "border-red-200 bg-red-50/60"
-                : "border-amber-200 bg-amber-50/60"
+              refunded
+                ? "border-gray-200 bg-gray-50/60"
+                : isStaleAssignment
+                  ? "border-red-200 bg-red-50/60"
+                  : "border-amber-200 bg-amber-50/60"
             }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1431,7 +2392,9 @@ export function OrderDetailClient({ data, locale }: Props) {
 
             {assignedToManufacturerAt && (
               <p className="mt-2 text-sm">
-                {manufacturerStatus === "assigned" ? (
+                {/* A refunded order waits for nobody's answer: the 24h SLA
+                    warning would urge chasing a job that is cancelled. */}
+                {manufacturerStatus === "assigned" && !refunded ? (
                   <span
                     className={
                       isStaleAssignment
@@ -1453,15 +2416,25 @@ export function OrderDetailClient({ data, locale }: Props) {
               </p>
             )}
 
-            {order.orderType === "marketplace" && order.sellerManufacturerId && (
+            {/* Refunded with a manufacturer still attached: the only thing left
+                is to detach them. Re-assignment is closed (refund-end-state)
+                and the route refuses a hand-off. */}
+            {refunded && (
+              <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">
+                Sipariş iade edildi ama üretici hâlâ bağlı. Geri aldığınızda üretici siparişten
+                ayrılır; sipariş atama kuyruğuna dönmez ve başka bir üreticiye verilmez.
+              </p>
+            )}
+            {!refunded && order.orderType === "marketplace" && order.sellerManufacturerId && (
               <p className="mt-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-900">
                 Bu bir mağaza siparişi — ürünü yalnızca sahibi üretici basabilir.
                 Başka bir üreticiye devretmek yerine iptal/iade değerlendirin.
               </p>
             )}
-            {["printed", "qc_pending", "qc_rejected", "qc_approved"].includes(
-              manufacturerStatus ?? ""
-            ) && (
+            {!refunded &&
+              ["printed", "qc_pending", "qc_rejected", "qc_approved"].includes(
+                manufacturerStatus ?? ""
+              ) && (
               <p className="mt-2 rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
                 Bu üreticinin yüklediği QC fotoğrafları yeni üreticiye
                 gösterilmeyecek (yeni QC turu başlar); denetim kaydında kalır.
@@ -1473,7 +2446,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                 onClick={() => setRevokeOpen(true)}
                 className="mt-3 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
               >
-                Atamayı geri al / başka üreticiye ver
+                {refunded ? "Üreticiden geri al" : "Atamayı geri al / başka üreticiye ver"}
               </button>
             ) : (
               <div className="mt-3 space-y-3">
@@ -1491,22 +2464,31 @@ export function OrderDetailClient({ data, locale }: Props) {
                   />
                 </div>
                 <div className="flex flex-wrap gap-4 text-xs text-gray-700">
-                  <label className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={revokeBlocklist}
-                      onChange={(e) => setRevokeBlocklist(e.target.checked)}
-                    />
-                    Bu üreticiyi bu sipariş için bir daha önerme
-                  </label>
-                  <label className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={revokeStrike}
-                      onChange={(e) => setRevokeStrike(e.target.checked)}
-                    />
-                    Güvenilirlik cezası (strike) uygula
-                  </label>
+                  {/* Nothing is suggested for a refunded order again, so this
+                      switch would change nothing there. */}
+                  {!refunded && (
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={revokeBlocklist}
+                        onChange={(e) => setRevokeBlocklist(e.target.checked)}
+                      />
+                      Bu üreticiyi bu sipariş için bir daha önerme
+                    </label>
+                  )}
+                  {/* No strike either: on a refunded order the refund ended the
+                      job, and taking the manufacturer off is cleanup, not a
+                      verdict on how they handled it. */}
+                  {!refunded && (
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={revokeStrike}
+                        onChange={(e) => setRevokeStrike(e.target.checked)}
+                      />
+                      Güvenilirlik cezası (strike) uygula
+                    </label>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -1517,7 +2499,9 @@ export function OrderDetailClient({ data, locale }: Props) {
                   >
                     {loading === "revoke"
                       ? "Geri alınıyor…"
-                      : "Atamayı geri al (kuyruğa döner)"}
+                      : refunded
+                        ? "Üreticiden geri al"
+                        : "Atamayı geri al (kuyruğa döner)"}
                   </button>
                   <button
                     onClick={() => {
@@ -1532,8 +2516,10 @@ export function OrderDetailClient({ data, locale }: Props) {
 
                 {/* Direct hand-off. The unresponsive manufacturer is filtered
                     out — the ranker would otherwise put them first, since
-                    their load just dropped. */}
-                {(() => {
+                    their load just dropped. Never on a refunded order: the
+                    route refuses the hand-off there, so a target list would
+                    promise a re-assignment that cannot happen. */}
+                {!refunded && (() => {
                   const targets = (candidates ?? []).filter(
                     (c) => c.eligible && c.manufacturerId !== manufacturer?.id
                   );
@@ -1708,6 +2694,7 @@ export function OrderDetailClient({ data, locale }: Props) {
             eklemeye davetiye. Üreticinin bastığı işi boyacıya vermek tek tıklık
             uzaklıkta kalır. */}
         {painting &&
+          !refunded &&
           !painting.needsPainting &&
           !order.shippedAt &&
           !["shipped", "delivered", "rejected"].includes(order.status) &&
@@ -1737,7 +2724,12 @@ export function OrderDetailClient({ data, locale }: Props) {
               )}
             </div>
             {!painting.canAddPainting && (
-              <p className="mt-2 text-xs text-gray-600">{painting.addPaintingBlockedReason}</p>
+              <>
+                <p className="mt-2 text-xs text-gray-600">{painting.addPaintingBlockedReason}</p>
+                {/* A refused add refreshes the page, which can close the form;
+                    the route's own words stay visible next to the new reason. */}
+                {addPaintingError && <p className="mt-1 text-xs text-red-600">{addPaintingError}</p>}
+              </>
             )}
             {painting.canAddPainting && showAddPainting && (
               <>
@@ -1840,6 +2832,18 @@ export function OrderDetailClient({ data, locale }: Props) {
                     .join(" · ")}
                 </p>
               </div>
+            ) : refunded ? (
+              <p className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                Sipariş iade edildi; boyacı hattı kapalı.
+              </p>
+            ) : paintsInHouseShare ? (
+              // In-house painting: nobody is missing. The amber "not assigned
+              // yet, assign one below" text contradicted the money line under
+              // it ("Boyama üreticide").
+              <p className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                Boyamayı üretici kendi atölyesinde yapıyor; boyacı ataması gerekmez.
+                İşi yine de bir boyacıya verirseniz boyama payı boyacıya geçer.
+              </p>
             ) : (
               <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 Bu sipariş boyama içeriyor ama <strong>henüz bir boyacıya
@@ -1867,7 +2871,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                   <div>
                     <p className="text-xs text-gray-500">Hakediş durumu</p>
                     <p className="font-medium text-gray-900">
-                      {painting.earning.status}
+                      {EARNING_STATUS_LABEL[painting.earning.status] ?? painting.earning.status}
                     </p>
                   </div>
                 </>
@@ -1875,7 +2879,11 @@ export function OrderDetailClient({ data, locale }: Props) {
                 <div className="col-span-2">
                   <p className="text-xs text-gray-500">Boyacı hakedişi</p>
                   <p className="text-gray-600">
-                    Henüz tahakkuk etmedi (boyacı kargoladığında oluşur)
+                    {refunded
+                      ? "İade edildi — hakediş oluşmaz"
+                      : paintsInHouseShare
+                        ? "Boyama üreticide — boyama payı üreticinin hakedişinde"
+                        : "Henüz tahakkuk etmedi (boyacı kargoladığında oluşur)"}
                   </p>
                 </div>
               )}
@@ -2011,7 +3019,8 @@ export function OrderDetailClient({ data, locale }: Props) {
 
             {/* Assign / reassign. Only while nobody holds the job and the print
                 has cleared QC — the same gate the manufacturer's hand-off uses. */}
-            {(!painting.painterStatus ||
+            {!refunded &&
+              (!painting.painterStatus ||
               painting.painterStatus === "unassigned") && (
               <div className="mt-4 border-t border-gray-200 pt-4">
                 <p className="mb-2 text-xs font-medium text-gray-600">
@@ -2238,6 +3247,109 @@ export function OrderDetailClient({ data, locale }: Props) {
             </div>
           </div>
         )}
+
+        {/* ─── İade ───────────────────────────────────────────
+            One line until opened: a destructive action should be reachable at
+            every stage, not loud on every order. */}
+        {canRefund && (
+          <div
+            className={`rounded-2xl border bg-white ${
+              refundOpen ? "border-red-200 p-5" : "border-gray-200 px-5 py-3"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">İade</h3>
+                <span className="text-xs text-gray-500">
+                  Tahsil edilen {formatCurrency(collectedKurus, loc)}
+                </span>
+              </div>
+              {!refundOpen && (
+                <button
+                  type="button"
+                  onClick={() => setRefundOpen(true)}
+                  className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
+                >
+                  İade et
+                </button>
+              )}
+            </div>
+            {refundOpen && (
+              <div className="mt-3 space-y-3">
+                <div className="space-y-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+                  <p>
+                    <strong>Bu işlem parayı geri göndermez.</strong> {refundMoneyInstruction}
+                  </p>
+                  <p>
+                    Üretici ve boyacı siparişten ayrılır, ödenmemiş hakedişleri geri alınır
+                    {order.giftCardAmountKurus > 0 ? ", hediye kartı bakiyesi karta geri yüklenir" : ""}.
+                    Müşteriye iade bildirimi gider. Sipariş durumu korunur, ileri işlemler kapanır.
+                  </p>
+                </div>
+                {paidOutShares.length > 0 && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <p className="font-semibold">Zaten ödenmiş, geri ALINMAYACAK:</p>
+                    <ul className="mt-1 space-y-0.5">
+                      {paidOutShares.map((s) => (
+                        <li key={s.party}>{describeEarning(s)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {batchedShares.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                    <p className="font-semibold">Bekleyen ödeme partisinden düşülecek:</p>
+                    <ul className="mt-1 space-y-0.5">
+                      {batchedShares.map((s) => (
+                        <li key={s.party}>{describeEarning(s)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {!money && (
+                  <p className="text-xs text-amber-700">
+                    Partner hakediş durumu yüklenemedi; iadeden önce{" "}
+                    <Link href="/admin/payouts" className="underline">Ödemeler</Link> sayfasını kontrol edin.
+                  </p>
+                )}
+                <div>
+                  <label htmlFor="refund-reason" className="mb-1 block text-xs font-medium text-gray-600">
+                    İade sebebi
+                  </label>
+                  <input
+                    id="refund-reason"
+                    type="text"
+                    value={refundReason}
+                    onChange={(e) => setRefundReason(e.target.value)}
+                    maxLength={500}
+                    placeholder="örn. müşteri vazgeçti, ürün hasarlı geldi"
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRefund}
+                    disabled={!!loading}
+                    className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:bg-gray-300 disabled:text-gray-500"
+                  >
+                    {loading === "refund" ? "İade ediliyor…" : "İadeyi onayla"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRefundOpen(false);
+                      setRefundReason("");
+                    }}
+                    className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ═══ Tab bar ═════════════════════════════════════════════ */}
@@ -2349,6 +3461,9 @@ export function OrderDetailClient({ data, locale }: Props) {
                 </div>
               </div>
             )}
+
+            {/* ─── Para dökümü ─────────────────────────── */}
+            <MoneyBreakdownCard money={money} loc={loc} />
           </div>
 
           {/* Right column (1/3) */}
@@ -2443,16 +3558,10 @@ export function OrderDetailClient({ data, locale }: Props) {
                   <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus, loc)}</dd>
                 </div>
                 {order.giftCardAmountKurus > 0 && (
-                  <>
-                    <div className="flex justify-between items-center">
-                      <dt className="text-gray-400">{d["admin.orderDetail.giftCardAmount"]}</dt>
-                      <dd className="font-medium"><span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-green-200">-{formatCurrency(order.giftCardAmountKurus, loc)}</span></dd>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <dt className="text-gray-400">{d["admin.orderDetail.remaining"]}</dt>
-                      <dd className="font-semibold text-gray-900">{formatCurrency(order.amountKurus - order.giftCardAmountKurus, loc)}</dd>
-                    </div>
-                  </>
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">{d["admin.orderDetail.giftCardAmount"]}</dt>
+                    <dd className="font-medium"><span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-green-200">-{formatCurrency(order.giftCardAmountKurus, loc)}</span></dd>
+                  </div>
                 )}
                 {order.havaleDiscountKurus > 0 && (
                   <div className="flex justify-between items-center">
@@ -2462,6 +3571,14 @@ export function OrderDetailClient({ data, locale }: Props) {
                         -{formatCurrency(order.havaleDiscountKurus, loc)}
                       </span>
                     </dd>
+                  </div>
+                )}
+                {/* Replaces the old "Kalan" (amount − gift card), which ignored
+                    the havale discount, so no line matched the cash that came in. */}
+                {(order.giftCardAmountKurus > 0 || order.havaleDiscountKurus > 0) && (
+                  <div className="flex justify-between items-center">
+                    <dt className="text-gray-400">Tahsil edilen</dt>
+                    <dd className="font-semibold text-gray-900">{formatCurrency(collectedKurus, loc)}</dd>
                   </div>
                 )}
                 {order.paymentMethod && (
@@ -2477,7 +3594,13 @@ export function OrderDetailClient({ data, locale }: Props) {
                 <div className="flex justify-between items-center">
                   <dt className="text-gray-400">{d["admin.payment.status"]}</dt>
                   <dd className="text-gray-700 text-xs">
-                    {d[`admin.payment.status.${order.paymentStatus}` as keyof typeof d] || order.paymentStatus}
+                    {refunded ? (
+                      <span className="rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">
+                        {paymentStatusLabel(d, order.paymentStatus)}
+                      </span>
+                    ) : (
+                      paymentStatusLabel(d, order.paymentStatus)
+                    )}
                   </dd>
                 </div>
                 {order.paymentMethod === "bank_transfer" && order.bankTransferReceiptUrl && (
@@ -2807,7 +3930,7 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
 
-            {["approved", "review"].includes(order.status) && (
+            {canUploadRevision && (
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-medium text-gray-700 mb-2">
                   Yeni sürüm yükle — yalnız değişen parçaları yükleyebilirsin. &quot;Önceki
@@ -3114,7 +4237,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                     <div className="pb-3 flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-gray-700 capitalize">{d[`admin.timeline.${action.action === "print" ? "printing" : action.action === "message_email" ? "emailSent" : action.action}` as keyof typeof d] || action.action}</span>
+                        <span className="text-sm font-medium text-gray-700 capitalize">{d[`admin.timeline.${action.action}` as keyof typeof d] || action.action}</span>
                         <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDateTime(action.createdAt, loc)}</span>
                       </div>
                       <p className="text-[10px] text-gray-400">{action.adminEmail}</p>

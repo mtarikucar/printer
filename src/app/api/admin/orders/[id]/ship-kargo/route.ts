@@ -9,6 +9,8 @@ import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR } from "@/lib/config/order-status-policy";
+import { isOrderRefunded, notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 export async function POST(
   request: NextRequest,
@@ -36,10 +38,25 @@ export async function POST(
         shippedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(and(eq(orders.id, id), eq(orders.status, "printing"), isNull(orders.manufacturerId)))
+      // notRefundedGuard(): a refunded order that was mid-production is left
+      // at printing + no manufacturer (the refund detaches it), which this
+      // route would otherwise hand to Yurtiçi (refund-end-state).
+      .where(
+        and(
+          eq(orders.id, id),
+          eq(orders.status, "printing"),
+          isNull(orders.manufacturerId),
+          notRefundedGuard()
+        )
+      )
       .returning();
 
     if (!order) {
+      // Name the refund when it is the reason; the generic 400 would send the
+      // admin hunting for a status problem that is not there.
+      if (await isOrderRefunded(id)) {
+        return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+      }
       return NextResponse.json(
         { error: "Order is not in printing status or is managed by a manufacturer" },
         { status: 400 }

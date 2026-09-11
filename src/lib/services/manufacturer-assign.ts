@@ -1,4 +1,4 @@
-import { and, eq, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, isNull, ne, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   adminActions,
@@ -9,6 +9,10 @@ import {
 } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import {
+  REFUNDED_PAYMENT_STATUS,
+  isRefunded,
+} from "@/lib/config/order-status-policy";
 
 /**
  * The one place an order is handed to a manufacturer.
@@ -30,6 +34,38 @@ export function assignableStatusGuard(): SQL {
     eq(orders.status, "approved"),
     and(eq(orders.status, "paid"), eq(orders.orderType, "marketplace"))
   )!;
+}
+
+/**
+ * The refund guard every forward action puts INSIDE its atomic UPDATE: the SQL
+ * twin of `!isRefunded(order)` (order-status-policy.ts). In the write, not in a
+ * pre-read, so a refund landing between a route's read and its write still
+ * wins.
+ *
+ * "Not refunded", deliberately not "payment succeeded": the rule stops exactly
+ * the refunded orders. Manual, havale, zero-amount and workshop orders may sit
+ * at another payment status and must keep moving; a 'succeeded' requirement
+ * would silently freeze them the day such a status exists.
+ *
+ * It lives here, beside assignableStatusGuard(), because assignment is the
+ * forward action every path funnels through and this module is already safe to
+ * load in the BullMQ worker; order-status-policy.ts is pure and holds no SQL.
+ */
+export function notRefundedGuard(): SQL {
+  return ne(orders.paymentStatus, REFUNDED_PAYMENT_STATUS);
+}
+
+/**
+ * After a guarded UPDATE matched no row: was a refund the reason? Lets a route
+ * answer 409 REFUNDED_ORDER_ERROR instead of a status error that sends the
+ * admin looking for a problem that is not there.
+ */
+export async function isOrderRefunded(orderId: string): Promise<boolean> {
+  const row = await db.query.orders.findFirst({
+    where: eq(orders.id, orderId),
+    columns: { paymentStatus: true },
+  });
+  return !!row && isRefunded(row);
 }
 
 /**
@@ -89,6 +125,22 @@ export type AssignFailure =
   | "no_printable_content"
   | "not_assignable";
 
+/**
+ * Admin-facing Turkish copy per failure, shared by the single and the bulk
+ * assign routes so both say the same thing. Typed on AssignFailure, so a new
+ * reason is a compile error there rather than an undefined entry at runtime.
+ * `not_assignable` names the refund because a refunded order fails with it
+ * (see notRefundedGuard); the old English text sent the admin looking for a
+ * status problem.
+ */
+export const ASSIGN_FAILURE_MESSAGES: Record<AssignFailure, string> = {
+  manufacturer_unavailable: "Üretici bulunamadı ya da aktif değil.",
+  no_printable_content:
+    "Bu siparişte üreticiye gönderilecek basılabilir içerik yok (model, ürün veya kalem). Önce 3D modeli yükleyin ya da sipariş kalemlerini girin.",
+  not_assignable:
+    "Sipariş atanamaz: bulunamadı, onaylı değil, zaten atanmış ya da iade edilmiş.",
+};
+
 export type AssignResult =
   | {
       ok: true;
@@ -125,6 +177,9 @@ export interface AssignArgs {
  * which is what stops a concurrent admin action, an auto-assignment and a
  * decline retry from all landing on the same order. Losing that race is not an
  * error for the caller to retry — it means someone else already assigned it.
+ *
+ * It also refuses a refunded order (notRefundedGuard): that fails with
+ * `not_assignable`, whoever the caller is.
  */
 export async function assignManufacturerToOrder(
   args: AssignArgs
@@ -151,6 +206,17 @@ export async function assignManufacturerToOrder(
     // Unassigned means NULL (never touched) or the explicit 'unassigned' the
     // cart fan-out writes for platform products — both are up for grabs.
     or(isNull(orders.manufacturerStatus), eq(orders.manufacturerStatus, "unassigned"))!,
+    // A refunded order keeps its status (refund-end-state decision) and the
+    // refund detaches the partner, so it sits at approved/paid + unassigned —
+    // exactly what an assignable order looks like. Without this the admin
+    // "Ata" button, bulk assign and automatic assignment would put a refunded
+    // order back on a partner's bench and a fresh earning would accrue at ship.
+    // It lives in the UPDATE (not a pre-read) so a refund landing between
+    // ranking and this write still wins, and outside `statusGuard` so the
+    // decline path (statusGuard: null) is covered too. The reason stays
+    // `not_assignable`: callers map reasons through fixed tables, and a new
+    // member would reach them as an unknown key.
+    notRefundedGuard(),
   ];
   if (statusGuard) conditions.push(statusGuard);
 

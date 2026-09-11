@@ -7,6 +7,10 @@ import { AdminSidebar } from "./sidebar";
 import { AdminRealtimeShell } from "./realtime-shell";
 import { PanelShell } from "@/components/panel-shell";
 import { auth } from "@/lib/auth/config";
+import {
+  AWAITING_MANUFACTURER,
+  NOT_REFUNDED,
+} from "@/lib/services/admin-order-sql";
 
 export default async function AdminLayout({
   children,
@@ -35,28 +39,31 @@ export default async function AdminLayout({
     redirect("/admin/login");
   }
 
-  // Count orders awaiting the admin to upload a 3D model
-  const [reviewCount] = await db
+  // The Orders badge counts work waiting on the admin, in two disjoint parts.
+  // Refunded orders are left out of both, because every forward action on a
+  // refunded order is refused, the model upload included.
+  //  1. awaiting_model: a 3D model for the admin to upload.
+  //  2. AWAITING_MANUFACTURER: paid work with no manufacturer (approved
+  //     custom/upload orders, and paid marketplace orders). This is the same
+  //     definition as the dashboard's "Atanmamış" card, the manufacturing
+  //     queue's first section and the "Üretici bekliyor" bucket. The badge
+  //     used to count only the marketplace half, refunds included, so the
+  //     four numbers disagreed.
+  // awaiting_model is neither `approved` nor `paid`, so no order counts twice.
+  const [awaitingModelCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
-    .where(sql`${orders.status} = 'awaiting_model'`);
+    .where(sql`${orders.status} = 'awaiting_model' AND ${NOT_REFUNDED}`);
 
-  // Paid marketplace orders with no manufacturer yet, and the bulk subset of
-  // them. Platform-owned (admin) products now correctly stay at `paid` instead
-  // of being parked in `awaiting_model`, so without these counters they'd be
-  // invisible in the sidebar badges and buried in the crowded "in progress"
-  // bucket. Both come from one scan.
-  const [unassignedCounts] = await db
+  // The Toplu üretim badge is the bulk subset of part 2 (assignable bulk
+  // orders). Both come from one scan.
+  const [awaitingManufacturerCounts] = await db
     .select({
-      marketplace: sql<number>`count(*)::int`,
+      all: sql<number>`count(*)::int`,
       bulk: sql<number>`count(*) FILTER (WHERE ${orders.isBulk})::int`,
     })
     .from(orders)
-    .where(
-      sql`${orders.orderType} = 'marketplace'
-        AND ${orders.status} = 'paid'
-        AND (${orders.manufacturerStatus} IS NULL OR ${orders.manufacturerStatus} = 'unassigned')`
-    );
+    .where(AWAITING_MANUFACTURER);
 
   // Count pending manufacturer approvals
   const [pendingMfgCount] = await db
@@ -70,11 +77,15 @@ export default async function AdminLayout({
     .from(orderDrafts)
     .where(sql`${orderDrafts.status} = 'awaiting_review'`);
 
-  // Count orders awaiting QC photo approval.
+  // Orders awaiting QC photo approval. Same predicate as the dashboard's
+  // "QC Bekleyen" card and the /admin/qc-queue list this badge opens: a
+  // refunded order is frozen, so its QC decision is not work. The refund
+  // resets manufacturerStatus today, so only stale or legacy rows differ, but
+  // the three numbers must not be able to disagree.
   const [qcPendingCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
-    .where(sql`${orders.manufacturerStatus} = 'qc_pending'`);
+    .where(sql`${orders.manufacturerStatus} = 'qc_pending' AND ${NOT_REFUNDED}`);
 
   // Count products awaiting moderation.
   const [pendingProductCount] = await db
@@ -94,11 +105,13 @@ export default async function AdminLayout({
     .from(painters)
     .where(sql`${painters.status} = 'pending_approval'`);
 
-  // Count painting jobs awaiting painter-QC review.
+  // Painting jobs awaiting painter-QC review. Refunded orders are left out,
+  // as in the /admin/painter-qc-queue list this badge opens (same reason as
+  // the QC badge above).
   const [painterQcPendingCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
-    .where(sql`${orders.painterStatus} = 'qc_pending'`);
+    .where(sql`${orders.painterStatus} = 'qc_pending' AND ${NOT_REFUNDED}`);
 
   // WhatsApp threads where the customer wrote after our last outbound message.
   // Nobody marks a thread read here, so "waiting on us" is the honest badge.
@@ -118,9 +131,9 @@ export default async function AdminLayout({
         title="Figurunica Admin"
         sidebar={
           <AdminSidebar
-            reviewCount={reviewCount.count}
-            unassignedMarketplaceCount={unassignedCounts.marketplace}
-            unassignedBulkCount={unassignedCounts.bulk}
+            awaitingModelCount={awaitingModelCount.count}
+            awaitingManufacturerCount={awaitingManufacturerCounts.all}
+            awaitingManufacturerBulkCount={awaitingManufacturerCounts.bulk}
             pendingManufacturerCount={pendingMfgCount.count}
             pendingProductCount={pendingProductCount.count}
             draftReviewCount={draftReviewCount.count}

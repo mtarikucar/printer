@@ -11,6 +11,8 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
+import { isRefunded } from "@/lib/config/order-status-policy";
+import { buildOrderMoneyBreakdown } from "@/lib/services/order-money";
 import {
   gateMode,
   requiresOverride,
@@ -74,6 +76,16 @@ export default async function AdminOrderDetailPage({
 
   if (!order) notFound();
 
+  // ─── Para dökümü ─────────────────────────────────────────────────────────
+  // Started here and awaited just before serialisation so its queries overlap
+  // the rest of this page's. It is a read-only view: if it throws, the card says
+  // so and the page still renders. A money view must never lock the admin out of
+  // shipping, assigning or refunding the order.
+  const moneyPromise = buildOrderMoneyBreakdown(order.id).catch((e) => {
+    console.error(`[admin order ${order.id}] money breakdown failed`, e);
+    return null;
+  });
+
   // Query active manufacturers for the assignment dropdown
   const activeManufacturers = await db.query.manufacturers.findMany({
     where: sql`${manufacturers.status} = 'active'`,
@@ -108,7 +120,8 @@ export default async function AdminOrderDetailPage({
   // Mirrors /api/admin/orders/[id]/add-painting exactly (the route is the
   // authority; this only decides what the card shows and why). The painting
   // share is carved out of the production share, so it is only possible before
-  // the manufacturer's earning has accrued.
+  // the manufacturer's earning has accrued. A refunded order is closed for new
+  // work, so it is refused first.
   const manufacturerEarningAccrued = order.needsPainting
     ? false
     : !!(await db.query.manufacturerEarnings.findFirst({
@@ -120,6 +133,8 @@ export default async function AdminOrderDetailPage({
       }));
   const addPaintingBlockedReason: string | null = order.needsPainting
     ? null
+    : isRefunded(order)
+      ? "Sipariş iade edildi; iade edilen siparişe boyama eklenemez."
     : order.workshopSessionId
       ? "Atölye siparişine boyama eklenemez: atölye partisi mekâna toplu teslim edilir, boyacı hattına girmez."
       : order.painterId
@@ -298,6 +313,8 @@ export default async function AdminOrderDetailPage({
             : null,
         }
       : null;
+
+  const money = await moneyPromise;
 
   // Serialize everything for client component
   const serialized = {
@@ -525,6 +542,8 @@ export default async function AdminOrderDetailPage({
       companyName: m.companyName,
     })),
     candidates,
+    // Already serialisable by contract (dates as ISO strings); null = loader failed.
+    money,
   };
 
   return (

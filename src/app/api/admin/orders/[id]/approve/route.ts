@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions, meshReports, generationAttempts } from "@/lib/db/schema";
@@ -15,6 +15,12 @@ import { requiresOverride, type PrintGateVerdict } from "@/lib/services/print-ga
 import { getWaOutboundQueue } from "@/lib/queue/queues";
 import { waConversations } from "@/lib/db/schema";
 import { APPROVAL_BUTTONS, WA_TEMPLATES } from "@/lib/config/whatsapp";
+import {
+  REFUNDED_ORDER_ERROR,
+  formatAdminNoteLine,
+  isRefunded,
+} from "@/lib/config/order-status-policy";
+import { isOrderRefunded, notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 /**
  * Admin approval of a reviewed order.
@@ -51,12 +57,23 @@ export async function POST(
       modelSource: orders.modelSource,
       modelGlbKey: orders.modelGlbKey,
       waConversationId: orders.waConversationId,
+      paymentStatus: orders.paymentStatus,
     })
     .from(orders)
     .where(eq(orders.id, id))
     .limit(1);
 
-  if (!current || current.status !== "review") {
+  if (!current) {
+    return NextResponse.json({ error: d["api.order.notInReview"] }, { status: 400 });
+  }
+  // Approval is a forward action (refund-end-state): it opens the manufacturer
+  // queue and emails "approved" for an order whose money already went back.
+  // Checked before the status so the admin reads the real reason, and before
+  // the print gate so no override is asked for.
+  if (isRefunded(current)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
+  if (current.status !== "review") {
     return NextResponse.json({ error: d["api.order.notInReview"] }, { status: 400 });
   }
 
@@ -87,6 +104,8 @@ export async function POST(
   }
 
   const nextStatus = needsCustomerApproval ? "awaiting_customer_approval" : "approved";
+  const note = typeof body.notes === "string" ? body.notes.trim() : "";
+  const noteLine = note ? formatAdminNoteLine(`Onaylandı: ${note}`) : null;
 
   const [order] = await db
     .update(orders)
@@ -94,13 +113,24 @@ export async function POST(
       status: nextStatus,
       // Only a real approval opens the manufacturer queue.
       ...(needsCustomerApproval ? {} : { manufacturerStatus: "unassigned" as const }),
-      adminNotes: body.notes,
+      // Appended, never overwritten (see order-status-policy.ts): an overwrite
+      // wiped the [SLA] / decline flags other writers leave in adminNotes.
+      ...(noteLine
+        ? {
+            adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${noteLine} ELSE ${orders.adminNotes} || E'\n' || ${noteLine} END`,
+          }
+        : {}),
       updatedAt: new Date(),
     })
-    .where(and(eq(orders.id, id), eq(orders.status, "review")))
+    // The refund guard is repeated in the write so a refund landing after the
+    // read above still wins.
+    .where(and(eq(orders.id, id), eq(orders.status, "review"), notRefundedGuard()))
     .returning();
 
   if (!order) {
+    if (await isOrderRefunded(id)) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
     return NextResponse.json({ error: d["api.order.notInReview"] }, { status: 400 });
   }
 

@@ -44,6 +44,7 @@ interface Painter {
   mapVisible: boolean;
   onboardingAcceptedAt: string | null;
   strikeCount: number;
+  notes: string | null;
 }
 
 // Painting-technique capability tags chosen at registration → readable labels
@@ -131,6 +132,37 @@ export function PaintersClient({
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         alert(data.error || `${action} başarısız`);
+        return;
+      }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  // Closing a tax review must say what was checked: the server refuses it
+  // without a note and appends who/when/what to the painter's admin notes.
+  // Same flow as the manufacturer list.
+  const closeTaxReview = async (p: Painter) => {
+    const input = window.prompt(
+      `${p.companyName}: vergi incelemesini kapat.\nNeyi kontrol ettiniz? (ör. "Vergi levhası görüldü, VKN doğrulandı")`
+    );
+    if (input === null) return;
+    const note = input.trim();
+    if (note.length < 3) {
+      alert("Neyi kontrol ettiğinizi kısaca yazın (en az 3 karakter).");
+      return;
+    }
+    setLoading(`tax-review-${p.id}`);
+    try {
+      const res = await fetch(`/api/admin/painters/${p.id}/tax-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Vergi incelemesi kapatılamadı");
         return;
       }
       router.refresh();
@@ -253,10 +285,27 @@ export function PaintersClient({
                       <span className="font-mono text-gray-700">
                         {p.taxIdType.toUpperCase()}: {p.taxId}
                       </span>
-                    ) : (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        Vergi levhası yok
-                      </span>
+                    ) : !p.requiresManualTaxReview ? (
+                      <span className="text-xs text-gray-400">Beyan edilmedi</span>
+                    ) : null}
+                    {/* The badge follows the flag, not the missing tax id: the
+                        flag is what the "Manuel İnceleme" tab filters on, and
+                        an admin can now close it. */}
+                    {p.requiresManualTaxReview && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                          Vergi levhası yok
+                        </span>
+                        {p.status !== "rejected" && (
+                          <button
+                            onClick={() => void closeTaxReview(p)}
+                            disabled={loading === `tax-review-${p.id}`}
+                            className="text-xs font-medium text-indigo-600 hover:underline disabled:text-gray-400"
+                          >
+                            {loading === `tax-review-${p.id}` ? "Kapatılıyor…" : "İncelemeyi kapat"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700 text-center">
@@ -450,6 +499,23 @@ export function PaintersClient({
                                 v: p.onboardingAcceptedAt ? formatDate(p.onboardingAcceptedAt, loc) : null,
                               },
                               { k: "Başvuru tarihi", v: formatDate(p.createdAt, loc) },
+                            ],
+                          },
+                          {
+                            // Partner-level admin decisions (e.g. a closed tax
+                            // review: who, when, what was checked).
+                            // painter_actions rows need an order, so they live
+                            // in painters.notes.
+                            title: "Admin notları",
+                            items: [
+                              {
+                                k: "Kayıtlar",
+                                v: p.notes ? (
+                                  <span className="block whitespace-pre-line text-left text-xs text-gray-700">
+                                    {p.notes}
+                                  </span>
+                                ) : null,
+                              },
                             ],
                           },
                         ]}

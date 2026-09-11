@@ -1,22 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { assignManufacturerToOrder } from "@/lib/services/manufacturer-assign";
-
-const ERRORS: Record<string, { message: string; status: number }> = {
-  manufacturer_unavailable: {
-    message: "Manufacturer not found or not active",
-    status: 400,
-  },
-  no_printable_content: {
-    message:
-      "Bu siparişte üreticiye gönderilecek basılabilir içerik yok (model, ürün veya kalem). Önce 3D modeli yükleyin ya da sipariş kalemlerini girin.",
-    status: 400,
-  },
-  not_assignable: {
-    message: "Order not found, not in approved status, or already assigned",
-    status: 400,
-  },
-};
+import {
+  ASSIGN_FAILURE_MESSAGES,
+  assignManufacturerToOrder,
+} from "@/lib/services/manufacturer-assign";
 
 export async function POST(
   request: NextRequest,
@@ -33,7 +20,7 @@ export async function POST(
 
     if (!manufacturerId) {
       return NextResponse.json(
-        { error: "manufacturerId is required" },
+        { error: "Üretici seçin." },
         { status: 400 }
       );
     }
@@ -49,15 +36,19 @@ export async function POST(
     });
 
     if (!result.ok) {
-      const err = ERRORS[result.reason];
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      // Same copy as the bulk assign route (ASSIGN_FAILURE_MESSAGES). Every
+      // reason is a 400, as before; a refunded order arrives as not_assignable.
+      return NextResponse.json(
+        { error: ASSIGN_FAILURE_MESSAGES[result.reason] },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error("Assign manufacturer failed:", error);
     return NextResponse.json(
-      { error: "Failed to assign manufacturer" },
+      { error: "Üretici atanamadı. Tekrar deneyin." },
       { status: 500 }
     );
   }

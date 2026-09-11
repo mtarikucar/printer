@@ -1,18 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, inArray, isNull } from "drizzle-orm";
+import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
-import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 const MAX_BULK_SIZE = 50;
 
+// Every message is Turkish because any caller may show it as-is. Ids are shape-
+// checked (guid: any 8-4-4-4-12 hex, what Postgres accepts, so a real row id is
+// never refused) because a malformed one reached Postgres inside inArray and
+// came back as a 500. The action is an enum because an unknown action used to
+// fall through to start-printing.
+const bodySchema = z.object(
+  {
+    orderIds: z
+      .array(
+        z
+          .string({ error: "Geçersiz sipariş kimliği." })
+          .guid({ error: "Geçersiz sipariş kimliği." }),
+        { error: "Sipariş seçimi zorunludur." }
+      )
+      .min(1, { error: "En az bir sipariş seçin." })
+      .max(MAX_BULK_SIZE, {
+        error: `Toplu işlemde en fazla ${MAX_BULK_SIZE} sipariş seçilebilir.`,
+      }),
+    action: z.enum(["approve", "start-printing"], {
+      error: "Geçersiz toplu işlem: onay ya da baskı başlatma seçin.",
+    }),
+  },
+  { error: "Geçersiz istek." }
+);
+
 export async function POST(request: NextRequest) {
   const locale = getRequestLocale(request);
-  const d = getDictionary(locale);
 
   const a = await requireAdmin();
 
@@ -22,21 +47,14 @@ export async function POST(request: NextRequest) {
 
   const session = { user: { email: a.session.user.email } };
 
-  const body = await request.json().catch(() => ({})) as {
-    orderIds: string[];
-    action: "approve" | "start-printing";
-  };
-
-  if (!body.orderIds?.length || !body.action) {
-    return NextResponse.json({ error: "orderIds and action are required" }, { status: 400 });
-  }
-
-  if (body.orderIds.length > MAX_BULK_SIZE) {
+  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: `Maximum ${MAX_BULK_SIZE} orders per bulk action` },
+      { error: parsed.error.issues[0]?.message ?? "Geçersiz istek." },
       { status: 400 }
     );
   }
+  const body = parsed.data;
 
   const allOrders = await db.query.orders.findMany({
     where: inArray(orders.id, body.orderIds),
@@ -71,9 +89,17 @@ export async function POST(request: NextRequest) {
 
   await db.transaction(async (tx) => {
     for (const order of eligible) {
-      // Atomic status transition within transaction
+      // Atomic status transition within transaction.
+      // Both actions move an order forward, so both carry their single
+      // route's refund guard: a refunded order keeps its status but is never
+      // approved or printed (refund-end-state). It is counted as skipped, like
+      // any other ineligible order.
+      const conditions = [
+        eq(orders.id, order.id),
+        eq(orders.status, requiredStatus),
+        notRefundedGuard(),
+      ];
       // For start-printing, exclude manufacturer-assigned orders
-      const conditions = [eq(orders.id, order.id), eq(orders.status, requiredStatus as any)];
       if (body.action === "start-printing") {
         conditions.push(isNull(orders.manufacturerId));
       }
@@ -92,6 +118,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // The action note goes to adminActions only, never into
+      // orders.adminNotes: that column carries the [SLA] / decline flags other
+      // writers append, and an action must not overwrite them.
       await tx.insert(adminActions).values({
         orderId: order.id,
         action: actionType,

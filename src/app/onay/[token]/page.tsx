@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getApprovalByToken } from "@/lib/services/model-approval";
+import { isOrderRefunded } from "@/lib/services/manufacturer-assign";
 import { ApprovalClient } from "./approval-client";
 
 // The page shows a 3D likeness derived from a photo the customer uploaded.
@@ -24,5 +25,10 @@ export default async function ModelApprovalPage({
   // both get a plain 404, which leaks nothing about whether an order exists.
   if (!view) notFound();
 
-  return <ApprovalClient token={token} view={view} />;
+  // A refund keeps the order's status, so an order refunded while it waited
+  // here still reads as undecided. Approval and revision are refused on it
+  // server-side; the page must not offer them either.
+  const refunded = await isOrderRefunded(view.orderId);
+
+  return <ApprovalClient token={token} view={view} refunded={refunded} />;
 }

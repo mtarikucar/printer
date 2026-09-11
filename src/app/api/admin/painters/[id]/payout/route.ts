@@ -1,79 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and, isNull } from "drizzle-orm";
-import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { db } from "@/lib/db";
-import { painterEarnings, painterPayouts } from "@/lib/db/schema";
+import { createPayoutForPainter } from "@/lib/services/painter-payouts";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 
-const bodySchema = z.object({ reference: z.string().max(200).optional() });
-
 const fmtTRY = (kurus: number) => `₺${(kurus / 100).toLocaleString("tr-TR")}`;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Admin batches a painter's not-yet-batched pending earnings into a single
-// payout and marks it paid in one atomic step (mirrors the manufacturer payout
-// route + markPayoutPaid, against the painter tables). Only earnings that are
-// still `pending` and unbatched are captured; reversed ones are never paid.
+// Step 1 of the payout flow — the SAME two steps the manufacturer side uses:
+// batch the painter's pending, not-yet-batched earnings into ONE pending
+// payout here; mark it paid via /api/admin/payouts/[id]/mark-paid once the bank
+// transfer has actually been sent.
+//
+// This route used to create the batch already "paid" in a single step. The
+// admin had no moment to check IBAN / account holder before the database
+// claimed the money had left, and a painter-requested batch (pending) and an
+// admin-created one (paid) went through two different flows for the same
+// thing. Reversed earnings are never captured (status must be 'pending').
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const a = await requireAdmin();
   if ("response" in a) return a.response;
   const { id } = await params;
-
-  let reference: string | undefined;
-  try {
-    reference = bodySchema.parse(await request.json().catch(() => ({}))).reference;
-  } catch {
-    return NextResponse.json({ error: "Geçersiz istek" }, { status: 400 });
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: "Ödenecek bekleyen kazanç yok" }, { status: 400 });
   }
 
-  const result = await db.transaction(async (tx) => {
-    const pending = await tx
-      .select({
-        id: painterEarnings.id,
-        netKurus: painterEarnings.netKurus,
-      })
-      .from(painterEarnings)
-      .where(
-        and(
-          eq(painterEarnings.painterId, id),
-          eq(painterEarnings.status, "pending"),
-          isNull(painterEarnings.payoutId)
-        )
-      );
-    if (pending.length === 0) return null;
-
-    const totalKurus = pending.reduce((s, e) => s + e.netKurus, 0);
-
-    const [payout] = await tx
-      .insert(painterPayouts)
-      .values({
-        painterId: id,
-        totalKurus,
-        earningCount: pending.length,
-        adminEmail: a.session.user.email,
-        status: "paid",
-        reference: reference ?? null,
-        paidAt: new Date(),
-      })
-      .returning({ id: painterPayouts.id });
-
-    await tx
-      .update(painterEarnings)
-      .set({ status: "paid", payoutId: payout.id, updatedAt: new Date() })
-      .where(
-        and(
-          eq(painterEarnings.painterId, id),
-          eq(painterEarnings.status, "pending"),
-          isNull(painterEarnings.payoutId)
-        )
-      );
-
-    return { payoutId: payout.id, totalKurus, count: pending.length };
-  });
-
+  const result = await createPayoutForPainter(id, a.session.user.email);
   if (!result) {
     return NextResponse.json(
       { error: "Ödenecek bekleyen kazanç yok" },
@@ -84,9 +38,9 @@ export async function POST(
   await notifyPainter({
     painterId: id,
     type: "payout",
-    subject: "Ödemeniz gerçekleştirildi",
-    body: `${fmtTRY(result.totalKurus)} tutarındaki ödemeniz banka hesabınıza gönderildi (${result.count} iş).`,
-  }).catch((e) => console.error("notifyPainter (payout) failed", e));
+    subject: "Ödemeniz hazırlanıyor",
+    body: `${fmtTRY(result.totalKurus)} tutarındaki ödemeniz oluşturuldu (${result.count} iş). Banka transferi yapıldığında ayrıca bilgilendirileceksiniz.`,
+  }).catch((e) => console.error("notifyPainter (payout create) failed", e));
 
   return NextResponse.json({ success: true, ...result });
 }

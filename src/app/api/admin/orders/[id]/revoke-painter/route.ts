@@ -8,11 +8,17 @@ import { revokeAfterPainterHandoff } from "@/lib/services/revoke-after-painter";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { isOrderRefunded } from "@/lib/services/manufacturer-assign";
 
 /**
  * Pull a painting order back from the painter to the assignment queue, detaching
  * both the painter and the manufacturer and reversing the manufacturer's accrued
  * print earning. See `revokeAfterPainterHandoff` for the invariants.
+ *
+ * On a refunded order the same call is cleanup: it takes the job off partners
+ * who should not work on money already returned. The order does not go back to
+ * the queue (every assign path refuses a refunded order), so the audit note and
+ * both partner notices say the job is cancelled instead.
  */
 const schema = z
   .object({
@@ -87,6 +93,12 @@ export async function POST(
     return NextResponse.json({ error: m.message }, { status: m.status });
   }
 
+  // A refund is terminal, so reading it after the revoke is accurate. Without
+  // this the refunded case told the manufacturer the order "yeniden atanacak"
+  // and logged "atama kuyruğuna döndü", neither of which can happen. A failed
+  // read falls back to the ordinary copy rather than failing a committed revoke.
+  const refunded = await isOrderRefunded(id).catch(() => false);
+
   // Every side effect below is isolated: the order has already moved, so a
   // failing email or Redis must not turn this into a 500 the admin reads as
   // "nothing happened".
@@ -114,7 +126,11 @@ export async function POST(
       notes:
         `Boyacıdan geri alındı: üretici ${prevMfg?.companyName ?? result.prevManufacturerId ?? "-"} ` +
         `(${result.prevManufacturerStatus ?? "-"}) + boyacı ${prevPainter?.companyName ?? result.prevPainterId} ` +
-        `(${result.prevPainterStatus}) → atama kuyruğuna döndü. Sebep: ${reason}`,
+        `(${result.prevPainterStatus}) ` +
+        (refunded
+          ? `→ sipariş iade edildiği için kuyruğa dönmedi, iş iptal edildi. `
+          : `→ atama kuyruğuna döndü. `) +
+        `Sebep: ${reason}`,
     })
     .catch((e) => console.error("revoke-painter: adminActions insert failed", e));
 
@@ -122,11 +138,17 @@ export async function POST(
     await notifyManufacturer({
       manufacturerId: result.prevManufacturerId,
       type: "order_unassigned",
-      subject: `Sipariş ataması geri alındı — ${result.orderNumber}`,
-      body:
-        `${result.orderNumber} numaralı siparişin ataması yönetici tarafından geri alındı ` +
-        `ve sipariş yeniden atanacak.\n\nSebep: ${reason}\n\n` +
-        `Bu sipariş artık üretici panelinizde görünmeyecektir.`,
+      subject: refunded
+        ? `Sipariş iade edildi, iş iptal edildi — ${result.orderNumber}`
+        : `Sipariş ataması geri alındı — ${result.orderNumber}`,
+      body: refunded
+        ? `${result.orderNumber} numaralı sipariş müşteriye iade edildi. Bu yüzden ataması ` +
+          `yönetici tarafından geri alındı ve iş iptal edildi; bu sipariş için yapmanız gereken başka bir işlem yok.\n\n` +
+          `Sebep: ${reason}\n\n` +
+          `Bu sipariş artık üretici panelinizde görünmeyecektir.`
+        : `${result.orderNumber} numaralı siparişin ataması yönetici tarafından geri alındı ` +
+          `ve sipariş yeniden atanacak.\n\nSebep: ${reason}\n\n` +
+          `Bu sipariş artık üretici panelinizde görünmeyecektir.`,
       orderId: id,
     }).catch((e) =>
       console.error("revoke-painter: manufacturer notify failed", e)
@@ -136,10 +158,18 @@ export async function POST(
   await notifyPainter({
     painterId: result.prevPainterId,
     type: "system_announcement",
-    subject: `Boyama işi geri alındı — ${result.orderNumber}`,
-    body:
-      `${result.orderNumber} numaralı boyama işi yönetici tarafından geri alındı ` +
-      `ve bu iş artık boyacı panelinizde görünmeyecektir.\n\nSebep: ${reason}`,
+    subject: refunded
+      ? `Sipariş iade edildi, boyama işi iptal edildi — ${result.orderNumber}`
+      : `Boyama işi geri alındı — ${result.orderNumber}`,
+    // The painter may be mid-paint: on a refund they must stop, not just learn
+    // the job moved.
+    body: refunded
+      ? `${result.orderNumber} numaralı sipariş müşteriye iade edildi. Bu yüzden boyama işi ` +
+        `yönetici tarafından geri alındı ve iptal edildi; bu iş için boyamaya ya da kargoya devam etmeyin.\n\n` +
+        `Sebep: ${reason}\n\n` +
+        `Bu iş artık boyacı panelinizde görünmeyecektir.`
+      : `${result.orderNumber} numaralı boyama işi yönetici tarafından geri alındı ` +
+        `ve bu iş artık boyacı panelinizde görünmeyecektir.\n\nSebep: ${reason}`,
     orderId: id,
   }).catch((e) => console.error("revoke-painter: painter notify failed", e));
 
@@ -159,5 +189,8 @@ export async function POST(
     prevManufacturer: prevMfg?.companyName ?? result.prevManufacturerId,
     prevPainter: prevPainter?.companyName ?? result.prevPainterId,
     prevPainterStatus: result.prevPainterStatus,
+    // Same signal revoke-manufacturer gives: the order went neither back to the
+    // queue nor to anyone else, because it was refunded.
+    ...(refunded ? { reason: "refunded" as const } : {}),
   });
 }

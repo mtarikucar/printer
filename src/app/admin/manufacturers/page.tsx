@@ -74,6 +74,8 @@ export default async function AdminManufacturersPage() {
     coverageProvinces: m.coverageProvinces ?? [],
     mapVisible: m.mapVisible,
     onboardingAcceptedAt: m.onboardingAcceptedAt ? m.onboardingAcceptedAt.toISOString() : null,
+    // Partner-level admin audit lines (e.g. a closed tax review), shown in Detay.
+    notes: m.notes,
   }));
 
   return (

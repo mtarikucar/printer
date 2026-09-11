@@ -1,10 +1,20 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { sql, inArray } from "drizzle-orm";
+import { sql, inArray, type AnyColumn } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderDrafts, analyticsEvents, products } from "@/lib/db/schema";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
+import {
+  CASH_COLLECTED_KURUS,
+  COUNTS_AS_REVENUE,
+  ISTANBUL_TODAY,
+  REVENUE_DEFINITION_TR,
+  dayKeyToDate,
+  istanbulDay,
+  istanbulLastDaysFirstDay,
+  istanbulLastDaysStart,
+} from "@/lib/services/admin-order-sql";
 
 // ── formatting helpers ──────────────────────────────────────────────────────
 const fmt = (k: number) =>
@@ -30,7 +40,11 @@ const FUNNEL_STEPS: { name: string; label: string }[] = [
   { name: "purchase", label: "Satın alma" },
 ];
 
-const NET = sql`${orders.amountKurus} - ${orders.giftCardAmountKurus} - ${orders.havaleDiscountKurus}`;
+// Revenue is the one C3 definition shared with the dashboard: cash collected
+// (amount − gift card − havale discount) on orders whose payment succeeded, so
+// refunded orders drop out. Both pages read these fragments; neither spells
+// the formula out itself.
+const NET = CASH_COLLECTED_KURUS;
 
 export default async function AdminAnalyticsPage({
   searchParams,
@@ -39,7 +53,13 @@ export default async function AdminAnalyticsPage({
 }) {
   const sp = await searchParams;
   const days = RANGES.some((r) => String(r.days) === sp.days) ? Number(sp.days) : 30;
-  const start = days > 0 ? new Date(Date.now() - days * 86_400_000) : new Date(0);
+  // "N gün" = the last N whole Istanbul days, today included: the window the
+  // dashboard's revenue trend uses (istanbulLastDaysStart). The old
+  // `now() − N × 24h` start opened mid-day, so the first bar was a partial day
+  // and this page's "30 gün" covered different days than the dashboard's.
+  // "Tümü" (0) has no lower bound.
+  const since = days > 0 ? istanbulLastDaysStart(days) : null;
+  const inWindow = (col: AnyColumn) => (since ? sql`${col} >= ${since}` : sql`true`);
 
   const [
     summaryRows,
@@ -50,48 +70,51 @@ export default async function AdminAnalyticsPage({
     campaignRows,
     productSalesRows,
     productEngageRows,
+    windowRows,
   ] = await Promise.all([
     db.execute(sql`
       SELECT count(*)::int AS c, coalesce(sum(${NET}),0)::bigint AS rev
       FROM ${orders}
-      WHERE ${orders.paymentStatus} = 'succeeded' AND ${orders.paidAt} >= ${start}`),
+      WHERE ${COUNTS_AS_REVENUE} AND ${inWindow(orders.paidAt)}`),
     db.execute(sql`
       SELECT count(*)::int AS total,
              count(*) FILTER (WHERE ${orderDrafts.status} = 'confirmed')::int AS confirmed
       FROM ${orderDrafts}
-      WHERE ${orderDrafts.createdAt} >= ${start}
+      WHERE ${inWindow(orderDrafts.createdAt)}
         AND ${orderDrafts.paymentMethod} <> 'gift_card_full'`),
     db.execute(sql`
       SELECT ${analyticsEvents.name} AS name,
              count(DISTINCT ${analyticsEvents.sessionId})::int AS sessions,
              count(*)::int AS events
       FROM ${analyticsEvents}
-      WHERE ${analyticsEvents.createdAt} >= ${start}
+      WHERE ${inWindow(analyticsEvents.createdAt)}
       GROUP BY ${analyticsEvents.name}`),
+    // One bar per Istanbul day. date_trunc('day', paidAt) cut at UTC midnight
+    // (03:00 Istanbul), so a sale at 01:30 counted on the previous day's bar.
     db.execute(sql`
-      SELECT date_trunc('day', ${orders.paidAt}) AS day,
+      SELECT ${istanbulDay(orders.paidAt)} AS day,
              count(*)::int AS c, coalesce(sum(${NET}),0)::bigint AS rev
       FROM ${orders}
-      WHERE ${orders.paymentStatus} = 'succeeded' AND ${orders.paidAt} >= ${start}
+      WHERE ${COUNTS_AS_REVENUE} AND ${inWindow(orders.paidAt)}
       GROUP BY day ORDER BY day`),
     db.execute(sql`
       SELECT coalesce(${orders.attributionChannel}, 'direct') AS channel,
              count(*)::int AS c, coalesce(sum(${NET}),0)::bigint AS rev
       FROM ${orders}
-      WHERE ${orders.paymentStatus} = 'succeeded' AND ${orders.paidAt} >= ${start}
+      WHERE ${COUNTS_AS_REVENUE} AND ${inWindow(orders.paidAt)}
       GROUP BY 1 ORDER BY rev DESC`),
     db.execute(sql`
       SELECT coalesce(${orders.utmSource}, '(direct)') AS source,
              coalesce(${orders.utmCampaign}, '(none)') AS campaign,
              count(*)::int AS c, coalesce(sum(${NET}),0)::bigint AS rev
       FROM ${orders}
-      WHERE ${orders.paymentStatus} = 'succeeded' AND ${orders.paidAt} >= ${start}
+      WHERE ${COUNTS_AS_REVENUE} AND ${inWindow(orders.paidAt)}
       GROUP BY 1, 2 ORDER BY rev DESC LIMIT 15`),
     db.execute(sql`
       SELECT ${orders.productId} AS pid, count(*)::int AS purchases,
              coalesce(sum(${NET}),0)::bigint AS rev
       FROM ${orders}
-      WHERE ${orders.paymentStatus} = 'succeeded' AND ${orders.paidAt} >= ${start}
+      WHERE ${COUNTS_AS_REVENUE} AND ${inWindow(orders.paidAt)}
         AND ${orders.productId} IS NOT NULL
       GROUP BY 1 ORDER BY rev DESC LIMIT 15`),
     db.execute(sql`
@@ -99,8 +122,15 @@ export default async function AdminAnalyticsPage({
              count(*) FILTER (WHERE ${analyticsEvents.name} = 'view_item')::int AS views,
              count(*) FILTER (WHERE ${analyticsEvents.name} = 'add_to_cart')::int AS atc
       FROM ${analyticsEvents}
-      WHERE ${analyticsEvents.createdAt} >= ${start} AND ${analyticsEvents.productId} IS NOT NULL
+      WHERE ${inWindow(analyticsEvents.createdAt)} AND ${analyticsEvents.productId} IS NOT NULL
       GROUP BY 1`),
+    // The window's first and last day for the header, read from the database
+    // clock the filters above use, so label and figures agree around midnight.
+    since
+      ? db.execute(sql`
+          SELECT to_char(${istanbulLastDaysFirstDay(days)}, 'DD.MM.YYYY') AS from_day,
+                 to_char(${ISTANBUL_TODAY}, 'DD.MM.YYYY') AS to_day`)
+      : Promise.resolve(null),
   ]);
 
   const summary = summaryRows.rows[0] as { c: number; rev: string };
@@ -108,6 +138,10 @@ export default async function AdminAnalyticsPage({
   const orderCount = Number(summary?.c ?? 0);
   const revenue = Number(summary?.rev ?? 0);
   const aov = orderCount > 0 ? revenue / orderCount : 0;
+  const windowRow = windowRows?.rows[0] as { from_day: string; to_day: string } | undefined;
+  const windowLabel = windowRow
+    ? `${windowRow.from_day} – ${windowRow.to_day} · son ${days} gün (İstanbul günleri, bugün dahil)`
+    : "Tüm zamanlar";
 
   // Funnel session map.
   const funnel = new Map<string, { sessions: number; events: number }>();
@@ -155,14 +189,14 @@ export default async function AdminAnalyticsPage({
     .slice(0, 15);
 
   const trend = (trendRows.rows as { day: string; c: number; rev: string }[]).map((r) => ({
-    day: new Date(r.day),
+    day: dayKeyToDate(r.day),
     rev: Number(r.rev),
     c: Number(r.c),
   }));
   const maxRev = Math.max(1, ...trend.map((t) => t.rev));
 
   const cards = [
-    { label: "Ciro (net, ödenmiş)", value: fmt(revenue), hint: fmtFull(revenue) },
+    { label: "Ciro (tahsil edilen)", value: fmt(revenue), hint: fmtFull(revenue) },
     { label: "Sipariş", value: int(orderCount) },
     { label: "Ortalama sepet (AOV)", value: orderCount ? fmt(aov) : "—" },
     { label: "Dönüşüm (sipariş/oturum)", value: pct(conversion) },
@@ -189,6 +223,8 @@ export default async function AdminAnalyticsPage({
         </div>
       </div>
 
+      <p className="-mt-4 mb-6 text-xs text-gray-500">{windowLabel}</p>
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
         {cards.map((c) => (
@@ -200,6 +236,8 @@ export default async function AdminAnalyticsPage({
           </div>
         ))}
       </div>
+
+      <p className="-mt-4 mb-8 text-xs text-gray-400">{REVENUE_DEFINITION_TR}</p>
 
       {/* Revenue trend */}
       <Section title="Ciro trendi">

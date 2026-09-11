@@ -1035,6 +1035,7 @@ const en = {
   "admin.status.approved": "Approved",
   "admin.status.printing": "Printing",
   "admin.status.painting": "Being painted",
+  "admin.status.quality_check": "Quality check",
   "admin.status.shipped": "Shipped",
   "admin.status.failed_generation": "Generation Failed",
   "admin.status.failed_mesh": "Mesh Failed",
@@ -1621,6 +1622,30 @@ const en = {
   "admin.timeline.confirmed": "Order confirmed",
   "admin.timeline.edited": "Order edited",
   "admin.timeline.emailSent": "Email sent",
+  // History rows look up the admin_action_type value directly
+  // (admin.timeline.<action>). Most past-tense keys above (approved, edited...)
+  // match no action value, so raw enum strings were shown.
+  "admin.timeline.approve": "Approved",
+  "admin.timeline.reject": "Rejected",
+  "admin.timeline.regenerate": "Regenerated",
+  "admin.timeline.print": "Printing started",
+  "admin.timeline.ship": "Shipped",
+  "admin.timeline.confirm": "Order confirmed",
+  "admin.timeline.deliver": "Delivered",
+  "admin.timeline.message_email": "Email sent",
+  "admin.timeline.edit": "Order edited",
+  "admin.timeline.force_review": "Moved to review",
+  "admin.timeline.assign_manufacturer": "Manufacturer/painter assignment changed",
+  "admin.timeline.mark_havale_paid": "Bank transfer confirmed",
+  "admin.timeline.mark_payment_expired": "Payment marked expired",
+  "admin.timeline.gallery_approve": "Gallery publication approved",
+  "admin.timeline.gallery_reject": "Gallery publication rejected",
+  "admin.timeline.gallery_reward": "Gallery reward granted",
+  "admin.timeline.gallery_feature": "Featured in gallery",
+  "admin.timeline.gallery_unfeature": "Removed from gallery features",
+  "admin.timeline.qc_approve": "Quality check approved",
+  "admin.timeline.qc_reject": "Quality check rejected",
+  "admin.timeline.refund": "Refunded",
 
   // Admin - Layout
   "admin.nav.reviewBadge": "{count}",
@@ -1787,6 +1812,7 @@ const en = {
   "admin.payment.status.succeeded": "Succeeded",
   "admin.payment.status.failed": "Failed",
   "admin.payment.status.expired": "Expired",
+  "admin.payment.status.refunded": "Refunded",
   "admin.payment.markHavalePaid": "Mark havale as paid",
   "admin.payment.markHavalePaid.confirm":
     "Confirm that the bank transfer has been received for this order?",

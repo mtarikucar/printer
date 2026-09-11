@@ -39,7 +39,7 @@ const profileSchema = z.object({
 });
 
 // Fields that materially affect payouts / order routing — restricted to active
-// manufacturers and re-flag for admin tax review when changed.
+// manufacturers. An IBAN change additionally waits for admin review (below).
 const SENSITIVE_FIELDS = [
   "iban",
   "bankAccountHolder",
@@ -131,11 +131,24 @@ export async function PATCH(request: NextRequest) {
       telefon: a.telefon,
     } satisfies TurkishAddress;
   }
-  if (validated.iban !== undefined && validated.iban !== current.iban) {
-    update.iban = validated.iban;
-    // Bank-detail change re-flags for manual tax review so admin re-verifies
-    // before any further payouts.
-    update.requiresManualTaxReview = true;
+  // The live IBAN is NEVER written from here. It used to be: a changed IBAN
+  // went straight into the column payouts read, with only a tax-review flag as
+  // trace, so it skipped the admin review queue (/admin/kyc-queue) entirely.
+  // The profile page now sends IBAN changes to /api/manufacturer/iban. This
+  // branch only exists for a page loaded before that change, which still posts
+  // `iban`: a changed value is parked for review exactly as that route does,
+  // and the unchanged value the old page always echoes back is ignored.
+  // requiresManualTaxReview is no longer set here: the review IS the re-check,
+  // and the flag (which nothing could clear) cost the shop 40 ranking points.
+  let ibanPending = false;
+  if (
+    validated.iban !== undefined &&
+    validated.iban !== current.iban &&
+    !(current.ibanReviewStatus === "pending" && validated.iban === current.pendingIban)
+  ) {
+    update.pendingIban = validated.iban;
+    update.ibanReviewStatus = "pending";
+    ibanPending = true;
   }
   if (validated.bankAccountHolder !== undefined) update.bankAccountHolder = validated.bankAccountHolder;
   if (validated.bankName !== undefined) update.bankName = validated.bankName;
@@ -143,7 +156,17 @@ export async function PATCH(request: NextRequest) {
   if (validated.acceptingOrders !== undefined) update.acceptingOrders = validated.acceptingOrders;
   if (validated.paintsInHouse !== undefined) update.paintsInHouse = validated.paintsInHouse;
   if (validated.materials !== undefined) {
-    update.capabilities = validated.materials.map((m) => `material_${m}`);
+    // This form owns ONLY the material_* tags. The same column also holds
+    // routing tags the page never shows or sends (large_format, style_<style>,
+    // …): orderRequirements asks for them and the assignment ranker scores on
+    // them. Replacing the whole array wiped them on every save — and the page
+    // saves the profile after every IBAN change too — so a shop silently fell
+    // out of large-format / storybook routing. Keep everything else as is.
+    const materialTags = [...new Set(validated.materials)].map((m) => `material_${m}`);
+    const otherTags = (Array.isArray(current.capabilities) ? current.capabilities : []).filter(
+      (tag) => typeof tag === "string" && !tag.startsWith("material_")
+    );
+    update.capabilities = [...materialTags, ...otherTags];
   }
   update.updatedAt = new Date();
 
@@ -152,5 +175,5 @@ export async function PATCH(request: NextRequest) {
     .set(update)
     .where(eq(manufacturers.id, session.manufacturerId));
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, ibanPending });
 }

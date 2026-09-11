@@ -113,3 +113,60 @@ export function carvePaintingShare(
     paintingAfter: order.paintingPriceKurus + paintingKurus,
   };
 }
+
+/**
+ * Siparişin ÜRETİM kalemi toplamı — boyamayı kimin yaptığından bağımsız.
+ *
+ * Kırılımlı siparişte kayıtlı `productionBaseKurus`; kırılımsız (eski)
+ * siparişte eski kural: tutar − boyama. Tanım gereği, boyama işi başkasına
+ * aitken `manufacturerBaseKurus`'un döndürdüğü tabanın AYNISIDIR (bkz.
+ * scripts/test-order-money.ts'teki eşitlik testi) — para dökümü ekranı
+ * "üretim payı" satırını buradan okur, böylece kendi kopyasını türetmez.
+ */
+export function effectiveProductionBaseKurus(order: EarningBaseOrder): number {
+  if (order.productionBaseKurus !== null) return order.productionBaseKurus;
+  return Math.max(0, order.amountKurus - order.paintingPriceKurus);
+}
+
+export interface OrderMoneySplit {
+  /** Üretim kalemi toplamı (kırılımsız siparişte eski kuralla türetilmiş). */
+  productionBaseKurus: number;
+  /** Boyama kalemi toplamı (`paintingPriceKurus`). */
+  paintingBaseKurus: number;
+  /** Üreticinin hakediş tabanı — `manufacturerBaseKurus` ile birebir. */
+  manufacturerBaseKurus: number;
+  /**
+   * Boyacının hakediş tabanı. Üretici işi kendi atölyesinde boyuyorsa 0: o
+   * pay zaten üreticinin tabanında. Aynı boyama payını iki partnere birden
+   * vaat etmek, kalem modelinin kapatmak için var olduğu hata sınıfıdır.
+   */
+  painterBaseKurus: number;
+  /** Üretici boyamayı kendisi yapıyor (devredilmemiş + "kendim boyarım"). */
+  paintsItself: boolean;
+  /** `productionBaseKurus` NULL — kalem modelinden önceki sipariş. */
+  legacySplit: boolean;
+  /** Üretim + boyama === sipariş tutarı (kalem invariant'ı). */
+  splitMatches: boolean;
+}
+
+/**
+ * Bir siparişin iki hakediş tabanına bölünüşü — admin para dökümü, partner
+ * ekranları ve testler aynı fonksiyonu çağırır. Yalnızca bu dosyadaki
+ * türetimleri birleştirir; yeni bir para kuralı İÇERMEZ. Komisyon burada
+ * yoktur: taban × oran hesabı `computeEarning`'in (services/finance.ts) işidir.
+ */
+export function orderMoneySplit(
+  order: EarningBaseOrder & { painterId: string | null; paintsInHouse: boolean }
+): OrderMoneySplit {
+  const paintsItself = order.painterId === null && order.paintsInHouse;
+  const productionBaseKurus = effectiveProductionBaseKurus(order);
+  return {
+    productionBaseKurus,
+    paintingBaseKurus: order.paintingPriceKurus,
+    manufacturerBaseKurus: manufacturerBaseKurus(order),
+    painterBaseKurus: paintsItself ? 0 : painterBaseKurus(order),
+    paintsItself,
+    legacySplit: order.productionBaseKurus === null,
+    splitMatches: productionBaseKurus + order.paintingPriceKurus === order.amountKurus,
+  };
+}

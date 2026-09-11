@@ -21,10 +21,13 @@ export async function POST(
 
   const r = await refundOrder({ orderId: id, reason, adminEmail: a.session.user.email });
   if (!r.ok) {
-    return NextResponse.json(
-      { error: r.reason },
-      { status: r.reason === "not_found" ? 404 : 400 }
-    );
+    // The admin page alerts `error` as-is, so it is Turkish copy, not a key.
+    // `already_refunded` also covers losing a race: the service's guarded
+    // UPDATE matched no row because a reject or another refund got there
+    // first, and none of the refund side effects ran a second time.
+    return r.reason === "already_refunded"
+      ? NextResponse.json({ error: "Sipariş zaten iade edilmiş." }, { status: 409 })
+      : NextResponse.json({ error: "Sipariş bulunamadı." }, { status: 404 });
   }
   return NextResponse.json({ ok: true });
 }

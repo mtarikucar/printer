@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import {
   COST_LINE_KINDS,
   isCostLineKind,
@@ -437,6 +439,183 @@ test("costLineRowFromKurus kuruşu Türkçe ondalıkla forma yazar", () => {
   // Forma yazılan metin, geri okunduğunda aynı kuruşu vermeli — aksi hâlde
   // kaydet'e basmak fiyatı sessizce değiştirirdi.
   assert.equal(parseTryToKurus(row.amountTry), 150000);
+});
+
+// ─── Grep guard: komisyon matematiği TEK yerde ──────────────────────────────
+// Faz 3 denetimi komisyon hesabının (`brüt − round(brüt × bps / 10000)`) beş
+// dosyada elle kopyalandığını buldu. Kopya; oran, yuvarlama ya da taban kuralı
+// değiştiğinde sessizce ayrışır — partner ekranda başka, hesabında başka rakam
+// görür. Hesap yalnızca aşağıdaki türetim modülünde yaşar; diğer herkes
+// computeEarning / orderMoneySplit / deriveOrderMoneyBreakdown çağırır.
+
+const SRC_ROOT = join(import.meta.dirname, "..", "src");
+const REPO_ROOT = join(import.meta.dirname, "..");
+
+// Kalıbın GERÇEKTEN hesaplandığı tek modül: finance.ts (computeEarning: bps →
+// komisyon, computeKdv: bps → KDV tabanı). Öteki türetim modülleri bps
+// matematiği yapmaz, finance.ts'e devreder — earning-base.ts (tabanlar),
+// config/cost-lines.ts (kalem bölüşümü), config/order-money.ts (para dökümü),
+// config/payment.ts (havale indirimi, kendi oran sabitiyle). O yüzden muaf
+// DEĞİLLER: oralara sızan bir kopya da testi düşürür.
+const DERIVATION_MODULES = new Set(["src/lib/services/finance.ts"]);
+
+/**
+ * Sahibine iletilmiş, henüz kaldırılmamış kopyalar: DOSYA + SATIRIN KENDİSİ
+ * (trim'lenmiş), asla bütün dosya değil — aynı dosyaya yazılan YENİ bir kopya
+ * da testi düşürür. Kopya temizlenince girdi silinmeli; artık hiçbir satırla
+ * eşleşmeyen girdi de testi düşürür, yoksa aynı satır sessizce geri dönebilir.
+ * Faz 3'ün üç kopyası (yeni sipariş formu, kalem editörü, boyacı işleri)
+ * computeEarning'e taşındı; liste boş kalmalı.
+ */
+const ALLOWED_COPIES: ReadonlyArray<{ file: string; line: string }> = [];
+
+// Sayı kalıbı tek başına para demek değil (`vh * 0.6` bir kaydırma eşiği):
+// kalıpların çoğu aynı satırda bir para kelimesi de ister.
+const MONEY_WORDS = /kurus|gross|net|commission|komisyon|price|amount|earning|bps/i;
+const COPY_PATTERNS: ReadonlyArray<{ name: string; re: RegExp; needsMoneyWord: boolean }> = [
+  // bps → tutar: `(x * rateBps) / 10000`, `/ 10_000`, `/ 1e4`. Yüzde GÖSTERİMİ
+  // (`bps / 100`) kalıba girmez.
+  { name: "bps → tutar (/ 10000)", re: /\/\s*(?:10_?000|1e4)\b/, needsMoneyWord: true },
+  // Sabit oranın ondalık kopyası: `amountKurus * 0.6`, `0.4 * grossKurus`.
+  { name: "sabit oran (× 0.4 / × 0.6)", re: /\*\s*0\.[46]0?\b|\b0\.[46]0?\s*\*/, needsMoneyWord: true },
+  // Sabit oranın yüzde kopyası: `gross * 60 / 100`, `(gross * 40) / 100`,
+  // `gross / 100 * 60`.
+  {
+    name: "sabit oran (× 60 / 100)",
+    re: /\*\s*[46]0\s*\)?\s*\/\s*100\b|\/\s*100\s*\)?\s*\*\s*[46]0\b/,
+    needsMoneyWord: true,
+  },
+  // Oranın kendisi: `4000 / 10000` — para kelimesi olmadan da kopyadır.
+  { name: "sabit oran (4000 / 10000)", re: /\b[46]000\s*\/\s*(?:10_?000|1e4)\b/, needsMoneyWord: false },
+];
+
+/** Satırı yakalayan kalıbın adı; kopya değilse null. */
+function copyPatternHit(l: string): string | null {
+  for (const p of COPY_PATTERNS) {
+    if (p.re.test(l) && (!p.needsMoneyWord || MONEY_WORDS.test(l))) return p.name;
+  }
+  return null;
+}
+
+function walkSources(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    if (name === "node_modules" || name.startsWith(".")) continue;
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) walkSources(full, out);
+    else if (/\.(ts|tsx)$/.test(name)) out.push(full);
+  }
+  return out;
+}
+
+function isCommentLine(l: string): boolean {
+  const t = l.trim();
+  return t.startsWith("//") || t.startsWith("*") || t.startsWith("/*");
+}
+
+/**
+ * Kopya taraması. Gerçek ağaçta ve aşağıdaki sentetik kaynaklarla AYNI kod
+ * çalışır — izin listesinin davranışı da böylece test edilir.
+ */
+function scanForCopies(
+  files: ReadonlyArray<{ rel: string; text: string }>,
+  allowed: ReadonlyArray<{ file: string; line: string }>
+): { offenders: string[]; staleAllowed: string[] } {
+  const offenders: string[] = [];
+  const used = new Set<number>();
+  for (const { rel, text } of files) {
+    if (DERIVATION_MODULES.has(rel)) continue;
+    text.split("\n").forEach((l, i) => {
+      if (isCommentLine(l)) return;
+      const hit = copyPatternHit(l);
+      if (!hit) return;
+      const trimmed = l.trim();
+      const allowedAt = allowed.findIndex((a) => a.file === rel && a.line === trimmed);
+      if (allowedAt >= 0) {
+        used.add(allowedAt);
+        return;
+      }
+      offenders.push(`${rel}:${i + 1} [${hit}] ${trimmed}`);
+    });
+  }
+  const staleAllowed = allowed.filter((_, i) => !used.has(i)).map((a) => `${a.file}: ${a.line}`);
+  return { offenders, staleAllowed };
+}
+
+test("komisyon matematiği türetim modülü dışında elle kopyalanmaz (grep guard)", () => {
+  const files = walkSources(SRC_ROOT).map((full) => ({
+    rel: relative(REPO_ROOT, full).split(sep).join("/"),
+    text: readFileSync(full, "utf8"),
+  }));
+  const { offenders, staleAllowed } = scanForCopies(files, ALLOWED_COPIES);
+  assert.deepEqual(
+    offenders,
+    [],
+    `komisyon hesabı elle kopyalanmış — computeEarning (services/finance.ts) kullanın:\n${offenders.join("\n")}`
+  );
+  assert.deepEqual(
+    staleAllowed,
+    [],
+    `ALLOWED_COPIES'te artık hiçbir satırla eşleşmeyen girdi var — silin:\n${staleAllowed.join("\n")}`
+  );
+});
+
+test("grep guard kalıpları kopyaları yakalar, zararsız satırları geçer", () => {
+  const hits = (l: string) => copyPatternHit(l) !== null;
+  // Faz 3'te ağaçta bulunan gerçek kopyalar.
+  assert.ok(hits("gross - Math.round((gross * PLATFORM_COMMISSION_RATE_BPS) / 10000);"));
+  assert.ok(hits("grossKurus - Math.round((grossKurus * PLATFORM_COMMISSION_RATE_BPS) / 10000);"));
+  assert.ok(hits("(j.paintingPriceKurus * j.commissionRateBps) / 10000"));
+  // Önceki kalıpların KAÇIRDIĞI biçimler.
+  assert.ok(hits("const c = Math.round((grossKurus * bps) / 10000);"));
+  assert.ok(hits("const c = (gross * rate) / 10_000;"));
+  assert.ok(hits("const net = gross * (1 - PLATFORM_COMMISSION_RATE_BPS / 1e4);"));
+  assert.ok(hits("const net = gross * 60 / 100;"));
+  assert.ok(hits("const net = Math.round(gross * 60 / 100);"));
+  assert.ok(hits("const net = Math.round((gross * 40) / 100);"));
+  assert.ok(hits("const net = Math.round(amountKurus / 100 * 60);"));
+  // Eski kalıpların zaten yakaladıkları.
+  assert.ok(hits("const net = amountKurus * 0.6;"));
+  assert.ok(hits("const partner = 0.4 * grossKurus;"));
+  assert.ok(hits("const share = 4000 / 10000;"));
+  // Zararsız: para olmayan oranlar ve yüzde GÖSTERİMİ.
+  assert.ok(!hits("setShowFloat(y > vh * 0.6 && y < docH - vh * 1.2);"));
+  assert.ok(!hits("style={{ animationDelay: `${(i + p.plate) % 5 * 0.4}s` }}"));
+  assert.ok(!hits("const sharePercent = (10000 - tier.commissionRateBps) / 100;"));
+  assert.ok(!hits("Platform hizmet bedeli (%{PLATFORM_COMMISSION_RATE_BPS / 100})"));
+  assert.ok(!hits("komisyon %{j.commissionRateBps / 100}"));
+  assert.ok(!hits('₺{(j.netKurus / 100).toLocaleString("tr-TR")}'));
+  assert.ok(!hits("const rounded = Math.round(raw / 100) * 100; // nearest ₺1"));
+});
+
+test("grep guard: izin satır METNİNE bağlı, dosyaya değil; eskiyen izin testi düşürür", () => {
+  const copy = "const net = gross - Math.round((gross * PLATFORM_COMMISSION_RATE_BPS) / 10000);";
+  const other = "const c = Math.round((grossKurus * bps) / 10000);";
+  const allowed = [{ file: "src/app/x.tsx", line: copy }];
+  // İzinli satır (girintisi ne olursa olsun) geçer…
+  let r = scanForCopies([{ rel: "src/app/x.tsx", text: `    ${copy}\n` }], allowed);
+  assert.deepEqual(r, { offenders: [], staleAllowed: [] });
+  // …ama aynı dosyaya yazılan YENİ bir kopya düşer: dosya muaf değil.
+  r = scanForCopies([{ rel: "src/app/x.tsx", text: `${copy}\n${other}` }], allowed);
+  assert.equal(r.offenders.length, 1);
+  assert.ok(r.offenders[0].startsWith("src/app/x.tsx:2 "), r.offenders[0]);
+  // Aynı metin başka dosyada izinli değil; eşleşmeyen izin "eskimiş" sayılır.
+  r = scanForCopies([{ rel: "src/app/y.tsx", text: copy }], allowed);
+  assert.equal(r.offenders.length, 1);
+  assert.deepEqual(r.staleAllowed, [`src/app/x.tsx: ${copy}`]);
+  // Türetim modülü muaf; yorum satırı kod değildir.
+  r = scanForCopies(
+    [
+      { rel: "src/lib/services/finance.ts", text: other },
+      { rel: "src/app/z.ts", text: `// ${other}\n * ${other}` },
+    ],
+    []
+  );
+  assert.deepEqual(r, { offenders: [], staleAllowed: [] });
+  // earning-base.ts / order-money.ts hesap yapmaz, finance.ts'e devreder → muaf değil.
+  for (const rel of ["src/lib/services/earning-base.ts", "src/lib/config/order-money.ts"]) {
+    r = scanForCopies([{ rel, text: other }], []);
+    assert.equal(r.offenders.length, 1, rel);
+  }
 });
 
 for (const [name, fn] of cases) {

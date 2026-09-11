@@ -1,12 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/lib/db";
-import { manufacturers, painters } from "@/lib/db/schema";
+import { manufacturers, orders, painters } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
+
+const orderIdSchema = z.string().uuid();
 
 // List painters a manufacturer can hand a painting job to: active + accepting.
 // Used to populate the "Boyacıya gönder" picker on the manufacturer order page.
-export async function GET() {
+//
+// With `?orderId=` each painter also carries `declined`: true when they already
+// refused THIS job (orders.declinedPainterIds). The picker greys them out and
+// send-to-painter refuses them, instead of the manufacturer finding out from a
+// 409. Only the manufacturer's own order is read; any other id marks nobody.
+export async function GET(request: NextRequest) {
   const session = await getManufacturerSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -17,6 +25,22 @@ export async function GET() {
   });
   if (!manufacturer || manufacturer.status !== "active") {
     return NextResponse.json({ error: "Your account is not active" }, { status: 403 });
+  }
+
+  let declined = new Set<string>();
+  // Validated first: a non-uuid compared with a uuid column is a Postgres
+  // error, which would turn a bad query string into a 500.
+  const orderId = orderIdSchema.safeParse(request.nextUrl.searchParams.get("orderId"));
+  if (orderId.success) {
+    const order = await db.query.orders.findFirst({
+      where: and(
+        eq(orders.id, orderId.data),
+        eq(orders.manufacturerId, session.manufacturerId)
+      ),
+      columns: { declinedPainterIds: true },
+    });
+    const ids = order?.declinedPainterIds;
+    if (Array.isArray(ids)) declined = new Set(ids);
   }
 
   const rows = await db
@@ -60,6 +84,7 @@ export async function GET() {
               postaKodu: addr.postaKodu ?? "",
             }
           : null,
+        declined: declined.has(p.id),
       };
     }),
   });

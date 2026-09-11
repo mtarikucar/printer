@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { reverseEarning } from "@/lib/services/payouts";
@@ -8,6 +8,8 @@ import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { recordRefund } from "@/lib/analytics/server";
+import { formatAdminNoteLine, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 export type RefundOrderResult =
   | { ok: true }
@@ -22,6 +24,13 @@ export type RefundOrderResult =
  * hakediş/boyacı hakedişi/hediye kartı geri alınır, admin aksiyonu yazılır,
  * müşteriye bildirim + e-posta gider, SSE yayılır, GA4 refund kaydedilir.
  * Para dışı adımların hatası loglanır ama iadeyi geri almaz (mevcut davranış).
+ *
+ * `already_refunded`: sipariş zaten iade edilmiş; hiçbir yan etki çalışmaz.
+ * Karar ön okumada DEĞİL, korumalı UPDATE'te verilir: okuma ile yazma arasına
+ * bir ret (reject rotası kendi korumalı çevirmesiyle `refunded` yazar) ya da
+ * ikinci bir iade girerse UPDATE hiçbir satırı eşleştirmez. Eskiden koşulsuz
+ * yazıyordu; iki yol da hakedişleri geri alıyor, müşteriye ikinci "iade edildi"
+ * e-postası gidiyor ve recordRefund geliri İKİ kez düşüyordu.
  */
 export async function refundOrder(input: {
   orderId: string;
@@ -50,15 +59,29 @@ export async function refundOrder(input: {
     },
   });
   if (!order) return { ok: false, reason: "not_found" };
-  if (order.paymentStatus === "refunded") {
+  // Hızlı yol; asıl koruma aşağıdaki UPDATE'in WHERE'inde.
+  if (isRefunded(order)) {
     return { ok: false, reason: "already_refunded" };
   }
 
-  await db
+  // İade gerekçesi admin notuna EKLENİR, üzerine yazılmaz: eskiden gerekçe
+  // (varsayılanı "Admin iadesi") notun tamamını siliyor, SLA worker'larının ve
+  // üretici red akışının bıraktığı [SLA] bayraklarını da götürüyordu.
+  const trimmedReason = reason?.trim() ?? "";
+  const reasonLine = trimmedReason ? formatAdminNoteLine(`İade: ${trimmedReason}`) : null;
+
+  // Korumalı çevirme: yalnız hâlâ iade edilmemiş sipariş `refunded` olur
+  // (notRefundedGuard, iade kuralının tek SQL karşılığı). RETURNING boş dönerse
+  // araya başka bir iade/ret girmiştir: o yol yan etkileri zaten çalıştırdı.
+  const [flipped] = await db
     .update(orders)
     .set({
       paymentStatus: "refunded",
-      adminNotes: reason ?? undefined,
+      ...(reasonLine
+        ? {
+            adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${reasonLine} ELSE ${orders.adminNotes} || E'\n' || ${reasonLine} END`,
+          }
+        : {}),
       // Halt fulfillment: detach the partners so a refunded order can no longer
       // be shipped for a fresh earning. The manufacturer/painter ship routes gate
       // on manufacturerId/painterId matching the session, so clearing them (and
@@ -71,7 +94,9 @@ export async function refundOrder(input: {
       painterStatus: "unassigned",
       updatedAt: new Date(),
     })
-    .where(eq(orders.id, id));
+    .where(and(eq(orders.id, id), notRefundedGuard()))
+    .returning({ id: orders.id });
+  if (!flipped) return { ok: false, reason: "already_refunded" };
 
   await reverseEarning(id).catch((e) => console.error("reverseEarning failed", e));
   // Also claw back the painter's earning for a refunded painting order.

@@ -2,7 +2,11 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturerActions } from "@/lib/db/schema";
 import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
-import { assignManufacturerToOrder } from "@/lib/services/manufacturer-assign";
+import {
+  assignManufacturerToOrder,
+  isOrderRefunded,
+} from "@/lib/services/manufacturer-assign";
+import { isRefunded } from "@/lib/config/order-status-policy";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
@@ -46,6 +50,10 @@ async function notifyAdminManualAssignment(args: {
 export type DeclineResult =
   | { ok: true; action: "reassigned"; newManufacturerId: string }
   | { ok: true; action: "admin_queue"; reason: string }
+  // A refunded order is only detached. It goes neither to another manufacturer
+  // nor to the admin queue (which leaves refunded orders out), so neither of
+  // the two actions above would be true.
+  | { ok: true; action: "released"; reason: "refunded" }
   | { ok: false; reason: string };
 
 /**
@@ -60,6 +68,8 @@ export type DeclineResult =
  *        - Append the declining mfg id to declinedManufacturerIds
  *        - Insert a `decline` row in manufacturer_actions (used by the
  *          reliability score)
+ *   2a. A refunded order stops here (`released`, reason 'refunded'): the
+ *      detach is the whole job, nothing below may move it forward.
  *   3. If declines < MAX_DECLINES_BEFORE_ADMIN, attempt automatic
  *      reassignment to the next-best eligible candidate (excluding any
  *      previously-declining manufacturer for this order).
@@ -124,6 +134,9 @@ export async function declineOrder(args: {
       orderNumber: order.orderNumber,
       userId: order.userId,
       orderType: order.orderType,
+      // Read under this transaction's row lock, so it is the payment state the
+      // detach saw. A refund landing after the commit is caught at the assign.
+      refunded: isRefunded(order),
     };
   });
 
@@ -146,6 +159,16 @@ export async function declineOrder(args: {
     manufacturerId,
     manufacturerStatus: "unassigned",
   });
+
+  // A refunded order stops at the detach. Everything below either moves it
+  // forward or asks a human to: the ranker writes a
+  // manufacturer_assignment_evaluations row, the auto-assign is refused by
+  // notRefundedGuard() (and was then reported as a lost race), and the
+  // marketplace / cap branches email the admin to assign or refund an order
+  // that is already refunded.
+  if (result.refunded) {
+    return { ok: true, action: "released", reason: "refunded" };
+  }
 
   // Marketplace orders can only be fulfilled by the product's OWNING seller —
   // the scoring-based reassignment below would hand the order to a different
@@ -249,6 +272,13 @@ export async function declineOrder(args: {
     },
   });
   if (!assigned.ok) {
+    // A refund that landed after the detach committed makes the assign's
+    // notRefundedGuard() refuse the write. Name that instead of blaming a race
+    // with another assignment that never happened. A failed read keeps the old
+    // reason rather than failing a decline that already committed.
+    if (await isOrderRefunded(orderId).catch(() => false)) {
+      return { ok: true, action: "released", reason: "refunded" };
+    }
     return {
       ok: true,
       action: "admin_queue",

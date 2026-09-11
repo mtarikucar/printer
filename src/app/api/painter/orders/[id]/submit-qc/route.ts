@@ -6,6 +6,9 @@ import { requireActivePainter } from "@/lib/services/painter-guard";
 import { painterQcNextStatus, type PainterOrderStatus } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { QC_MIN_PHOTOS } from "@/lib/config/qc";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 // Painter submits the current QC round for admin review:
 // accepted|painting|painted|qc_rejected → qc_pending (requires >=1 photo).
@@ -21,10 +24,15 @@ export async function POST(
     where: and(eq(orders.id, id), eq(orders.painterId, g.painterId)),
     columns: {
       id: true, orderNumber: true, userId: true, manufacturerId: true,
-      painterStatus: true, painterQcRound: true,
+      painterStatus: true, painterQcRound: true, paymentStatus: true,
     },
   });
   if (!order) return NextResponse.json({ error: "İş bulunamadı" }, { status: 404 });
+  // Before the photo count, so a refunded job is not told to upload more
+  // photos. The race-proof half is notRefundedGuard() in the UPDATE below.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
 
   const current = (order.painterStatus ?? "") as PainterOrderStatus;
   const next = painterQcNextStatus(current, "submit");
@@ -48,9 +56,21 @@ export async function POST(
   const [updated] = await db
     .update(orders)
     .set({ painterStatus: next, updatedAt: new Date() })
-    .where(and(eq(orders.id, id), eq(orders.painterId, g.painterId), eq(orders.painterStatus, current)))
+    .where(
+      and(
+        eq(orders.id, id),
+        eq(orders.painterId, g.painterId),
+        eq(orders.painterStatus, current),
+        notRefundedGuard()
+      )
+    )
     .returning({ id: orders.id, orderNumber: orders.orderNumber, userId: orders.userId, manufacturerId: orders.manufacturerId, status: orders.status });
-  if (!updated) return NextResponse.json({ error: "İşlem başarısız" }, { status: 400 });
+  if (!updated) {
+    if (await isPartnerOrderRefunded(id, { painterId: g.painterId })) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
+    return NextResponse.json({ error: "İşlem başarısız" }, { status: 400 });
+  }
 
   await db
     .insert(painterActions)

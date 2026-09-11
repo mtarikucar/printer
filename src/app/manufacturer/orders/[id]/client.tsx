@@ -15,6 +15,7 @@ import { formatPhoneDisplay } from "@/lib/phone";
 import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 import { sizeDisplay } from "@/lib/config/sizes";
 import { formatModelSize } from "@/lib/config/order-model";
+import { isRefunded } from "@/lib/config/order-status-policy";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -51,6 +52,8 @@ interface OrderData {
     uploadedAt: string | null;
   } | null;
   status: string;
+  /** "refunded" → the page offers no forward action and promises no earning. */
+  paymentStatus: string | null;
   manufacturerStatus: string | null;
   needsPainting: boolean;
   /** Atölye partisine ait — kargo Figurünica'nın toplu sevkiyle gider. */
@@ -64,7 +67,22 @@ interface OrderData {
   // Manual/WhatsApp orders have no product row — this is what was ordered.
   selectedAddons: { name: string; priceKurus: number }[];
   grossKurus: number;
+  /** grossKurus is production + painting (the shop paints in house). */
+  baseIncludesPainting: boolean;
   commissionRateBps: number;
+  /** Expected split of grossKurus — computed on the server (computeEarning). */
+  commissionKurus: number;
+  netEarningKurus: number;
+  /** The accrued earning row once it exists: what will actually be paid. */
+  accruedEarning: {
+    grossKurus: number;
+    commissionKurus: number;
+    netKurus: number;
+    commissionRateBps: number;
+    status: string;
+    payoutStatus: string | null;
+    paidAt: string | null;
+  } | null;
   customerNote: string | null;
   shippingAddress: {
     adres: string;
@@ -305,10 +323,27 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
 
   // What this job pays. The 24-hour accept/decline decision was previously made
   // blind; the partnership contract now promises this is visible beforehand.
-  const commissionKurus = Math.round(
-    (order.grossKurus * order.commissionRateBps) / 10000
-  );
-  const netEarningKurus = order.grossKurus - commissionKurus;
+  // Every number arrives computed from the server (the same helpers the
+  // accrual uses); this card used to redo the commission split itself. Once the
+  // earning has accrued the card shows that row instead of a preview.
+  const accrued =
+    order.accruedEarning && order.accruedEarning.status !== "reversed"
+      ? order.accruedEarning
+      : null;
+  const earningReversed = order.accruedEarning?.status === "reversed";
+  // Refunded order (see the banner). A transfer already made survives the
+  // refund — reverseEarning skips paid rows — so only that case still shows a
+  // real earning; every other outcome pays nothing and must not be promised.
+  const refunded = isRefunded(order);
+  const refundedButPaid =
+    refunded &&
+    accrued !== null &&
+    (accrued.status === "paid" || accrued.payoutStatus === "paid");
+  const earningVoided = earningReversed || (refunded && !refundedButPaid);
+  const shownGrossKurus = accrued ? accrued.grossKurus : order.grossKurus;
+  const shownCommissionKurus = accrued ? accrued.commissionKurus : order.commissionKurus;
+  const shownNetKurus = accrued ? accrued.netKurus : order.netEarningKurus;
+  const shownRateBps = accrued ? accrued.commissionRateBps : order.commissionRateBps;
   const router = useRouter();
   const loc = locale as Locale;
 
@@ -341,13 +376,15 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
         }
       );
       if (!res.ok) {
-        const data = await res.json();
+        // A proxy 502 or an HTML error page has no JSON body; parsing it threw
+        // and only the generic catch text showed. Keep the status so the
+        // manufacturer (and support) can tell what failed. (The old fallback
+        // read a dictionary key that does not exist and ended in English.)
+        const data: { error?: unknown } | null = await res.json().catch(() => null);
         setError(
-          data.error ||
-            (d[
-              "manufacturer.orderDetail.actionFailed" as keyof typeof d
-            ] as string) ||
-            "Action failed"
+          typeof data?.error === "string" && data.error
+            ? data.error
+            : `İşlem tamamlanamadı (HTTP ${res.status}). Lütfen tekrar deneyin.`
         );
         return;
       }
@@ -355,21 +392,26 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
     } catch {
       setError(
         (d["common.error" as keyof typeof d] as string) ||
-          "An error occurred"
+          "Bir hata oluştu"
       );
     } finally {
       setLoading(null);
     }
   };
 
-  const canAccept = order.manufacturerStatus === "assigned";
-  const canStartPrinting = order.manufacturerStatus === "accepted";
-  const canFinishPrinting = order.manufacturerStatus === "printing";
+  // A refunded order keeps its sub-status (the badge may still say "Baskıda"),
+  // but the job is cancelled: every forward step is switched off so the page
+  // never walks the workshop into printing, QC, a painter hand-off or a
+  // shipment nobody will pay for.
+  const canAccept = !refunded && order.manufacturerStatus === "assigned";
+  const canStartPrinting = !refunded && order.manufacturerStatus === "accepted";
+  const canFinishPrinting = !refunded && order.manufacturerStatus === "printing";
   const canSubmitQc =
-    order.manufacturerStatus === "printed" ||
-    order.manufacturerStatus === "qc_rejected";
-  const isQcPending = order.manufacturerStatus === "qc_pending";
-  const canShip = order.manufacturerStatus === "qc_approved";
+    !refunded &&
+    (order.manufacturerStatus === "printed" ||
+      order.manufacturerStatus === "qc_rejected");
+  const isQcPending = !refunded && order.manufacturerStatus === "qc_pending";
+  const canShip = !refunded && order.manufacturerStatus === "qc_approved";
   // A manufacturer that paints in-house may paint + ship a painting order it has
   // NOT handed off to a painter (mirrors the server ship gate). Once a painter is
   // assigned, only the hand-off pipeline applies.
@@ -382,7 +424,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   const canShipDirect =
     canShip && !order.isWorkshop && (!order.needsPainting || inHousePaint);
   const isShipped = order.manufacturerStatus === "shipped";
-  const canCancel = [
+  const canCancel = !refunded && [
     "accepted",
     "printing",
     "printed",
@@ -390,6 +432,39 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
     "qc_rejected",
     "qc_approved",
   ].includes(order.manufacturerStatus || "");
+
+  // The earning card's status line. What the earning row says wins, then the
+  // refund, then the stage the job is at. The accrual points it names are the
+  // real ones — hand-off to a painter, the manufacturer's own shipment, or the
+  // workshop batch shipment (the ship route refuses a single workshop seat) —
+  // and once such a point is behind us with no row, it reports the missing
+  // row instead of promising a future accrual next to a "Kargolandı" badge.
+  const paidSuffix = accrued?.paidAt ? ` (${formatDateTime(accrued.paidAt, loc)})` : "";
+  const earningStatusLine = earningReversed
+    ? "Bu siparişin hak edişi geri alındı (iade / itiraz); ödenmeyecek."
+    : refunded
+      ? refundedButPaid
+        ? `Sipariş iade edildi; hak edişiniz iadeden önce ödenmişti${paidSuffix}.`
+        : accrued
+          ? "Sipariş iade edildi ama hak ediş kaydı hâlâ açık görünüyor — lütfen bize bildirin."
+          : "Sipariş iade edildi; bu siparişten hak ediş oluşmaz."
+      : accrued
+        ? accrued.status === "paid" || accrued.payoutStatus === "paid"
+          ? `Hak edişiniz tahakkuk etti ve ödendi${paidSuffix}.`
+          : accrued.payoutStatus === "pending"
+            ? "Hak edişiniz tahakkuk etti ve bir ödemeye eklendi; transfer yapılınca bildirilecek."
+            : "Hak edişiniz tahakkuk etti; Kazançlar sayfasından ödeme talep edebilirsiniz."
+        : order.handedToPainter
+          ? "Baskı payınız devirde tahakkuk etmeliydi ama kayıt görünmüyor — lütfen bize bildirin."
+          : isShipped
+            ? order.isWorkshop
+              ? "Parti sevk edildi; hak edişiniz tahakkuk etmeliydi ama kayıt görünmüyor — lütfen bize bildirin."
+              : "Sipariş kargolandı; hak edişiniz tahakkuk etmeliydi ama kayıt görünmüyor — lütfen bize bildirin."
+            : order.isWorkshop
+              ? "Hak ediş, atölye partisi sevk edildiğinde tahakkuk eder."
+              : order.needsPainting && !order.paintsInHouse
+                ? "Hak ediş, işi boyacıya devrettiğinizde tahakkuk eder."
+                : "Hak ediş, siparişi kargoladığınızda tahakkuk eder.";
 
   const addr = order.shippingAddress;
 
@@ -469,6 +544,11 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           {order.isWorkshop && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
               ATÖLYE PARTİSİ — TOPLU SEVK
+            </span>
+          )}
+          {refunded && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
+              İADE EDİLDİ
             </span>
           )}
           {/* What was ordered — the snapshot was serialized but never shown. */}
@@ -570,6 +650,27 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           )}
         </div>
       </div>
+
+      {/* Refunded. A real refund detaches the partners (manufacturerId = null),
+          so such an order normally drops off this page; a refunded row still
+          pointing at this workshop read like a live job — "Baskıda", "Baskıyı
+          Tamamla", an earning "on shipping" — without a word about the refund. */}
+      {refunded && (
+        <div
+          role="alert"
+          className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-900"
+        >
+          <p className="font-semibold">
+            {refundedButPaid
+              ? "Bu sipariş iade edildi. İş iptal; yeni hakediş oluşmaz."
+              : "Bu sipariş iade edildi. İş iptal; hakediş oluşmaz."}
+          </p>
+          <p className="mt-1 text-red-900/80">
+            Baskı, kalite kontrol, boyacıya devir ve kargo adımları kapatıldı.
+            Sorunuz varsa aşağıdaki mesajlaşmadan bize yazın.
+          </p>
+        </div>
+      )}
 
       {/* Çok parçalı işin dosyaları başlığın EYLEM satırında değil kendi bloğunda:
           orada başlığı sıkıştırıp masaüstünde hizasını bozuyordu. */}
@@ -693,24 +794,32 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
         <div className="lg:col-span-2 space-y-5">
           {/* ─── What this job pays ─────────────────────
               Shown before the accept/decline decision, not after. */}
-          {order.grossKurus > 0 && (
+          {(order.grossKurus > 0 || order.accruedEarning) && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
                 Bu siparişten kazancınız
               </h3>
-              <p className="mt-2 text-2xl font-bold text-emerald-900">
+              <p
+                className={`mt-2 text-2xl font-bold ${
+                  earningVoided ? "text-gray-400 line-through" : "text-emerald-900"
+                }`}
+              >
                 ₺
-                {(netEarningKurus / 100).toLocaleString("tr-TR", {
+                {(shownNetKurus / 100).toLocaleString("tr-TR", {
                   minimumFractionDigits: 2,
                 })}
               </p>
               <p className="mt-1 text-xs text-emerald-800/80">
-                Sipariş tutarı ₺
-                {(order.grossKurus / 100).toLocaleString("tr-TR", {
+                {/* Not "Sipariş tutarı": this is the workshop's share of the
+                    kalem bases — the production kalem, plus the painting
+                    kalem when the shop paints in house (baseIncludesPainting,
+                    derived on the server next to the base itself). */}
+                {order.baseIncludesPainting ? "Üretim + boyama payı" : "Üretim payı"} ₺
+                {(shownGrossKurus / 100).toLocaleString("tr-TR", {
                   minimumFractionDigits: 2,
                 })}{" "}
-                · Platform hizmet bedeli %{order.commissionRateBps / 100} (₺
-                {(commissionKurus / 100).toLocaleString("tr-TR", {
+                · Platform hizmet bedeli %{shownRateBps / 100} (₺
+                {(shownCommissionKurus / 100).toLocaleString("tr-TR", {
                   minimumFractionDigits: 2,
                 })}
                 )
@@ -722,12 +831,8 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 {/* Once the job is with a painter the manufacturer can no longer
                     ship it (the ship gate blocks any order with a painterId), so
                     "accrues when you ship" would be false — the print portion
-                    already accrued at hand-off. */}
-                {order.handedToPainter
-                  ? "Baskı payınız, işi boyacıya devrettiğinizde tahakkuk etti."
-                  : order.needsPainting && !order.paintsInHouse
-                    ? "Hak ediş, işi boyacıya devrettiğinizde tahakkuk eder."
-                    : "Hak ediş, siparişi kargoladığınızda tahakkuk eder."}
+                    already accrued at hand-off. See earningStatusLine. */}
+                {earningStatusLine}
               </p>
             </div>
           )}
@@ -1290,7 +1395,8 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
               <SendToPainterPanel orderId={order.id} />
             )}
 
-          {order.needsPainting &&
+          {!refunded &&
+            order.needsPainting &&
             order.painterStatus &&
             order.painterStatus !== "unassigned" && (
               <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-5 text-sm text-purple-900">
@@ -1421,7 +1527,8 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
-          {!canAccept &&
+          {!refunded &&
+            !canAccept &&
             !canStartPrinting &&
             !canFinishPrinting &&
             !canSubmitQc &&

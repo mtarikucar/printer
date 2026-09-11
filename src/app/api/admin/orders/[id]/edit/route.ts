@@ -150,25 +150,98 @@ export async function POST(
     if (!Array.isArray(body.attributes) || body.attributes.length > 12) {
       return NextResponse.json({ error: "Geçersiz özellik listesi" }, { status: 400 });
     }
-    const cleaned = body.attributes
-      .map((a) => ({
-        groupName: String(a?.name ?? "").trim().slice(0, 60),
-        choiceName: String(a?.value ?? "").trim().slice(0, 200),
-        priceDeltaKurus: 0,
-      }))
+    // THIS ROUTE NEVER MOVES MONEY. amountKurus and the kalem columns stay as
+    // the customer paid. But `priceDeltaKurus` on each selected option is part
+    // of that payment snapshot: the order's Para dökümü (src/lib/config/
+    // order-money.ts) carves the option rows out of the amount with it. So a
+    // spec save keeps the delta of every group/choice pair it did not change;
+    // only a new or changed choice gets 0 (nothing was ever charged for it, and
+    // the carve folds its share back into the base row). Rewriting every row
+    // with 0, as this used to, silently moved priced options into the base.
+    const cleanText = (group: unknown, choice: unknown) => ({
+      groupName: String(group ?? "").trim().slice(0, 60),
+      choiceName: String(choice ?? "").trim().slice(0, 200),
+    });
+    const groupKey = (groupName: string) => groupName.toLocaleLowerCase("tr");
+    const pairKey = (o: { groupName: string; choiceName: string }) =>
+      JSON.stringify([o.groupName, o.choiceName]);
+    const prior = (order.selectedOptions ?? []).map((o) => ({
+      ...cleanText(o.groupName, o.choiceName),
+      priceDeltaKurus: Number.isFinite(o.priceDeltaKurus) ? o.priceDeltaKurus : 0,
+    }));
+
+    // Boyut, Malzeme and "Boyama / Yüzey" belong to the typed fields. The admin
+    // client never lists them as editable rows (the saveSpec payload holds only
+    // the other rows), so the request cannot say whether one changed; the
+    // typed field decides. "boyut" is rebuilt from the typed size below. The
+    // other two are kept as they are unless their typed field changes in this
+    // request, or the admin typed a row with that group name; they used to be
+    // dropped on every spec save, a priced one taking its delta with it.
+    const OWNED_GROUPS = ["boyut", "malzeme", "boyama / yüzey"];
+    const priorSize = (() => {
+      if (!order.figurineSize) return null;
+      const n = normalizeSizeInput(order.figurineSize);
+      return n.ok ? n.value || null : order.figurineSize;
+    })();
+    // `undefined`: the size is not being edited; the Boyut rows stay as they are.
+    const sizeUnchanged = sizeValue === undefined || sizeValue === priorSize;
+    const materialChanged =
+      body.material !== undefined && body.material !== null && body.material !== order.material;
+    const finishChanged =
+      body.finish !== undefined && body.finish !== null && body.finish !== order.finish;
+
+    const incoming = body.attributes
+      .map((a) => cleanText(a?.name, a?.value))
       .filter((a) => a.groupName && a.choiceName)
       // "Boyut" is owned by the typed column below — a free-form row with that
       // name would contradict it on the manufacturer's card.
-      .filter((a) => a.groupName.toLocaleLowerCase("tr") !== "boyut");
+      .filter((a) => groupKey(a.groupName) !== "boyut");
+    const incomingGroups = new Set(incoming.map((a) => groupKey(a.groupName)));
+
+    const keepOwned = (g: string): boolean => {
+      if (g === "boyut") return sizeValue === undefined || (sizeValue === null && priorSize === null);
+      if (incomingGroups.has(g)) return false;
+      if (g === "malzeme") return !materialChanged;
+      return !finishChanged; // "boyama / yüzey"
+    };
+    const keptOwned = prior.filter((o) => {
+      const g = groupKey(o.groupName);
+      return OWNED_GROUPS.includes(g) && keepOwned(g);
+    });
+
+    // Rows the request does speak for keep their delta by exact pair match.
+    // Each prior row is used once, so a duplicated row does not duplicate the
+    // money.
+    const pool = new Map<string, number[]>();
+    for (const o of prior) {
+      const g = groupKey(o.groupName);
+      if (OWNED_GROUPS.includes(g) && keepOwned(g)) continue;
+      const k = pairKey(o);
+      pool.set(k, [...(pool.get(k) ?? []), o.priceDeltaKurus]);
+    }
+    const takeDelta = (o: { groupName: string; choiceName: string }) =>
+      pool.get(pairKey(o))?.shift() ?? 0;
+
+    const cleaned: { groupName: string; choiceName: string; priceDeltaKurus: number }[] = [];
     // Keep the spec snapshot in sync with the typed size: without this the
     // column said "18 cm" while the manufacturer still read the old "Orta".
+    // An unchanged size is the same choice, so the rebuilt row carries the
+    // delta its Boyut row(s) had; a changed size gets 0.
     if (sizeValue) {
-      cleaned.unshift({
+      const priorBoyut = prior.filter((o) => groupKey(o.groupName) === "boyut");
+      cleaned.push({
         groupName: "Boyut",
         choiceName: sizeDisplayTr(sizeValue),
-        priceDeltaKurus: 0,
+        priceDeltaKurus: sizeUnchanged
+          ? priorBoyut.reduce((sum, o) => sum + o.priceDeltaKurus, 0)
+          : 0,
       });
     }
+    // Owned rows first, in their stored order (Boyut, Malzeme, Boyama / Yüzey
+    // is how the create route writes them), then the free-form rows.
+    cleaned.push(...keptOwned);
+    for (const a of incoming) cleaned.push({ ...a, priceDeltaKurus: takeDelta(a) });
+
     updates.selectedOptions = cleaned.length > 0 ? cleaned : null;
     changedFields.push("selectedOptions");
   }

@@ -9,6 +9,8 @@ import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 /**
  * Admin hand-off to a painter — the counterpart to the manufacturer's
@@ -59,10 +61,17 @@ export async function POST(
       manufacturerStatus: true,
       painterStatus: true,
       declinedPainterIds: true,
+      paymentStatus: true,
     },
   });
   if (!order) {
     return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+  }
+  // Refund-end-state: a refunded order keeps its status but never moves
+  // forward. Handing it to a painter would also accrue the manufacturer's print
+  // earning below on money that already went back to the customer.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
   }
   if (!order.needsPainting) {
     return NextResponse.json(
@@ -157,6 +166,8 @@ export async function POST(
       and(
         eq(orders.id, id),
         eq(orders.manufacturerStatus, "qc_approved"),
+        // Re-checked here so a refund landing after the read above still wins.
+        notRefundedGuard(),
         sql`(${orders.painterStatus} IS NULL OR ${orders.painterStatus} = 'unassigned')`
       )
     )

@@ -47,6 +47,7 @@ interface Manufacturer {
   coverageProvinces: string[];
   mapVisible: boolean;
   onboardingAcceptedAt: string | null;
+  notes: string | null;
 }
 
 // material_* capability tags chosen at registration → admin-readable labels.
@@ -124,6 +125,37 @@ export function ManufacturersClient({
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         alert(data.error || `${action} failed`);
+        return;
+      }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  // Closing a tax review lifts the ranker's −40 compliance penalty, so it must
+  // say what was checked: the server refuses it without a note and appends
+  // who/when/what to the manufacturer's admin notes.
+  const closeTaxReview = async (m: Manufacturer) => {
+    const input = window.prompt(
+      `${m.companyName}: vergi incelemesini kapat.\nNeyi kontrol ettiniz? (ör. "Vergi levhası görüldü, VKN doğrulandı")`
+    );
+    if (input === null) return;
+    const note = input.trim();
+    if (note.length < 3) {
+      alert("Neyi kontrol ettiğinizi kısaca yazın (en az 3 karakter).");
+      return;
+    }
+    setLoading(`tax-review-${m.id}`);
+    try {
+      const res = await fetch(`/api/admin/manufacturers/${m.id}/tax-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Vergi incelemesi kapatılamadı");
         return;
       }
       router.refresh();
@@ -221,6 +253,7 @@ export function ManufacturersClient({
                   expanded={expandedId === m.id}
                   onToggle={() => setExpandedId(expandedId === m.id ? null : m.id)}
                   performAction={performAction}
+                  onCloseTaxReview={() => void closeTaxReview(m)}
                 />
               ))}
             </tbody>
@@ -239,6 +272,7 @@ function MfrRow({
   expanded,
   onToggle,
   performAction,
+  onCloseTaxReview,
 }: {
   m: Manufacturer;
   d: ReturnType<typeof useDictionary>;
@@ -246,6 +280,7 @@ function MfrRow({
   loading: string | null;
   expanded: boolean;
   onToggle: () => void;
+  onCloseTaxReview: () => void;
   performAction: (
     id: string,
     action: "activate" | "suspend" | "conditionally-approve" | "approve" | "reject"
@@ -280,10 +315,27 @@ function MfrRow({
                       <span className="font-mono text-gray-700">
                         {m.taxIdType.toUpperCase()}: {m.taxId}
                       </span>
-                    ) : (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        {d["admin.manufacturers.badgeManualReview"]}
-                      </span>
+                    ) : !m.requiresManualTaxReview ? (
+                      <span className="text-xs text-gray-400">Beyan edilmedi</span>
+                    ) : null}
+                    {/* The badge follows the flag, not the missing tax id: the
+                        flag is what the ranker penalises and what the "Manuel
+                        inceleme" tab filters on, and an admin can now close it. */}
+                    {m.requiresManualTaxReview && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                          {d["admin.manufacturers.badgeManualReview"]}
+                        </span>
+                        {m.status !== "rejected" && (
+                          <button
+                            onClick={onCloseTaxReview}
+                            disabled={loading === `tax-review-${m.id}`}
+                            className="text-xs font-medium text-indigo-600 hover:underline disabled:text-gray-400"
+                          >
+                            {loading === `tax-review-${m.id}` ? "Kapatılıyor…" : "İncelemeyi kapat"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700 text-center">
@@ -500,6 +552,23 @@ function MfrRow({
                                 v: m.onboardingAcceptedAt ? formatDate(m.onboardingAcceptedAt, loc) : null,
                               },
                               { k: "Başvuru tarihi", v: formatDate(m.createdAt, loc) },
+                            ],
+                          },
+                          {
+                            // Partner-level admin decisions (e.g. a closed tax
+                            // review: who, when, what was checked). admin_actions
+                            // rows need an order, so they live in
+                            // manufacturers.notes.
+                            title: "Admin notları",
+                            items: [
+                              {
+                                k: "Kayıtlar",
+                                v: m.notes ? (
+                                  <span className="block whitespace-pre-line text-left text-xs text-gray-700">
+                                    {m.notes}
+                                  </span>
+                                ) : null,
+                              },
                             ],
                           },
                         ]}

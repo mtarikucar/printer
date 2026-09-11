@@ -48,5 +48,9 @@ export async function POST(
     success: true,
     status: result.status,
     alreadyDecided: result.alreadyDecided ?? false,
+    // Approval and revision are refused on a refunded order and come back as
+    // alreadyDecided. Without this flag the page could only thank the customer
+    // for a decision that was never recorded.
+    refunded: result.refunded ?? false,
   });
 }

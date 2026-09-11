@@ -13,6 +13,8 @@ import {
 } from "@/lib/upload-with-progress";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import { ModelViewer } from "@/components/model-viewer";
+import { formatCurrency } from "@/lib/i18n/format";
+import { isRefunded } from "@/lib/config/order-status-policy";
 
 interface Job {
   id: string;
@@ -25,12 +27,21 @@ interface Job {
   finish: string | null;
   modifiers: string[] | null;
   painterStatus: string | null;
-  paintingPriceKurus: number;
+  /** "refunded" → cancelled job: no actions, no earning promised. */
+  paymentStatus: string | null;
   assignedAt: string | null;
   /** Colour and other spec the customer/admin agreed on. */
   specRows: { label: string; value: string }[];
   material: string | null;
+  /**
+   * The painter's payout for this job, computed on the server with the
+   * accrual's own functions (painterBaseKurus + computeEarning at the order's
+   * frozen rate). Display only: this component never redoes the commission.
+   */
   commissionRateBps: number;
+  grossKurus: number;
+  commissionKurus: number;
+  netKurus: number;
   handoffCarrier: string | null;
   handoffTrackingNumber: string | null;
   receivedAt: string | null;
@@ -109,6 +120,7 @@ export function PainterJobsClient({
   page,
   pageSize,
   filterStatus,
+  locale,
 }: {
   jobs: Job[];
   total: number;
@@ -243,25 +255,24 @@ export function PainterJobsClient({
                   >
                     {STATUS_LABEL[j.painterStatus ?? ""] || j.painterStatus}
                   </span>
+                  {isRefunded(j) && (
+                    <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                      İade edildi
+                    </span>
+                  )}
                 </div>
                 <span className="text-right text-sm font-semibold text-gray-800">
-                  {(() => {
-                    // Gross was shown as if it were the payout; commission is
-                    // deducted at accrual.
-                    const commission = Math.round(
-                      (j.paintingPriceKurus * j.commissionRateBps) / 10000
-                    );
-                    const net = j.paintingPriceKurus - commission;
-                    return (
-                      <>
-                        ₺{(net / 100).toLocaleString("tr-TR")}
-                        <span className="block text-[11px] font-normal text-gray-400">
-                          brüt ₺{(j.paintingPriceKurus / 100).toLocaleString("tr-TR")} ·
-                          komisyon %{j.commissionRateBps / 100}
-                        </span>
-                      </>
-                    );
-                  })()}
+                  {/* Net is the payout (commission is deducted at accrual); all
+                      three figures come from the server's computeEarning and
+                      are formatted like the Kazançlar page (formatCurrency, two
+                      decimals, commission shown as an amount too). */}
+                  <span className={isRefunded(j) ? "text-gray-400 line-through" : undefined}>
+                    {formatCurrency(j.netKurus, locale)}
+                  </span>
+                  <span className="block text-[11px] font-normal text-gray-400">
+                    brüt {formatCurrency(j.grossKurus, locale)} · komisyon %{j.commissionRateBps / 100}{" "}
+                    (−{formatCurrency(j.commissionKurus, locale)})
+                  </span>
                 </span>
               </div>
               <div className="text-sm text-gray-700 mb-1">
@@ -354,6 +365,7 @@ export function PainterJobsClient({
               {/* The painter ships to the customer directly, so they need the
                   address — it was never sent to this panel. */}
               {j.shippingAddress &&
+                !isRefunded(j) &&
                 ["accepted", "painting", "painted", "qc_approved"].includes(
                   j.painterStatus ?? ""
                 ) && (
@@ -372,6 +384,7 @@ export function PainterJobsClient({
               {/* Physical hand-off: courier record and the receipt confirmation
                   that starts the defect-reporting window. */}
               {(j.handoffTrackingNumber || j.handoffCarrier || !j.receivedAt) &&
+                !isRefunded(j) &&
                 ["assigned", "accepted"].includes(j.painterStatus ?? "") && (
                   <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
                     <span>
@@ -397,124 +410,136 @@ export function PainterJobsClient({
                   </div>
                 )}
 
-              <div className="flex flex-wrap items-center gap-2">
-                {j.painterStatus === "assigned" && (
-                  <>
-                    <button
-                      onClick={() => call(j.id, "accept")}
-                      disabled={busy !== null}
-                      className="px-4 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
-                    >
-                      Kabul et
-                    </button>
-                    <button
-                      onClick={() => decline(j.id)}
-                      disabled={busy !== null}
-                      className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50"
-                    >
-                      Reddet
-                    </button>
-                  </>
-                )}
-                {/* Paint done → submit QC photos for admin review. Also the
-                    re-submit path after a QC rejection. */}
-                {["accepted", "painting", "painted", "qc_rejected"].includes(
-                  j.painterStatus ?? ""
-                ) && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {j.painterStatus === "qc_rejected" && (
-                      <span className="w-full text-xs text-red-600">
-                        QC reddedildi — düzeltip yeni fotoğraflarla tekrar gönderin.
-                      </span>
-                    )}
-                    <label className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg cursor-pointer hover:bg-gray-200">
-                      QC fotoğrafı ekle
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
+              {/* Refunded: the job is cancelled. Same treatment as the
+                  manufacturer order page — a clear banner instead of accept /
+                  QC / ship buttons, and no earning promised. */}
+              {isRefunded(j) ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800"
+                >
+                  Bu sipariş iade edildi. İş iptal; hakediş oluşmaz.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  {j.painterStatus === "assigned" && (
+                    <>
+                      <button
+                        onClick={() => call(j.id, "accept")}
                         disabled={busy !== null}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void uploadQcPhoto(j.id, f);
-                          e.target.value = "";
-                        }}
+                        className="px-4 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        Kabul et
+                      </button>
+                      <button
+                        onClick={() => decline(j.id)}
+                        disabled={busy !== null}
+                        className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                      >
+                        Reddet
+                      </button>
+                    </>
+                  )}
+                  {/* Paint done → submit QC photos for admin review. Also the
+                      re-submit path after a QC rejection. */}
+                  {["accepted", "painting", "painted", "qc_rejected"].includes(
+                    j.painterStatus ?? ""
+                  ) && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {j.painterStatus === "qc_rejected" && (
+                        <span className="w-full text-xs text-red-600">
+                          QC reddedildi — düzeltip yeni fotoğraflarla tekrar gönderin.
+                        </span>
+                      )}
+                      <label className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg cursor-pointer hover:bg-gray-200">
+                        QC fotoğrafı ekle
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={busy !== null}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void uploadQcPhoto(j.id, f);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                      {qcProgress?.id === j.id && (
+                        <UploadProgressBar
+                          progress={qcProgress.p}
+                          processingLabel="Fotoğraf işleniyor…"
+                          className="w-full"
+                        />
+                      )}
+                      {j.qcPhotoUrls.length > 0 && (
+                        <span className="flex gap-1">
+                          {j.qcPhotoUrls.slice(0, 4).map((u) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              key={u}
+                              src={u}
+                              alt="QC"
+                              className="h-10 w-10 rounded border border-gray-200 object-cover"
+                            />
+                          ))}
+                        </span>
+                      )}
+                      {(qcUploaded[j.id] ?? 0) > 0 && (
+                        <span className="text-xs text-green-600">
+                          {qcUploaded[j.id]} fotoğraf eklendi
+                        </span>
+                      )}
+                      <button
+                        onClick={() => submitQc(j.id)}
+                        disabled={
+                          busy !== null || (qcUploaded[j.id] ?? 0) < QC_MIN_PHOTOS
+                        }
+                        className="px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                      >
+                        QC&apos;ye gönder
+                      </button>
+                    </div>
+                  )}
+                  {j.painterStatus === "qc_pending" && (
+                    <span className="text-sm text-purple-700">
+                      QC onayında — admin incelemesi bekleniyor.
+                    </span>
+                  )}
+                  {j.painterStatus === "qc_approved" && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        value={tracking[j.id] ?? ""}
+                        onChange={(e) => setTracking((s) => ({ ...s, [j.id]: e.target.value }))}
+                        placeholder="Takip no"
+                        className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm"
                       />
-                    </label>
-                    {qcProgress?.id === j.id && (
-                      <UploadProgressBar
-                        progress={qcProgress.p}
-                        processingLabel="Fotoğraf işleniyor…"
-                        className="w-full"
-                      />
-                    )}
-                    {j.qcPhotoUrls.length > 0 && (
-                      <span className="flex gap-1">
-                        {j.qcPhotoUrls.slice(0, 4).map((u) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={u}
-                            src={u}
-                            alt="QC"
-                            className="h-10 w-10 rounded border border-gray-200 object-cover"
-                          />
+                      <select
+                        value={carrier[j.id] ?? ""}
+                        onChange={(e) => setCarrier((s) => ({ ...s, [j.id]: e.target.value }))}
+                        className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm"
+                      >
+                        <option value="">Kargo firması</option>
+                        {CARRIERS.map((c) => (
+                          <option key={c.value} value={c.value}>
+                            {c.label}
+                          </option>
                         ))}
-                      </span>
-                    )}
-                    {(qcUploaded[j.id] ?? 0) > 0 && (
-                      <span className="text-xs text-green-600">
-                        {qcUploaded[j.id]} fotoğraf eklendi
-                      </span>
-                    )}
-                    <button
-                      onClick={() => submitQc(j.id)}
-                      disabled={
-                        busy !== null || (qcUploaded[j.id] ?? 0) < QC_MIN_PHOTOS
-                      }
-                      className="px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                    >
-                      QC&apos;ye gönder
-                    </button>
-                  </div>
-                )}
-                {j.painterStatus === "qc_pending" && (
-                  <span className="text-sm text-purple-700">
-                    QC onayında — admin incelemesi bekleniyor.
-                  </span>
-                )}
-                {j.painterStatus === "qc_approved" && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      value={tracking[j.id] ?? ""}
-                      onChange={(e) => setTracking((s) => ({ ...s, [j.id]: e.target.value }))}
-                      placeholder="Takip no"
-                      className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm"
-                    />
-                    <select
-                      value={carrier[j.id] ?? ""}
-                      onChange={(e) => setCarrier((s) => ({ ...s, [j.id]: e.target.value }))}
-                      className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm"
-                    >
-                      <option value="">Kargo firması</option>
-                      {CARRIERS.map((c) => (
-                        <option key={c.value} value={c.value}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => ship(j.id)}
-                      disabled={busy !== null}
-                      className="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      Kargola
-                    </button>
-                  </div>
-                )}
-                {j.painterStatus === "shipped" && (
-                  <span className="text-sm text-gray-400">Tamamlandı</span>
-                )}
-              </div>
+                      </select>
+                      <button
+                        onClick={() => ship(j.id)}
+                        disabled={busy !== null}
+                        className="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        Kargola
+                      </button>
+                    </div>
+                  )}
+                  {j.painterStatus === "shipped" && (
+                    <span className="text-sm text-gray-400">Tamamlandı</span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -10,6 +10,7 @@ import {
   generationAttempts,
   manufacturerActions,
   manufacturers,
+  manufacturerEarnings,
   qcPhotos,
   qcReviews,
   products,
@@ -21,7 +22,8 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
-import { manufacturerBaseKurus } from "@/lib/services/earning-base";
+import { orderMoneySplit } from "@/lib/services/earning-base";
+import { computeEarning } from "@/lib/services/finance";
 import { latestModelFiles } from "@/lib/services/order-model";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
 import { ManufacturerOrderDetailClient } from "./client";
@@ -267,6 +269,40 @@ export default async function ManufacturerOrderDetailPage({
     })
   );
 
+  // What this job pays, derived ONCE here on the server with the same two
+  // helpers the accrual itself uses (manufacturerBaseKurus → computeEarning).
+  // The card used to redo the commission split in the browser — a hand-copied
+  // money rule that could round or drift away from what actually accrues.
+  // orderMoneySplit wraps that same manufacturerBaseKurus call and also says
+  // whether the base carries the painting kalem (baseIncludesPainting below).
+  const moneySplit = orderMoneySplit({
+    amountKurus: order.amountKurus,
+    productionBaseKurus: order.productionBaseKurus,
+    paintingPriceKurus: order.paintingPriceKurus,
+    painterId: order.painterId,
+    paintsInHouse: manufacturer.paintsInHouse,
+  });
+  const earningBaseKurus = moneySplit.manufacturerBaseKurus;
+  const rateBps = order.commissionRateBps ?? PLATFORM_COMMISSION_RATE_BPS;
+  const expectedEarning = computeEarning(earningBaseKurus, rateBps);
+  // Once the earning has accrued the card shows THAT row — the amount that
+  // will actually be paid, and whether it has been. Scoped to this workshop:
+  // after a revoke the order's earning row can belong to the previous one.
+  const accrued = await db.query.manufacturerEarnings.findFirst({
+    where: and(
+      eq(manufacturerEarnings.orderId, order.id),
+      eq(manufacturerEarnings.manufacturerId, session.manufacturerId)
+    ),
+    columns: {
+      grossKurus: true,
+      commissionKurus: true,
+      netKurus: true,
+      commissionRateBps: true,
+      status: true,
+    },
+    with: { payout: { columns: { status: true, paidAt: true } } },
+  });
+
   const serialized = {
     order: {
       id: order.id,
@@ -318,6 +354,9 @@ export default async function ManufacturerOrderDetailPage({
           }
         : null,
       status: order.status,
+      // A refunded order keeps its sub-status ("printing" …); the page needs
+      // the payment status to show the refund and switch off forward actions.
+      paymentStatus: order.paymentStatus,
       manufacturerStatus: order.manufacturerStatus,
       needsPainting: order.needsPainting,
       // Atölye partisine ait sipariş: tek tek kargolanamaz (ship ucu 409
@@ -340,16 +379,31 @@ export default async function ManufacturerOrderDetailPage({
       // kept seeing the full amount here — the same painting share the painter
       // was being promised on their own panel. One shared derivation, so the
       // card can no longer drift from what actually accrues.
-      grossKurus: manufacturerBaseKurus({
-        amountKurus: order.amountKurus,
-        productionBaseKurus: order.productionBaseKurus,
-        paintingPriceKurus: order.paintingPriceKurus,
-        painterId: order.painterId,
-        paintsInHouse: manufacturer.paintsInHouse,
-      }),
+      grossKurus: earningBaseKurus,
+      // The shop paints in house and the order has a painting kalem, so the
+      // base above is production + painting. The card called it "Üretim payı"
+      // regardless. Same derivation as the base (orderMoneySplit.paintsItself),
+      // so the label cannot disagree with the amount.
+      baseIncludesPainting:
+        moneySplit.paintsItself && moneySplit.paintingBaseKurus > 0,
       // The rate frozen at accept, so the preview matches what will be paid.
       // Before accept the column is NULL — fall back to the live rate.
-      commissionRateBps: order.commissionRateBps ?? PLATFORM_COMMISSION_RATE_BPS,
+      commissionRateBps: rateBps,
+      // computeEarning's split of that base — the same call accrueEarning
+      // makes, so the preview cannot round differently from the real row.
+      commissionKurus: expectedEarning.commissionKurus,
+      netEarningKurus: expectedEarning.netKurus,
+      accruedEarning: accrued
+        ? {
+            grossKurus: accrued.grossKurus,
+            commissionKurus: accrued.commissionKurus,
+            netKurus: accrued.netKurus,
+            commissionRateBps: accrued.commissionRateBps,
+            status: accrued.status,
+            payoutStatus: accrued.payout?.status ?? null,
+            paidAt: accrued.payout?.paidAt?.toISOString() ?? null,
+          }
+        : null,
       // True once the job is with a painter: the card must stop promising the
       // painting share and stop saying "accrues when you ship" (shipping such
       // an order is blocked by the ship gate's isNull(painterId)).

@@ -7,6 +7,8 @@ import { orders, adminActions, qcPhotos, qcReviews } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { qcNextStatus, type ManufacturerOrderStatus } from "@/lib/services/qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { isOrderRefunded, notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 const rejectSchema = z.object({ reason: z.string().trim().min(1).max(1000) });
 
@@ -37,9 +39,15 @@ export async function POST(
       manufacturerId: true,
       orderNumber: true,
       userId: true,
+      paymentStatus: true,
     },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  // A rejection sends the manufacturer back to reprint: forward work on money
+  // already returned. A refunded order still attached stops here.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
 
   const next = qcNextStatus(
     (order.manufacturerStatus ?? "") as ManufacturerOrderStatus,
@@ -57,9 +65,13 @@ export async function POST(
       qcRejectionCount: sql`${orders.qcRejectionCount} + 1`,
       updatedAt: new Date(),
     })
-    .where(and(eq(orders.id, id), eq(orders.manufacturerStatus, "qc_pending")))
+    // The guard again in the write, so a refund landing after the read wins.
+    .where(and(eq(orders.id, id), eq(orders.manufacturerStatus, "qc_pending"), notRefundedGuard()))
     .returning();
   if (!updated) {
+    if (await isOrderRefunded(id)) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
     return NextResponse.json({ error: "Order is not awaiting QC" }, { status: 400 });
   }
 

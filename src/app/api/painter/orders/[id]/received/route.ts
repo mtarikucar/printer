@@ -3,6 +3,9 @@ import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, painterActions } from "@/lib/db/schema";
 import { requireActivePainter } from "@/lib/services/painter-guard";
+import { REFUNDED_ORDER_ERROR } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 /**
  * Painter confirms the base print physically arrived.
@@ -29,11 +32,18 @@ export async function POST(
         eq(orders.painterId, g.painterId),
         // Only before painting starts, and only once.
         inArray(orders.painterStatus, ["assigned", "accepted"]),
-        isNull(orders.receivedByPainterAt)
+        isNull(orders.receivedByPainterAt),
+        // Refund-end-state: a refunded order still attached to this painter
+        // (legacy row, or a refund racing this click) must not move forward.
+        // In the UPDATE, not a pre-read, so a refund landing mid-request wins.
+        notRefundedGuard()
       )
     )
     .returning({ id: orders.id });
   if (!order) {
+    if (await isPartnerOrderRefunded(id, { painterId: g.painterId })) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
     return NextResponse.json(
       { error: "İş bulunamadı veya teslim alındı olarak işaretlenemez" },
       { status: 400 }

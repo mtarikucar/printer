@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
@@ -8,6 +8,7 @@ import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 
 export async function POST(
   request: NextRequest,
@@ -26,11 +27,24 @@ export async function POST(
 
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
+  const note = typeof body.notes === "string" ? body.notes.trim() : "";
+  const noteLine = note ? formatAdminNoteLine(`Teslim edildi: ${note}`) : null;
 
   // Atomic status transition
   const [order] = await db
     .update(orders)
-    .set({ status: "delivered", deliveredAt: new Date(), adminNotes: body.notes, updatedAt: new Date() })
+    .set({
+      status: "delivered",
+      deliveredAt: new Date(),
+      // Appended, never overwritten (see order-status-policy.ts): an overwrite
+      // wiped the [SLA] / decline flags other writers leave in adminNotes.
+      ...(noteLine
+        ? {
+            adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${noteLine} ELSE ${orders.adminNotes} || E'\n' || ${noteLine} END`,
+          }
+        : {}),
+      updatedAt: new Date(),
+    })
     .where(and(eq(orders.id, id), eq(orders.status, "shipped")))
     .returning();
 

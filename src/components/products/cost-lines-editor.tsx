@@ -21,6 +21,7 @@ import {
   type CostLineKind,
 } from "@/lib/config/cost-lines";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
+import { computeEarning } from "@/lib/services/finance";
 // Satır tipi ve fabrikaları config/cost-line-row.ts'te — sunucudaki ürün
 // sayfaları da onları çağırıyor. Buradan YENİDEN dışa aktarma: iki makul import
 // yolu bırakmak, dört körlemesine düzeltme commit'ini doğuran karışıklığın ta
@@ -115,8 +116,10 @@ export function CostLinesEditor({
     : null;
 
   const netBps = 10000 - PLATFORM_COMMISSION_RATE_BPS;
+  // Tahakkukla aynı fonksiyon (services/finance.ts): formdaki "net" rakamı,
+  // partnerin hesabına yazılacak rakamdan yuvarlama kadar bile ayrışmasın.
   const partnerNet = (grossKurus: number) =>
-    grossKurus - Math.round((grossKurus * PLATFORM_COMMISSION_RATE_BPS) / 10000);
+    computeEarning(grossKurus, PLATFORM_COMMISSION_RATE_BPS).netKurus;
 
   const hasPainting = (bases?.paintingKurus ?? 0) > 0;
 

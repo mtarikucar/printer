@@ -105,7 +105,12 @@ export function KycQueueClient({
         </div>
       )}
 
-      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+      {/* id="iban": /admin/payouts links straight here (#iban), past the
+          documents section. scroll-mt clears the mobile panel's sticky bar. */}
+      <h2
+        id="iban"
+        className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 scroll-mt-16"
+      >
         Bekleyen IBAN değişiklikleri
       </h2>
       {ibanChanges.length === 0 ? (

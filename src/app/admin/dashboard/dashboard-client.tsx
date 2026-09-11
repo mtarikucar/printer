@@ -13,6 +13,8 @@ interface DashboardClientProps {
     pendingReview: number;
     approved: number;
     printing: number;
+    qualityCheck: number;
+    painting: number;
     shipped: number;
     delivered: number;
     failed: number;
@@ -23,7 +25,9 @@ interface DashboardClientProps {
     activeManufacturers: number;
     unassignedOrders: number;
     inProduction: number;
+    qcPending: number;
     pendingManufacturerApproval: number;
+    refundedOpen: number;
   };
   revenueTrend: { date: string; amount: number }[];
   recentOrders: {
@@ -41,17 +45,23 @@ interface DashboardClientProps {
     status: string;
     reason: string;
   }[];
+  /** The revenue definition (C3) in words, shared with /admin/analytics. */
+  revenueNote: string;
   locale: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
   pending_payment: "bg-amber-100 text-amber-700",
   paid: "bg-blue-100 text-blue-700",
+  awaiting_model: "bg-indigo-50 text-indigo-700",
   generating: "bg-indigo-100 text-indigo-700",
   processing_mesh: "bg-indigo-100 text-indigo-700",
   review: "bg-yellow-100 text-yellow-700",
+  awaiting_customer_approval: "bg-cyan-100 text-cyan-800",
   approved: "bg-green-100 text-green-700",
   printing: "bg-purple-100 text-purple-700",
+  quality_check: "bg-orange-100 text-orange-700",
+  painting: "bg-fuchsia-100 text-fuchsia-700",
   shipped: "bg-emerald-100 text-emerald-700",
   delivered: "bg-emerald-100 text-emerald-700",
   failed_generation: "bg-red-100 text-red-700",
@@ -70,12 +80,15 @@ export function DashboardClient({
   revenueTrend,
   recentOrders,
   attentionOrders,
+  revenueNote,
   locale,
 }: DashboardClientProps) {
   const d = useDictionary();
   const loc = locale as Locale;
+  const statusLabel = (status: string) =>
+    d[`admin.status.${status}` as keyof typeof d] || status.replace(/_/g, " ");
 
-  const cards = [
+  const cards: MetricCardProps[] = [
     {
       label: d["admin.dashboard.totalOrders"],
       value: metrics.total,
@@ -102,6 +115,16 @@ export function DashboardClient({
       color: "bg-purple-500",
     },
     {
+      label: d["admin.status.quality_check"],
+      value: metrics.qualityCheck,
+      color: "bg-orange-500",
+    },
+    {
+      label: d["admin.status.painting"],
+      value: metrics.painting,
+      color: "bg-fuchsia-500",
+    },
+    {
       label: d["admin.dashboard.shipped"],
       value: metrics.shipped,
       color: "bg-emerald-500",
@@ -126,6 +149,45 @@ export function DashboardClient({
       value: metrics.giftCardsCreated,
       color: "bg-pink-500",
     },
+    {
+      // Left out of every count above; frozen until settled by hand. The
+      // bucket it opens uses the same predicate (REFUNDED_OPEN), so the card's
+      // number is the length of that list.
+      label: "İade edildi (açık)",
+      value: metrics.refundedOpen,
+      color: "bg-red-600",
+      href: "/admin/orders?bucket=refunded_open",
+    },
+  ];
+
+  const manufacturingCards: MetricCardProps[] = [
+    {
+      label: d["admin.dashboard.activeManufacturers"],
+      value: metrics.activeManufacturers,
+      color: "bg-blue-500",
+    },
+    {
+      label: d["admin.dashboard.unassignedOrders"],
+      value: metrics.unassignedOrders,
+      color: "bg-amber-500",
+      href: "/admin/orders?bucket=unassigned",
+    },
+    {
+      label: d["admin.dashboard.inProduction"],
+      value: metrics.inProduction,
+      color: "bg-purple-500",
+    },
+    {
+      label: d["admin.dashboard.qcPending"],
+      value: metrics.qcPending,
+      color: "bg-orange-500",
+      href: "/admin/qc-queue",
+    },
+    {
+      label: d["admin.dashboard.pendingManufacturerApproval"],
+      value: metrics.pendingManufacturerApproval,
+      color: "bg-yellow-500",
+    },
   ];
 
   const maxRevenue = Math.max(...revenueTrend.map((r) => r.amount), 1);
@@ -140,51 +202,16 @@ export function DashboardClient({
       {/* Metric cards */}
       <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
         {cards.map((card) => (
-          <div
-            key={card.label}
-            className="bg-white rounded-xl border border-gray-200 p-4"
-          >
-            <div className={`w-3 h-3 rounded-full ${card.color} mb-3`} />
-            <p className="text-2xl font-bold text-gray-900">{card.value}</p>
-            <p className="text-sm text-gray-500">{card.label}</p>
-          </div>
+          <MetricCard key={card.label} {...card} />
         ))}
       </div>
 
       {/* Manufacturing metrics */}
       <div className="mt-8">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Manufacturing</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            {
-              label: d["admin.dashboard.activeManufacturers"],
-              value: metrics.activeManufacturers,
-              color: "bg-blue-500",
-            },
-            {
-              label: d["admin.dashboard.unassignedOrders"],
-              value: metrics.unassignedOrders,
-              color: "bg-amber-500",
-            },
-            {
-              label: d["admin.dashboard.inProduction"],
-              value: metrics.inProduction,
-              color: "bg-purple-500",
-            },
-            {
-              label: d["admin.dashboard.pendingManufacturerApproval"],
-              value: metrics.pendingManufacturerApproval,
-              color: "bg-yellow-500",
-            },
-          ].map((card) => (
-            <div
-              key={card.label}
-              className="bg-white rounded-xl border border-gray-200 p-4"
-            >
-              <div className={`w-3 h-3 rounded-full ${card.color} mb-3`} />
-              <p className="text-2xl font-bold text-gray-900">{card.value}</p>
-              <p className="text-sm text-gray-500">{card.label}</p>
-            </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {manufacturingCards.map((card) => (
+            <MetricCard key={card.label} {...card} />
           ))}
         </div>
       </div>
@@ -198,9 +225,7 @@ export function DashboardClient({
           <p className="text-3xl font-bold text-gray-900 mt-2">
             {formatCurrency(metrics.revenueKurus, loc)}
           </p>
-          <p className="text-sm text-gray-500 mt-1">
-            {d["admin.dashboard.revenueSubtitle"]}
-          </p>
+          <p className="text-sm text-gray-500 mt-1">{revenueNote}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900">
@@ -311,7 +336,7 @@ export function DashboardClient({
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[order.status] || "bg-gray-100 text-gray-700"}`}
                         >
-                          {order.status.replace(/_/g, " ")}
+                          {statusLabel(order.status)}
                         </span>
                       </td>
                       <td className="py-2 pr-3 text-right text-gray-700">
@@ -370,7 +395,7 @@ export function DashboardClient({
                       <span
                         className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[order.status] || "bg-gray-100 text-gray-700"}`}
                       >
-                        {order.status.replace(/_/g, " ")}
+                        {statusLabel(order.status)}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500 truncate mt-0.5">
@@ -391,6 +416,34 @@ export function DashboardClient({
         </div>
       </div>
     </div>
+  );
+}
+
+interface MetricCardProps {
+  label: string;
+  value: number;
+  color: string;
+  /** Where the number can be acted on; the card becomes a link. */
+  href?: string;
+}
+
+function MetricCard({ label, value, color, href }: MetricCardProps) {
+  const body = (
+    <>
+      <div className={`w-3 h-3 rounded-full ${color} mb-3`} />
+      <p className="text-2xl font-bold text-gray-900">{value}</p>
+      <p className="text-sm text-gray-500">{label}</p>
+    </>
+  );
+  return href ? (
+    <Link
+      href={href}
+      className="block bg-white rounded-xl border border-gray-200 p-4 transition-colors hover:border-gray-300 hover:bg-gray-50"
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">{body}</div>
   );
 }
 

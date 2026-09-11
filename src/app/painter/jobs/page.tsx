@@ -10,6 +10,8 @@ import { PainterJobsClient } from "./jobs-client";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
+import { painterBaseKurus } from "@/lib/services/earning-base";
+import { computeEarning } from "@/lib/services/finance";
 
 const PAGE_SIZE = 20;
 
@@ -33,6 +35,34 @@ const FILTERABLE: PainterJobStatus[] = [
   "qc_approved",
   "shipped",
 ];
+
+/**
+ * What the painter is paid for one job, computed on the server with the same
+ * two functions the accrual uses: painterBaseKurus for the base and
+ * computeEarning at the order's rate. The client only displays the result; it
+ * used to redo the commission by hand, which drifts the moment the rounding or
+ * the base rule changes.
+ */
+function jobEarning(o: {
+  amountKurus: number;
+  productionBaseKurus: number | null;
+  paintingPriceKurus: number;
+  commissionRateBps: number | null;
+}): { commissionRateBps: number; grossKurus: number; commissionKurus: number; netKurus: number } {
+  // The rate frozen on the order, not the live constant — the painter
+  // agreement promises the rate is fixed at accept and that changes are
+  // not retroactive. Showing the live rate silently repriced in-flight
+  // jobs on screen. NULL only on pre-freeze rows (accruePainterEarning falls
+  // back the same way).
+  const rateBps = o.commissionRateBps ?? PLATFORM_COMMISSION_RATE_BPS;
+  const e = computeEarning(painterBaseKurus(o), rateBps);
+  return {
+    commissionRateBps: rateBps,
+    grossKurus: e.grossKurus,
+    commissionKurus: e.commissionKurus,
+    netKurus: e.netKurus,
+  };
+}
 
 export default async function PainterJobsPage({
   searchParams,
@@ -83,6 +113,11 @@ export default async function PainterJobsPage({
         finish: true,
         modifiers: true,
         painterStatus: true,
+        // A refunded job is shown as cancelled, without action buttons.
+        paymentStatus: true,
+        // painterBaseKurus takes the whole kalem triple (see jobEarning).
+        amountKurus: true,
+        productionBaseKurus: true,
         paintingPriceKurus: true,
         commissionRateBps: true,
         assignedToPainterAt: true,
@@ -151,14 +186,11 @@ export default async function PainterJobsPage({
           finish: o.finish,
           modifiers: o.modifiers as string[] | null,
           painterStatus: o.painterStatus,
-          paintingPriceKurus: o.paintingPriceKurus,
+          paymentStatus: o.paymentStatus,
           assignedAt: o.assignedToPainterAt?.toISOString() ?? null,
           material: o.material,
-          // The rate frozen on the order, not the live constant — the painter
-          // agreement promises the rate is fixed at accept and that changes are
-          // not retroactive. Showing the live rate silently repriced in-flight
-          // jobs on screen. NULL only on pre-freeze rows.
-          commissionRateBps: o.commissionRateBps ?? PLATFORM_COMMISSION_RATE_BPS,
+          // Rate + gross / commission / net, computed here (see jobEarning).
+          ...jobEarning(o),
           handoffCarrier: o.painterHandoffCarrier,
           handoffTrackingNumber: o.painterHandoffTrackingNumber,
           receivedAt: o.receivedByPainterAt?.toISOString() ?? null,

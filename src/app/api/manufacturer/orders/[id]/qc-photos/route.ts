@@ -12,6 +12,7 @@ import {
   qcPhotosWouldExceed,
   type ManufacturerOrderStatus,
 } from "@/lib/services/qc";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
 
 // Active-manufacturer gate, mirrors finish-printing/ship route.ts.
 async function requireActiveManufacturer() {
@@ -42,9 +43,14 @@ export async function POST(
 
   const order = await db.query.orders.findFirst({
     where: and(eq(orders.id, id), eq(orders.manufacturerId, session.manufacturerId)),
-    columns: { id: true, manufacturerStatus: true, qcRound: true },
+    columns: { id: true, manufacturerStatus: true, qcRound: true, paymentStatus: true },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  // QC photos are the step before submit-qc; a refunded order has no QC left
+  // to do. Deleting a pending photo (DELETE below) stays allowed.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
   if (!canUploadQcPhotos((order.manufacturerStatus ?? "") as ManufacturerOrderStatus)) {
     return NextResponse.json(
       { error: "QC photos can't be uploaded in this status" },

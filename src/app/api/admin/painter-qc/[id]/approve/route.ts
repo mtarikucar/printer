@@ -6,6 +6,8 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { painterQcNextStatus, type PainterOrderStatus } from "@/lib/services/painter-qc";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { isOrderRefunded, notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 // Admin approves a painter's QC round: qc_pending → qc_approved (shipping unlocked).
 export async function POST(
@@ -20,10 +22,15 @@ export async function POST(
     where: eq(orders.id, id),
     columns: {
       id: true, orderNumber: true, userId: true, manufacturerId: true,
-      painterId: true, painterStatus: true, painterQcRound: true,
+      painterId: true, painterStatus: true, painterQcRound: true, paymentStatus: true,
     },
   });
   if (!order) return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+  // Approving painter QC unlocks the painter's ship, which accrues their
+  // earning. A refunded order that still has its painter attached stops here.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
 
   const next = painterQcNextStatus((order.painterStatus ?? "") as PainterOrderStatus, "approve");
   if (!next) return NextResponse.json({ error: "Sipariş QC onayına uygun değil" }, { status: 400 });
@@ -31,9 +38,15 @@ export async function POST(
   const [updated] = await db
     .update(orders)
     .set({ painterStatus: next, updatedAt: new Date() })
-    .where(and(eq(orders.id, id), eq(orders.painterStatus, "qc_pending")))
+    // The guard again in the write, so a refund landing after the read wins.
+    .where(and(eq(orders.id, id), eq(orders.painterStatus, "qc_pending"), notRefundedGuard()))
     .returning({ id: orders.id, orderNumber: orders.orderNumber, userId: orders.userId, manufacturerId: orders.manufacturerId, status: orders.status });
-  if (!updated) return NextResponse.json({ error: "Zaten işlenmiş" }, { status: 400 });
+  if (!updated) {
+    if (await isOrderRefunded(id)) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
+    return NextResponse.json({ error: "Zaten işlenmiş" }, { status: 400 });
+  }
 
   await db.insert(painterQcReviews).values({
     orderId: id, round: order.painterQcRound, decision: "approved", adminEmail: a.session.user.email,

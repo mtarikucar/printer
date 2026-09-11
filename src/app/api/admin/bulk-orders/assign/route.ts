@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { assignManufacturerToOrder } from "@/lib/services/manufacturer-assign";
+import {
+  ASSIGN_FAILURE_MESSAGES,
+  assignManufacturerToOrder,
+} from "@/lib/services/manufacturer-assign";
 
 // Hand a batch of orders for ONE product to a single manufacturer.
 //
@@ -12,10 +15,27 @@ import { assignManufacturerToOrder } from "@/lib/services/manufacturer-assign";
 // into an unbounded fan-out of notifications.
 const MAX_BULK_ASSIGN = 50;
 
-const schema = z.object({
-  manufacturerId: z.string().uuid(),
-  orderIds: z.array(z.string().uuid()).min(1).max(MAX_BULK_ASSIGN),
-});
+// Every message is Turkish: the bulk-orders page shows the first issue's text
+// as-is, and zod's defaults are English.
+const schema = z.object(
+  {
+    manufacturerId: z
+      .string({ error: "Üretici seçin." })
+      .uuid({ error: "Geçerli bir üretici seçin." }),
+    orderIds: z
+      .array(
+        z
+          .string({ error: "Geçersiz sipariş kimliği." })
+          .uuid({ error: "Geçersiz sipariş kimliği." }),
+        { error: "Sipariş listesi geçersiz." }
+      )
+      .min(1, { error: "En az bir sipariş seçin." })
+      .max(MAX_BULK_ASSIGN, {
+        error: `Tek seferde en fazla ${MAX_BULK_ASSIGN} sipariş atanabilir.`,
+      }),
+  },
+  { error: "Geçersiz istek." }
+);
 
 export async function POST(request: NextRequest) {
   const a = await requireAdmin();
@@ -24,7 +44,7 @@ export async function POST(request: NextRequest) {
   const parsed = schema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Geçersiz veri" },
+      { error: parsed.error.issues[0]?.message ?? "Geçersiz istek." },
       { status: 400 }
     );
   }
@@ -35,7 +55,9 @@ export async function POST(request: NextRequest) {
   // the order still being unassigned. Racing 50 of these at one manufacturer
   // buys nothing and makes the failure report harder to read.
   const assigned: string[] = [];
-  const skipped: Array<{ orderId: string; reason: string }> = [];
+  // `message` is the same Turkish copy the single assign route returns, so a
+  // skipped refunded order is named as such rather than left as a bare key.
+  const skipped: Array<{ orderId: string; reason: string; message: string }> = [];
   for (const orderId of orderIds) {
     const result = await assignManufacturerToOrder({
       orderId,
@@ -43,7 +65,13 @@ export async function POST(request: NextRequest) {
       adminEmail: a.session.user.email,
     });
     if (result.ok) assigned.push(orderId);
-    else skipped.push({ orderId, reason: result.reason });
+    else {
+      skipped.push({
+        orderId,
+        reason: result.reason,
+        message: ASSIGN_FAILURE_MESSAGES[result.reason],
+      });
+    }
   }
 
   // A partially-applied batch is the normal outcome when someone else grabbed

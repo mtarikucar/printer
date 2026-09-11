@@ -9,15 +9,23 @@ import { getPainterSession } from "@/lib/services/painter-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import { isRefunded } from "@/lib/config/order-status-policy";
 
 // Turkish labels for the per-order painting sub-lifecycle
 // (painterOrderStatusEnum). Hardcoded — the painter realm carries no i18n keys.
+// Same words as /painter/jobs (STATUS_LABEL in jobs-client.tsx), QC states
+// included: without them a job in QC showed the raw enum ("qc_approved").
+// jobs-client.tsx is a client module, so this server page cannot import its
+// constant; keep the two in step.
 const PAINTER_STATUS_LABELS: Record<string, string> = {
   unassigned: "Atanmadı",
   assigned: "Atandı",
   accepted: "Kabul edildi",
   painting: "Boyanıyor",
   painted: "Boyandı",
+  qc_pending: "QC onayında",
+  qc_rejected: "QC reddedildi",
+  qc_approved: "QC onaylandı",
   shipped: "Kargolandı",
 };
 
@@ -102,9 +110,14 @@ export default async function PainterDashboardPage() {
         .select({ c: count() })
         .from(orders)
         .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "painting"))),
+      // "Bekleyen kazanç" = pending AND not yet batched into a payout — the
+      // same filter as the admin queue and the manufacturer earnings page.
+      // Summing every pending row double-showed money the painter had already
+      // requested (batched, awaiting the transfer) as still owed.
       db
         .select({
-          s: sql<number>`coalesce(sum(${painterEarnings.netKurus}), 0)::int`,
+          s: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${painterEarnings.payoutId} is null), 0)::int`,
+          inPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${painterEarnings.payoutId} is not null), 0)::int`,
         })
         .from(painterEarnings)
         .where(
@@ -123,11 +136,15 @@ export default async function PainterDashboardPage() {
           customerName: true,
           painterStatus: true,
           assignedToPainterAt: true,
+          // A refund keeps the painter status, so the row needs this to say
+          // the job is cancelled, as /painter/jobs does.
+          paymentStatus: true,
         },
       }),
     ]);
 
-  const pendingEarnings = pending?.s ?? 0;
+  const pendingEarnings = Number(pending?.s ?? 0);
+  const inPayoutKurus = Number(pending?.inPayout ?? 0);
   const inProgress = (assigned?.c ?? 0) + (accepted?.c ?? 0) + (painting?.c ?? 0);
 
   const stats: Array<{ label: string; value: string | number }> = [
@@ -176,6 +193,23 @@ export default async function PainterDashboardPage() {
         </p>
       </div>
 
+      <Link
+        href="/painter/earnings"
+        className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4 hover:bg-gray-50"
+      >
+        <div>
+          <p className="text-xs uppercase tracking-wide text-gray-500">
+            Kazançlar ve ödemeler
+          </p>
+          <p className="mt-1 text-sm text-gray-700">
+            {inPayoutKurus > 0
+              ? `Ödeme sürecinde: ${formatCurrency(inPayoutKurus, locale)}`
+              : "İş bazında kazanç, ödeme talebi ve ödeme geçmişi"}
+          </p>
+        </div>
+        <span className="text-sm text-indigo-600">Görüntüle →</span>
+      </Link>
+
       <div className="mt-8 rounded-xl border border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
           <h2 className="font-semibold text-gray-900">Son işler</h2>
@@ -204,10 +238,15 @@ export default async function PainterDashboardPage() {
                   <span className="text-sm text-gray-600">
                     {o.customerName}
                   </span>
-                  <span className="text-xs text-gray-500">
+                  <span className="flex items-center gap-1.5 text-xs text-gray-500">
                     {o.painterStatus
                       ? PAINTER_STATUS_LABELS[o.painterStatus] ?? o.painterStatus
                       : "—"}
+                    {isRefunded(o) && (
+                      <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                        İade edildi
+                      </span>
+                    )}
                   </span>
                   <span className="text-xs text-gray-400">
                     {o.assignedToPainterAt

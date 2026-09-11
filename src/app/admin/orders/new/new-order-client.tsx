@@ -23,6 +23,7 @@ import {
   type CostLineKind,
 } from "@/lib/config/cost-lines";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
+import { computeEarning } from "@/lib/services/finance";
 
 interface LineItem {
   description: string;
@@ -175,8 +176,10 @@ export function NewOrderClient({ locale: _locale }: { locale: string }) {
         return { kind: li.kind, amountKurus };
       })
     );
+    // Tahakkukla aynı fonksiyon: önizlemedeki net, partnerin hesabına
+    // yazılacak rakamdan yuvarlama kadar bile ayrışmasın.
     const net = (gross: number) =>
-      gross - Math.round((gross * PLATFORM_COMMISSION_RATE_BPS) / 10000);
+      computeEarning(gross, PLATFORM_COMMISSION_RATE_BPS).netKurus;
     const total = bases.productionKurus + bases.paintingKurus;
     return {
       total,

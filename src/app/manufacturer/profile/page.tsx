@@ -5,6 +5,7 @@ import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import { ManufacturerKyc } from "@/components/manufacturer-kyc";
 import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/PhoneInput";
 import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
+import { isValidTrIban, normalizeIban } from "@/lib/services/iban";
 
 interface TurkishAddress {
   adres: string;
@@ -29,6 +30,9 @@ interface ManufacturerProfile {
   iban: string | null;
   bankAccountHolder: string | null;
   bankName: string | null;
+  // IBAN change parked for admin review; the live `iban` is what payouts use.
+  pendingIban: string | null;
+  ibanReviewStatus: "none" | "pending";
   maxConcurrentOrders: number;
   acceptingOrders: boolean;
   paintsInHouse: boolean;
@@ -65,6 +69,7 @@ export default function ManufacturerProfilePage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Editable form state
   const [contactPerson, setContactPerson] = useState("");
@@ -96,6 +101,9 @@ export default function ManufacturerProfilePage() {
 
   const loadProfile = async () => {
     try {
+      // /auth/me also carries the IBAN still waiting for admin review; without
+      // it a partner who just submitted a change sees their old IBAN and
+      // assumes the save failed.
       const res = await fetch("/api/manufacturer/auth/me");
       if (!res.ok) {
         setError("Profil yüklenemedi");
@@ -152,10 +160,36 @@ export default function ManufacturerProfilePage() {
         return;
       }
     }
+    const ibanClean = normalizeIban(iban);
+    // An IBAN change never goes live from this form: it is parked for admin
+    // review via /api/manufacturer/iban (the profile route no longer writes the
+    // live column). Unchanged = the live value, or the one already waiting.
+    const ibanChanged =
+      !!ibanClean &&
+      ibanClean !== (profile?.iban ?? "") &&
+      !(profile?.ibanReviewStatus === "pending" && ibanClean === profile.pendingIban);
+    if (ibanChanged && !isValidTrIban(ibanClean)) {
+      setSaveError("Geçersiz IBAN. TR ile başlayan 26 karakterlik IBAN'ı kontrol edin.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
+    setNotice(null);
     try {
-      const ibanClean = iban.replace(/\s+/g, "").toUpperCase();
+      // IBAN first: if it is refused nothing else is saved, so the partner
+      // fixes one thing and saves once.
+      if (ibanChanged) {
+        const ibanRes = await fetch("/api/manufacturer/iban", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ iban: ibanClean }),
+        });
+        const ibanData = await ibanRes.json().catch(() => ({}));
+        if (!ibanRes.ok) {
+          setSaveError(ibanData.error || "IBAN kaydedilemedi");
+          return;
+        }
+      }
       // Send only the fields that actually carry a value. An older account can
       // have no IBAN/bank/address on file (those columns are nullable and the
       // register form only started demanding them later); posting them back as
@@ -180,7 +214,6 @@ export default function ManufacturerProfilePage() {
               telefon: phoneE164,
             },
           }),
-          ...(ibanClean && { iban: ibanClean }),
           ...(bankAccountHolder.trim() && { bankAccountHolder }),
           ...(bankName.trim() && { bankName }),
           maxConcurrentOrders: clampCapacity(maxConcurrent),
@@ -195,6 +228,11 @@ export default function ManufacturerProfilePage() {
         return;
       }
       setEditing(false);
+      if (ibanChanged) {
+        setNotice(
+          "Yeni IBAN admin onayına gönderildi. Onaylanana kadar ödemeleriniz kayıtlı IBAN'a yapılır."
+        );
+      }
       await loadProfile();
     } catch {
       setSaveError("Bir hata oluştu");
@@ -338,9 +376,19 @@ export default function ManufacturerProfilePage() {
             <div className="sm:col-span-2">
               <label className="block text-xs font-medium text-gray-500 mb-1">IBAN</label>
               {editing ? (
-                <input className={`${inputCls} font-mono uppercase`} value={iban} onChange={(e) => setIban(e.target.value.toUpperCase())} />
+                <>
+                  <input className={`${inputCls} font-mono uppercase`} value={iban} onChange={(e) => setIban(e.target.value.toUpperCase())} />
+                  <p className="mt-1 text-xs text-gray-500">
+                    IBAN değişikliği admin onayından sonra geçerli olur. Onaylanana kadar ödemeler kayıtlı IBAN&apos;a yapılır.
+                  </p>
+                </>
               ) : (
                 <p className="text-gray-900 font-mono text-sm">{profile.iban ?? "—"}</p>
+              )}
+              {profile.ibanReviewStatus === "pending" && profile.pendingIban && (
+                <p className="mt-1 text-xs text-amber-700">
+                  Admin onayında bekleyen IBAN: <span className="font-mono">{profile.pendingIban}</span>
+                </p>
               )}
             </div>
             <div>
@@ -456,6 +504,9 @@ export default function ManufacturerProfilePage() {
 
         {saveError && (
           <div className="bg-red-50 text-red-700 rounded-xl p-3 text-sm">{saveError}</div>
+        )}
+        {notice && (
+          <div className="bg-emerald-50 text-emerald-800 rounded-xl p-3 text-sm">{notice}</div>
         )}
 
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">

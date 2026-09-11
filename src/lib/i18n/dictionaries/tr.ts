@@ -1037,6 +1037,7 @@ const tr: Dictionary = {
   "admin.status.approved": "Onaylandı",
   "admin.status.printing": "Baskıda",
   "admin.status.painting": "Boyanıyor",
+  "admin.status.quality_check": "Kalite kontrolde",
   "admin.status.shipped": "Kargolanan",
   "admin.status.failed_generation": "Oluşturma Başarısız",
   "admin.status.failed_mesh": "Mesh Başarısız",
@@ -1628,6 +1629,30 @@ const tr: Dictionary = {
   "admin.timeline.confirmed": "Sipariş onaylandı",
   "admin.timeline.edited": "Sipariş düzenlendi",
   "admin.timeline.emailSent": "E-posta gönderildi",
+  // Geçmiş satırı admin_action_type değerini doğrudan anahtar olarak arar
+  // (admin.timeline.<aksiyon>). Yukarıdaki geçmiş-zaman anahtarlarının çoğu
+  // (approved, edited…) hiçbir aksiyonla eşleşmediği için ham enum görünüyordu.
+  "admin.timeline.approve": "Onaylandı",
+  "admin.timeline.reject": "Reddedildi",
+  "admin.timeline.regenerate": "Yeniden oluşturuldu",
+  "admin.timeline.print": "Baskı başladı",
+  "admin.timeline.ship": "Kargoya verildi",
+  "admin.timeline.confirm": "Sipariş onaylandı",
+  "admin.timeline.deliver": "Teslim edildi",
+  "admin.timeline.message_email": "E-posta gönderildi",
+  "admin.timeline.edit": "Sipariş düzenlendi",
+  "admin.timeline.force_review": "İncelemeye alındı",
+  "admin.timeline.assign_manufacturer": "Üretici/boyacı ataması değişti",
+  "admin.timeline.mark_havale_paid": "Havale ödemesi onaylandı",
+  "admin.timeline.mark_payment_expired": "Ödeme süresi doldu",
+  "admin.timeline.gallery_approve": "Galeri yayını onaylandı",
+  "admin.timeline.gallery_reject": "Galeri yayını reddedildi",
+  "admin.timeline.gallery_reward": "Galeri ödülü verildi",
+  "admin.timeline.gallery_feature": "Galeride öne çıkarıldı",
+  "admin.timeline.gallery_unfeature": "Galeride öne çıkarma kaldırıldı",
+  "admin.timeline.qc_approve": "Kalite kontrol onaylandı",
+  "admin.timeline.qc_reject": "Kalite kontrol reddedildi",
+  "admin.timeline.refund": "İade edildi",
 
   // Admin - Layout
   "admin.nav.reviewBadge": "{count}",
@@ -1794,6 +1819,7 @@ const tr: Dictionary = {
   "admin.payment.status.succeeded": "Tamamlandı",
   "admin.payment.status.failed": "Başarısız",
   "admin.payment.status.expired": "Süresi doldu",
+  "admin.payment.status.refunded": "İade edildi",
   "admin.payment.markHavalePaid": "Havaleyi onayla",
   "admin.payment.markHavalePaid.confirm":
     "Bu sipariş için havalenin alındığını onaylıyor musunuz?",

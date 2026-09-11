@@ -18,6 +18,12 @@
  * approval'` guard lives in that function, so a customer tapping "Onaylıyorum"
  * in the same second as this sweep produces one transition, not two.
  *
+ * Refunded orders are outside the sweep. A refund keeps the order's status, so
+ * one can sit in `awaiting_customer_approval` forever; it is not waiting for
+ * anyone. It must not be auto-approved (decideModelApproval refuses as well),
+ * the customer who got their money back must not be reminded, and it is not
+ * paid work stuck at the gate, so it is not escalated either.
+ *
  * Resilience: one bad order must not abort the sweep. Every order is handled in
  * its own try/catch; the collected failures are reported once at the end.
  */
@@ -36,6 +42,7 @@ import { decideModelApproval, modelApprovalUrl } from "../../services/model-appr
 import { planApprovalSweep, slaThresholds } from "../../config/model-approval-sla";
 import { getPublicUrl } from "../../services/storage";
 import { emitOrderChanged } from "../../realtime/emit";
+import { notRefundedGuard } from "../../services/manufacturer-assign";
 
 /** Marker on `orders.admin_notes`; also what keeps the escalation from repeating. */
 const ESCALATION_FLAG = "[ONAY-SLA]";
@@ -107,7 +114,9 @@ async function pendingApprovals(): Promise<PendingApproval[]> {
     .where(
       and(
         eq(orders.status, "awaiting_customer_approval"),
-        isNull(orderModelApprovals.decidedAt)
+        isNull(orderModelApprovals.decidedAt),
+        // Refunded orders are out of the sweep (see the header).
+        notRefundedGuard()
       )
     )
     .orderBy(desc(orderModelApprovals.revision));
@@ -132,7 +141,9 @@ async function processJob(job: Job) {
   const [{ parked }] = await db
     .select({ parked: sql<number>`count(*)::int` })
     .from(orders)
-    .where(eq(orders.status, "awaiting_customer_approval"));
+    // The same set as pendingApprovals(); otherwise every refunded order parked
+    // here would be reported as missing its approval row.
+    .where(and(eq(orders.status, "awaiting_customer_approval"), notRefundedGuard()));
 
   if (parked > pending.length) {
     // No open approval row means /onay has nothing to show and no clock runs.
@@ -188,7 +199,11 @@ async function processJob(job: Job) {
           continue;
         }
         if (result.alreadyDecided) {
-          job.log(`${row.orderNumber} already decided (${result.status})`);
+          job.log(
+            result.refunded
+              ? `${row.orderNumber} refunded meanwhile; not auto-approved`
+              : `${row.orderNumber} already decided (${result.status})`
+          );
           continue;
         }
         await emitOrderChanged({

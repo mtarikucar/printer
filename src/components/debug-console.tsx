@@ -2,6 +2,9 @@
 
 import { useEffect } from "react";
 
+/** Panels whose pages never carry a customer session (see the probe below). */
+const PANEL_PREFIXES = ["/admin", "/manufacturer", "/painter"];
+
 /**
  * Debug console that survives React crashes.
  * Mounts a vanilla DOM element outside React's tree so it persists
@@ -23,6 +26,13 @@ export function DebugConsole() {
 
     // Only init once
     if (document.getElementById("__debug_console")) return;
+
+    // /api/auth/me is the CUSTOMER session. Admin (NextAuth) and partner
+    // (manufacturer / painter cookie) pages never carry one, so probing it
+    // there could not unlock the console and only logged a 401 console error
+    // on every page load. Those panels skip the probe entirely.
+    const path = window.location.pathname;
+    if (PANEL_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return;
 
     fetch("/api/auth/me")
       .then(async (res) => {

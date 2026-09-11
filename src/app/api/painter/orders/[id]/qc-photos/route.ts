@@ -12,6 +12,7 @@ import {
   painterQcPhotosWouldExceed,
   type PainterOrderStatus,
 } from "@/lib/services/painter-qc";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
 
 // POST: painter uploads one or more finished paint-job photos for the current
 // QC round. Mirrors the manufacturer qc-photos route (sharp re-encode strips
@@ -26,9 +27,14 @@ export async function POST(
 
   const order = await db.query.orders.findFirst({
     where: and(eq(orders.id, id), eq(orders.painterId, g.painterId)),
-    columns: { id: true, painterStatus: true, painterQcRound: true },
+    columns: { id: true, painterStatus: true, painterQcRound: true, paymentStatus: true },
   });
   if (!order) return NextResponse.json({ error: "İş bulunamadı" }, { status: 404 });
+  // QC photos are the step before submit-qc; a refunded order has no QC left
+  // to do.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
   if (!canUploadPainterQcPhotos((order.painterStatus ?? "") as PainterOrderStatus)) {
     return NextResponse.json(
       { error: "Bu durumda QC fotoğrafı yüklenemez" },

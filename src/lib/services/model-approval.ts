@@ -3,6 +3,8 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { orderModelApprovals, orders } from "@/lib/db/schema";
 import { getPublicUrl } from "./storage";
+import { isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "./manufacturer-assign";
 
 /**
  * The customer's approval of the 3D model, before anything is printed.
@@ -176,6 +178,12 @@ export interface DecideResult {
   status?: string;
   /** Set when the order was already decided — a second tap is a friendly no-op. */
   alreadyDecided?: boolean;
+  /**
+   * Set when approval or revision was refused because the order was refunded.
+   * Nothing changed. It comes with `alreadyDecided`, so callers that only
+   * know that flag keep answering with a friendly no-op.
+   */
+  refunded?: boolean;
 }
 
 /**
@@ -184,6 +192,9 @@ export interface DecideResult {
  * The status update is atomic on `awaiting_customer_approval`, so a double tap,
  * a retried webhook and a duplicate WhatsApp button press all collapse into one
  * transition. `approved` is the only decision that lets production start.
+ *
+ * A refunded order is never approved or sent to revision (refund-end-state);
+ * a cancellation is still recorded, because it only closes the order.
  */
 export async function decideModelApproval(args: {
   token: string;
@@ -193,7 +204,7 @@ export async function decideModelApproval(args: {
   userAgent?: string | null;
 }): Promise<DecideResult> {
   const [order] = await db
-    .select({ id: orders.id, orderNumber: orders.orderNumber, status: orders.status, userId: orders.userId, manufacturerId: orders.manufacturerId })
+    .select({ id: orders.id, orderNumber: orders.orderNumber, status: orders.status, paymentStatus: orders.paymentStatus, userId: orders.userId, manufacturerId: orders.manufacturerId })
     .from(orders)
     .where(eq(orders.modelApprovalToken, args.token))
     .limit(1);
@@ -206,6 +217,15 @@ export async function decideModelApproval(args: {
         ? "review"
         : "rejected";
 
+  // A refund keeps the order's status, so a refunded order parked here still
+  // shows /onay and still reaches the SLA sweeper. Approving it would reopen
+  // the manufacturer queue for money already returned; a revision would queue
+  // generation work nobody pays for. Cancelling stays allowed.
+  const movesForward = nextStatus !== "rejected";
+  if (movesForward && isRefunded(order)) {
+    return { ok: true, alreadyDecided: true, refunded: true, status: order.status };
+  }
+
   const updated = await db
     .update(orders)
     .set({
@@ -217,11 +237,31 @@ export async function decideModelApproval(args: {
       ...(args.decision === "revision" ? { customerModelRevisionNote: args.note ?? null } : {}),
       updatedAt: new Date(),
     })
-    .where(and(eq(orders.id, order.id), eq(orders.status, "awaiting_customer_approval")))
+    .where(
+      and(
+        eq(orders.id, order.id),
+        eq(orders.status, "awaiting_customer_approval"),
+        // The race-proof half of the check above: a refund landing between
+        // the read and this write still wins. Not applied to a cancellation.
+        movesForward ? notRefundedGuard() : undefined
+      )
+    )
     .returning({ id: orders.id });
 
   if (updated.length === 0) {
-    return { ok: true, alreadyDecided: true, status: order.status };
+    // Either another decision got here first or a refund did; re-read so the
+    // caller learns which, and the current status rather than the stale one.
+    const [latest] = await db
+      .select({ status: orders.status, paymentStatus: orders.paymentStatus })
+      .from(orders)
+      .where(eq(orders.id, order.id))
+      .limit(1);
+    return {
+      ok: true,
+      alreadyDecided: true,
+      status: latest?.status ?? order.status,
+      ...(movesForward && latest && isRefunded(latest) ? { refunded: true } : {}),
+    };
   }
 
   await db

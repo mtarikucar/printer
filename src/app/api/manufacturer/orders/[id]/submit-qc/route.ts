@@ -7,6 +7,9 @@ import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { qcNextStatus, type ManufacturerOrderStatus } from "@/lib/services/qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 // Manufacturer submits the current round of QC photos for admin review:
 // printed | qc_rejected → qc_pending (order.status → quality_check).
@@ -35,9 +38,15 @@ export async function POST(
       email: true,
       orderNumber: true,
       customerName: true,
+      paymentStatus: true,
     },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  // Before the photo count, so a refunded job is not told to upload more
+  // photos. The race-proof half is notRefundedGuard() in the UPDATE below.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
 
   const current = (order.manufacturerStatus ?? "") as ManufacturerOrderStatus;
   const next = qcNextStatus(current, "submit");
@@ -70,11 +79,15 @@ export async function POST(
       and(
         eq(orders.id, id),
         eq(orders.manufacturerId, session.manufacturerId),
-        eq(orders.manufacturerStatus, current)
+        eq(orders.manufacturerStatus, current),
+        notRefundedGuard()
       )
     )
     .returning();
   if (!updated) {
+    if (await isPartnerOrderRefunded(id, { manufacturerId: session.manufacturerId })) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
     return NextResponse.json(
       { error: "Order is not in a submittable status" },
       { status: 400 }

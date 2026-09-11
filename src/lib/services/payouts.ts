@@ -1,62 +1,114 @@
-import { eq, and, ne, isNull } from "drizzle-orm";
+import { eq, and, ne, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturerEarnings, payouts, invoices, orders } from "@/lib/db/schema";
 import { computeEarning, computeKdv } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS, KDV_RATE_BPS } from "@/lib/config/prices";
 import { eInvoiceProvider } from "@/lib/services/e-invoice";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
-// Accrue a manufacturer's earning for a shipped order. Idempotent on orderId
-// (the unique constraint + onConflictDoNothing makes a double-ship a no-op).
+/**
+ * What an accrual call did. Callers fire and forget (`.catch` + log), but why
+ * an earning did NOT land has to be visible: "skipped because refunded" must
+ * never read like "already there".
+ */
+export type AccrualOutcome =
+  | "accrued"
+  | "already_accrued"
+  | "skipped_refunded"
+  | "order_not_found";
+
+/**
+ * Accrue a manufacturer's earning. The single choke point for manufacturer
+ * money: every manufacturer_earnings row is written here (ship, send-to-painter,
+ * the admin painter hand-off, the workshop batch ship, the revoke-after-painter
+ * re-accrual). Idempotent on orderId: the unique constraint and
+ * onConflictDoNothing make a double-ship a no-op.
+ *
+ * A refunded order never accrues. The routes refuse forward actions on one, but
+ * this is the backstop for whatever reaches it anyway: a refunded row that kept
+ * its partner, a caller that forgot the guard, a re-accrual after a lost race.
+ * The check and the insert share one transaction, and the order row is read
+ * FOR SHARE. A refund that commits first empties the guarded read. A refund
+ * that comes later waits on the row lock until this commits, and its
+ * reverseEarning() then reverses the new row. In neither order does a pending
+ * earning survive on a refunded order.
+ */
 export async function accrueEarning(
   orderId: string,
   manufacturerId: string,
   grossKurus: number
-): Promise<void> {
-  // Use the rate frozen when the manufacturer accepted the order; fall back to
-  // the current rate for orders accepted before the column existed.
-  const [row] = await db
-    .select({
-      rate: orders.commissionRateBps,
-      amountKurus: orders.amountKurus,
-      productionBaseKurus: orders.productionBaseKurus,
-      paintingPriceKurus: orders.paintingPriceKurus,
-    })
-    .from(orders)
-    .where(eq(orders.id, orderId))
-    .limit(1);
-  const rateBps = row?.rate ?? PLATFORM_COMMISSION_RATE_BPS;
+): Promise<AccrualOutcome> {
+  const outcome = await db.transaction(async (tx): Promise<AccrualOutcome> => {
+    // Bounded wait for the row lock. A caller already holding this order row
+    // in its own open transaction would otherwise hang here forever: the wait
+    // is on another connection, so Postgres sees no deadlock. After 5s it fails
+    // into the caller's `.catch` log instead.
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
 
-  // Money tripwire. The kalem model's whole guarantee is that the two earning
-  // bases sum to the order total; if that ever stops holding, partner payouts
-  // can drift past the price again — the exact failure this model replaced.
-  // Loud log, never a throw: refusing to accrue would leave a shipped order
-  // unpaid, which is worse than an over/under-payment we can see and correct.
-  if (row?.productionBaseKurus != null) {
-    const split = row.productionBaseKurus + row.paintingPriceKurus;
-    if (split !== row.amountKurus) {
-      console.error(
-        `[kalem] order ${orderId}: production(${row.productionBaseKurus}) + painting(${row.paintingPriceKurus}) = ${split} ≠ amount(${row.amountKurus})`
-      );
+    // Use the rate frozen when the manufacturer accepted the order; fall back
+    // to the current rate for orders accepted before the column existed.
+    const [row] = await tx
+      .select({
+        rate: orders.commissionRateBps,
+        amountKurus: orders.amountKurus,
+        productionBaseKurus: orders.productionBaseKurus,
+        paintingPriceKurus: orders.paintingPriceKurus,
+      })
+      .from(orders)
+      .where(and(eq(orders.id, orderId), notRefundedGuard()))
+      .for("share");
+    if (!row) {
+      const [exists] = await tx
+        .select({ id: orders.id })
+        .from(orders)
+        .where(eq(orders.id, orderId));
+      return exists ? "skipped_refunded" : "order_not_found";
     }
-    if (grossKurus > row.amountKurus) {
-      console.error(
-        `[kalem] order ${orderId}: manufacturer gross ${grossKurus} exceeds order amount ${row.amountKurus}`
-      );
+    const rateBps = row.rate ?? PLATFORM_COMMISSION_RATE_BPS;
+
+    // Money tripwire. The kalem model's whole guarantee is that the two earning
+    // bases sum to the order total; if that ever stops holding, partner payouts
+    // can drift past the price again — the exact failure this model replaced.
+    // Loud log, never a throw: refusing to accrue would leave a shipped order
+    // unpaid, which is worse than an over/under-payment we can see and correct.
+    if (row.productionBaseKurus != null) {
+      const split = row.productionBaseKurus + row.paintingPriceKurus;
+      if (split !== row.amountKurus) {
+        console.error(
+          `[kalem] order ${orderId}: production(${row.productionBaseKurus}) + painting(${row.paintingPriceKurus}) = ${split} ≠ amount(${row.amountKurus})`
+        );
+      }
+      if (grossKurus > row.amountKurus) {
+        console.error(
+          `[kalem] order ${orderId}: manufacturer gross ${grossKurus} exceeds order amount ${row.amountKurus}`
+        );
+      }
     }
+
+    const e = computeEarning(grossKurus, rateBps);
+    const inserted = await tx
+      .insert(manufacturerEarnings)
+      .values({
+        orderId,
+        manufacturerId,
+        grossKurus: e.grossKurus,
+        commissionKurus: e.commissionKurus,
+        netKurus: e.netKurus,
+        commissionRateBps: e.commissionRateBps,
+      })
+      .onConflictDoNothing({ target: manufacturerEarnings.orderId })
+      .returning({ id: manufacturerEarnings.id });
+    return inserted.length > 0 ? "accrued" : "already_accrued";
+  });
+
+  if (outcome === "skipped_refunded") {
+    console.warn(
+      `[accrual] order ${orderId}: skipped: refunded — no manufacturer earning for ${manufacturerId}`
+    );
+  } else if (outcome === "order_not_found") {
+    console.error(`[accrual] order ${orderId}: not found — no manufacturer earning accrued`);
   }
-
-  const e = computeEarning(grossKurus, rateBps);
-  await db
-    .insert(manufacturerEarnings)
-    .values({
-      orderId,
-      manufacturerId,
-      grossKurus: e.grossKurus,
-      commissionKurus: e.commissionKurus,
-      netKurus: e.netKurus,
-      commissionRateBps: e.commissionRateBps,
-    })
-    .onConflictDoNothing({ target: manufacturerEarnings.orderId });
+  return outcome;
 }
 
 // Clawback — used when an order is refunded / a dispute is resolved against the

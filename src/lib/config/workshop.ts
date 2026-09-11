@@ -6,6 +6,7 @@
  * importu standalone Node worker'ını crash-loop'a sokar (bkz. order-draft
  * zinciri).
  */
+import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
 
 /**
  * Boyanmamış kişiye özel atölye figürü. Boyama işi seansın KENDİSİDİR ve
@@ -249,7 +250,10 @@ export const WORKSHOP_PARTICIPANT_STATUS_LABELS: Record<
  * okur, bir gün altıncı bir çağrı yeri eklenirse kendi kopyasını yazamaz.
  */
 export const WORKSHOP_BATCH_EXCLUDED_STATUSES = ["rejected"] as const;
-export const WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES = ["refunded"] as const;
+// Değer, iade kuralının tek kaynağı REFUNDED_PAYMENT_STATUS'tan gelir
+// (order-status-policy.ts, saf modül): isRefunded() ve notRefundedGuard() da
+// onu okur. Literal kopya bir gün kuraldan ayrışırdı.
+export const WORKSHOP_BATCH_EXCLUDED_PAYMENT_STATUSES = [REFUNDED_PAYMENT_STATUS] as const;
 
 /**
  * Bir sipariş satırı partiye giriyor mu? SQL yazamayan çağıranlar için (admin

@@ -26,8 +26,14 @@ export async function requireAdmin(): Promise<
   const session = await auth();
   const role = (session?.user as { role?: string } | undefined)?.role;
   if (!session?.user?.email || role !== "admin") {
+    // Turkish: admin clients show `error` as-is (the payouts page alerts it
+    // when the session has expired). Callers must branch on the 401 status,
+    // never on this text; none compared against the old English one.
     return {
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "Bu işlem için admin oturumu gerekiyor." },
+        { status: 401 }
+      ),
     };
   }
   return {

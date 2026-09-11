@@ -1,14 +1,17 @@
 export const dynamic = "force-dynamic";
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, painterQcPhotos } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
+import { NOT_REFUNDED } from "@/lib/services/admin-order-sql";
 import { PainterQcQueueClient } from "./client";
 
 export default async function AdminPainterQcQueuePage() {
   const rows = await db.query.orders.findMany({
-    where: eq(orders.painterStatus, "qc_pending"),
+    // Refunded orders are frozen, so their painter QC is not work. Same
+    // predicate as the sidebar's "Boyacı QC" badge that opens this list.
+    where: and(eq(orders.painterStatus, "qc_pending"), NOT_REFUNDED),
     orderBy: [desc(orders.updatedAt)],
     limit: 200,
     columns: {

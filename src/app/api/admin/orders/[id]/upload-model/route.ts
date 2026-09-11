@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
@@ -27,6 +27,8 @@ import {
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 // No size cap: production models are hundreds of megabytes. Files come in
 // through the chunked staging API (src/lib/services/chunked-upload.ts) and are
@@ -121,6 +123,10 @@ export async function POST(
 
   const order = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
   if (!order) return fail(404, d["api.order.notFound"]);
+  // A model upload is a forward action (refund-end-state): it advances
+  // awaiting_model → approved, the assignable shape. Refused before anything is
+  // promoted; `fail` discards the staged parts.
+  if (isRefunded(order)) return fail(409, REFUNDED_ORDER_ERROR);
   if (!UPLOADABLE.includes(order.status)) return fail(400, "Sipariş model beklemiyor.");
 
   // Validate everything before promoting anything.
@@ -193,10 +199,14 @@ export async function POST(
   // Advance awaiting_model → approved (only from awaiting_model, so re-uploads
   // on an already-fulfilling order keep its current status).
   const newStatus = order.status === "awaiting_model" ? "approved" : order.status;
-  await db
+  // Refund guard in the write too: a refund that landed while the files were
+  // being promoted must not see its order advance. The revision stays attached
+  // (files on a refunded order are inert) and is still audited below.
+  const [advanced] = await db
     .update(orders)
     .set({ status: newStatus, updatedAt: new Date() })
-    .where(eq(orders.id, orderId));
+    .where(and(eq(orders.id, orderId), notRefundedGuard()))
+    .returning({ id: orders.id });
 
   const stl = inputs.filter((f) => f.kind === "stl").length;
   const glb = inputs.length - stl;
@@ -208,6 +218,10 @@ export async function POST(
       result.carriedCount > 0 ? `, ${result.carriedCount} parça önceki sürümden taşındı` : ""
     }; toplam ${result.fileCount} dosya`,
   });
+
+  if (!advanced) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
 
   await emitOrderChanged({
     orderId,

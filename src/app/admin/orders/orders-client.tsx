@@ -7,9 +7,9 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { sizeDisplay } from "@/lib/config/sizes";
+import { isRefunded } from "@/lib/config/order-status-policy";
 
 const STATUS_COLORS: Record<string, string> = {
-  pending_payment: "bg-amber-100 text-amber-700",
   paid: "bg-blue-100 text-blue-700",
   awaiting_model: "bg-indigo-50 text-indigo-700",
   generating: "bg-indigo-100 text-indigo-700",
@@ -18,6 +18,8 @@ const STATUS_COLORS: Record<string, string> = {
   awaiting_customer_approval: "bg-cyan-100 text-cyan-800",
   approved: "bg-green-100 text-green-700",
   printing: "bg-purple-100 text-purple-700",
+  quality_check: "bg-orange-100 text-orange-700",
+  painting: "bg-fuchsia-100 text-fuchsia-700",
   shipped: "bg-emerald-100 text-emerald-700",
   delivered: "bg-emerald-100 text-emerald-700",
   failed_generation: "bg-red-100 text-red-700",
@@ -25,10 +27,15 @@ const STATUS_COLORS: Record<string, string> = {
   rejected: "bg-red-100 text-red-700",
 };
 
-// `unassigned` is not a status bucket — it is paid marketplace work with no
-// manufacturer on it. Platform-owned products live there until someone (or the
-// auto-assigner) places them, and at `paid` they would otherwise hide inside
-// the crowded "in progress" bucket.
+// `unassigned` is not a status bucket. It is paid work with no manufacturer on
+// it: approved custom/upload orders, and paid marketplace orders (platform
+// products live at `paid` until someone, or the auto-assigner, places them).
+// Both would otherwise hide inside the crowded "in progress" bucket.
+// `refunded` holds every refunded order. A refunded order keeps its status but
+// is frozen (no forward action is allowed), so the work buckets leave it out.
+// `refunded_open` is the part of it that is not closed yet (not rejected or
+// delivered) and still has to be settled with its partner; the dashboard's
+// "İade edildi (açık)" card opens it.
 const BUCKET_ORDER = [
   "all",
   "needsAction",
@@ -37,15 +44,20 @@ const BUCKET_ORDER = [
   "inProgress",
   "completed",
   "problems",
+  "refunded",
+  "refunded_open",
 ] as const;
 
 const BUCKET_LABELS: Partial<Record<(typeof BUCKET_ORDER)[number], string>> = {
   unassigned: "Üretici bekliyor",
   painting: "Boyama",
+  refunded: "İade edildi",
+  refunded_open: "İade edildi (açık)",
 };
 
-// Painter-side state, kept short enough for a table cell.
-const PAINTER_BADGE: Record<string, { label: string; cls: string }> = {
+// Painter-side state, kept short enough for a table cell. The manufacturing
+// queue shows the same chips for orders that are with a painter.
+export const PAINTER_BADGE: Record<string, { label: string; cls: string }> = {
   assigned: { label: "Boyacı kabul bekliyor", cls: "bg-amber-100 text-amber-800" },
   accepted: { label: "Boyacıda", cls: "bg-fuchsia-100 text-fuchsia-800" },
   painting: { label: "Boyanıyor", cls: "bg-fuchsia-100 text-fuchsia-800" },
@@ -56,9 +68,10 @@ const PAINTER_BADGE: Record<string, { label: string; cls: string }> = {
   shipped: { label: "Boyacı kargoladı", cls: "bg-emerald-100 text-emerald-700" },
 };
 
-// Exact statuses for the power-user dropdown (every value used in admin.status.*)
+// Exact statuses for the power-user dropdown: every order_status value, in
+// lifecycle order. `pending_payment` is not one (it exists on drafts and gift
+// cards only). Offering it made Postgres reject the filter and 500 the page.
 const EXACT_STATUSES = [
-  "pending_payment",
   "paid",
   "awaiting_model",
   "generating",
@@ -67,12 +80,50 @@ const EXACT_STATUSES = [
   "awaiting_customer_approval",
   "approved",
   "printing",
+  "quality_check",
+  "painting",
   "shipped",
   "delivered",
   "failed_generation",
   "failed_mesh",
   "rejected",
 ];
+
+type BulkAction = "approve" | "start-printing";
+
+interface BulkResult {
+  tone: "ok" | "warn" | "error";
+  text: string;
+}
+
+// What the bulk-action route requires, in words, for the "atlandı" line. It
+// mirrors the route's guarded UPDATE: the status the action starts from, not
+// refunded, and for printing no manufacturer on the order. The route answers
+// with counts only, so the line names the rule rather than a per-order reason.
+const BULK_ACTION_COPY: Record<BulkAction, { done: string; rule: string }> = {
+  approve: {
+    done: "onaylandı",
+    rule: "yalnız incelemedeki ve iade edilmemiş siparişler onaylanabilir",
+  },
+  "start-printing": {
+    done: "baskıya alındı",
+    rule: "baskı yalnız onaylı, üreticisi olmayan ve iade edilmemiş siparişlerde başlatılabilir",
+  },
+};
+
+function bulkSummary(action: BulkAction, processed: number, skipped: number): BulkResult {
+  const copy = BULK_ACTION_COPY[action];
+  const done =
+    processed > 0 ? `${processed} sipariş ${copy.done}.` : "Hiçbir sipariş işlenmedi.";
+  if (skipped === 0) return { tone: "ok", text: done };
+  return { tone: "warn", text: `${done} ${skipped} sipariş atlandı: ${copy.rule}.` };
+}
+
+const BULK_RESULT_TONE: Record<BulkResult["tone"], string> = {
+  ok: "border-green-200 bg-green-50 text-green-800",
+  warn: "border-amber-200 bg-amber-50 text-amber-900",
+  error: "border-red-200 bg-red-50 text-red-800",
+};
 
 interface OrdersClientProps {
   orders: Array<{
@@ -83,6 +134,7 @@ interface OrdersClientProps {
     figurineSize: string | null;
     style: string;
     status: string;
+    paymentStatus: string;
     needsPainting: boolean;
     painterStatus: string | null;
     isBulk: boolean;
@@ -110,11 +162,15 @@ export function OrdersClient({
   const [searchValue, setSearchValue] = useState(filters.q || "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  // Outcome of the last bulk action, shown inline above the table.
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear selection when orders change (filter/page navigation)
+  // Clear the selection, and the last bulk result (it is about the old list),
+  // when orders change (filter/page navigation)
   useEffect(() => {
     setSelectedIds(new Set());
+    setBulkResult(null);
   }, [page, filters.status, filters.bucket, filters.q, filters.dateFrom, filters.dateTo]);
 
   const totalPages = Math.ceil(total / pageSize);
@@ -215,31 +271,67 @@ export function OrdersClient({
 
   // Bulk actions
   const performBulkAction = useCallback(
-    async (action: "approve" | "start-printing") => {
-      if (selectedIds.size === 0) return;
+    async (action: BulkAction) => {
+      const picked = orders.filter((o) => selectedIds.has(o.id));
+      // Refunded orders are frozen: never send one into a forward bulk action,
+      // even when it still sits at review/approved and got ticked. They still
+      // count as skipped below, so processed + skipped = the selection.
+      const orderIds = picked.filter((o) => !isRefunded(o)).map((o) => o.id);
+      const skippedHere = picked.length - orderIds.length;
+      if (orderIds.length === 0) return;
       setBulkLoading(true);
+      setBulkResult(null);
       try {
         const res = await fetch("/api/admin/orders/bulk-action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            orderIds: Array.from(selectedIds),
+            orderIds,
             action,
           }),
         });
-        if (res.ok) {
-          setSelectedIds(new Set());
-          router.refresh();
+        if (!res.ok) {
+          // The route's own error text is English, so it is not shown.
+          setBulkResult({
+            tone: "error",
+            text: "Toplu işlem yapılamadı. Sayfayı yenileyip tekrar deneyin.",
+          });
+          return;
         }
+        // The route skips, without failing, every order its guarded UPDATE
+        // does not match: one refunded or moved on after this page loaded, or
+        // (printing) one a manufacturer took. The counts used to be ignored,
+        // so such a skip was silent.
+        const body = (await res.json().catch(() => ({}))) as {
+          processed?: unknown;
+          skipped?: unknown;
+        };
+        if (typeof body.processed === "number" && typeof body.skipped === "number") {
+          setBulkResult(bulkSummary(action, body.processed, body.skipped + skippedHere));
+        } else {
+          setBulkResult({
+            tone: "warn",
+            text: "İşlem gönderildi ama sonuç okunamadı. Listeden siparişlerin durumunu kontrol edin.",
+          });
+        }
+        setSelectedIds(new Set());
+        router.refresh();
+      } catch {
+        setBulkResult({
+          tone: "error",
+          text: "Sunucuya ulaşılamadı. Siparişlerin son durumunu görmek için sayfayı yenileyin.",
+        });
       } finally {
         setBulkLoading(false);
       }
     },
-    [selectedIds, router]
+    [orders, selectedIds, router]
   );
 
-  // Check if selected orders can be bulk-actioned
-  const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
+  // Check if selected orders can be bulk-actioned (a refunded one never can)
+  const selectedOrders = orders.filter(
+    (o) => selectedIds.has(o.id) && !isRefunded(o)
+  );
   const canBulkApprove = selectedOrders.some((o) => o.status === "review");
   const canBulkPrint = selectedOrders.some((o) => o.status === "approved");
 
@@ -353,6 +445,24 @@ export function OrdersClient({
         </div>
       )}
 
+      {/* Result of the last bulk action. Inline rather than alert(): it
+          stays visible after the list refreshes and says what was skipped. */}
+      {bulkResult && (
+        <div
+          role="status"
+          className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm ${BULK_RESULT_TONE[bulkResult.tone]}`}
+        >
+          <p>{bulkResult.text}</p>
+          <button
+            type="button"
+            onClick={() => setBulkResult(null)}
+            className="shrink-0 text-xs font-medium underline"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
+
       {/* Orders table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <table className="w-full min-w-[760px]">
@@ -436,6 +546,13 @@ export function OrdersClient({
                       `admin.status.${order.status}` as keyof typeof d
                     ] || order.status}
                   </span>
+                  {/* A refunded order keeps its status, so the status chip
+                      alone would read as live work. */}
+                  {isRefunded(order) && (
+                    <span className="ml-1 inline-block rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">
+                      İade edildi
+                    </span>
+                  )}
                   {/* Painter state is a parallel track: the order status says
                       "painting" for every stage of it, so without this the desk
                       can't tell "waiting for the painter to accept" from
@@ -486,9 +603,12 @@ export function OrdersClient({
       {total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-gray-500">
+            {/* The dictionary (tr and en) names these {from} and {to}; the
+                client replaced {start} and {end}, so the raw placeholders
+                showed. */}
             {(d["admin.orders.showingRange"] as string)
-              .replace("{start}", String(rangeStart))
-              .replace("{end}", String(rangeEnd))
+              .replace("{from}", String(rangeStart))
+              .replace("{to}", String(rangeEnd))
               .replace("{total}", String(total))}
           </p>
           <div className="flex gap-2">

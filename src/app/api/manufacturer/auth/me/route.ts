@@ -39,6 +39,11 @@ export async function GET() {
       iban: manufacturer.iban,
       bankAccountHolder: manufacturer.bankAccountHolder,
       bankName: manufacturer.bankName,
+      // An IBAN change parked for admin review. The profile page shows it, so
+      // a partner who just submitted one does not see only the old IBAN and
+      // assume the save failed. Same fields as the painter /me.
+      pendingIban: manufacturer.pendingIban,
+      ibanReviewStatus: manufacturer.ibanReviewStatus,
       maxConcurrentOrders: manufacturer.maxConcurrentOrders,
       acceptingOrders: manufacturer.acceptingOrders,
       paintsInHouse: manufacturer.paintsInHouse,

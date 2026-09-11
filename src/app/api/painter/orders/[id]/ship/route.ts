@@ -9,6 +9,9 @@ import { notifyCustomer } from "@/lib/services/customer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { sendSms } from "@/lib/services/sms";
+import { REFUNDED_ORDER_ERROR } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 // Painter ships the painted figurine DIRECTLY to the customer. This is the
 // terminal painting event: order → shipped, and the painter's earning
@@ -41,11 +44,17 @@ export async function POST(
           eq(orders.id, id),
           eq(orders.painterId, g.painterId),
           // Ship gate: only jobs that passed admin painter-QC approval may ship.
-          eq(orders.painterStatus, "qc_approved")
+          eq(orders.painterStatus, "qc_approved"),
+          // Refund-end-state: no shipping mail and no painter earning on money
+          // already returned. In the UPDATE, so a refund mid-request still wins.
+          notRefundedGuard()
         )
       )
       .returning();
     if (!order) {
+      if (await isPartnerOrderRefunded(id, { painterId: g.painterId })) {
+        return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+      }
       return NextResponse.json(
         { error: "İş bulunamadı veya kargolanabilir durumda değil (önce QC onayı gerekir)" },
         { status: 400 }

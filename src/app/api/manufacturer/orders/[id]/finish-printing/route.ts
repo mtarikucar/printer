@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 export async function POST(
   request: NextRequest,
@@ -40,12 +43,19 @@ export async function POST(
       and(
         eq(orders.id, id),
         eq(orders.manufacturerId, session.manufacturerId),
-        eq(orders.manufacturerStatus, "printing")
+        eq(orders.manufacturerStatus, "printing"),
+        // Refund-end-state: a refunded order still attached to this partner
+        // (legacy row, or a refund racing this click) must not move forward.
+        // In the UPDATE, not a pre-read, so a refund landing mid-request wins.
+        notRefundedGuard()
       )
     )
     .returning();
 
   if (!order) {
+    if (await isPartnerOrderRefunded(id, { manufacturerId: session.manufacturerId })) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
     return NextResponse.json(
       { error: "Order not found or not in printing status" },
       { status: 400 }

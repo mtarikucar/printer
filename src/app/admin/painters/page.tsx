@@ -65,6 +65,8 @@ export default async function AdminPaintersPage() {
     mapVisible: p.mapVisible,
     onboardingAcceptedAt: p.onboardingAcceptedAt ? p.onboardingAcceptedAt.toISOString() : null,
     strikeCount: p.strikeCount,
+    // Partner-level admin audit lines (e.g. a closed tax review), shown in Detay.
+    notes: p.notes,
   }));
 
   return (

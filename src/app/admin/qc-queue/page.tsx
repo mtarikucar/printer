@@ -1,26 +1,31 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplayTr } from "@/lib/config/sizes";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
+import { NOT_REFUNDED } from "@/lib/services/admin-order-sql";
 
 /**
  * Admin QC queue — orders whose manufacturer has uploaded finished-product
  * photos and submitted them for review (manufacturerStatus = 'qc_pending').
  * Each card links to the order detail where the admin approves/rejects.
  * Mirrors /admin/gallery-queue styling + the admin-sidebar layout.
+ *
+ * Refunded orders are left out (NOT_REFUNDED), the same predicate as the
+ * dashboard's "QC Bekleyen" card and the sidebar badge that open this list:
+ * a refunded order is frozen, so its QC decision is not work.
  */
 export default async function AdminQcQueuePage() {
   const locale = await getLocale();
   const d = getDictionary(locale);
 
   const items = await db.query.orders.findMany({
-    where: eq(orders.manufacturerStatus, "qc_pending"),
+    where: and(eq(orders.manufacturerStatus, "qc_pending"), NOT_REFUNDED),
     columns: {
       id: true,
       orderNumber: true,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, manufacturers, painters, manufacturerActions } from "@/lib/db/schema";
@@ -9,6 +9,9 @@ import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 
 const schema = z.object({
   painterId: z.string().uuid("Boyacı seçin"),
@@ -55,10 +58,16 @@ export async function POST(
       id: true, orderNumber: true, userId: true, amountKurus: true,
       paintingPriceKurus: true, productionBaseKurus: true,
       needsPainting: true, manufacturerStatus: true,
-      painterStatus: true,
+      painterStatus: true, declinedPainterIds: true, paymentStatus: true,
     },
   });
   if (!order) return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+  // A hand-off accrues the print earning and gives a painter paid work, both
+  // on money already returned. Readable refusal here; the race-proof half is
+  // notRefundedGuard() in the UPDATE below.
+  if (isRefunded(order)) {
+    return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+  }
   if (!order.needsPainting) {
     return NextResponse.json({ error: "Bu sipariş için boyama seçilmemiş" }, { status: 400 });
   }
@@ -68,8 +77,26 @@ export async function POST(
       { status: 400 }
     );
   }
+  // 409, not 400: the request is valid but the order is already in the state
+  // it would create — the same answer admin assign-painter and this route's own
+  // lost-race branch give, so clients handle both paths alike.
   if (order.painterStatus && order.painterStatus !== "unassigned") {
-    return NextResponse.json({ error: "Bu sipariş zaten bir boyacıya gönderildi" }, { status: 400 });
+    return NextResponse.json({ error: "Bu sipariş zaten bir boyacıya gönderildi" }, { status: 409 });
+  }
+
+  // A painter who already refused this job must not be handed it again. The
+  // admin path (assign-painter) always checked this; this one did not, so a job
+  // could bounce straight back to the painter who just turned it down. A
+  // pre-check is enough: a painter can only decline while assigned, and this
+  // route only runs while the order is unassigned.
+  const declined = Array.isArray(order.declinedPainterIds)
+    ? (order.declinedPainterIds as string[])
+    : [];
+  if (declined.includes(parsed.data.painterId)) {
+    return NextResponse.json(
+      { error: "Bu boyacı bu siparişi daha önce reddetti. Lütfen başka bir boyacı seçin." },
+      { status: 409 }
+    );
   }
 
   // Selected painter must be active + accepting + under capacity.
@@ -111,11 +138,31 @@ export async function POST(
       and(
         eq(orders.id, id),
         eq(orders.manufacturerId, session.manufacturerId),
-        eq(orders.manufacturerStatus, "qc_approved")
+        eq(orders.manufacturerStatus, "qc_approved"),
+        notRefundedGuard(),
+        // No painter yet: the condition admin assign-painter writes with. The
+        // painter check above reads before this write, so without it a
+        // concurrent admin hand-off was overwritten by a second painter, and
+        // the painter the admin picked (already notified) silently lost the job.
+        or(isNull(orders.painterStatus), eq(orders.painterStatus, "unassigned"))
       )
     )
     .returning();
-  if (!updated) return NextResponse.json({ error: "İşlem başarısız" }, { status: 400 });
+  if (!updated) {
+    if (await isPartnerOrderRefunded(id, { manufacturerId: session.manufacturerId })) {
+      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+    }
+    // A lost race, not a bad request: the order moved between the checks above
+    // and this write. 409 with a reason the manufacturer can act on (reload),
+    // instead of a bare "İşlem başarısız".
+    return NextResponse.json(
+      {
+        error:
+          "Sipariş bu sırada değişti: bir boyacıya atanmış ya da QC durumu değişmiş olabilir. Sayfayı yenileyin.",
+      },
+      { status: 409 }
+    );
+  }
 
   await db
     .insert(manufacturerActions)

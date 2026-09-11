@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
@@ -9,14 +9,7 @@ import { PhoneInput, phoneInputToE164, e164ToPhoneInput } from "@/components/Pho
 import { DEFAULT_COUNTRY, formatPhoneDisplay, type CountryCode } from "@/lib/phone";
 
 import { useDictionary } from "@/lib/i18n/locale-context";
-import {
-  uploadWithProgress,
-  type UploadProgress,
-  type UploadError,
-} from "@/lib/upload-with-progress";
-import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
-import { uploadLargeFile } from "@/lib/upload-large-file";
-import { manufacturerBaseKurus } from "@/lib/services/earning-base";
+import { manufacturerBaseKurus, carvePaintingShare } from "@/lib/services/earning-base";
 import {
   SIZE_PRESETS_CM,
   SIZE_TEXT_MAX,
@@ -27,6 +20,10 @@ import {
 import { formatCurrency, formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
+import { OrderModelUploader } from "@/components/admin/order-model-uploader";
+import { formatModelSize } from "@/lib/config/order-model";
+import { parseTryToKurus } from "@/lib/config/cost-lines";
+import { currentModelUrl } from "@/lib/config/order-model-presence";
 
 /**
  * Everything the painting leg of an order is doing. Populated only for orders
@@ -35,6 +32,11 @@ import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
  */
 interface PaintingData {
   needsPainting: boolean;
+  /** Siparişin toplamı — boyama payı eklerken önizleme için. */
+  amountKurus: number;
+  /** Boyama kalemi henüz yoksa eklenebilir mi (route ile aynı kural). */
+  canAddPainting: boolean;
+  addPaintingBlockedReason: string | null;
   paintingPriceKurus: number;
   productionBaseKurus: number | null;
   painterStatus: string | null;
@@ -185,7 +187,17 @@ interface Props {
     printGate?: PrintGateData | null;
     approvedImageUrl?: string | null;
     photos: { id: string; originalUrl: string; thumbnailUrl: string | null }[];
-    modelRevisions: { id: string; revision: number; glbUrl: string | null; stlUrl: string | null; uploadedByEmail: string | null; note: string | null; createdAt: string }[];
+    modelRevisions: {
+      id: string;
+      revision: number;
+      glbUrl: string | null;
+      stlUrl: string | null;
+      uploadedByEmail: string | null;
+      note: string | null;
+      createdAt: string;
+      /** Sürümün TÜM parçaları; bir iş 12-13 ayrı STL olabilir. */
+      files: { id: string; name: string; kind: string; sizeBytes: number | null; url: string }[];
+    }[];
     latestGeneration: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; costCents: number | null; durationMs: number | null; createdAt: string } | null;
     latestReport: { isWatertight: boolean; isVolume: boolean; vertexCount: number; faceCount: number; componentCount: number; boundingBox: any; baseAdded: boolean; repairsApplied: string[] | null } | null;
     generationAttempts: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; errorMessage: string | null; costCents: number | null; durationMs: number | null; createdAt: string }[];
@@ -358,17 +370,14 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [painterPick, setPainterPick] = useState("");
   const [painterCarrier, setPainterCarrier] = useState("");
   const [painterTracking, setPainterTracking] = useState("");
+  // Boyama kalemi olmadan satılmış siparişe boyacı payı ekleme.
+  const [paintingAmount, setPaintingAmount] = useState("");
+  const [addPaintingError, setAddPaintingError] = useState<string | null>(null);
+  const [showAddPainting, setShowAddPainting] = useState(false);
   const [journeyCopied, setJourneyCopied] = useState(false);
   const [qcRejectReason, setQcRejectReason] = useState("");
   const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
 
-  // 3D model upload (awaiting_model → approved)
-  const [modelGlbFile, setModelGlbFile] = useState<File | null>(null);
-  const [modelStlFile, setModelStlFile] = useState<File | null>(null);
-  const [uploadingModel, setUploadingModel] = useState(false);
-  const [uploadModelError, setUploadModelError] = useState<string | null>(null);
-  const [modelProgress, setModelProgress] = useState<UploadProgress | null>(null);
-  const modelAbortRef = useRef<AbortController | null>(null);
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -430,74 +439,6 @@ export function OrderDetailClient({ data, locale }: Props) {
       router.refresh();
     } finally {
       setLoading(null);
-    }
-  };
-
-  const uploadModel = async () => {
-    if (!modelGlbFile) return;
-    setUploadingModel(true);
-    setUploadModelError(null);
-    setModelProgress(null);
-    // A GLB+STL pair is tens of megabytes; fetch() reports nothing while they
-    // are on the wire, which is why this used to sit on "Yükleniyor…" with no
-    // sign of life. XHR gives us the real byte count.
-    const controller = new AbortController();
-    modelAbortRef.current = controller;
-    try {
-      // Print models run to hundreds of megabytes. They go up in chunks so
-      // neither the reverse proxy's body limit nor the server's memory is a
-      // ceiling; the final POST carries only the staged ids.
-      const totalBytes =
-        modelGlbFile.size + (modelStlFile ? modelStlFile.size : 0);
-      let doneBytes = 0;
-      const relay = (p: UploadProgress) => {
-        if (p.phase === "processing") {
-          setModelProgress({ ...p, loadedBytes: totalBytes, totalBytes });
-          return;
-        }
-        const loaded = doneBytes + p.loadedBytes;
-        setModelProgress({
-          phase: "uploading",
-          percent: Math.min(99, Math.round((loaded / totalBytes) * 100)),
-          loadedBytes: loaded,
-          totalBytes,
-        });
-      };
-
-      const glb = await uploadLargeFile(modelGlbFile, {
-        onProgress: relay,
-        signal: controller.signal,
-      });
-      doneBytes += modelGlbFile.size;
-      let stl: { uploadId: string } | null = null;
-      if (modelStlFile) {
-        stl = await uploadLargeFile(modelStlFile, {
-          onProgress: relay,
-          signal: controller.signal,
-        });
-      }
-
-      const fd = new FormData();
-      fd.append("glbUploadId", glb.uploadId);
-      if (stl) fd.append("stlUploadId", stl.uploadId);
-      await uploadWithProgress(`/api/admin/orders/${order.id}/upload-model`, fd, {
-        onProgress: (p) =>
-          setModelProgress({ ...p, phase: "processing", loadedBytes: totalBytes, totalBytes }),
-        signal: controller.signal,
-      });
-      setModelGlbFile(null);
-      setModelStlFile(null);
-      router.refresh();
-    } catch (e) {
-      const err = e as UploadError;
-      // A cancel is the admin's own doing — not an error to shout about.
-      if (!err?.aborted) {
-        setUploadModelError(err?.message || d["admin.orderDetail.actionFailed"]);
-      }
-    } finally {
-      modelAbortRef.current = null;
-      setModelProgress(null);
-      setUploadingModel(false);
     }
   };
 
@@ -666,8 +607,13 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   // Prefer the admin-uploaded 3D model; fall back to the legacy generation
   // output so historical orders still show their mesh + download links.
-  const displayGlbUrl = order.modelGlbUrl ?? latestGeneration?.outputGlbUrl ?? null;
-  const displayStlUrl = order.modelStlUrl ?? latestGeneration?.outputStlUrl ?? null;
+  // Eski auto-3D denemesine yalnız siparişin KENDİ modeli hiç yoksa düşülür:
+  // yalnız-STL bir sürüm, eskimiş bir GLB'yi görüntüleyicide diriltmesin.
+  const displayGlbUrl = currentModelUrl(order, "glb", latestGeneration);
+  const displayStlUrl = currentModelUrl(order, "stl", latestGeneration);
+  // Güncel sürüm çok parçalıysa başlıktaki tek "STL İndir" yalnız İLK parçayı
+  // (birincil dosyayı) verirdi; 13 parçalık bir işte admin 12'sini hiç görmezdi.
+  const latestStlParts = (modelRevisions[0]?.files ?? []).filter((f) => f.kind === "stl");
 
   const hasManufacturer = !!manufacturer;
   const canApprove = order.status === "review";
@@ -826,6 +772,54 @@ export function OrderDetailClient({ data, locale }: Props) {
    * the same operation as the manufacturer's "send to painter": same guards,
    * same status transition, and it accrues the manufacturer's print earning.
    */
+  // Canlı önizleme: route ile AYNI saf fonksiyon (carvePaintingShare), yani
+  // ekranda görülen bölüşüm sunucunun yazacağıyla birebir aynıdır.
+  const paintingPreview = useMemo(() => {
+    if (!painting || painting.needsPainting || !paintingAmount.trim()) return null;
+    return carvePaintingShare(
+      {
+        amountKurus: painting.amountKurus,
+        productionBaseKurus: painting.productionBaseKurus,
+        paintingPriceKurus: painting.paintingPriceKurus,
+      },
+      parseTryToKurus(paintingAmount)
+    );
+  }, [painting, paintingAmount]);
+
+  const handleAddPainting = async () => {
+    if (!paintingPreview?.ok || !painting) return;
+    // Para taşıyan, üreticiye bildirim giden bir işlem: tek tıkla değil, bölüşümü
+    // görüp onaylayarak.
+    const ok = window.confirm(
+      [
+        `Boyacı payı ${formatCurrency(paintingPreview.paintingAfter, loc)} üretim payından ayrılacak.`,
+        `Üretim payı: ${formatCurrency(paintingPreview.productionBefore, loc)} → ${formatCurrency(paintingPreview.productionAfter, loc)}`,
+        `Müşteri toplamı değişmez (${formatCurrency(painting.amountKurus, loc)}). Üreticiye bildirim gider.`,
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    setLoading("add-painting");
+    setAddPaintingError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/add-painting`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: paintingAmount }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAddPaintingError(body.error ?? "Boyama kalemi eklenemedi.");
+        return;
+      }
+      setPaintingAmount("");
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const handleAssignPainter = async () => {
     if (!painterPick) return;
     setLoading("assign-painter");
@@ -910,11 +904,21 @@ export function OrderDetailClient({ data, locale }: Props) {
               {d["admin.orderDetail.downloadGlb"]}
             </a>
           )}
-          {displayStlUrl && (
-            <a href={displayStlUrl} download className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
+          {latestStlParts.length > 1 ? (
+            <a
+              href={`/api/admin/orders/${order.id}/model-files/zip?kind=stl`}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-medium text-white transition-colors shadow-sm"
+            >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              {d["admin.orderDetail.downloadStl"]}
+              STL parçaları (ZIP · {latestStlParts.length})
             </a>
+          ) : (
+            displayStlUrl && (
+              <a href={displayStlUrl} download className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-medium text-white transition-colors shadow-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                {d["admin.orderDetail.downloadStl"]}
+              </a>
+            )
           )}
         </div>
       </div>
@@ -1096,45 +1100,20 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-base font-semibold text-indigo-900">3D Modeli Yükle</h3>
-                <p className="text-sm text-indigo-700 mt-0.5">Müşterinin onayladığı görselden 3D modeli üretip yükleyin.</p>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-indigo-800 mb-1">GLB modeli (zorunlu)</label>
-                    <input
-                      type="file"
-                      accept=".glb"
-                      onChange={(e) => setModelGlbFile(e.target.files?.[0] ?? null)}
-                      className="w-full text-sm text-indigo-900 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-700"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-indigo-800 mb-1">STL modeli (opsiyonel)</label>
-                    <input
-                      type="file"
-                      accept=".stl"
-                      onChange={(e) => setModelStlFile(e.target.files?.[0] ?? null)}
-                      className="w-full text-sm text-indigo-900 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-200"
-                    />
-                  </div>
-                </div>
-                {uploadModelError && (
-                  <p className="mt-3 text-sm text-red-600">{uploadModelError}</p>
-                )}
-                <button
-                  onClick={uploadModel}
-                  disabled={!modelGlbFile || uploadingModel}
-                  className="mt-3 px-6 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:bg-gray-400 transition-colors shadow-sm"
-                >
-                  {uploadingModel ? "Yükleniyor…" : "Yükle"}
-                </button>
-                {modelProgress && (
-                  <UploadProgressBar
-                    progress={modelProgress}
-                    processingLabel="Model kaydediliyor…"
-                    onCancel={() => modelAbortRef.current?.abort()}
-                    className="mt-3"
+                <p className="text-sm text-indigo-700 mt-0.5">Müşterinin onayladığı görselden 3D modeli üretip yükleyin. Çok parçalı işlerde tüm parçaları ya da ZIP&apos;i tek seferde yükleyebilirsin.</p>
+                <div className="mt-3">
+                  {/* Yükleme bitince sipariş "onaylandı"ya geçer ve bu kart kaybolur;
+                      yeni sürüm yalnız Üretim sekmesinde listelenir. Oraya geçmezsek
+                      admin yüklemenin olup olmadığını göremez. */}
+                  <OrderModelUploader
+                    orderId={order.id}
+                    variant="initial"
+                    onUploaded={() => {
+                      setTab("production");
+                      router.refresh();
+                    }}
                   />
-                )}
+                </div>
               </div>
             </div>
           </div>
@@ -1720,6 +1699,115 @@ export function OrderDetailClient({ data, locale }: Props) {
           )}
         </div>
 
+        {/* ─── Boyama kalemi yok: ekle, sonra boyacı ata ───────────────────
+            Boyacı hattı `needsPainting`'e bağlı; boyama kalemi olmadan satılan
+            bir siparişte aşağıdaki kart hiç görünmüyordu ve üreticinin bastığı
+            işi boyacıya vermenin yolu yoktu. */}
+        {/* Varsayılan KAPALI tek satır: her boyamasız siparişte (kit alan müşteri
+            dahil) büyük bir form göstermek hem kalabalık hem de yanlışlıkla boyama
+            eklemeye davetiye. Üreticinin bastığı işi boyacıya vermek tek tıklık
+            uzaklıkta kalır. */}
+        {painting &&
+          !painting.needsPainting &&
+          !order.shippedAt &&
+          !["shipped", "delivered", "rejected"].includes(order.status) &&
+          (!!manufacturer || painting.canAddPainting) && (
+          <div
+            className={`rounded-2xl border bg-white ${
+              showAddPainting ? "border-fuchsia-200 p-5" : "border-gray-200 px-5 py-3"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+                  Boyama
+                </h3>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                  Boyama kalemi yok
+                </span>
+              </div>
+              {painting.canAddPainting && !showAddPainting && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddPainting(true)}
+                  className="rounded-lg border border-fuchsia-300 px-3 py-1 text-xs font-semibold text-fuchsia-700 hover:bg-fuchsia-50"
+                >
+                  Boyama ekle
+                </button>
+              )}
+            </div>
+            {!painting.canAddPainting && (
+              <p className="mt-2 text-xs text-gray-600">{painting.addPaintingBlockedReason}</p>
+            )}
+            {painting.canAddPainting && showAddPainting && (
+              <>
+                <p className="mt-3 text-sm text-gray-700">
+                  Bu sipariş boyama kalemi olmadan açılmış, bu yüzden boyacıya atanamıyor. Boyacı payını
+                  buradan eklediğinde &quot;Boyacı ata&quot; bölümü açılır.
+                </p>
+              <div className="mt-3 space-y-2">
+                <label htmlFor="painting-amount" className="block text-xs font-medium text-gray-600">
+                  Boyacı payı (₺)
+                </label>
+                <input
+                  id="painting-amount"
+                  value={paintingAmount}
+                  onChange={(e) => {
+                    setPaintingAmount(e.target.value);
+                    setAddPaintingError(null);
+                  }}
+                  inputMode="decimal"
+                  placeholder="ör. 450"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+                {paintingPreview?.ok && (
+                  <p className="rounded-lg bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-900">
+                    Toplam {formatCurrency(painting.amountKurus, loc)} değişmez. Üretim payı{" "}
+                    {formatCurrency(paintingPreview.productionBefore, loc)} →{" "}
+                    <strong>{formatCurrency(paintingPreview.productionAfter, loc)}</strong>, boyacı payı{" "}
+                    <strong>{formatCurrency(paintingPreview.paintingAfter, loc)}</strong>.
+                  </p>
+                )}
+                {paintingPreview && !paintingPreview.ok && (
+                  <p className="text-xs text-red-600">
+                    {paintingPreview.reason === "exceeds_production"
+                      ? "Boyacı payı üretim payından küçük olmalı."
+                      : "Geçerli bir tutar girin (ör. 450 ya da 1.250,50)."}
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-500">
+                  Müşteriden ek ücret alınmaz; boyacı payı üretim payından ayrılır. Üreticiye bildirim
+                  gider ve siparişin yüzeyi &quot;El boyaması&quot; olur.
+                </p>
+                {addPaintingError && <p className="text-xs text-red-600">{addPaintingError}</p>}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <button
+                      onClick={handleAddPainting}
+                      disabled={!paintingPreview?.ok || loading === "add-painting"}
+                      className="w-full rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-700 disabled:opacity-50"
+                    >
+                      {loading === "add-painting" ? "Ekleniyor…" : "Boyama kalemi ekle"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddPainting(false);
+                      setPaintingAmount("");
+                      setAddPaintingError(null);
+                    }}
+                    className="text-xs text-gray-500 underline hover:text-gray-700"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+              </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* ─── Painting leg: who has it, where it is, what they earn ─────── */}
         {painting?.needsPainting && (
           <div className="rounded-2xl border border-fuchsia-200 bg-white p-5">
@@ -1932,7 +2020,10 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {manufacturerStatus !== "qc_approved" ? (
                   <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
                     Atama, üretici QC onayından sonra açılır. Şu anki üretici
-                    durumu: <strong>{manufacturerStatus ?? "—"}</strong>.
+                    durumu: <strong>{manufacturerStatus ?? "—"}</strong>.{" "}
+                    <a href="/admin/qc-queue" className="text-blue-700 hover:underline">
+                      QC kuyruğuna git
+                    </a>
                   </p>
                 ) : painting.candidates.length === 0 ? (
                   <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
@@ -2664,17 +2755,53 @@ export function OrderDetailClient({ data, locale }: Props) {
                     )}
                     {r.note && <span className="text-xs text-gray-400 italic">· {r.note}</span>}
                     <div className="flex gap-2 ml-auto">
-                      {r.glbUrl && (
+                      {r.files.length > 1 && (
+                        <a
+                          href={`/api/admin/orders/${order.id}/model-files/zip?revision=${r.revision}`}
+                          className="px-3 py-1 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800"
+                        >
+                          Tümünü indir (ZIP · {r.files.length})
+                        </a>
+                      )}
+                      {/* Parça kaydı olmayan eski sürümler: birincil dosyalar. */}
+                      {r.files.length === 0 && r.glbUrl && (
                         <a href={r.glbUrl} download className="px-3 py-1 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800">
                           GLB indir
                         </a>
                       )}
-                      {r.stlUrl && (
+                      {r.files.length === 0 && r.stlUrl && (
                         <a href={r.stlUrl} download className="px-3 py-1 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
                           STL indir
                         </a>
                       )}
                     </div>
+                    {r.files.length > 0 && (
+                      <ul className="basis-full mt-1 grid gap-1 sm:grid-cols-2">
+                        {r.files.map((f) => (
+                          <li key={f.id}>
+                            <a
+                              href={f.url}
+                              download={f.name}
+                              className="flex items-center gap-2 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-800 hover:bg-gray-100"
+                            >
+                              <span
+                                className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-bold uppercase ${
+                                  f.kind === "stl" ? "bg-emerald-100 text-emerald-800" : "bg-indigo-100 text-indigo-800"
+                                }`}
+                              >
+                                {f.kind}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate" title={f.name}>
+                                {f.name}
+                              </span>
+                              {f.sizeBytes != null && (
+                                <span className="shrink-0 text-gray-400">{formatModelSize(f.sizeBytes)}</span>
+                              )}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2683,30 +2810,17 @@ export function OrderDetailClient({ data, locale }: Props) {
             {["approved", "review"].includes(order.status) && (
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-medium text-gray-700 mb-2">
-                  Yeni sürüm yükle (düzeltilmiş modeli buradan yükleyin)
+                  Yeni sürüm yükle — yalnız değişen parçaları yükleyebilirsin. &quot;Önceki
+                  parçaları koru&quot; açıkken aynı adlı parça yenisiyle değişir, diğerleri aynen
+                  taşınır; kapatırsan yüklediğin dosyalar tüm setin yerine geçer. Üretici yalnız
+                  güncel sürümün dosyalarını görür.
                 </p>
-                <div className="space-y-2">
-                  <input
-                    type="file"
-                    accept=".glb"
-                    onChange={(e) => setModelGlbFile(e.target.files?.[0] ?? null)}
-                    className="w-full text-sm text-gray-900 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-700"
-                  />
-                  <input
-                    type="file"
-                    accept=".stl"
-                    onChange={(e) => setModelStlFile(e.target.files?.[0] ?? null)}
-                    className="w-full text-sm text-gray-900 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-gray-700 hover:file:bg-gray-200"
-                  />
-                </div>
-                {uploadModelError && <p className="mt-2 text-sm text-red-600">{uploadModelError}</p>}
-                <button
-                  onClick={uploadModel}
-                  disabled={!modelGlbFile || uploadingModel}
-                  className="mt-3 px-5 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:bg-gray-400 transition-colors"
-                >
-                  {uploadingModel ? "Yükleniyor…" : "Yeni sürümü yükle"}
-                </button>
+                <OrderModelUploader
+                  orderId={order.id}
+                  variant="revision"
+                  previousFiles={(modelRevisions[0]?.files ?? []).map((f) => ({ name: f.name, kind: f.kind }))}
+                  onUploaded={() => router.refresh()}
+                />
               </div>
             )}
           </div>

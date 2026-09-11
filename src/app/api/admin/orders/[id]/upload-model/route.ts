@@ -1,34 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
-import { saveFile, getPublicUrl } from "@/lib/services/storage";
-import { attachOrderModel } from "@/lib/services/order-model";
+import { deleteFile, saveFile } from "@/lib/services/storage";
+import {
+  TooManyModelFilesError,
+  attachOrderModelFiles,
+  type OrderModelFileInput,
+} from "@/lib/services/order-model";
 import {
   isValidUploadId,
   promoteStagedUpload,
   readStagedHead,
   discardStagedUpload,
+  stagedSize,
 } from "@/lib/services/chunked-upload";
-import { nanoid } from "nanoid";
+import {
+  MAX_ORDER_MODEL_FILES,
+  MODEL_HEAD_BYTES,
+  orderModelKindOf,
+  verifyModelHead,
+  type OrderModelKind,
+} from "@/lib/config/order-model";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 
-// No size cap: production models are hundreds of megabytes. Large files come
-// in through the chunked staging API (src/lib/services/chunked-upload.ts) and
-// are never held in memory — the small multipart path below stays for small
-// files and older clients.
+// No size cap: production models are hundreds of megabytes. Files come in
+// through the chunked staging API (src/lib/services/chunked-upload.ts) and are
+// never held in memory; this POST only carries the staged ids.
 
-// Admin uploads the manually-produced 3D model for a paid custom order. In the
-// image-first flow there is NO automatic 3D — a paid order sits in
-// `awaiting_model` until the admin sculpts + uploads the print model here, which
-// advances it to `approved` (ready for self-fulfilment or manufacturer assign).
-// Re-uploads on an already-approved/review order just replace the file.
+/**
+ * Admin uploads the model FILES for a paid order — one revision, any number
+ * of STL and/or GLB parts (some jobs are 12-13 parts, often a ZIP the browser
+ * already expanded). GLB is optional: STL-only and GLB-only are both valid.
+ *
+ * Body (multipart):
+ *   files = JSON [{ uploadId, name }]   ← current client
+ *   glbUploadId / stlUploadId / glb / stl ← older single-pair clients, still accepted
+ *
+ * Every file is checked by its first bytes BEFORE any is promoted: one bad
+ * part rejects the whole batch and discards every staged upload, so a revision
+ * never goes live with 12 of 13 parts.
+ */
+
+type Entry =
+  | { source: "staged"; uploadId: string; name: string; kind: OrderModelKind }
+  | { source: "inline"; file: File; name: string; kind: OrderModelKind };
+
+// "paid" covers admin-fulfilled WhatsApp orders (marketplace, no seller) that
+// were created before they auto-advanced to awaiting_model.
+const UPLOADABLE = ["awaiting_model", "approved", "review", "paid"];
+
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
@@ -37,97 +65,130 @@ export async function POST(
   if ("response" in a) return a.response;
 
   const { id: orderId } = await params;
-
   const formData = await request.formData();
-  const glbFile = formData.get("glb") as File | null;
-  const stlFile = formData.get("stl") as File | null;
-  // Chunk-staged uploads: the bytes are already on disk, the form only carries
-  // the id. This is how a 350 MB model gets here without a 700 MB heap spike.
-  const glbUploadId = String(formData.get("glbUploadId") ?? "");
-  const stlUploadId = String(formData.get("stlUploadId") ?? "");
 
-  if (!glbFile && !glbUploadId) {
-    return NextResponse.json({ error: "Missing glb file" }, { status: 400 });
+  const entries: Entry[] = [];
+  const stagedIds: string[] = [];
+  // "Önceki parçaları koru": aynı adlı parça yenisiyle yerinde değişir, diğerleri
+  // önceki sürümden aynen taşınır (bkz. mergeRevisionFiles).
+  const carryForward = formData.get("carryForward") === "1";
+  const fail = async (status: number, error: string) => {
+    await Promise.all(stagedIds.map((id) => discardStagedUpload(id).catch(() => {})));
+    return NextResponse.json({ error }, { status });
+  };
+
+  const rawFiles = formData.get("files");
+  if (typeof rawFiles === "string" && rawFiles.trim()) {
+    let list: unknown;
+    try {
+      list = JSON.parse(rawFiles);
+    } catch {
+      return fail(400, "Geçersiz dosya listesi.");
+    }
+    if (!Array.isArray(list)) return fail(400, "Geçersiz dosya listesi.");
+    // Register every id FIRST so a rejection further down discards them all.
+    for (const item of list) {
+      const uploadId = String((item as { uploadId?: unknown })?.uploadId ?? "");
+      if (isValidUploadId(uploadId)) stagedIds.push(uploadId);
+    }
+    for (const item of list) {
+      const uploadId = String((item as { uploadId?: unknown })?.uploadId ?? "");
+      const name = String((item as { name?: unknown })?.name ?? "").slice(0, 300);
+      if (!isValidUploadId(uploadId)) return fail(400, "Geçersiz yükleme kimliği.");
+      const kind = orderModelKindOf(name);
+      if (!kind) return fail(400, `${name || "Dosya"}: yalnız STL ve GLB yüklenebilir.`);
+      entries.push({ source: "staged", uploadId, name, kind });
+    }
   }
-  if (glbUploadId && !isValidUploadId(glbUploadId)) {
-    return NextResponse.json({ error: "Geçersiz yükleme kimliği." }, { status: 400 });
+
+  // Older single-pair clients.
+  for (const kind of ["glb", "stl"] as const) {
+    const upId = String(formData.get(`${kind}UploadId`) ?? "");
+    const file = formData.get(kind);
+    if (upId) {
+      if (!isValidUploadId(upId)) return fail(400, "Geçersiz yükleme kimliği.");
+      stagedIds.push(upId);
+      entries.push({ source: "staged", uploadId: upId, name: `model.${kind}`, kind });
+    } else if (file instanceof File && file.size > 0) {
+      entries.push({ source: "inline", file, name: file.name || `model.${kind}`, kind });
+    }
   }
-  if (stlUploadId && !isValidUploadId(stlUploadId)) {
-    return NextResponse.json({ error: "Geçersiz yükleme kimliği." }, { status: 400 });
+
+  if (entries.length === 0) return fail(400, "En az bir STL ya da GLB dosyası yükleyin.");
+  if (entries.length > MAX_ORDER_MODEL_FILES) {
+    return fail(400, `Bir sürümde en fazla ${MAX_ORDER_MODEL_FILES} dosya yüklenebilir.`);
   }
 
   const order = await db.query.orders.findFirst({ where: eq(orders.id, orderId) });
-  if (!order) {
-    return NextResponse.json({ error: d["api.order.notFound"] }, { status: 404 });
-  }
-  // "paid" covers admin-fulfilled WhatsApp orders (marketplace, no seller) that
-  // were created before they auto-advanced to awaiting_model — the admin can
-  // still attach a model, which moves them to approved for assignment.
-  const uploadable = ["awaiting_model", "approved", "review", "paid"];
-  if (!uploadable.includes(order.status)) {
-    return NextResponse.json(
-      { error: "Order is not awaiting a model" },
-      { status: 400 },
-    );
+  if (!order) return fail(404, d["api.order.notFound"]);
+  if (!UPLOADABLE.includes(order.status)) return fail(400, "Sipariş model beklemiyor.");
+
+  // Validate everything before promoting anything.
+  const checked: { entry: Entry; sizeBytes: number | null }[] = [];
+  for (const e of entries) {
+    let size: number | null;
+    let head: Uint8Array;
+    if (e.source === "staged") {
+      size = await stagedSize(e.uploadId);
+      if (size === null) return fail(400, `${e.name}: yükleme bulunamadı ya da süresi doldu.`);
+      head = await readStagedHead(e.uploadId, MODEL_HEAD_BYTES).catch(() => new Uint8Array(0));
+    } else {
+      size = e.file.size;
+      head = new Uint8Array(await e.file.slice(0, MODEL_HEAD_BYTES).arrayBuffer());
+    }
+    const verdict = verifyModelHead(e.kind, head, size);
+    if (!verdict.ok) return fail(400, `${e.name}: ${verdict.reason}.`);
+    checked.push({ entry: e, sizeBytes: size });
   }
 
-  // Validate the GLB header (glTF magic bytes: 0x67 0x6C 0x54 0x46 = "glTF").
-  // For a staged file only the first bytes are read — never the whole model.
-  const glbHead = glbUploadId
-    ? await readStagedHead(glbUploadId, 4).catch(() => Buffer.alloc(0))
-    : Buffer.from(await glbFile!.slice(0, 4).arrayBuffer());
-  if (
-    glbHead.length < 4 ||
-    glbHead[0] !== 0x67 ||
-    glbHead[1] !== 0x6c ||
-    glbHead[2] !== 0x54 ||
-    glbHead[3] !== 0x46
-  ) {
-    if (glbUploadId) await discardStagedUpload(glbUploadId).catch(() => {});
-    return NextResponse.json({ error: "Invalid GLB file" }, { status: 400 });
-  }
+  // Disk names are ASCII nanoids; the human name lives in order_model_files.
+  //
+  // Everything from here on runs AFTER validation. If promotion or the DB write
+  // throws (disk full, lock timeout, the merged set exceeding the cap), undo it
+  // all: discard what is still staged and delete what was already promoted, so
+  // a failed upload leaves neither orphaned files nor a half revision — and the
+  // admin gets a readable JSON error instead of an HTML 500 page.
+  const dir = `models/${orderId}`;
+  const inputs: OrderModelFileInput[] = [];
+  let result: Awaited<ReturnType<typeof attachOrderModelFiles>>;
+  try {
+    for (const { entry: e, sizeBytes } of checked) {
+      const diskName = `${nanoid()}.${e.kind}`;
+      const key =
+        e.source === "staged"
+          ? await promoteStagedUpload(e.uploadId, dir, diskName)
+          : await saveFile(Buffer.from(await e.file.arrayBuffer()), dir, diskName);
+      inputs.push({ key, name: e.name, kind: e.kind, sizeBytes });
+    }
 
-  const glbName = `model-${nanoid()}.glb`;
-  const glbKey = glbUploadId
-    ? await promoteStagedUpload(glbUploadId, `models/${orderId}`, glbName)
-    : await saveFile(
-        Buffer.from(await glbFile!.arrayBuffer()),
-        `models/${orderId}`,
-        glbName
+    // Revision archiving + the order's live model columns are written by
+    // attachOrderModelFiles(), the SAME function the auto-3D worker reaches — the
+    // two hands that produce a model must not keep separate copies of this logic.
+    // It does not touch orders.status; that stays here.
+    result = await attachOrderModelFiles({
+      orderId,
+      files: inputs,
+      carryForward,
+      source: "admin_upload",
+      uploadedByEmail: a.session.user.email,
+    });
+  } catch (err) {
+    await Promise.all(stagedIds.map((id) => discardStagedUpload(id).catch(() => {})));
+    await Promise.all(inputs.map((f) => deleteFile(f.key).catch(() => {})));
+    if (err instanceof TooManyModelFilesError) {
+      return NextResponse.json(
+        {
+          error: `Önceki parçalarla birlikte ${err.total} dosya oluyor; bir sürümde en fazla ${MAX_ORDER_MODEL_FILES} dosya olabilir. "Önceki parçaları koru" kutusunu kapatıp tüm seti yükleyin.`,
+        },
+        { status: 400 }
       );
-  const glbUrl = getPublicUrl(glbKey);
-
-  let stlKey: string | null = null;
-  let stlUrl: string | null = null;
-  if (stlUploadId) {
-    stlKey = await promoteStagedUpload(
-      stlUploadId,
-      `models/${orderId}`,
-      `model-${nanoid()}.stl`
+    }
+    console.error("[upload-model] kaydedilemedi", err);
+    return NextResponse.json(
+      { error: "Dosyalar kaydedilemedi; sipariş değişmedi. Tekrar deneyin." },
+      { status: 500 }
     );
-    stlUrl = getPublicUrl(stlKey);
-  } else if (stlFile) {
-    const stlBuffer = Buffer.from(await stlFile.arrayBuffer());
-    stlKey = await saveFile(stlBuffer, `models/${orderId}`, `model-${nanoid()}.stl`);
-    stlUrl = getPublicUrl(stlKey);
   }
-
-  // Revision archiving + the order's live model columns are written by
-  // attachOrderModel(), the SAME function the auto-3D worker uses — the two
-  // hands that produce a model must not keep separate copies of this logic.
-  // It deliberately does not touch orders.status; that stays here. It DOES
-  // stamp model_source='admin_upload' and clear model_turntable_*: replacing an
-  // auto-generated model by hand must not leave a 360° video of the old mesh
-  // behind, because that video is what the customer is asked to approve.
-  await attachOrderModel({
-    orderId,
-    glbKey,
-    glbUrl,
-    stlKey,
-    stlUrl,
-    source: "admin_upload",
-    uploadedByEmail: a.session.user.email,
-  });
 
   // Advance awaiting_model → approved (only from awaiting_model, so re-uploads
   // on an already-fulfilling order keep its current status).
@@ -137,11 +198,15 @@ export async function POST(
     .set({ status: newStatus, updatedAt: new Date() })
     .where(eq(orders.id, orderId));
 
+  const stl = inputs.filter((f) => f.kind === "stl").length;
+  const glb = inputs.length - stl;
   await db.insert(adminActions).values({
     orderId,
     action: "upload_model",
     adminEmail: a.session.user.email,
-    notes: stlUrl ? "Uploaded GLB + STL model" : "Uploaded GLB model",
+    notes: `Sürüm ${result.revision}: ${inputs.length} dosya yüklendi (${stl} STL, ${glb} GLB)${
+      result.carriedCount > 0 ? `, ${result.carriedCount} parça önceki sürümden taşındı` : ""
+    }; toplam ${result.fileCount} dosya`,
   });
 
   await emitOrderChanged({
@@ -152,5 +217,12 @@ export async function POST(
     status: newStatus,
   });
 
-  return NextResponse.json({ success: true, status: newStatus, modelGlbUrl: glbUrl });
+  return NextResponse.json({
+    success: true,
+    status: newStatus,
+    revision: result.revision,
+    fileCount: result.fileCount,
+    carriedCount: result.carriedCount,
+    modelGlbUrl: result.glbUrl,
+  });
 }

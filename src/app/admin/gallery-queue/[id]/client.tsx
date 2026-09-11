@@ -27,6 +27,8 @@ interface ReviewData {
   createdAt: string;
   photoUrl: string | null;
   glbUrl: string | null;
+  /** Any model (GLB or STL). glbUrl is only the 3D preview. */
+  hasModel: boolean;
 }
 
 const CATEGORIES = [
@@ -202,6 +204,12 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
             <div className="h-96 rounded-lg overflow-hidden bg-gray-50">
               <ModelViewer url={review.glbUrl} className="w-full h-full" />
             </div>
+          ) : review.hasModel ? (
+            <p className="text-sm text-gray-500">
+              3D önizleme yok — bu siparişin modelinde GLB bulunmuyor (yalnız
+              baskı dosyası yüklenmiş). Galeri fotoğrafla yayınlanır; onay için
+              GLB gerekmez.
+            </p>
           ) : (
             <p className="text-sm text-gray-400">GLB hazır değil</p>
           )}

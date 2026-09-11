@@ -5,6 +5,7 @@ import { orders, generationAttempts } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { orderHasOwnModel } from "@/lib/config/order-model-presence";
 
 export async function POST(
   request: NextRequest,
@@ -42,15 +43,23 @@ export async function POST(
     );
   }
 
-  // The printable model comes from the admin upload (orders.model_glb_url)
-  // since the auto-3D pipeline was removed; generation_attempts is the legacy
-  // source and is empty for every order created after that migration. Reading
-  // only the legacy table made publishing impossible for all new orders.
-  const hasModel =
-    !!order.modelGlbUrl || order.generationAttempts.length > 0;
+  // The printable model comes from the admin upload (orders.model_*) since the
+  // auto-3D pipeline was removed; generation_attempts is the legacy source and
+  // is empty for every order created after that migration. Reading only the
+  // legacy table made publishing impossible for all new orders.
+  //
+  // ANY uploaded model counts, not just a GLB: a revision may be STL-only (the
+  // print parts), and the gallery publishes from the customer's photo — it never
+  // renders a model (see listPublishedGalleryItems) — so requiring a GLB locked
+  // STL-only orders out of the gallery for no reason.
+  const hasModel = orderHasOwnModel(order) || order.generationAttempts.length > 0;
   if (!hasModel) {
     return NextResponse.json(
-      { error: "No completed generation available" },
+      {
+        error:
+          "Bu siparişe henüz model yüklenmedi; model hazır olunca galeride paylaşabilirsin.",
+        code: "no_model",
+      },
       { status: 400 }
     );
   }

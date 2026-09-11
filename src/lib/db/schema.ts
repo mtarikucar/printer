@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  bigint,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { Attribution } from "../analytics/types";
@@ -818,7 +819,7 @@ export const orderPhotos = pgTable("order_photos", {
 
 // Version history of the admin-uploaded 3D print model. Every upload adds a new
 // revision (old files are preserved, never deleted); the order's live
-// modelGlb*/modelStl* columns always point at the latest revision.
+// modelGlb / modelStl columns always point at the latest revision.
 export const orderModelRevisions = pgTable(
   "order_model_revisions",
   {
@@ -827,8 +828,11 @@ export const orderModelRevisions = pgTable(
       .notNull()
       .references(() => orders.id),
     revision: integer("revision").notNull(),
-    glbKey: text("glb_key").notNull(),
-    glbUrl: text("glb_url").notNull(),
+    // Sürümün BİRİNCİL dosyaları (ilk GLB / ilk STL). Sürümün tüm dosyaları
+    // order_model_files'tadır. GLB artık zorunlu değil: yalnız STL (baskı) ya
+    // da yalnız GLB (görüntüleme) geçerli bir yüklemedir.
+    glbKey: text("glb_key"),
+    glbUrl: text("glb_url"),
     stlKey: text("stl_key"),
     stlUrl: text("stl_url"),
     uploadedByEmail: text("uploaded_by_email"),
@@ -839,6 +843,40 @@ export const orderModelRevisions = pgTable(
     orderRevUnique: uniqueIndex("order_model_revisions_order_rev_idx").on(
       t.orderId,
       t.revision
+    ),
+  })
+);
+
+/**
+ * Bir model sürümünün TÜM dosyaları. Bir sipariş tek bir model değil, bir
+ * dosya kümesidir: bazı işler 12-13 ayrı parçadan oluşuyor (ZIP olarak
+ * yükleniyor). Sürüm başlığı (order_model_revisions) ve siparişin canlı
+ * modelGlb / modelStl kolonları geriye dönük uyumluluk için BİRİNCİL dosyayı
+ * gösterir; parçaların hepsi burada.
+ *
+ * `fileKey` diskteki ASCII anahtardır; `fileName` admin'in yüklediği görünen
+ * addır (indirmede bu kullanılır). Aynı sürümde adlar tekilleştirilir.
+ */
+export const orderModelFiles = pgTable(
+  "order_model_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id),
+    revision: integer("revision").notNull(),
+    kind: text("kind").notNull(), // 'stl' | 'glb'
+    fileKey: text("file_key").notNull(),
+    fileName: text("file_name").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byOrderRevision: index("order_model_files_order_rev_idx").on(
+      t.orderId,
+      t.revision,
+      t.sortOrder
     ),
   })
 );
@@ -2292,6 +2330,7 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   }),
   photos: many(orderPhotos),
   modelRevisions: many(orderModelRevisions),
+  modelFiles: many(orderModelFiles),
   generationAttempts: many(generationAttempts),
   adminActions: many(adminActions),
   messages: many(adminMessages),
@@ -2324,6 +2363,13 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
 export const orderModelRevisionsRelations = relations(orderModelRevisions, ({ one }) => ({
   order: one(orders, {
     fields: [orderModelRevisions.orderId],
+    references: [orders.id],
+  }),
+}));
+
+export const orderModelFilesRelations = relations(orderModelFiles, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderModelFiles.orderId],
     references: [orders.id],
   }),
 }));

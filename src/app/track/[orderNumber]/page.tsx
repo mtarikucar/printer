@@ -100,6 +100,8 @@ interface OrderData {
   galleryReviewStatus?: "none" | "pending" | "approved" | "rejected";
   galleryReviewReason?: string | null;
   glbUrl: string | null;
+  /** Any model at all (GLB or STL) — gallery-publish eligibility. glbUrl is only the viewer's. */
+  hasModel: boolean;
   digitalFiles?: { entitled: boolean; stlReady: boolean; objReady: boolean };
   selectedOptions?: { groupName: string; choiceName: string }[];
   selectedAddons?: { name: string }[];
@@ -809,8 +811,10 @@ function TrackPageInner({ orderNumber }: { orderNumber: string }) {
                 ulaşabildiği tek yer burası. */}
             <ConsumerRequestForm orderNumber={order.orderNumber} />
 
-            {/* Publish toggle */}
-            {PUBLISH_ELIGIBLE_STATUSES.includes(order.status) && order.glbUrl && (
+            {/* Publish toggle — gated on having ANY model, not on the viewer's
+                GLB: an STL-only order can still go to the gallery (it shows the
+                photo), and hiding the toggle along with the viewer locked it out. */}
+            {PUBLISH_ELIGIBLE_STATUSES.includes(order.status) && order.hasModel && (
               <PublishToggle
                 orderNumber={order.orderNumber}
                 initialIsPublic={order.isPublic}

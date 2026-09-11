@@ -3,6 +3,10 @@ import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, previews } from "@/lib/db/schema";
 import { normalizeFileUrl } from "@/lib/services/storage";
+import {
+  orderHasOwnModel,
+  type OrderOwnModelColumns,
+} from "@/lib/config/order-model-presence";
 
 /**
  * The customer's "journey" page: the photo they uploaded, the design they
@@ -39,14 +43,18 @@ export interface JourneyEligibility {
  *
  * The photo may sit on order_photos (the manual/promoted path copies it there)
  * or on the preview the customer approved.
+ *
+ * "A figure it ended as" is ANY uploaded model — GLB, STL or both. A revision
+ * may now be STL-only (the print parts), and keying this on the GLB meant such
+ * an order never got a token: no QR in the shipping mail, and the card page told
+ * the operator to upload a model that was already there. The journey page needs
+ * a GLB only for its 3D viewer and simply leaves that panel out without one
+ * (loadJourney returns glbUrl null) — photo, design and specs still stand.
  */
-export async function journeyEligibility(order: {
-  id: string;
-  previewId: string | null;
-  modelGlbKey: string | null;
-  modelGlbUrl: string | null;
-}): Promise<JourneyEligibility> {
-  const hasModel = !!(order.modelGlbKey || order.modelGlbUrl);
+export async function journeyEligibility(
+  order: { id: string; previewId: string | null } & OrderOwnModelColumns
+): Promise<JourneyEligibility> {
+  const hasModel = orderHasOwnModel(order);
 
   const [photo] = await db
     .select({ id: orderPhotos.id })
@@ -85,8 +93,11 @@ export async function ensureJourneyToken(orderId: string): Promise<string | null
     columns: {
       id: true,
       previewId: true,
+      modelUploadedAt: true,
       modelGlbKey: true,
       modelGlbUrl: true,
+      modelStlKey: true,
+      modelStlUrl: true,
       journeyToken: true,
     },
   });

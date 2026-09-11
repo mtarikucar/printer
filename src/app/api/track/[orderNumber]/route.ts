@@ -5,6 +5,7 @@ import { orders, orderDrafts, generationAttempts } from "@/lib/db/schema";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getBankDetails } from "@/lib/config/payment";
+import { currentModelUrl, orderHasOwnModel } from "@/lib/config/order-model-presence";
 
 /**
  * Track endpoint resolves either a confirmed order or a pending draft (same reference string).
@@ -68,11 +69,17 @@ export async function GET(
       publicDisplayName: order.publicDisplayName,
       galleryReviewStatus: order.galleryReviewStatus,
       galleryReviewReason: order.galleryReviewReason,
-      // Prefer the admin-uploaded model (image-first fal.ai flow), falling back
-      // to a legacy succeeded generation attempt for historical orders.
+      // The order's own model (admin upload / auto-3D attach); a legacy
+      // succeeded generation attempt stands in ONLY for a historical order that
+      // never had one. An STL-only revision therefore shows NO viewer rather
+      // than the superseded generated mesh it replaced.
       glbUrl: normalizeFileUrl(
-        order.modelGlbUrl ?? order.generationAttempts[0]?.outputGlbUrl ?? null
+        currentModelUrl(order, "glb", order.generationAttempts[0])
       ),
+      // Gallery-publish eligibility, deliberately separate from glbUrl: the
+      // viewer needs a GLB, publishing does not (the gallery shows the photo).
+      // Mirrors the check in /api/customer/orders/[orderNumber]/publish.
+      hasModel: orderHasOwnModel(order) || order.generationAttempts.length > 0,
       // Digital-files add-on: whether the customer bought it and whether the
       // print-ready files are downloadable yet. The bytes are served only via
       // the entitlement-gated /api/customer/orders/.../download endpoint.
@@ -80,9 +87,11 @@ export async function GET(
         entitled:
           order.paymentStatus === "succeeded" &&
           (order.upsells ?? []).includes("digital_files"),
-        // STL comes from the admin upload (orders.model_stl_url) or a legacy
-        // attempt; OBJ is legacy-attempt-only (image-first flow produces no OBJ).
-        stlReady: !!(order.modelStlUrl || order.generationAttempts[0]?.outputStlUrl),
+        // STL comes from the order's own model, or a legacy attempt only when
+        // there is none — the same rule the download route serves by, so
+        // "ready" never promises a file the download then refuses. OBJ is
+        // legacy-attempt-only (image-first flow produces no OBJ).
+        stlReady: !!currentModelUrl(order, "stl", order.generationAttempts[0]),
         objReady: !!order.generationAttempts[0]?.outputObjUrl,
       },
       paymentMethod: order.paymentMethod,
@@ -145,6 +154,7 @@ export async function GET(
     isPublic: false,
     publicDisplayName: null,
     glbUrl: null,
+    hasModel: false,
     paymentMethod: draft.paymentMethod,
     // Map draft status → legacy paymentStatus values the UI uses to switch banners.
     paymentStatus:

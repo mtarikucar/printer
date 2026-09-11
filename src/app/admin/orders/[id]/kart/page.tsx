@@ -34,8 +34,11 @@ export default async function OrderJourneyCardPage({
       orderNumber: true,
       customerName: true,
       previewId: true,
+      modelUploadedAt: true,
       modelGlbKey: true,
       modelGlbUrl: true,
+      modelStlKey: true,
+      modelStlUrl: true,
       journeyToken: true,
     },
   });
@@ -107,6 +110,16 @@ export default async function OrderJourneyCardPage({
           <strong>{order.orderNumber}</strong> siparişinin yolculuk sayfasına
           gider.
         </p>
+        {/* STL-only revisions are valid now, and the journey page needs a GLB
+            only for its rotating 3D panel. Saying so here stops the operator
+            wondering why the page behind the QR shows no figure to spin. */}
+        {!order.modelGlbKey && !order.modelGlbUrl && (
+          <p className="mt-2 max-w-2xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Bu siparişte GLB yok: yolculuk sayfası fotoğraf ve tasarımla açılır,
+            döndürülebilir 3D model bölümü görünmez. GLB yüklersen o bölüm de
+            eklenir.
+          </p>
+        )}
         <CardActions url={url} />
         <Link
           href={`/admin/orders/${id}`}

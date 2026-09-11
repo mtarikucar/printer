@@ -5,6 +5,7 @@ import { orders, generationAttempts, manufacturers } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getFileBuffer } from "@/lib/services/storage";
 import { normalizeFileUrl } from "@/lib/services/storage";
+import { currentModelUrl } from "@/lib/config/order-model-presence";
 
 export async function GET(
   request: NextRequest,
@@ -31,7 +32,15 @@ export async function GET(
       eq(orders.id, id),
       eq(orders.manufacturerId, session.manufacturerId)
     ),
-    columns: { id: true, orderNumber: true, modelStlUrl: true },
+    columns: {
+      id: true,
+      orderNumber: true,
+      modelUploadedAt: true,
+      modelGlbKey: true,
+      modelGlbUrl: true,
+      modelStlKey: true,
+      modelStlUrl: true,
+    },
     with: {
       generationAttempts: {
         where: eq(generationAttempts.status, "succeeded"),
@@ -47,12 +56,17 @@ export async function GET(
   }
 
   // Admin-uploaded model first (orders.model_stl_url); generationAttempts is the
-  // legacy auto-3D source, kept for historical orders.
+  // legacy auto-3D source, used ONLY for a historical order with no model of its
+  // own. A GLB-only revision has no STL — the attempt's STL is the unprocessed
+  // mesh that revision replaced, not something to print.
   const stlUrl = normalizeFileUrl(
-    order.modelStlUrl ?? order.generationAttempts[0]?.outputStlUrl ?? null
+    currentModelUrl(order, "stl", order.generationAttempts[0])
   );
   if (!stlUrl) {
-    return NextResponse.json({ error: "No STL file available" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Bu siparişin güncel modelinde STL dosyası yok. Sayfayı yenileyin." },
+      { status: 404 }
+    );
   }
 
   // Extract the file key from the URL (part after /api/files/)

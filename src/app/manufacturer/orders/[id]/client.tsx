@@ -14,6 +14,7 @@ import type { Locale } from "@/lib/i18n/types";
 import { formatPhoneDisplay } from "@/lib/phone";
 import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 import { sizeDisplay } from "@/lib/config/sizes";
+import { formatModelSize } from "@/lib/config/order-model";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -126,6 +127,9 @@ interface Props {
     glbUrl: string | null;
     stlUrl: string | null;
     objUrl: string | null;
+    /** Güncel model sürümünün TÜM parçaları (bir iş 12-13 ayrı STL olabilir). */
+    modelFiles: { id: string; name: string; kind: string; sizeBytes: number | null }[];
+    modelFilesRevision: number | null;
     actions: {
       id: string;
       action: string;
@@ -190,7 +194,15 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, actions } = data;
+  // Çok parçalı iş: tek "STL indir" düğmesi yalnız İLK parçayı verirdi ve
+  // üretici 13 parçanın 12'sini hiç görmeden baskıya başlardı.
+  const stlParts = modelFiles.filter((f) => f.kind === "stl");
+  const glbParts = modelFiles.filter((f) => f.kind === "glb");
+  // Tek bir modelin GLB + STL çifti "2 parça" DEĞİLDİR — 0053 backfill'i her eski
+  // siparişi tam olarak böyle bir çifte çevirir ve panel her siparişte yanlış
+  // "2 parçadan oluşuyor" derdi. Çok parçalı = birden çok STL ya da birden çok GLB.
+  const multiPart = stlParts.length > 1 || glbParts.length > 1;
   const d = useDictionary();
   const isMarketplace = order.orderType === "marketplace";
   // A manual/WhatsApp order is a "marketplace" order with no product behind it:
@@ -501,7 +513,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 "Download GLB"}
             </a>
           )}
-          {stlUrl && (
+          {stlUrl && stlParts.length <= 1 && (
             <a
               href={`/api/manufacturer/orders/${order.id}/download-stl`}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-emerald-200 transition-all hover:shadow-md hover:shadow-emerald-200"
@@ -558,6 +570,63 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           )}
         </div>
       </div>
+
+      {/* Çok parçalı işin dosyaları başlığın EYLEM satırında değil kendi bloğunda:
+          orada başlığı sıkıştırıp masaüstünde hizasını bozuyordu. */}
+        {multiPart && (
+          <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-emerald-900">
+                {stlParts.length > 1
+                  ? `Bu iş ${stlParts.length} baskı parçasından oluşuyor`
+                  : `Bu işin ${modelFiles.length} dosyası var`}
+                {modelFilesRevision ? ` · model v${modelFilesRevision}` : ""}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {stlParts.length > 1 && (
+                  <a
+                    href={`/api/manufacturer/orders/${order.id}/model-files/zip?kind=stl`}
+                    className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                  >
+                    Tüm STL parçalarını indir (ZIP · {stlParts.length})
+                  </a>
+                )}
+                <a
+                  href={`/api/manufacturer/orders/${order.id}/model-files/zip`}
+                  className="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
+                >
+                  Hepsini indir (ZIP)
+                </a>
+              </div>
+            </div>
+            <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
+              {modelFiles.map((f) => (
+                <li key={f.id}>
+                  <a
+                    href={`/api/manufacturer/orders/${order.id}/model-files/${f.id}`}
+                    className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 ring-1 ring-emerald-100 hover:ring-emerald-300"
+                  >
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        f.kind === "stl" ? "bg-emerald-100 text-emerald-800" : "bg-indigo-100 text-indigo-800"
+                      }`}
+                    >
+                      {f.kind}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate" title={f.name}>
+                      {f.name}
+                    </span>
+                    {f.sizeBytes != null && (
+                      <span className="shrink-0 text-[11px] text-gray-500">
+                        {formatModelSize(f.sizeBytes)}
+                      </span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
       {/* ─── Horizontal Timeline Stepper ──────────────────── */}
       <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5 mb-5">

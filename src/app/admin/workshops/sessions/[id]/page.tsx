@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { manufacturers, workshopSessions, workshopParticipants } from "@/lib/db/schema";
 import { orderInBatch } from "@/lib/config/workshop";
+import { orderHasOwnModel } from "@/lib/config/order-model-presence";
 import { computeEarning } from "@/lib/services/finance";
 import { SessionClient } from "./session-client";
 
@@ -36,7 +37,15 @@ export default async function AdminWorkshopSessionPage({
           orderNumber: true,
           status: true,
           paymentStatus: true,
+          // Model hazırlığı HER model türünü sayar: yalnız STL (baskı
+          // parçaları) yüklenmiş bir sipariş de hazırdır. Yalnız GLB'ye bakmak,
+          // modeli yüklenmiş katılımcıyı "Eksik" gösterip gereksiz yeniden
+          // yüklemeye ya da partiyi bekletmeye yol açıyordu.
+          modelUploadedAt: true,
+          modelGlbKey: true,
           modelGlbUrl: true,
+          modelStlKey: true,
+          modelStlUrl: true,
           amountKurus: true,
           productionBaseKurus: true,
           commissionRateBps: true,
@@ -51,7 +60,7 @@ export default async function AdminWorkshopSessionPage({
   // bir sipariş ne model sayacında ne komisyon toplamında görünmeli: ekran,
   // partinin gerçekte kaç figür olduğunu söylemek zorunda.
   const batch = participants.filter((p) => p.order && orderInBatch(p.order));
-  const missing = batch.filter((p) => !p.order!.modelGlbUrl);
+  const missing = batch.filter((p) => !orderHasOwnModel(p.order!));
   const readyCount = batch.length - missing.length;
 
   // Üreticinin toplam net payı her SİPARİŞİN KENDİ donmuş oranından
@@ -141,7 +150,7 @@ export default async function AdminWorkshopSessionPage({
         // "geride kalanlar" client state'i (leftBehind) bir sayfa
         // yenilemesinde kaybolur, bu alan kaybolmaz.
         orderStatus: p.order?.status ?? null,
-        modelReady: Boolean(p.order?.modelGlbUrl),
+        modelReady: p.order ? orderHasOwnModel(p.order) : false,
       }))}
       readyCount={readyCount}
       totalCount={batch.length}

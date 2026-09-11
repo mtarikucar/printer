@@ -22,6 +22,8 @@ import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getProductSpec } from "@/lib/services/product-spec";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
+import { latestModelFiles } from "@/lib/services/order-model";
+import { currentModelUrl } from "@/lib/config/order-model-presence";
 import { ManufacturerOrderDetailClient } from "./client";
 
 export default async function ManufacturerOrderDetailPage({
@@ -122,6 +124,9 @@ export default async function ManufacturerOrderDetailPage({
   if (!order) notFound();
 
   const latestGeneration = order.generationAttempts[0] ?? null;
+  // Every part of the CURRENT model revision. A job can be 12-13 separate STLs;
+  // the single glbUrl/stlUrl below is only the primary file of each kind.
+  const latestFiles = await latestModelFiles(order.id);
 
   // Only the current round's photos are shown to the manufacturer; older
   // (rejected) rounds stay in the DB as an audit trail.
@@ -384,9 +389,21 @@ export default async function ManufacturerOrderDetailPage({
     // auto-3D pipeline was removed; generationAttempts is the legacy fallback for
     // historical orders. Reading only the latter left every recent order with no
     // downloadable file at all.
-    glbUrl: normalizeFileUrl(order.modelGlbUrl ?? latestGeneration?.outputGlbUrl ?? null),
-    stlUrl: normalizeFileUrl(order.modelStlUrl ?? latestGeneration?.outputStlUrl ?? null),
+    //
+    // That fallback applies ONLY while the order has no model of its own. A
+    // revision may now be STL-only or GLB-only, and `modelGlbUrl ?? attempt`
+    // then handed the workshop the superseded generated mesh as the "current"
+    // GLB (viewer + GLB indir), or the raw attempt STL as the print file.
+    glbUrl: normalizeFileUrl(currentModelUrl(order, "glb", latestGeneration)),
+    stlUrl: normalizeFileUrl(currentModelUrl(order, "stl", latestGeneration)),
     objUrl: normalizeFileUrl(latestGeneration?.outputObjUrl ?? null),
+    modelFiles: latestFiles.files.map((f) => ({
+      id: f.id,
+      name: f.fileName,
+      kind: f.kind,
+      sizeBytes: f.sizeBytes,
+    })),
+    modelFilesRevision: latestFiles.revision,
     actions: order.manufacturerActions.map((a) => ({
       id: a.id,
       action: a.action,

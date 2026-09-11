@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { orders, generationAttempts } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getFileBuffer, normalizeFileUrl } from "@/lib/services/storage";
+import { latestModelFiles } from "@/lib/services/order-model";
+import { modelFilesZipResponse } from "@/lib/services/model-file-download";
+import { currentModelUrl } from "@/lib/config/order-model-presence";
 
 /**
  * Customer download of the print-ready STL/OBJ for an order — the paid
@@ -41,6 +44,10 @@ export async function GET(
       orderNumber: true,
       paymentStatus: true,
       upsells: true,
+      modelUploadedAt: true,
+      modelGlbKey: true,
+      modelGlbUrl: true,
+      modelStlKey: true,
       modelStlUrl: true,
     },
     with: {
@@ -68,10 +75,28 @@ export async function GET(
     );
   }
 
+  // Multi-part model: when the current revision carries several STL parts the
+  // customer gets them all in one ZIP. The single-file path below still serves
+  // one-part and legacy orders exactly as before.
+  if (format === "stl") {
+    const { files } = await latestModelFiles(order.id);
+    const stls = files.filter((f) => f.kind === "stl");
+    if (stls.length > 1) {
+      return modelFilesZipResponse(
+        stls.map((f) => ({ key: f.fileKey, name: f.fileName })),
+        `${order.orderNumber}-stl.zip`
+      );
+    }
+  }
+
   const attempt = order.generationAttempts[0];
+  // The legacy attempt's STL stands in only for an order with no model of its
+  // own: after a GLB-only revision it is the superseded generated mesh, not the
+  // print-ready file the customer paid for. The track page's stlReady applies
+  // the same rule, so it never offers a download this then refuses.
   const rawUrl =
     format === "stl"
-      ? (order.modelStlUrl ?? attempt?.outputStlUrl)
+      ? currentModelUrl(order, "stl", attempt)
       : attempt?.outputObjUrl;
   const fileUrl = normalizeFileUrl(rawUrl ?? null);
   if (!fileUrl) {

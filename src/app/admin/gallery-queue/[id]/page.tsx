@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, generationAttempts } from "@/lib/db/schema";
+import { currentModelUrl, orderHasOwnModel } from "@/lib/config/order-model-presence";
 import { GalleryReviewClient } from "./client";
 
 export default async function AdminGalleryReviewPage({
@@ -42,7 +43,11 @@ export default async function AdminGalleryReviewPage({
       galleryReviewReason: true,
       createdAt: true,
       // Admin-uploaded model is the real source since auto-3D was removed.
+      modelUploadedAt: true,
+      modelGlbKey: true,
       modelGlbUrl: true,
+      modelStlKey: true,
+      modelStlUrl: true,
     },
   });
   if (!order) notFound();
@@ -65,8 +70,14 @@ export default async function AdminGalleryReviewPage({
           galleryReviewReason: order.galleryReviewReason,
           createdAt: order.createdAt.toISOString(),
           photoUrl: order.photos[0]?.originalUrl ?? null,
-          glbUrl:
-            order.modelGlbUrl ?? order.generationAttempts[0]?.outputGlbUrl ?? null,
+          // The generation attempt stands in only for an order with no model of
+          // its own — otherwise an STL-only revision would preview the
+          // superseded generated mesh here as if it were the figure.
+          glbUrl: currentModelUrl(order, "glb", order.generationAttempts[0]),
+          // Separate from glbUrl so an STL-only order reads "no 3D preview"
+          // rather than "GLB not ready": the gallery publishes from the photo
+          // and never needs a GLB.
+          hasModel: orderHasOwnModel(order) || order.generationAttempts.length > 0,
         }}
       />
     </div>

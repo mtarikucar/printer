@@ -174,19 +174,23 @@ export function JourneyClient({ data }: { data: JourneyData }) {
           Ve işte, elindeki.
         </h2>
 
+        {/* No GLB (an STL-only print revision) means no viewer — and then no
+            "drag to rotate" hint pointing at nothing. The specs below stand. */}
         {data.glbUrl && (
-          <div className="j-frame mt-8 overflow-hidden rounded-[28px]">
-            <ModelViewer
-              url={data.glbUrl}
-              // Slow rotation: they are looking, not inspecting — and it makes
-              // the object feel alive the moment the panel scrolls into view.
-              autoRotate
-              background="#241D30"
-              className="h-[380px] w-full sm:h-[460px]"
-            />
-          </div>
+          <>
+            <div className="j-frame mt-8 overflow-hidden rounded-[28px]">
+              <ModelViewer
+                url={data.glbUrl}
+                // Slow rotation: they are looking, not inspecting — and it makes
+                // the object feel alive the moment the panel scrolls into view.
+                autoRotate
+                background="#241D30"
+                className="h-[380px] w-full sm:h-[460px]"
+              />
+            </div>
+            <p className="j-hint mt-3 text-center">Çevirmek için sürükle</p>
+          </>
         )}
-        <p className="j-hint mt-3 text-center">Çevirmek için sürükle</p>
 
         <dl className="j-spec mt-10">
           <dt>Sipariş</dt>

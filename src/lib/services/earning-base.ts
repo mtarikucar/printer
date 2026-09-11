@@ -76,3 +76,40 @@ export function painterBaseKurus(order: EarningBaseOrder): number {
 export function orderNeedsPainting(paintingPriceKurus: number): boolean {
   return paintingPriceKurus > 0;
 }
+
+export type CarvePaintingResult =
+  | {
+      ok: true;
+      /** Ayrılmadan önceki üretim tabanı (kırılımsız eski siparişte tutarın kendisi). */
+      productionBefore: number;
+      productionAfter: number;
+      paintingAfter: number;
+    }
+  | { ok: false; reason: "invalid_amount" | "exceeds_production" };
+
+/**
+ * Boyama kalemi olmadan satılmış bir siparişte boyacı payını ÜRETİM payından
+ * ayırır. Müşterinin ödediği toplam değişmez; iki tabanın toplamı ayırmadan
+ * önceki toplama eşit kalır (kalem invariant'ı).
+ *
+ * Admin route'u (/api/admin/orders/[id]/add-painting) ve admin ekranındaki
+ * canlı önizleme AYNI fonksiyonu çağırır: ekranda görülen bölüşüm sunucunun
+ * yazacağıyla birebir aynı olmalı.
+ */
+export function carvePaintingShare(
+  order: EarningBaseOrder,
+  paintingKurus: number
+): CarvePaintingResult {
+  if (!Number.isInteger(paintingKurus) || paintingKurus <= 0) {
+    return { ok: false, reason: "invalid_amount" };
+  }
+  const productionBefore = order.productionBaseKurus ?? order.amountKurus;
+  // Üretim payı sıfıra inemez: üretici hâlâ basıyor, bedelsiz iş olmaz.
+  if (paintingKurus >= productionBefore) return { ok: false, reason: "exceeds_production" };
+  return {
+    ok: true,
+    productionBefore,
+    productionAfter: productionBefore - paintingKurus,
+    paintingAfter: order.paintingPriceKurus + paintingKurus,
+  };
+}

@@ -1,9 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
-import { and, eq, desc, inArray } from "drizzle-orm";
+import { and, eq, desc, inArray, asc, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, orderModelRevisions, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
+import { orders, orderPhotos, orderModelRevisions, orderModelFiles, manufacturerEarnings, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
@@ -88,6 +88,49 @@ export default async function AdminOrderDetailPage({
   // Only fetched for orders that actually involve a painter — an ordinary print
   // job pays nothing for this.
   const paintingRelevant = order.needsPainting || !!order.painterId;
+
+  // Every file of every model revision — a revision is a SET of parts (some
+  // jobs are 12-13 STLs), so the single glb/stl pair on the revision header is
+  // only the primary. Queried flat and grouped here; one query, no N+1.
+  const modelFileRows = await db
+    .select()
+    .from(orderModelFiles)
+    .where(eq(orderModelFiles.orderId, order.id))
+    .orderBy(asc(orderModelFiles.revision), asc(orderModelFiles.sortOrder));
+  const filesByRevision = new Map<number, typeof modelFileRows>();
+  for (const f of modelFileRows) {
+    const list = filesByRevision.get(f.revision) ?? [];
+    list.push(f);
+    filesByRevision.set(f.revision, list);
+  }
+
+  // ─── Can the admin still ADD a painting line to this order? ───────────────
+  // Mirrors /api/admin/orders/[id]/add-painting exactly (the route is the
+  // authority; this only decides what the card shows and why). The painting
+  // share is carved out of the production share, so it is only possible before
+  // the manufacturer's earning has accrued.
+  const manufacturerEarningAccrued = order.needsPainting
+    ? false
+    : !!(await db.query.manufacturerEarnings.findFirst({
+        where: and(
+          eq(manufacturerEarnings.orderId, order.id),
+          ne(manufacturerEarnings.status, "reversed")
+        ),
+        columns: { id: true },
+      }));
+  const addPaintingBlockedReason: string | null = order.needsPainting
+    ? null
+    : order.workshopSessionId
+      ? "Atölye siparişine boyama eklenemez: atölye partisi mekâna toplu teslim edilir, boyacı hattına girmez."
+      : order.painterId
+      ? "Sipariş zaten bir boyacıda."
+      : order.shippedAt || ["shipped", "delivered", "rejected"].includes(order.status)
+        ? "Sipariş kargolanmış ya da kapanmış; boyama eklenemez."
+        : manufacturerEarningAccrued
+          ? "Üreticinin hakedişi tahakkuk etmiş; boyama payı artık üretim payından ayrılamaz."
+          : (order.productionBaseKurus ?? order.amountKurus) <= 1
+            ? "Üretim payı boyama ayırmaya yetmiyor."
+            : null;
 
   // ─── Journey QR ──────────────────────────────────────────────────────────
   // Resolved here so the order page can show the code itself rather than a
@@ -327,6 +370,13 @@ export default async function AdminOrderDetailPage({
       uploadedByEmail: r.uploadedByEmail,
       note: r.note,
       createdAt: r.createdAt.toISOString(),
+      files: (filesByRevision.get(r.revision) ?? []).map((f) => ({
+        id: f.id,
+        name: f.fileName,
+        kind: f.kind,
+        sizeBytes: f.sizeBytes,
+        url: getPublicUrl(f.fileKey),
+      })),
     })),
     latestGeneration: latestGeneration ? {
       id: latestGeneration.id,
@@ -393,6 +443,9 @@ export default async function AdminOrderDetailPage({
     journey,
     painting: {
       needsPainting: order.needsPainting,
+      amountKurus: order.amountKurus,
+      canAddPainting: !order.needsPainting && addPaintingBlockedReason === null,
+      addPaintingBlockedReason,
       paintingPriceKurus: order.paintingPriceKurus,
       productionBaseKurus: order.productionBaseKurus,
       painterStatus: order.painterStatus,

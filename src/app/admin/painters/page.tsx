@@ -62,6 +62,7 @@ export default async function AdminPaintersPage() {
     maxConcurrentOrders: p.maxConcurrentOrders,
     acceptingOrders: p.acceptingOrders,
     capabilities: p.capabilities ?? [],
+    mapVisible: p.mapVisible,
     onboardingAcceptedAt: p.onboardingAcceptedAt ? p.onboardingAcceptedAt.toISOString() : null,
     strikeCount: p.strikeCount,
   }));

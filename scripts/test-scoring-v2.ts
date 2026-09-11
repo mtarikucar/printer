@@ -137,8 +137,8 @@ check(
 delete process.env.MFG_W2_DISTANCE;
 
 // ─── weightsVersion ──────────────────────────────────────────────
-check("weightsVersion('v1') === 'v1.1'", weightsVersion("v1") === "v1.1");
-check("weightsVersion('v2') === 'v2.1'", weightsVersion("v2") === "v2.1");
+check("weightsVersion('v1') === 'v1.2'", weightsVersion("v1") === "v1.2");
+check("weightsVersion('v2') === 'v2.2'", weightsVersion("v2") === "v2.2");
 
 // ─── getCanaryPercent ────────────────────────────────────────────
 delete process.env.MANUFACTURER_SCORING_V2_PERCENT;

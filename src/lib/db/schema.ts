@@ -1324,6 +1324,13 @@ export const manufacturers = pgTable("manufacturers", {
   // Does its own hand-painting: may print AND paint a professional-painting
   // order itself (earning the full amount) instead of handing off to a painter.
   paintsInHouse: boolean("paints_in_house").notNull().default(false),
+  // Üretim ağı haritası: bu atölyenin SORUMLU olduğu iller (kendi ili hariç —
+  // konum ili etkin kapsamaya kodda eklenir, bkz. lib/config/network-map.ts).
+  // Admin belirler; hem anasayfadaki public haritayı hem atama mesafe skorunu
+  // (kapsama isabeti = 85) besler.
+  coverageProvinces: jsonb("coverage_provinces").$type<string[]>(),
+  // Partneri public haritadan çıkarır. Kapsama verisi ve atama skoru etkilenmez.
+  mapVisible: boolean("map_visible").notNull().default(true),
   // Onboarding
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
   // Which version of the partnership agreement was accepted. Without it a
@@ -1612,6 +1619,10 @@ export const painters = pgTable("painters", {
   bankName: text("bank_name"),
   maxConcurrentOrders: integer("max_concurrent_orders").notNull().default(5),
   acceptingOrders: boolean("accepting_orders").notNull().default(true),
+  // Boyacıyı public haritadan çıkarır. Boyacılarda kapsama kolonu YOKTUR:
+  // boyacıyı üretici elle seçer, mesafeye göre sıralayan bir ranker yok — veri
+  // toplamak için kolon açmak boşuna yüzey olurdu.
+  mapVisible: boolean("map_visible").notNull().default(true),
   onboardingAcceptedAt: timestamp("onboarding_accepted_at"),
   // Which version of the partnership agreement was accepted. Without it a
   // later edit to the contract text cannot be proven against a partner who

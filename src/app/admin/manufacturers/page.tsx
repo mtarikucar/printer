@@ -71,6 +71,8 @@ export default async function AdminManufacturersPage() {
     acceptingOrders: m.acceptingOrders,
     capabilities: m.capabilities ?? [],
     paintsInHouse: m.paintsInHouse,
+    coverageProvinces: m.coverageProvinces ?? [],
+    mapVisible: m.mapVisible,
     onboardingAcceptedAt: m.onboardingAcceptedAt ? m.onboardingAcceptedAt.toISOString() : null,
   }));
 

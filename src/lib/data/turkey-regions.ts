@@ -106,3 +106,27 @@ export function regionOf(il: string | undefined | null): Region | undefined {
   if (!il) return undefined;
   return IL_TO_REGION[il];
 }
+
+/** Bölge kimliklerinin Türkçe adları — admin bölge çipleri ve harita lejantı. */
+export const REGION_LABELS: Record<Region, string> = {
+  marmara: "Marmara",
+  ege: "Ege",
+  akdeniz: "Akdeniz",
+  ic_anadolu: "İç Anadolu",
+  karadeniz: "Karadeniz",
+  dogu_anadolu: "Doğu Anadolu",
+  guneydogu_anadolu: "Güneydoğu Anadolu",
+};
+
+export const REGION_IDS: readonly Region[] = Object.keys(REGION_LABELS) as Region[];
+
+/**
+ * Bölge → iller. IL_TO_REGION'dan TÜRETİLİR; elle ikinci bir liste tutmak iki
+ * kaynağın sessizce ayrışması demekti (yeni bir il yalnız birine eklenirdi).
+ */
+export const PROVINCES_BY_REGION: Record<Region, string[]> = (() => {
+  const out = Object.fromEntries(REGION_IDS.map((r) => [r, [] as string[]])) as Record<Region, string[]>;
+  for (const [il, region] of Object.entries(IL_TO_REGION)) out[region].push(il);
+  for (const r of REGION_IDS) out[r].sort((a, b) => a.localeCompare(b, "tr"));
+  return out;
+})();

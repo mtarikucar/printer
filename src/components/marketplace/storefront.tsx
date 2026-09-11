@@ -1,12 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import type { NetworkMapData } from "@/lib/config/network-map";
 import type { ProductListItem } from "@/components/product-card";
 import { HeroCreate } from "./hero-create";
 import { CategoryRibbon } from "./category-ribbon";
 import { ProductRow } from "./product-row";
 import { RecentlyViewed } from "./recently-viewed";
 import { CustomStrip } from "./custom-strip";
+
+// 81 ilin geometrisi ~47 KB (~20 KB gz). Ayrı chunk'a alınır ki ağ verisi
+// olmayan (bölümün hiç render edilmediği) ziyaretçi bunu indirmesin. SSR AÇIK
+// kalır — bölüm LCP alanının altında ama içerik HTML'de bulunmalı.
+const NetworkMapSection = dynamic(() =>
+  import("./network-map/network-map-section").then((m) => m.NetworkMapSection)
+);
 
 export interface RootCategory {
   path: string;
@@ -26,9 +35,12 @@ function rootSegment(categoryPath: string | null): string | null {
 export function StorefrontHome({
   products,
   roots,
+  networkMap,
 }: {
   products: ProductListItem[];
   roots: RootCategory[];
+  /** null → ağ verisi çekilemedi ya da hiç partner yok; bölüm çizilmez. */
+  networkMap: NetworkMapData | null;
 }) {
   const d = useDictionary();
 
@@ -59,6 +71,9 @@ export function StorefrontHome({
           viewAllHref={`/shop?category=${encodeURIComponent(r.path)}`}
         />
       ))}
+      {networkMap && networkMap.partners.length > 0 && (
+        <NetworkMapSection data={networkMap} />
+      )}
       <CustomStrip />
     </>
   );

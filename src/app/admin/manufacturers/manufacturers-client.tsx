@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import Link from "next/link";
 import {
   PartnerApplicationDetails,
   BoolChip,
@@ -43,6 +44,8 @@ interface Manufacturer {
   acceptingOrders: boolean;
   capabilities: string[];
   paintsInHouse: boolean;
+  coverageProvinces: string[];
+  mapVisible: boolean;
   onboardingAcceptedAt: string | null;
 }
 
@@ -425,6 +428,46 @@ function MfrRow({
                               {
                                 k: "Kendi boyama",
                                 v: <BoolChip value={m.paintsInHouse} yes="Evet (boyayıp kargolar)" no="Hayır (boyacıya gönderir)" />,
+                              },
+                            ],
+                          },
+                          {
+                            title: "Etki Alanı",
+                            items: [
+                              {
+                                k: "Sorumlu iller",
+                                v:
+                                  m.coverageProvinces.length > 0
+                                    ? `${m.coverageProvinces.length} il: ${m.coverageProvinces.join(", ")}`
+                                    : null,
+                              },
+                              {
+                                // Ham map_visible "public haritada mı?" sorusunun
+                                // yanıtı DEĞİL: public sorgu ayrıca status='active'
+                                // istiyor. Askıdaki bir partner için "Görünür"
+                                // yazmak, gizlilik denetimi yapan admin'e yanlış
+                                // cevap vermek olurdu.
+                                k: "Haritada",
+                                v:
+                                  m.status === "active" ? (
+                                    <BoolChip value={m.mapVisible} yes="Yayında" no="Gizli" />
+                                  ) : (
+                                    <span className="text-gray-500">
+                                      Yayında değil ({m.mapVisible ? "izinli" : "gizli"})
+                                    </span>
+                                  ),
+                              },
+                              {
+                                k: "Düzenle",
+                                v:
+                                  m.status === "rejected" ? null : (
+                                    <Link
+                                      href={`/admin/network-map?partner=${m.id}`}
+                                      className="text-cyan-700 underline"
+                                    >
+                                      Haritada düzenle
+                                    </Link>
+                                  ),
                               },
                             ],
                           },

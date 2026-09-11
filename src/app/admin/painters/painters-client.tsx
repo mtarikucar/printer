@@ -41,6 +41,7 @@ interface Painter {
   maxConcurrentOrders: number;
   acceptingOrders: boolean;
   capabilities: string[];
+  mapVisible: boolean;
   onboardingAcceptedAt: string | null;
   strikeCount: number;
 }
@@ -411,6 +412,17 @@ export function PaintersClient({
                               { k: "Eş zamanlı iş limiti", v: p.maxConcurrentOrders },
                               { k: "İş alıyor", v: <BoolChip value={p.acceptingOrders} /> },
                               { k: "Uyarı (strike)", v: p.strikeCount },
+                              {
+                                k: "Haritada",
+                                v:
+                                  p.status === "active" ? (
+                                    <BoolChip value={p.mapVisible} yes="Yayında (adsız)" no="Gizli" />
+                                  ) : (
+                                    <span className="text-gray-500">
+                                      Yayında değil ({p.mapVisible ? "izinli" : "gizli"})
+                                    </span>
+                                  ),
+                              },
                             ],
                           },
                           {

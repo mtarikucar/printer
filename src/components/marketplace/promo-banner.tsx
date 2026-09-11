@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { PixelGrid } from "./pixel-grid";
 
 /**
  * Storefront banner row: a primary shop-the-marketplace card (mascot
@@ -33,23 +34,6 @@ function Voxel({
 }
 
 // Faint pixel-grid texture tying the cards to the mascot's voxel world.
-function PixelGrid({ light }: { light?: boolean }) {
-  const line = light ? "rgba(255,255,255,0.07)" : "rgba(8,145,178,0.07)";
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-0"
-      style={{
-        backgroundImage: `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`,
-        backgroundSize: "22px 22px",
-        maskImage: "radial-gradient(120% 120% at 70% 40%, black 30%, transparent 75%)",
-        WebkitMaskImage:
-          "radial-gradient(120% 120% at 70% 40%, black 30%, transparent 75%)",
-      }}
-    />
-  );
-}
-
 function hideOnError(e: React.SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.style.display = "none";
 }

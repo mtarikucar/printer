@@ -6,6 +6,8 @@ import { StorefrontHome } from "@/components/marketplace/storefront";
 import { type ProductListItem } from "@/components/product-card";
 import { getPublicImageUrl } from "@/lib/services/storage";
 import { getChildCategories } from "@/lib/services/categories";
+import { getNetworkMapData } from "@/lib/services/network-map";
+import type { NetworkMapData } from "@/lib/config/network-map";
 
 export const revalidate = 60;
 
@@ -36,6 +38,16 @@ export default async function HomePage() {
     ratingCount: p.ratingCount,
   }));
 
+  // Üretim ağı haritası DEKORATİF bir bölümdür: verisi gelmezse anasayfa
+  // çökmemeli. Yerel geliştirme veritabanı şema ile senkron değil (ör. painters
+  // tablosu yok), bu yüzden sorgu gerçekten patlayabilir.
+  let networkMap: NetworkMapData | null = null;
+  try {
+    networkMap = await getNetworkMapData();
+  } catch (err) {
+    console.warn("[home] üretim ağı haritası yüklenemedi:", err);
+  }
+
   // Root categories drive the ribbon + one shelf per populated root.
   const roots = (await getChildCategories(null)).map((c) => ({
     path: c.path,
@@ -45,7 +57,7 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
-      <StorefrontHome products={items} roots={roots} />
+      <StorefrontHome products={items} roots={roots} networkMap={networkMap} />
     </main>
   );
 }

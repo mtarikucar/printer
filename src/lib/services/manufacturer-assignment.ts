@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { regionOf } from "@/lib/data/turkey-regions";
+import { effectiveCoverage } from "@/lib/config/network-map";
 import {
   getAssignmentWeights,
   type ScoringProfile,
@@ -85,13 +86,53 @@ export interface CandidateScore {
   ineligibleReason?: string;
 }
 
-function distanceScore(orderCity: string | undefined, mfgCity: string | undefined): number {
-  if (!orderCity || !mfgCity) return 30;
-  if (orderCity === mfgCity) return 100;
+/**
+ * Mesafe skorunun NEDEN o değer olduğu. Skorun kendisinden geri çıkarılamaz:
+ * admin adaylara bakarken 85'i "Aynı bölge" diye etiketlemek yanlış olurdu
+ * (kapsama isabeti bambaşka bir gerekçedir ve farklı bölgede de olabilir).
+ */
+export type DistanceKind = "same_il" | "coverage" | "same_region" | "other" | "unknown";
+
+export interface DistanceVerdict {
+  score: number;
+  kind: DistanceKind;
+}
+
+/**
+ * Sipariş ili ile atölye arasındaki yakınlık skoru.
+ *
+ * Kademeler ve SIRA (sıra kuralın kendisidir):
+ *  1. sipariş ili bilinmiyor      → 30
+ *  2. atölyenin ili = sipariş ili → 100
+ *  3. sipariş ili ETKİ ALANINDA   → 85
+ *  4. aynı bölge                  → 60
+ *  5. atölyenin ili bilinmiyor    → 30
+ *  6. aksi                        → 20
+ *
+ * Kapsama kontrolü "il bilinmiyor" kontrolünden ÖNCE gelir: adresi olmayan ama
+ * admin'in etki alanı tanımladığı bir atölye geçerli bir durumdur ve o iller
+ * için tam olarak bu skoru hak eder.
+ *
+ * 85, aynı ilin (100) altında ve aynı bölgenin (60) üstünde: sorumluluk
+ * verilmiş il o atölyeyi öne çeker ama siparişin KENDİ ilindeki atölye hâlâ
+ * önde kalır. Uyarı: 81 ile yayılmış bir kapsama, ülke genelinde aynı-bölge
+ * rakiplerini geçer — admin editörü bu yüzden geniş seçimde uyarı gösterir.
+ */
+export function distanceScore(
+  orderCity: string | undefined,
+  mfgCity: string | undefined,
+  coverage?: readonly string[] | null
+): DistanceVerdict {
+  if (!orderCity) return { score: 30, kind: "unknown" };
+  if (mfgCity && orderCity === mfgCity) return { score: 100, kind: "same_il" };
+  if (coverage?.includes(orderCity)) return { score: 85, kind: "coverage" };
+  if (!mfgCity) return { score: 30, kind: "unknown" };
   const orderRegion = regionOf(orderCity);
   const mfgRegion = regionOf(mfgCity);
-  if (orderRegion && mfgRegion && orderRegion === mfgRegion) return 60;
-  return 20;
+  if (orderRegion && mfgRegion && orderRegion === mfgRegion) {
+    return { score: 60, kind: "same_region" };
+  }
+  return { score: 20, kind: "other" };
 }
 
 function loadScore(currentLoad: number, max: number): number {
@@ -420,8 +461,12 @@ export async function rankManufacturersForOrder(
           : Promise.resolve(70),
       ]);
       const sameProductUnits = batchUnits.get(m.id) ?? 0;
+      // Etkin kapsama = admin'in verdiği iller + atölyenin kendi ili. Public
+      // harita ile atama aynı fonksiyondan beslenir, ikisi ayrışamaz.
+      const coverage = effectiveCoverage(m.coverageProvinces, city);
+      const distance = distanceScore(orderCity, city ?? undefined, coverage);
       const scores = {
-        distance: distanceScore(orderCity, city ?? undefined),
+        distance: distance.score,
         load: loadScore(currentLoad, max),
         reliability,
         onTimeDelivery,
@@ -465,8 +510,9 @@ export async function rankManufacturersForOrder(
       // the admin decide. (Compliance score already penalizes missing IBAN.)
 
       const reasons: string[] = [];
-      if (orderCity && city && orderCity === city) reasons.push("Aynı şehir");
-      else if (scores.distance >= 60) reasons.push("Aynı bölge");
+      if (distance.kind === "same_il") reasons.push("Aynı şehir");
+      else if (distance.kind === "coverage") reasons.push("Etki alanı");
+      else if (distance.kind === "same_region") reasons.push("Aynı bölge");
       if (scores.load >= 80) reasons.push("Düşük yük");
       else if (scores.load <= 30 && eligible) reasons.push("Yüksek yük");
       if (scores.reliability >= 85) reasons.push("Güvenilir");

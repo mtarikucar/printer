@@ -78,9 +78,14 @@ export function getAssignmentWeights(profile: ScoringProfile): ScoringWeights {
  * Both bumped to .1 when batchAffinity was introduced: v1's other weights were
  * rebalanced to make room for it, so pre-change rows were scored by a
  * different algorithm and must not be compared against post-change ones.
+ *
+ * Bumped to .2 when partner coverage provinces became a distance tier (a
+ * covered il now scores 85, between same-il 100 and same-region 60). The
+ * weights did not move, but the meaning of the `distance` sub-score did, so
+ * pre- and post-change evaluations are not comparable either.
  */
 export function weightsVersion(profile: ScoringProfile): string {
-  return profile === "v1" ? "v1.1" : "v2.1";
+  return profile === "v1" ? "v1.2" : "v2.2";
 }
 
 /**

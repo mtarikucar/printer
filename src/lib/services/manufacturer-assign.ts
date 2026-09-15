@@ -7,6 +7,7 @@ import {
   orderItems,
   orders,
 } from "@/lib/db/schema";
+import { autoAssignPlacementPlan } from "@/lib/config/flags";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
@@ -73,9 +74,17 @@ export async function isOrderRefunded(orderId: string): Promise<boolean> {
  *
  * An order with nothing to print must never reach a partner — that is exactly
  * how an assigned order ended up showing someone an empty screen. Printable
- * content = an uploaded model, a legacy generated model, a marketplace product
- * (its own or per line item), or — for a manual/WhatsApp order — at least one
- * written line item.
+ * content = a FILE or a PRODUCT: an uploaded model, the order's own model
+ * columns, a legacy generated model, or a marketplace product (its own or per
+ * line item).
+ *
+ * Written line items (`selectedAddons`) used to count too, and that was the
+ * bug: an admin typing "Özel figür ×1 · ₺3.500" produced a printable-looking
+ * order with no mesh anywhere, so it was handed to a manufacturer who opened
+ * it and found a price and nothing to print. A description is a price
+ * agreement, not a print job — the owner's rule (manual-orders-without-model)
+ * is that such an order waits at `awaiting_model` until the model lands, and
+ * the admin upload-model route places it the moment it does.
  *
  * Also the discriminator that keeps `kickOffMarketplaceOrder` honest: a
  * platform catalogue product has a productId, an admin-typed WhatsApp order
@@ -90,7 +99,6 @@ export async function orderHasPrintableContent(orderId: string): Promise<boolean
       modelStlKey: true,
       productId: true,
       uploadedModelId: true,
-      selectedAddons: true,
     },
     with: {
       generationAttempts: {
@@ -106,8 +114,7 @@ export async function orderHasPrintableContent(orderId: string): Promise<boolean
     target.modelStlKey ||
     target.productId ||
     target.uploadedModelId ||
-    target.generationAttempts.length > 0 ||
-    (target.selectedAddons?.length ?? 0) > 0
+    target.generationAttempts.length > 0
   ) {
     return true;
   }
@@ -123,7 +130,11 @@ export async function orderHasPrintableContent(orderId: string): Promise<boolean
 export type AssignFailure =
   | "manufacturer_unavailable"
   | "no_printable_content"
-  | "not_assignable";
+  | "not_assignable"
+  // Satıcının kendi katalog ürünü, hedef atölye o satıcı DEĞİL. Ayrı bir üye,
+  // çünkü admin'e söylenecek şey "atanamaz" değil "bu işi yalnız sahibi
+  // basabilir"dir ve bu cevap bir yarış kaybı gibi tekrar denenmemelidir.
+  | "seller_owned";
 
 /**
  * Admin-facing Turkish copy per failure, shared by the single and the bulk
@@ -136,10 +147,94 @@ export type AssignFailure =
 export const ASSIGN_FAILURE_MESSAGES: Record<AssignFailure, string> = {
   manufacturer_unavailable: "Üretici bulunamadı ya da aktif değil.",
   no_printable_content:
-    "Bu siparişte üreticiye gönderilecek basılabilir içerik yok (model, ürün veya kalem). Önce 3D modeli yükleyin ya da sipariş kalemlerini girin.",
+    "Bu siparişte üreticiye gönderilecek basılabilir içerik yok (model dosyası ya da katalog ürünü). Yazılı kalemler tek başına yetmez: önce 3D modeli yükleyin.",
   not_assignable:
     "Sipariş atanamaz: bulunamadı, onaylı değil, zaten atanmış ya da iade edilmiş.",
+  // Çağıranın elinde satıcının ADI varsa (AssignResult bunu geri veriyor) daha
+  // iyi bir cümle kurabilir; bu, adı çözülemediğinde de doğru kalan hâlidir.
+  seller_owned:
+    "Bu sipariş bir satıcının kendi kataloğundan çıktı: yalnız o atölyeye atanabilir, başka bir atölyeye verilemez.",
 };
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * PAZARYERİ MÜLKİYET KURALI (E-C1)
+ *
+ * Kural tek cümle: satıcının kendi kataloğundan çıkan sipariş YALNIZ o satıcının
+ * atölyesinde basılır. Ürünün dosyaları satıcıya aittir; rakip bir atölyeye
+ * bastırmak, satıcının ürününü rakibine vermektir.
+ *
+ * Kural artık ÇAĞIRAN BAŞINA değil, siparişi üreticiye yazan TEK NOKTADA durur
+ * (assignManufacturerToOrder). Rota başına kopyalandığı sürece bir sonraki
+ * yazıcı onu unutabiliyordu — nitekim unutuldu da: atamayı geri alıp doğrudan
+ * başka bir atölyeye devreden rota kendi UPDATE'ini yazıyor ve hiçbir mülkiyet
+ * kontrolü yapmıyordu.
+ *
+ * Karar BURADA YENİDEN YAZILMAZ; otomatik atamanın saf kuralından okunur
+ * (autoAssignPlacementPlan). `declined`/`exclude` listeleri bilerek boş geçilir:
+ * onlar "şu an OTOMATİK verme" sinyalleridir, mülkiyetin kendisi değil — admin
+ * siparişi satıcının KENDİ atölyesine her zaman verebilmelidir.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Bu yerleştirme mülkiyet kuralını çiğner mi? (saf; DB yok) */
+export function sellerOwnedPlacementBlocked(
+  sellerManufacturerId: string | null,
+  targetManufacturerId: string
+): boolean {
+  const plan = autoAssignPlacementPlan({
+    sellerManufacturerId,
+    declinedManufacturerIds: [],
+    excludeManufacturerIds: [],
+  });
+  return plan.kind === "seller" && plan.manufacturerId !== targetManufacturerId;
+}
+
+/**
+ * Aynı kuralın SQL ikizi: "bu siparişin sahibi yok ya da sahibi tam olarak bu
+ * atölye". Tek tek atama bu fonksiyondan geçer; TOPLU yazıcılar (atölye seansı
+ * partisi) tek UPDATE ile onlarca siparişe dokunduğu için kuralı satır satır
+ * çağıramaz — koşulu WHERE'e koyarlar ve dışarıda kalan siparişi ayrıca
+ * raporlarlar.
+ */
+export function sellerPlacementGuard(manufacturerId: string): SQL {
+  return or(
+    isNull(orders.sellerManufacturerId),
+    eq(orders.sellerManufacturerId, manufacturerId)
+  )!;
+}
+
+/**
+ * Denetlenebilir bir aşma gerekçesinin ALT SINIRI (karakter).
+ *
+ * Neden BURADA: baraj, aşmayı kabul eden yerin kuralıdır. Rotalara bırakıldığı
+ * sürece her rota kendi sayısını yazdı ve biri gevşek kaldı — tek atama ucu 10
+ * karakter isterken geri alma ucu zaten zorunlu olan 3 karakterlik "sebep"i
+ * gerekçe yerine geçiriyordu, yani aynı mülkiyet aşması oradan "abc" ile
+ * geçebiliyordu. Rotalar bunu admin'e ERKEN söylemek için içe aktarır; son sözü
+ * kapı söyler.
+ */
+export const SELLER_OVERRIDE_REASON_MIN_LENGTH = 10;
+
+/** Siparişin sahibi (ve adı) — reddi ADIYLA söyleyebilmek için. */
+async function loadSellerOwnership(orderId: string): Promise<{
+  sellerManufacturerId: string | null;
+  sellerName: string | null;
+}> {
+  const [row] = await db
+    .select({
+      sellerManufacturerId: orders.sellerManufacturerId,
+      sellerName: manufacturers.companyName,
+    })
+    .from(orders)
+    .leftJoin(manufacturers, eq(manufacturers.id, orders.sellerManufacturerId))
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  // Sipariş yoksa mülkiyet de yoktur: cevabı aşağıdaki korumalı UPDATE verir
+  // (not_assignable), yoksa var olmayan bir sipariş "satıcının" sanılırdı.
+  return {
+    sellerManufacturerId: row?.sellerManufacturerId ?? null,
+    sellerName: row?.sellerName ?? null,
+  };
+}
 
 export type AssignResult =
   | {
@@ -151,7 +246,17 @@ export type AssignResult =
         status: string;
       };
     }
-  | { ok: false; reason: AssignFailure };
+  | {
+      ok: false;
+      reason: AssignFailure;
+      /**
+       * `seller_owned` reddinde siparişin SAHİBİ. Mesajı burada değil çağıranda
+       * kurmak için: rota "X atölyesinin kendi kataloğundan çıktı" diyebilmeli,
+       * servis ise adı çözülemediğinde de doğru kalan genel cümleyi taşır.
+       */
+      sellerManufacturerId?: string | null;
+      sellerName?: string | null;
+    };
 
 export interface AssignArgs {
   orderId: string;
@@ -168,6 +273,22 @@ export interface AssignArgs {
   statusGuard?: SQL | null;
   /** Skip the printable-content check when the caller already proved it. */
   skipPrintableCheck?: boolean;
+  /**
+   * SATICI KURALININ BİLİNÇLİ AŞILMASI — yalnız admin, yalnız denetlenerek.
+   *
+   * Sahibin kararı: satıcının kendi ürünü kazara başka bir atölyeye GİTMEMELİ,
+   * ama satıcının atölyesi temelli kapandığında admin'in elinde bir çıkış
+   * KALMALI. Bu yüzden aşma mümkündür ve üç şeyi birden ister: açık bayrak,
+   * işlemi yapan admin (`adminEmail`) ve bir GEREKÇE. Üçü tamam değilse aşma
+   * çalışmaz (aşağıda `seller_owned` ile reddedilir): denetlenemeyen bir aşma,
+   * aşma değil sessiz bir ihlaldir.
+   *
+   * Toplu atama bunu ASLA geçmez (bkz. bulk-orders/assign): tek tıkla elli
+   * siparişte mülkiyet aşmak, kuralın kendisini kaldırmak olurdu.
+   */
+  allowSellerOverride?: boolean;
+  /** Aşmanın denetim satırına yazılan gerekçesi. Aşma varsa ZORUNLUDUR. */
+  sellerOverrideReason?: string;
 }
 
 /**
@@ -180,11 +301,57 @@ export interface AssignArgs {
  *
  * It also refuses a refunded order (notRefundedGuard): that fails with
  * `not_assignable`, whoever the caller is.
+ *
+ * Ve MÜLKİYET kuralını uygular (E-C1): satıcının kendi katalog ürünü başka bir
+ * atölyeye verilemez — `seller_owned` ile reddedilir. Kural buradadır ki
+ * siparişe üretici yazan HER yol onu YAPISI GEREĞİ uygulasın; çağıran başına
+ * kopyalandığında bir yazıcı onu unutmuştu. Admin, denetlenmiş bir aşma
+ * (`allowSellerOverride` + `adminEmail` + gerekçe) ile kuralı bilerek geçebilir.
  */
 export async function assignManufacturerToOrder(
   args: AssignArgs
 ): Promise<AssignResult> {
   const { orderId, manufacturerId } = args;
+
+  // MÜLKİYET, her şeyden ÖNCE. Hedef atölyenin var olup olmadığından da önce:
+  // satıcının ürününü rakibe vermek, kapalı bir atölyeye vermekten daha ağır
+  // bir hatadır ve cevabın "üretici aktif değil" olması sebebi gizlerdi.
+  const ownership = await loadSellerOwnership(orderId);
+  const sellerBreach = sellerOwnedPlacementBlocked(
+    ownership.sellerManufacturerId,
+    manufacturerId
+  );
+  // Aşma DENETLENEBİLİR olmak zorunda: bayrak tek başına yetmez, işlemi yapan
+  // admin ve gerekçe de gerekir. Eksikse aşma YOK sayılır ve sipariş reddedilir
+  // — sessiz bir ihlal, açık bir redden her zaman daha kötüdür.
+  const rawOverrideReason = args.sellerOverrideReason?.trim() ?? "";
+  // Barajın altındaki gerekçe YOK sayılır: aşağıdaki `length > 0` artık
+  // "gerekçe gönderilmiş mi"yi değil "DENETLENEBİLİR bir gerekçe var mı"yı
+  // okur. Baraj kapının kendisinde durduğu için hiçbir çağıran ondan daha
+  // gevşek olamaz — rota kendi sayısını yazsa bile aşma burada düşer.
+  const overrideReason =
+    rawOverrideReason.length >= SELLER_OVERRIDE_REASON_MIN_LENGTH ? rawOverrideReason : "";
+  const overrideAudited =
+    args.allowSellerOverride === true &&
+    !!args.adminEmail &&
+    overrideReason.length > 0;
+  if (sellerBreach && !overrideAudited) {
+    if (args.allowSellerOverride === true) {
+      console.error(
+        `assignManufacturerToOrder: denetlenmemiş satıcı aşması reddedildi (${orderId}) — ` +
+          `adminEmail ve en az ${SELLER_OVERRIDE_REASON_MIN_LENGTH} karakterlik gerekçe zorunlu` +
+          (rawOverrideReason.length > 0
+            ? ` (gönderilen gerekçe ${rawOverrideReason.length} karakter)`
+            : "")
+      );
+    }
+    return {
+      ok: false,
+      reason: "seller_owned",
+      sellerManufacturerId: ownership.sellerManufacturerId,
+      sellerName: ownership.sellerName,
+    };
+  }
 
   const manufacturer = await db.query.manufacturers.findFirst({
     where: and(
@@ -219,6 +386,19 @@ export async function assignManufacturerToOrder(
     notRefundedGuard(),
   ];
   if (statusGuard) conditions.push(statusGuard);
+  // Kuralın SQL ikizi, YAZININ İÇİNDE. Yukarıdaki okuma ile bu UPDATE arasında
+  // siparişin sahibi değişirse (ör. admin pazaryeri alanlarını düzenlerse) ön
+  // kontrol bayatlar; bu koşul o durumda da ihlali yazdırmaz.
+  //
+  // Koşulu yalnız GERÇEK bir ihlalin denetlenmiş aşması düşürebilir. Bayrak tek
+  // başına yetmez: sahibi OLMAYAN bir siparişte de denetlenmiş aşma üçlüsü
+  // gelebilir (rota onu kendi ön okumasına göre gönderir) ve o çağrıda koşulu
+  // düşürmek korumayı hiçbir şey karşılığında kaldırırdı — ön okuma ile yazma
+  // arasına düşen bir sahiplik yazısı korumasız işlenir, üstelik ne denetim
+  // notu ne satıcı bildirimi olurdu (ikisi de `sellerBreach`e bağlı).
+  if (!(overrideAudited && sellerBreach)) {
+    conditions.push(sellerPlacementGuard(manufacturerId));
+  }
 
   const [order] = await db
     .update(orders)
@@ -239,17 +419,72 @@ export async function assignManufacturerToOrder(
 
   if (!order) return { ok: false, reason: "not_assignable" };
 
+  /* ──────────────────────────────────────────────────────────────────────────
+   * BURADAN SONRASI EN İYİ ÇABADIR — hiçbiri fırlatarak dışarı çıkmaz.
+   *
+   * Yukarıdaki UPDATE COMMIT oldu: sipariş üreticinin tezgâhında ve hakediş
+   * bundan sonra o atölyeye işleyecek. Bu noktadan sonra atılan bir hata
+   * atamayı GERİ ALMAZ, yalnızca çağırana "atanamadı" yalanını söyler —
+   * otomatik atama yolunda bunun bedeli somut: order-confirm, atamayı bir
+   * try/catch içinde çağırıyor ve catch'i `{ assigned: false }` döndürüyor,
+   * yani bir Redis kesintisi GERÇEKLEŞMİŞ bir atamayı admin'e "otomatik
+   * atanmadı" diye gösterirdi (üstelik değerlendirme taslağı da düşürülerek).
+   * Bu yüzden denetim satırı, bildirimler ve canlı yayın AYRI AYRI yakalanır
+   * ve gürültülü loglanır: iz kaybolmaz ama dönen sonuç gerçeği söyler.
+   * ────────────────────────────────────────────────────────────────────────── */
+
   if (args.adminEmail) {
-    await db.insert(adminActions).values({
-      orderId,
-      action: "assign_manufacturer",
-      adminEmail: args.adminEmail,
-      notes: `Assigned to ${manufacturer.companyName}`,
-    });
+    // Aşma, atamanın kendisinden AYRI bir olaydır: denetim satırı satıcıyı,
+    // hedefi ve gerekçeyi birlikte adlandırır, çünkü "bu iş rakip atölyeye
+    // nasıl gitti" sorusunun cevabı yalnızca burada durur.
+    const sellerLabel =
+      ownership.sellerName ?? ownership.sellerManufacturerId ?? "bilinmeyen satıcı";
+    const notes = sellerBreach
+      ? `SATICI KURALI AŞILDI: ürünün sahibi ${sellerLabel}, sipariş ${manufacturer.companyName} atölyesine atandı. Gerekçe: ${overrideReason}`
+      : `Assigned to ${manufacturer.companyName}`;
+    try {
+      await db.insert(adminActions).values({
+        orderId,
+        action: "assign_manufacturer",
+        adminEmail: args.adminEmail,
+        notes,
+      });
+    } catch (err) {
+      // Denetim satırı yazılamasa bile aşmanın izi KALMALI: log satırı aynı
+      // cümleyi taşır, böylece "bu iş rakip atölyeye nasıl gitti" sorusunun
+      // cevabı hiçbir hâlde tamamen kaybolmaz.
+      console.error(
+        `assignManufacturerToOrder: denetim satırı yazılamadı (${orderId}) — ${notes}`,
+        err
+      );
+    }
   }
 
-  // Best-effort: a failed inbox/email write must not undo a committed
-  // assignment — the order is already on the partner's bench either way.
+  if (sellerBreach) {
+    // Ürünün SAHİBİ bunu öğrenmek zorunda: kendi kataloğundan çıkan bir iş
+    // başka bir atölyede basılıyor. Bildirim en iyi çabadır — yazılamaması
+    // denetim satırını da atamayı da geri almaz.
+    try {
+      await notifyManufacturer({
+        manufacturerId: ownership.sellerManufacturerId!,
+        type: "order_unassigned",
+        subject: `Kendi ürününüz başka bir atölyeye atandı: ${order.orderNumber}`,
+        body:
+          `${order.orderNumber} numaralı sipariş sizin kataloğunuzdan çıktı, ancak yönetici kararıyla ` +
+          `${manufacturer.companyName} atölyesine atandı.\n\nGerekçe: ${overrideReason}\n\n` +
+          `Sorunuz varsa yöneticiyle iletişime geçin.`,
+        orderId,
+      });
+    } catch (err) {
+      console.error(
+        `assignManufacturerToOrder: satıcı aşma bildirimi gönderilemedi (${orderId})`,
+        err
+      );
+    }
+  }
+
+  // A failed inbox/email write must not undo a committed assignment — the
+  // order is already on the partner's bench either way.
   try {
     await notifyManufacturer({
       manufacturerId,
@@ -266,14 +501,20 @@ export async function assignManufacturerToOrder(
     console.error(`assignManufacturerToOrder: notify failed for ${orderId}`, err);
   }
 
-  await emitOrderChanged({
-    orderId: order.id,
-    orderNumber: order.orderNumber,
-    userId: order.userId,
-    manufacturerId,
-    status: order.status,
-    manufacturerStatus: "assigned",
-  });
+  // Canlı yayın da en iyi çaba: Redis'e ulaşılamaması yalnızca açık ekranların
+  // birkaç saniye geç yenilenmesi demektir, atamanın kendisi olmuş bitmiştir.
+  try {
+    await emitOrderChanged({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      userId: order.userId,
+      manufacturerId,
+      status: order.status,
+      manufacturerStatus: "assigned",
+    });
+  } catch (err) {
+    console.error(`assignManufacturerToOrder: yayın gönderilemedi (${orderId})`, err);
+  }
 
   return {
     ok: true,

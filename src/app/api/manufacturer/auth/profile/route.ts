@@ -1,13 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
+import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { isValidTrIban, normalizeIban } from "@/lib/services/iban";
 import { phoneField } from "@/lib/phone";
+// "Kendi boyama" ödeme etkisi TEK yerden hesaplanır: admin ekranının kullandığı
+// fonksiyonun aynısı. İkinci bir kopya, aynı değişiklik için admin ekranı ile
+// partner ekranının farklı lira söylemesi demekti. Ortak hesap bir SERVİSTE
+// durur, admin rota modülünde değil: oradan import etmek partnerin kendi
+// isteğine admin kimlik doğrulama yığınını (requireAdmin/next-auth) da
+// bağlıyordu.
+import {
+  impactSentence,
+  paintingImpact,
+  type PaintingImpact,
+} from "@/lib/services/painting-impact";
+
+// Yalnız biçimlendirme (para hesabı değil): partnere gösterilen tutar lira.
+const tl = (kurus: number) =>
+  `₺${(kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const addressSchema = z.object({
   adres: z.string().min(5),
@@ -33,6 +49,11 @@ const profileSchema = z.object({
   maxConcurrentOrders: z.number().int().min(1).max(50).optional(),
   acceptingOrders: z.boolean().optional(),
   paintsInHouse: z.boolean().optional(),
+  // Partner, "kendi boyama" değişikliğinin ELİNDEKİ boyalı siparişlerdeki
+  // ödeme etkisini ekranda gördü ve onayladı. Etkilenen sipariş varken bu onay
+  // olmadan kayıt YAPILMAZ (409 + etki dökümü döner) — admin tarafındaki
+  // kuralın aynısı.
+  paintsInHouseAck: z.boolean().optional(),
   // Production materials this manufacturer prints (at least one). Persisted as
   // `material_<m>` capability tags that drive material-based order routing.
   materials: z.array(z.enum(["resin", "filament"])).min(1).optional(),
@@ -48,6 +69,34 @@ const SENSITIVE_FIELDS = [
   "acceptingOrders",
   "paintsInHouse",
 ] as const;
+
+/**
+ * "Kendi boyama" kutusunu ÇEVİRMEDEN önce sorulan soru: bu değişiklik elimde
+ * duran hangi siparişlerde hakediş tabanımı ne kadar değiştirir?
+ *
+ * Salt okunur ve yalnız oturumun KENDİ kaydını okur; rakam admin ekranıyla aynı
+ * fonksiyondan (ve dolayısıyla kargo ucunun kullandığı tabandan) gelir.
+ */
+export async function GET() {
+  const session = await getManufacturerSession();
+  if (!session) {
+    return NextResponse.json({ error: "Oturum açık değil." }, { status: 401 });
+  }
+  const current = await db.query.manufacturers.findFirst({
+    where: eq(manufacturers.id, session.manufacturerId),
+    columns: { id: true, paintsInHouse: true },
+  });
+  if (!current) {
+    return NextResponse.json({ error: "Üretici kaydı bulunamadı." }, { status: 404 });
+  }
+  // Tek anlamlı soru bayrağın TERSİ: form yalnız değeri çevirdiğinde sorar.
+  const impact = await paintingImpact(
+    current.id,
+    current.paintsInHouse,
+    !current.paintsInHouse
+  );
+  return NextResponse.json({ paintsInHouse: current.paintsInHouse, impact });
+}
 
 export async function PATCH(request: NextRequest) {
   const session = await getManufacturerSession();
@@ -116,6 +165,37 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
+  // PARA KAPISI — "kendi boyama" bir tercih kutusu değil, hakediş girdisidir:
+  // boyamalı siparişte üreticiye ödenecek taban bu bayraktan türer
+  // (services/earning-base.ts → manufacturerBaseKurus) ve kargo ucu bayrağı
+  // CANLI okur. Partner bayrağı kendi panelinden çevirdiğinde ELİNDE DURAN
+  // boyalı siparişlerin ödemesi de değişiyordu; üstelik uyarı, onay ve iz
+  // olmadan. Admin tarafındaki kuralın aynısı burada da işler: etkiyi göster,
+  // ayrı onay iste, iz bırak. Fark yalnız dilde — burada partnerin kendisi
+  // okuyor.
+  let paintingChange: PaintingImpact | null = null;
+  if (
+    validated.paintsInHouse !== undefined &&
+    validated.paintsInHouse !== current.paintsInHouse
+  ) {
+    const impact = await paintingImpact(
+      session.manufacturerId,
+      current.paintsInHouse,
+      validated.paintsInHouse
+    );
+    if (impact.count > 0 && validated.paintsInHouseAck !== true) {
+      return NextResponse.json(
+        {
+          error: `Bu değişiklik devam eden ${impact.count} boyalı siparişinizde hakediş tabanınızı toplam ${tl(Math.abs(impact.totalDeltaKurus))} ${impact.totalDeltaKurus < 0 ? "azaltır" : "artırır"}. Kaydetmek için ödeme etkisini onaylayın.`,
+          needsPaintingAck: true,
+          impact,
+        },
+        { status: 409 }
+      );
+    }
+    paintingChange = impact;
+  }
+
   const update: Partial<typeof manufacturers.$inferInsert> = {};
   if (validated.contactPerson !== undefined) update.contactPerson = validated.contactPerson;
   if (validated.phone !== undefined) update.phone = validated.phone;
@@ -170,10 +250,40 @@ export async function PATCH(request: NextRequest) {
   }
   update.updatedAt = new Date();
 
+  // Partnerin kendi yaptığı PARA etkili değişiklik de iz bırakmalı: admin bu
+  // satırı üretici kartında görür ve "bu siparişte taban neden değişti"
+  // sorusunun cevabı tam olarak budur. (admin_actions satırları bir sipariş
+  // istiyor; partner düzeyindeki kararların başka evi yok.)
+  const paintingNote = paintingChange
+    ? formatAdminNoteLine(
+        `Üretici kendi panelinden "kendi boyama" ayarını değiştirdi: ${current.paintsInHouse ? "Evet" : "Hayır"} → ${validated.paintsInHouse ? "Evet" : "Hayır"} (${impactSentence(paintingChange)})`
+      )
+    : null;
+
   await db
     .update(manufacturers)
-    .set(update)
+    .set({
+      ...update,
+      // Not SQL tarafında eklenir: admin aynı anda yazarsa biri diğerinin
+      // notunu ezmesin (admin rotasıyla aynı kural).
+      ...(paintingNote
+        ? {
+            notes: sql`CASE WHEN ${manufacturers.notes} IS NULL OR ${manufacturers.notes} = '' THEN ${paintingNote} ELSE ${manufacturers.notes} || E'\n' || ${paintingNote} END`,
+          }
+        : {}),
+    })
     .where(eq(manufacturers.id, session.manufacturerId));
 
-  return NextResponse.json({ success: true, ibanPending });
+  return NextResponse.json({
+    success: true,
+    ibanPending,
+    // Kayıttan SONRA da söylenir: partner neyi onayladığını ekranda görmeli.
+    painting:
+      paintingChange && paintingChange.count > 0
+        ? {
+            count: paintingChange.count,
+            totalDeltaKurus: paintingChange.totalDeltaKurus,
+          }
+        : null,
+  });
 }

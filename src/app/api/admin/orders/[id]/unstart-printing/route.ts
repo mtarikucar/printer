@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orders, adminActions } from "@/lib/db/schema";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 /**
  * Undo an admin self-fulfilled "start printing".
@@ -72,5 +73,23 @@ export async function POST(
     status: order.status,
   }).catch((e) => console.error("unstart-printing: emit failed", e));
 
-  return NextResponse.json({ success: true });
+  // Bu geçiş siparişi tam olarak "onaylı + atanmamış" hâline sokar — yani
+  // otomatik atamanın tetiklendiği hâle. Yukarıdaki `isNull(manufacturerId)`
+  // koşulu yüzünden buraya ancak üreticisiz bir sipariş gelebilir, dolayısıyla
+  // atanacak bir sipariş her zaman gerçekten boştadır. Tetiklemezsek baskıyı
+  // geri alan admin, sistemin kendiliğinden yapacağı atamayı elle aramak
+  // zorunda kalırdı; siparişi "onaylı + atanmamış" bırakan diğer sekiz geçişin
+  // hepsinde bu çağrı var, eksik olan tek yer burasıydı.
+  //
+  // Koşulsuz: kapıların hepsi (tür anahtarı, iade, durum, basılabilir içerik)
+  // fonksiyonun kendi içinde ve her siparişte güvenli. Beklenerek çağrılır ki
+  // admin sayfayı yenilediğinde atanmış üreticiyi görsün; fonksiyon asla
+  // fırlatmaz, yani bu cevabı bozamaz.
+  const placement = await autoAssignIfEligible(id, { reason: "baskı geri alındı" });
+
+  return NextResponse.json({
+    success: true,
+    autoAssigned: placement.assigned,
+    ...(placement.skipped ? { autoAssignSkipped: placement.skipped } : {}),
+  });
 }

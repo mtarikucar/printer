@@ -5,6 +5,7 @@ import { orderModelApprovals, orders } from "@/lib/db/schema";
 import { getPublicUrl } from "./storage";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { notRefundedGuard } from "./manufacturer-assign";
+import { autoAssignIfEligible } from "./order-confirm";
 
 /**
  * The customer's approval of the 3D model, before anything is printed.
@@ -184,6 +185,12 @@ export interface DecideResult {
    * know that flag keep answering with a friendly no-op.
    */
   refunded?: boolean;
+  /**
+   * Onay siparişi üreticiye yerleştirdi mi? Yalnız BEKLENEN otomatik atama
+   * yolunda (SLA süpürmesinin otomatik onayı) doludur; müşteri kendi
+   * dokunuşunda atamayı beklemez (bkz. aşağıdaki not).
+   */
+  autoAssigned?: boolean;
 }
 
 /**
@@ -279,6 +286,28 @@ export async function decideModelApproval(args: {
         sql`${orderModelApprovals.decidedAt} is null`
       )
     );
+
+  // Müşterinin onayı, meshy_auto siparişini "onaylı + atanmamış" hâline sokan
+  // geçiştir — otomatik atama tam olarak burada devreye girer. Tetikleyici
+  // ROTAYA değil bu fonksiyona konuldu: hem /onay sayfası hem onay SLA
+  // süpürmesi buradan geçer, iki kopya zamanla ayrışırdı.
+  //
+  // Bekleme kuralı: SLA'nın otomatik onayı BEKLENİR (worker'da gecikmenin
+  // maliyeti yok, karşılığında süpürme kaydı "atandı mı"yı yazabiliyor);
+  // müşterinin kendi dokunuşunda beklenmez — aday puanlama sorguları
+  // "Onaylıyorum" tıklamasının cevabını geciktirmemeli.
+  if (nextStatus === "approved") {
+    const reason =
+      args.decision === "auto_approved" ? "onay SLA otomatik onayı" : "müşteri onayı";
+    if (args.decision === "auto_approved") {
+      const placement = await autoAssignIfEligible(order.id, { reason });
+      return { ok: true, status: nextStatus, autoAssigned: placement.assigned };
+    }
+    // Fırlatmaz; .catch yalnız yüzen söz zinciri için.
+    void autoAssignIfEligible(order.id, { reason }).catch((err) =>
+      console.error(`[ATAMA] müşteri onayı sonrası atama hata verdi: ${order.id}`, err)
+    );
+  }
 
   return { ok: true, status: nextStatus };
 }

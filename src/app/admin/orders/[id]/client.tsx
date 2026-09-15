@@ -34,6 +34,19 @@ import {
   type PartyShare,
   type PartnerEarningRow,
 } from "@/lib/config/order-money";
+import {
+  DISTANCE_MODEL_LABELS_TR,
+  SCORE_KEYS,
+  SCORE_LABELS_TR,
+  SCORE_SHORT_LABELS_TR,
+  comparisonTitleTr,
+  placementDivergence,
+  placementLabel,
+  sideVersionLabel,
+  type EvaluationDecision,
+  type EvaluationSide,
+  type ScoreKey,
+} from "@/app/admin/scoring-evaluations/evaluation-view";
 
 /**
  * Everything the painting leg of an order is doing. Populated only for orders
@@ -121,6 +134,35 @@ const PAINTER_ACTION_LABEL: Record<string, string> = {
   ship: "Kargoladı",
   admin_revoked: "Admin geri aldı",
 };
+
+/**
+ * Mülkiyet devri gerekçesini soran kutu (hem atama hem geri alma kullanır).
+ *
+ * BARAJIN SAYISI BU DOSYADA YAZILI DEĞİLDİR. Baraj, aşmayı kabul eden kapının
+ * sabitidir (SELLER_OVERRIDE_REASON_MIN_LENGTH, manufacturer-assign.ts) ve bu
+ * dosya bir istemci bileşeni: o modül DB + iş kuyruğu import ettiği için
+ * tarayıcı paketine giremez (bu ekranın DB modülünü değer olarak import
+ * etmemesi scripts/test-order-model-files.ts'te ayrıca kurala bağlanmıştır).
+ * Sayıyı buraya elle kopyalamak ekranla kapının ayrı düşmesi demekti; regresyon
+ * tam olarak öyle doğdu: ekran üç karakteri yeterli sandı, kapı on istedi ve
+ * admin çıkışı olmayan bir 400'e kilitlendi. Bu yüzden sayıyı SUNUCUNUN kendi
+ * cümlesi taşır — kısa gerekçe 400 ile döner ve kutu bu kez o cümleyle yeniden
+ * açılır, yani admin her hâlde bir sonraki adımı görür.
+ */
+const SELLER_OVERRIDE_REASON_PROMPT =
+  "Mülkiyet devrinin gerekçesi — denetim kaydına yazılacak ve satıcıya bildirim gidecek:";
+
+function promptSellerOverrideReason(
+  message: string,
+  current: string
+): string | null {
+  const typed = window.prompt(message, current);
+  // Vazgeçmek de boş bırakmak da "aşma yapma" demektir: gerekçesiz bir devri
+  // kapı zaten reddeder, isteği hiç göndermeyiz.
+  if (typed === null) return null;
+  const trimmed = typed.trim();
+  return trimmed ? trimmed : null;
+}
 
 // ─── Types ───────────────────────────────────────────────────
 interface OrderData {
@@ -254,12 +296,21 @@ interface Props {
       currentLoad: number;
       maxConcurrentOrders: number;
       acceptingOrders: boolean;
-      scores: { distance: number; load: number; reliability: number; compliance: number };
+      scores: Record<ScoreKey, number>;
       totalScore: number;
       reasons: string[];
       eligible: boolean;
       ineligibleReason?: string;
     }[];
+    /**
+     * Atama KARARLARI, en yenisi başta (kayıt satırları değil: bir karar birden
+     * çok satır yazar, sunucu onları eşleyip gönderir). Boş dizi = bu sipariş
+     * için hiç değerlendirme yazılmamış: elle atanmış, otomatik atamadan önce
+     * açılmış eski bir sipariş, ya da satıcının KENDİ atölyesine yerleştirilmiş
+     * olabilir — mülkiyet yerleştirmesi sıralayıcıya hiç girmez, bu yüzden
+     * otomatik olsa bile değerlendirme satırı yazmaz (order-confirm.ts).
+     */
+    assignmentDecisions?: EvaluationDecision[];
   };
   locale: string;
 }
@@ -1109,9 +1160,424 @@ function MoneyBreakdownCard({
   );
 }
 
+/** Bir adayın alt skorları. Kaydedilmemiş bileşen hiç çizilmez. */
+function ScoreBars({ scores }: { scores: Partial<Record<ScoreKey, number>> }) {
+  const present = SCORE_KEYS.filter((k) => scores[k] !== undefined);
+  if (present.length === 0) return null;
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {present.map((k) => {
+        const value = scores[k] ?? 0;
+        return (
+          <div key={k} className="space-y-1">
+            <div className="flex justify-between text-[10px] text-gray-500">
+              <span>{SCORE_SHORT_LABELS_TR[k]}</span>
+              <span className="font-medium text-gray-700">{value}</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full bg-indigo-500"
+                style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Değerlendirmenin bir tarafı: kazanan + ilk üç adayın skor dökümü.
+ *
+ * "İşi alan" rozeti KARARIN KENDİ damgasından okunur, siparişin bugünkü
+ * üreticisinden değil. Eski rozet ("atanan") bugünkü üreticiye bakıyordu: iş
+ * karardan sonra devredildiğinde aynı kart kendisiyle çelişiyor, üstünde "iş bu
+ * karardan sonra devredildi" yazarken dökümde o yeni atölyeyi bu kararın
+ * seçimiymiş gibi işaretliyordu. Kayıt bilmiyorsa rozet de yoktur.
+ */
+function EvaluationSideBlock({
+  side,
+  title,
+  placedManufacturerId,
+}: {
+  side: EvaluationSide;
+  title: string;
+  /** Kararın işi verdiği atölye; null = kayıt bunu hiç yazmamış. */
+  placedManufacturerId: string | null;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-800">{title}</p>
+        <span className="text-[10px] text-gray-500">
+          <code className="rounded bg-gray-100 px-1">{sideVersionLabel(side)}</code>
+          {side.distanceModel
+            ? ` · ${DISTANCE_MODEL_LABELS_TR[side.distanceModel] ?? side.distanceModel}`
+            : ""}
+        </span>
+      </div>
+      {side.candidates.length === 0 ? (
+        <p className="mt-2 text-xs text-gray-500">
+          {side.winnerName
+            ? `Seçilen: ${side.winnerName} — skor dökümü kaydedilmemiş.`
+            : "Bu taraf için kayıt yok."}
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {side.candidates.map((c, i) => {
+            const isWinner =
+              !!c.manufacturerId && c.manufacturerId === side.winnerId;
+            const isPlaced =
+              !!c.manufacturerId && c.manufacturerId === placedManufacturerId;
+            return (
+              <li
+                key={c.manufacturerId ?? i}
+                className={`rounded-lg p-2 ${
+                  isWinner
+                    ? "bg-emerald-50 ring-1 ring-emerald-200"
+                    : "bg-gray-50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-xs font-medium text-gray-800">
+                    {c.companyName ?? "—"}
+                    {isWinner && (
+                      <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-700">
+                        seçilen
+                      </span>
+                    )}
+                    {isPlaced && !isWinner && (
+                      <span className="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-700">
+                        işi alan
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-sm font-bold text-gray-700">
+                    {c.totalScore ?? "—"}
+                  </span>
+                </div>
+                <ScoreBars scores={c.scores} />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {/* Rozetin YOKLUĞU da bir iddiadır ("kimse almadı" gibi okunur): kayıt
+          işi kime verdiğini yazmamışsa bu açıkça söylenir. */}
+      {side.candidates.length > 0 && !placedManufacturerId && (
+        <p className="mt-2 text-[11px] text-gray-500">
+          Bu kararın işi hangi atölyeye verdiği kayıtlı değil; “işi alan”
+          işareti gösterilemiyor.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Bu iş neden bu atölyeye gitti?"
+ *
+ * Kaynak, atama kararının ANINDA yazılmış değerlendirme kayıtlarıdır; bu kart
+ * onları okur, yeniden hesaplamaz. Sayfa açılışında yeniden sıralasaydı yük,
+ * güvenilirlik ve etki alanı o günden beri değiştiği için admin'e kararı
+ * açıklamayan — hatta onunla çelişen — bir tablo gösterirdi.
+ *
+ * MANŞET KARARDIR, KAYIT SATIRI DEĞİL. Bir karar tabloya birden çok satır yazar
+ * (ağırlık karşılaştırması + sürekli mesafe gölgesi) ve bu satırlar
+ * mikrosaniyelerle ayrılır. "En yeni satırı" manşete almak, hangi
+ * karşılaştırmanın öne çıkacağını iki eşzamanlı INSERT'ün yarışına bırakıyordu;
+ * kardeş satır da "önceki değerlendirme" diye görünüyordu — oysa öncesi değil,
+ * aynı anın öbür yarısıydı. Sunucu satırları karara eşlediği için burada canlı
+ * seçim BİR KEZ yazılır, her gölge karşılaştırması adıyla etiketlenir ve
+ * "önceki" başlığı yalnızca gerçekten daha eski KARARLARA ayrılır.
+ */
+function AssignmentEvaluationCard({
+  decisions,
+  assignedManufacturerId,
+  loc,
+}: {
+  decisions: EvaluationDecision[];
+  assignedManufacturerId: string | null;
+  loc: Locale;
+}) {
+  const current = decisions[0];
+  if (!current) return null;
+  const earlier = decisions.slice(1);
+  // "Bu karar işi kime verdi" sorusunu YALNIZ kararın kendi damgası cevaplar.
+  // Siparişin bugünkü üreticisine düşen eski davranış, karardan çok sonra elle
+  // yapılan bir devri bu kararın sonucu sanıyor ve sıralamayı "birincisini
+  // seçmedi" diye suçluyordu. Kayıt bilmiyorsa ekran da bilmediğini söyler.
+  const placedId = current.placedManufacturerId;
+  /**
+   * Kararın işi verdiği atölyenin ekran karşılığı: ad çözüldü mü, yalnız kimlik
+   * mi var, yoksa kayıt yerleştirmeyi hiç yazmamış mı.
+   */
+  const placement = placementLabel(current);
+  /** Kayıt, işin kime gittiğini hiç yazmamış (damgadan önceki kayıt). */
+  const placementUnknown = !current.placedManufacturerId;
+  // Karardan sonra el değiştirmiş mi?
+  const handedOff =
+    !!current.placedManufacturerId &&
+    !!assignedManufacturerId &&
+    current.placedManufacturerId !== assignedManufacturerId;
+  // Sıralamanın birincisi ile işi gerçekten alan atölye ayrıştıysa admin bunu
+  // görmeli — ama SEBEP, kaydın söyleyebildiği kadar söylenir: aynı ayrışmayı
+  // geri alma sonrası dışlama da (otomatik, çok sık) elle atama da üretir.
+  const divergence = placementDivergence({
+    placedManufacturerId: placedId,
+    liveWinnerId: current.live.winnerId,
+    liveWinnerName: current.live.winnerName,
+    excludedManufacturerIds: current.excludedManufacturerIds,
+  });
+  const comparisons = current.comparisons.filter(
+    (c) => !!c.shadow.winnerId || c.shadow.candidates.length > 0
+  );
+
+  return (
+    <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-indigo-900">
+          Bu iş neden bu atölyeye gitti?
+        </h3>
+        <span className="text-xs text-gray-500">
+          {formatDateTime(current.createdAt, loc)}
+        </span>
+      </div>
+
+      <p className="mt-2 text-xs text-indigo-900/80">
+        Skorlar atama anında kaydedildi; bugünkü yük ve güvenilirlik
+        değerleriyle yeniden hesaplanmaz. 100 en iyi, 0 en kötüdür.
+      </p>
+
+      {placement.kind === "named" && (
+        <p className="mt-2 text-xs text-indigo-900">
+          Bu karar işi <strong>{placement.name}</strong> atölyesine verdi.
+        </p>
+      )}
+
+      {/* Kayıt bir atölye YAZMIŞ ama adı çözülemiyor (atölye kaydı silinmiş
+          olabilir). Cümle adın varlığına bağlıyken kart burada tamamen
+          susuyordu: kimlik yazılı olduğu için aşağıdaki "kayıtlı değil" notu da
+          çıkmıyor, karar bir atölyeye iş vermişken ekran hiçbir şey
+          söylemiyordu. Bilinen şey yazılır, eksik olan da adıyla söylenir. */}
+      {placement.kind === "unnamed" && (
+        <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700">
+          Bu karar işi bir atölyeye verdi, ama o atölyenin{" "}
+          <strong>adı çözülemedi</strong> (atölye kaydı silinmiş olabilir).
+          Kayıttaki atölye kimliği:{" "}
+          <code className="rounded bg-gray-100 px-1">{placement.shortId}…</code>
+        </p>
+      )}
+
+      {divergence && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {divergence.kind === "excluded" ? (
+            <>
+              İşi alan üretici, sıralamanın birincisi değil: birinci sıradaki{" "}
+              <strong>{divergence.winnerName ?? "atölye"}</strong> bu
+              yerleştirmede hariç tutulmuştu (iş az önce o atölyeden geri
+              alınmıştı), bu yüzden karar sıradaki uygun atölyeye verildi. Elle
+              atama değildir.
+            </>
+          ) : (
+            <>
+              İşi alan üretici, sıralamanın birincisi değil. İki sebebi olabilir:
+              sıralamanın birincisi bu yerleştirmede hariç tutulmuş olabilir (iş
+              az önce o atölyeden geri alındıysa) ya da iş elle atanmış olabilir.
+              Kayıt hangisi olduğunu söylemiyor.
+            </>
+          )}
+        </p>
+      )}
+
+      {/* Damgasız eski kayıt: sapma VAR MI, YOK MU bilinmiyor. Buradaki
+          sessizlik de bir iddiadır ("sapma yok" gibi okunur), o yüzden
+          bilinmediği açıkça yazılır. */}
+      {placementUnknown && current.live.winnerId && (
+        <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700">
+          Bu kararın işi hangi atölyeye verdiği <strong>kayıtlı değil</strong>
+          {" "}(damgadan önce yazılmış kayıt), bu yüzden sıralamanın birincisinden
+          sapıp sapmadığı da bilinmiyor.
+          {assignedManufacturerId
+            ? " Siparişte şu an duran üretici bu kararın sonucu olmayabilir."
+            : ""}
+        </p>
+      )}
+
+      {/* Ne yerleştirme damgası ne de bir sıralama kazananı var. Kart bu hâlde
+          manşette HİÇBİR ŞEY yazmıyordu: ekran "kayıt bu karar hakkında hiçbir
+          şey söylemiyor" ile "söylenecek bir sapma yok"u aynı sessizlikle
+          gösteriyordu. Kartın geri kalanı gibi burada da bilinen yazılır,
+          eksik olan adıyla söylenir. */}
+      {placementUnknown && !current.live.winnerId && (
+        <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700">
+          Bu kararda ne sıralamanın seçtiği atölye ne de işi alan atölye{" "}
+          <strong>kayıtlı değil</strong>: kayıt kazanan yazmamış (o an uygun
+          aday çıkmamış olabilir) ve yerleştirme damgası da yok. Bilinenler,
+          kararın yazıldığı an ve aşağıdaki karşılaştırma kayıtlarıdır.
+          {assignedManufacturerId
+            ? " Siparişte şu an duran üretici bu kararın sonucu olmayabilir."
+            : ""}
+        </p>
+      )}
+
+      {/* Aynı karar birden çok kez yazılmışsa: satırlar hemfikir olduğunda bu
+          hiçbir yerde görünmüyordu. Hata değil, veri kalitesi notu. */}
+      {current.supersededRowCount > 0 && (
+        <p className="mt-2 text-[11px] text-gray-600">
+          Bu kararın aynı karşılaştırması {current.supersededRowCount} kez daha
+          kaydedilmiş; aşağıda her karşılaştırmanın en yeni kaydı gösteriliyor.
+        </p>
+      )}
+
+      {/* Devir, sıralamanın hatası değildir: kararın kendi damgası varken
+          "sıralama yanlış seçti" demek yanlış suçlama olurdu. */}
+      {handedOff && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          İş bu karardan sonra başka bir atölyeye devredildi; siparişte şu an
+          duran üretici bu kararın sonucu değildir.
+        </p>
+      )}
+
+      {/* Aynı kararın kayıtları canlı kazanan konusunda ayrışıyorsa, birini
+          doğruymuş gibi manşete almak kararı yanlış anlatır. */}
+      {!current.liveConsistent && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Bu kararın kayıtları canlı seçim konusunda ayrışıyor; aşağıdaki
+          karşılaştırmaları tek tek okuyun.
+        </p>
+      )}
+
+      <div className="mt-3 space-y-3">
+        <EvaluationSideBlock
+          side={current.live}
+          title="Karar veren sıralama"
+          placedManufacturerId={placedId}
+        />
+
+        {/* Her gölge karşılaştırması KENDİ adıyla: hangisinin sürekli mesafe,
+            hangisinin ağırlık denemesi olduğu sürüm kodundan okunmamalı. */}
+        {comparisons.map((c) => (
+          <div key={c.id} className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-indigo-900">
+                {comparisonTitleTr(c)}
+              </span>
+              <code className="rounded bg-white px-1 text-[10px] text-gray-600">
+                {c.weightsVersion}
+              </code>
+              {c.agrees && (
+                <span className="rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-700">
+                  aynı atölyeyi seçti
+                </span>
+              )}
+              {c.differs && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700">
+                  başka bir atölye seçti
+                </span>
+              )}
+              {!c.agrees && !c.differs && (
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-600">
+                  yalnız bir taraf atölye seçebildi
+                </span>
+              )}
+            </div>
+            <EvaluationSideBlock
+              side={c.shadow}
+              title={`${comparisonTitleTr(c)} (karara etki etmedi)`}
+              placedManufacturerId={placedId}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500">
+        <span>
+          Bu kararın karşılaştırmaları:{" "}
+          {current.comparisons.map((c, i) => (
+            <span key={c.id}>
+              {i > 0 && ", "}
+              <code className="rounded bg-white px-1">{c.weightsVersion}</code>
+            </span>
+          ))}
+        </span>
+        <Link
+          href="/admin/scoring-evaluations"
+          className="font-medium text-indigo-700 hover:underline"
+        >
+          Tüm değerlendirmeler →
+        </Link>
+      </div>
+
+      {earlier.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-900">
+            Önceki atama kararları ({earlier.length})
+          </summary>
+          <div className="mt-2 space-y-2">
+            {earlier.map((d) => (
+              <div
+                key={d.key}
+                className="rounded-xl border border-gray-200 bg-white p-3"
+              >
+                <p className="text-[11px] text-gray-500">
+                  {formatDateTime(d.createdAt, loc)}
+                </p>
+                <p className="mt-1 text-xs text-gray-700">
+                  Sıralamanın birincisi:{" "}
+                  <strong>{d.live.winnerName ?? "—"}</strong>
+                </p>
+                {/* Satırlar biriktiği için bu liste artık gerçek geçmiştir:
+                    "bu iş kaç kez el değiştirdi" sorusunu ancak kararın İŞİ
+                    KİME VERDİĞİ cevaplar, sıralamanın birincisi değil. */}
+                {(() => {
+                  const p = placementLabel(d);
+                  if (p.kind === "named") {
+                    return (
+                      <p className="text-xs text-gray-700">
+                        İşi alan: <strong>{p.name}</strong>
+                      </p>
+                    );
+                  }
+                  if (p.kind === "unnamed") {
+                    return (
+                      <p className="text-xs text-gray-700">
+                        İşi alan: <strong>adı çözülemedi</strong> (kayıttaki
+                        kimlik:{" "}
+                        <code className="rounded bg-gray-100 px-1">
+                          {p.shortId}…
+                        </code>
+                        )
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="text-xs text-gray-500">
+                      İşi alan: bilinmiyor (kayıtta yok)
+                    </p>
+                  );
+                })()}
+                <ul className="mt-1 space-y-0.5">
+                  {d.comparisons.map((c) => (
+                    <li key={c.id} className="text-[11px] text-gray-600">
+                      {comparisonTitleTr(c)} ({c.weightsVersion}):{" "}
+                      {c.shadow.winnerName ?? "—"}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, printGate, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates, money } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, money } = data;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -1125,11 +1591,20 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [revokeReason, setRevokeReason] = useState("");
   const [revokeStrike, setRevokeStrike] = useState(false);
   const [revokeBlocklist, setRevokeBlocklist] = useState(true);
+  // "Kuyruğumda kalsın": geri alınan sipariş otomatik olarak yeniden
+  // yerleştirilmesin. Varsayılan kapalı, çünkü fazın amacı tıklama beklemeyen
+  // siparişler; admin tersini isterse (müşteriyle konuşulacak, iade
+  // düşünülüyor, üretici elle seçilecek) bilerek işaretler.
+  const [revokeKeepInQueue, setRevokeKeepInQueue] = useState(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
   // Revoke-from-painter controls (bad hand-off → back to assignment queue).
   const [revokePainterReason, setRevokePainterReason] = useState("");
   const [revokePainterOpen, setRevokePainterOpen] = useState(false);
   const [revokePainterBlocklist, setRevokePainterBlocklist] = useState(true);
+  // "Kuyruğumda kalsın": boyacıdan geri alınan sipariş de otomatik olarak yeni
+  // bir üreticiye yerleşiyor (revoke-after-painter.ts, para mutabakatından
+  // sonra). Üretici geri almasıyla aynı seçenek, aynı varsayılan: kapalı.
+  const [revokePainterKeepInQueue, setRevokePainterKeepInQueue] = useState(false);
   // Admin-side painter hand-off (used when the manufacturer never sent it, or
   // after a revoke/decline left the job with nobody).
   const [painterPick, setPainterPick] = useState("");
@@ -1510,7 +1985,25 @@ export function OrderDetailClient({ data, locale }: Props) {
   const canUploadRevision = !refunded && ["approved", "review"].includes(order.status);
   const addr = order.shippingAddress;
 
-  const assignManufacturer = async (manufacturerId?: string) => {
+  /**
+   * Satıcının kendi katalog ürünü: atama ekranı bunu ÖNCEDEN söylemeli.
+   *
+   * Kuralı sunucu uyguluyor (yalnız sahibi atölye basabilir), ama admin'in onu
+   * ancak reddi görünce öğrenmesi ekranı "neden olmadı" oyununa çeviriyordu.
+   */
+  const sellerOwnedNotice = order.sellerManufacturerId ? (
+    <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+      Bu sipariş satıcının kendi kataloğundan çıktı: normalde yalnız satıcının
+      kendi atölyesi basabilir. Başka bir atölye seçerseniz ayrıca onay ve
+      gerekçe istenir; gerekçe denetim kaydına yazılır ve satıcıya bildirim
+      gider.
+    </p>
+  ) : null;
+
+  const assignManufacturer = async (
+    manufacturerId?: string,
+    sellerOverrideReason?: string
+  ) => {
     // Accept the id as an argument so call sites that just did a
     // `setSelectedManufacturerId(...)` then call us can pass it directly —
     // otherwise we'd read the stale closure value (`""` on first click).
@@ -1521,10 +2014,56 @@ export function OrderDetailClient({ data, locale }: Props) {
       const res = await fetch(`/api/admin/orders/${order.id}/assign-manufacturer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ manufacturerId: id }),
+        body: JSON.stringify({
+          manufacturerId: id,
+          // Mülkiyet aşması: yalnız admin aşağıdaki onayı verip gerekçe
+          // yazdığında gönderilir. Gerekçesiz bir aşmayı sunucu da reddeder.
+          ...(sellerOverrideReason
+            ? {
+                allowSellerOverride: true,
+                overrideReason: sellerOverrideReason,
+              }
+            : {}),
+        }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        // MÜLKİYET REDDİ bir yarış hatası değil: aynı isteği tekrar denemek
+        // hiçbir zaman işe yaramaz, admin'in KARAR vermesi gerekir. Satıcının
+        // atölyesi temelli kapandığında elinde bir çıkış kalsın diye onay +
+        // gerekçe istenir; ikisi de yoksa sipariş rakibe gitmez.
+        if (data.requiresSellerOverride && !sellerOverrideReason) {
+          const seller = data.sellerName
+            ? `${data.sellerName} atölyesinin`
+            : "bir satıcının";
+          const confirmed = window.confirm(
+            [
+              `Bu sipariş ${seller} kendi kataloğundan çıktı: ürünü normalde yalnız o atölye basabilir.`,
+              "",
+              "Yine de başka bir atölyeye atamak istiyor musunuz?",
+              "Devam ederseniz gerekçe istenir; gerekçe denetim kaydına yazılır ve satıcıya bildirim gider.",
+            ].join("\n")
+          );
+          if (!confirmed) return;
+          const typed = promptSellerOverrideReason(SELLER_OVERRIDE_REASON_PROMPT, "");
+          if (!typed) return;
+          await assignManufacturer(id, typed);
+          return;
+        }
+        // Gerekçe kapının barajını geçmediyse (400) admin'i orada bırakmayız:
+        // kutu bu kez SUNUCUNUN cümlesiyle yeniden açılır (baraj sayısını o
+        // taşır, bkz. promptSellerOverrideReason). Eskiden buradaki tek çıkış
+        // hata mesajıydı ve yazılan gerekçe de kayboluyordu.
+        if (sellerOverrideReason && res.status === 400) {
+          const retyped = promptSellerOverrideReason(
+            data.error || SELLER_OVERRIDE_REASON_PROMPT,
+            sellerOverrideReason
+          );
+          if (retyped) {
+            await assignManufacturer(id, retyped);
+            return;
+          }
+        }
         reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
@@ -1538,8 +2077,14 @@ export function OrderDetailClient({ data, locale }: Props) {
    * Take the order back from the current manufacturer. With a target id it is
    * handed over in the same call; without one it returns to the queue.
    */
-  const revokeManufacturer = async (targetManufacturerId?: string) => {
-    if (revokeReason.trim().length < 3) {
+  const revokeManufacturer = async (
+    targetManufacturerId?: string,
+    sellerOverrideReason?: string
+  ) => {
+    // Mülkiyet devrinde denetim satırına geçen metin, kutuya yazılan kısa
+    // "sebep" değil ayrıca sorulan gerekçedir — atama ekranındaki akışın aynısı.
+    const effectiveReason = sellerOverrideReason ?? revokeReason.trim();
+    if (effectiveReason.length < 3) {
       alert("Geri alma sebebi zorunludur.");
       return;
     }
@@ -1549,16 +2094,64 @@ export function OrderDetailClient({ data, locale }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reason: revokeReason.trim(),
+          reason: effectiveReason,
           // The strike box is hidden on a refunded order; a tick made before a
           // refund arrived live must not ride along with the cleanup.
           strike: !refunded && revokeStrike,
           blocklist: revokeBlocklist,
+          // Yalnız hedefsiz geri almada anlamlı: bir üreticiye devrederken
+          // zaten otomatik atama çalışmaz.
+          keepInQueue: !targetManufacturerId && revokeKeepInQueue,
           ...(targetManufacturerId ? { targetManufacturerId } : {}),
+          // Mülkiyet aşması: yalnız admin aşağıdaki uyarıyı okuyup kabul ettiğinde
+          // ve AYRICA bir gerekçe yazdığında gönderilir; o gerekçe denetim
+          // kaydına aynen yazılır.
+          ...(sellerOverrideReason ? { allowSellerOverride: true } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Mülkiyet reddi: tekrar denemek işe yaramaz, karar admin'indir.
+        // Sipariş bu noktada HÂLÂ eski üreticisinde — devir reddedildiğinde
+        // geri alma da çalışmadı, yani yarım bir işlem kalmaz.
+        if (data.requiresSellerOverride && !sellerOverrideReason) {
+          const seller = data.sellerName
+            ? `${data.sellerName} atölyesinin`
+            : "bir satıcının";
+          const confirmed = window.confirm(
+            [
+              `Bu sipariş ${seller} kendi kataloğundan çıktı: ürünü normalde yalnız o atölye basabilir.`,
+              "",
+              "Yine de başka bir üreticiye devretmek istiyor musunuz?",
+              "Devam ederseniz gerekçe istenir; gerekçe denetim kaydına yazılır ve satıcıya bildirim gider.",
+            ].join("\n")
+          );
+          if (!confirmed) return;
+          // Kutudaki kısa "sebep"i aşmanın gerekçesi diye GERİ GÖNDERMEK, kapı
+          // barajı uygulamaya başladıktan sonra admin'i çıkışı olmayan bir 400'e
+          // kilitliyordu (aynı gerekçeyle tekrar denemek hiçbir zaman geçmez).
+          // Atama ekranındaki gibi ayrıca sorulur; yazdığı sebep kutuya
+          // önceden doldurulur ki uzatsın, sıfırdan yazmasın.
+          const typed = promptSellerOverrideReason(
+            SELLER_OVERRIDE_REASON_PROMPT,
+            revokeReason.trim()
+          );
+          if (!typed) return;
+          await revokeManufacturer(targetManufacturerId, typed);
+          return;
+        }
+        // Gerekçe barajı geçmediyse (400): kutu sunucunun cümlesiyle yeniden
+        // açılır — bkz. promptSellerOverrideReason.
+        if (sellerOverrideReason && res.status === 400) {
+          const retyped = promptSellerOverrideReason(
+            data.error || SELLER_OVERRIDE_REASON_PROMPT,
+            sellerOverrideReason
+          );
+          if (retyped) {
+            await revokeManufacturer(targetManufacturerId, retyped);
+            return;
+          }
+        }
         reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
@@ -1567,14 +2160,42 @@ export function OrderDetailClient({ data, locale }: Props) {
       // landed while this page was open). The old text blamed a race ("başkası
       // tarafından alındı") and invited a retry that can only fail.
       const tookOver = !!data.prevStatus && data.prevStatus !== "assigned";
+      // Otomatik yerleştirme satıcının kendi ürününde SIRALAMA sonucu değildir:
+      // mülkiyet kuralı gereği tek olası atölye satıcının kendisidir
+      // (autoAssignPlacementPlan → "seller"), yani sipariş "sıradaki uygun
+      // atölyeye" değil SAHİBİNE geri döner. Tek cümle ikisini birbirine
+      // karıştırıyordu ve admin siparişi rakip bir atölyede sanabiliyordu.
+      const autoPlacedCopy = order.sellerManufacturerId
+        ? "Atama geri alındı ve sipariş, ürünün sahibi olan satıcının kendi atölyesine geri verildi (sıralamayla değil, mülkiyet kuralıyla)."
+        : "Atama geri alındı ve sipariş otomatik olarak sıradaki uygun atölyeye atandı.";
+      // Otomatik atama devredeyken "geri al" tıklaması işi saniyeler içinde
+      // BAŞKA bir atölyeye gönderebiliyor. Bu yüzden sonuç artık her hâlde
+      // söylenir: sessiz kalmak, admin'in siparişi kuyrukta sandığı hâlde
+      // üretime girmiş olmasına yol açardı.
       const outcome =
         data.reason === "refunded" || refunded
           ? "Üretici siparişten ayrıldı. Sipariş iade edildiği için yeniden atanmadı; atama kuyruğuna da dönmez."
           : targetManufacturerId && data.reassigned === false
-            ? "Atama geri alındı ancak yeni üreticiye devredilemedi (sipariş bu sırada başkası tarafından alındı). Listeden tekrar seçin."
-            : tookOver
-              ? "Atama geri alındı."
-              : null;
+            ? // Sunucu devrin neden olmadığını söylüyorsa onu göster: her
+              // başarısız devri yarışa yormak, tekrarlanamayacak bir denemeyi
+              // (ör. mülkiyet) tekrar ettiriyordu.
+              `Atama geri alındı ancak yeni üreticiye devredilemedi. ${
+                data.handoffError ??
+                "Sipariş bu sırada başkası tarafından alınmış olabilir."
+              } Listeden tekrar seçin.`
+            : targetManufacturerId
+              ? sellerOverrideReason
+                ? "Atama geri alındı ve sipariş seçtiğiniz üreticiye devredildi. Mülkiyet devri denetim kaydına yazıldı; satıcıya bildirim gitti."
+                : "Atama geri alındı ve sipariş seçtiğiniz üreticiye devredildi."
+              : data.autoAssigned
+                ? autoPlacedCopy
+                : data.heldForSeller
+                  ? // Satıcının kendi ürünü: kuyrukta kalmasının sebebi aday
+                    // yokluğu ya da kapalı anahtar DEĞİL, mülkiyet kuralı.
+                    "Atama geri alındı. Bu ürünü yalnız satıcının kendi atölyesi basabilir, bu yüzden sipariş otomatik olarak başka bir atölyeye verilmedi; kuyrukta kararınızı bekliyor."
+                  : data.keptInQueue
+                    ? "Atama geri alındı. Sipariş, isteğiniz üzerine otomatik atanmadan kuyrukta bekliyor."
+                    : "Atama geri alındı; sipariş atama kuyruğunda bekliyor (uygun aday bulunamadı ya da otomatik atama kapalı).";
       if (outcome) {
         alert(
           tookOver
@@ -1583,6 +2204,7 @@ export function OrderDetailClient({ data, locale }: Props) {
         );
       }
       setRevokeReason("");
+      setRevokeKeepInQueue(false);
       router.refresh();
     } finally {
       setLoading(null);
@@ -1607,6 +2229,10 @@ export function OrderDetailClient({ data, locale }: Props) {
         body: JSON.stringify({
           reason: revokePainterReason.trim(),
           blocklistManufacturer: revokePainterBlocklist,
+          // Admin'in açık isteği: yerleştirme yapılmasın. Rotanın kabul ettiği
+          // alan (revoke-painter/route.ts) buraya kadar bağlanmamıştı, bu yüzden
+          // seçenek ekranda hiç yoktu.
+          keepInQueue: revokePainterKeepInQueue,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1614,7 +2240,31 @@ export function OrderDetailClient({ data, locale }: Props) {
         reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
         return;
       }
+      // Sonuç her hâlde söylenir. Bu tık, işi boyacıdan alırken siparişi
+      // saniyeler içinde BAŞKA bir üreticiye gönderebiliyor; sessiz kalmak,
+      // admin'in siparişi kuyrukta sandığı hâlde üretime girmiş olmasına yol
+      // açardı. Dallar üretici geri almasındakilerin AYNISIDIR — aynı cümleler,
+      // aynı sıra: iade, satıcıya geri dönüş, sıralamadan gelen atölye,
+      // mülkiyet yüzünden kuyrukta tutma, admin isteğiyle kuyrukta bırakma,
+      // uygun aday yok. Eski metin satıcı dallarını hiç tanımıyordu: mülkiyet
+      // kuralıyla kuyrukta kalan bir mağaza siparişi "uygun aday bulunamadı"
+      // diye okunuyor ve admin, aslında kural gereği kapalı olan atamayı
+      // üretici havuzunda ya da anahtarda arıyordu.
+      alert(
+        data.reason === "refunded" || refunded
+          ? "Boyacı ve üretici siparişten ayrıldı. Sipariş iade edildiği için yeniden atanmadı; atama kuyruğuna da dönmez."
+          : data.autoAssigned
+            ? order.sellerManufacturerId
+              ? "Boyacı ve üretici çıkarıldı; sipariş, ürünün sahibi olan satıcının kendi atölyesine geri verildi (sıralamayla değil, mülkiyet kuralıyla). Yeni üretici baskıya sıfırdan başlar."
+              : "Boyacı ve üretici çıkarıldı; sipariş otomatik olarak sıradaki uygun atölyeye atandı. Yeni üretici baskıya sıfırdan başlar."
+            : data.heldForSeller
+              ? "Boyacı ve üretici çıkarıldı. Bu ürünü yalnız satıcının kendi atölyesi basabilir, bu yüzden sipariş otomatik olarak başka bir atölyeye verilmedi; kuyrukta kararınızı bekliyor."
+              : data.keptInQueue
+                ? "Boyacı ve üretici çıkarıldı. Sipariş, isteğiniz üzerine otomatik atanmadan kuyrukta bekliyor."
+                : "Boyacı ve üretici çıkarıldı; sipariş atama kuyruğunda bekliyor (uygun aday bulunamadı ya da otomatik atama kapalı)."
+      );
       setRevokePainterReason("");
+      setRevokePainterKeepInQueue(false);
       setRevokePainterOpen(false);
       router.refresh();
     } finally {
@@ -2243,9 +2893,16 @@ export function OrderDetailClient({ data, locale }: Props) {
         {canAssignManufacturer && candidates && candidates.length > 0 && (
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5 space-y-3">
             <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider">{d["admin.orderDetail.assignManufacturer"]}</h3>
+            {/* Cümle, aşağıdaki çubuklarla AYNI kaynaktan (SCORE_KEYS) kurulur.
+                Elle sayılan liste, sıralayıcıya zamanında teslim ile parti
+                uyumu eklendiğinde sessizce yalan söylemeye başlamıştı: cümle
+                dört ad sayarken kartlarda altı çubuk çiziliyordu. Tek kaynak
+                olunca bileşen eklemek cümleyi de günceller. */}
             <p className="text-xs text-blue-700/80">
-              Mesafe · Yük · Güvenilirlik · Uygunluk skorlarına göre sıralandı. En iyi adaylar üstte.
+              {SCORE_KEYS.map((k) => SCORE_LABELS_TR[k]).join(" · ")} skorlarının
+              ağırlıklı toplamına göre sıralandı. En iyi adaylar üstte.
             </p>
+            {sellerOwnedNotice}
             <div className="space-y-2">
               {candidates
                 .filter((c) => c.eligible)
@@ -2285,15 +2942,20 @@ export function OrderDetailClient({ data, locale }: Props) {
                             ))}
                           </div>
                         )}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-                          {(["distance", "load", "reliability", "compliance"] as const).map((k) => (
+                        {/* Sıralayıcının BÜTÜN bileşenleri. Dördü gösterilip
+                            zamanında teslim ile parti uyumu gizlendiğinde,
+                            toplam skor ekrandaki çubuklardan çıkmıyordu ve
+                            admin "bu atölye neden önde?" sorusunu buradan
+                            cevaplayamıyordu. */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                          {SCORE_KEYS.map((k) => (
                             <div key={k} className="space-y-1">
                               <div className="flex justify-between text-[10px] text-gray-500">
-                                <span>{k === "distance" ? "Mesafe" : k === "load" ? "Yük" : k === "reliability" ? "Güven" : "Uygun"}</span>
+                                <span>{SCORE_SHORT_LABELS_TR[k]}</span>
                                 <span>{c.scores[k]}</span>
                               </div>
                               <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-blue-500" style={{ width: `${c.scores[k]}%` }} />
+                                <div className="h-full bg-blue-500" style={{ width: `${Math.max(0, Math.min(100, c.scores[k]))}%` }} />
                               </div>
                             </div>
                           ))}
@@ -2346,6 +3008,7 @@ export function OrderDetailClient({ data, locale }: Props) {
         {canAssignManufacturer && (!candidates || candidates.length === 0) && activeManufacturers && activeManufacturers.length > 0 && (
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5">
             <h3 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-3">{d["admin.orderDetail.assignManufacturer"]}</h3>
+            {sellerOwnedNotice && <div className="mb-3">{sellerOwnedNotice}</div>}
             <div className="flex gap-2">
               <select
                 value={selectedManufacturerId}
@@ -2428,7 +3091,10 @@ export function OrderDetailClient({ data, locale }: Props) {
             {!refunded && order.orderType === "marketplace" && order.sellerManufacturerId && (
               <p className="mt-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-900">
                 Bu bir mağaza siparişi — ürünü yalnızca sahibi üretici basabilir.
-                Başka bir üreticiye devretmek yerine iptal/iade değerlendirin.
+                Önce iptal/iade değerlendirin. Yine de başka bir üreticiye
+                devretmek gerekiyorsa (ör. satıcının atölyesi kapandıysa) devir
+                sırasında ayrıca onay istenir; yazdığınız sebep denetim kaydına
+                geçer ve satıcıya bildirim gider.
               </p>
             )}
             {!refunded &&
@@ -2489,7 +3155,34 @@ export function OrderDetailClient({ data, locale }: Props) {
                       Güvenilirlik cezası (strike) uygula
                     </label>
                   )}
+                  {/* İade edilen siparişte hiçbir şekilde atama yapılmaz, bu
+                      yüzden orada seçeneğin karşılığı yok. */}
+                  {!refunded && (
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={revokeKeepInQueue}
+                        onChange={(e) => setRevokeKeepInQueue(e.target.checked)}
+                      />
+                      Kuyruğumda kalsın (otomatik atama yapılmasın)
+                    </label>
+                  )}
                 </div>
+                {!refunded && (
+                  <p className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-600">
+                    {/* Otomatik atama artık KOŞULLU: sipariş türünün kendi
+                        anahtarı (config/flags.ts) kapalıysa, uygun aday
+                        çıkmazsa ya da ürün satıcının kendi kataloğundansa
+                        yerleştirme olmaz. "Birinci atölyeye atanır" diyen eski
+                        cümle, sonuç kutusunun (aşağıdaki alert) zaten ayırdığı
+                        bu dalları admin'e önceden yanlış vaat ediyordu. */}
+                    {revokeKeepInQueue
+                      ? "Sipariş geri alındıktan sonra atanmadan kuyrukta bekler; üreticiyi kendiniz seçersiniz."
+                      : order.sellerManufacturerId
+                        ? "Bu ürün satıcının kendi kataloğundan çıktı: geri aldığınızda sipariş başka bir atölyeye verilmez — yalnız satıcının kendi atölyesine atanabilir, o da mümkün değilse kuyrukta kararınızı bekler."
+                        : "Geri aldığınız anda sipariş, sıralamanın uygun ilk atölyesine otomatik olarak atanmaya çalışılır (az önce çıkardığınız üretici bu denemede hariç tutulur). Bu sipariş türünde otomatik atama kapalıysa ya da uygun aday çıkmazsa kuyrukta bekler. Önce müşteriyle konuşacaksanız ya da iade düşünüyorsanız yukarıdaki kutuyu işaretleyin."}
+                  </p>
+                )}
 
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -2501,12 +3194,15 @@ export function OrderDetailClient({ data, locale }: Props) {
                       ? "Geri alınıyor…"
                       : refunded
                         ? "Üreticiden geri al"
-                        : "Atamayı geri al (kuyruğa döner)"}
+                        : revokeKeepInQueue
+                          ? "Geri al ve kuyrukta bırak"
+                          : "Geri al ve yeniden ata"}
                   </button>
                   <button
                     onClick={() => {
                       setRevokeOpen(false);
                       setRevokeReason("");
+                      setRevokeKeepInQueue(false);
                     }}
                     className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
                   >
@@ -2598,6 +3294,15 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {/* ─── Atama gerekçesi: kararın kendi anındaki skorları ───────────── */}
+        {assignmentDecisions && assignmentDecisions.length > 0 && (
+          <AssignmentEvaluationCard
+            decisions={assignmentDecisions}
+            assignedManufacturerId={manufacturer?.id ?? null}
+            loc={loc}
+          />
         )}
 
         {/* ─── Journey QR: the code itself, in the order, not behind a link ── */}
@@ -3119,7 +3824,11 @@ export function OrderDetailClient({ data, locale }: Props) {
 
             <p className="mt-2 rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-900">
               ⚠ Bu işlem hem <strong>boyacıyı</strong> hem <strong>üreticiyi</strong> çıkarır ve
-              sipariş tekrar atama kuyruğuna (onaylı) döner. Üreticinin baskı hakedişi
+              sipariş tekrar atama kuyruğuna (onaylı) döner; aşağıdaki kutuyu
+              işaretlemezseniz oradan <strong>otomatik olarak</strong> yeni bir
+              üreticiye gitmeye çalışır (bu sipariş türünde otomatik atama
+              kapalıysa ya da uygun aday yoksa kuyrukta bekler).
+              Üreticinin baskı hakedişi
               {" "}(<strong>
                 {formatCurrency(
                   manufacturerBaseKurus({
@@ -3160,28 +3869,64 @@ export function OrderDetailClient({ data, locale }: Props) {
                     className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
                   />
                 </div>
-                <label className="flex items-center gap-1.5 text-xs text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={revokePainterBlocklist}
-                    onChange={(e) => setRevokePainterBlocklist(e.target.checked)}
-                  />
-                  Bu üreticiyi bu sipariş için bir daha önerme
-                </label>
+                <div className="flex flex-wrap gap-4 text-xs text-gray-700">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={revokePainterBlocklist}
+                      onChange={(e) => setRevokePainterBlocklist(e.target.checked)}
+                    />
+                    Bu üreticiyi bu sipariş için bir daha önerme
+                  </label>
+                  {/* İade edilen siparişte hiçbir şekilde atama yapılmaz, bu
+                      yüzden orada seçeneğin karşılığı yok (üretici geri
+                      almasındaki kuralın aynısı). */}
+                  {!refunded && (
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={revokePainterKeepInQueue}
+                        onChange={(e) =>
+                          setRevokePainterKeepInQueue(e.target.checked)
+                        }
+                      />
+                      Kuyruğumda kalsın (otomatik atama yapılmasın)
+                    </label>
+                  )}
+                </div>
+                {!refunded && (
+                  <p className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-600">
+                    {/* Üretici geri almasındaki kuralın aynısı: yerleştirme
+                        koşulludur (tür anahtarı, uygun aday, satıcı mülkiyeti),
+                        bu yüzden burada da vaat edilmez. */}
+                    {revokePainterKeepInQueue
+                      ? "Sipariş geri alındıktan sonra atanmadan kuyrukta bekler; üreticiyi kendiniz seçersiniz."
+                      : order.sellerManufacturerId
+                        ? "Bu ürün satıcının kendi kataloğundan çıktı: geri aldığınızda sipariş başka bir atölyeye verilmez — yalnız satıcının kendi atölyesine atanabilir, o da mümkün değilse kuyrukta kararınızı bekler."
+                        : "Geri aldığınız anda sipariş, sıralamanın uygun ilk atölyesine otomatik olarak atanmaya çalışılır (az önce çıkarılan üretici bu denemede hariç tutulur). Bu sipariş türünde otomatik atama kapalıysa ya da uygun aday çıkmazsa kuyrukta bekler. Önce müşteriyle konuşacaksanız ya da iade düşünüyorsanız yukarıdaki kutuyu işaretleyin."}
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={revokePainter}
                     disabled={!!loading || revokePainterReason.trim().length < 3}
                     className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:bg-gray-300 disabled:text-gray-500"
                   >
+                    {/* Düğme ne yapacağını söyler: eski metin ("atama
+                        kuyruğuna") otomatik yerleştirmeden hiç söz etmiyordu. */}
                     {loading === "revoke-painter"
                       ? "Geri alınıyor…"
-                      : "Geri al (atama kuyruğuna)"}
+                      : refunded
+                        ? "Boyacıdan geri al"
+                        : revokePainterKeepInQueue
+                          ? "Geri al ve kuyrukta bırak"
+                          : "Geri al ve yeniden ata"}
                   </button>
                   <button
                     onClick={() => {
                       setRevokePainterOpen(false);
                       setRevokePainterReason("");
+                      setRevokePainterKeepInQueue(false);
                     }}
                     className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
                   >

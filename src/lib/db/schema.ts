@@ -1536,14 +1536,23 @@ export const manufacturerActions = pgTable("manufacturer_actions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// Q7: shadow + canary log for manufacturer scoring v2 rollout. Every
-// assignment evaluation writes one row capturing both v1 + v2 winners
-// (or v2 alone once cutover happens). Used by /admin/scoring-evaluations
-// to eyeball disagreement before flipping the percent dial up.
+// Q7: shadow + canary log for manufacturer scoring v2 rollout. A row is written
+// per COMPARISON of a placement that really happened (weights comparison, plus
+// the continuous-distance shadow), capturing both sides' winners. Used by
+// /admin/scoring-evaluations to eyeball disagreement before flipping the
+// percent dial up.
 //
-// Unique (order_id, weights_version) prevents N12 decline-retry storms
-// from filling the table with duplicate evaluations for the same order
-// against the same scoring profile.
+// NO uniqueness here: rows APPEND. Migration 0054 dropped the old
+// UNIQUE (order_id, weights_version) precisely because it made a second
+// placement of the same order (revoke + re-place, decline + reassign) overwrite
+// the first one's record — the very N12 decline-retry case the old comment
+// claimed it protected. The rows of one placement are tied together by the
+// `decisionId` the writer stamps into both jsonb sides
+// (services/manufacturer-assignment-shadow.ts), which is how the admin screens
+// separate two decisions seconds apart. Growth is bounded at the source (a
+// ranking that places nothing writes nothing, and the decline cap stops the
+// retry storm) and old rows age out via the 30-day
+// scoring-evaluations-cleanup worker.
 export const manufacturerAssignmentEvaluations = pgTable(
   "manufacturer_assignment_evaluations",
   {
@@ -1561,10 +1570,28 @@ export const manufacturerAssignmentEvaluations = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => ({
-    orderVersionUnique: uniqueIndex("mfg_eval_order_version_idx").on(
+    /**
+     * KARAR GEÇMİŞİ: satırlar EKLENİR, üzerine yazılmaz.
+     *
+     * Eskiden burada UNIQUE (order_id, weights_version) vardı ve yazıcı
+     * çakışmayı `onConflictDoUpdate` ile çözüyordu; yani bir siparişin İKİNCİ
+     * ataması (geri al + yeniden yerleştirme, ret sonrası yeniden atama)
+     * birincinin kaydını siliyordu. Sonuç: sipariş başına her zaman tam olarak
+     * bir karar, "Önceki atama kararları" hiçbir zaman dolmuyor ve ilk kararın
+     * kimi seçtiği geri alınamaz biçimde kayboluyordu (migration 0054).
+     *
+     * İki okuma deseni var ve ikisi de created_at'e göre sıralı:
+     *  - sipariş detayı: order_id = ? ORDER BY created_at DESC  → ilk indeks
+     *  - değerlendirme listesi + saklama temizliği (30 günden eski satırları
+     *    silen worker): created_at üzerinden → ikinci indeks
+     * Artan btree, DESC sıralamayı da geriye tarayarak karşılar; ayrı bir DESC
+     * indekse gerek yok.
+     */
+    byOrderCreated: index("mfg_eval_order_created_idx").on(
       t.orderId,
-      t.weightsVersion
+      t.createdAt
     ),
+    byCreated: index("mfg_eval_created_idx").on(t.createdAt),
   })
 );
 

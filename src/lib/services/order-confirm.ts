@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, users } from "@/lib/db/schema";
+import { orderItems, orders, users } from "@/lib/db/schema";
 import { getEmailQueue } from "@/lib/queue/queues";
 import type { Locale } from "@/lib/i18n/types";
 import { issueGuestClaimToken } from "@/lib/services/password-reset";
@@ -8,11 +8,25 @@ import { emitOrderChanged } from "@/lib/realtime/emit";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import {
   assignManufacturerToOrder,
+  isOrderRefunded,
   orderHasPrintableContent,
 } from "@/lib/services/manufacturer-assign";
-import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
+import {
+  commitAssignmentEvaluation,
+  discardAssignmentEvaluation,
+  rankForOrderWithShadow,
+} from "@/lib/services/manufacturer-assignment-shadow";
+import { EXCLUDED_THIS_ATTEMPT_REASON } from "@/lib/services/manufacturer-assignment";
 import { getModelGenerationQueue } from "@/lib/queue/queues";
 import { isFlagEnabled } from "@/lib/services/flags";
+import {
+  autoAssignFlagFor,
+  autoAssignPlacementPlan,
+  autoAssignRowGate,
+  classifyAutoAssignOrder,
+  type AutoAssignSkip,
+} from "@/lib/config/flags";
+import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 import { reserveSpend, releaseSpend } from "@/lib/services/spend-guard";
 import { resolveTargetHeightMm } from "@/lib/config/sizes";
 import { CONTENT_CONSENT_VERSION_MESHY } from "@/lib/config/content-consent";
@@ -292,14 +306,8 @@ export async function kickOffMarketplaceOrder(
     // Shape 2. Leave the status at `paid` — it is already assignable — and try
     // to place it. A failure here is never fatal: the order simply stays
     // unassigned and shows up in the admin's "atanmamış" bucket.
-    try {
-      await autoAssignMarketplaceOrder(order.id, order.orderNumber);
-    } catch (err) {
-      console.error(
-        `kickOffMarketplaceOrder: auto-assign failed for ${order.id}`,
-        err
-      );
-    }
+    // Never throws (see autoAssignIfEligible), so no try/catch is needed here.
+    await autoAssignIfEligible(order.id, { reason: "ödeme alındı" });
   } else {
     // Shape 3.
     await db
@@ -318,39 +326,262 @@ export async function kickOffMarketplaceOrder(
 }
 
 /**
- * Place a platform-product order with the best-scoring eligible manufacturer.
+ * [ATAMA] notunu siparişe EKLER ve admin'e e-posta atar.
  *
- * Ranking goes through the Q7 shadow wrapper (not the raw ranker) so automatic
- * assignments show up in the same canary/evaluation telemetry as the admin UI
- * and the decline-retry path. The ranker's batch-affinity signal is what makes
- * repeat orders of the same product cluster in one workshop.
+ * Neden yalnız console.warn olmaz: uygun üretici bulunamayan sipariş sessizce
+ * atanmamış kalır ve kimse haberdar olmaz — otomatik atamanın tek görünür
+ * başarısızlığı budur. Üretici reddi akışı (manufacturer-decline.ts) aynı iki
+ * şeyi yapar; burada da aynısı yapılır ki sahibi tek bir yerde
+ * ("siparişin admin notu" + posta kutusu) her iki sebebi de görsün.
  *
- * No eligible candidate is a normal outcome, not an error: the order keeps its
- * `paid` + unassigned state and waits for an admin in /admin/bulk-orders.
+ * Not SQL'de birleştirilir (araya giren [SLA]/[N12] bayrakları kaybolmasın) ve
+ * satır biçimi tek kaynaktan gelir (formatAdminNoteLine).
  */
-async function autoAssignMarketplaceOrder(orderId: string, orderNumber: string) {
-  const candidates = await rankForOrderWithShadow(orderId);
-  const best = candidates.find((c) => c.eligible);
-  if (!best) {
-    console.warn(
-      `autoAssignMarketplaceOrder: no eligible manufacturer for ${orderNumber}`
-    );
-    return;
+async function flagManualAssignment(args: {
+  orderId: string;
+  orderNumber: string;
+  reason: string;
+}): Promise<void> {
+  const note = formatAdminNoteLine(`[ATAMA] Otomatik atama yapılamadı: ${args.reason}. Sipariş atanmamış bekliyor; /admin/orders üzerinden elle üretici atayın.`);
+  try {
+    await db
+      .update(orders)
+      .set({
+        adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, args.orderId));
+  } catch (err) {
+    console.error(`[ATAMA] not yazılamadı: ${args.orderNumber}`, err);
   }
-  const result = await assignManufacturerToOrder({
-    orderId,
-    manufacturerId: best.manufacturerId,
-    // Already proved above, and the ranker just read the same order.
-    skipPrintableCheck: true,
-    notification: {
-      subject: `Yeni sipariş atandı: ${orderNumber}`,
-      body: `${orderNumber} numaralı sipariş otomatik olarak size atandı.\n\nÜretici panelinizden 24 saat içinde kabul veya reddedin.`,
-    },
-  });
-  if (!result.ok) {
-    console.warn(
-      `autoAssignMarketplaceOrder: ${orderNumber} not assigned (${result.reason})`
-    );
+
+  const adminEmail = process.env.ADMIN_EMAIL || "system@figurunica.com";
+  try {
+    await getEmailQueue().add("admin-auto-assign-failed", {
+      type: "admin_custom",
+      to: adminEmail,
+      orderNumber: args.orderNumber,
+      customerName: "Admin",
+      customSubject: `Otomatik atama yapılamadı — ${args.orderNumber}`,
+      customBody:
+        `${args.orderNumber} numaralı sipariş otomatik olarak bir üreticiye atanamadı.\n\n` +
+        `Sebep: ${args.reason}\n\n` +
+        `Sipariş atanmamış olarak bekliyor. /admin/orders üzerinden elle üretici atayın ` +
+        `ya da üretici kapasitesi/etki alanı ayarlarını gözden geçirin.`,
+      locale: "tr",
+    });
+  } catch (err) {
+    console.error(`[ATAMA] admin e-postası kuyruğa alınamadı: ${args.orderNumber}`, err);
   }
 }
 
+/**
+ * P1-C1 — "onaylı + atanmamış" hâline giren HER sipariş için otomatik üretici
+ * ataması. Tek giriş noktasıdır: admin onayı, admin model yükleme, müşteri
+ * model onayı, onay SLA'sının otomatik onayı, toplu onay, atamanın geri
+ * alınması ve ödeme sonrası pazaryeri akışı hepsi bunu çağırır.
+ *
+ * HER sipariş üzerinde çağrılması güvenlidir: siparişi yeniden okur, türünün
+ * anahtarına bakar, iade korumasını ve "onaylı + atanmamış" şartını uygular,
+ * sıralar, atomik atar. Uygun aday yoksa [ATAMA] notu yazıp admin'e posta atar.
+ *
+ * İKİ SIRALAMA-DIŞI KURAL (autoAssignPlacementPlan):
+ *  - Satıcının kendi katalog ürünü (`sellerManufacturerId` dolu) YALNIZ kendi
+ *    atölyesine atanır; kendi atölyesi alamıyorsa sipariş admin'e bırakılır.
+ *    Sıralamaya hiç girmez, çünkü orada rakip bir atölye kazanabilirdi.
+ *  - `excludeManufacturerIds`, o denemeye özgü dışlamadır (geri alınan atölye).
+ *
+ * ASLA fırlatmaz: çağıranların çoğu (onay, model yükleme, toplu işlem) zaten
+ * COMMIT olmuş bir geçişin ardından çağırır; burada atılan bir hata o geçişi
+ * geri almaz, yalnızca admin'e "işlem başarısız" yalanını söylerdi. Çağıran
+ * isterse `.catch` ile ateşle-unut da yapabilir.
+ *
+ * Sıralama ham sıralayıcıya değil Q7 gölge sarmalayıcısına gider, böylece
+ * otomatik atamalar admin arayüzü ve red-yeniden atama ile AYNI telemetriye
+ * düşer (ranker-rollout kararı: skor değişiklikleri önce gölgede).
+ */
+export async function autoAssignIfEligible(
+  orderId: string,
+  opts?: {
+    reason?: string;
+    /**
+     * Bu atama denemesinde HARİÇ tutulacak atölyeler. Siparişin kalıcı
+     * reddedenler listesinden (declinedManufacturerIds) ayrıdır: geri alma
+     * "kara listeye ekle" işaretlenmeden yapıldığında bile sipariş az önce
+     * koparıldığı atölyeye anında geri dönmemelidir.
+     */
+    excludeManufacturerIds?: string[];
+  }
+): Promise<{
+  assigned: boolean;
+  manufacturerId?: string;
+  skipped?: AutoAssignSkip;
+}> {
+  try {
+    const order = await db.query.orders.findFirst({
+      where: eq(orders.id, orderId),
+      columns: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        paymentStatus: true,
+        orderType: true,
+        manufacturerId: true,
+        manufacturerStatus: true,
+        workshopSessionId: true,
+        attributionChannel: true,
+        productId: true,
+        parentReference: true,
+        // Pazaryeri ürününün sahibi. Otomatik atama bunu bilmek ZORUNDA:
+        // satıcının kendi ürünü rakip bir atölyeye gönderilemez.
+        sellerManufacturerId: true,
+        declinedManufacturerIds: true,
+      },
+    });
+    if (!order) return { assigned: false, skipped: "not_eligible" };
+
+    // Sepet alt siparişi ürünlerini satırlarında taşır (orders→items ilişkisi
+    // yok), tür kararı bunu bilmek zorunda.
+    const [lineItem] = await db
+      .select({ id: orderItems.id })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId))
+      .limit(1);
+    const shape = { ...order, hasOrderItems: !!lineItem };
+
+    const kind = classifyAutoAssignOrder(shape);
+    const flagKey = autoAssignFlagFor(kind);
+    // Atölye siparişinde anahtar YOKTUR: bayrak okumadan çıkılır, böylece
+    // kapalı olmayan bir anahtar "açık" diye yorumlanamaz.
+    const flagEnabled = flagKey ? await isFlagEnabled(flagKey) : false;
+
+    const gate = autoAssignRowGate(shape, flagEnabled);
+    if (gate) return { assigned: false, skipped: gate };
+
+    if (!(await orderHasPrintableContent(orderId))) {
+      // Elle yazılmış, modeli henüz yüklenmemiş sipariş buraya düşer. Bu bir
+      // arıza değil, beklenen hâldir (sipariş `awaiting_model`'da bekler), bu
+      // yüzden not/e-posta YOKTUR — model yüklendiğinde upload-model rotası
+      // aynı fonksiyonu yeniden çağırır.
+      return { assigned: false, skipped: "not_eligible" };
+    }
+
+    // Kime bakılacak: satıcının kendi atölyesi mi, sıralama mı, hiçbiri mi.
+    const plan = autoAssignPlacementPlan({
+      sellerManufacturerId: order.sellerManufacturerId,
+      declinedManufacturerIds: Array.isArray(order.declinedManufacturerIds)
+        ? (order.declinedManufacturerIds as string[])
+        : [],
+      excludeManufacturerIds: opts?.excludeManufacturerIds ?? [],
+    });
+    if (plan.kind === "skip") {
+      // Satıcının kendi ürünü, ama kendi atölyesine verilemiyor. Sıralamaya
+      // HİÇ girilmez (girilse rakip atölye kazanırdı): sipariş atanmamış kalır
+      // ve admin elle karar verir.
+      return { assigned: false, skipped: "not_eligible" };
+    }
+
+    let targetManufacturerId: string;
+    // Sıralamadan geçildi mi? Değerlendirme satırı YALNIZ o zaman yazılır:
+    // satıcının kendi atölyesine yapılan yerleştirme bir sıralama kararı
+    // değildir ve beklemede bir taslağı da yoktur.
+    const ranked = plan.kind === "rank";
+    if (plan.kind === "seller") {
+      targetManufacturerId = plan.manufacturerId;
+    } else {
+      // Dışlama SIRALAMANIN İÇİNDE uygulanır, sonrasında süzülerek değil:
+      // sonradan süzmek, kaydedilen kazanan olarak SEÇİLEMEYECEK bir atölyeyi
+      // bırakıyordu. Sipariş sayfası da o ayrışmayı gördüğünde "iş elle atanmış
+      // olabilir" diyordu — hiç yapılmamış bir insan kararını suçlayarak.
+      const candidates = await rankForOrderWithShadow(orderId, {
+        excludeManufacturerIds: plan.excluded,
+      });
+      const best = candidates.find((c) => c.eligible);
+      if (!best) {
+        // Dışlananlar artık sıralamada "uygun değil" olarak işaretli; sebebi
+        // metinden değil sıralayıcının kendi sabitinden okuyoruz.
+        const excludedCount = candidates.filter(
+          (c) => c.ineligibleReason === EXCLUDED_THIS_ATTEMPT_REASON
+        ).length;
+        const why =
+          candidates.length === 0
+            ? "aktif üretici yok"
+            : excludedCount > 0
+              ? `${excludedCount} atölye bu deneme için dışlandı (atama az önce onlardan geri alındı); kalan ${candidates.length - excludedCount} üreticinin hiçbiri uygun değil`
+              : `${candidates.length} üreticinin hiçbiri uygun değil (kapasite / malzeme / sipariş almıyor / daha önce reddetti)`;
+        // Sıraladık ama hiçbir işi YERLEŞTİRMEDİK. Taslak düşürülmezse
+        // gecikmeli doğrulama, bu arada siparişi başka biri atadığında o
+        // atamayı bizim sıralamamızın sonucuymuş gibi kaydeder.
+        discardAssignmentEvaluation(orderId);
+        await flagManualAssignment({
+          orderId,
+          orderNumber: order.orderNumber,
+          reason: why,
+        });
+        return { assigned: false, skipped: "no_candidate" };
+      }
+      targetManufacturerId = best.manufacturerId;
+    }
+
+    const trigger = opts?.reason ? ` (${opts.reason})` : "";
+    const result = await assignManufacturerToOrder({
+      orderId,
+      manufacturerId: targetManufacturerId,
+      // Az önce kanıtlandı, sıralayıcı da aynı siparişi okudu.
+      skipPrintableCheck: true,
+      notification: {
+        subject: `Yeni sipariş atandı: ${order.orderNumber}`,
+        body: `${order.orderNumber} numaralı sipariş otomatik olarak size atandı${trigger}.\n\nÜretici panelinizden 24 saat içinde kabul veya reddedin.`,
+      },
+    });
+    if (!result.ok) {
+      // Yarışı kaybettik: ORTADA BİZİM VERDİĞİMİZ BİR KARAR YOK, dolayısıyla
+      // hiçbir değerlendirme satırı yazılmamalı. Taslak düşürülmezse gecikmeli
+      // doğrulama siparişte o an duran üreticiyi görür ve BAŞKASININ atamasını
+      // bizim sıralamamızın sonucuymuş gibi kaydederdi.
+      if (ranked) discardAssignmentEvaluation(orderId);
+      // Atomik UPDATE eşleşmedi: ya araya bir iade girdi (ileri işlem yasağı)
+      // ya da bu sırada başkası siparişi aldı. İkincisi bir arıza değil —
+      // sipariş zaten bir üreticide — bu yüzden admin'e posta atılmaz.
+      if (await isOrderRefunded(orderId).catch(() => false)) {
+        return { assigned: false, skipped: "refunded" };
+      }
+      if (plan.kind === "seller" && result.reason === "manufacturer_unavailable") {
+        // Satıcının atölyesi kapanmış/askıya alınmış. Başka atölyeye otomatik
+        // verilemeyeceği için bu, admin'in görmesi gereken bir çıkmazdır.
+        await flagManualAssignment({
+          orderId,
+          orderNumber: order.orderNumber,
+          reason:
+            "ürünün sahibi olan atölye aktif değil; satıcının kendi ürünü başka bir atölyeye otomatik verilemez",
+        });
+        return { assigned: false, skipped: "no_candidate" };
+      }
+      console.info(
+        `[ATAMA] ${order.orderNumber} atanamadı (${result.reason}); sipariş bu sırada başka bir işlemle değişmiş olabilir`
+      );
+      return { assigned: false, skipped: "not_eligible" };
+    }
+
+    // Korumalı UPDATE geçti: kararı yaratan sıralama ile kararın kendisi ancak
+    // BURADA birbirine bağlanır. Satırı 2,5 sn'lik doğrulama zamanlayıcısına
+    // bırakmıyoruz: o zamanlayıcı unref'li, yani kısa ömürlü bir süreçte (betik,
+    // tek işlik worker) hiç çalışmadan kaybolur ve karar hiç kaydedilmez.
+    if (ranked) await commitAssignmentEvaluation(orderId, targetManufacturerId);
+
+    return { assigned: true, manufacturerId: targetManufacturerId };
+  } catch (err) {
+    // Beklemedeki değerlendirme taslağını HER durumda düşür. Atama çağırısı
+    // "ok değil" dönmek yerine FIRLATIRSA taslak bellekte kalıyor ve gecikmeli
+    // doğrulama, bu arada siparişi alan BAŞKA bir aktörün atamasını bizim
+    // sıralamamızın sonucu sanarak kaydediyordu. Koşulsuzdur: `ranked` bu kapsamda
+    // okunamaz ve okunmasına gerek de yok — sıralama hiç yapılmadıysa düşürme
+    // sessiz bir no-op'tur, başarılı atamadan sonra fırlayan hatada ise taslağı
+    // commit çoktan almıştır.
+    discardAssignmentEvaluation(orderId);
+    // Sıralayıcı/DB hatası çağıranın işlemini bozmamalı: geçiş zaten yazıldı,
+    // sipariş atanmamış kalır ve admin kuyruğunda görünür.
+    console.error(`[ATAMA] otomatik atama hata verdi: ${orderId}`, err);
+    return { assigned: false };
+  }
+}

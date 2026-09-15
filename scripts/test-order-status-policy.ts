@@ -320,6 +320,220 @@ ok(
   !codeIdentifiers("// notRefundedGuard REFUNDED_ORDER_ERROR\nconst a = 1;").has("notRefundedGuard")
 );
 
+/* ── İleri yazma: ya KENDİ korumalı UPDATE'i, ya TEK KAPIYA devir ───────────
+ *
+ * Eski kural "dosyada korumayı taşıyan en az bir `update(orders)` var mı"ydı ve
+ * atama tek kapıya toplandığı gün YAPISI GEREĞİ bayatladı: geri alma rotası
+ * kendi devir UPDATE'ini sildi, işi `assignManufacturerToOrder`a bıraktı. Orada
+ * koruma KALKMADI, tek yere TAŞINDI; buna rağmen bu liste kırmızı yanıyordu.
+ *
+ * Yeni kural devri KABUL EDER ama bedavaya değil:
+ *   1. Dosya siparişe partner YAZIYORSA (yerleştirme), koruma o yazmanın kendi
+ *      WHERE'inde durmak zorundadır. "Dosya bir yerinde atama servisini
+ *      çağırıyor" MAZERET DEĞİLDİR — geri alma rotasının eski hâli tam olarak
+ *      öyleydi: servisi bir dalda çağırıyor, devri kendi UPDATE'iyle yazıyordu.
+ *   2. Kendi ileri yazması yoksa devir sayılır, ama YALNIZCA kapının kendisi
+ *      korumayı taşıyorsa. Devir, korumanın orada VAR OLDUĞUNU kanıtlamak
+ *      zorunda; yoksa "kapıya bıraktım" cümlesi korumayı kaldırmanın yolu olur.
+ *
+ * Yerleştirme = `manufacturerId`/`painterId` alanına NULL OLMAYAN bir değer
+ * yazan UPDATE. Koparma (`manufacturerId: null`) ve kargo geri alması
+ * (`status: 'printing'`, `shippedAt: null`) ileri işlem DEĞİLDİR: onları ileri
+ * saymak iade korumasını temizlik yollarına da dayatırdı — bu dosyanın alt
+ * bölümü tam tersini şart koşuyor (iade edilmiş sipariş de koparılabilmeli).
+ */
+const CHOKE_POINT = "src/lib/services/manufacturer-assign.ts";
+const CHOKE_POINT_CALL = "assignManufacturerToOrder";
+
+/** `.set({...})` içinde `prop`a NULL OLMAYAN bir değer yazılıyor mu? */
+function setPlaces(set: ts.ObjectLiteralExpression, prop: string): boolean {
+  return set.properties.some((p) => {
+    // Kısayol (`manufacturerId,`) her zaman bir değişkendir, yani NULL değil.
+    if (ts.isShorthandPropertyAssignment(p)) return p.name.text === prop;
+    if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name) || p.name.text !== prop) {
+      return false;
+    }
+    return p.initializer.kind !== ts.SyntaxKind.NullKeyword;
+  });
+}
+
+/** Siparişe partner YAZAN (koparmayan) `update(orders)` zincirleri. */
+function placementWrites(src: string): UpdateChain[] {
+  return updateChains(parse(src)).filter(
+    // `.set` okunamıyorsa (ör. yardımcı çağrısıyla kurulan yük) yerleştirme
+    // SAYILIR: okunamayan bir yük, korumanın saklanacağı yer olmamalı.
+    (c) => !c.set || setPlaces(c.set, "manufacturerId") || setPlaces(c.set, "painterId")
+  );
+}
+
+/**
+ * Siparişi müşteriye doğru İLERLETEN durum değerleri.
+ *
+ * `approved` burada YOK: baskının geri alınması siparişi atama aşamasına
+ * döndürür, yani ileri değil geri bir adımdır. `rejected`/`cancelled` de yok;
+ * onlar siparişi kapatır. Liste bilerek dar: bir durumu yanlışlıkla "ileri"
+ * saymak, temizlik yollarına iade koruması dayatmak demektir ve bu dosyanın alt
+ * bölümü tam tersini şart koşuyor.
+ */
+const FORWARD_STATUSES = new Set([
+  "printing",
+  "quality_check",
+  "painting",
+  "shipped",
+  "delivered",
+]);
+
+/** `.set({...})` bir alana AÇIKÇA null yazıyor mu — geri alma/temizlik işareti. */
+function setNullsAnything(set: ts.ObjectLiteralExpression): boolean {
+  return set.properties.some(
+    (p) => ts.isPropertyAssignment(p) && p.initializer.kind === ts.SyntaxKind.NullKeyword
+  );
+}
+
+/**
+ * Partner YAZMAYAN ama siparişi ileri taşıyan UPDATE'ler: `status` alanına
+ * yukarıdaki değerlerden birini yazanlar.
+ *
+ * Kargo geri alması (`status: 'printing'`, `shippedAt: null`) bunun DIŞINDA
+ * kalır — aynı `.set` içinde bir alana null yazılması, o yazının ileri değil
+ * geri bir adım olduğunun yapısal işaretidir.
+ *
+ * Yalnız düz metin değerler sayılır: `status: nextStatus` gibi değişkenle
+ * yazılan geçişler buradan geçer, çünkü değişkenin hangi durumu taşıdığı
+ * sözdiziminden okunamaz. O dosyalar (onay, toplu işlem, model onayı) zaten
+ * `statusWritesGuarded` ile HER durum yazması üzerinden denetleniyor.
+ */
+function forwardStatusWrites(src: string): UpdateChain[] {
+  return updateChains(parse(src)).filter(
+    (c) =>
+      !!c.set &&
+      !setNullsAnything(c.set) &&
+      c.set.properties.some(
+        (p) =>
+          ts.isPropertyAssignment(p) &&
+          ts.isIdentifier(p.name) &&
+          p.name.text === "status" &&
+          ts.isStringLiteralLike(p.initializer) &&
+          FORWARD_STATUSES.has(p.initializer.text)
+      )
+  );
+}
+
+/** Dosya işi tek atama kapısına devrediyor mu — yorum değil, GERÇEK çağrı? */
+function delegatesToChokePoint(src: string): boolean {
+  return anyNode(
+    parse(src),
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === CHOKE_POINT_CALL
+  );
+}
+
+/**
+ * İleri yazmanın iade koruması altında olduğu KANITLANIYOR mu: ya dosyanın
+ * kendi UPDATE'inde, ya da korumayı taşıdığı doğrulanmış tek kapıya devirle.
+ */
+function forwardWriteProtected(src: string, chokePointGuarded: boolean): boolean {
+  const placements = placementWrites(src);
+  // 1. Kendi yerleştirmesi varsa: her biri korumayı KENDİ WHERE'inde taşımalı.
+  if (placements.some((c) => !c.where || !whereCarries(c.where, isGuardCall))) return false;
+  // 2. Kendi ileri DURUM yazması da korumalı olmalı — devirden BAĞIMSIZ olarak.
+  //    Devir yalnızca ATAMANIN korunduğunu kanıtlar; dosyanın kendi yazdığı bir
+  //    `printing`/`shipped` geçişi hakkında hiçbir şey söylemez. Kural yalnız
+  //    yerleştirmelere bakarken, kapıya devreden bir dosya korumasız bir ileri
+  //    durum yazması ekleyip yeşil kalabiliyordu: iade edilmiş bir sipariş
+  //    üretime sokulur, üstelik hakediş oradan işlemeye devam ederdi.
+  if (
+    forwardStatusWrites(src).some((c) => !c.where || !whereCarries(c.where, isGuardCall))
+  ) {
+    return false;
+  }
+  // 3. Korumalı bir ileri yazması varsa eski kural zaten sağlanmış.
+  if (guardInUpdateWhere(src)) return true;
+  // 4. Kendi ileri yazması yok: işi kapıya devretmiş OLMALI ve kapı korumalı.
+  return delegatesToChokePoint(src) && chokePointGuarded;
+}
+
+// Denetleyicinin kendisi: devri kabul etmeli, kaçamağı reddetmeli.
+const FORWARD_SELF_TESTS: Array<[string, string, boolean, boolean]> = [
+  [
+    "delegation to the choke point is accepted",
+    "async function f(){ await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); }",
+    true,
+    true,
+  ],
+  [
+    "delegation plus a detach of its own is accepted",
+    "async function f(){ await db.update(orders).set({ manufacturerId: null, manufacturerStatus: 'unassigned' }).where(eq(orders.paymentStatus, 'refunded')); await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); }",
+    true,
+    true,
+  ],
+  [
+    "delegation is refused when the choke point itself is unguarded",
+    "async function f(){ await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); }",
+    false,
+    false,
+  ],
+  [
+    "its own unguarded hand-off is rejected even though it calls the choke point",
+    "async function f(){ await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); await db.update(orders).set({ manufacturerId: target.id, manufacturerStatus: 'assigned' }).where(eq(orders.id, id)); }",
+    true,
+    false,
+  ],
+  [
+    "its own guarded hand-off is accepted",
+    "async function f(){ await db.update(orders).set({ manufacturerId: target.id }).where(and(eq(orders.id, id), notRefundedGuard())); }",
+    true,
+    true,
+  ],
+  [
+    "a painter placement is a forward write too",
+    "async function f(){ await db.update(orders).set({ painterId: painter.id, status: 'painting' }).where(eq(orders.id, id)); }",
+    true,
+    false,
+  ],
+  [
+    "neither a forward write nor a delegation is rejected",
+    "async function f(){ await db.update(orders).set({ manufacturerId: null }).where(eq(orders.id, id)); }",
+    true,
+    false,
+  ],
+  [
+    // Devir, dosyanın KENDİ ileri durum yazmasını aklamaz.
+    "a delegating file's unguarded forward status write is rejected",
+    "async function f(){ await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); await db.update(orders).set({ status: 'printing', updatedAt: new Date() }).where(eq(orders.id, id)); }",
+    true,
+    false,
+  ],
+  [
+    "a delegating file's guarded forward status write is accepted",
+    "async function f(){ await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); await db.update(orders).set({ status: 'printing', updatedAt: new Date() }).where(and(eq(orders.id, id), notRefundedGuard())); }",
+    true,
+    true,
+  ],
+  [
+    // Kargo geri alması ileri DEĞİLDİR: aynı `.set` içinde bir alana null
+    // yazılması, adımın geri yönde olduğunun yapısal işaretidir.
+    "a cargo rollback next to a delegation is accepted",
+    "async function f(){ await assignManufacturerToOrder({ orderId: id, manufacturerId: t }); await db.update(orders).set({ status: 'printing', shippedAt: null, updatedAt: new Date() }).where(eq(orders.id, id)); }",
+    true,
+    true,
+  ],
+];
+for (const [name, src, chokeGuarded, want] of FORWARD_SELF_TESTS) {
+  ok(
+    `checker: ${name} → ${want ? "accepted" : "rejected"}`,
+    forwardWriteProtected(src, chokeGuarded) === want
+  );
+}
+
+// Devri kabul etmenin ÖN ŞARTI: kapı korumayı gerçekten taşıyor. `false`
+// geçiliyor, yani kapı kendi kendine devredemez — korumayı kendi UPDATE'inde
+// göstermek zorunda. Bu bayrak düşerse devreden her rota da kırmızı yanar.
+const chokePointGuarded = forwardWriteProtected(read(CHOKE_POINT), false);
+ok(`${CHOKE_POINT}: the choke point carries the guard in its own placement UPDATE`, chokePointGuarded);
+
 // Siparişi ileri taşıyan her yazma: iade korumasını atomik UPDATE'in WHERE'inde
 // taşımalı ve 'succeeded' şartı koymamalı (elle açılan, havale, sıfır tutarlı
 // ve atölye siparişleri başka bir ödeme durumunda da ilerleyebilmeli).
@@ -337,7 +551,10 @@ const FORWARD_WRITES = [
 ];
 for (const rel of FORWARD_WRITES) {
   const src = read(rel);
-  ok(`${rel}: refund guard inside the UPDATE's where`, guardInUpdateWhere(src));
+  ok(
+    `${rel}: refund guard in its own UPDATE's where, or delegated to the guarded choke point`,
+    forwardWriteProtected(src, chokePointGuarded)
+  );
   ok(`${rel}: no 'succeeded' requirement`, !hasSucceededRequirement(src));
 }
 

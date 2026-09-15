@@ -102,8 +102,25 @@ export function ManufacturersClient({
   const [filter, setFilter] = useState<FilterTab>("all");
   const [loading, setLoading] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Kaydedilen satır ANINDA güncel görünsün diye yerel üst-yazım. Sayfa sunucu
+  // bileşeninden besleniyor; router.refresh() dönene kadar panel eski değeri
+  // gösterirse admin "kaydedilmedi mi?" diye ikinci kez kaydeder.
+  const [overrides, setOverrides] = useState<Record<string, Partial<Manufacturer>>>({});
 
-  const filtered = manufacturers.filter((m) => matchesFilter(m, filter));
+  // Üst-yazım YALNIZCA refresh dönene kadar yaşar. Sunucudan yeni satırlar
+  // geldiğinde sıfırlanır; yoksa üreticinin kendi panelinden yaptığı sonraki
+  // değişiklik, admin'in bayatlamış değerinin altında sayfa kapanana kadar
+  // görünmez kalırdı. (Render sırasında ayarlamak, React'in "prop değişince
+  // state'i düzelt" kalıbı: fazladan bir render turu ve bayat değerin bir kare
+  // boyunca görünmesi olmaz.)
+  const [serverRows, setServerRows] = useState(manufacturers);
+  if (serverRows !== manufacturers) {
+    setServerRows(manufacturers);
+    setOverrides({});
+  }
+
+  const rows = manufacturers.map((m) => ({ ...m, ...(overrides[m.id] ?? {}) }));
+  const filtered = rows.filter((m) => matchesFilter(m, filter));
 
   const performAction = async (
     id: string,
@@ -254,6 +271,12 @@ export function ManufacturersClient({
                   onToggle={() => setExpandedId(expandedId === m.id ? null : m.id)}
                   performAction={performAction}
                   onCloseTaxReview={() => void closeTaxReview(m)}
+                  onSaved={(patch) =>
+                    setOverrides((prev) => ({
+                      ...prev,
+                      [m.id]: { ...(prev[m.id] ?? {}), ...patch },
+                    }))
+                  }
                 />
               ))}
             </tbody>
@@ -273,6 +296,7 @@ function MfrRow({
   onToggle,
   performAction,
   onCloseTaxReview,
+  onSaved,
 }: {
   m: Manufacturer;
   d: ReturnType<typeof useDictionary>;
@@ -281,6 +305,7 @@ function MfrRow({
   expanded: boolean;
   onToggle: () => void;
   onCloseTaxReview: () => void;
+  onSaved: (patch: Partial<Manufacturer>) => void;
   performAction: (
     id: string,
     action: "activate" | "suspend" | "conditionally-approve" | "approve" | "reject"
@@ -573,9 +598,424 @@ function MfrRow({
                           },
                         ]}
                       />
+                      <RankerInputsEditor m={m} onSaved={onSaved} />
                     </td>
                   </tr>
                 )}
     </>
+  );
+}
+
+/**
+ * Atama girdilerinin admin düzenlemesi.
+ *
+ * Bu alanlar siparişin hangi atölyeye düşeceğini belirler: kapasite ve
+ * "sipariş alıyor" sert filtre, malzeme etiketleri malzeme eşleşmesi (hiç
+ * etiket yoksa atölye HER malzemeyi basabilir sayılır). Otomatik atama yalnız
+ * bu veriye güvendiği için yanlış girilmiş bir değeri düzeltecek bir yer
+ * gerekti; bugüne kadar yalnız partnerin kendisi değiştirebiliyordu.
+ *
+ * İKİ ALAN BURADA ÖZEL:
+ *  • "Kendi boyar" bir yönlendirme kutusu DEĞİL, bir PARA girdisidir: kargo ucu
+ *    bayrağı canlı okur, yani çevirmek atölyenin ELİNDEKİ boyalı siparişlerde
+ *    hakediş tabanını değiştirir. Form bu yüzden önce etkilenen siparişleri
+ *    sunucudan sorar, lira cinsinden gösterir ve ayrı bir onay ister.
+ *  • Malzemeler yalnız admin GERÇEKTEN dokunduysa gönderilir. Hiç etiketi
+ *    olmayan eski bir atölye bugün her malzemeye adaydır; kapasiteyi düzeltmek
+ *    için açılan bir form onu sessizce tek malzemeye daraltmamalı.
+ */
+
+/** Sunucunun "kendi boyama" etki dökümü (/api/admin/manufacturers/[id] GET). */
+interface PaintingImpactOrder {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  currentBaseKurus: number;
+  nextBaseKurus: number;
+  /** Negatif = üreticinin payı azalır. */
+  deltaKurus: number;
+}
+
+interface PaintingImpact {
+  count: number;
+  totalDeltaKurus: number;
+  orders: PaintingImpactOrder[];
+  truncated: boolean;
+}
+
+const formatLira = (kurus: number) =>
+  `₺${(kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function RankerInputsEditor({
+  m,
+  onSaved,
+}: {
+  m: Manufacturer;
+  onSaved: (patch: Partial<Manufacturer>) => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [limit, setLimit] = useState(String(m.maxConcurrentOrders));
+  const [accepting, setAccepting] = useState(m.acceptingOrders);
+  const [materials, setMaterials] = useState<string[]>([]);
+  // Admin malzeme kutularına DOKUNDU mu. Dokunmadıysa `materials` hiç
+  // gönderilmez; bkz. yukarıdaki not (eski atölyeyi sessizce daraltmama).
+  const [materialsTouched, setMaterialsTouched] = useState(false);
+  const [paints, setPaints] = useState(m.paintsInHouse);
+  const [impact, setImpact] = useState<PaintingImpact | null>(null);
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [impactAck, setImpactAck] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+
+  const currentMaterialTags = m.capabilities.filter((c) => c.startsWith("material_"));
+  const hasNoMaterialTags = currentMaterialTags.length === 0;
+  const paintsChanged = paints !== m.paintsInHouse;
+  const ackRequired = paintsChanged && !!impact && impact.count > 0;
+
+  // Form AÇILIRKEN doldurulur. useEffect ile senkronlamak, satır sunucudan
+  // yenilendiğinde admin'in yazdığı değeri altından çekerdi.
+  const openEditor = () => {
+    setLimit(String(m.maxConcurrentOrders));
+    setAccepting(m.acceptingOrders);
+    setMaterials(currentMaterialTags.map((c) => c.slice("material_".length)));
+    setMaterialsTouched(false);
+    setPaints(m.paintsInHouse);
+    setImpact(null);
+    setImpactAck(false);
+    setImpactLoading(false);
+    setReason("");
+    setError(null);
+    setSavedMsg(null);
+    setOpen(true);
+  };
+
+  const toggleMaterial = (key: string) => {
+    setMaterialsTouched(true);
+    setMaterials((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  /**
+   * "Kendi boyar" kutusu çevrildiğinde: bu değişiklik ELDEKİ hangi siparişlerde
+   * kime ne kadar ödeneceğini değiştirir? Rakamı sunucu hesaplar (kargo ucunun
+   * kullandığı aynı fonksiyonla), istemci yalnız gösterir.
+   */
+  const loadImpact = async (next: boolean) => {
+    if (next === m.paintsInHouse) {
+      setImpact(null);
+      setImpactAck(false);
+      return;
+    }
+    setImpactLoading(true);
+    try {
+      const res = await fetch(`/api/admin/manufacturers/${m.id}`, {
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => null);
+      setImpact(res.ok && data?.impact ? (data.impact as PaintingImpact) : null);
+    } catch {
+      // Etki listesi alınamadıysa kayıt yine engellenmez: sunucu kendi
+      // kontrolünü yapar ve onay gerekiyorsa 409 ile geri çevirir.
+      setImpact(null);
+    } finally {
+      setImpactLoading(false);
+    }
+  };
+
+  const save = async () => {
+    const n = Number(limit);
+    if (!Number.isInteger(n) || n < 1 || n > 999) {
+      setError("Eş zamanlı iş limiti 1 ile 999 arasında olmalı.");
+      return;
+    }
+    if (materialsTouched && materials.length === 0) {
+      setError(
+        "En az bir malzeme seçili olmalı. Malzemeleri değiştirmek istemiyorsanız kutuları eski hâline getirin."
+      );
+      return;
+    }
+    if (reason.trim().length < 3) {
+      setError("Neden değiştirdiğinizi kısaca yazın (en az 3 karakter).");
+      return;
+    }
+    if (ackRequired && !impactAck) {
+      setError(
+        "Kendi boyama değişikliğinin devam eden siparişlerdeki ödeme etkisini onaylayın."
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/manufacturers/${m.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxConcurrentOrders: n,
+          acceptingOrders: accepting,
+          // Dokunulmadıysa hiç gönderilmez: sunucu da alanı yoksa malzemelere
+          // dokunmaz.
+          ...(materialsTouched ? { materials } : {}),
+          paintsInHouse: paints,
+          paintsInHouseAck: impactAck,
+          reason: reason.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data?.needsPaintingAck && data?.impact) {
+          // Sunucu etkiyi bizden daha taze biliyor (ekranda yokken yeni bir
+          // sipariş düşmüş olabilir): dökümü göster, onayı yeniden iste.
+          setImpact(data.impact as PaintingImpact);
+          setImpactAck(false);
+        }
+        setError(data.error || "Kaydedilemedi");
+        return;
+      }
+      if (data.manufacturer) {
+        onSaved({
+          maxConcurrentOrders: data.manufacturer.maxConcurrentOrders,
+          acceptingOrders: data.manufacturer.acceptingOrders,
+          paintsInHouse: data.manufacturer.paintsInHouse,
+          capabilities: data.manufacturer.capabilities ?? [],
+          notes: data.manufacturer.notes ?? null,
+        });
+      }
+      const changedCount = Array.isArray(data.changed) ? data.changed.length : 0;
+      setReason("");
+      setMaterialsTouched(false);
+      setImpact(null);
+      setImpactAck(false);
+      setSavedMsg(
+        changedCount === 0
+          ? "Değişen alan yok; kayıt aynı kaldı."
+          : m.status === "rejected"
+            ? `Kaydedildi ✓ ${changedCount} alan güncellendi (reddedilmiş başvuru, bildirim gönderilmedi).`
+            : `Kaydedildi ✓ ${changedCount} alan güncellendi, üreticiye bildirildi.`
+      );
+      setOpen(false);
+      // Sunucu verisiyle uzlaş: üst-yazım yalnız refresh dönene kadar geçerli.
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Atama girdileri (admin)
+          </h4>
+          <p className="mt-1 text-xs text-gray-500">
+            Kapasite, sipariş kabulü, malzemeler ve kendi boyama; siparişin hangi
+            atölyeye düşeceğini belirler. &quot;Kendi boyama&quot; ayrıca
+            üreticiye ne ödeneceğini etkiler. Değişiklik üreticinin admin
+            notlarına iz olarak yazılır ve kendisine bildirilir.
+          </p>
+        </div>
+        {!open && (
+          <button
+            type="button"
+            onClick={openEditor}
+            className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Düzenle
+          </button>
+        )}
+      </div>
+
+      {savedMsg && !open && <p className="mt-2 text-xs text-green-700">{savedMsg}</p>}
+
+      {open && (
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                Eş zamanlı iş limiti
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                step={1}
+                value={limit}
+                onChange={(e) => setLimit(e.target.value)}
+                className="w-28 rounded border border-gray-300 px-2 py-1 text-sm"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Aktif iş sayısı bu sayıya ulaşınca atölyeye yeni sipariş düşmez.
+                Şu an {m.activeOrders} aktif iş var.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                Durum
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={accepting}
+                  onChange={(e) => setAccepting(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                Sipariş alıyor
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={paints}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setPaints(next);
+                    setImpactAck(false);
+                    void loadImpact(next);
+                  }}
+                  className="h-4 w-4"
+                />
+                Kendi boyar (boyacıya göndermez)
+              </label>
+              <p className="mt-1 text-xs text-gray-400">
+                Bu kutu ödeme girdisidir: kendi boyayan atölye, boyama payını da
+                kendi hakedişine yazar. Değiştirmek elde duran boyalı siparişleri
+                etkiler.
+              </p>
+            </div>
+          </div>
+
+          {paintsChanged && (
+            <div
+              className={`rounded-lg border p-3 ${
+                ackRequired
+                  ? "border-amber-300 bg-amber-50"
+                  : "border-gray-200 bg-gray-50"
+              }`}
+            >
+              {impactLoading ? (
+                <p className="text-xs text-gray-600">
+                  Etkilenen siparişler hesaplanıyor…
+                </p>
+              ) : impact && impact.count > 0 ? (
+                <>
+                  <p className="text-xs font-semibold text-amber-900">
+                    Bu değişiklik devam eden {impact.count} boyalı siparişi
+                    etkiler: üreticinin hakediş tabanı toplam{" "}
+                    {formatLira(Math.abs(impact.totalDeltaKurus))}{" "}
+                    {impact.totalDeltaKurus < 0 ? "azalır" : "artar"}.
+                  </p>
+                  <ul className="mt-1 space-y-0.5 text-[11px] text-amber-900">
+                    {impact.orders.map((o) => (
+                      <li key={o.orderId}>
+                        <span className="font-mono">{o.orderNumber}</span>:{" "}
+                        {formatLira(o.currentBaseKurus)} →{" "}
+                        {formatLira(o.nextBaseKurus)} (
+                        {o.deltaKurus < 0 ? "−" : "+"}
+                        {formatLira(Math.abs(o.deltaKurus))})
+                      </li>
+                    ))}
+                    {impact.truncated && <li>… ve diğerleri</li>}
+                  </ul>
+                  <p className="mt-1 text-[11px] text-amber-800">
+                    Kargolanmış ya da hakedişi yazılmış siparişler etkilenmez;
+                    boyacıya devredilmiş siparişlerde de taban değişmez.
+                  </p>
+                  <label className="mt-2 flex items-start gap-2 text-xs font-medium text-amber-900">
+                    <input
+                      type="checkbox"
+                      checked={impactAck}
+                      onChange={(e) => setImpactAck(e.target.checked)}
+                      className="mt-0.5 h-4 w-4"
+                    />
+                    Bu {impact.count} siparişte üreticiye ödenecek tutarın
+                    değişeceğini biliyorum ve onaylıyorum.
+                  </label>
+                </>
+              ) : (
+                <p className="text-xs text-gray-600">
+                  Devam eden boyalı siparişi yok: bu değişiklik mevcut ödemeleri
+                  etkilemiyor, yalnızca bundan sonrası için geçerli.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Malzemeler
+            </label>
+            <div className="flex flex-wrap gap-3">
+              {Object.entries(MATERIAL_LABELS).map(([tag, label]) => {
+                const key = tag.slice("material_".length);
+                return (
+                  <label key={tag} className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={materials.includes(key)}
+                      onChange={() => toggleMaterial(key)}
+                      className="h-4 w-4"
+                    />
+                    {label}
+                  </label>
+                );
+              })}
+            </div>
+            {hasNoMaterialTags ? (
+              <p className="mt-1 text-xs text-amber-700">
+                Bu atölyede malzeme etiketi YOK. Bugünkü kural: etiketi olmayan
+                atölye her malzemede aday sayılır. Kutulara dokunmazsanız bu
+                böyle kalır; bir malzeme işaretlerseniz atölye yalnızca
+                işaretlediklerinize aday olur.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-gray-400">
+                Dokunmazsanız malzemeler değişmez. Düzenlerseniz en az biri
+                zorunlu: hiç etiketi olmayan atölye her malzemeyi basabilir
+                sayılır.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Gerekçe (üreticiye iletilir)
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder='örn. "Telefonda kapasitesini 8 olarak bildirdi"'
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={busy || (ackRequired && !impactAck)}
+              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
+            >
+              {busy ? "Kaydediliyor…" : "Kaydet ve üreticiye bildir"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              disabled={busy}
+              className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-60"
+            >
+              Vazgeç
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

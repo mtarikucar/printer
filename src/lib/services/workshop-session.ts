@@ -21,6 +21,10 @@ import {
 } from "@/lib/config/workshop";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
+  sellerOwnedPlacementBlocked,
+  sellerPlacementGuard,
+} from "@/lib/services/manufacturer-assign";
+import {
   notifyAdminSessionWithoutManufacturer,
   notifyManufacturerOrdersAdopted,
   notifyManufacturerSessionClosed,
@@ -188,6 +192,12 @@ export function batchDeliverPending(sessionId: string) {
  * Üretici yoksa YALNIZCA oran yazılır: oran, `accrueEarning`/`accruePainterEarning`
  * tarafından siparişten okunduğu için üreticisiz bir seansta bile donmuş olmalı —
  * sonradan değişen bir sabit geçmişi yeniden fiyatlamamalı.
+ *
+ * MÜLKİYET KURALI BURADA DEĞİL, ÇAĞIRANIN WHERE'İNDEDİR (`sellerPlacementGuard`).
+ * Bu fonksiyon yalnız "hangi alanlar yazılır"ı bilir; "hangi siparişe yazılır"
+ * sorusunu tek UPDATE ile onlarca satıra dokunan çağıran yanıtlar. Üç çağıranın
+ * üçü de kuralı WHERE'ine koymak ZORUNDA — bkz. scripts/test-auto-assign.ts,
+ * orada bu yapısal olarak denetleniyor.
  */
 function batchAssignmentSet(args: {
   manufacturerId: string | null;
@@ -223,8 +233,22 @@ export async function countBatchOrders(sessionId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
+/** Yayın ve bildirim için taşınan sipariş satırı. */
+type BatchRow = { id: string; orderNumber: string; userId: string; status: string };
+
 export interface CloseSessionResult {
+  /** Partiye giren sipariş adedi — komisyon kademesi bundan hesaplanır. */
   orderCount: number;
+  /**
+   * Üreticinin tezgâhına GERÇEKTEN yazılan adet (üretici yoksa 0).
+   *
+   * `orderCount`tan ayrı duruyor çünkü ikisi ayrılabiliyor: mülkiyet kuralının
+   * elediği sipariş partiye girer (oranı donar) ama kimseye yazılmaz. Tek sayı
+   * döndüğü sürece çağıran, üreticiye söylenenden farklı bir rakam kaydediyordu.
+   */
+  assignedCount: number;
+  /** Mülkiyet kuralının elediği adet: oranı donduruldu, ataması admin'e kaldı. */
+  skippedCount: number;
   commissionRateBps: number;
 }
 
@@ -235,7 +259,10 @@ type CloseOutcome =
       manufacturerId: string | null;
       orderCount: number;
       commissionRateBps: number;
-      batch: { id: string; orderNumber: string; userId: string; status: string }[];
+      /** Üreticiye yazılan siparişler. */
+      batch: BatchRow[];
+      /** Mülkiyet kuralının elediği, yalnız oranı donan siparişler. */
+      skipped: BatchRow[];
     };
 
 /**
@@ -326,18 +353,53 @@ export async function closeSession(
 
     // Adet, seans satırı kilitliyken sayılır: bu noktadan sonra `reserveSeat`
     // (status = 'open' şartı) yeni koltuk veremez, yani sayı gerçekten kesindir.
-    const batch = await tx
+    const batchRows = await tx
       .select({
         id: orders.id,
         orderNumber: orders.orderNumber,
         userId: orders.userId,
         status: orders.status,
+        // Pazaryeri ürününün sahibi: parti yazımı da mülkiyet kuralına tabidir.
+        sellerManufacturerId: orders.sellerManufacturerId,
       })
       .from(orders)
       .where(batchOrderFilter(sessionId));
 
-    const orderCount = batch.length;
+    const orderCount = batchRows.length;
     const commissionRateBps = workshopCommissionRateBps(orderCount);
+
+    // PAZARYERİ MÜLKİYET KURALI (E-C1) parti yazımında da geçerlidir.
+    //
+    // Bugün hiçbir atölye seansı siparişinin satıcısı yoktur (katılım taslağı
+    // `custom` türünde açılır), yani bu kural şu an tek bir siparişi bile
+    // elemiyor. Yine de YAZILI: terfi (`order-draft`) taslağın
+    // `sellerManufacturerId` alanını KOŞULSUZ kopyalar, yani bir gün satıcıya
+    // ait bir ürün bir seans partisine girerse burası onu sessizce partinin
+    // üreticisine — yani rakip bir atölyeye — yazardı. Parti yazımı sipariş
+    // başına atama servisinden geçmediği için kuralı kendi WHERE'inde taşımak
+    // ZORUNDA.
+    //
+    // Karar seansın DURUMUNDAN ÖNCE veriliyor: "kaç sipariş gerçekten bir
+    // tezgâha yazıldı" sorusunun cevabı hem aşağıdaki `in_production`
+    // kararının, hem bildirimlerin, hem de dönen sayıların girdisidir.
+    const blocked = claimed.manufacturerId
+      ? batchRows.filter((o) =>
+          sellerOwnedPlacementBlocked(o.sellerManufacturerId, claimed.manufacturerId!)
+        )
+      : [];
+    const blockedIds = new Set(blocked.map((o) => o.id));
+    // Kuralın elediği sipariş SESSİZCE geride bırakılmaz: kaybolmasıyla ihlal
+    // arasındaki fark, bu logun kendisidir.
+    if (blocked.length > 0) {
+      console.error(
+        `[workshop] seans ${sessionId}: ${blocked.length} sipariş satıcısına ait olduğu için ` +
+          `partinin üreticisine ATANMADI (oran donduruldu, atama admin'e kaldı): ` +
+          blocked.map((o) => o.orderNumber).join(", ")
+      );
+    }
+    // Üreticinin tezgâhına GERÇEKTEN yazılan adet. Üretici yoksa hiçbir sipariş
+    // yerleşmez: parti yazılır ama yalnız oranı donar.
+    const placedCount = claimed.manufacturerId ? orderCount - blockedIds.size : 0;
 
     // Boş parti üretime GİRMEZ; `in_production` yazmak mekana gitmeyecek bir
     // sevkiyatı bekliyor gibi gösterirdi.
@@ -346,9 +408,14 @@ export async function closeSession(
     // "üretimde" görünen ama kimsenin bakmadığı bir ödenmiş sipariş yığını,
     // durumun kendisinin yalan söylemesidir. `closed` dürüst hâldir ve admin'e
     // haber verilir (aşağıda).
+    //
+    // Aynı sebeple: partinin TAMAMI mülkiyet kuralına takılırsa seans da
+    // `in_production` olmaz. Üretici alanı dolu diye "üretimde" demek, hiçbir
+    // siparişin yazılmadığı bir tezgâhı üretimde göstermek olurdu — yukarıdaki
+    // iki dalın kaçındığı yalanın aynısı.
     const nextStatus = orderCount === 0
       ? "cancelled"
-      : claimed.manufacturerId
+      : placedCount > 0
         ? "in_production"
         : "closed";
 
@@ -382,29 +449,89 @@ export async function closeSession(
             at: closedAt,
           })
         )
-        .where(batchOrderFilter(sessionId));
+        .where(
+          claimed.manufacturerId
+            ? and(
+                batchOrderFilter(sessionId),
+                sellerPlacementGuard(claimed.manufacturerId)
+              )
+            : batchOrderFilter(sessionId)
+        );
+
+      if (blockedIds.size > 0) {
+        // Elenen siparişte oran YİNE donar: oran partinin fiyatıdır, atama
+        // değil. Donmazsa hakediş sonradan değişebilen bir sabitle hesaplanır.
+        await tx
+          .update(orders)
+          .set(
+            batchAssignmentSet({ manufacturerId: null, commissionRateBps, at: closedAt })
+          )
+          .where(
+            and(batchOrderFilter(sessionId), inArray(orders.id, [...blockedIds]))
+          );
+      }
     }
 
-    return { manufacturerId: claimed.manufacturerId, orderCount, commissionRateBps, batch };
+    // Parti = GERÇEKTEN atanan siparişler: yayın ve bildirimler ancak bunları
+    // "kabul edilmiş" diye anlatabilir.
+    const batch = batchRows.filter((o) => !blockedIds.has(o.id));
+
+    return {
+      manufacturerId: claimed.manufacturerId,
+      orderCount,
+      commissionRateBps,
+      batch,
+      skipped: blocked,
+    };
   });
 
   if ("reason" in outcome) return { error: outcome.reason };
 
-  if (outcome.orderCount > 0 && !outcome.manufacturerId) {
-    // Ödenmiş siparişleri olan bir seans üreticisiz kapandı: PATCH ucu seansı
-    // açarken üretici şart koşuyor, demek ki sonradan kaldırılmış. Parti kimseye
-    // düşmedi ve seans `closed`'da bekliyor; admin elle atamak zorunda.
+  // GERÇEKTEN bir tezgâha yazılan adet: üretici yoksa sıfır, üretici varken
+  // mülkiyet kuralı her satırı elediyse yine sıfır. Kapanışın bundan sonraki
+  // her cümlesi (admin bildirimi, üretici bildirimi, dönen sayı ve worker'ın
+  // iş geçmişine yazdığı satır) PARTİ BÜYÜKLÜĞÜNÜ değil bu sayıyı konuşur.
+  const placedCount = outcome.manufacturerId ? outcome.batch.length : 0;
+
+  if (outcome.orderCount > 0 && placedCount === 0) {
+    // Ödenmiş siparişi olan bir parti hiçbir tezgâha yazılmadı. İKİ sebebi
+    // olabilir ve ikisi de admin'in elle atamasını gerektirir: seansın
+    // üreticisi sonradan kaldırılmıştır (PATCH ucu açarken üretici şart
+    // koşuyor), ya da partinin TAMAMI mülkiyet kuralına takılmıştır. Koşul
+    // eskiden yalnız `!manufacturerId` idi, yani ikinci hâlde kimseye haber
+    // verilmiyordu: seans `closed`'da, siparişler ödenmiş ve kimse basmıyor.
     console.error(
-      `[workshop] seans ${sessionId} üreticisiz kapandı — ${outcome.orderCount} sipariş atanmadı`
+      `[workshop] seans ${sessionId}: ${outcome.orderCount} ödenmiş siparişin hiçbiri bir üreticiye ` +
+        `yazılmadı (` +
+        (outcome.manufacturerId
+          ? `${outcome.skipped.length} sipariş mülkiyet kuralına takıldı`
+          : "seansta üretici yok") +
+        `) — atama admin'e kaldı`
     );
     await notifyAdminSessionWithoutManufacturer(sessionId, outcome.orderCount);
   }
 
   // Yan etkiler işlem COMMIT ettikten SONRA: bir e-posta/Redis hatası paranın
   // dondurulduğu adımı geri almamalı.
-  if (outcome.manufacturerId) {
+  //
+  // Üreticiye YALNIZ doğru olan iki cümleden biri söylenir:
+  //  - ona gerçekten yazılmış bir parti varsa "şu kadar figür sizde",
+  //  - seansa hiç ödenmiş katılımcı GELMEDİYSE "parti iptal, kapasiteyi
+  //    serbest bırakın".
+  // Üçüncü hâlde (parti dolu ama tamamı mülkiyet kuralına takıldı) ikisi de
+  // YALAN olurdu: `orderCount: 0` ile çağırmak üreticiye "bu seansa ödenmiş
+  // katılımcı olmadı" dedirtiyordu, oysa ödenmiş siparişler var ve oranları
+  // donduruldu. O hâlde muhatap ADMİN'dir (yukarıdaki bildirim); üreticiye
+  // gidecek doğru metin workshop-manufacturer-notify.ts'e eklenecek ayrı bir
+  // daldır — burada uydurulmuş bir cümle, sessiz kalmaktan daha kötüdür.
+  if (placedCount > 0) {
     await notifyManufacturerSessionClosed(sessionId, {
-      orderCount: outcome.orderCount,
+      orderCount: placedCount,
+      commissionRateBps: outcome.commissionRateBps,
+    });
+  } else if (outcome.manufacturerId && outcome.orderCount === 0) {
+    await notifyManufacturerSessionClosed(sessionId, {
+      orderCount: 0,
       commissionRateBps: outcome.commissionRateBps,
     });
   }
@@ -418,8 +545,29 @@ export async function closeSession(
       manufacturerStatus: outcome.manufacturerId ? "accepted" : null,
     }).catch(() => {});
   }
+  // Elenen sipariş de DEĞİŞTİ: komisyon oranı donduruldu. Yayından düşürmek,
+  // açık duran ekranlarda onu kapanış öncesi hâliyle bırakıyordu — hem de tam
+  // olarak elle karar verilmesi gereken siparişte. `manufacturerId: null`, yani
+  // olay üreticinin odasına gitmez: sipariş onun tezgâhına hiç yazılmadı.
+  for (const order of outcome.skipped) {
+    await emitOrderChanged({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      userId: order.userId,
+      manufacturerId: null,
+      status: order.status,
+      manufacturerStatus: null,
+    }).catch(() => {});
+  }
 
-  return { orderCount: outcome.orderCount, commissionRateBps: outcome.commissionRateBps };
+  return {
+    orderCount: outcome.orderCount,
+    // Üreticiye söylenen adetle (yukarıdaki bildirim) dönen adet ARTIK AYNI
+    // kaynaktan geliyor: ikisi de gerçekten yazılan partiyi sayıyor.
+    assignedCount: placedCount,
+    skippedCount: outcome.skipped.length,
+    commissionRateBps: outcome.commissionRateBps,
+  };
 }
 
 /**
@@ -520,19 +668,35 @@ export async function assignBatchManufacturer(input: {
       };
     }
 
-    const batch = await tx
+    const batchRows = await tx
       .select({
         id: orders.id,
         orderNumber: orders.orderNumber,
         userId: orders.userId,
         status: orders.status,
+        sellerManufacturerId: orders.sellerManufacturerId,
       })
       .from(orders)
       .where(and(batchOrderFilter(sessionId), isNull(orders.manufacturerId)));
 
+    // Mülkiyet kuralı (E-C1): satıcının kendi ürünü toplu devirle de rakip bir
+    // atölyeye geçemez. Bugün böyle bir sipariş yok; kuralın burada yazılı
+    // olması, bir gün olduğunda sessizce devredilmemesini sağlıyor.
+    const blocked = batchRows.filter((o) =>
+      sellerOwnedPlacementBlocked(o.sellerManufacturerId, manufacturerId)
+    );
+    if (blocked.length > 0) {
+      console.error(
+        `[workshop] seans ${sessionId}: ${blocked.length} sipariş satıcısına ait olduğu için ` +
+          `toplu devirde ATLANDI: ` + blocked.map((o) => o.orderNumber).join(", ")
+      );
+    }
+    const blockedIds = new Set(blocked.map((o) => o.id));
+    const batch = batchRows.filter((o) => !blockedIds.has(o.id));
+
     // Oran kapanışta donmuştu; yoksa bu parti hiç fiyatlanmamış demektir ve
     // üretici hangi payı aldığını bilmeden basmaya başlamamalı.
-    if (batch.length > 0 && claimed.commissionRateBps === null) {
+    if (batchRows.length > 0 && claimed.commissionRateBps === null) {
       throw new Error(
         "WORKSHOP_BATCH_UNPRICED: seans donmuş komisyon oranı taşımıyor"
       );
@@ -548,7 +712,13 @@ export async function assignBatchManufacturer(input: {
             at,
           })
         )
-        .where(and(batchOrderFilter(sessionId), isNull(orders.manufacturerId)));
+        .where(
+          and(
+            batchOrderFilter(sessionId),
+            isNull(orders.manufacturerId),
+            sellerPlacementGuard(manufacturerId)
+          )
+        );
 
       // Parti artık gerçekten basılıyor: durum bunu söylemeli. `closed`,
       // "ödendi ama kimse basmıyor"un adıydı.
@@ -754,6 +924,7 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
     .select({
       orderId: orders.id,
       orderNumber: orders.orderNumber,
+      sellerManufacturerId: orders.sellerManufacturerId,
       sessionId: workshopSessions.id,
       sessionStatus: workshopSessions.status,
       commissionRateBps: workshopSessions.commissionRateBps,
@@ -827,6 +998,22 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
       continue;
     }
 
+    // Mülkiyet kuralı (E-C1): geç ödeyen sipariş partiye ALINIR, ama satıcısı
+    // varsa ve o satıcı partinin üreticisi değilse alınmaz — sahiplenme sessiz
+    // bir devir aracına dönüşemez. Kural hem listede (log) hem WHERE'de.
+    const adoptable = rows.filter(
+      (r) => !sellerOwnedPlacementBlocked(r.sellerManufacturerId, batchManufacturerId)
+    );
+    if (adoptable.length < rows.length) {
+      const skipped = rows.filter((r) => !adoptable.includes(r));
+      console.error(
+        `[workshop] seans ${sessionId}: ${skipped.length} öksüz sipariş satıcısına ait olduğu için ` +
+          `partiye ALINMADI (elle karar gerekiyor): ` +
+          skipped.map((r) => r.orderNumber).join(", ")
+      );
+    }
+    if (adoptable.length === 0) continue;
+
     const updated = await db
       .update(orders)
       .set(batchAssignmentSet({ manufacturerId: batchManufacturerId, commissionRateBps, at }))
@@ -834,10 +1021,11 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
         and(
           inArray(
             orders.id,
-            rows.map((r) => r.orderId)
+            adoptable.map((r) => r.orderId)
           ),
           isNull(orders.manufacturerId),
-          isNull(orders.commissionRateBps)
+          isNull(orders.commissionRateBps),
+          sellerPlacementGuard(batchManufacturerId)
         )
       )
       .returning({

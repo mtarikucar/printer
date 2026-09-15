@@ -62,6 +62,31 @@ const MATERIAL_LABELS: Record<string, string> = {
   filament: "Filament (FDM)",
 };
 
+/**
+ * Sunucunun "kendi boyama" ödeme etkisi dökümü
+ * (/api/manufacturer/auth/profile GET). Rakamlar kargo ucunun kullandığı
+ * hakediş tabanından gelir; ekran yalnız gösterir.
+ */
+interface PaintingImpactOrder {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  currentBaseKurus: number;
+  nextBaseKurus: number;
+  /** Negatif = payınız azalır. */
+  deltaKurus: number;
+}
+
+interface PaintingImpact {
+  count: number;
+  totalDeltaKurus: number;
+  orders: PaintingImpactOrder[];
+  truncated: boolean;
+}
+
+const formatLira = (kurus: number) =>
+  `₺${(kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export default function ManufacturerProfilePage() {
   const [profile, setProfile] = useState<ManufacturerProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,6 +122,52 @@ export default function ManufacturerProfilePage() {
       prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
     );
 
+  // "Kendi boyama" bir tercih kutusu değil, ÖDEME girdisidir: boyamalı bir
+  // siparişte size ödenecek taban bu bayraktan türer ve kargo anında canlı
+  // okunur, yani bayrağı çevirmek ELİNİZDEKİ boyalı siparişlerin ödemesini de
+  // değiştirir. Kutu çevrildiğinde etkisi sunucudan sorulur, lira olarak
+  // gösterilir ve ayrı onay istenir (admin ekranındaki kuralın aynısı).
+  const [paintImpact, setPaintImpact] = useState<PaintingImpact | null>(null);
+  const [paintImpactLoading, setPaintImpactLoading] = useState(false);
+  const [paintImpactAck, setPaintImpactAck] = useState(false);
+  // Etki SORULAMADI mı (sunucuya ulaşılamadı / hata döndü). Ayrı bir bayrak
+  // olmak zorunda: başarısız istek de `paintImpact = null` bırakıyordu ve ekran
+  // bunu "devam eden boyalı siparişiniz yok" diye okuyordu — yani hesaplanamayan
+  // bir para etkisi, partnere "etkilenmezsiniz" GÜVENCESİ olarak görünüyordu.
+  const [paintImpactError, setPaintImpactError] = useState(false);
+  const paintsChanged = !!profile && paintsInHouse !== profile.paintsInHouse;
+  const paintAckRequired = paintsChanged && !!paintImpact && paintImpact.count > 0;
+
+  const loadPaintingImpact = async (next: boolean) => {
+    if (!profile || next === profile.paintsInHouse) {
+      setPaintImpact(null);
+      setPaintImpactAck(false);
+      setPaintImpactError(false);
+      return;
+    }
+    setPaintImpactLoading(true);
+    setPaintImpactError(false);
+    try {
+      const res = await fetch("/api/manufacturer/auth/profile", { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.impact) {
+        // "Sıfır" değil, "bilinmiyor": ekran bunu güvence olarak yazmamalı.
+        setPaintImpact(null);
+        setPaintImpactError(true);
+        return;
+      }
+      setPaintImpact(data.impact as PaintingImpact);
+    } catch {
+      // Etki listesi alınamadıysa kayıt yine engellenmez: sunucu kendi
+      // kontrolünü yapar ve onay gerekiyorsa 409 ile geri çevirir. Ama ekran
+      // "etkilenecek siparişiniz yok" DİYEMEZ — bunu bilmiyoruz.
+      setPaintImpact(null);
+      setPaintImpactError(true);
+    } finally {
+      setPaintImpactLoading(false);
+    }
+  };
+
   const districtOptions = useMemo(() => (il ? DISTRICTS[il] ?? [] : []), [il]);
 
   const loadProfile = async () => {
@@ -130,6 +201,11 @@ export default function ManufacturerProfilePage() {
       setMaxConcurrent(String(p.maxConcurrentOrders));
       setAcceptingOrders(p.acceptingOrders);
       setPaintsInHouse(p.paintsInHouse);
+      // Kayıtlı değere dönüldü: bekleyen etki dökümü ve onayı da sıfırlanır.
+      setPaintImpact(null);
+      setPaintImpactAck(false);
+      setPaintImpactLoading(false);
+      setPaintImpactError(false);
       // Derive declared materials from capability tags. A legacy manufacturer
       // with none declared accepts all — pre-check both so editing preserves
       // that (saving an empty set would fail the server's min-1 rule).
@@ -170,6 +246,12 @@ export default function ManufacturerProfilePage() {
       !(profile?.ibanReviewStatus === "pending" && ibanClean === profile.pendingIban);
     if (ibanChanged && !isValidTrIban(ibanClean)) {
       setSaveError("Geçersiz IBAN. TR ile başlayan 26 karakterlik IBAN'ı kontrol edin.");
+      return;
+    }
+    if (paintAckRequired && !paintImpactAck) {
+      setSaveError(
+        "Kendi boyama değişikliğinin devam eden siparişlerinizdeki ödeme etkisini onaylayın."
+      );
       return;
     }
     setSaving(true);
@@ -219,19 +301,39 @@ export default function ManufacturerProfilePage() {
           maxConcurrentOrders: clampCapacity(maxConcurrent),
           acceptingOrders,
           paintsInHouse,
+          paintsInHouseAck: paintImpactAck,
           materials,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
+        if (data?.needsPaintingAck && data?.impact) {
+          // Sunucu etkiyi bizden daha taze biliyor (ekran açıkken yeni bir
+          // sipariş düşmüş olabilir): dökümü göster, onayı yeniden iste.
+          setPaintImpact(data.impact as PaintingImpact);
+          setPaintImpactAck(false);
+          // Sunucu etkiyi 409 ile SÖYLEDİ: artık bilinmeyen bir durum yok.
+          setPaintImpactError(false);
+        }
         setSaveError(data.error || "Kaydedilemedi");
         return;
       }
       setEditing(false);
+      // Ne değiştiği kayıttan SONRA da yazılır: para etkisi tek bir "Kaydedildi"
+      // ile geçiştirilmemeli.
+      const notices: string[] = [];
       if (ibanChanged) {
-        setNotice(
+        notices.push(
           "Yeni IBAN admin onayına gönderildi. Onaylanana kadar ödemeleriniz kayıtlı IBAN'a yapılır."
         );
+      }
+      if (data?.painting && data.painting.count > 0) {
+        notices.push(
+          `Kendi boyama ayarınız güncellendi: devam eden ${data.painting.count} boyalı siparişte hakediş tabanınız toplam ${formatLira(Math.abs(data.painting.totalDeltaKurus))} ${data.painting.totalDeltaKurus < 0 ? "azaldı" : "arttı"}.`
+        );
+      }
+      if (notices.length > 0) {
+        setNotice(notices.join(" "));
       }
       await loadProfile();
     } catch {
@@ -491,7 +593,17 @@ export default function ManufacturerProfilePage() {
             <label className="block text-xs font-medium text-gray-500 mb-1">Kendi Boyama</label>
             {editing ? (
               <label className="inline-flex items-center gap-2 mt-1 text-sm text-gray-700">
-                <input type="checkbox" checked={paintsInHouse} onChange={(e) => setPaintsInHouse(e.target.checked)} className="h-4 w-4 rounded" />
+                <input
+                  type="checkbox"
+                  checked={paintsInHouse}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setPaintsInHouse(next);
+                    setPaintImpactAck(false);
+                    void loadPaintingImpact(next);
+                  }}
+                  className="h-4 w-4 rounded"
+                />
                 Boyamalı siparişleri kendim boyayıp kargolarım
               </label>
             ) : (
@@ -501,6 +613,77 @@ export default function ManufacturerProfilePage() {
             )}
           </div>
         </div>
+
+        {/* Bayrağın ödeme etkisi: kutuyu çevirdiğiniz anda, kaydetmeden önce. */}
+        {editing && paintsChanged && (
+          <div
+            className={`rounded-xl border p-3 ${
+              paintAckRequired ? "border-amber-300 bg-amber-50" : "border-gray-200 bg-gray-50"
+            }`}
+          >
+            {paintImpactLoading ? (
+              <p className="text-xs text-gray-600">Etkilenen siparişleriniz hesaplanıyor…</p>
+            ) : paintImpactError ? (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-amber-900">
+                  Bu değişikliğin ödeme etkisi HESAPLANAMADI (sunucuya
+                  ulaşılamadı). Elinizde etkilenecek boyalı sipariş olup
+                  olmadığını şu an bilmiyoruz.
+                </p>
+                <p className="text-[11px] text-amber-800">
+                  Kaydetmeden önce tekrar deneyin. Etkilenen siparişiniz varsa
+                  kayıt zaten geri çevrilir ve etkiyi o zaman göreceksiniz.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void loadPaintingImpact(paintsInHouse)}
+                  className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+                >
+                  Tekrar dene
+                </button>
+              </div>
+            ) : paintImpact && paintImpact.count > 0 ? (
+              <>
+                <p className="text-xs font-semibold text-amber-900">
+                  Bu değişiklik devam eden {paintImpact.count} boyalı siparişinizi
+                  etkiler: hakediş tabanınız toplam{" "}
+                  {formatLira(Math.abs(paintImpact.totalDeltaKurus))}{" "}
+                  {paintImpact.totalDeltaKurus < 0 ? "azalır" : "artar"}.
+                </p>
+                <ul className="mt-1 space-y-0.5 text-[11px] text-amber-900">
+                  {paintImpact.orders.map((o) => (
+                    <li key={o.orderId}>
+                      <span className="font-mono">{o.orderNumber}</span>:{" "}
+                      {formatLira(o.currentBaseKurus)} → {formatLira(o.nextBaseKurus)} (
+                      {o.deltaKurus < 0 ? "−" : "+"}
+                      {formatLira(Math.abs(o.deltaKurus))})
+                    </li>
+                  ))}
+                  {paintImpact.truncated && <li>… ve diğerleri</li>}
+                </ul>
+                <p className="mt-1 text-[11px] text-amber-800">
+                  Kargoladığınız ya da hakedişi yazılmış siparişler etkilenmez;
+                  boyacıya devrettiğiniz siparişlerde de taban değişmez.
+                </p>
+                <label className="mt-2 flex items-start gap-2 text-xs font-medium text-amber-900">
+                  <input
+                    type="checkbox"
+                    checked={paintImpactAck}
+                    onChange={(e) => setPaintImpactAck(e.target.checked)}
+                    className="mt-0.5 h-4 w-4"
+                  />
+                  Bu {paintImpact.count} siparişte bana ödenecek tutarın
+                  değişeceğini biliyorum ve onaylıyorum.
+                </label>
+              </>
+            ) : (
+              <p className="text-xs text-gray-600">
+                Devam eden boyalı siparişiniz yok: bu değişiklik mevcut
+                ödemelerinizi etkilemez, yalnızca bundan sonrası için geçerli.
+              </p>
+            )}
+          </div>
+        )}
 
         {saveError && (
           <div className="bg-red-50 text-red-700 rounded-xl p-3 text-sm">{saveError}</div>
@@ -521,7 +704,7 @@ export default function ManufacturerProfilePage() {
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || (paintAckRequired && !paintImpactAck)}
                 onClick={handleSave}
                 className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium disabled:bg-indigo-400"
               >

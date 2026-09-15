@@ -214,6 +214,17 @@ async function processJob(job: Job) {
           status: "approved",
           manufacturerStatus: "unassigned",
         });
+        // Otomatik onay siparişi "onaylı + atanmamış" hâline sokar ve üretici
+        // ataması `decideModelApproval` içinden BEKLENEREK yapılır (tek
+        // tetikleyici orada durur, müşterinin /onay yolu da aynı yerden geçer).
+        // Sonucu buraya yazmak, süpürme kaydının "onaylandı ama kimseye
+        // gitmedi" durumunu göstermesini sağlar; atanamayan sipariş ayrıca
+        // [ATAMA] notu + admin e-postası üretir.
+        job.log(
+          result.autoAssigned
+            ? `${row.orderNumber} auto-approved and auto-assigned`
+            : `${row.orderNumber} auto-approved; not auto-assigned (see [ATAMA] note)`
+        );
         autoApproved.push({ orderNumber: row.orderNumber, hours: Math.floor(age) });
         continue;
       }

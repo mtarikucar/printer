@@ -256,6 +256,14 @@ export async function POST(request: NextRequest) {
   // skips AI generation entirely and, with no seller assigned, leaves the order
   // in the admin queue. A "custom" draft would instead hit kickOffOrderProcessing
   // and — finding no preview/photo — mark itself failed_generation.
+  //
+  // Ödeme alındıktan sonra bu sipariş `awaiting_model`'da BEKLER ve otomatik
+  // atamaya girmez (manual-orders-without-model kararı): aşağıdaki kalemler bir
+  // fiyat anlaşmasıdır, basılacak bir dosya değil, ve üreticiye kalem listesi
+  // gönderilirse partner siparişi açıp basacak bir şey bulamaz
+  // (orderHasPrintableContent artık kalemleri saymaz). Admin 3D modeli
+  // /api/admin/orders/[id]/upload-model ile yüklediğinde sipariş `approved`
+  // olur ve o rota otomatik atamayı çağırır — yani model indiği anda yerleşir.
   await db.insert(orderDrafts).values({
     reference,
     userId: user.id,

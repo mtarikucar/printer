@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/schema";
 import { reverseEarning, accrueEarning } from "@/lib/services/payouts";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 /**
  * Admin pulls a painting order all the way back from the painter to the
@@ -57,6 +58,8 @@ export type RevokeAfterPainterResult =
       orderNumber: string;
       userId: string;
       orderStatus: string;
+      /** Geri alınan sipariş otomatik olarak yeni bir üreticiye yerleşti mi. */
+      autoAssigned: boolean;
     }
   | { code: "not_found" }
   | { code: "not_handed_to_painter" }
@@ -74,10 +77,17 @@ export async function revokeAfterPainterHandoff(args: {
   blocklistManufacturer?: boolean;
   /** Add the painter to the order's painter blocklist. Default off. */
   blocklistPainter?: boolean;
+  /**
+   * "Kuyruğumda kalsın": sipariş geri alındıktan sonra otomatik olarak yeni bir
+   * üreticiye YERLEŞTİRİLMESİN. Admin bazen bunu ister (müşteriyle
+   * konuşulacak, iade düşünülüyor, üretici elle seçilecek). Varsayılan false.
+   */
+  keepInQueue?: boolean;
 }): Promise<RevokeAfterPainterResult> {
   const { orderId, adminEmail, reason } = args;
   const blocklistManufacturer = args.blocklistManufacturer !== false;
   const blocklistPainter = args.blocklistPainter === true;
+  const keepInQueue = args.keepInQueue === true;
 
   // Read + validate first (the atomic UPDATE below carries the concurrency
   // guard, mirroring painter-decline; we deliberately avoid an outer
@@ -267,6 +277,22 @@ export async function revokeAfterPainterHandoff(args: {
       console.error("revoke-after-painter: painterActions insert failed", e)
     );
 
+  // Detach BİTTİ: sipariş yeniden "onaylı/paid + atanmamış", yani otomatik
+  // atamanın tetiklendiği geçişlerden biri. Tetikleyici rotaya değil buraya
+  // konuldu ki bu fonksiyonu çağıran her yol (bugün admin rotası) aynı davransın.
+  // Para mutabakatından SONRA çağrılır: hakediş geri alınmadan yeni üretici
+  // atanırsa UNIQUE(order_id) yüzünden ikinci tahakkuk sessizce ₺0 kalırdı.
+  let autoAssigned = false;
+  if (!keepInQueue) {
+    const placement = await autoAssignIfEligible(orderId, {
+      reason: "boyacıdan geri alındı",
+      // `blocklistManufacturer` işaretlenmemiş olsa bile iş, az önce
+      // koparıldığı atölyeye anında geri gitmemeli.
+      excludeManufacturerIds: prevManufacturerId ? [prevManufacturerId] : [],
+    });
+    autoAssigned = placement.assigned;
+  }
+
   return {
     code: "ok" as const,
     prevManufacturerId,
@@ -276,5 +302,6 @@ export async function revokeAfterPainterHandoff(args: {
     orderNumber: order.orderNumber,
     userId: order.userId,
     orderStatus: restoredStatus,
+    autoAssigned,
   };
 }

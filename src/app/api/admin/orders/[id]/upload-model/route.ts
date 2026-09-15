@@ -29,6 +29,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 // No size cap: production models are hundreds of megabytes. Files come in
 // through the chunked staging API (src/lib/services/chunked-upload.ts) and are
@@ -231,9 +232,21 @@ export async function POST(
     status: newStatus,
   });
 
+  // Model yüklemesi, elle yazılmış siparişin üreticiye gidebildiği ANDIR
+  // (manual-orders-without-model kararı): sipariş o ana kadar basılabilir
+  // içeriği olmadığı için `awaiting_model`'da bekler, dosya inince burada
+  // yerleştirilir. Durum kontrolü yapılmaz — `autoAssignIfEligible` her
+  // siparişte güvenlidir ve uygun değilse hiçbir şey yapmaz; böylece zaten
+  // `approved` + atanmamış duran bir siparişe model eklemek de onu yerleştirir.
+  const placement = await autoAssignIfEligible(orderId, {
+    reason: "model yüklendi",
+  });
+
   return NextResponse.json({
     success: true,
     status: newStatus,
+    autoAssigned: placement.assigned,
+    ...(placement.skipped ? { autoAssignSkipped: placement.skipped } : {}),
     revision: result.revision,
     fileCount: result.fileCount,
     carriedCount: result.carriedCount,

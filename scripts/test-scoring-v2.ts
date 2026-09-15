@@ -7,11 +7,17 @@
 // Run: npx tsx scripts/test-scoring-v2.ts
 
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import {
   getAssignmentWeights,
   getCanaryPercent,
+  getDistanceModel,
+  getDistanceShadowPercent,
+  shouldRunDistanceShadow,
   shouldUseV2,
   V1_WEIGHTS,
+  V3_WEIGHTS,
   weightsVersion,
   type ScoringWeights,
 } from "../src/lib/config/manufacturer-scoring";
@@ -137,8 +143,226 @@ check(
 delete process.env.MFG_W2_DISTANCE;
 
 // ─── weightsVersion ──────────────────────────────────────────────
+// v1.2 / v2.2 SABİT kalmalı: sürekli mesafe canlı skoru değiştirmiyor. Bu iki
+// satır kırılıyorsa ya canlı algoritma gerçekten değişmiştir (o zaman sürüm
+// bump'ı doğrudur) ya da yanlışlıkla canlı yol oynatılmıştır.
 check("weightsVersion('v1') === 'v1.2'", weightsVersion("v1") === "v1.2");
 check("weightsVersion('v2') === 'v2.2'", weightsVersion("v2") === "v2.2");
+check("weightsVersion('v3') === 'v3.0'", weightsVersion("v3") === "v3.0");
+check(
+  "her profil ayrı bir weights_version üretir (değerlendirme satırları karışamaz)",
+  new Set([weightsVersion("v1"), weightsVersion("v2"), weightsVersion("v3")])
+    .size === 3
+);
+
+// ─── v3: sürekli mesafe gölge profili ────────────────────────────
+// v3'te TEK değişken oynar: mesafe alt-skorunun nasıl hesaplandığı. Ağırlıklar
+// da kaysaydı gölge kaydında farklı çıkan bir kazananı sürekli mesafeye
+// atfedemezdik.
+const v3 = getAssignmentWeights("v3");
+check("v3 ağırlıkları v1 ile AYNI nesne", v3 === V1_WEIGHTS);
+check("V3_WEIGHTS de aynı nesne", V3_WEIGHTS === V1_WEIGHTS);
+const v3Sum = sumWeights(v3);
+check("v3 ağırlıkları 1.0 toplar", Math.abs(v3Sum - 1) < 0.0001, `actual: ${v3Sum}`);
+
+check("getDistanceModel: canlı profiller kademeli", getDistanceModel("v1") === "tiered");
+check("getDistanceModel: v2 de kademeli", getDistanceModel("v2") === "tiered");
+check("getDistanceModel: v3 sürekli", getDistanceModel("v3") === "continuous");
+
+// Yapısal kilit: v3 GÖLGEDİR. Bu iki kontrol, birinin v3'ü sessizce canlı
+// otoriteye terfi ettirmesini engeller (ranker-rollout: yüzdeyle açma ayrı bir
+// karardır, bu fazda kimin iş aldığı değişmemeli).
+const shadowSrc = fs.readFileSync(
+  path.join(__dirname, "../src/lib/services/manufacturer-assignment-shadow.ts"),
+  "utf8"
+);
+check(
+  "otorite yalnız v1/v2 arasından seçilir",
+  /const authoritativeProfile: ScoringProfile = useV2 \? "v2" : "v1";/.test(
+    shadowSrc
+  )
+);
+check(
+  "v3 tek bir gölge sabiti üzerinden kullanılır",
+  shadowSrc.includes('const SHADOW_DISTANCE_PROFILE: ScoringProfile = "v3";')
+);
+check(
+  "salt-okunur aday listesi için kayıt yazmayan bir yol var",
+  shadowSrc.includes("export async function rankForOrderPreview(")
+);
+check(
+  "önizleme yolu kayıt makinesine hiç girmez",
+  !/export async function rankForOrderPreview\([\s\S]*?\n}/
+    .exec(shadowSrc)![0]
+    .includes("stashPending")
+);
+
+// Değerlendirme satırı = GERÇEKLEŞEN atama. Sıralama anında yazılan satır,
+// (order_id, weights_version) tekil indeksini işgal edip siparişin gerçek
+// atamasını düşürüyordu; aşağıdaki kilitler o davranışın geri gelmesini
+// engeller.
+check(
+  "sıralama anında satır YAZILMAZ, beklemeye alınır",
+  // Çağrı dışlama listesini de taşıyor; kilit ARGÜMAN sayısına değil, satırın
+  // sıralama anında YAZILMAYIP beklemeye alınmasına bakar.
+  /stashPending\(orderId, rankedAt, rows[,)]/.test(shadowSrc) &&
+    !/export async function rankForOrderWithShadow\([\s\S]*?\n}/
+      .exec(shadowSrc)![0]
+      .includes("writeEvaluationRows(")
+);
+check(
+  "yerleştirme sonrası yazım için açık bir kanca var",
+  shadowSrc.includes("export async function commitAssignmentEvaluation(")
+);
+check(
+  "yerleştirme OLMADIYSA taslağı düşüren bir yol var",
+  shadowSrc.includes("export function discardAssignmentEvaluation(")
+);
+
+// Karar GEÇMİŞİ (migration 0054). Satırlar EKLENİR: tekil indeks kalktığı için
+// bir çakışma çözümü yazmak artık ikinci kararı sessizce yutardı — ki bu tam
+// olarak "Önceki atama kararları" bölümünü hiç doldurmayan eski davranıştı.
+// Metni değil KODU arıyoruz: dosyanın yorumları bu kararın NEDENİNİ anlatmak
+// için eski çağrının adını anıyor, kilit ona takılmamalı.
+check(
+  "değerlendirme satırı EKLENİR, üzerine yazılmaz",
+  !/\.onConflictDoUpdate\(/.test(shadowSrc) &&
+    !/\.onConflictDoNothing\(/.test(shadowSrc)
+);
+check(
+  "created_at TEK saatten gelir (DB varsayılanı; uygulama saati yazılmaz)",
+  !/createdAt: new Date\(\)/.test(shadowSrc)
+);
+
+// Dışlama SIRALAMANIN İÇİNDE. Sonradan süzülen bir dışlama, kayda
+// seçilemeyecek bir kazanan bırakıyor ve sipariş sayfası o ayrışmayı "iş elle
+// atanmış olabilir" diye açıklıyordu — hiç yapılmamış bir insan kararı.
+check(
+  "gölge sarmalayıcısı dışlamayı sıralayıcıya GEÇİRİR",
+  /rankManufacturersForProfiles\(orderId, profiles, \{\s*excludeManufacturerIds,/.test(
+    shadowSrc
+  )
+);
+check(
+  "tek profile düşen yedek yol da dışlamayı taşır",
+  (shadowSrc.match(/rankManufacturersForOrder\([\s\S]{0,120}?excludeManufacturerIds/g) ?? [])
+    .length === 2
+);
+check(
+  "dışlama satıra da damgalanır (sebep ekranda okunabilsin)",
+  /excludedManufacturerIds: \[\.\.\.excludedManufacturerIds\]/.test(shadowSrc)
+);
+check(
+  "satır, işi GERÇEKTEN alan atölyeyi kaydeder",
+  /function sideJson\([\s\S]*?\n {4}assignedManufacturerId,/.test(shadowSrc)
+);
+check(
+  "gölge karşılaştırmaları tek ortak veri yüklemesinden beslenir",
+  shadowSrc.includes("rankManufacturersForProfiles(orderId, profiles,")
+);
+check(
+  "mesafe gölgesi tek ayarla örneklenebilir",
+  shadowSrc.includes("shouldRunDistanceShadow(orderId)")
+);
+
+// ─── Mesafe gölgesi örnekleme oranı ──────────────────────────────
+// Varsayılan %100: gölge döneminin amacı veri toplamak. Ama tek bir ayarla
+// kısılabilmeli — maliyet (atama başına üç sıralama, tarama ekranında onlarca
+// sipariş) kod değişikliği gerektirmeden dizginlenebilsin.
+delete process.env.MANUFACTURER_DISTANCE_SHADOW_PERCENT;
+check(
+  "getDistanceShadowPercent varsayılanı 100 (her atamada)",
+  getDistanceShadowPercent() === 100
+);
+check(
+  "varsayılanda her sipariş mesafe gölgesine girer",
+  ["FIG-A", "FIG-B", "FIG-C"].every((id) => shouldRunDistanceShadow(id))
+);
+
+process.env.MANUFACTURER_DISTANCE_SHADOW_PERCENT = "0";
+check("örnekleme %0 → gölge kapanır", getDistanceShadowPercent() === 0);
+check(
+  "%0'da hiçbir sipariş gölgeye girmez",
+  ["FIG-A", "FIG-B", "FIG-C"].every((id) => !shouldRunDistanceShadow(id))
+);
+
+process.env.MANUFACTURER_DISTANCE_SHADOW_PERCENT = "20";
+check("örnekleme env'den okunur (20)", getDistanceShadowPercent() === 20);
+let sampled = 0;
+for (let i = 0; i < 1000; i++) {
+  if (shouldRunDistanceShadow(crypto.randomBytes(8).toString("hex"), 20)) {
+    sampled++;
+  }
+}
+check(
+  `%20 örnekleme gerçekten ~%20 (${(sampled / 1000).toFixed(3)})`,
+  Math.abs(sampled / 1000 - 0.2) < 0.05
+);
+delete process.env.MANUFACTURER_DISTANCE_SHADOW_PERCENT;
+
+check(
+  "aynı sipariş için karar kararlı (yeniden sıralama deneyi bozmaz)",
+  (() => {
+    const id = "FIG-STABLE-SHADOW";
+    const first = shouldRunDistanceShadow(id, 50);
+    for (let i = 0; i < 10; i++) {
+      if (shouldRunDistanceShadow(id, 50) !== first) return false;
+    }
+    return true;
+  })()
+);
+
+// İki deneyin kovaları AYRI olmalı: aynı hash kullanılsaydı v2 kanaryasına
+// giren siparişler mesafe gölgesine de birebir aynı şekilde girer/girmezdi,
+// yani iki ölçüm birbirinin yanlılığını taşırdı.
+check(
+  "mesafe gölgesi kovası, v2 kanarya kovasından bağımsız",
+  (() => {
+    let differs = 0;
+    for (let i = 0; i < 500; i++) {
+      const id = crypto.randomBytes(8).toString("hex");
+      if (shouldUseV2(id, 50) !== shouldRunDistanceShadow(id, 50)) differs++;
+    }
+    // Bağımsız iki kova için beklenen ~%50; aynı hash olsaydı 0 çıkardı.
+    return differs > 150;
+  })()
+);
+
+
+// ─── D-C1: karar kimliği damgası ─────────────────────────────────
+// Bir yerleştirme kararı tabloya birden çok satır yazıyor (ağırlık
+// karşılaştırması + mesafe gölgesi) ve İKİ AYRI karar birbirine saniyeler kadar
+// yaklaşabiliyor (arka arkaya iki geri alma, otomatik atamanın hemen ardından
+// tarama uygulaması). Okuyucu satırları bu damgayla grupluyor; damga yoksa 5
+// sn'lik pencereye düşüyor ve o pencere iki gerçek kararı tek karara katlayıp
+// öncekinin kazananını da işi alan atölyesini de ekrandan siliyordu.
+const writeFn = /async function writeEvaluationRows\([\s\S]*?\n}/.exec(shadowSrc)![0];
+check(
+  "yazıcı karar kimliğini uuid üreticisinden alır",
+  /import \{ randomUUID \} from "node:crypto";/.test(shadowSrc)
+);
+check("yazıcı her yazımda bir karar kimliği üretir", /const decisionId = randomUUID\(\);/.test(writeFn));
+check(
+  "kimlik satır döngüsünün DIŞINDA üretilir (karar başına TEK kimlik)",
+  writeFn.indexOf("const decisionId = randomUUID()") > -1 &&
+    writeFn.indexOf("const decisionId = randomUUID()") <
+      writeFn.indexOf("for (const row of pending.rows)")
+);
+check(
+  "kimlik satırın İKİ jsonb tarafına da damgalanır",
+  (writeFn.match(/sideJson\(\s*row\.v[12],\s*decisionId,/g) ?? []).length === 2,
+  String((writeFn.match(/sideJson\(\s*row\.v[12],\s*decisionId,/g) ?? []).length)
+);
+check(
+  "damga jsonb'de okuyucunun aradığı adla durur (`decisionId`)",
+  /function sideJson\([\s\S]*?\n {4}decisionId,/.test(shadowSrc)
+);
+// Aynı taslak iki kez yazılamaz (`takePending` onu alır), yani bir kimlik iki
+// karara dağılamaz; yeniden sıralanan sipariş yeni taslak ve yeni kimlik alır.
+check(
+  "taslağı yazan iki yol da onu bellekten ALIR (aynı kimlik iki kez yazılamaz)",
+  (shadowSrc.match(/takePending\(orderId\)/g) ?? []).length >= 2
+);
 
 // ─── getCanaryPercent ────────────────────────────────────────────
 delete process.env.MANUFACTURER_SCORING_V2_PERCENT;

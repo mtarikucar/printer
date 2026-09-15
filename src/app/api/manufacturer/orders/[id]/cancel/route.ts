@@ -7,6 +7,7 @@ import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { applyStrike } from "@/lib/services/strikes";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 // Manufacturer cancels an order they already accepted (printer broke, out of
 // material, etc.). Unlike "decline" (only allowed while `assigned`), this is
@@ -21,6 +22,12 @@ const CANCELLABLE = [
   "qc_rejected",
   "qc_approved",
 ] as const;
+
+// Tek kaynak: aynı metin SQL CASE'in iki dalında da geçiyor. "Manuel atama
+// gerekli" demiyor, çünkü sipariş artık kuyruğa girer girmez otomatik atamaya
+// sokuluyor; yerleştirme yapılamazsa [ATAMA] notunu autoAssignIfEligible yazar.
+const CANCEL_NOTE =
+  "[İPTAL] Üretici kabul sonrası iptal etti — sipariş atama kuyruğuna döndü.";
 
 const schema = z.object({ reason: z.string().trim().max(500).optional() });
 
@@ -81,7 +88,7 @@ export async function POST(
       // Durable admin flag so the order is visibly back in the manual queue even
       // if ADMIN_EMAIL is unset / the alert email fails (mirrors decline's N12
       // adminNotes). Append, don't overwrite a concurrent note.
-      adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${"[İPTAL] Üretici kabul sonrası iptal etti — manuel atama gerekli."} ELSE ${orders.adminNotes} || E'\n' || ${"[İPTAL] Üretici kabul sonrası iptal etti — manuel atama gerekli."} END`,
+      adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${CANCEL_NOTE} ELSE ${orders.adminNotes} || E'\n' || ${CANCEL_NOTE} END`,
       // Fresh QC round for the next manufacturer; prior photos stay as audit.
       qcRound: sql`${orders.qcRound} + 1`,
       updatedAt: new Date(),
@@ -141,5 +148,19 @@ export async function POST(
       .catch((e) => console.error("manufacturer-cancelled email enqueue failed", e));
   }
 
-  return NextResponse.json({ success: true });
+  // İptal, siparişi "onaylı + atanmamış" hâline sokan geçişlerden biridir —
+  // yani otomatik atamanın tetiklendiği yerlerden. Bu olmadan üretici iptal
+  // ettiğinde sipariş, sahibi fark edene kadar kimsenin tezgâhında olmadan
+  // beklerdi. Kapılar (tür anahtarı, iade, basılabilir içerik) fonksiyonun
+  // kendi içinde; burada yalnız iptal eden atölyenin dışlanması var.
+  const placement = await autoAssignIfEligible(id, {
+    reason: "üretici kabul sonrası iptal etti",
+    excludeManufacturerIds: [session.manufacturerId],
+  });
+
+  return NextResponse.json({
+    success: true,
+    autoAssigned: placement.assigned,
+    ...(placement.skipped ? { autoAssignSkipped: placement.skipped } : {}),
+  });
 }

@@ -10,6 +10,7 @@ import { signOutAction } from "./actions";
 export function AdminSidebar({
   awaitingModelCount,
   awaitingManufacturerCount,
+  assignmentSweepCount,
   awaitingManufacturerBulkCount,
   pendingManufacturerCount,
   pendingProductCount,
@@ -22,6 +23,7 @@ export function AdminSidebar({
 }: {
   awaitingModelCount: number;
   awaitingManufacturerCount: number;
+  assignmentSweepCount: number;
   awaitingManufacturerBulkCount: number;
   pendingManufacturerCount: number;
   pendingProductCount: number;
@@ -68,6 +70,15 @@ export function AdminSidebar({
           // as the "Üretici bekliyor" bucket). The two sets are disjoint; see
           // admin/layout.tsx.
           badge: awaitingModelCount + awaitingManufacturerCount,
+        },
+        {
+          href: "/admin/assignment-sweep",
+          label: "Atama taraması",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />,
+          // Aynı küme (AWAITING_MANUFACTURER): siparişler rozetinin üretici
+          // bekleyen yarısı, taramanın listelediği satırlar ve bu sayı hep
+          // aynı tanımdan gelir, yoksa rozet ile liste ayrışır.
+          badge: assignmentSweepCount,
         },
         {
           href: "/admin/bulk-orders",
@@ -218,7 +229,11 @@ export function AdminSidebar({
       links: [
         {
           href: "/admin/scoring-evaluations",
-          label: "Scoring v2",
+          // Ekranın kendi başlığıyla birebir aynı: menüde başka bir ad görmek,
+          // admin'in iki ayrı ekran sandığı tek bir ekran demek. Ayrıca sayfa
+          // artık yalnız v2 ağırlık kanaryasını değil sürekli mesafe gölgesini
+          // de taşıyor, yani "Scoring v2" adı kapsamı da yanlış anlatıyordu.
+          label: "Sıralama değerlendirmeleri",
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />,
           badge: 0,
         },

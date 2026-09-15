@@ -8,6 +8,7 @@ import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 const MAX_BULK_SIZE = 50;
 
@@ -161,6 +162,26 @@ export async function POST(request: NextRequest) {
   // Emit realtime change once per affected order after the transaction commits
   for (const job of emitJobs) {
     await emitOrderChanged(job);
+  }
+
+  // Toplu onay da her siparişi "onaylı + atanmamış" hâline sokar, yani otomatik
+  // atamanın tetiklendiği geçişlerden biridir.
+  //
+  // Yanıt BEKLENMEZ: 50 siparişin sıralaması (aday puanlama sorguları) tek bir
+  // HTTP isteğine sığmaz ve admin'i saniyelerce bekletirdi. İş uzun ömürlü Node
+  // sürecinde arka planda sürer; her atama kendi başına atomik ve tekrarlanabilir
+  // olduğundan yarıda kalan bir tur yalnızca "atanmamış sipariş" bırakır, bozuk
+  // durum bırakmaz. Fonksiyon asla fırlatmaz; yine de yüzen söz zinciri için
+  // .catch bırakıldı.
+  if (body.action === "approve" && emitJobs.length > 0) {
+    const ids = emitJobs.map((j) => j.orderId);
+    void (async () => {
+      for (const orderId of ids) {
+        await autoAssignIfEligible(orderId, { reason: "toplu onay" });
+      }
+    })().catch((err) =>
+      console.error("[ATAMA] toplu onay sonrası otomatik atama hata verdi", err)
+    );
   }
 
   return NextResponse.json({ success: true, processed, skipped });

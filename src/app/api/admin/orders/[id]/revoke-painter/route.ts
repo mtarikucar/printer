@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { adminActions, manufacturers, painters } from "@/lib/db/schema";
+import { adminActions, manufacturers, orders, painters } from "@/lib/db/schema";
 import { revokeAfterPainterHandoff } from "@/lib/services/revoke-after-painter";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { notifyPainter } from "@/lib/services/painter-notifications";
@@ -25,6 +25,10 @@ const schema = z
     reason: z.string().trim().min(3).max(500),
     blocklistManufacturer: z.boolean().default(true),
     blocklistPainter: z.boolean().default(false),
+    // "Kuyruğumda kalsın": geri alınan sipariş otomatik olarak yeni bir
+    // üreticiye yerleştirilmesin. Üretici geri almasındaki (revoke-manufacturer)
+    // seçeneğin aynısı — admin bazen siparişi bilerek kendi kuyruğunda tutar.
+    keepInQueue: z.boolean().default(false),
   })
   .strict();
 
@@ -44,14 +48,17 @@ export async function POST(
       { status: 400 }
     );
   }
-  const { reason, blocklistManufacturer, blocklistPainter } = parsed.data;
+  const { reason, blocklistManufacturer, blocklistPainter, keepInQueue } = parsed.data;
 
+  // Otomatik atama servisin İÇİNDE, para mutabakatından sonra yapılır
+  // (revoke-after-painter.ts); burada yalnız admin'in açık isteği taşınır.
   const result = await revokeAfterPainterHandoff({
     orderId: id,
     adminEmail,
     reason,
     blocklistManufacturer,
     blocklistPainter,
+    keepInQueue,
   });
 
   if (result.code !== "ok") {
@@ -99,6 +106,42 @@ export async function POST(
   // read falls back to the ordinary copy rather than failing a committed revoke.
   const refunded = await isOrderRefunded(id).catch(() => false);
 
+  // Sipariş satıcının KENDİ katalog ürünü mü ve iş tam da o satıcının
+  // atölyesinden mi alındı? Öyleyse mülkiyet kuralı gereği başka bir atölyeye
+  // GİDEMEZ: kuyrukta kalmasının sebebi aday yokluğu ya da kapalı bir anahtar
+  // değil, kuralın kendisidir. Hesap üretici geri almasındaki (revoke-manufacturer)
+  // ile aynıdır ve aynı adla döndürülür, çünkü iki ekranın da aynı cümleyi
+  // kurabilmesi gerekir. Üretici yoksa soru anlamsızdır, o zaman okumayız.
+  const sellerManufacturerId = result.prevManufacturerId
+    ? ((
+        await db.query.orders
+          .findFirst({
+            where: eq(orders.id, id),
+            columns: { sellerManufacturerId: true },
+          })
+          .catch(() => null)
+      )?.sellerManufacturerId ?? null)
+    : null;
+  const heldForSeller =
+    !result.autoAssigned &&
+    !refunded &&
+    !!sellerManufacturerId &&
+    sellerManufacturerId === result.prevManufacturerId;
+
+  // Kaybeden üreticiye giden yazı da olan bitene uymalı. "Sipariş yeniden
+  // atanacak" cümlesi üç durumda yalandı: admin kuyrukta bıraktığında, uygun
+  // aday çıkmadığında ve ürün satıcının kendi kataloğundan çıktığında (o
+  // durumda üretici zaten satıcının kendisidir, iş kimseye yönlendirilmez).
+  // Üretici geri almasındaki nextStepLine ile aynı cümleler.
+  const nextStepLine = result.autoAssigned
+    ? "Sipariş başka bir üreticiye yönlendirildi."
+    : heldForSeller
+      ? "Bu ürün sizin kataloğunuzdan çıktı ve yalnız sizin atölyenizde basılabilir; " +
+        "bu yüzden sipariş başka bir atölyeye yönlendirilmeyecek. Şu an yönetici " +
+        "kuyruğunda bekliyor, nasıl devam edileceğine yönetici karar verecek."
+      : "Sipariş şu an yönetici kuyruğunda bekliyor; başka bir üreticiye " +
+        "yönlendirilip yönlendirilmeyeceğine yönetici karar verecek.";
+
   // Every side effect below is isolated: the order has already moved, so a
   // failing email or Redis must not turn this into a 500 the admin reads as
   // "nothing happened".
@@ -129,7 +172,11 @@ export async function POST(
         `(${result.prevPainterStatus}) ` +
         (refunded
           ? `→ sipariş iade edildiği için kuyruğa dönmedi, iş iptal edildi. `
-          : `→ atama kuyruğuna döndü. `) +
+          : result.autoAssigned
+            ? `→ otomatik olarak başka bir üreticiye atandı. `
+            : keepInQueue
+              ? `→ admin isteğiyle kuyrukta bırakıldı (otomatik atama yapılmadı). `
+              : `→ atama kuyruğuna döndü. `) +
         `Sebep: ${reason}`,
     })
     .catch((e) => console.error("revoke-painter: adminActions insert failed", e));
@@ -146,8 +193,8 @@ export async function POST(
           `yönetici tarafından geri alındı ve iş iptal edildi; bu sipariş için yapmanız gereken başka bir işlem yok.\n\n` +
           `Sebep: ${reason}\n\n` +
           `Bu sipariş artık üretici panelinizde görünmeyecektir.`
-        : `${result.orderNumber} numaralı siparişin ataması yönetici tarafından geri alındı ` +
-          `ve sipariş yeniden atanacak.\n\nSebep: ${reason}\n\n` +
+        : `${result.orderNumber} numaralı siparişin ataması yönetici tarafından geri alındı.\n\n` +
+          `${nextStepLine}\n\nSebep: ${reason}\n\n` +
           `Bu sipariş artık üretici panelinizde görünmeyecektir.`,
       orderId: id,
     }).catch((e) =>
@@ -189,6 +236,14 @@ export async function POST(
     prevManufacturer: prevMfg?.companyName ?? result.prevManufacturerId,
     prevPainter: prevPainter?.companyName ?? result.prevPainterId,
     prevPainterStatus: result.prevPainterStatus,
+    // Sipariş kuyruğa döndükten sonra otomatik yerleşti mi, yoksa admin
+    // isteğiyle kuyrukta mı kaldı — istemci mesajı bunu söylemeli.
+    autoAssigned: result.autoAssigned,
+    keptInQueue: keepInQueue,
+    // Üretici geri almasının verdiği alanın aynısı: sipariş satıcının kendi
+    // ürünü olduğu için mi kuyrukta kaldı? Ekranın "uygun aday bulunamadı ya da
+    // otomatik atama kapalı" cümlesi burada yanlıştır.
+    ...(heldForSeller ? { heldForSeller: true as const } : {}),
     // Same signal revoke-manufacturer gives: the order went neither back to the
     // queue nor to anyone else, because it was refunded.
     ...(refunded ? { reason: "refunded" as const } : {}),

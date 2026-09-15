@@ -3,7 +3,14 @@
  * exercised by the migration round-trip and by usage, not here.
  */
 import assert from "node:assert/strict";
-import { FLAG_KEYS, FLAG_DEFAULTS, isFlagKey } from "../src/lib/config/flags";
+import {
+  AI_SPEND_FLAG_KEYS,
+  AUTO_ASSIGN_FLAG_KEYS,
+  FLAG_KEYS,
+  FLAG_DEFAULTS,
+  flagForcedOffByKillSwitch,
+  isFlagKey,
+} from "../src/lib/config/flags";
 import {
   SPEND_CAPS,
   capForScope,
@@ -24,8 +31,13 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("five flags, closed set", () => {
+test("ten flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
+    "auto_assign_cart_platform",
+    "auto_assign_custom",
+    "auto_assign_manual",
+    "auto_assign_upload",
+    "auto_assign_whatsapp_ai",
     "auto_model_enabled",
     "fal_enabled",
     "meshy_enabled",
@@ -34,11 +46,56 @@ test("five flags, closed set", () => {
   ]);
 });
 test("everything that spends NEW money defaults off", () => {
+  // The spend set is spelled out here rather than derived from the source, so a
+  // new money-spending flag cannot escape the rule by being filed under
+  // routing: the closed-set test above already forces every new key to be
+  // named, and this list forces it to be classified honestly.
+  assert.deepEqual([...AI_SPEND_FLAG_KEYS].sort(), [
+    "auto_model_enabled",
+    "fal_enabled",
+    "meshy_enabled",
+    "wa_agent_enabled",
+    "wa_bot_enabled",
+  ]);
   assert.equal(FLAG_DEFAULTS.fal_enabled, true, "fal is already live today");
-  for (const key of FLAG_KEYS) {
+  for (const key of AI_SPEND_FLAG_KEYS) {
     if (key !== "fal_enabled") {
       assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);
     }
+  }
+  // No key may dodge the rule by belonging to neither group.
+  for (const key of FLAG_KEYS) {
+    const spend = (AI_SPEND_FLAG_KEYS as readonly string[]).includes(key);
+    const routing = (AUTO_ASSIGN_FLAG_KEYS as readonly string[]).includes(key);
+    assert.ok(spend !== routing, `${key} must sit in exactly one group`);
+  }
+  // Routing switches spend nothing new — they do by themselves what the admin
+  // does by hand today — so they legitimately ship ON.
+  for (const key of AUTO_ASSIGN_FLAG_KEYS) {
+    assert.equal(FLAG_DEFAULTS[key], true, `${key} ships enabled`);
+  }
+});
+test("AI_KILL_ALL stops the spending, not the manufacturer routing", () => {
+  const previous = process.env.AI_KILL_ALL;
+  try {
+    process.env.AI_KILL_ALL = "1";
+    for (const key of AI_SPEND_FLAG_KEYS) {
+      assert.equal(flagForcedOffByKillSwitch(key), true, `${key} must be killed`);
+    }
+    for (const key of AUTO_ASSIGN_FLAG_KEYS) {
+      assert.equal(
+        flagForcedOffByKillSwitch(key),
+        false,
+        `${key} must keep routing orders — it spends no money`
+      );
+    }
+    delete process.env.AI_KILL_ALL;
+    for (const key of FLAG_KEYS) {
+      assert.equal(flagForcedOffByKillSwitch(key), false, `${key} off-switch leaked`);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.AI_KILL_ALL;
+    else process.env.AI_KILL_ALL = previous;
   }
 });
 test("isFlagKey rejects anything outside the set", () => {

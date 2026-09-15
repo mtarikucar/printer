@@ -8,10 +8,18 @@ import {
 } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { regionOf } from "@/lib/data/turkey-regions";
+import {
+  MAP_UNIT_KM,
+  foldProvinceName,
+  provinceDistanceUnits,
+  sameProvinceName,
+} from "@/lib/data/province-distance";
 import { effectiveCoverage } from "@/lib/config/network-map";
 import {
   getAssignmentWeights,
+  getDistanceModel,
   type ScoringProfile,
+  type ScoringWeights,
 } from "@/lib/config/manufacturer-scoring";
 import { manufacturerSupportsMaterial } from "@/lib/services/capability";
 
@@ -117,10 +125,16 @@ export interface DistanceVerdict {
  * verilmiş il o atölyeyi öne çeker ama siparişin KENDİ ilindeki atölye hâlâ
  * önde kalır. Uyarı: 81 ile yayılmış bir kapsama, ülke genelinde aynı-bölge
  * rakiplerini geçer — admin editörü bu yüzden geniş seçimde uyarı gösterir.
+ *
+ * CANLI OLAN BUDUR ve Phase 1'de kademeleri DEĞİŞMEDİ: sürekli mesafeli sürüm
+ * (`distanceScoreContinuous`, hemen aşağıda) yalnız v3 gölge profilinde
+ * çalışır, kimin iş aldığını bu fazda değiştirmemesi için (ranker-rollout).
  */
 export function distanceScore(
-  orderCity: string | undefined,
-  mfgCity: string | undefined,
+  // null da kabul eder: adres alanları ve partner ili DB'de nullable, çağıranın
+  // `?? undefined` yazmak zorunda kalması sessiz hatalara davetiye.
+  orderCity: string | null | undefined,
+  mfgCity: string | null | undefined,
   coverage?: readonly string[] | null
 ): DistanceVerdict {
   if (!orderCity) return { score: 30, kind: "unknown" };
@@ -135,11 +149,187 @@ export function distanceScore(
   return { score: 20, kind: "other" };
 }
 
-function loadScore(currentLoad: number, max: number): number {
+/**
+ * Sürekli mesafe skorunun gerekçesi. Kademeli `DistanceKind` ile bilerek AYRI
+ * bir tip: "coverage_pin" bir kademe değil, hesaplanan skorun altına
+ * düşemeyeceği bir TABANDIR; "near"/"far" ise tek bir eğrinin iki yakası.
+ */
+export type ContinuousDistanceKind =
+  | "same_il"
+  | "coverage_pin"
+  | "near"
+  | "far"
+  | "unknown";
+
+export interface ContinuousDistanceVerdict {
+  score: number;
+  kind: ContinuousDistanceKind;
+  /** Çapa mesafesi (harita birimi); illerden biri tanınmıyorsa null. */
+  units: number | null;
+}
+
+/** Bu mesafeye kadar "yakın" (~300 km): ertesi gün teslim yarıçapı. */
+export const DISTANCE_NEAR_UNITS = 200;
+/**
+ * ~300 km'deki (DISTANCE_NEAR_UNITS) skor. EĞRİNİN KALİBRASYON NOKTASI BUDUR.
+ *
+ * NEDEN 55 — yakınlık kısa mesafede BASKIN olmalı. Ağırlıklar mesafe 0.35,
+ * yük 0.30 olduğuna göre iki atölye arasındaki kararı şu eşitlik verir:
+ *
+ *     0.35 × (mesafe farkı)  >  0.30 × (yük farkı)
+ *
+ * Siparişin kendi ilindeki atölye 100 alıyor; 300 km ötedeki 55 alırsa mesafe
+ * farkı 45 → 15.75 puan. Bu, 50 puanlık bir yük farkını (15.0 puan) bile
+ * yener: yarı dolu YEREL atölye, boştaki UZAK atölyeyi geçer. Eski kalibrasyon
+ * (700 birimde tabana inen tek bir doğru) aynı mesafeye yalnız 22 puan
+ * biçiyordu → 7.7 puan, ve 35 puanlık bir yük farkı (10.5) işi 300 km öteye
+ * taşıyordu. Çalışma anındaki örneklemede 6 siparişin 4'ünde olan tam olarak
+ * buydu; kargoyu platform ödediği için bu doğrudan para kaybıdır.
+ *
+ * Yakınlık mutlak DEĞİL: neredeyse dolu bir yerel atölye (9/10 → yük 10) hâlâ
+ * boştaki uzak atölyeye kaybeder (38 < 49.6) — kapasite hâlâ konuşur.
+ */
+export const DISTANCE_NEAR_SCORE = 55;
+/**
+ * Skorun tabana oturduğu mesafe (~1050 km). Ötesini ayırmanın yönlendirmeye
+ * katkısı yok: 1100 km ile 1400 km arasındaki fark kargoda da tek bir "en uzak
+ * bölge" satırıdır.
+ */
+export const DISTANCE_FLOOR_UNITS = 700;
+/** Uzaklık tabanı — kademeli sürümün "diğer" skoruyla aynı, kıyas bozulmasın. */
+export const DISTANCE_FLOOR_SCORE = 20;
+/** İl bilinmiyorsa nötr skor — kademeli sürümle aynı. */
+export const DISTANCE_UNKNOWN_SCORE = 30;
+/** Etki alanı pini: hesaplanan skor bunun ALTINA düşemez. */
+export const COVERAGE_PIN_FLOOR = 85;
+
+/**
+ * Mesafe → skor eğrisi: İKİ DOĞRU PARÇASI, kırılma noktası ~300 km.
+ *
+ *   0 birim          → 100
+ *   200 birim (~300 km) → 55   (ilk 300 km 45 puana mal olur)
+ *   700 birim (~1050 km) → 20  (sonraki 750 km yalnız 35 puana)
+ *
+ * Kırılma kasıtlı: yakınlığın PARASAL karşılığı kısa mesafede yoğunlaşır
+ * (aynı gün/ertesi gün kargo, hasarda geri dönüş, atölyeye uğrayabilme).
+ * 900 km ile 1200 km arasındaki fark ise ne kargo tarifesinde ne teslim
+ * süresinde ayrı bir satırdır — o aralıkta eğrinin dik olması yalnız gürültü
+ * üretirdi.
+ */
+function continuousDecay(units: number): number {
+  const capped = Math.min(Math.max(units, 0), DISTANCE_FLOOR_UNITS);
+  if (capped <= DISTANCE_NEAR_UNITS) {
+    const drop = (100 - DISTANCE_NEAR_SCORE) * (capped / DISTANCE_NEAR_UNITS);
+    return Math.round(100 - drop);
+  }
+  const beyond =
+    (capped - DISTANCE_NEAR_UNITS) / (DISTANCE_FLOOR_UNITS - DISTANCE_NEAR_UNITS);
+  const drop = (DISTANCE_NEAR_SCORE - DISTANCE_FLOOR_SCORE) * beyond;
+  return Math.round(DISTANCE_NEAR_SCORE - drop);
+}
+
+/** Kapsama listesi bu ili içeriyor mu? Serbest yazım toleranslı. */
+function coverageCovers(
+  coverage: readonly string[] | null | undefined,
+  orderCity: string
+): boolean {
+  if (!coverage || coverage.length === 0) return false;
+  const key = foldProvinceName(orderCity);
+  if (!key) return false;
+  return coverage.some((c) => foldProvinceName(c) === key);
+}
+
+/**
+ * Sürekli mesafe skoru — v3 GÖLGE profilinin mesafe alt-skoru.
+ *
+ * NEDEN: kademeli sürümde mesafe üç kovaya iniyor ve iki komşu il farklı
+ * bölgelere düşüyorsa (Kocaeli→Düzce, 103 km) ülkenin öbür ucuyla
+ * (Edirne→Hakkari, 1423 km) AYNI 20 puanı alıyor. Kargoyu platform ödediği
+ * için bu, parayı doğrudan yanlış yere akıtan bir körlüktür.
+ *
+ * Kurallar (sıra kuralın kendisidir):
+ *  1. sipariş ili bilinmiyor        → 30 (pin bile kurtarmaz: nereye
+ *     gönderileceği bilinmeden "bu il benim" demenin anlamı yok)
+ *  2. atölyenin ili = sipariş ili   → 100
+ *  3. çapalar biliniyor             → `continuousDecay` eğrisi (100 → 55 → 20)
+ *  4. çapa yoksa ama il pinliyse    → 85
+ *  5. aksi                          → 30
+ * Sonra: il pinliyse skor 85'in altına düşemez (coverage-model kararı —
+ * hesaplanan kapsama Phase 5'te gelecek, bugünkü elle seçilmiş iller PİN).
+ *
+ * Pin'in TABAN olması (kademeli sürümdeki gibi sabit 85 değil) kasıtlı: 500 km
+ * öteden "bu ile de bakarım" demiş bir atölye, siparişin kendi ilindeki
+ * atölyeyi geçemez; ama yakındaki pinli atölye 85'e sıkışıp hak ettiği 91'i
+ * kaybetmez de.
+ */
+export function distanceScoreContinuous(
+  orderCity: string | null | undefined,
+  mfgCity: string | null | undefined,
+  coverage?: readonly string[] | null
+): ContinuousDistanceVerdict {
+  if (!orderCity) {
+    return { score: DISTANCE_UNKNOWN_SCORE, kind: "unknown", units: null };
+  }
+  if (sameProvinceName(orderCity, mfgCity)) {
+    return { score: 100, kind: "same_il", units: 0 };
+  }
+
+  const pinned = coverageCovers(coverage, orderCity);
+  const units = provinceDistanceUnits(orderCity, mfgCity);
+
+  if (units === null) {
+    // Adresi olmayan ama admin'in etki alanı tanımladığı atölye geçerli bir
+    // durumdur ve o iller için tam olarak pin tabanını hak eder.
+    if (pinned) {
+      return { score: COVERAGE_PIN_FLOOR, kind: "coverage_pin", units: null };
+    }
+    return { score: DISTANCE_UNKNOWN_SCORE, kind: "unknown", units: null };
+  }
+
+  const decayed = continuousDecay(units);
+  if (pinned && decayed < COVERAGE_PIN_FLOOR) {
+    return { score: COVERAGE_PIN_FLOOR, kind: "coverage_pin", units };
+  }
+  return {
+    score: decayed,
+    kind: units <= DISTANCE_NEAR_UNITS ? "near" : "far",
+    units,
+  };
+}
+
+/**
+ * Doluluk → 0-100. Boş atölye 100, kapasitesi dolan 0.
+ *
+ * Dışa açık: kalibrasyon testleri "yarı dolu yerel atölye, boştaki uzak
+ * atölyeyi geçer mi?" sorusunu sıralayıcının KENDİ yük fonksiyonuyla kurmalı;
+ * testte elle yazılmış bir yük skoru, formül kaydığında sessizce yalan söyler.
+ */
+export function loadScore(currentLoad: number, max: number): number {
   if (max <= 0) return 0;
   if (currentLoad >= max) return 0;
   const ratio = currentLoad / max;
   return Math.max(0, Math.round((1 - ratio) * 100));
+}
+
+/**
+ * Alt skorların ağırlıklı toplamı — sıralamanın TEK formülü.
+ *
+ * Ayrı bir fonksiyon, çünkü mesafe eğrisinin kalibrasyonu ancak "bu fark, şu
+ * yük farkını yener mi?" diye sınanabilir; testin formülü elle kopyalaması
+ * hâlinde test, ranker'ın ne yaptığını değil kendi kopyasını doğrular.
+ */
+export function weightedTotal(
+  scores: CandidateScore["scores"],
+  weights: ScoringWeights
+): number {
+  return (
+    scores.distance * weights.distance +
+    scores.load * weights.load +
+    scores.reliability * weights.reliability +
+    scores.onTimeDelivery * weights.onTimeDelivery +
+    scores.compliance * weights.compliance +
+    scores.batchAffinity * weights.batchAffinity
+  );
 }
 
 /**
@@ -375,6 +565,34 @@ async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
 }
 
 /**
+ * Bu DENEMEYE özgü dışlanan atölyenin uygunsuzluk gerekçesi.
+ *
+ * Sabit olarak duruyor ki çağıran (order-confirm) "hiç aday çıkmadı"yı
+ * anlatırken sebebi metin karşılaştırmadan ayırt edebilsin: "uygun üreticilerin
+ * tamamı bu deneme için dışlandı" ile "hiçbiri zaten uygun değildi" admin için
+ * iki ayrı operasyonel gerçektir.
+ */
+export const EXCLUDED_THIS_ATTEMPT_REASON =
+  "Bu deneme için dışlandı (iş az önce bu atölyeden geri alındı)";
+
+/** Sıralamayı etkileyen, siparişin kendi satırında YAZMAYAN girdiler. */
+export interface RankOptions {
+  /**
+   * Bu denemede sıralamaya HİÇ girmemesi gereken atölyeler (geri alınan atölye).
+   *
+   * Siparişin kalıcı `declinedManufacturerIds` listesinden ayrıdır: geri alma
+   * "kara listeye ekle" işaretlenmeden yapıldığında bile sipariş az önce
+   * koparıldığı atölyeye anında geri dönmemelidir.
+   *
+   * SIRALAMANIN İÇİNDE uygulanır, sonrasında değil: dışlama sıralamadan sonra
+   * süzülürse kaydedilen "kazanan" seçilemeyecek bir atölye olur ve sipariş
+   * sayfası o ayrışmayı "iş elle atanmış olabilir" diye —yani hiç olmamış bir
+   * insan kararı olarak— açıklar.
+   */
+  excludeManufacturerIds?: readonly string[];
+}
+
+/**
  * Rank candidates for an order using either v1 (legacy) or v2 (Q7
  * rollout). Profile defaults to v1 so existing callers stay on the
  * authoritative algorithm during shadow phase; Q7 dual-write code calls
@@ -382,8 +600,52 @@ async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
  */
 export async function rankManufacturersForOrder(
   orderId: string,
-  profile: ScoringProfile = "v1"
+  profile: ScoringProfile = "v1",
+  opts?: RankOptions
 ): Promise<CandidateScore[]> {
+  const byProfile = await rankManufacturersForProfiles(orderId, [profile], opts);
+  return byProfile.get(profile) ?? [];
+}
+
+/**
+ * AYNI siparişi birden çok profile göre sıralar — veriyi BİR KEZ okuyarak.
+ *
+ * NEDEN: her atamada artık üç sıralama karşılaştırılıyor (canlı + ağırlık
+ * gölgesi + mesafe gölgesi) ve tarama ekranı bunu tek istekte onlarca siparişe
+ * uyguluyor. Profil başına ayrı `rankManufacturersForOrder` çağrısı, aynı
+ * satırları üç kez okumak demekti: en pahalısı atölye başına geçmiş sorgusu
+ * (güvenilirlik + gerekirse zamanında teslim), yani 3×N sorgu.
+ *
+ * MALİYET (sorgu sayısı, N = aktif atölye sayısı):
+ *   1 sipariş + 1 atölye listesi + 1 yük toplaması
+ *   + (parti ağırlığı > 0 ise) 1 sipariş kalemi + 2 parti toplaması
+ *   + N güvenilirlik  + (v2 gibi OTD ağırlığı > 0 bir profil varsa) N OTD
+ * ve bu toplam KARŞILAŞTIRILAN PROFİL SAYISINDAN BAĞIMSIZDIR. Üç profil için
+ * eskiden ~3×(6+N) sorgu vardı, şimdi ~6+N. Atölye başına sorgular paralel
+ * çalışır; 25 siparişlik bir tarama tek HTTP isteği içinde 25×(6+N) sorgu
+ * demektir (N=10 → ~400 indeksli sorgu), profil sayısı arttıkça büyümez.
+ *
+ * Siparişler ARASINDA önbellek YOK ve olmamalı: tarama uygularken her atama
+ * bir sonraki siparişin yük tablosunu değiştirir; bayat bir yük tablosu
+ * kapasitesi dolmuş atölyeye iş yazdırırdı.
+ *
+ * Canlı sıralama BİREBİR aynı kalır: ortak yükleme yalnız I/O'yu paylaşır,
+ * skorlar profil başına ayrı ayrı ve eski sırayla hesaplanır — ağırlığı 0 olan
+ * sinyaller (v1'de OTD, parti) profilin kendi sonucunda yine nötr yazılır.
+ */
+export async function rankManufacturersForProfiles(
+  orderId: string,
+  profiles: readonly ScoringProfile[],
+  opts?: RankOptions
+): Promise<Map<ScoringProfile, CandidateScore[]>> {
+  const wanted = [...new Set(profiles)];
+  const out = new Map<ScoringProfile, CandidateScore[]>();
+  if (wanted.length === 0) return out;
+  const allEmpty = () => {
+    for (const p of wanted) out.set(p, []);
+    return out;
+  };
+
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
     columns: {
@@ -393,7 +655,7 @@ export async function rankManufacturersForOrder(
       productId: true,
     },
   });
-  if (!order) return [];
+  if (!order) return allEmpty();
 
   // Manufacturers who already declined or cancelled-after-accept for THIS order
   // must not be re-offered it — otherwise the admin candidate list (and any
@@ -403,8 +665,22 @@ export async function rankManufacturersForOrder(
       ? (order.declinedManufacturerIds as string[])
       : []
   );
+  // Bu denemeye özgü dışlama. Sıralamanın İÇİNDE uygulanır (bkz. RankOptions):
+  // kaydedilen karar, verilebilecek kararla birebir aynı olsun.
+  const excludedIds = new Set(
+    (opts?.excludeManufacturerIds ?? []).filter((id) => !!id)
+  );
 
-  const weights = getAssignmentWeights(profile);
+  const weightsByProfile = new Map<ScoringProfile, ScoringWeights>(
+    wanted.map((p) => [p, getAssignmentWeights(p)] as const)
+  );
+  const weightsOf = (p: ScoringProfile) =>
+    weightsByProfile.get(p) ?? getAssignmentWeights(p);
+  // Bir sinyal, onu KULLANAN en az bir profil varsa yüklenir. Kullanmayan
+  // profilin sonucunda değeri yine nötr yazılır (aşağıda), böylece ortak
+  // yükleme tek bir profilin çıktısını bile değiştirmez.
+  const needsOtd = wanted.some((p) => weightsOf(p).onTimeDelivery > 0);
+  const needsBatch = wanted.some((p) => weightsOf(p).batchAffinity > 0);
 
   const shipping = order.shippingAddress as TurkishAddress | null;
   const orderCity = shipping?.il;
@@ -414,7 +690,7 @@ export async function rankManufacturersForOrder(
     where: inArray(manufacturers.status, ["active"]),
   });
 
-  if (mfgs.length === 0) return [];
+  if (mfgs.length === 0) return allEmpty();
 
   // Bulk-compute current load for all active manufacturers.
   const loads = await db
@@ -436,39 +712,66 @@ export async function rankManufacturersForOrder(
     if (l.manufacturerId) loadMap.set(l.manufacturerId, l.load);
   }
 
-  // Batching signal. Skipped entirely when the weight is 0, mirroring the OTD
-  // skip below — a disabled signal must not cost two queries per ranking.
-  const batchUnits =
-    weights.batchAffinity > 0
-      ? await sameProductUnitsByManufacturer(
-          await productIdsForOrder(orderId, order.productId)
-        )
-      : new Map<string, number>();
+  // Batching signal. Skipped entirely when no requested profile weights it,
+  // mirroring the OTD skip below — a disabled signal must not cost queries.
+  const batchUnits = needsBatch
+    ? await sameProductUnitsByManufacturer(
+        await productIdsForOrder(orderId, order.productId)
+      )
+    : new Map<string, number>();
 
-  const candidates = await Promise.all(
-    mfgs.map(async (m): Promise<CandidateScore> => {
+  // Atölye başına geçmiş sinyalleri: TÜM profiller için bir kez.
+  const history = new Map<
+    string,
+    { reliability: number; onTimeDelivery: number }
+  >();
+  await Promise.all(
+    mfgs.map(async (m) => {
+      const [reliability, onTimeDelivery] = await Promise.all([
+        reliabilityScoreFor(m.id),
+        // Hiçbir profil OTD'ye ağırlık vermiyorsa sorguyu hiç açma.
+        needsOtd ? onTimeDeliveryScoreFor(m.id) : Promise.resolve(70),
+      ]);
+      history.set(m.id, { reliability, onTimeDelivery });
+    })
+  );
+
+  for (const profile of wanted) {
+    const weights = weightsOf(profile);
+    // Mesafe modeli profile bağlıdır. Canlı profiller (v1/v2) kademeli skoru
+    // kullanmaya devam eder — bu fazda canlı atamanın KİMİ seçtiği değişmemeli;
+    // yalnız v3 gölgesi sürekli mesafeyle puanlar.
+    const distanceModel = getDistanceModel(profile);
+
+    const candidates = mfgs.map((m): CandidateScore => {
       const addr = m.address as TurkishAddress | null;
       const city = addr?.il ?? null;
       const district = addr?.ilce ?? null;
       const currentLoad = loadMap.get(m.id) ?? 0;
       const max = m.maxConcurrentOrders;
 
-      const [reliability, onTimeDelivery] = await Promise.all([
-        reliabilityScoreFor(m.id),
-        // v1 doesn't use OTD — skip the query to keep v1 ranking fast.
-        weights.onTimeDelivery > 0
-          ? onTimeDeliveryScoreFor(m.id)
-          : Promise.resolve(70),
-      ]);
-      const sameProductUnits = batchUnits.get(m.id) ?? 0;
+      const signals = history.get(m.id) ?? { reliability: 70, onTimeDelivery: 70 };
+      // Ağırlığı 0 olan sinyal, profilin çıktısında da nötr kalır: v1'in
+      // değerlendirme anlık görüntüsü ortak yükleme yüzünden değişmesin.
+      const onTimeDelivery =
+        weights.onTimeDelivery > 0 ? signals.onTimeDelivery : 70;
+      const sameProductUnits =
+        weights.batchAffinity > 0 ? batchUnits.get(m.id) ?? 0 : 0;
       // Etkin kapsama = admin'in verdiği iller + atölyenin kendi ili. Public
       // harita ile atama aynı fonksiyondan beslenir, ikisi ayrışamaz.
       const coverage = effectiveCoverage(m.coverageProvinces, city);
-      const distance = distanceScore(orderCity, city ?? undefined, coverage);
+      const continuous =
+        distanceModel === "continuous"
+          ? distanceScoreContinuous(orderCity, city, coverage)
+          : null;
+      const distance: {
+        score: number;
+        kind: DistanceKind | ContinuousDistanceKind;
+      } = continuous ?? distanceScore(orderCity, city, coverage);
       const scores = {
         distance: distance.score,
         load: loadScore(currentLoad, max),
-        reliability,
+        reliability: signals.reliability,
         onTimeDelivery,
         compliance:
           (m.requiresManualTaxReview ? 60 : 100) +
@@ -478,20 +781,22 @@ export async function rankManufacturersForOrder(
       };
       scores.compliance = Math.max(0, Math.min(100, scores.compliance));
 
-      const totalScore =
-        scores.distance * weights.distance +
-        scores.load * weights.load +
-        scores.reliability * weights.reliability +
-        scores.onTimeDelivery * weights.onTimeDelivery +
-        scores.compliance * weights.compliance +
-        scores.batchAffinity * weights.batchAffinity;
+      const totalScore = weightedTotal(scores, weights);
 
       let eligible = true;
       let ineligibleReason: string | undefined;
+      // SIRA KURALIN KENDİSİDİR: en üstte bu denemeye özgü dışlama durur.
+      // Kalıcı "reddetti" etiketinden önce gelir, çünkü iş az önce bu atölyeden
+      // GERİ ALINDIYSA admin'in gördüğü gerekçe o olmalıdır — daha eski bir
+      // reddin üstünü örtmez, yalnızca bugünkü sebebi öne alır.
+      //
       // Material hard-filter: an order routes only to manufacturers that declare
       // they print its material. Legacy manufacturers with no declared material
       // tags are treated as able to print any material (manufacturerSupportsMaterial).
-      if (declinedIds.has(m.id)) {
+      if (excludedIds.has(m.id)) {
+        eligible = false;
+        ineligibleReason = EXCLUDED_THIS_ATTEMPT_REASON;
+      } else if (declinedIds.has(m.id)) {
         eligible = false;
         ineligibleReason = "Bu siparişi daha önce reddetti / iptal etti";
       } else if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
@@ -511,8 +816,13 @@ export async function rankManufacturersForOrder(
 
       const reasons: string[] = [];
       if (distance.kind === "same_il") reasons.push("Aynı şehir");
-      else if (distance.kind === "coverage") reasons.push("Etki alanı");
+      else if (distance.kind === "coverage" || distance.kind === "coverage_pin")
+        reasons.push("Etki alanı");
       else if (distance.kind === "same_region") reasons.push("Aynı bölge");
+      // Sürekli modelde "aynı bölge" diye bir kademe yok; mesafeyi km olarak
+      // yazmak admin'e kademeden daha çok şey söyler.
+      else if (continuous?.kind === "near" && continuous.units !== null)
+        reasons.push(`Yakın (~${Math.round(continuous.units * MAP_UNIT_KM)} km)`);
       if (scores.load >= 80) reasons.push("Düşük yük");
       else if (scores.load <= 30 && eligible) reasons.push("Yüksek yük");
       if (scores.reliability >= 85) reasons.push("Güvenilir");
@@ -541,12 +851,15 @@ export async function rankManufacturersForOrder(
         eligible,
         ineligibleReason,
       };
-    })
-  );
+    });
 
-  // Sort eligible first (by score desc), ineligible at bottom.
-  return candidates.sort((a, b) => {
-    if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
-    return b.totalScore - a.totalScore;
-  });
+    // Sort eligible first (by score desc), ineligible at bottom.
+    candidates.sort((a, b) => {
+      if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+      return b.totalScore - a.totalScore;
+    });
+    out.set(profile, candidates);
+  }
+
+  return out;
 }

@@ -5,7 +5,7 @@ import { getRedisConnection } from "@/lib/queue/connection";
 import {
   FLAG_DEFAULTS,
   FLAG_KEYS,
-  killAllEngaged,
+  flagForcedOffByKillSwitch,
   type FlagKey,
 } from "@/lib/config/flags";
 
@@ -26,11 +26,19 @@ function redisOrNull() {
 
 /**
  * A 10s Redis TTL cache in front of the DB, so a flipped flag reaches every
- * process within ten seconds without a redeploy. Both a Redis outage and a DB
- * outage degrade to the compiled default — never to "enabled".
+ * process within ten seconds without a redeploy.
+ *
+ * Both a Redis outage and a DB outage degrade to the compiled default — which
+ * is what each default MEANS, not a uniform "off". For the AI/spend keys the
+ * default is off, so an outage never starts spending money on its own. For the
+ * five `auto_assign_*` keys the default is ON, so an outage keeps orders
+ * routing to manufacturers; that is deliberate — a flags-table hiccup must not
+ * silently freeze every order in the admin queue, and auto-assignment only does
+ * by itself what the admin would otherwise do by hand.
  */
 export async function isFlagEnabled(key: FlagKey): Promise<boolean> {
-  if (killAllEngaged()) return false;
+  // Kill switch yalnız AI/harcama anahtarlarını kapatır (flags.ts'teki kapsam).
+  if (flagForcedOffByKillSwitch(key)) return false;
 
   const redis = redisOrNull();
   if (redis) {
@@ -104,6 +112,11 @@ export async function getAllFlags(): Promise<Record<FlagKey, boolean>> {
     console.error("[flags] bulk read failed; using compiled defaults", err);
   }
 
-  if (killAllEngaged()) for (const key of FLAG_KEYS) out[key] = false;
+  // Aynı kapsam: acil durumda para muslukları kapanır, sipariş yönlendirmesi
+  // olduğu gibi kalır. Sağlık ucu ve admin ekranı bu haritayı okur, yani
+  // burada kapatılan her anahtar ekranda da "kapalı" görünür.
+  for (const key of FLAG_KEYS) {
+    if (flagForcedOffByKillSwitch(key)) out[key] = false;
+  }
   return out;
 }

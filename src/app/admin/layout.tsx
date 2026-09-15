@@ -133,6 +133,9 @@ export default async function AdminLayout({
           <AdminSidebar
             awaitingModelCount={awaitingModelCount.count}
             awaitingManufacturerCount={awaitingManufacturerCounts.all}
+            // Atama taraması ekranı tam olarak bu kümeyi listeler
+            // (AWAITING_MANUFACTURER), o yüzden ikinci bir sorgu yok.
+            assignmentSweepCount={awaitingManufacturerCounts.all}
             awaitingManufacturerBulkCount={awaitingManufacturerCounts.bulk}
             pendingManufacturerCount={pendingMfgCount.count}
             pendingProductCount={pendingProductCount.count}

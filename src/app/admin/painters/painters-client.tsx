@@ -102,8 +102,25 @@ export function PaintersClient({
   const [filter, setFilter] = useState<FilterTab>("all");
   const [loading, setLoading] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Kaydedilen satır ANINDA güncel görünsün diye yerel üst-yazım. Sayfa sunucu
+  // bileşeninden besleniyor; router.refresh() dönene kadar panel eski değeri
+  // gösterirse admin "kaydedilmedi mi?" diye ikinci kez kaydeder.
+  const [overrides, setOverrides] = useState<Record<string, Partial<Painter>>>({});
 
-  const filtered = painters.filter((p) => matchesFilter(p, filter));
+  // Üst-yazım YALNIZCA refresh dönene kadar yaşar. Sunucudan yeni satırlar
+  // geldiğinde sıfırlanır; yoksa boyacının kendi panelinden yaptığı sonraki
+  // değişiklik, admin'in bayatlamış değerinin altında sayfa kapanana kadar
+  // görünmez kalırdı. (Render sırasında ayarlamak, React'in "prop değişince
+  // state'i düzelt" kalıbı: fazladan bir render turu ve bayat değerin bir kare
+  // boyunca görünmesi olmaz.)
+  const [serverRows, setServerRows] = useState(painters);
+  if (serverRows !== painters) {
+    setServerRows(painters);
+    setOverrides({});
+  }
+
+  const rows = painters.map((p) => ({ ...p, ...(overrides[p.id] ?? {}) }));
+  const filtered = rows.filter((p) => matchesFilter(p, filter));
 
   const performAction = async (
     id: string,
@@ -520,6 +537,15 @@ export function PaintersClient({
                           },
                         ]}
                       />
+                      <PainterRankerInputsEditor
+                        p={p}
+                        onSaved={(patch) =>
+                          setOverrides((prev) => ({
+                            ...prev,
+                            [p.id]: { ...(prev[p.id] ?? {}), ...patch },
+                          }))
+                        }
+                      />
                     </td>
                   </tr>
                 )}
@@ -527,6 +553,275 @@ export function PaintersClient({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Atama girdilerinin admin düzenlemesi (boyacı).
+ *
+ * Faz 4'teki otomatik boyacı ataması uygunluğu bu iki alandan okuyacak: aktif
+ * iş sayısı limiti ve "iş alıyor" bayrağı. Teknik etiketleri ise hangi işin
+ * kime gideceğini belirliyor. Bugüne kadar yalnız boyacının kendisi
+ * değiştirebiliyordu, yani telefonda "bu hafta iş alamam" diyen bir atölyeyi
+ * sıradan çıkarmanın yolu yoktu.
+ *
+ * Boyacıda etki alanı (kapsama) kolonu YOKTUR; burada da açılmaz.
+ */
+function PainterRankerInputsEditor({
+  p,
+  onSaved,
+}: {
+  p: Painter;
+  onSaved: (patch: Partial<Painter>) => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [limit, setLimit] = useState(String(p.maxConcurrentOrders));
+  const [accepting, setAccepting] = useState(p.acceptingOrders);
+  const [techniques, setTechniques] = useState<string[]>([]);
+  // Admin teknik kutularına DOKUNDU mu. Dokunmadıysa `capabilities` hiç
+  // gönderilmez. Sebebi üreticideki `materialsTouched` ile aynı: yalnız
+  // kapasiteyi düzeltmek için açılan bir form, boyacının etiket kümesi hakkında
+  // hüküm vermemeli. Etiketi hiç olmayan boyacıda eski hâli daha da kötüydü —
+  // form "En az bir teknik seçili olmalı" diyip kaydı komple engelliyordu, yani
+  // admin kapasiteyi düzeltebilmek için olmayan teknikleri uydurmak zorundaydı.
+  const [techniquesTouched, setTechniquesTouched] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+
+  // Kayıt formundaki 5 teknik + bu boyacıda duran tanımadığımız etiketler.
+  // Bilinmeyenleri listelemezsek, admin kaydettiği anda sessizce silinirlerdi.
+  const techniqueOptions = [
+    ...Object.keys(TECHNIQUE_LABELS),
+    ...p.capabilities.filter((c) => !(c in TECHNIQUE_LABELS)),
+  ];
+  const hasNoTechniqueTags = p.capabilities.length === 0;
+
+  // Form AÇILIRKEN doldurulur. useEffect ile senkronlamak, satır sunucudan
+  // yenilendiğinde admin'in yazdığı değeri altından çekerdi.
+  const openEditor = () => {
+    setLimit(String(p.maxConcurrentOrders));
+    setAccepting(p.acceptingOrders);
+    setTechniques([...p.capabilities]);
+    setTechniquesTouched(false);
+    setReason("");
+    setError(null);
+    setSavedMsg(null);
+    setOpen(true);
+  };
+
+  const toggleTechnique = (key: string) => {
+    setTechniquesTouched(true);
+    setTechniques((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  const save = async () => {
+    const n = Number(limit);
+    if (!Number.isInteger(n) || n < 1 || n > 999) {
+      setError("Eş zamanlı iş limiti 1 ile 999 arasında olmalı.");
+      return;
+    }
+    // Kural yalnız GERÇEKTEN düzenlenen teknik kümesi için geçerli: dokunulmamış
+    // bir form, boş etiket kümesi yüzünden kapasite düzeltmesini engellememeli.
+    if (techniquesTouched && techniques.length === 0) {
+      setError(
+        "En az bir teknik seçili olmalı. Teknikleri değiştirmek istemiyorsanız kutuları eski hâline getirin."
+      );
+      return;
+    }
+    if (reason.trim().length < 3) {
+      setError("Neden değiştirdiğinizi kısaca yazın (en az 3 karakter).");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/painters/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxConcurrentOrders: n,
+          acceptingOrders: accepting,
+          // Dokunulmadıysa hiç gönderilmez; sunucu da alan yoksa tekniklere
+          // dokunmaz (patchSchema'da `capabilities` optional).
+          ...(techniquesTouched ? { capabilities: techniques } : {}),
+          reason: reason.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Kaydedilemedi");
+        return;
+      }
+      if (data.painter) {
+        onSaved({
+          maxConcurrentOrders: data.painter.maxConcurrentOrders,
+          acceptingOrders: data.painter.acceptingOrders,
+          capabilities: data.painter.capabilities ?? [],
+          notes: data.painter.notes ?? null,
+        });
+      }
+      const changedCount = Array.isArray(data.changed) ? data.changed.length : 0;
+      setReason("");
+      setTechniquesTouched(false);
+      setSavedMsg(
+        changedCount === 0
+          ? "Değişen alan yok; kayıt aynı kaldı."
+          : p.status === "rejected"
+            ? `Kaydedildi ✓ ${changedCount} alan güncellendi (reddedilmiş başvuru, bildirim gönderilmedi).`
+            : `Kaydedildi ✓ ${changedCount} alan güncellendi, boyacıya bildirildi.`
+      );
+      setOpen(false);
+      // Sunucu verisiyle uzlaş: üst-yazım yalnız refresh dönene kadar geçerli.
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Atama girdileri (admin)
+          </h4>
+          <p className="mt-1 text-xs text-gray-500">
+            Kapasite ve iş kabulü, boyama işinin bu atölyeye düşüp düşmeyeceğini
+            BUGÜN belirler; teknikler ise şimdilik bilgi etiketidir (aşağıya
+            bakın). Değişiklik boyacının admin notlarına iz olarak yazılır ve
+            kendisine bildirilir.
+          </p>
+        </div>
+        {!open && (
+          <button
+            type="button"
+            onClick={openEditor}
+            className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Düzenle
+          </button>
+        )}
+      </div>
+
+      {savedMsg && !open && <p className="mt-2 text-xs text-green-700">{savedMsg}</p>}
+
+      {open && (
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                Eş zamanlı iş limiti
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                step={1}
+                value={limit}
+                onChange={(e) => setLimit(e.target.value)}
+                className="w-28 rounded border border-gray-300 px-2 py-1 text-sm"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Aktif iş sayısı bu sayıya ulaşınca boyacıya yeni iş düşmez. Şu an{" "}
+                {p.activeOrders} aktif iş var.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                Durum
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={accepting}
+                  onChange={(e) => setAccepting(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                İş alıyor
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Teknikler
+            </label>
+            <div className="flex flex-wrap gap-3">
+              {techniqueOptions.map((key) => (
+                <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={techniques.includes(key)}
+                    onChange={() => toggleTechnique(key)}
+                    className="h-4 w-4"
+                  />
+                  {TECHNIQUE_LABELS[key] ?? key}
+                </label>
+              ))}
+            </div>
+            {/* Etiketlerin bugünkü anlamı olduğu gibi yazılır: boyacı seçimi
+                (üreticinin "Boyacıya gönder" listesi ve admin'in boyacı atama
+                ucu) yalnız "aktif + iş alıyor + kapasite" bakar, tekniklere
+                BAKMAZ. Etiketsiz bir boyacı bu yüzden iş dışı kalmaz. */}
+            {hasNoTechniqueTags ? (
+              <p className="mt-1 text-xs text-amber-700">
+                Bu boyacıda teknik etiketi YOK. Bu, işlerin ona gitmesini
+                engellemez: boyacı seçimi bugün yalnız &quot;aktif + iş alıyor +
+                kapasite&quot; bakıyor, teknikler üreticinin gördüğü bilgi
+                etiketi olarak duruyor (otomatik boyacı ataması bunları
+                okuyacak). Kutulara dokunmazsanız etiketsiz kalır.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-gray-400">
+                Dokunmazsanız teknikler değişmez. Düzenlerseniz en az biri
+                zorunlu. Teknikler bugün bir işi elemez; üreticinin boyacı seçme
+                ekranında bilgi olarak görünür.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Gerekçe (boyacıya iletilir)
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder='örn. "Telefonda bu hafta iş alamayacağını bildirdi"'
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={busy}
+              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
+            >
+              {busy ? "Kaydediliyor…" : "Kaydet ve boyacıya bildir"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              disabled={busy}
+              className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-60"
+            >
+              Vazgeç
+            </button>
+          </div>
         </div>
       )}
     </div>

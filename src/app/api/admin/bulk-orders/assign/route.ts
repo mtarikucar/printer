@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
+import { db } from "@/lib/db";
+import { manufacturers, orders } from "@/lib/db/schema";
 import {
   ASSIGN_FAILURE_MESSAGES,
   assignManufacturerToOrder,
@@ -50,6 +53,32 @@ export async function POST(request: NextRequest) {
   }
   const { manufacturerId, orderIds } = parsed.data;
 
+  // PAZARYERİ KURALI: satıcının kendi kataloğundan çıkan sipariş YALNIZ satıcının
+  // kendi atölyesine verilebilir. Toplu ekran tek bir üretici seçtirir, yani
+  // "bu üründen 9 siparişi şu atölyeye ver" tek tıkla satıcının ürününü
+  // rakibine bastırabilirdi.
+  //
+  // Kuralı UYGULAYAN yer artık atama kapısının kendisi (E-C1,
+  // assignManufacturerToOrder → `seller_owned`), bu yüzden burada ikinci bir
+  // kopyası YOK: döngü kapının cevabını okur. Toplu uçta AŞMA DA YOKTUR (kapıya
+  // `allowSellerOverride` geçilmez) — sahibin kararı: mülkiyet ancak tek
+  // siparişte, gerekçeli ve denetlenmiş bir kararla aşılabilir; elli siparişte
+  // tek tıkla aşılabilen bir kural, kural değildir.
+  //
+  // Satıcı adı sipariş başına ayrı sorgu ile değil, tek toplu okumayla alınır:
+  // atlama gerekçesi satıcıyı ADIYLA söylemeli, yoksa admin hangi siparişin
+  // neden kaldığını ekrandan anlayamaz.
+  const ownershipRows = await db
+    .select({
+      orderId: orders.id,
+      sellerManufacturerId: orders.sellerManufacturerId,
+      sellerName: manufacturers.companyName,
+    })
+    .from(orders)
+    .leftJoin(manufacturers, eq(manufacturers.id, orders.sellerManufacturerId))
+    .where(inArray(orders.id, orderIds));
+  const ownership = new Map(ownershipRows.map((r) => [r.orderId, r]));
+
   // Sequential on purpose: each assignment writes an audit row and fires a
   // partner notification, and the shared service already guards each update on
   // the order still being unassigned. Racing 50 of these at one manufacturer
@@ -64,14 +93,30 @@ export async function POST(request: NextRequest) {
       manufacturerId,
       adminEmail: a.session.user.email,
     });
-    if (result.ok) assigned.push(orderId);
-    else {
+    if (result.ok) {
+      assigned.push(orderId);
+      continue;
+    }
+    if (result.reason === "seller_owned") {
+      // Atlanır, aşılmaz. Ad önce kapının cevabından, o çözemediyse toplu
+      // okumadan alınır; ikisi de yoksa cümle adsız da doğru kalır.
+      const sellerName =
+        result.sellerName ?? ownership.get(orderId)?.sellerName ?? null;
+      const seller = sellerName ? `${sellerName} atölyesinin` : "bir satıcının";
       skipped.push({
         orderId,
         reason: result.reason,
-        message: ASSIGN_FAILURE_MESSAGES[result.reason],
+        message:
+          `Bu sipariş ${seller} kendi kataloğundan çıktı: yalnız o atölyeye atanabilir. ` +
+          `Toplu atamada bu kural aşılamaz; gerekiyorsa siparişin kendi sayfasından gerekçeli olarak devredin.`,
       });
+      continue;
     }
+    skipped.push({
+      orderId,
+      reason: result.reason,
+      message: ASSIGN_FAILURE_MESSAGES[result.reason],
+    });
   }
 
   // A partially-applied batch is the normal outcome when someone else grabbed

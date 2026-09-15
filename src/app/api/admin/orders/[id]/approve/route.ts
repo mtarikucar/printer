@@ -21,6 +21,7 @@ import {
   isRefunded,
 } from "@/lib/config/order-status-policy";
 import { isOrderRefunded, notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 /**
  * Admin approval of a reviewed order.
@@ -212,5 +213,23 @@ export async function POST(
     manufacturerStatus: order.manufacturerStatus,
   });
 
-  return NextResponse.json({ success: true, status: nextStatus });
+  // Onay, siparişi "onaylı + atanmamış" hâline sokan geçiştir; otomatik atama
+  // tam olarak burada devreye girer. `awaiting_customer_approval` yolunda
+  // ÇAĞRILMAZ: orada henüz gerçek bir onay yoktur ve üretici kuyruğu açılmaz
+  // (meshy_auto siparişi ancak müşteri onayladıktan sonra atanabilir).
+  //
+  // Beklenerek çağrılır: admin sayfayı yenilediğinde atanmış üreticiyi görsün.
+  // Fonksiyon asla fırlatmaz, yani onay yanıtını bozamaz.
+  const placement =
+    nextStatus === "approved"
+      ? await autoAssignIfEligible(id, { reason: "admin onayı" })
+      : null;
+
+  return NextResponse.json({
+    success: true,
+    status: nextStatus,
+    // İstemci "atandı mı, neden atanmadı" bilgisini gösterebilsin diye döner.
+    autoAssigned: placement?.assigned ?? false,
+    ...(placement?.skipped ? { autoAssignSkipped: placement.skipped } : {}),
+  });
 }

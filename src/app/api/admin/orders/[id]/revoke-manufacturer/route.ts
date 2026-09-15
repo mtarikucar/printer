@@ -17,13 +17,17 @@ import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { applyStrike } from "@/lib/services/strikes";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
+  ASSIGN_FAILURE_MESSAGES,
+  SELLER_OVERRIDE_REASON_MIN_LENGTH,
+  assignManufacturerToOrder,
   isOrderRefunded,
-  notRefundedGuard,
 } from "@/lib/services/manufacturer-assign";
 import {
   REFUNDED_PAYMENT_STATUS,
   isRefunded,
 } from "@/lib/config/order-status-policy";
+import { autoAssignPlacementPlan } from "@/lib/config/flags";
+import { autoAssignIfEligible } from "@/lib/services/order-confirm";
 
 /**
  * Take an assigned order back from a manufacturer, optionally handing it to a
@@ -43,8 +47,38 @@ const schema = z
     blocklist: z.boolean().default(true),
     // Reliability penalty — opt-in, since "did not answer" may be a holiday.
     strike: z.boolean().default(false),
+    // "Kuyruğumda kalsın": geri alınan sipariş hemen yeni bir üreticiye
+    // YERLEŞTİRİLMESİN. Otomatik atama olmadan "hedefsiz geri alma" zaten
+    // siparişi admin kuyruğunda bırakıyordu; otomatik atamayla birlikte aynı
+    // tık siparişi saniyeler içinde başka bir atölyeye gönderir. Admin bazen
+    // tam tersini ister (müşteriyle konuşulacak, iptal/iade düşünülüyor,
+    // üretici elle seçilecek), bu yüzden o davranış açık bir seçenek oldu.
+    // Varsayılan false: fazın amacı tıklama beklemeyen siparişler.
+    keepInQueue: z.boolean().default(false),
+    // Satıcının KENDİ katalog ürününü başka bir atölyeye devretmek için açık
+    // onay. Varsayılan false: eksik gönderilen (ya da elle kurulmuş) bir istek
+    // mülkiyet kuralını AŞAMAZ. Ayrı bir gerekçe alanı yok, çünkü bu uçta
+    // `reason` zaten zorunlu ve denetim satırına aynen yazılıyor.
+    allowSellerOverride: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .superRefine((v, ctx) => {
+    // Bu uçta AYRI bir gerekçe alanı yok: aşmanın gerekçesi `reason`dur. Ama
+    // olağan geri alma için yeterli olan üç karakter, mülkiyet aşmasını
+    // denetlenebilir kılmaz — "abc" denetim satırında hiçbir soruya cevap
+    // vermez. Barajın kendisi kapıda (SELLER_OVERRIDE_REASON_MIN_LENGTH); bu
+    // kontrol yalnızca aynı barajı admin'e ERKEN ve anlaşılır söyler, yoksa
+    // istek kapıdan "satıcı kuralı" hatasıyla dönerdi ve ekranda eksik olanın
+    // gerekçenin UZUNLUĞU olduğu hiç görünmezdi.
+    if (!v.allowSellerOverride) return;
+    if (v.reason.trim().length < SELLER_OVERRIDE_REASON_MIN_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: `Mülkiyet devri gerekçesi en az ${SELLER_OVERRIDE_REASON_MIN_LENGTH} karakter olmalıdır.`,
+      });
+    }
+  });
 
 /** 409 copy when a hand-off target is sent for a refunded order. */
 const REFUNDED_HANDOFF_ERROR = "İade edilen sipariş başka bir üreticiye devredilemez.";
@@ -169,16 +203,37 @@ export async function POST(
   const { id } = await params;
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
+    // Mülkiyet aşmasının gerekçe barajı kendi cümlesiyle söylenir: admin
+    // "sebebi zaten yazdım" diye bakakalmasın — eksik olan sebep değil, aşmayı
+    // denetlenebilir kılacak uzunluktur.
+    const overrideIssue = parsed.error.issues.find(
+      (i) => i.code === "custom" && i.path[0] === "reason"
+    );
     return NextResponse.json(
-      { error: "Sebep zorunludur (en az 3 karakter)." },
+      { error: overrideIssue?.message ?? "Sebep zorunludur (en az 3 karakter)." },
       { status: 400 }
     );
   }
-  const { reason, targetManufacturerId, blocklist, strike } = parsed.data;
+  const {
+    reason,
+    targetManufacturerId,
+    blocklist,
+    strike,
+    keepInQueue,
+    allowSellerOverride,
+  } = parsed.data;
 
   const current = await db.query.orders.findFirst({
     where: eq(orders.id, id),
-    columns: { manufacturerId: true, customerName: true, paymentStatus: true },
+    columns: {
+      manufacturerId: true,
+      customerName: true,
+      paymentStatus: true,
+      // Pazaryeri ürününün sahibi. Hem devir kapısı hem de kaybeden üreticiye
+      // gidecek yazı bunu bilmek zorunda: satıcının kendi ürünü başka bir
+      // atölyeye yönlendirilemez, o yüzden "yönlendirilecek" denemez.
+      sellerManufacturerId: true,
+    },
   });
 
   // Refused before anything moves. Revoking first and then failing the
@@ -216,6 +271,59 @@ export async function POST(
       { error: "Sipariş zaten bu üreticide. Farklı bir üretici seçin." },
       { status: 400 }
     );
+  }
+
+  /**
+   * PAZARYERİ MÜLKİYETİ — geri alma ÇALIŞMADAN önce.
+   *
+   * Bağlayıcı kural: satıcının kendi kataloğundan çıkan sipariş yalnız o
+   * satıcının atölyesine verilebilir. Kuralın UYGULANDIĞI yer tek atama kapısı
+   * (assignManufacturerToOrder, aşağıda); buradaki okuma onun yerine geçmez,
+   * iki iş yapar:
+   *  1. Admin'i yarım bir işlemle bırakmaz. İade kontrolünde olduğu gibi: önce
+   *     geri alıp sonra devri reddetmek siparişi üreticisiz bırakır ve admin'e
+   *     bir yarış hatası gösterirdi.
+   *  2. Reddi satıcının ADIYLA anlatır ve gerekçeli devir yolunu gösterir —
+   *     satıcının atölyesi temelli kapandığında admin'in elinde başka çıkış
+   *     kalmıyordu.
+   *
+   * `declined`/`exclude` listeleri BİLEREK boş: onlar "şu an OTOMATİK verme"
+   * sinyalleridir. Satıcı kendi siparişini reddetmiş olsa bile admin onu yine
+   * KENDİ atölyesine devredebilmelidir; yapamayacağı tek şey onaysız olarak
+   * rakibe vermektir.
+   */
+  let sellerOverrideUsed = false;
+  if (target) {
+    const plan = autoAssignPlacementPlan({
+      sellerManufacturerId: current?.sellerManufacturerId ?? null,
+      declinedManufacturerIds: [],
+      excludeManufacturerIds: [],
+    });
+    if (plan.kind === "seller" && plan.manufacturerId !== target.id) {
+      if (!allowSellerOverride) {
+        const seller = await db.query.manufacturers
+          .findFirst({
+            where: eq(manufacturers.id, plan.manufacturerId),
+            columns: { companyName: true },
+          })
+          .catch(() => null);
+        const sellerLabel = seller?.companyName
+          ? `${seller.companyName} atölyesinin`
+          : "bir satıcının";
+        return NextResponse.json(
+          {
+            error:
+              `Bu sipariş ${sellerLabel} kendi kataloğundan çıktı: normalde yalnız o atölyeye verilebilir. ` +
+              `Yine de devretmek için ekrandaki mülkiyet onayını işaretleyin; yazdığınız sebep denetim kaydına geçer.`,
+            reason: "seller_owned",
+            requiresSellerOverride: true,
+            sellerName: seller?.companyName ?? null,
+          },
+          { status: 409 }
+        );
+      }
+      sellerOverrideUsed = true;
+    }
   }
 
   let result: RevokeResult = await revokeManufacturerAssignment({
@@ -285,30 +393,69 @@ export async function POST(
     .catch(() => null);
   const prevName = prevCompany?.companyName ?? result.prevManufacturerId;
 
-  // Optional atomic hand-off. Guarded so a concurrent assignment wins cleanly:
-  // the revoke itself already succeeded, so we still return 200. This write
-  // bypasses assignManufacturerToOrder, so it repeats that function's refund
-  // guard: a refund landing between the revoke above and this write must not
-  // put the order back on a bench (refund-end-state); it stays unassigned.
+  // İsteğe bağlı devir. Artık TEK ATAMA KAPISINDAN geçer: burada eskiden
+  // kapıyı bilerek atlayan ayrı bir korumalı UPDATE vardı ve pazaryeri
+  // mülkiyet kuralı yalnız o kapıda yaşadığı için, satıcının kendi katalog
+  // ürünü bu uçtan tek çağrıda rakip atölyeye verilebiliyordu.
+  //
+  // Kapıya geçilen iki seçenek geri almanın anlamını korur:
+  //  • `statusGuard: null` — siparişin durumunu geri alma zaten doğruladı ve
+  //    gerekiyorsa atanabilir duruma çevirdi (manufacturer-revoke.ts). Kapının
+  //    varsayılan durum şartı burada yeni bir ret kapısı açardı: "paid"de
+  //    bekleyen (atölye seansı, elle açılmış) siparişlerin devri kırılırdı.
+  //  • `skipPrintableCheck: true` — sipariş az önce bir üreticinin tezgâhındaydı;
+  //    basılacak içeriği olduğu oradan belli.
+  // İade koruması kapının İÇİNDE (notRefundedGuard) durur, yani geri alma ile
+  // bu yazma arasına düşen bir iade siparişi yine tezgâha koyamaz. Denetim
+  // satırını kapıya YAZDIRMIYORUZ (`adminEmail` geçilmez): aşağıda geri alma +
+  // devir tek satırda, sebebiyle birlikte kaydediliyor.
   let reassigned = false;
+  let handoffError: string | null = null;
   if (target) {
-    const [row] = await db
-      .update(orders)
-      .set({
+    try {
+      const handoff = await assignManufacturerToOrder({
+        orderId: id,
         manufacturerId: target.id,
-        manufacturerStatus: "assigned",
-        assignedToManufacturerAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(orders.id, id),
-          eq(orders.manufacturerStatus, "unassigned"),
-          notRefundedGuard()
-        )
-      )
-      .returning({ id: orders.id });
-    reassigned = !!row;
+        statusGuard: null,
+        skipPrintableCheck: true,
+        // Aşma DENETLENEBİLİR olmak zorunda: kapı bayrağın yanında işlemi yapan
+        // admin'i ve gerekçeyi de ister, yoksa aşmayı yok sayıp reddeder. Zaten
+        // zorunlu olan `reason` gerekçe yerine geçer. Yalnız aşmada `adminEmail`
+        // geçilir: o zaman kapı satıcıyı, hedefi ve gerekçeyi adlandıran kendi
+        // denetim satırını yazar (ve satıcıya bildirim gönderir); olağan devirde
+        // aşağıdaki tek birleşik satır yeterlidir.
+        allowSellerOverride: sellerOverrideUsed,
+        ...(sellerOverrideUsed
+          ? { adminEmail, sellerOverrideReason: reason }
+          : {}),
+        notification: {
+          subject: `Yeni sipariş atandı — ${result.orderNumber}`,
+          body:
+            `Sayın ${target.companyName},\n\n` +
+            `${result.orderNumber} numaralı sipariş size atandı.\n\n` +
+            `Lütfen üretici panelinizden 24 saat içinde kabul veya reddedin.\n\n` +
+            `Müşteri: ${current?.customerName ?? ""}`,
+        },
+      });
+      reassigned = handoff.ok;
+      if (!handoff.ok) handoffError = ASSIGN_FAILURE_MESSAGES[handoff.reason];
+    } catch (e) {
+      // Kapı yazmadan da patlayabilir, yazdıktan sonra (bildirim/SSE) da. Geri
+      // alma ZATEN yapıldı, bu yüzden 500 dönmek admin'e "hiçbir şey olmadı"
+      // der. Siparişin şu an kimde olduğunu okuyup gerçeği söyleriz.
+      console.error("revoke: hand-off assign failed", e);
+      const after = await db.query.orders
+        .findFirst({
+          where: eq(orders.id, id),
+          columns: { manufacturerId: true },
+        })
+        .catch(() => null);
+      reassigned = after?.manufacturerId === target.id;
+      if (!reassigned) {
+        handoffError =
+          "Devir sırasında beklenmeyen bir hata oluştu; sipariş atanmadan kuyrukta. Sayfayı yenileyip tekrar deneyin.";
+      }
+    }
   }
 
   // Did the refund keep the order from going back to work? Either it was
@@ -317,6 +464,25 @@ export async function POST(
   const refunded =
     !reassigned &&
     ((!!current && isRefunded(current)) || (await isOrderRefunded(id)));
+
+  // Hedefsiz geri alma = sipariş kuyruğa döndü, yani yeniden "onaylı +
+  // atanmamış" hâline girdi — otomatik atamanın tetiklendiği geçişlerden biri.
+  // Üç durumda yerleştirilmez: admin "kuyruğumda kalsın" dediğinde, sipariş
+  // iade edildiyse (ileri işlem yasağı) ve zaten elle devredildiyse.
+  // `blocklist` işaretliyse geri alınan üretici declinedManufacturerIds'e
+  // yazılır, bu yüzden sıralayıcı siparişi ona geri vermez.
+  let autoAssigned = false;
+  if (!target && !refunded && !keepInQueue) {
+    const placement = await autoAssignIfEligible(id, {
+      reason: "atama geri alındı",
+      // Kara liste işaretlenmemiş olsa BİLE sipariş, az önce koparıldığı
+      // atölyeye saniyeler içinde geri dönmemeli: `blocklist` kalıcı bir
+      // "bir daha asla" kaydıdır ve admin çoğu geri almada onu istemez;
+      // buradaki dışlama yalnız BU yerleştirme denemesi için geçerlidir.
+      excludeManufacturerIds: [result.prevManufacturerId],
+    });
+    autoAssigned = placement.assigned;
+  }
 
   // Every side effect below is isolated: the order has already moved, so a
   // failing email or Redis must not turn this into a 500 the admin reads as
@@ -328,16 +494,54 @@ export async function POST(
       action: "assign_manufacturer",
       adminEmail,
       notes: reassigned
-        ? `Geri alındı: ${prevName} (${result.prevStatus}) → yeniden atandı: ${target!.companyName}. Sebep: ${reason}`
+        ? `Geri alındı: ${prevName} (${result.prevStatus}) → yeniden atandı: ${target!.companyName}${
+            sellerOverrideUsed
+              ? " [MÜLKİYET DEVRİ: satıcının kendi katalog ürünü, admin onayıyla başka atölyeye verildi — satıcı ve gerekçe ayrı denetim satırında]"
+              : ""
+          }. Sebep: ${reason}`
         : refunded
           ? `Atama geri alındı: ${prevName} (${result.prevStatus}). Sipariş iade edildiği için kuyruğa dönmedi${target ? `, ${target.companyName} üreticisine devredilmedi` : ""}. Sebep: ${reason}`
-          : `Atama geri alındı: ${prevName} (${result.prevStatus}) → kuyruğa döndü. Sebep: ${reason}`,
+          : autoAssigned
+            ? `Atama geri alındı: ${prevName} (${result.prevStatus}) → otomatik olarak başka bir üreticiye atandı. Sebep: ${reason}`
+            : keepInQueue
+              ? `Atama geri alındı: ${prevName} (${result.prevStatus}) → admin isteğiyle kuyrukta bırakıldı (otomatik atama yapılmadı). Sebep: ${reason}`
+              : `Atama geri alındı: ${prevName} (${result.prevStatus}) → kuyruğa döndü. Sebep: ${reason}`,
     })
     .catch((e) => console.error("revoke: adminActions insert failed", e));
+
+  // Sipariş şu an satıcının KENDİ katalog ürünü mü ve kaybeden üretici o
+  // satıcının kendisi mi? Öyleyse iş tanım gereği başka bir atölyeye
+  // gidemez: kural "yalnız sahibi basabilir"dir ve bildirim tam da sahibine
+  // gidiyor.
+  const sellerManufacturerId = current?.sellerManufacturerId ?? null;
+  const heldForSeller =
+    !reassigned &&
+    !autoAssigned &&
+    !refunded &&
+    !!sellerManufacturerId &&
+    sellerManufacturerId === result.prevManufacturerId;
 
   // The losing manufacturer's copy must match what happens next. A refunded
   // order is not re-routed anywhere: the job is cancelled, and telling them it
   // goes to another manufacturer was untrue.
+  //
+  // Aynı şey "başka bir üreticiye yönlendirilecek" cümlesi için de geçerliydi:
+  // dört durumda yerleştirme YOKTUR — admin kuyrukta bıraktığında, türün
+  // otomatik atama anahtarı kapalıyken, uygun aday çıkmadığında ve satıcının
+  // kendi ürününde. Denetim notu (yukarıda) bu dalları zaten ayırıyordu;
+  // partnere giden yazı ayırmıyordu. Artık tek bir yerden, olan bitene göre
+  // kurulur.
+  const nextStepLine = reassigned
+    ? "Sipariş başka bir üreticiye devredildi."
+    : autoAssigned
+      ? "Sipariş başka bir üreticiye yönlendirildi."
+      : heldForSeller
+        ? "Bu ürün sizin kataloğunuzdan çıktı ve yalnız sizin atölyenizde basılabilir; " +
+          "bu yüzden sipariş başka bir atölyeye yönlendirilmeyecek. Şu an yönetici " +
+          "kuyruğunda bekliyor, nasıl devam edileceğine yönetici karar verecek."
+        : "Sipariş şu an yönetici kuyruğunda bekliyor; başka bir üreticiye " +
+          "yönlendirilip yönlendirilmeyeceğine yönetici karar verecek.";
+
   await notifyManufacturer({
     manufacturerId: result.prevManufacturerId,
     type: "order_unassigned",
@@ -349,8 +553,8 @@ export async function POST(
         `yönetici tarafından geri alındı ve iş iptal edildi; bu sipariş için üretime devam etmeyin.\n\n` +
         `Sebep: ${reason}\n\n` +
         `Bu sipariş artık üretici panelinizde görünmeyecektir.`
-      : `${result.orderNumber} numaralı siparişin ataması yönetici tarafından geri alındı ` +
-      `ve sipariş başka bir üreticiye yönlendirilecek.\n\n` +
+      : `${result.orderNumber} numaralı siparişin ataması yönetici tarafından geri alındı.\n\n` +
+      `${nextStepLine}\n\n` +
       `Sebep: ${reason}\n\n` +
       `Bu sipariş artık üretici panelinizde görünmeyecektir. ` +
       `Yoğunluk nedeniyle sipariş alamıyorsanız panelinizdeki "Sipariş Alıyor" anahtarını kapatabilirsiniz.`,
@@ -376,34 +580,25 @@ export async function POST(
     manufacturerStatus: "unassigned",
   }).catch((e) => console.error("revoke: emit (old manufacturer) failed", e));
 
-  if (reassigned && target) {
-    await notifyManufacturer({
-      manufacturerId: target.id,
-      type: "order_assigned",
-      subject: `Yeni sipariş atandı — ${result.orderNumber}`,
-      body:
-        `Sayın ${target.companyName},\n\n` +
-        `${result.orderNumber} numaralı sipariş size atandı.\n\n` +
-        `Lütfen üretici panelinizden 24 saat içinde kabul veya reddedin.\n\n` +
-        `Müşteri: ${current?.customerName ?? ""}`,
-      orderId: id,
-    }).catch((e) => console.error("revoke: new-manufacturer notify failed", e));
-
-    await emitOrderChanged({
-      orderId: id,
-      orderNumber: result.orderNumber,
-      userId: result.userId,
-      manufacturerId: target.id,
-      status: result.orderStatus,
-      manufacturerStatus: "assigned",
-    }).catch((e) => console.error("revoke: emit (new manufacturer) failed", e));
-  }
+  // Yeni üreticinin bildirimi ve SSE yayını ARTIK BURADA YOK: ikisini de atama
+  // kapısı yapıyor (yukarıdaki `notification` metniyle). Burada tekrarlamak
+  // partnere aynı işi iki kez haber vermek olurdu.
 
   return NextResponse.json({
     success: true,
     reassigned,
+    // Sipariş hedefsiz geri alındıktan sonra otomatik olarak yerleşti mi, yoksa
+    // admin isteğiyle kuyrukta mı kaldı — istemci mesajı bunu söylemeli.
+    autoAssigned,
+    keptInQueue: keepInQueue,
     prevStatus: result.prevStatus,
     prevManufacturer: prevName,
+    // Devir neden olmadı: istemci "başkası aldı" diye yarışı suçlayıp
+    // tekrar denemesin, gerçek sebebi göstersin.
+    ...(handoffError ? { handoffError } : {}),
+    // Sipariş satıcının kendi ürünü olduğu için mi kuyrukta kaldı? Ekranın
+    // "uygun aday bulunamadı ya da otomatik atama kapalı" cümlesi burada yanlış.
+    ...(heldForSeller ? { heldForSeller: true as const } : {}),
     // Tells the client why the order went neither back to the queue nor to
     // the chosen manufacturer, so it does not blame a race and invite a retry.
     ...(refunded ? { reason: "refunded" as const } : {}),

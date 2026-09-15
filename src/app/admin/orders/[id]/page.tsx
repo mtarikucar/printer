@@ -3,13 +3,19 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { and, eq, desc, inArray, asc, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, orderModelRevisions, orderModelFiles, manufacturerEarnings, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
+import { orders, orderPhotos, orderModelRevisions, orderModelFiles, manufacturerAssignmentEvaluations, manufacturerEarnings, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
-import { rankForOrderWithShadow } from "@/lib/services/manufacturer-assignment-shadow";
+import { rankForOrderPreview } from "@/lib/services/manufacturer-assignment-shadow";
+import { weightsVersion } from "@/lib/config/manufacturer-scoring";
+import {
+  buildOrderEvaluation,
+  groupEvaluationDecisions,
+  parseEvaluationSide,
+} from "@/app/admin/scoring-evaluations/evaluation-view";
 import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { buildOrderMoneyBreakdown } from "@/lib/services/order-money";
@@ -34,11 +40,14 @@ export default async function AdminOrderDetailPage({
   const { id } = await params;
   const { weights: weightsParam } = await searchParams;
   const locale = await getLocale();
-  // Q7 escape hatch — admin can append ?weights=v1 or ?weights=v2 to
-  // see the ranked list under a specific profile regardless of canary
-  // percent. Skips evaluation logging.
+  // Escape hatch — ?weights=v1|v2|v3 shows the ranked list under one profile
+  // regardless of the canary percent. v3 is the continuous-distance shadow, so
+  // this is how the admin sees what the new distance model WOULD pick before
+  // it is switched on. Nothing here is logged: no view writes an evaluation.
   const forceProfile =
-    weightsParam === "v1" || weightsParam === "v2" ? weightsParam : undefined;
+    weightsParam === "v1" || weightsParam === "v2" || weightsParam === "v3"
+      ? weightsParam
+      : undefined;
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, id),
@@ -254,11 +263,90 @@ export default async function AdminOrderDetailPage({
           .where(inArray(painters.id, declinedPainterIds))
       : [];
 
-  // Rank candidates for the assignment recommendation UI. Goes through
-  // the Q7 shadow wrapper which logs both v1/v2 winners and returns the
-  // authoritative one (v1 until canary expands). ?weights=v1|v2 query
-  // param bypasses canary for admin diagnostics.
-  const candidates = await rankForOrderWithShadow(id, forceProfile);
+  // Rank candidates for the assignment recommendation UI.
+  //
+  // The PREVIEW ranker, not the shadow wrapper: opening this page is not an
+  // assignment decision, so it must not write an evaluation row. Rows are
+  // written where the decision is made (automatic assignment, decline retry),
+  // and they now ACCUMULATE rather than overwrite — a row written by a page
+  // view would therefore show up on both admin screens as a placement that
+  // never happened, next to the real ones, with no way to tell them apart.
+  //
+  // The profile still follows the canary, so the admin sees the same ranking
+  // the assignment would use; ?weights=... overrides it for diagnostics.
+  const candidates = await rankForOrderPreview(id, forceProfile);
+
+  // ─── "Bu iş neden bu atölyeye gitti?" ────────────────────────────────────
+  // Bir atama KARARI birden çok satır yazar (ağırlık karşılaştırması + sürekli
+  // mesafe gölgesi), çünkü bir satırda yalnız iki kazanan sütunu var. Bu yüzden
+  // satır limiti karar sayısının katı seçilir ve satırlar aşağıda kararlara
+  // bölünür; "en yeni satır" manşete alınırsa hangi karşılaştırmanın öne
+  // çıkacağı iki eşzamanlı INSERT'ün mikrosaniyelik yarışına kalırdı.
+  //
+  // Limit neden bu kadar geniş: satırlar artık üst üste yazılmıyor, birikiyor.
+  // Bir sipariş birden çok kez yerleştirilebilir (ret, geri alma, yeniden
+  // atama) ve her yerleştirme kendi satırlarını bırakır; kart beş KARAR
+  // gösterdiğine göre, o beş kararın satırlarının hepsi pencereye sığmalı —
+  // yoksa "önceki atama kararları" eksik kalır.
+  const evaluationRows = await db
+    .select({
+      id: manufacturerAssignmentEvaluations.id,
+      orderId: manufacturerAssignmentEvaluations.orderId,
+      createdAt: manufacturerAssignmentEvaluations.createdAt,
+      weightsVersion: manufacturerAssignmentEvaluations.weightsVersion,
+      authoritative: manufacturerAssignmentEvaluations.authoritative,
+      v1WinnerId: manufacturerAssignmentEvaluations.v1WinnerId,
+      v2WinnerId: manufacturerAssignmentEvaluations.v2WinnerId,
+      v1Scores: manufacturerAssignmentEvaluations.v1Scores,
+      v2Scores: manufacturerAssignmentEvaluations.v2Scores,
+    })
+    .from(manufacturerAssignmentEvaluations)
+    .where(eq(manufacturerAssignmentEvaluations.orderId, id))
+    .orderBy(desc(manufacturerAssignmentEvaluations.createdAt))
+    .limit(40);
+
+  // Winner names. The jsonb summary usually carries companyName, but a winner
+  // outside the stored top-3 (or an older row shape) would otherwise render as
+  // a bare uuid, which tells the admin nothing.
+  const evaluationWinnerIds = Array.from(
+    new Set(
+      evaluationRows
+        .flatMap((r) => [
+          r.v1WinnerId,
+          r.v2WinnerId,
+          // Kararın YERLEŞTİĞİ atölye, sıralamanın kazananı olmayabilir (elle
+          // atama, sonradan devir). Adı burada çözülmezse kartta çıplak uuid
+          // kalırdı — kart da tam o cümleyi kurmak için var.
+          parseEvaluationSide(r.v1Scores).placedManufacturerId,
+          parseEvaluationSide(r.v2Scores).placedManufacturerId,
+        ])
+        .filter((x): x is string => !!x)
+    )
+  );
+  const evaluationNames =
+    evaluationWinnerIds.length > 0
+      ? await db
+          .select({ id: manufacturers.id, companyName: manufacturers.companyName })
+          .from(manufacturers)
+          .where(inArray(manufacturers.id, evaluationWinnerIds))
+      : [];
+  const evaluationNameMap = new Map(
+    evaluationNames.map((m) => [m.id, m.companyName])
+  );
+  // The distance-shadow row stores its columns differently from the weights
+  // row (v1 = the live pick, v2 = the continuous-distance challenger), so the
+  // reader has to be told which stamp marks it.
+  const distanceShadowVersion = weightsVersion("v3");
+  // Satırlar → kararlar. En yeni karar sayfanın manşeti olur, kalanlar gerçek
+  // GEÇMİŞTİR (aynı kararın kardeş satırı değil). Beş karar, admin'in "bu iş
+  // kaç kez el değiştirdi" sorusunu cevaplamasına yeter.
+  const assignmentDecisions = groupEvaluationDecisions(
+    evaluationRows.map((r) =>
+      buildOrderEvaluation(r, (mid) => evaluationNameMap.get(mid) ?? null, {
+        distanceShadowVersion,
+      })
+    )
+  ).slice(0, 5);
 
   const latestGeneration = order.generationAttempts.find(
     (g) => g.status === "succeeded"
@@ -542,6 +630,8 @@ export default async function AdminOrderDetailPage({
       companyName: m.companyName,
     })),
     candidates,
+    // Why the chosen shop won. Already serialisable (dates as ISO strings).
+    assignmentDecisions,
     // Already serialisable by contract (dates as ISO strings); null = loader failed.
     money,
   };
@@ -550,16 +640,15 @@ export default async function AdminOrderDetailPage({
     <div className="p-4 sm:p-8 max-w-7xl">
       {forceProfile && (
         <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          <strong>Q7 escape hatch:</strong> ranking shown under forced
-          profile <code className="text-xs bg-amber-100 px-1 rounded">
-            {forceProfile}
-          </code>. This view is diagnostic and is NOT logged to
-          scoring-evaluations.{" "}
+          <strong>Tanı görünümü:</strong> aday listesi{" "}
+          <code className="rounded bg-amber-100 px-1 text-xs">{forceProfile}</code>{" "}
+          profiliyle sıralandı (kanarya oranı yok sayıldı). Bu görünüm yalnızca
+          incelemek içindir; atamayı değiştirmez ve hiçbir yere kaydedilmez.{" "}
           <a
             href={`/admin/orders/${id}`}
             className="underline hover:text-amber-700"
           >
-            Clear override
+            Normal görünüme dön
           </a>
         </div>
       )}

@@ -121,8 +121,17 @@ async function processJob(job: Job) {
         continue;
       }
       closed++;
+      // İş geçmişi GERÇEKTEN yazılan adedi söyler: parti büyüklüğü
+      // (`orderCount`) ile üreticinin tezgâhına düşen adet ayrılabiliyor —
+      // mülkiyet kuralının elediği sipariş partiye girer, oranı donar, ama
+      // kimseye atanmaz. Tek sayı yazıldığı sürece kısmen elenmiş bir parti
+      // geçmişte "tamamı atandı" gibi okunuyordu.
       await job.log(
-        `session ${session.id}: ${result.orderCount} sipariş, komisyon ${result.commissionRateBps}bps`
+        `session ${session.id}: ${result.assignedCount}/${result.orderCount} sipariş üreticiye yazıldı` +
+          (result.skippedCount > 0
+            ? ` (${result.skippedCount} sipariş mülkiyet kuralıyla atlandı — atama admin'e kaldı)`
+            : "") +
+          `, komisyon ${result.commissionRateBps}bps`
       );
     } catch (err) {
       const message = (err as Error).message;

@@ -263,10 +263,36 @@ jobs:
             docker tag "${IMAGE_BASE}/worker:${IMAGE_TAG}" "${IMAGE_BASE}/worker:latest"
             log "Image'lar cekildi."
 
+            # ─── 2b. Compose proje adi ───────────────────────────────
+            # compose, proje adini compose dosyasinin klasorunden turetir
+            # ("docker"). Calisan yigin baska bir proje adiyla ayaga kalktiysa
+            # compose ayni container adlarini yeniden yaratmaya calisir: BOS
+            # hacim olusturur ve ya ad cakismasiyla patlar (2026-09-15) ya da
+            # daha kotusu, uygulamayi bos bir veritabanina baglar. Bu yuzden
+            # proje adini CALISAN kaptan okuyoruz.
+            COMPOSE_PROJECT="$(docker inspect printer_postgres --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || true)"
+            if [ -z "$COMPOSE_PROJECT" ]; then
+                COMPOSE_PROJECT="$(docker inspect printer_redis --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || true)"
+            fi
+            if [ -z "$COMPOSE_PROJECT" ]; then
+                COMPOSE_PROJECT="$(basename "$(dirname "$COMPOSE_FILE")")"
+                warn "Calisan yigin bulunamadi, compose proje adi varsayilan kullanildi: $COMPOSE_PROJECT"
+            fi
+            log "Compose proje adi: $COMPOSE_PROJECT"
+
+            # Veri kaybi kapisi: postgres calisiyorsa o projenin veri hacmi de
+            # var olmali. Yoksa compose bos bir hacim yaratir ve uygulama bos
+            # veritabanina baglanir; deploy'u burada durduruyoruz.
+            if docker ps --format '{{.Names}}' | grep -qx 'printer_postgres'; then
+                if ! docker volume ls --format '{{.Name}}' | grep -qx "${COMPOSE_PROJECT}_printer_pgdata"; then
+                    err "Veri hacmi ${COMPOSE_PROJECT}_printer_pgdata yok ama printer_postgres calisiyor — compose bos hacim yaratacakti, deploy durduruldu"
+                fi
+            fi
+
             # ─── 3. Keep DB & Redis running ──────────────────────────
             log "Postgres ve Redis kontrol ediliyor..."
-            docker-compose -f "$COMPOSE_FILE" up -d postgres redis
-            docker-compose -f "$COMPOSE_FILE" up -d --wait postgres redis 2>/dev/null || true
+            docker-compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d postgres redis
+            docker-compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --wait postgres redis 2>/dev/null || true
 
             # ─── 4. Run migration ────────────────────────────────────
             # One-time cutover to `drizzle-kit migrate`: if this DB has never been
@@ -285,11 +311,11 @@ jobs:
             fi
 
             log "Veritabani migration calistiriliyor..."
-            docker-compose -f "$COMPOSE_FILE" run --rm migrate
+            docker-compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" run --rm migrate
 
             # ─── 5. Restart app & worker with new images ─────────────
             log "Servisler guncelleniyor..."
-            docker-compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate app worker
+            docker-compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-deps --force-recreate app worker
 
             # ─── 6. Health check ─────────────────────────────────────
             log "Saglik kontrolu yapiliyor..."

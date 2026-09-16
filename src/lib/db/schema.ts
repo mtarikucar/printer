@@ -1804,6 +1804,122 @@ export const painterQcReviews = pgTable("painter_qc_reviews", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+/**
+ * Boyacı sıralamasının ADAY ANLIK GÖRÜNTÜSÜ (jsonb).
+ *
+ * Alan adları, saf sıralayıcının `PainterCandidate` sözleşmesiyle BİREBİR
+ * aynıdır (P4-C1, services/painter-assignment.ts): aynı olmasalar yazıcı her
+ * çağrıda elle eşleme yapardı ve sıralayıcıya yeni bir bileşen eklendiği gün
+ * kayıt sessizce eski beş bileşeni yazmaya devam ederdi.
+ */
+export interface PainterEvaluationCandidateSnapshot {
+  painterId: string;
+  companyName: string;
+  eligible: boolean;
+  /** Neden elendi (kapasite dolu, sipariş almıyor, zaten reddetti, pasif...). */
+  ineligibleReason?: string;
+  score: number;
+  parts: {
+    route: number;
+    load: number;
+    reliability: number;
+    qcQuality: number;
+    onTime: number;
+  };
+}
+
+/**
+ * Boyacı atama değerlendirmeleri — otomatik boyacı seçiminin KARAR KAYDI
+ * (P4-C3). `manufacturer_assignment_evaluations` örnek alınmıştır.
+ *
+ * NEDEN AYRI TABLO: üretici tablosu bir A/B düellosunun şeklini taşıyor (iki
+ * kazanan sütunu, `authoritative`), çünkü orada iki profil yarışıyor. Boyacı
+ * sıralayıcısının tek bir ağırlık kümesi var; o tabloya sığdırmak "v2 kazananı"
+ * sütununu sonsuza kadar boş bırakmak, iki farklı kararı tek ekranda
+ * karıştırmak ve üreticinin saklama temizliğini boyacı satırlarına da
+ * uygulamak demekti.
+ *
+ * ÜRETİCİ TABLOSUNDAN ÖĞRENİLEN İKİ DERS BURADA SÜTUN OLDU:
+ *  1. `placed_painter_id` — sıralamanın birincisi ile İŞİ GERÇEKTEN ALAN
+ *     boyacı aynı olmak zorunda değil (admin elle başkasını seçebilir).
+ *     Üretici tarafında bunun sütunu yoktu ve yerleşen ancak jsonb damgasından
+ *     okunabiliyordu; satırın bütün anlamı ise "şu karar şu boyacıya gitti"dir.
+ *  2. Satırlar EKLENİR, üzerine yazılmaz: tekil bir (order_id, weights_version)
+ *     indeksi, aynı siparişin ikinci kararını (ret sonrası yeniden yerleştirme)
+ *     birincinin üstüne yazardı — üretici tarafında tam olarak bu yaşandı
+ *     (migration 0054). Ret hakkının geçmişi (DÖRT ret: üç yeniden
+ *     yerleştirme hakkı + işlenmekte olan ret — config/flags.ts ·
+ *     PAINTER_MAX_DECLINES) bu tablodan okunacağı için burada tekillik hiç
+ *     kurulmuyor.
+ *
+ * SATIR NE ZAMAN YAZILIR: yalnız GERÇEK bir karar olduğunda — bir boyacı
+ * yerleştirildiğinde ya da hiçbir boyacının uygun olmadığı kaydedilip iş admin
+ * kuyruğuna düştüğünde. Sayfa görüntülemesi, aday listesi önizlemesi ve
+ * "sadece sıralayalım" çağrıları satır YAZMAZ; yazıcının girdisinde böyle bir
+ * seçenek de yoktur (services/painter-evaluation.ts).
+ *
+ * GİZLİLİK: boyacı kimliği yalnız işi devreden üreticiye açılır (boyacı
+ * sözleşmesi). Bu tablo İÇ kayıttır; müşteriye görünen hiçbir yüzeye
+ * bağlanmamalıdır.
+ */
+export const painterAssignmentEvaluations = pgTable(
+  "painter_assignment_evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** Sıralamanın birincisi. Uygun aday yoksa NULL. */
+    winnerPainterId: uuid("winner_painter_id").references(() => painters.id),
+    /**
+     * İşi GERÇEKTEN alan boyacı. Elle atamada birinciden farklı olabilir;
+     * kimse yerleşmediyse (admin kuyruğu) NULL kalır. Siparişin BUGÜNKÜ
+     * boyacısına bakmak bu soruyu cevaplamaz: iş sonradan devredilmiş olabilir.
+     */
+    placedPainterId: uuid("placed_painter_id").references(() => painters.id),
+    /** İlk N aday + skor bileşenleri (PainterEvaluationCandidateSnapshot[]). */
+    candidates: jsonb("candidates").$type<PainterEvaluationCandidateSnapshot[]>(),
+    /**
+     * Bu DENEMEDE sıralamaya hiç sokulmayan boyacılar (önceki retler, cevapsız
+     * kalan 24 saatlik SLA). "En yakın boyacı neden hiç görünmüyor" sorusunun
+     * cevabı yalnız burada durur.
+     */
+    excludedPainterIds: jsonb("excluded_painter_ids").$type<string[]>(),
+    /** Satırı üreten ağırlık kümesinin sürümü (ör. "p1.0"). */
+    weightsVersion: text("weights_version").notNull(),
+    /**
+     * Kararı tetikleyen olay — ALTI değer. Tek kaynak:
+     * services/painter-evaluation.ts · PAINTER_ASSIGNMENT_TRIGGERS.
+     *   qc_approve | decline_retry | sla_reassign | admin_manual |
+     *   manufacturer_handoff | admin_swap
+     * Son ikisi sonradan eklendi (üreticinin kendi devri ve admin'in boyacı
+     * değişimi); kolon `text` olduğu için yeni tetikleyici migration istemez.
+     */
+    trigger: text("trigger").notNull(),
+    /**
+     * Kimse yerleşmediyse SEBEBİ (Türkçe değil, makine kodu; ekran kendi
+     * etiketini basar). Yerleşen varsa NULL.
+     */
+    outcomeReason: text("outcome_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    /**
+     * İki okuma deseni, ikisi de zamana göre sıralı (üretici tablosundaki
+     * ikiliyle aynı):
+     *  - sipariş detayı: order_id = ? ORDER BY created_at DESC
+     *  - değerlendirme listesi + 30 günlük saklama temizliği: created_at
+     * Artan btree DESC sıralamayı geriye tarayarak karşılar; ayrı DESC indeks
+     * gerekmez.
+     */
+    byOrderCreated: index("painter_eval_order_created_idx").on(
+      t.orderId,
+      t.createdAt
+    ),
+    byCreated: index("painter_eval_created_idx").on(t.createdAt),
+  })
+);
+
 // ─── Product categories (nested, unlimited depth) ───────────────────────────
 // Admin-curated taxonomy. Adjacency list (parentId) gives arbitrary depth; a
 // materialized `path` of ancestor slugs (e.g. "figurine/marvel") makes subtree

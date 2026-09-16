@@ -28,7 +28,28 @@ interface Painter {
   taxIdType: "vkn" | "tckn" | null;
   requiresManualTaxReview: boolean;
   status: string;
+  /**
+   * GÖSTERİM: tezgâhtaki ayrı iş (kutu) sayısı. KAPI DEĞİLDİR — bu sayıya
+   * bakarak "yer var" demek, uçların uygulamadığı bir ölçüyü ekranda kapı gibi
+   * göstermek olur (bkz. painter-capacity.ts · KARAR 2). NOT: bu dosya bir
+   * istemci bileşenidir; o modülün YOLUNU yazmak bile tarayıcı testini
+   * düşürdüğü için burada yalnız dosya adıyla anılıyor.
+   */
   activeOrders: number;
+  /**
+   * KAPI: ağırlıklı yük. Bir iş 1 birim, her 20 adet için 1 birim daha
+   * (painterLoadUnits). Uçların, sıralayıcının ve otomatik yerleştiricinin
+   * limitle karşılaştırdığı sayı budur.
+   */
+  loadUnits: number;
+  /**
+   * Kapının TEK cevabı: bu boyacıya bir iş daha düşer mi. Eşik burada YENİDEN
+   * HESAPLANMAZ — sunucudaki painterHasRoom'dan hazır gelir (istemci
+   * painter-capacity'yi import edemez: `pg`yi paketine sürükler).
+   */
+  hasRoom: boolean;
+  /** Ortak yük etiketi: "6/2 birim · 1 iş" (painterLoadLabel). */
+  loadLabel: string;
   createdAt: string;
   rejectionReason: string | null;
   workSamplePhotoUploadedAt: string | null;
@@ -251,7 +272,7 @@ export function PaintersClient({
                   Vergi No
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                  Aktif İşler
+                  Yük
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
                   Kayıt Tarihi
@@ -325,8 +346,18 @@ export function PaintersClient({
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 text-center">
-                    {p.activeOrders}
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
+                    {/* Yük, KAPININ ölçüsüyle yazılır (ortak etiket: "6/2 birim
+                        · 1 iş"), sipariş kartı ve üretici seçicisiyle aynı
+                        biçimde. Ham iş sayısını tek başına basmak, uçlar
+                        ağırlıklı yükle reddederken kapasitenin YÖNETİLDİĞİ
+                        ekranda boş yer varmış gibi göstermekti (ölçüm: P4G-1). */}
+                    {p.loadLabel}
+                    {!p.hasRoom && (
+                      <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        Dolu
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
                     {formatDate(p.createdAt, loc)}
@@ -729,9 +760,22 @@ function PainterRankerInputsEditor({
                 onChange={(e) => setLimit(e.target.value)}
                 className="w-28 rounded border border-gray-300 px-2 py-1 text-sm"
               />
-              <p className="mt-1 text-xs text-gray-400">
-                Aktif iş sayısı bu sayıya ulaşınca boyacıya yeni iş düşmez. Şu an{" "}
-                {p.activeOrders} aktif iş var.
+              {/* KURAL, KAPININ ÖLÇÜSÜYLE ANLATILIR. Eski cümle ("Aktif iş
+                  sayısı bu sayıya ulaşınca…") artık her uçta yanlıştı: kapı ham
+                  iş sayısını değil AĞIRLIKLI yükü limitle karşılaştırıyor, yani
+                  tek bir parti işi tutan boyacıya hiçbir uç iş yazmazken bu
+                  ekran — limitin ELLE düzenlendiği yer — yer varmış gibi
+                  okunuyordu (ölçüm: P4G-1). Ağırlık cümlesi painterLoadUnits
+                  ile (1 + adet/20) aynı kalmalı. Etiket ve hasRoom sunucudaki
+                  tek ölçüden gelir; kayıttan sonra router.refresh() tazeler. */}
+              <p className="mt-1 text-xs text-gray-500">
+                Yeni iş, boyacının <strong>ağırlıklı yükü</strong> bu sayının
+                altındayken düşer; ham iş sayısı kapı değildir. Bir iş 1 birim
+                sayılır, her 20 adet için 1 birim daha eklenir (60 adetlik tek iş
+                = 4 birim). Kayıtlı yük: {p.loadLabel}
+                {p.hasRoom
+                  ? " — yeni iş düşebilir."
+                  : " — kapasitesi dolu, yeni iş düşmez."}
               </p>
             </div>
 

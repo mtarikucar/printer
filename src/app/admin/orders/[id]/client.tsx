@@ -25,6 +25,12 @@ import { formatModelSize } from "@/lib/config/order-model";
 import { parseTryToKurus } from "@/lib/config/cost-lines";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
 import { REJECTABLE_STATUSES, isRefunded } from "@/lib/config/order-status-policy";
+// Kolinin yolda olup olmadığını söyleyen ÖLÇÜ uçlarla AYNI satırdan gelir
+// (assign-painter, swap-painter, send-to-painter ve otomatik yollar da bunu
+// çağırıyor). Ekran kendi kuralını kurarsa panel "gerek yok" derken uç 409
+// döndürür — bu kartın kapattığı kusur tam olarak buydu. flags.ts saf modüldür
+// (db yok, "server-only" yok), bu yüzden istemci bileşeni onu import edebilir.
+import { painterParcelOnTheWay } from "@/lib/config/flags";
 import type {
   ModelUploadSideEffects,
   ModelUploadStage,
@@ -71,6 +77,20 @@ import {
   type EvaluationSide,
   type ScoreKey,
 } from "@/app/admin/scoring-evaluations/evaluation-view";
+// Boyacı kararının okunuşu: aynı saf modülü sunucu (page.tsx) ve bu bileşen
+// birlikte kullanır, yoksa "kim seçildi / kim işi aldı" iki yerde iki ayrı
+// biçimde yorumlanırdı.
+import {
+  PAINTER_SCORE_KEYS,
+  PAINTER_SCORE_LABELS_TR,
+  PAINTER_SCORE_SHORT_LABELS_TR,
+  painterOutcomeReasonLabelTr,
+  painterPlacementDivergence,
+  painterPlacementLabel,
+  painterTriggerLabelTr,
+  type PainterEvaluation,
+  type PainterScoreKey,
+} from "@/app/admin/scoring-evaluations/painter-evaluation-view";
 
 /**
  * Canlı QC turunun KANIT durumu — sayfanın serileştirdiği hâli
@@ -228,11 +248,36 @@ interface PaintingData {
     companyName: string;
     contactPerson: string | null;
     phone: string | null;
+    /**
+     * GÖSTERİM: tezgâhtaki ayrı kutu sayısı. KAPI DEĞİLDİR — bir parti işi tek
+     * "iş"tir ama tezgâhın tamamını doldurabilir.
+     */
     currentLoad: number;
     maxConcurrentOrders: number;
+    /** Kapının ölçüsüyle yazılmış tek yük etiketi: "6/2 birim · 1 iş". */
+    loadLabel: string;
     acceptingOrders: boolean;
     declined: boolean;
     eligible: boolean;
+    /** Sıralayıcının sırası (1 = en iyi); sıralama okunamadıysa null. */
+    rank: number | null;
+    /** 100 en iyi, 0 en kötü. Sırasızsa null — sıfır DEĞİL. */
+    score: number | null;
+    /** Skorun bileşenleri: rota, yük, güvenilirlik, QC kalitesi, zamanında. */
+    parts: Partial<Record<PainterScoreKey, number>> | null;
+    /**
+     * KAPI: ağırlıklı yük (sipariş başına 1, parti işlerinde her 20 birim için
+     * 1 — capacity-unit kararı). Atama/devir uçlarının kabul-ret ölçüsü BUDUR;
+     * `currentLoad` değil. İkisi ayrıştığında ekranın iş sayısını göstermesi,
+     * uç reddederken "1/5 iş" okutmak olurdu (ölçüm: P4F-2).
+     */
+    loadUnits: number | null;
+    /** Sıralayıcının insan okuyacağı kısa gerekçeleri. */
+    reasons: string[];
+    /** Seçilemiyorsa sebebi (Türkçe). */
+    ineligibleReason: string | null;
+    /** Sıralamanın önerdiği boyacı: kutuda ön seçili gelir. */
+    suggested: boolean;
   }[];
   declined: { id: string; companyName: string }[];
 }
@@ -686,6 +731,13 @@ interface Props {
      */
     assignmentDecisions?: EvaluationDecision[];
     /**
+     * Boyacı atama KARARLARI, en yenisi başta. Boyacı tarafında bir karar TEK
+     * satır yazar (gölge sıralama yok). Boş dizi = bu sipariş için hiç boyacı
+     * kararı yazılmamış: elle atanmış eski bir sipariş olabilir, ya da üretici
+     * kendi boyadığı için sıralama hiç çalışmamıştır.
+     */
+    painterAssignmentDecisions?: PainterEvaluation[];
+    /**
      * Hangi GÖSTERİM tablosu OKUNAMADI (sunucu doldurur: page.tsx · displayRead).
      *
      * Bayrak olmadan bu ekran, yapılmamış bir okumanın sonucunu gerçek bir kayıt
@@ -713,6 +765,10 @@ interface Props {
       painterEarning?: boolean;
       painterCandidates?: boolean;
       painterDeclined?: boolean;
+      /** Boyacı sıralaması üretilemedi: liste SIRASIZ, öneri gösterilemez. */
+      painterRanking?: boolean;
+      /** Boyacı kararları okunamadı: gerekçe kartı BOŞ değil, bilinmiyor. */
+      painterAssignmentDecisions?: boolean;
     };
   };
   locale: string;
@@ -2011,6 +2067,311 @@ function AssignmentEvaluationCard({
   );
 }
 
+/**
+ * "Bu iş neden bu boyacıya gitti?"
+ *
+ * Kaynak, atama kararının ANINDA yazılmış değerlendirme satırıdır; kart onu
+ * OKUR, yeniden hesaplamaz. Sayfa açılışında yeniden sıralasaydı yük,
+ * güvenilirlik ve QC geçmişi o günden beri değiştiği için admin'e kararı
+ * açıklamayan — hatta onunla çelişen — bir tablo gösterirdi.
+ *
+ * Üretici ikizinden (AssignmentEvaluationCard) iki farkı var ve ikisi de
+ * tabloda sütun: boyacı tarafında bir karar TEK satır yazar (gölge sıralama
+ * yok), ama kararın NEDEN o an alındığı değişir — QC onayı, ret sonrası,
+ * 24 saat cevapsızlık, elle atama. O yüzden manşette karşılaştırma değil
+ * TETİKLEYİCİ durur.
+ *
+ * "Kimse yerleşmedi" hâli sessizce geçilmez: o sipariş admin kuyruğunda
+ * bekliyordur ve kartın işi tam da bunu söylemektir.
+ */
+function PainterEvaluationCard({
+  decisions,
+  assignedPainterId,
+  refunded,
+  assignBoxOnScreen,
+  loc,
+}: {
+  decisions: PainterEvaluation[];
+  /** Siparişte ŞU AN duran boyacı — kararın sonucu olmayabilir. */
+  assignedPainterId: string | null;
+  /** İade edilmiş sipariş: bu siparişe artık boyacı ATANMAZ. */
+  refunded: boolean;
+  /**
+   * Elle atama kutusu ŞU ANDA ekranda mı? Kart tavsiye verirken sayfanın
+   * gerçeğine bakmalı: kutu iade edilmiş siparişte hiç render edilmiyor.
+   */
+  assignBoxOnScreen: boolean;
+  loc: Locale;
+}) {
+  const current = decisions[0];
+  if (!current) return null;
+  const earlier = decisions.slice(1);
+  const placement = painterPlacementLabel(current);
+  const outcome = painterOutcomeReasonLabelTr(current.outcomeReason);
+  // Sıralamanın birincisi ile işi ALAN boyacı ayrıştıysa sebep, kaydın
+  // söyleyebildiği kadar söylenir: dışlanmış, elle atanmış ya da bilinmiyor.
+  const divergence = painterPlacementDivergence({
+    placedPainterId: current.placedPainterId,
+    winnerPainterId: current.winnerPainterId,
+    winnerName: current.winnerName,
+    excludedPainterIds: current.excludedPainterIds,
+    trigger: current.trigger,
+  });
+  // Karardan sonra el değiştirmiş mi? Devir, sıralamanın hatası DEĞİLDİR.
+  const handedOff =
+    !!current.placedPainterId &&
+    !!assignedPainterId &&
+    current.placedPainterId !== assignedPainterId;
+
+  return (
+    <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/60 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fuchsia-900">
+          Bu iş neden bu boyacıya gitti?
+        </h3>
+        <span className="text-xs text-gray-500">
+          {formatDateTime(current.createdAt, loc)}
+        </span>
+      </div>
+
+      <p className="mt-2 text-xs text-fuchsia-900/80">
+        Karar sebebi: <strong>{painterTriggerLabelTr(current.trigger)}</strong>.
+        Skorlar atama anında kaydedildi; bugünkü yük ve güvenilirlik
+        değerleriyle yeniden hesaplanmaz. 100 en iyi, 0 en kötüdür.
+      </p>
+
+      {placement.kind === "named" && (
+        <p className="mt-2 text-xs text-fuchsia-900">
+          Bu karar işi <strong>{placement.name}</strong> atölyesine verdi.
+        </p>
+      )}
+
+      {/* Kayıt bir boyacı YAZMIŞ ama adı çözülemiyor: bilinen yazılır, eksik
+          olan da adıyla söylenir. */}
+      {placement.kind === "unnamed" && (
+        <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700">
+          Bu karar işi bir boyacıya verdi, ama o boyacının{" "}
+          <strong>adı çözülemedi</strong> (kaydı silinmiş olabilir). Kayıttaki
+          kimlik:{" "}
+          <code className="rounded bg-gray-100 px-1">{placement.shortId}…</code>
+        </p>
+      )}
+
+      {/* Kimse yerleşmedi: sessizlik burada "karar yok" diye okunurdu, oysa iş
+          admin kuyruğunda bekliyor olabilir.
+
+          TALİMAT EKRANDA OLANI TARİF EDER. Ölçülen kusur: cümle koşulsuzca
+          "yukarıdaki Boyacı ata kutusundan elle atayabilirsiniz" diyordu, ama o
+          kutu yalnız canlı ve QC'den geçmiş bir siparişte render ediliyor —
+          iade edilmiş siparişte ekranda hiç yok. Admin, var olmayan bir kutuya
+          yönlendiriliyordu. */}
+      {placement.kind === "unrecorded" && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Bu kararda <strong>hiçbir boyacıya iş verilmedi</strong>
+          {outcome ? `: ${outcome}` : " (sebep kayıtta yok)"}.{" "}
+          {refunded
+            ? "Sipariş iade edildiği için artık boyacı atanmaz: ekranda elle atama kutusu yok ve otomatik atama da iade edilmiş siparişi geçmez. Bu kayıt yalnızca o günkü kararı gösterir; yapmanız gereken bir işlem yok."
+            : assignBoxOnScreen
+              ? "Sipariş, bir boyacı atanana kadar bekler — yukarıdaki “Boyacı ata” kutusundan elle atayabilirsiniz."
+              : "Sipariş, bir boyacı atanana kadar bekler. Elle atama kutusu şu anda ekranda değil (iş bir boyacıda duruyor, baskı henüz QC onayından geçmedi ya da boyacı listesi getirilemedi); yukarıdaki boyacı bölümü hangi adımın beklendiğini söylüyor."}
+        </p>
+      )}
+
+      {divergence && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {divergence.kind === "excluded" ? (
+            <>
+              İşi alan boyacı, sıralamanın birincisi değil: birinci sıradaki{" "}
+              <strong>{divergence.winnerName ?? "boyacı"}</strong> bu denemede
+              hariç tutulmuştu (işi daha önce reddetmiş ya da 24 saat cevapsız
+              kalmış), bu yüzden iş sıradaki uygun boyacıya verildi.
+            </>
+          ) : divergence.kind === "manual" ? (
+            <>
+              İşi alan boyacı, sıralamanın birincisi değil:{" "}
+              <strong>admin elle</strong> başka bir boyacı seçti. Sıralamanın
+              birincisi{" "}
+              <strong>{divergence.winnerName ?? "—"}</strong> idi.
+            </>
+          ) : (
+            <>
+              İşi alan boyacı, sıralamanın birincisi değil. İki sebebi olabilir:
+              birinci bu denemede hariç tutulmuş olabilir ya da iş elle atanmış
+              olabilir. Kayıt hangisi olduğunu söylemiyor.
+            </>
+          )}
+        </p>
+      )}
+
+      {handedOff && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          İş bu karardan sonra başka bir boyacıya devredildi; siparişte şu an
+          duran boyacı bu kararın sonucu değildir.
+        </p>
+      )}
+
+      <div className="mt-3">
+        <PainterCandidateBreakdownCard decision={current} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500">
+        <span>
+          Ağırlık sürümü:{" "}
+          <code className="rounded bg-white px-1">
+            {current.weightsVersion ?? "—"}
+          </code>
+        </span>
+        <Link
+          href="/admin/scoring-evaluations?taraf=boyaci"
+          className="font-medium text-fuchsia-700 hover:underline"
+        >
+          Tüm boyacı kararları →
+        </Link>
+      </div>
+
+      {earlier.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-900">
+            Önceki boyacı kararları ({earlier.length})
+          </summary>
+          <div className="mt-2 space-y-2">
+            {earlier.map((d) => {
+              const p = painterPlacementLabel(d);
+              const reason = painterOutcomeReasonLabelTr(d.outcomeReason);
+              return (
+                <div
+                  key={d.id}
+                  className="rounded-xl border border-gray-200 bg-white p-3"
+                >
+                  <p className="text-[11px] text-gray-500">
+                    {formatDateTime(d.createdAt, loc)} ·{" "}
+                    {painterTriggerLabelTr(d.trigger)}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-700">
+                    Sıralamanın birincisi:{" "}
+                    <strong>{d.winnerName ?? "—"}</strong>
+                  </p>
+                  {p.kind === "named" && (
+                    <p className="text-xs text-gray-700">
+                      İşi alan: <strong>{p.name}</strong>
+                    </p>
+                  )}
+                  {p.kind === "unnamed" && (
+                    <p className="text-xs text-gray-700">
+                      İşi alan: <strong>adı çözülemedi</strong> (kimlik:{" "}
+                      <code className="rounded bg-gray-100 px-1">
+                        {p.shortId}…
+                      </code>
+                      )
+                    </p>
+                  )}
+                  {p.kind === "unrecorded" && (
+                    <p className="text-xs text-gray-500">
+                      Kimse yerleşmedi{reason ? `: ${reason}` : " (sebep kayıtta yok)"}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Kararın aday dökümü: kim kaçıncı, hangi bileşenden kaç puan aldı.
+ *
+ * "Seçilen" ile "işi alan" AYRI işaretlenir; admin elle başkasını seçtiğinde
+ * ikisi ayrışır ve tek bir rozet kararı yanlış anlatırdı. Elenen adayın SEBEBİ
+ * de yazılır: listede sessizce duran bir boyacı, "neden bu skorla seçilmedi"
+ * sorusunu cevapsız bırakıyordu.
+ */
+function PainterCandidateBreakdownCard({
+  decision,
+}: {
+  decision: PainterEvaluation;
+}) {
+  if (decision.candidates.length === 0) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-3">
+        <p className="text-[11px] text-gray-500">
+          Bu karar için aday dökümü kaydedilmemiş.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <ul className="space-y-2">
+        {decision.candidates.map((c, i) => {
+          const isWinner =
+            !!c.painterId && c.painterId === decision.winnerPainterId;
+          const isPlaced =
+            !!c.painterId && c.painterId === decision.placedPainterId;
+          return (
+            <li
+              key={c.painterId ?? i}
+              className={`rounded-lg p-2 ${
+                isWinner ? "bg-emerald-50 ring-1 ring-emerald-200" : "bg-gray-50"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-gray-800">
+                  {c.companyName ?? "—"}
+                  {isWinner && (
+                    <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-700">
+                      seçilen
+                    </span>
+                  )}
+                  {isPlaced && !isWinner && (
+                    <span className="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-700">
+                      işi alan
+                    </span>
+                  )}
+                  {c.eligible === false && (
+                    <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-700">
+                      elendi
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs font-bold text-gray-700">
+                  {c.totalScore ?? "—"}
+                </span>
+              </div>
+              {c.eligible === false && c.ineligibleReason && (
+                <p className="mt-0.5 text-[10px] text-amber-700">
+                  {c.ineligibleReason}
+                </p>
+              )}
+              <div className="mt-1 flex flex-wrap gap-1">
+                {PAINTER_SCORE_KEYS.filter((k) => c.scores[k] !== undefined).map(
+                  (k) => (
+                    <span
+                      key={k}
+                      title={PAINTER_SCORE_LABELS_TR[k]}
+                      className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-gray-600 ring-1 ring-gray-200"
+                    >
+                      {PAINTER_SCORE_SHORT_LABELS_TR[k]} {c.scores[k]}
+                    </span>
+                  )
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {decision.excludedPainterIds.length > 0 && (
+        <p className="mt-2 text-[10px] text-gray-500">
+          Bu denemede {decision.excludedPainterIds.length} boyacı sıralamaya hiç
+          sokulmadı (daha önce reddetmiş ya da 24 saat cevapsız kalmış).
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Partnerin sürüm onay durumu (sunucuda partner-model-ack.ts hesaplar). */
 interface PartnerAckState {
   announcedRevision: number | null;
@@ -2397,7 +2758,7 @@ function PartnerChatPanel({ orderId, loc }: { orderId: string; loc: Locale }) {
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, painterAssignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures } = data;
   // Turun onaylanamama sebebi TEK yerde cümleye çevrilir: kırmızı kutu, kapalı
   // onay düğmesinin başlığı, denetimli istisnanın bağlantısı ve onay kutusu
   // aynı sebebi anlatsın. Dördü ayrı ayrı yazıldığında ekran "eski baskı"
@@ -2455,6 +2816,14 @@ export function OrderDetailClient({ data, locale }: Props) {
   // bir üreticiye yerleşiyor (revoke-after-painter.ts, para mutabakatından
   // sonra). Üretici geri almasıyla aynı seçenek, aynı varsayılan: kapalı.
   const [revokePainterKeepInQueue, setRevokePainterKeepInQueue] = useState(false);
+  // Güvenilirlik cezası (strike) — üretici geri almasındaki `revokeStrike`in
+  // ikizi. Varsayılan KAPALI: geri alma her zaman boyacının kusuru değildir
+  // (müşteri vazgeçti, adres değişti, iş acele başkasına verildi), o yüzden
+  // cezayı admin AÇIKÇA ister. Rota bu alanı Faz 1'den beri kabul ediyordu
+  // (revoke-painter/route.ts · şema `.strict()`, `strike: z.boolean()`) ama
+  // panel onu hiç GÖNDERMİYORDU: boyacı tarafında ceza fiilen hiç yazılmadı ve
+  // askıya alma eşiği (3) hiç dolmadı.
+  const [revokePainterStrike, setRevokePainterStrike] = useState(false);
   // Admin-side painter hand-off (used when the manufacturer never sent it, or
   // after a revoke/decline left the job with nobody).
   const [painterPick, setPainterPick] = useState("");
@@ -2532,9 +2901,22 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapPainterId, setSwapPainterId] = useState("");
   const [swapReason, setSwapReason] = useState("");
-  const [swapBlocklist, setSwapBlocklist] = useState(true);
+  const [swapBlocklist, setSwapBlocklist] = useState(false);
+  // Devirde parçanın YENİ sevkiyatı — atama kutusundaki iki alanın aynısı.
+  // Bu alanlar yokken devir, kolisi yolda olan HER siparişte 409
+  // (parcel_in_transit) ile geri dönüyordu ve admin'in panelden uyabileceği
+  // bir yol kalmıyordu: geriye yalnız "boyacıdan geri al" kalıyor, o da iki
+  // partneri birden koparıyordu. Devir kutusu, koliyi açıkça devretmenin yeri.
+  const [swapCarrier, setSwapCarrier] = useState("");
+  const [swapTracking, setSwapTracking] = useState("");
   // Yeni uçların hatası: sayfanın üstünde tek bir yerde görünür.
   const [actionError, setActionError] = useState<string | null>(null);
+  // BAŞARILI ama EKSİK kalan işlemin uyarısı (uçların `warning` alanı).
+  // Ölçülen kusur: uç 200 + Türkçe uyarı dönüyordu ("karar kaydı yazılamadı"),
+  // panel gövdeyi yalnız hata dalında okuduğu için uyarı yere düşüyordu; admin
+  // işlemin eksik tamamlandığını hiçbir yerde görmüyordu. Hata KUTUSUNDAN AYRI
+  // durur: işlem geçerlidir, kırmızı bir kutu onu başarısız gösterirdi.
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
 
 
   // Edit state
@@ -2675,6 +3057,10 @@ export function OrderDetailClient({ data, locale }: Props) {
     return { ok: false, error: message, data };
   };
 
+  /** Uçların başarı gövdesindeki Türkçe uyarı (yoksa null). */
+  const responseWarning = (data: Record<string, unknown>): string | null =>
+    typeof data.warning === "string" && data.warning.trim() ? data.warning : null;
+
   const jsonInit = (body: unknown, method = "POST"): RequestInit => ({
     method,
     headers: { "Content-Type": "application/json" },
@@ -2692,6 +3078,9 @@ export function OrderDetailClient({ data, locale }: Props) {
   ): Promise<boolean> => {
     setLoading(key);
     setActionError(null);
+    // Yeni bir işlem, bir öncekinin uyarısını da kapatır: bayat uyarı, az önce
+    // yapılan işleme aitmiş gibi okunurdu.
+    setActionWarning(null);
     try {
       const r = await callApi(path, init);
       if (!r.ok) {
@@ -3030,17 +3419,58 @@ export function OrderDetailClient({ data, locale }: Props) {
     );
   };
 
+  // ─── ÖN SEÇİM ────────────────────────────────────────────────────────────
+  // Sunucu sıralamanın birincisini işaretliyor (page.tsx · suggested). Kullanıcı
+  // bir şey seçmediyse öneri GEÇERLİDİR; yoksa sıralamayı gösterip yine de en
+  // üstteki adı elle tıklatmış olurduk. Öneri yalnız sıralama gerçekten
+  // okunduğunda gelir: sırasız listede hiçbir satır "önerilen" değildir.
+  const suggestedPainterId = painting?.candidates.find((c) => c.suggested)?.id ?? "";
+  const effectivePainterPick = painterPick || suggestedPainterId;
+  const chosenPainterCard =
+    painting?.candidates.find((c) => c.id === effectivePainterPick) ?? null;
+  // Devirde öneri FARKLIDIR: şu anki boyacı hariç, sıradaki ilk uygun boyacı.
+  // Ama KURAL ATAMA KUTUSUYLA AYNIDIR: sıra gerçekten okunmadıysa (rank null)
+  // hiçbir satır önerilmez. Sırasız listenin ilk uygun adını ön seçili
+  // getirmek, "liste sırasızdır" uyarısının hemen altında alfabetik bir adı
+  // tavsiye diye satmak olurdu — üstelik devirde seçim tek tıkla uygulanıyor.
+  const suggestedSwapPainterId =
+    painting?.candidates.find(
+      (c) => c.eligible && c.rank !== null && c.id !== painter?.id
+    )?.id ?? "";
+  const effectiveSwapPainterId = swapPainterId || suggestedSwapPainterId;
+
+  // BASKI ŞU AN DIŞARIDA MI? Ölçü uçların kullandığının AYNISIDIR
+  // (flags.ts · painterParcelOnTheWay): kargo FİRMASI kanıt sayılmaz, takip
+  // numarası ya da boyacının teslim damgası kanıttır. Ekranın kendi kuralını
+  // kurması, panelin "sorun yok" dediği bir devri ucun reddetmesi demekti.
+  const painterParcelOut = painterParcelOnTheWay({
+    painterHandoffTrackingNumber: painting?.handoffTrackingNumber ?? null,
+    receivedByPainterAt: painting?.receivedAt ? new Date(painting.receivedAt) : null,
+  });
+  // Koli yoldayken devir, YENİ sevkiyat bildirilmeden kabul edilmez (uç:
+  // 409 · parcel_in_transit). Kural ekranda da uygulanır ki admin reddi
+  // yemeden önce ne istendiğini görsün.
+  const swapNeedsTracking = painterParcelOut && !swapTracking.trim();
+
   const swapPainter = async () => {
-    if (!swapPainterId) return;
+    if (!effectiveSwapPainterId) return;
     if (swapReason.trim().length < 3) {
       alert("Gerekçe zorunludur.");
+      return;
+    }
+    if (swapNeedsTracking) {
+      alert(
+        "Baskı boyacıya gönderilmiş ya da onun elinde görünüyor: devir için parçanın yeni sevkiyatını girin. Takip numarası zorunludur (elden teslimde teslim notunu yazın)."
+      );
       return;
     }
     const ok = window.confirm(
       [
         "İş yalnız YENİ BOYACIYA geçecek.",
         "Üretici, üretici durumu ve tahakkuk etmiş baskı hakedişi olduğu gibi kalır.",
-        "Baskı hâlâ eski boyacının elinde: devir kargosu ve gerekirse yeniden baskı elle mutabakatla kapatılır.",
+        painterParcelOut
+          ? `Baskı eski boyacıda: yeni sevkiyat ${swapCarrier || "-"} / ${swapTracking.trim()} olarak kaydedilecek, eski kargo kaydı da sipariş notuna yazılacak.`
+          : "Baskı hâlâ eski boyacının elinde: devir kargosu ve gerekirse yeniden baskı elle mutabakatla kapatılır.",
         "",
         "Devam edilsin mi?",
       ].join("\n")
@@ -3050,14 +3480,23 @@ export function OrderDetailClient({ data, locale }: Props) {
       "swap-painter",
       `/api/admin/orders/${order.id}/swap-painter`,
       jsonInit({
-        painterId: swapPainterId,
+        painterId: effectiveSwapPainterId,
         reason: swapReason.trim(),
         blocklistPainter: swapBlocklist,
+        // Atama kutusuyla AYNI iki alan (handleAssignPainter): uç ikisini de
+        // aynı adla bekliyor ve koli yoldayken takip numarası ZORUNLU.
+        carrier: swapCarrier || undefined,
+        trackingNumber: swapTracking.trim() || undefined,
       }),
-      () => {
+      (data) => {
         setSwapOpen(false);
         setSwapPainterId("");
         setSwapReason("");
+        setSwapCarrier("");
+        setSwapTracking("");
+        // Devir geçerli, ama kararın gerekçe kaydı yazılamamış olabilir: uç bunu
+        // `warning` ile söyler ve bu callback onu YERE DÜŞÜRÜYORDU.
+        setActionWarning(responseWarning(data));
       }
     );
   };
@@ -3462,6 +3901,32 @@ export function OrderDetailClient({ data, locale }: Props) {
     order.painterStatus !== "unassigned" &&
     order.painterStatus !== "shipped" &&
     !order.shippedAt;
+  // CEVAPSIZ İŞ = CEZASIZ İŞ (sahibin kararı). `painterStatus === "assigned"`
+  // boyacının işi henüz ÜSTLENMEDİĞİ hâldir; kabul ettiği an "accepted" olur.
+  // 24 saatlik süpürme cevapsız işi sıradaki boyacıya geçirir ve ceza YAZMAZ
+  // (painter-accept-sla.worker.ts; strikes.ts'in başındaki not da bunu yazıyor).
+  // Admin süpürmeden ÖNCE elle geri alırsa kural değişmemeli: yoksa aynı olgu
+  // (boyacı hiç cevap vermedi) kimin önce davrandığına göre cezalanırdı.
+  const painterJobUnanswered = order.painterStatus === "assigned";
+  // İade edilmiş siparişte de ceza yoktur: orada işi bitiren iadedir, boyacının
+  // kusuru yoktur (order-status-policy). Rota ikinci savunma hattıdır
+  // (`strike && !refunded` + strikes.ts'in kendi iade kapısı); burası cezanın
+  // SORULDUĞU yer olduğu için kuralı ekranda da uygular.
+  const canStrikePainter = !refunded && !painterJobUnanswered;
+  // Gerekçe kartının ("Bu iş neden bu boyacıya gitti?") adres verebilmesi için
+  // elle atama kutusunun GERÇEKTEN ekranda olması gerekir. Kutu yalnız bu beş
+  // koşulun hepsi doğruyken render ediliyor (aşağıdaki "Boyacı ata" bloğu);
+  // kart ise yalnız karar sayısına bakıp "yukarıdaki kutudan atayın" diyordu ve
+  // iade edilmiş siparişte var olmayan bir kutuyu adres gösteriyordu.
+  // `painting` sayfadan gelmeyebilir (boyama bölümü hiç render edilmemiş
+  // sipariş); o hâlde kutu da yok, yani hesap `false` vermeli — kartın tavsiyesi
+  // "kutu ekranda" diye okunmamalı.
+  const painterAssignBoxOnScreen =
+    !refunded &&
+    (!painting?.painterStatus || painting.painterStatus === "unassigned") &&
+    manufacturerStatus === "qc_approved" &&
+    !readFailures?.painterCandidates &&
+    (painting?.candidates.length ?? 0) > 0;
   const waitingHours = assignmentAgeHours ?? 0;
   const isStaleAssignment =
     manufacturerStatus === "assigned" && waitingHours >= 24;
@@ -3800,6 +4265,14 @@ export function OrderDetailClient({ data, locale }: Props) {
           // alan (revoke-painter/route.ts) buraya kadar bağlanmamıştı, bu yüzden
           // seçenek ekranda hiç yoktu.
           keepInQueue: revokePainterKeepInQueue,
+          // GÜVENİLİRLİK CEZASI — ölçülen kusur: rota `strike`i kabul ediyor ve
+          // işliyordu (POST edildiğinde boyacının strike_count'u 0 → 1 oldu), ama
+          // panel alanı HİÇ göndermiyordu; boyacı cezaları bu yüzden hiç
+          // ateşlenmedi. Kapılar burada da uygulanır ki gönderilen değer kaydın
+          // gerçeğiyle aynı olsun: iade edilmiş siparişte ceza yok, işi henüz
+          // üstlenmemiş (cevapsız) boyacıya ceza yok. Kutu o hâllerde zaten
+          // ekranda değil; canlıda araya giren bir iade için ikinci kapı budur.
+          strike: canStrikePainter && revokePainterStrike,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -3830,8 +4303,13 @@ export function OrderDetailClient({ data, locale }: Props) {
                 ? "Boyacı ve üretici çıkarıldı. Sipariş, isteğiniz üzerine otomatik atanmadan kuyrukta bekliyor."
                 : "Boyacı ve üretici çıkarıldı; sipariş atama kuyruğunda bekliyor (uygun aday bulunamadı ya da otomatik atama kapalı)."
       );
+      // İşlem BAŞARILI ama eksik kalan bir şey varsa (koli hâlâ dışarıda) uç
+      // bunu `warning` ile söyler. Uyarı kutusu hata kutusundan ayrıdır: geri
+      // alma geçerlidir, kırmızı bir kutu onu başarısız gösterirdi.
+      setActionWarning(responseWarning(data));
       setRevokePainterReason("");
       setRevokePainterKeepInQueue(false);
+      setRevokePainterStrike(false);
       setRevokePainterOpen(false);
       router.refresh();
     } finally {
@@ -3896,14 +4374,15 @@ export function OrderDetailClient({ data, locale }: Props) {
   };
 
   const handleAssignPainter = async () => {
-    if (!painterPick) return;
+    if (!effectivePainterPick) return;
     setLoading("assign-painter");
+    setActionWarning(null);
     try {
       const res = await fetch(`/api/admin/orders/${order.id}/assign-painter`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          painterId: painterPick,
+          painterId: effectivePainterPick,
           carrier: painterCarrier || undefined,
           trackingNumber: painterTracking.trim() || undefined,
         }),
@@ -3916,6 +4395,10 @@ export function OrderDetailClient({ data, locale }: Props) {
       setPainterPick("");
       setPainterCarrier("");
       setPainterTracking("");
+      // Atama yapıldı; uç eksik kalan bir şey bildirdiyse (gerekçe kaydı
+      // yazılamadı) admin bunu SAYFANIN ÜSTÜNDE okur — eskiden gövde yalnız
+      // hata dalında okunduğu için uyarı hiçbir yere ulaşmıyordu.
+      setActionWarning(responseWarning(data));
       router.refresh();
     } finally {
       setLoading(null);
@@ -4118,6 +4601,25 @@ export function OrderDetailClient({ data, locale }: Props) {
           <button
             type="button"
             onClick={() => setActionError(null)}
+            className="shrink-0 text-xs font-medium underline"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
+
+      {/* ─── Yapıldı ama EKSİK: uçların `warning` alanı ────
+          Hata kutusundan ayrı ve sarı: işlem GERÇEKLEŞTİ, yalnız bir yan adım
+          (çoğunlukla karar kaydı) tamamlanamadı. */}
+      {actionWarning && (
+        <div
+          role="status"
+          className="mb-5 flex items-start justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          <span>{actionWarning}</span>
+          <button
+            type="button"
+            onClick={() => setActionWarning(null)}
             className="shrink-0 text-xs font-medium underline"
           >
             Kapat
@@ -5599,8 +6101,18 @@ export function OrderDetailClient({ data, locale }: Props) {
                         boyacının elinde: devir kargosu ve gerekirse yeniden baskı elle mutabakatla
                         kapatılır.
                       </p>
+                      {/* Devir kutusu da SIRALIDIR ve aynı sıralayıcıyı okur:
+                          iki ekranda iki ayrı sıra olsaydı, admin işi "daha
+                          iyi" sandığı boyacıya taşırken sistemin başkasını
+                          seçtiğini hiç göremezdi. */}
+                      {readFailures?.painterRanking && (
+                        <ReadFailedNotice>
+                          Boyacı sıralaması şu anda hesaplanamadı (geçici sistem arızası): aşağıdaki
+                          liste <strong>sırasızdır</strong>. Devir kapanmadı; yük bilgisi gerçektir.
+                        </ReadFailedNotice>
+                      )}
                       <select
-                        value={swapPainterId}
+                        value={effectiveSwapPainterId}
                         onChange={(e) => setSwapPainterId(e.target.value)}
                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                       >
@@ -5609,14 +6121,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                           .filter((c) => c.id !== painter?.id)
                           .map((c) => (
                             <option key={c.id} value={c.id} disabled={!c.eligible}>
-                              {c.companyName} — {c.currentLoad}/{c.maxConcurrentOrders}
-                              {c.declined
-                                ? " (reddetti)"
-                                : !c.acceptingOrders
-                                  ? " (iş almıyor)"
-                                  : c.currentLoad >= c.maxConcurrentOrders
-                                    ? " (kapasite dolu)"
-                                    : ""}
+                              {`${c.rank !== null ? `${c.rank}. ` : ""}${c.companyName} — ${c.loadLabel}${c.score !== null ? ` · skor ${c.score}` : ""}${c.eligible ? "" : ` (${c.ineligibleReason ?? "uygun değil"})`}`}
                             </option>
                           ))}
                       </select>
@@ -5636,11 +6141,74 @@ export function OrderDetailClient({ data, locale }: Props) {
                         />
                         Eski boyacıyı bu sipariş için bir daha önerme
                       </label>
+                      {/* PARÇANIN YENİ SEVKİYATI — atama kutusundaki iki alanın
+                          aynısı. Koli yoldayken uç, takip numarası olmadan
+                          devri REDDEDER (409 · parcel_in_transit); bu alanlar
+                          olmadığı için o ret panelden kapatılamıyordu ve
+                          admin'e yalnız iki partneri birden koparan düğme
+                          kalıyordu. Sebep burada, adminin durduğu yerde
+                          yazılıdır. */}
+                      {painterParcelOut ? (
+                        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                          Bu siparişin baskısı boyacıya gönderilmiş ya da onun elinde görünüyor
+                          (kargo kaydı: {painting.handoffCarrier ?? "-"} /{" "}
+                          {painting.handoffTrackingNumber ?? "-"}
+                          {painting.receivedAt ? ", boyacı teslim aldı" : ""}). Devir için parçanın{" "}
+                          <strong>yeni sevkiyatını</strong> girin:{" "}
+                          <strong>takip numarası zorunludur</strong> (elden teslimde teslim notunu
+                          yazın). Numarasız devir, kutunun nerede olduğunu söyleyen tek kaydın
+                          üstüne yazardı; üstelik sipariş otomatik yolların gözünde &quot;kolisi
+                          yola çıkmamış&quot; hâle gelir ve sıradaki ret ya da 24 saatlik sessizlik
+                          işi bir sonraki boyacıya taşırken baskı ilk boyacıda kalırdı. Eski kargo
+                          kaydı silinmez: sipariş notuna &quot;önceki sevkiyat → yeni sevkiyat&quot;
+                          olarak yazılır.
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-gray-500">
+                          Parça henüz kargoya verilmemiş görünüyor (takip numarası ve teslim
+                          damgası yok): sevkiyat alanları isteğe bağlı. Yine de yeni boyacıya bir
+                          kargo çıkacaksa buraya yazın — kolinin tek kaydı bu iki alandır.
+                        </p>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={swapCarrier}
+                          onChange={(e) => setSwapCarrier(e.target.value)}
+                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        >
+                          <option value="">
+                            {painterParcelOut ? "Teslim şekli" : "Teslim şekli (ops.)"}
+                          </option>
+                          <option value="elden">Elden</option>
+                          <option value="yurtici">Yurtiçi</option>
+                          <option value="aras">Aras</option>
+                          <option value="mng">MNG</option>
+                          <option value="ptt">PTT</option>
+                          <option value="surat">Sürat</option>
+                          <option value="other">Diğer</option>
+                        </select>
+                        <input
+                          value={swapTracking}
+                          onChange={(e) => setSwapTracking(e.target.value)}
+                          maxLength={60}
+                          placeholder={
+                            painterParcelOut ? "Takip no (zorunlu)" : "Takip no (ops.)"
+                          }
+                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        />
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={swapPainter}
-                          disabled={!!loading || !swapPainterId || swapReason.trim().length < 3}
+                          disabled={
+                            !!loading ||
+                            !effectiveSwapPainterId ||
+                            swapReason.trim().length < 3 ||
+                            // Ucun kapısının ekrandaki karşılığı: koli yoldayken
+                            // takip numarası olmadan devir yok.
+                            swapNeedsTracking
+                          }
                           className="rounded-xl bg-fuchsia-600 px-4 py-2 text-xs font-semibold text-white hover:bg-fuchsia-700 disabled:bg-gray-300 disabled:text-gray-500"
                         >
                           {loading === "swap-painter" ? "Değiştiriliyor…" : "Boyacıyı değiştir"}
@@ -5651,6 +6219,8 @@ export function OrderDetailClient({ data, locale }: Props) {
                             setSwapOpen(false);
                             setSwapPainterId("");
                             setSwapReason("");
+                            setSwapCarrier("");
+                            setSwapTracking("");
                           }}
                           className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
                         >
@@ -5694,25 +6264,97 @@ export function OrderDetailClient({ data, locale }: Props) {
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    <select
-                      value={painterPick}
-                      onChange={(e) => setPainterPick(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                    >
-                      <option value="">Boyacı seçin…</option>
-                      {painting.candidates.map((c) => (
-                        <option key={c.id} value={c.id} disabled={!c.eligible}>
-                          {c.companyName} — {c.currentLoad}/{c.maxConcurrentOrders}
-                          {c.declined
-                            ? " (reddetti)"
-                            : !c.acceptingOrders
-                              ? " (iş almıyor)"
-                              : c.currentLoad >= c.maxConcurrentOrders
-                                ? " (kapasite dolu)"
-                                : ""}
-                        </option>
-                      ))}
-                    </select>
+                    {/* Sıralama üretilemediyse liste ALFABETİKTİR ve bu
+                        SÖYLENİR: sırasız bir listenin ilk satırı "önerilen"
+                        gibi okunmamalı. Atama kapanmaz — sıralama bir
+                        tavsiyedir, kapı değil. */}
+                    {readFailures?.painterRanking && (
+                      <ReadFailedNotice>
+                        Boyacı sıralaması şu anda hesaplanamadı (geçici sistem arızası): aşağıdaki
+                        liste <strong>sırasızdır</strong> ve önerilen boyacı gösterilemiyor. Atama
+                        kapanmadı ve yük bilgisi gerçektir; seçimi siz yapın.
+                      </ReadFailedNotice>
+                    )}
+                    <ul className="space-y-1.5">
+                      {painting.candidates.map((c) => {
+                        const isChosen = c.id === effectivePainterPick;
+                        return (
+                          <li key={c.id}>
+                            <button
+                              type="button"
+                              disabled={!c.eligible}
+                              onClick={() => setPainterPick(c.id)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                                isChosen
+                                  ? "border-fuchsia-400 bg-white ring-2 ring-fuchsia-200"
+                                  : "border-gray-200 bg-white hover:border-fuchsia-300"
+                              } ${c.eligible ? "" : "cursor-not-allowed opacity-60"}`}
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-sm font-medium text-gray-900">
+                                  {c.rank !== null && (
+                                    <span className="mr-1 text-xs text-gray-500">
+                                      {c.rank}.
+                                    </span>
+                                  )}
+                                  {c.companyName}
+                                  {c.suggested && (
+                                    <span className="ml-1 rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-fuchsia-700">
+                                      önerilen
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-xs text-gray-600">
+                                  {/* Yük, KAPININ ölçüsüyle yazılır (ortak
+                                      etiket: "6/2 birim · 1 iş"). İş sayısını
+                                      tek başına göstermek, uç ağırlıklı yükle
+                                      reddederken ekranda "1/5 iş" okutmak
+                                      olurdu — kilitli satırın sebebi de
+                                      anlaşılmazdı. */}
+                                  {c.loadLabel}
+                                  {c.score !== null && (
+                                    <span className="ml-2 font-semibold text-gray-700">
+                                      skor {c.score}
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              {c.parts && (
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {PAINTER_SCORE_KEYS.filter(
+                                    (k) => typeof c.parts?.[k] === "number"
+                                  ).map((k) => (
+                                    <span
+                                      key={k}
+                                      title={PAINTER_SCORE_LABELS_TR[k]}
+                                      className="rounded-full bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-600 ring-1 ring-gray-200"
+                                    >
+                                      {PAINTER_SCORE_SHORT_LABELS_TR[k]} {c.parts?.[k]}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {c.reasons.length > 0 && (
+                                <p className="mt-1 text-[11px] text-gray-500">
+                                  {c.reasons.join(" · ")}
+                                </p>
+                              )}
+                              {!c.eligible && c.ineligibleReason && (
+                                <p className="mt-1 text-[11px] font-medium text-amber-700">
+                                  {c.ineligibleReason}
+                                </p>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <p className="text-[11px] text-gray-500">
+                      Sıra, işi otomatik yerleştiren sıralamanın kendisidir: rota
+                      (üreticiden boyacıya + boyacıdan müşteriye), yük,
+                      güvenilirlik, QC kalitesi ve zamanında teslim. 100 en iyi,
+                      0 en kötüdür.
+                    </p>
                     <div className="grid grid-cols-2 gap-2">
                       <select
                         value={painterCarrier}
@@ -5737,12 +6379,14 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                     <button
                       onClick={handleAssignPainter}
-                      disabled={!painterPick || loading === "assign-painter"}
+                      disabled={!effectivePainterPick || loading === "assign-painter"}
                       className="w-full rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-700 disabled:opacity-50"
                     >
                       {loading === "assign-painter"
                         ? "Atanıyor…"
-                        : "Boyacıya ata ve gönder"}
+                        : chosenPainterCard
+                          ? `Boyacıya ata ve gönder: ${chosenPainterCard.companyName}`
+                          : "Boyacıya ata ve gönder"}
                     </button>
                     <p className="text-[11px] text-gray-500">
                       Atama, üreticinin baskı hakedişini tahakkuk ettirir ve
@@ -5754,6 +6398,24 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {/* ─── Boyacı atama gerekçesi: kararın kendi anındaki skorları ───── */}
+        {readFailures?.painterAssignmentDecisions && (
+          <ReadFailedNotice>
+            Boyacı atama değerlendirme kayıtları şu anda okunamadı (geçici sistem arızası): bu
+            siparişin &quot;neden bu boyacıya gitti&quot; dökümü gösterilemiyor. Kayıtlar
+            silinmedi; bu kart boş DEĞİL, bilinmiyor.
+          </ReadFailedNotice>
+        )}
+        {painterAssignmentDecisions && painterAssignmentDecisions.length > 0 && (
+          <PainterEvaluationCard
+            decisions={painterAssignmentDecisions}
+            assignedPainterId={painter?.id ?? null}
+            refunded={refunded}
+            assignBoxOnScreen={painterAssignBoxOnScreen}
+            loc={loc}
+          />
         )}
 
         {/* ─── Revoke from painter (bad hand-off → assignment queue) ─────── */}
@@ -5811,6 +6473,23 @@ export function OrderDetailClient({ data, locale }: Props) {
             </p>
             )}
 
+            {/* KOLİ HÂLÂ DIŞARIDA OLABİLİR. Geri alma iki partneri de koparır ve
+                devir/kargo alanlarını temizler — tam koparma meşrudur, ama
+                fiziksel kutu bu tıkla yerinden kımıldamaz. Alanlar silindikten
+                sonra kutunun nerede olduğunu söyleyen tek kayıt sipariş notudur;
+                uç oraya yazar, bu cümle de admin'i tıklamadan önce uyarır. */}
+            {painterParcelOut && (
+              <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                ⚠ Baskı şu anda boyacıda ya da ona giden yolda görünüyor (kargo kaydı:{" "}
+                {painting?.handoffCarrier ?? "-"} / {painting?.handoffTrackingNumber ?? "-"}
+                {painting?.receivedAt ? ", boyacı teslim aldı" : ""}). Geri alma bu kutuyu
+                taşımaz: siparişteki devir/kargo alanları temizlenir, kaydın kendisi sipariş
+                notlarına yazılır. Kutunun geri gelmesini ya da yeni partnere ulaşmasını elle
+                takip edin. Yalnız BOYACIYI değiştirecekseniz yukarıdaki &quot;Boyacıyı
+                değiştir&quot; kutusunu kullanın: orası koliyi yeni sevkiyat numarasıyla devreder
+                ve üreticiyi yerinde bırakır.
+              </p>
+            )}
             {!revokePainterOpen ? (
               <button
                 onClick={() => setRevokePainterOpen(true)}
@@ -5858,7 +6537,32 @@ export function OrderDetailClient({ data, locale }: Props) {
                       />
                       Kuyruğumda kalsın (otomatik atama yapılmasın)
                     </label>
+                    {/* Üretici geri almasındaki ceza kutusunun ikizi. İşi henüz
+                        üstlenmemiş (cevapsız) boyacıda SORULMAZ: sahibin kararı
+                        gereği cevapsızlık ceza değildir, sebebi hemen altında
+                        yazıyor. */}
+                    {canStrikePainter && (
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={revokePainterStrike}
+                          onChange={(e) => setRevokePainterStrike(e.target.checked)}
+                        />
+                        Güvenilirlik cezası (strike) uygula
+                      </label>
+                    )}
                   </div>
+                )}
+                {/* Kutunun YOKLUĞU da açıklanır: eksik bir seçenek, unutulmuş
+                    bir alan gibi okunmamalı. */}
+                {!refunded && painterJobUnanswered && (
+                  <p className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-600">
+                    Bu boyacı işi henüz üstlenmedi (durum: <strong>atandı</strong>, kabul yok). Sahibin
+                    kararı gereği cevapsız kalan iş sıradaki boyacıya geçer ama{" "}
+                    <strong>ceza yazılmaz</strong> — 24 saatlik otomatik süpürme de aynı kuralı
+                    uygular. Bu yüzden burada ceza kutusu yok; cevapsızlık yine de siparişin üç
+                    denemelik sınırına sayılır.
+                  </p>
                 )}
                 {!refunded && (
                   <p className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-600">
@@ -5893,6 +6597,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                       setRevokePainterOpen(false);
                       setRevokePainterReason("");
                       setRevokePainterKeepInQueue(false);
+                      setRevokePainterStrike(false);
                     }}
                     className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
                   >

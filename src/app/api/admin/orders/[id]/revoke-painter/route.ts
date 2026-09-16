@@ -12,11 +12,13 @@ import {
   painters,
 } from "@/lib/db/schema";
 import {
+  painterParcelRevokeTrace,
   revokeAfterPainterHandoff,
   type RevokeAfterPainterResult,
 } from "@/lib/services/revoke-after-painter";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { notifyPainter } from "@/lib/services/painter-notifications";
+import { applyStrike, strikeSkipNoticeTr } from "@/lib/services/strikes";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { isOrderRefunded } from "@/lib/services/manufacturer-assign";
 import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
@@ -44,6 +46,12 @@ const schema = z
     // üreticiye yerleştirilmesin. Üretici geri almasındaki (revoke-manufacturer)
     // seçeneğin aynısı — admin bazen siparişi bilerek kendi kuyruğunda tutar.
     keepInQueue: z.boolean().default(false),
+    // Güvenilirlik cezası — üretici geri almasındaki (revoke-manufacturer)
+    // alanın ikizi. Varsayılan KAPALI: geri alma her zaman boyacının kusuru
+    // değildir (müşteri vazgeçti, adres değişti, iş acele başkasına verildi),
+    // o yüzden cezayı admin AÇIKÇA ister. Şema `.strict()` olduğu için bu alan
+    // eklenmeden istemci onu gönderemezdi.
+    strike: z.boolean().default(false),
   })
   .strict();
 
@@ -84,6 +92,11 @@ async function detachRefundedFromPainter(args: {
         orderNumber: orders.orderNumber,
         userId: orders.userId,
         status: orders.status,
+        // Koli kaydı: aşağıdaki UPDATE bu üç alanı da temizliyor, o yüzden
+        // temizlemeden ÖNCE okunur ve nota taşınır.
+        painterHandoffCarrier: orders.painterHandoffCarrier,
+        painterHandoffTrackingNumber: orders.painterHandoffTrackingNumber,
+        receivedByPainterAt: orders.receivedByPainterAt,
       })
       .from(orders)
       .where(eq(orders.id, orderId))
@@ -105,7 +118,11 @@ async function detachRefundedFromPainter(args: {
     const prevPainterId = order.painterId;
     const prevManufacturerStatus = order.manufacturerStatus;
     const prevPainterStatus = order.painterStatus;
-    const note = `[BOYACIDAN GERİ ALMA] Admin ${adminEmail} iade edilmiş siparişte partnerleri kopardı (üretici: ${prevManufacturerStatus ?? "-"}, boyacı: ${prevPainterStatus}). Sipariş durumu korundu, kuyruğa dönmedi. Sebep: ${reason}`;
+    // İade edilmiş sipariş de fiziksel bir kutu taşıyor olabilir: iade PARAYI
+    // geri verir, koliyi geri getirmez. Kayıt, alanlar silinmeden önce nota
+    // geçer — ölçü olağan yolunkiyle aynı (painterParcelRevokeTrace).
+    const parcel = painterParcelRevokeTrace(order);
+    const note = `[BOYACIDAN GERİ ALMA] Admin ${adminEmail} iade edilmiş siparişte partnerleri kopardı (üretici: ${prevManufacturerStatus ?? "-"}, boyacı: ${prevPainterStatus}). Sipariş durumu korundu, kuyruğa dönmedi.${parcel.noteClause} Sebep: ${reason}`;
 
     const [updated] = await tx
       .update(orders)
@@ -175,6 +192,7 @@ async function detachRefundedFromPainter(args: {
       // Durum DEĞİŞMEDİ: SSE yayını da siparişin gerçek durumunu taşımalı.
       orderStatus: order.status,
       autoAssigned: false,
+      parcelWarningTr: parcel.warningTr,
     };
   });
 }
@@ -196,7 +214,8 @@ export async function POST(
         { status: 400 }
       );
     }
-    const { reason, blocklistManufacturer, blocklistPainter, keepInQueue } = parsed.data;
+    const { reason, blocklistManufacturer, blocklistPainter, keepInQueue, strike } =
+      parsed.data;
 
     // İade TERMİNALDİR, bu yüzden bu ön okuma soruyu kapatır. Geri almadan ÖNCE
     // okunuyor, sonra değil: olağan geri alma siparişi atama aşamasına döndürür
@@ -335,6 +354,62 @@ export async function POST(
       })
       .catch(() => null);
 
+    // GÜVENİLİRLİK CEZASI — boyacı tarafında BU İLK ÇAĞRI.
+    //
+    // `painters.strike_count` Faz 1'den beri duruyordu ve `applyStrike` boyacı
+    // türünü destekliyordu, ama hiçbir çağıran türü geçmiyordu: boyacının
+    // sayacı hep 0 kalıyor, askıya alma eşiği hiç dolmuyordu. Yani boyacılar
+    // için yaptırım fiilen YOKTU.
+    //
+    // ÜÇ KAPI:
+    //  • admin açıkça istemeden yazılmaz (`strike`);
+    //  • iade edilmiş siparişte ASLA yazılmaz — orada işi bitiren iadedir,
+    //    boyacının bir kusuru yoktur (order-status-policy.ts: temizlik hiçbir
+    //    partneri cezalandırmaz);
+    //  • CEVAPSIZ KALAN İŞTE yazılmaz. Sahibin kararı: 24 saat yanıtlanmayan iş
+    //    sıradaki boyacıya geçer, sınıra sayılır ama CEZA YAZILMAZ. Bu kapı
+    //    bugüne kadar YALNIZ panelde duruyordu (client.tsx · canStrikePainter);
+    //    ölçülen kusur da tam buydu: doğrudan bir POST `strike: true` ile
+    //    cevapsız bir işte sayacı 1'den 2'ye çıkarabiliyordu. Aynı olgunun
+    //    (boyacı hiç cevap vermedi) cezalanıp cezalanmaması, süpürmenin mi
+    //    admin'in mi önce davrandığına bağlı kalamaz — kural ucun kendisinde.
+    //
+    // `orderId` de geçilir ki iade kapısı çağırandan BAĞIMSIZ olarak kapansın:
+    // bu rotanın `refunded` okuması ile cezanın yazıldığı an arasına düşen bir
+    // iade, cezayı yine de engeller (strikes.ts).
+    //
+    // SONUÇ OKUNUR VE SÖYLENİR: admin cezayı AÇIKÇA istediği hâlde yazılmadıysa
+    // (iade, cevapsız iş, sipariş okunamadı, partner bulunamadı) bunu hem
+    // denetim satırından hem de cevabın gövdesinden öğrenir. Eskiden
+    // `StrikeOutcome` olduğu gibi atılıyordu: cevap `success: true` diyor, ceza
+    // yazılmıyor ve hiçbir yerde tek kelime bulunmuyordu.
+    const painterJobUnanswered = result.prevPainterStatus === "assigned";
+    let strikeApplied = false;
+    let strikeNoticeTr: string | null = null;
+    if (strike && !refunded) {
+      if (painterJobUnanswered) {
+        strikeNoticeTr = strikeSkipNoticeTr("unanswered_job");
+      } else {
+        const strikeOutcome = await applyStrike(result.prevPainterId, {
+          kind: "painter",
+          orderId: id,
+        }).catch((e) => {
+          console.error("revoke-painter: applyStrike failed", e);
+          return null;
+        });
+        if (!strikeOutcome) {
+          strikeNoticeTr = strikeSkipNoticeTr("write_failed");
+        } else if (strikeOutcome.skipped) {
+          strikeNoticeTr = strikeSkipNoticeTr(strikeOutcome.skipped);
+        } else {
+          strikeApplied = true;
+        }
+      }
+    } else if (strike) {
+      // Buraya yalnız iade dalı düşer (yukarıdaki koşulun tek olumsuzu).
+      strikeNoticeTr = strikeSkipNoticeTr("refunded");
+    }
+
     // admin_action_type bir pg ENUM: yeni değer eklenemez (geri alma migration'ı
     // temiz kaldıramaz), bu yüzden bu fazın uçları NÖTR 'edit' değerini yazıp
     // gerçek anlamı nota bırakır. Burada 'assign_manufacturer' YAZILMAZ: bu satır
@@ -361,6 +436,9 @@ export async function POST(
               : keepInQueue
                 ? `→ admin isteğiyle kuyrukta bırakıldı (otomatik atama yapılmadı). `
                 : `→ atama kuyruğuna döndü. `) +
+          // İstenmiş ama yazılmamış ceza KALICI ize de girer: cevabın gövdesi
+          // yalnız o an ekranda olan kişiye ulaşır.
+          (strike ? (strikeApplied ? `Güvenilirlik cezası uygulandı. ` : `${strikeNoticeTr} `) : ``) +
           `Sebep: ${reason}`,
       })
       .catch((e) => console.error("revoke-painter: adminActions insert failed", e));
@@ -424,6 +502,15 @@ export async function POST(
       // isteğiyle kuyrukta mı kaldı — istemci mesajı bunu söylemeli.
       autoAssigned: result.autoAssigned,
       keptInQueue: keepInQueue,
+      // Ceza GERÇEKTEN yazıldı mı. Admin kutuyu işaretlediği hâlde `false`
+      // dönüyorsa sebebini `strikeWarning` söyler; ikisi birlikte okunur.
+      strikeApplied,
+      ...(strikeNoticeTr ? { strikeWarning: strikeNoticeTr } : {}),
+      // KOPARMA ENGELLENMEZ ama SESSİZ DE KALMAZ: kutu hâlâ boyacıdaysa ya da
+      // ona giden yoldaysa bu 200'ün gövdesi onu söyler. Kalıcı iz siparişin
+      // notundadır (yukarıdaki `note`); bu alan onun ekrandaki yarısıdır ve
+      // panel `warning` alanını zaten basıyor.
+      ...(result.parcelWarningTr ? { warning: result.parcelWarningTr } : {}),
       // Üretici geri almasının verdiği alanın aynısı: sipariş satıcının kendi
       // ürünü olduğu için mi kuyrukta kaldı? Ekranın "uygun aday bulunamadı ya da
       // otomatik atama kapalı" cümlesi burada yanlıştır.

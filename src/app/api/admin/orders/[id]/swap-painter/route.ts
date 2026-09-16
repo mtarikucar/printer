@@ -13,11 +13,16 @@ import {
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { notifyPainter } from "@/lib/services/painter-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
-import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
+// Kapasitenin TEK ölçüsü (ham count(*) yerine): iade edilmiş iş kimsenin
+// tezgâhını doldurmaz ve bu uç, ekranın uygun gösterdiği boyacıyı reddedemez.
+import { painterCapacityGate } from "@/lib/services/painter-capacity";
 import { PAINTER_REVOCABLE_STATUSES } from "@/lib/services/revoke-after-painter";
+// Koli kapısı: otomatik yolların kullandığı ölçünün AYNISI.
+import { painterParcelOnTheWay } from "@/lib/config/flags";
 import { REFUNDED_ORDER_ERROR, formatAdminNoteLine, isRefunded } from "@/lib/config/order-status-policy";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
+import { recordPainterPlacementDecision } from "@/lib/services/painter-evaluation";
 
 /**
  * YALNIZ BOYACIYI DEĞİŞTİR.
@@ -117,6 +122,10 @@ export async function POST(
         declinedPainterIds: true,
         shippedAt: true,
         needsPainting: true,
+        // Kolinin nerede olduğunu söyleyen üç alan; koli kapısı bunları okur.
+        painterHandoffCarrier: true,
+        painterHandoffTrackingNumber: true,
+        receivedByPainterAt: true,
       },
     });
     if (!order) return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
@@ -150,6 +159,43 @@ export async function POST(
       );
     }
 
+    // ── FİZİKSEL KOLİ SESSİZCE YENİDEN YÖNLENDİRİLMEZ ───────────────────────
+    //
+    // Bu ucun koli kapısı HİÇ YOKTU ve önkoşulu (PAINTER_REVOCABLE_STATUSES +
+    // kargolanmamış olmak) kutunun eski boyacının ELİNDE olduğu durumları da
+    // kapsıyor: accepted/painting/painted/qc_pending/qc_approved. Değişim
+    // yazması teslim/boyandı damgalarını sıfırlıyor, kargo/takip alanlarını da
+    // isteğin (çoğu zaman boş) alanlarıyla eziyordu — yani takip numarası
+    // verilmeyen bir değişim, kolinin nereye gittiğini söyleyen TEK kaydı
+    // siliyordu. Üstelik o kayıt gidince sipariş otomatik yolların gözünde
+    // "kolisi yola çıkmamış" hâle geliyor ve sıradaki ret ya da 24 saatlik
+    // sessizlik işi bir sonraki boyacıya yazarken baskı hâlâ İLK boyacıda
+    // kalıyordu (ölçülen P4E-1).
+    //
+    // Karar: koli yoldayken değişim YASAK DEĞİL ama SESSİZ DE DEĞİL — admin
+    // parçanın yeni sevkiyatını bildirmek zorunda. Otomatik yollar aynı ölçüyle
+    // (flags.ts · painterParcelOnTheWay) kendi başlarına asla taşımaz; orada
+    // karar adminindir, burası da o kararın yazıldığı yerdir.
+    const parcelOnTheWay = painterParcelOnTheWay(order);
+    // Kanıt yalnız takip numarasıdır; kargo firması paket çıkmadan da
+    // seçilebildiği için flags.ts onu bilerek kanıt saymaz.
+    const newTracking = parsed.data.trackingNumber?.trim() || null;
+    if (parcelOnTheWay && !newTracking) {
+      return NextResponse.json(
+        {
+          // Bu bir REDDİR (409 + `error` + sabit `code`); karar kaydı uyarısı
+          // ise 200 + `warning` olarak döner. İkisi karışmasın.
+          error:
+            "Bu siparişin baskısı boyacıya gönderilmiş ya da onun elinde görünüyor. " +
+            "Boyacıyı değiştirmek için parçanın yeni sevkiyatını girin: takip " +
+            "numarası zorunludur (elden teslimde teslim notunu yazın). Numarasız " +
+            "değişim, kolinin nerede olduğunu söyleyen tek kaydı silerdi.",
+          code: "parcel_in_transit",
+        },
+        { status: 409 }
+      );
+    }
+
     // Para sınırı (yukarıdaki nota bakın): açık bir boyacı hakedişi varsa dur.
     const existingEarning = await db
       .select({ id: painterEarnings.id })
@@ -172,7 +218,8 @@ export async function POST(
         id: true,
         status: true,
         acceptingOrders: true,
-        maxConcurrentOrders: true,
+        // maxConcurrentOrders BİLEREK OKUNMAZ: eşiği ortak ölçü kendi okur
+        // (painter-capacity.ts); buradaki ikinci kopya ikinci bir kural olurdu.
         companyName: true,
       },
     });
@@ -191,17 +238,11 @@ export async function POST(
         { status: 409 }
       );
     }
-    const [{ count: activeCount }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.painterId, nextPainterId),
-          inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
-        )
-      );
-    if (activeCount >= nextPainter.maxConcurrentOrders) {
-      return NextResponse.json({ error: "Seçilen boyacının kapasitesi dolu." }, { status: 409 });
+    // Kapasite ORTAK ölçüden: ham iş sayısı değil ağırlıklı yük, ve iade
+    // edilmiş iş sayılmaz. Cümle de tek kaynaktan gelir.
+    const gate = await painterCapacityGate(nextPainterId);
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: 409 });
     }
 
     const prevPainterId = order.painterId;
@@ -210,8 +251,17 @@ export async function POST(
       .findFirst({ where: eq(painters.id, prevPainterId), columns: { companyName: true } })
       .catch(() => null);
 
+    // Üstüne yazılan koli kaydı KAYBOLMAZ: eski sevkiyat da bu nota geçer.
+    // "Koliyi açıkça devret" kuralının yazılı yarısı budur — kapı yalnız yeni
+    // numarayı ZORUNLU kılar, notu da hangi kutunun nereden geldiğini yazar.
+    const parcelClause = parcelOnTheWay
+      ? ` Önceki sevkiyat: ${order.painterHandoffCarrier ?? "-"} / ` +
+        `${order.painterHandoffTrackingNumber ?? "-"}` +
+        `${order.receivedByPainterAt ? " (önceki boyacı teslim almıştı)" : ""} → ` +
+        `yeni sevkiyat: ${parsed.data.carrier ?? "-"} / ${newTracking}.`
+      : "";
     const note = formatAdminNoteLine(
-      `[BOYACI DEĞİŞİMİ] Admin ${adminEmail}: ${prevPainter?.companyName ?? prevPainterId} (${prevPainterStatus}) → ${nextPainter.companyName}. Üretici ve baskı hakedişi korundu. Sebep: ${reason}`
+      `[BOYACI DEĞİŞİMİ] Admin ${adminEmail}: ${prevPainter?.companyName ?? prevPainterId} (${prevPainterStatus}) → ${nextPainter.companyName}. Üretici ve baskı hakedişi korundu.${parcelClause} Sebep: ${reason}`
     );
 
     const now = new Date();
@@ -226,8 +276,18 @@ export async function POST(
         // sıfırlanır, yoksa yeni boyacı "teslim alınmış" bir işe devam ederdi.
         receivedByPainterAt: null,
         paintedAt: null,
-        painterHandoffCarrier: parsed.data.carrier ?? null,
-        painterHandoffTrackingNumber: parsed.data.trackingNumber || null,
+        // HAYATTA KALAN KARGO KAYDININ ÜSTÜNE `null` YAZILMAZ: yeni sevkiyat
+        // bildirildiyse yazılır, bildirilmediyse (koli de yolda değilse)
+        // alanlara hiç dokunulmaz. Eski davranış, takip numarası girilmeyen her
+        // değişimde bu iki alanı siliyordu.
+        ...(newTracking
+          ? {
+              painterHandoffCarrier: parsed.data.carrier ?? null,
+              painterHandoffTrackingNumber: newTracking,
+            }
+          : parsed.data.carrier
+            ? { painterHandoffCarrier: parsed.data.carrier }
+            : {}),
         // Eski boyacının QC fotoğrafları yenisine görünmesin.
         painterQcRound: sql`${orders.painterQcRound} + 1`,
         ...(blocklistPainter
@@ -297,6 +357,23 @@ export async function POST(
       })
       .catch((e) => console.error("swap-painter: adminActions insert failed", e));
 
+    // DEĞİŞİM DE BİR YERLEŞTİRMEDİR ve kaydı aynı ortak kapıdan yazılır.
+    //
+    // Eskiden bu yol yalnız eylem günlüğüne yazıyordu: sipariş yeni bir
+    // boyacıya geçiyor, QC turu artıyor, devir damgaları sıfırlanıyor ama
+    // "bu iş neden bu boyacıya gitti" dökümünde bu karar hiç görünmüyordu.
+    //
+    // Dışlananlar: siparişi daha önce reddedenler + İŞİ ELİNDEN ALINAN boyacı.
+    // Kara listeye alınmasa bile o boyacı bu kararın dışındadır; listede
+    // görünmesi "neden yine o seçilmedi" sorusunu cevapsız bırakırdı.
+    const evaluation = await recordPainterPlacementDecision({
+      orderId: id,
+      trigger: "admin_swap",
+      painterId: nextPainterId,
+      excludedPainterIds: Array.from(new Set([...declined, prevPainterId])),
+      doneTr: "Boyacı değiştirildi",
+    });
+
     // Bildirimler: her biri izole — sipariş çoktan değişti, bir e-posta hatası
     // bunu admin'e "hiçbir şey olmadı" gibi göstermemeli.
     await notifyPainter({
@@ -358,6 +435,9 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+      // Gerekçe kaydı yazılamadıysa admin bunu ekranda okur; ekran alanı
+      // düşürse bile aynı cümle siparişin admin notuna yazıldı.
+      ...(evaluation.warningTr ? { warning: evaluation.warningTr } : {}),
       prevPainter: prevPainter?.companyName ?? prevPainterId,
       prevPainterStatus,
       newPainter: nextPainter.companyName,

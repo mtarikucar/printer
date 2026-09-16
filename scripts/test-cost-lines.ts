@@ -38,6 +38,10 @@ import {
   type PayoutClaimOps,
 } from "../src/lib/services/payout-claim";
 import { REFUNDED_PAYMENT_STATUS } from "../src/lib/config/order-status-policy";
+// YALNIZ TİP: `import type` derlemede silinir, yani payouts.ts (ve onunla gelen
+// pg havuzu) bu dosyayı DB'siz koşarken hâlâ import edilmez. Statü birliği
+// şemadan türer; testin kendi kopyasını yazması tam da yasak olan şeydir.
+import type { EarningRowStatus } from "../src/lib/services/payouts";
 
 let passed = 0;
 const cases: Array<[string, () => void | Promise<void>]> = [];
@@ -990,6 +994,410 @@ test("damga yüklemi: açık satır = bekleyen VE partisiz", () => {
   assert.match(q.sql, /"manufacturer_earnings"\."payout_id" is null/);
   assert.match(q.sql, /"manufacturer_earnings"\."status" = \$\d/);
   assert.deepEqual(q.params, [OPEN_EARNING_STATUS]);
+});
+
+// ─── RET ve YENİDEN DEVİRDE ÜRETİCİNİN BASKI PAYI (Faz 4) ──────────────────
+//
+// SAHİBİN KARARI: boyacı işi reddettiğinde üreticinin baskı hakedişi DURUR.
+// Baskıyı yapmış, QC'den geçmiş, hiçbir hatası olmayan üreticinin parası
+// boyacının kararıyla silinemez. Bu kararın bir yan etkisi var ve para deliği
+// tam oradaydı: hakediş satırı sipariş üzerinde TEKİLDİR, oysa retten sonra
+// siparişin gidebileceği iki sonun tutarları FARKLIDIR:
+//
+//   • iş sıradaki boyacıya gider → üretici payı = ÜRETİM kalemi (değişmez),
+//   • ret hakkı tükenince (DÖRDÜNCÜ ret; config/flags.ts ·
+//     PAINTER_MAX_DECLINES) iş admin kuyruğuna düşer ve "kendim boyarım"
+//     üreticisi
+//     siparişi kendi boyayıp kargolar → üretici payı = ÜRETİM + BOYAMA.
+//
+// İkinci dalda tahakkuk ikinci kez, DAHA BÜYÜK bir tutarla çağrılır. Eski kural
+// (`onConflictDoNothing`) o çağrıyı sessizce yutuyordu: satır küçük tutarda
+// kalıyor, üretici boyama payından mahrum kalıyor ve ortada ne hata, ne günlük,
+// ne de admin'in görebileceği tek bir iz oluyordu. Aşağısı iki dalın da
+// tutarını ÇİVİLER.
+
+/**
+ * payouts.ts'i DB'siz sınamak için dinamik olarak yükler.
+ *
+ * NEDEN GÜVENLİ: o zincirdeki hiçbir bağlantı import anında kurulmaz — pg
+ * havuzu ilk sorguda, Redis ilk çağrıda açılır. Kararın KENDİSİ buradan okunur;
+ * testin kendi kopyasını yazması tam da bu dosyanın yasakladığı şey olurdu.
+ *
+ * Üst seviye await yok (tsx bu dosyayı CJS'e çeviriyor), bu yüzden yükleme test
+ * gövdesinin içinde ve yalnız bir kez yapılır.
+ */
+type PayoutsModule = typeof import("../src/lib/services/payouts");
+let payoutsCache: PayoutsModule | null = null;
+async function payoutsModule(): Promise<PayoutsModule> {
+  payoutsCache ??= await import("../src/lib/services/payouts");
+  return payoutsCache;
+}
+
+/** Siparişin TEK hakediş satırı — UNIQUE(order_id) kısıtının bellekteki eşi. */
+interface LedgerRow {
+  manufacturerId: string;
+  grossKurus: number;
+  netKurus: number;
+  /** Satır bir ödeme partisine girdi ya da ödendi mi (artık düzeltilemez). */
+  settled: boolean;
+  /**
+   * Satırın statüsü. "reversed" satır DOĞRU tutarı taşısa bile ödenmez —
+   * claimableEarningWhere onu hiçbir partiye almaz — o yüzden karar tutardan
+   * ÖNCE buna bakmak zorundadır.
+   */
+  status: EarningRowStatus;
+}
+
+/**
+ * Tek bir tahakkuk çağrısını satıra uygular.
+ *
+ * Karar GERÇEK koddan (reconcileAccrual), tutar gerçek türetimden
+ * (manufacturerBaseKurus + computeEarning) gelir; burada ikinci bir para kuralı
+ * YOKTUR. `settled` satırın düzeltilemezliği, sunucudaki `openEarningWhere`
+ * yükleminin ("bekleyen VE partisiz") bellekteki karşılığıdır.
+ */
+async function applyAccrual(
+  row: LedgerRow | null,
+  incoming: { manufacturerId: string; grossKurus: number }
+): Promise<{ row: LedgerRow; outcome: string }> {
+  const { reconcileAccrual } = await payoutsModule();
+  const e = computeEarning(incoming.grossKurus, PLATFORM_COMMISSION_RATE_BPS);
+  if (!row) {
+    return {
+      row: {
+        manufacturerId: incoming.manufacturerId,
+        grossKurus: e.grossKurus,
+        netKurus: e.netKurus,
+        settled: false,
+        status: "pending",
+      },
+      outcome: "accrued",
+    };
+  }
+  const decision = reconcileAccrual({
+    existing: row,
+    incoming: { manufacturerId: incoming.manufacturerId, grossKurus: e.grossKurus },
+  });
+  if (decision.action === "keep") return { row, outcome: "already_accrued" };
+  if (decision.action === "refuse") {
+    return { row, outcome: `mismatch_refused:${decision.reason}` };
+  }
+  // Düzeltme YALNIZ açık satırda; kapalı satırda sunucu yüklemi 0 satır döner.
+  if (row.settled) return { row, outcome: "mismatch_refused:settled" };
+  return {
+    row: { ...row, grossKurus: e.grossKurus, netKurus: e.netKurus },
+    outcome: "corrected",
+  };
+}
+
+/** Faz 4 senaryolarının siparişi: ₺3.500 = ₺2.400 üretim + ₺1.100 boyama. */
+const PAINTING_ORDER = {
+  amountKurus: 350000,
+  productionBaseKurus: 240000,
+  paintingPriceKurus: 110000,
+};
+
+test("devreden üretici: ret ve yeniden devir baskı payını DEĞİŞTİRMEZ", async () => {
+  const mfg = "uretici-1";
+
+  // 1) Devir: taban ÜRETİM kalemidir — boyama payı boyacınındır.
+  let s = await applyAccrual(null, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: "boyaci-1",
+      paintsInHouse: false,
+    }),
+  });
+  assert.equal(s.outcome, "accrued");
+  assert.equal(s.row.grossKurus, 240000);
+
+  // 2) Boyacı reddetti: para yoluna HİÇ dokunulmaz (ne çevirme ne silme) —
+  //    satır olduğu gibi durur. Ret rotasının kaynağı da aşağıda çivileniyor.
+
+  // 3) Sıradaki boyacıya yeniden devir: aynı taban, İKİNCİ KEZ ÖDEME YOK.
+  s = await applyAccrual(s.row, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: "boyaci-2",
+      paintsInHouse: false,
+    }),
+  });
+  assert.equal(s.outcome, "already_accrued");
+  assert.equal(s.row.grossKurus, 240000);
+  assert.equal(s.row.netKurus, computeEarning(240000, PLATFORM_COMMISSION_RATE_BPS).netKurus);
+  assert.equal(s.row.netKurus, 144000);
+});
+
+test("kendim boyarım üreticisi: ret hakkı tükenince kendi kargolayınca EKSİK ödenmez", async () => {
+  const mfg = "uretici-2";
+
+  // 1) Admin işi bir boyacıya devretti: üretici "kendim boyarım" olsa bile iş
+  //    fiilen boyacıdadır, yani taban yalnız ÜRETİM kalemidir.
+  let s = await applyAccrual(null, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: "boyaci-1",
+      paintsInHouse: true,
+    }),
+  });
+  assert.equal(s.outcome, "accrued");
+  assert.equal(s.row.grossKurus, 240000, "devirde boyama payı üreticiye yazılamaz");
+
+  // 2) Üç boyacı da reddetti → iş admin kuyruğunda, siparişte boyacı yok.
+  //    Hakediş satırı (sahibin kararı) 240000 kuruşta duruyor.
+
+  // 3) Üretici siparişi KENDİ boyayıp kargoladı → taban ÜRETİM + BOYAMA.
+  s = await applyAccrual(s.row, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: null,
+      paintsInHouse: true,
+    }),
+  });
+  assert.equal(s.outcome, "corrected");
+  assert.equal(s.row.grossKurus, 350000);
+  assert.equal(s.row.netKurus, 210000);
+
+  // ÖLÇÜLEN DELİĞİN BÜYÜKLÜĞÜ: düzeltme olmasaydı satır 240000'de kalır ve
+  // üretici tam olarak boyama kalemi kadar eksik ödenirdi.
+  assert.equal(350000 - 240000, PAINTING_ORDER.paintingPriceKurus);
+  assert.equal(
+    210000 - 144000,
+    computeEarning(PAINTING_ORDER.paintingPriceKurus, PLATFORM_COMMISSION_RATE_BPS).netKurus
+  );
+});
+
+test("partiye girmiş/ödenmiş satır sessizce düzeltilmez — REDDEDİLİR", async () => {
+  const mfg = "uretici-3";
+  const first = await applyAccrual(null, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: "boyaci-1",
+      paintsInHouse: true,
+    }),
+  });
+  // Satır ödeme partisine girdi: parti toplamı bu net'ten yazıldı.
+  const settled: LedgerRow = { ...first.row, settled: true };
+
+  const s = await applyAccrual(settled, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: null,
+      paintsInHouse: true,
+    }),
+  });
+  assert.equal(s.outcome, "mismatch_refused:settled");
+  // Tutar DEĞİŞMEZ: parti, arkasındaki hakedişlerle çelişirse "Ödendi işaretle"
+  // onu kalıcı olarak reddeder — bir deliği kapatırken ödemenin tamamı kilitlenir.
+  assert.equal(s.row.grossKurus, 240000);
+});
+
+test("satır BAŞKA bir üreticiye aitse tutar düzeltilmez", async () => {
+  const s = await applyAccrual(
+    {
+      manufacturerId: "uretici-A",
+      grossKurus: 240000,
+      netKurus: 144000,
+      settled: false,
+      status: "pending",
+    },
+    { manufacturerId: "uretici-B", grossKurus: 350000 }
+  );
+  assert.equal(s.outcome, "mismatch_refused:other_manufacturer");
+  assert.equal(s.row.manufacturerId, "uretici-A");
+  assert.equal(s.row.grossKurus, 240000);
+});
+
+// ─── GERİ ÇEVRİLMİŞ SATIR: "aynı tutar" her zaman "para yerinde" demek değil ─
+//
+// ÖLÇÜLEN HÂL: admin kargoyu geri alır (ship-revert) — hakediş satırı SİLİNMEZ,
+// "reversed" olur — ve sipariş yeniden kargolanınca tahakkuk aynı tutarla ikinci
+// kez çağrılır. Statüye bakmayan karar buna "keep" diyordu; çağıran
+// "already_accrued" cevabını alıyor, oysa `reversed` satır hiçbir ödeme
+// partisine giremiyordu: üretici o siparişten HİÇ ödenmeyecekti ve ortada tek
+// bir iz yoktu.
+
+test("geri çevrilmiş satır, AYNI tutarda bile 'zaten tahakkuk etti' DEMEZ", async () => {
+  const mfg = "uretici-5";
+  const base = manufacturerBaseKurus({
+    ...PAINTING_ORDER,
+    painterId: "boyaci-1",
+    paintsInHouse: false,
+  });
+  const first = await applyAccrual(null, { manufacturerId: mfg, grossKurus: base });
+  assert.equal(first.outcome, "accrued");
+
+  // Admin kargoyu geri aldı: satır silinmez, "geri çevrildi" olur.
+  const reversed: LedgerRow = { ...first.row, status: "reversed" };
+
+  // Sipariş yeniden kargolandı → AYNI taban, ikinci tahakkuk.
+  const s = await applyAccrual(reversed, { manufacturerId: mfg, grossKurus: base });
+  assert.notEqual(s.outcome, "already_accrued");
+  assert.equal(s.outcome, "mismatch_refused:reversed");
+  // Satır diriltilmez: çevirme bir insanın/iadenin kararıdır ve net'i bekleyen
+  // partiden çoktan düşülmüştür.
+  assert.equal(s.row.status, "reversed");
+  assert.equal(s.row.grossKurus, 240000);
+});
+
+test("geri çevrilmiş satır FARKLI tutarda 'partiye girmiş' DEMEZ", async () => {
+  const mfg = "uretici-6";
+  const first = await applyAccrual(null, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: "boyaci-1",
+      paintsInHouse: true,
+    }),
+  });
+  const reversed: LedgerRow = { ...first.row, status: "reversed" };
+
+  // Üretici siparişi kendi boyayıp yeniden kargoladı → taban ÜRETİM + BOYAMA,
+  // yani satırdakinden FARKLI bir tutar.
+  const s = await applyAccrual(reversed, {
+    manufacturerId: mfg,
+    grossKurus: manufacturerBaseKurus({
+      ...PAINTING_ORDER,
+      painterId: null,
+      paintsInHouse: true,
+    }),
+  });
+  assert.equal(s.outcome, "mismatch_refused:reversed");
+  // Satır PARTİSİZ ve ÖDENMEMİŞTİ: "settled" demek, admin'i var olmayan bir
+  // partiyi aramaya yollardı.
+  assert.notEqual(s.outcome, "mismatch_refused:settled");
+  assert.equal(s.row.grossKurus, 240000);
+  assert.equal(s.row.settled, false);
+});
+
+test("red mesajı satırın DURUMUNU söyler (metin, hâlle uyuşur)", async () => {
+  const { accrualMismatchNote } = await payoutsModule();
+  const arg = { manufacturerId: "uretici-7", wantedGrossKurus: 350000 };
+
+  const reversed = accrualMismatchNote({ ...arg, foundGrossKurus: 240000, reason: "reversed" });
+  assert.match(reversed, /geri çevrildi/);
+  assert.match(reversed, /240000/);
+  assert.match(reversed, /350000/);
+  // Eski metnin ta kendisi: partisiz bir satır için "partiye girmiş" demek.
+  assert.ok(!reversed.includes("ödeme partisine girmiş"), reversed);
+
+  const settled = accrualMismatchNote({ ...arg, foundGrossKurus: 240000, reason: "settled" });
+  assert.match(settled, /ödeme partisine girmiş ya da ödenmiş/);
+  assert.ok(!settled.includes("geri çevrildi"), settled);
+
+  const vanished = accrualMismatchNote({ ...arg, foundGrossKurus: null, reason: "vanished" });
+  // Olmayan satıra tutar uydurulmaz (eski metin "satır 0 kuruş" yazıyordu).
+  assert.ok(!vanished.includes("satır 0 kuruş"), vanished);
+  assert.ok(!vanished.includes("null"), vanished);
+  assert.match(vanished, /okunabildi|okunamadı/);
+
+  const other = accrualMismatchNote({
+    ...arg,
+    foundGrossKurus: 240000,
+    reason: "other_manufacturer",
+  });
+  assert.match(other, /BAŞKA bir üreticiye ait/);
+  assert.ok(!other.includes("geri çevrildi"), other);
+});
+
+/**
+ * Tahakkuk yolunun kusurları. SAF: gövde metni girer, sorun listesi çıkar —
+ * gerçek kaynak da sentetik (düzeltme öncesi) gövde de AYNI koddan geçer.
+ */
+function accrualDefects(body: string): string[] {
+  const out: string[] = [];
+  if (!body.includes("reconcileAccrual(")) out.push("çakışan satırı hiç incelemiyor");
+  if (!/\.for\(\s*"update"/.test(body)) out.push("çakışan satırı KİLİTSİZ okuyor");
+  if (!/status:\s*manufacturerEarnings\.status/.test(body)) {
+    out.push("çakışan satırın STATÜSÜNÜ okumuyor");
+  }
+  if (!/\.update\(\s*manufacturerEarnings\s*\)/.test(body)) {
+    out.push("yanlış tutarı düzeltmiyor");
+  }
+  if (!body.includes("openEarningWhere(")) out.push("düzeltmeyi AÇIK satırla sınırlamıyor");
+  if (!/eq\(\s*manufacturerEarnings\.manufacturerId\s*,/.test(body)) {
+    out.push("düzeltmeyi satırın SAHİBİYLE sınırlamıyor");
+  }
+  if (!body.includes("mismatch_refused")) out.push("düzeltemediğini söylemiyor");
+  // İz, kararı veren İŞLEMİN İÇİNDE yazılmalı: dışarıda, başka bir bağlantıda
+  // ve hatası yutularak yazılan not hiç yazılmayabilir — red o zaman kalıcı
+  // hiçbir kayıt bırakmadan biter.
+  if (!/writeMismatchNote\(\s*\{?\s*tx\b/.test(body)) {
+    out.push("reddin izini İŞLEMİN DIŞINDA bırakıyor");
+  }
+  return out;
+}
+
+test("tahakkuk: yanlış tutarlı satır ya DÜZELTİLİR ya da gürültüyle reddedilir", () => {
+  assert.deepEqual(
+    accrualDefects(
+      functionBody(
+        readSite("src/lib/services/payouts.ts"),
+        "export async function accrueEarning("
+      )
+    ),
+    []
+  );
+});
+
+test("pin ISIRIR: çakışmayı YUTAN eski tahakkuk gövdesi testi DÜŞÜRÜR", () => {
+  // Düzeltmeden önceki gövdenin ta kendisi: çakışma sessizce yutuluyor ve
+  // "already_accrued" deniyordu — satır küçük tutarda kalsa bile.
+  const yutan = [
+    "const e = computeEarning(grossKurus, rateBps);",
+    "const inserted = await tx",
+    "  .insert(manufacturerEarnings)",
+    "  .values({ orderId, manufacturerId, grossKurus: e.grossKurus })",
+    "  .onConflictDoNothing({ target: manufacturerEarnings.orderId })",
+    "  .returning({ id: manufacturerEarnings.id });",
+    'return inserted.length > 0 ? "accrued" : "already_accrued";',
+  ].join("\n");
+  assert.deepEqual(accrualDefects(yutan), [
+    "çakışan satırı hiç incelemiyor",
+    "çakışan satırı KİLİTSİZ okuyor",
+    "çakışan satırın STATÜSÜNÜ okumuyor",
+    "yanlış tutarı düzeltmiyor",
+    "düzeltmeyi AÇIK satırla sınırlamıyor",
+    "düzeltmeyi satırın SAHİBİYLE sınırlamıyor",
+    "düzeltemediğini söylemiyor",
+    "reddin izini İŞLEMİN DIŞINDA bırakıyor",
+  ]);
+
+  // Düzeltilmiş gövde temiz: tarama masum kodu düşürmüyor.
+  const duzeltilmis = [
+    'const [existing] = await tx.select({ manufacturerId: manufacturerEarnings.manufacturerId, grossKurus: manufacturerEarnings.grossKurus, status: manufacturerEarnings.status }).from(manufacturerEarnings).where(eq(manufacturerEarnings.orderId, orderId)).for("update");',
+    "const decision = reconcileAccrual({ existing, incoming: { manufacturerId, grossKurus: e.grossKurus } });",
+    "const fixed = await tx.update(manufacturerEarnings).set({ grossKurus: e.grossKurus }).where(and(eq(manufacturerEarnings.orderId, orderId), eq(manufacturerEarnings.manufacturerId, manufacturerId), openEarningWhere(manufacturerEarnings))).returning({ id: manufacturerEarnings.id });",
+    'if (fixed.length === 0) { await writeMismatchNote({ tx, orderId, reason: "settled" }); return { outcome: "mismatch_refused" }; }',
+  ].join("\n");
+  assert.deepEqual(accrualDefects(duzeltilmis), []);
+});
+
+test("boyacı reddi üreticinin baskı hakedişine DOKUNMAZ", () => {
+  // Sahibin kararı KODA bakılarak sınanır: kaldırılan çağrıyı anlatan yorum,
+  // çağrının kendisi sayılmamalı.
+  const code = readSite("src/app/api/painter/orders/[id]/decline/route.ts")
+    .split("\n")
+    .filter((l) => !isCommentLine(l))
+    .join("\n");
+  assert.ok(
+    !code.includes("reverseEarning("),
+    "ret, üreticinin baskı hakedişini geri alıyor"
+  );
+  assert.ok(
+    !/delete\(\s*manufacturerEarnings\s*\)/.test(code),
+    "ret, üreticinin hakediş satırını siliyor"
+  );
+  assert.ok(
+    !code.includes("accrueEarning("),
+    "ret, hakediş yazıyor — tutarı belirleyen yer ret değil, devir/kargo adımıdır"
+  );
 });
 
 test("ekran toplamları SQL'den gelir, listelenen sayfadan değil", () => {

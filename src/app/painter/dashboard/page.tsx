@@ -10,12 +10,19 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import {
   claimableEarningWhere,
   inPayoutEarningWhere,
   refundedOpenEarningWhere,
   refundedInPayoutEarningWhere,
 } from "@/lib/services/earning-claimable";
+// Kapasite TEK ölçüden okunur; bu sayfa sunucu bileşeni olduğu için yükleyiciyi
+// doğrudan çağırır (istemci bileşeni çağıramazdı: modül `pg`yi sürükler).
+import {
+  emptyPainterCapacity,
+  loadPainterCapacity,
+} from "@/lib/services/painter-capacity";
 
 // Turkish labels for the per-order painting sub-lifecycle
 // (painterOrderStatusEnum). Hardcoded — the painter realm carries no i18n keys.
@@ -102,20 +109,24 @@ export default async function PainterDashboardPage() {
   }
 
   const pid = session.painterId;
-  const [[assigned], [accepted], [painting], [pending], recent] =
+  const [[assigned], [accepted], [painting], [pending], recent, capacityRow] =
     await Promise.all([
+      // İADE: iade edilmiş sipariş kimsenin işi değildir. Bu üç kutu eskiden
+      // yalnız painter_status'e bakıyordu, tezgâh kutusu ise ortak ölçüden
+      // (painter-capacity.ts) geldiği için iadeyi düşüyordu: aynı ekran iki
+      // farklı iş sayısı gösteriyordu. Sayım kuralı tek olsun diye guard eklendi.
       db
         .select({ c: count() })
         .from(orders)
-        .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "assigned"))),
+        .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "assigned"), notRefundedGuard())),
       db
         .select({ c: count() })
         .from(orders)
-        .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "accepted"))),
+        .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "accepted"), notRefundedGuard())),
       db
         .select({ c: count() })
         .from(orders)
-        .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "painting"))),
+        .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "painting"), notRefundedGuard())),
       // "Bekleyen kazanç" = TALEP EDİLEBİLİR para, kuralı ortak yerden okur
       // (earning-claimable.ts). İki ayrı hata vardı: tahakkuk etmiş her satırı
       // toplamak, boyacının zaten talep ettiği (partilenmiş, transferi bekleyen)
@@ -149,6 +160,13 @@ export default async function PainterDashboardPage() {
           paymentStatus: true,
         },
       }),
+      // TEZGÂH YÜKÜ: kapının ta kendisi (services/painter-capacity.ts). Bu
+      // sayfa yükü kendisi sayıyordu ve üç yönden birden yanlıştı: (a) elle
+      // yazılmış üç durum (assigned/accepted/painting) aktif küme DEĞİL —
+      // boyanmış ve QC'deki işler dışarıda kalıyordu, (b) iade edilmiş iş
+      // düşülmüyordu (iade kimsenin kapasitesini tüketmez), (c) BİRİM yerine
+      // KUTU sayıyordu. Partnere kendi işi hakkında yanlış bir şey söylenemez.
+      loadPainterCapacity(pid),
     ]);
 
   const pendingEarnings = Number(pending?.s ?? 0);
@@ -156,7 +174,10 @@ export default async function PainterDashboardPage() {
   // "Bekleyen kazanç"tan DIŞARIDA kalan para: sebebi rakamın yanında yazsın.
   const refundedUnpayable =
     Number(pending?.refundedOpen ?? 0) + Number(pending?.refundedInPayout ?? 0);
-  const inProgress = (assigned?.c ?? 0) + (accepted?.c ?? 0) + (painting?.c ?? 0);
+  // Boyacı satırı yukarıda okundu, yani null pratikte imkânsız; yine de eksik
+  // satır "bilinmiyor" diye okunmasın diye boş tezgâh satırına düşüyoruz.
+  const capacity =
+    capacityRow ?? emptyPainterCapacity(pid, painter.maxConcurrentOrders);
 
   const stats: Array<{ label: string; value: string | number }> = [
     { label: "Atanan işler", value: assigned?.c ?? 0 },
@@ -213,10 +234,34 @@ export default async function PainterDashboardPage() {
 
       <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
         <p className="text-xs uppercase tracking-wide text-gray-500">
-          Devam eden / Maks kapasite
+          Tezgâh yükü / Maks kapasite
         </p>
         <p className="mt-1 text-2xl font-bold text-gray-900">
-          {inProgress} / {painter.maxConcurrentOrders}
+          {capacity.loadUnits} / {capacity.maxConcurrentOrders}{" "}
+          <span className="text-base font-medium text-gray-500">birim</span>
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          {capacity.activeJobs} aktif iş · bir iş 1 birim sayılır, her 20 adet
+          için 1 birim daha eklenir (60 adetlik tek iş = 4 birim). İade edilen
+          siparişler bu yükü doldurmaz.
+        </p>
+        {/* Cümle, uçların uyguladığı boolean'dan gelir: eşik burada YENİDEN
+            hesaplanmaz. "İş kabulü kapalı" ayrı bir gerçektir ve kapasiteyle
+            karıştırılmaz — ikisi de doğru söylenmeli. */}
+        <p
+          className={`mt-1 text-xs font-medium ${
+            !painter.acceptingOrders
+              ? "text-gray-600"
+              : capacity.hasRoom
+                ? "text-emerald-700"
+                : "text-amber-700"
+          }`}
+        >
+          {!painter.acceptingOrders
+            ? "Yeni iş kabulünü kapattınız: kapasiteniz uygun olsa da iş düşmez."
+            : capacity.hasRoom
+              ? "Yeni boyama işi düşebilir."
+              : "Kapasiteniz dolu: yük limitin altına inene kadar yeni iş düşmez."}
         </p>
       </div>
 

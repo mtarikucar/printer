@@ -27,6 +27,11 @@ export const FLAG_KEYS = [
   "auto_assign_whatsapp_ai",
   "auto_assign_manual",
   "auto_assign_cart_platform",
+  // Faz 4 — otomatik BOYACI ataması. Üretici anahtarlarının aksine TEK anahtar,
+  // çünkü boyacı seçimi sipariş türüne göre dallanmaz: üretici QC'sinden geçen
+  // ve boyama kalemi olan her sipariş aynı kapıdan geçer. Türe göre bölmek,
+  // hiçbir zaman kullanılmayacak beş ayrı düğme demek olurdu.
+  "auto_assign_painter",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -51,6 +56,7 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   auto_assign_whatsapp_ai: true,
   auto_assign_manual: true,
   auto_assign_cart_platform: true,
+  auto_assign_painter: true,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -64,6 +70,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   auto_assign_whatsapp_ai: "Otomatik atama — WhatsApp yapay zekâ siparişleri",
   auto_assign_manual: "Otomatik atama — elle yazılan siparişler",
   auto_assign_cart_platform: "Otomatik atama — platform kataloğu / sepet siparişleri",
+  auto_assign_painter: "Otomatik boyacı ataması (üretici QC onayında)",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -94,6 +101,10 @@ export const AUTO_ASSIGN_FLAG_KEYS = [
   "auto_assign_whatsapp_ai",
   "auto_assign_manual",
   "auto_assign_cart_platform",
+  // Boyacı ataması da bir YÖNLENDİRMEDİR, harcama değil: kill switch onu da
+  // durdurmamalı. Acil durumda boyacı atamasının durması, üretici QC'sinden
+  // geçmiş işlerin kimsenin tezgâhına düşmeden beklemesi demek olurdu.
+  "auto_assign_painter",
 ] as const satisfies readonly FlagKey[];
 
 export function isAiSpendFlag(key: FlagKey): boolean {
@@ -308,4 +319,229 @@ export function autoAssignPlacementPlan(o: {
       : { kind: "seller", manufacturerId: o.sellerManufacturerId };
   }
   return { kind: "rank", excluded };
+}
+
+// ─── Otomatik BOYACI ataması: kapı ve ret üst sınırı (Faz 4) ────────────────
+//
+// Üretici ikizinin yanında durur ve aynı sebeple SAF tutulur: kural rotada
+// (admin QC onayı), boyacı ret yolunda, SLA süpürmesinde ve testte AYNI cümleyi
+// söylemek zorunda; hiçbiri diğerinin çalışma ortamını paylaşmıyor. DB'ye bağlı
+// olsaydı veritabanı olmadan sınanamazdı.
+
+/**
+ * Otomatik boyacı atamasının yapılmama sebebi. KAPALI KÜME — P4-C2 sözleşmesi.
+ *
+ * `not_needed` bilerek iki hâli birden taşır: siparişte boyama kalemi yok, ya da
+ * baskı henüz üretici QC'sinden geçmedi. İkisinde de "şu anda devredilecek bir
+ * iş yok" doğrudur ve sözleşmenin kümesi genişletilemez.
+ */
+export type PainterAssignSkip =
+  | "flag_off"
+  | "not_needed"
+  | "paints_in_house"
+  | "already_assigned"
+  | "refunded"
+  | "no_candidate";
+
+/** Otomatik boyacı atamasının okuduğu alanlar (DB'ye bağlı değil). */
+export interface PainterAssignOrderShape {
+  paymentStatus: string | null;
+  needsPainting: boolean;
+  /** Üreticinin sipariş üstündeki alt durumu; devir yalnız `qc_approved`da açılır. */
+  manufacturerStatus: string | null;
+  painterId: string | null;
+  painterStatus: string | null;
+  /** Siparişin üreticisi boyamayı KENDİ atölyesinde yapıyor mu. */
+  manufacturerPaintsInHouse: boolean;
+}
+
+/**
+ * Sipariş satırından karar verilebilen kapı. Aday sıralaması BURADA YOKTUR
+ * (DB ister): çağıran önce bunu çalıştırır, `null` dönerse sıralamaya gider —
+ * böylece elenecek bir sipariş için boşuna sorgu atılmaz.
+ *
+ * SIRA KURALIN KENDİSİDİR, çünkü admin'e ve kayda yazılan sebep bu sıradan
+ * çıkar — ve sebep YANLIŞSA gerçek arıza gürültüye gömülür. Ölçülen kusur tam
+ * buydu: anahtar EN BAŞTA sorulduğu için, boyacı hiç İSTEMEYEN bir siparişin
+ * (needs_painting=false) QC onayı bile admin'e "otomatik boyacı atama anahtarı
+ * kapalı… elle boyacı atayın" alarmı yazıyordu. Boyamasız her sipariş için
+ * yanlış alarm demekti bu; gerçek arıza da o gürültünün altında kalırdı.
+ *
+ * Bu yüzden önce "bu sipariş zaten bir boyacı İSTEMİYOR" soruları sorulur
+ * (iade → boyama yok → üretici kendi boyuyor → zaten bir boyacıda → baskı
+ * henüz hazır değil), anahtar EN SON gelir. Böylece `flag_off` yalnız gerçekten
+ * boyacıya gidecek bir sipariş durdurulduğunda yazılır — ve orada alarm
+ * DOĞRUDUR: baskı üreticide öksüz bekliyordur (painterUnplacedNeedsAdmin onu
+ * bilerek insana çıkarır).
+ */
+export function painterAssignRowGate(
+  o: PainterAssignOrderShape,
+  flagEnabled: boolean
+): Exclude<PainterAssignSkip, "no_candidate"> | null {
+  // İade kararı (refund-end-state): iade edilmiş sipariş durumunu KORUR, yani
+  // üreticisi QC'den geçmiş bir sipariş tam olarak devredilebilir görünür.
+  // Buradaki kontrol olmadan otomatik atama onu bir boyacının tezgâhına
+  // koyardı; SQL tarafındaki notRefundedGuard() ikinci savunma hattıdır.
+  if (o.paymentStatus === "refunded") return "refunded";
+  if (!o.needsPainting) return "not_needed";
+  // Üretici kendi boyuyorsa boyacı ataması YAPILMAZ (sahibin kararı). Boyama
+  // payı da onun hakedişinde kalır (earning-base.ts · manufacturerBaseKurus).
+  if (o.manufacturerPaintsInHouse) return "paints_in_house";
+  if (o.painterId) return "already_assigned";
+  if (o.painterStatus && o.painterStatus !== "unassigned") return "already_assigned";
+  // Boyacıya giden şey FİZİKSEL baskıdır: QC onayından önce ortada devredilecek
+  // bir parça yoktur.
+  if (o.manufacturerStatus !== "qc_approved") return "not_needed";
+  // ANAHTAR EN SON: buraya ulaşan sipariş, anahtar açık olsaydı GERÇEKTEN bir
+  // boyacıya gidecek olandır. "Kapalı" cevabı ancak burada doğrudur.
+  if (!flagEnabled) return "flag_off";
+  return null;
+}
+
+/**
+ * Bir ret (ya da 24 saatlik sessizlik) sonrası sipariş EN FAZLA kaç kez yeniden
+ * bir boyacıya yerleştirilir.
+ *
+ * SAHİBİN CÜMLESİ ÖLÇÜDÜR: "bir ret üç kez yeniden seçer, sonra admin kuyruğuna
+ * gider". Ölçülen davranış bunun bir eksiğiydi — ret #1 ve #2 yeniden
+ * yerleştiriliyor, #3 doğrudan admin kuyruğuna düşüyordu — çünkü sayaç REDLERİ
+ * sayıyor ve İŞLENMEKTE OLAN ret de sayıya dâhil: ilk yerleştirme bir "yeniden
+ * seçim" değildir, ama sayaçta ondan ayrılmıyordu.
+ *
+ * Kural bu yüzden YENİDEN YERLEŞTİRME sayısıyla yazılır; ret üst sınırı ondan
+ * TÜRETİLİR. İki sayı birbirinden bağımsız yazılsaydı, birini değiştiren
+ * diğerini sessizce yalanlardı.
+ *
+ * Cevapsız bırakılan iş de bu sayıya girer — sahibin kararı: ceza yazılmaz ama
+ * deneme sayılır, yoksa cevap vermeyen boyacılar siparişi sonsuza kadar
+ * dolaştırırdı.
+ *
+ * NOT: üretici ikizi (MAX_DECLINES_BEFORE_ADMIN = 3 ret) bir eksik dener; ayrım
+ * bilinçlidir, boyacı tarafının sınırını sahibin yukarıdaki cümlesi belirler.
+ */
+export const PAINTER_MAX_REPLACEMENTS = 3;
+
+/**
+ * Kaçıncı retten sonra artık hiç denenmez. TÜRETİLMİŞTİR: ilk yerleştirme bir
+ * yeniden seçim olmadığı için üç yeniden seçim ancak DÖRDÜNCÜ rette tükenir.
+ */
+export const PAINTER_MAX_DECLINES = PAINTER_MAX_REPLACEMENTS + 1;
+
+/** Ret/cevapsızlık sayısı üst sınıra ulaştı mı (artık admin kuyruğu)? */
+export function painterDeclinesExhausted(declinedCount: number): boolean {
+  return declinedCount >= PAINTER_MAX_DECLINES;
+}
+
+/**
+ * Atlama sebebinin Türkçe karşılığı — CÜMLE İÇİNDE kullanılacak kısa parça
+ * ("Boyacı atanmadı: <parça>.").
+ *
+ * `Record<PainterAssignSkip, string>` olarak yazılır: kümeye yeni bir sebep
+ * eklendiği gün karşılığını yazmayı unutmak DERLEME hatası verir — admin'in
+ * notuna düşen bir "undefined" değil.
+ */
+export const PAINTER_ASSIGN_SKIP_LABELS_TR: Record<PainterAssignSkip, string> = {
+  flag_off: "otomatik boyacı atama anahtarı kapalı",
+  not_needed: "siparişte boyama yok ya da baskı henüz QC'den geçmedi",
+  paints_in_house: "üretici boyamayı kendi yapıyor",
+  already_assigned: "sipariş bu sırada başka bir boyacıya atandı",
+  refunded: "sipariş iade edilmiş",
+  no_candidate: "uygun boyacı kalmadı",
+};
+
+/**
+ * Kapalı kümeye GİRMEYEN sonuçlar.
+ *
+ * `PainterAssignSkip` "kural baktı ve yerleştirmedi" demektir; bu ikisi ise
+ * kuralın hiç çalışamadığı ya da çalışmasının YASAK olduğu hâllerdir:
+ *
+ *  - `unexpected_error`: yerleştirme beklenmeyen bir hatayla durdu. Kapalı
+ *    kümeye sokulamaz, çünkü küme sözleşmedir (P4-C2) ve "arıza" bir atlama
+ *    sebebi değildir; ama CEVAPSIZ da bırakılamaz — ölçülen kusur tam olarak
+ *    buydu: hata yutuluyor, sipariş boyacısız kalıyor ve kimse duymuyordu.
+ *  - `parcel_in_transit`: baskı, işi bırakan boyacıya ÇOKTAN yola çıkmış. Yeni
+ *    bir boyacı yazmak, fiziksel paketi öksüz bırakırdı; kararı admin verir.
+ *
+ * NOT (sahibine): `parcel_in_transit` gerçek bir yerleştirme kuralıdır ve
+ * doğru yeri `PainterAssignSkip`tir. Kümeye eklemek SLA süpürmesindeki
+ * `Record<PainterAssignSkip, string>` sözlüğünü de aynı anda güncellemeyi
+ * gerektirdiği için (başka bir dosyanın sahibi) burada ayrı tutuldu.
+ */
+export type PainterAssignFailure = "unexpected_error" | "parcel_in_transit";
+
+export const PAINTER_ASSIGN_FAILURE_LABELS_TR: Record<PainterAssignFailure, string> = {
+  unexpected_error: "beklenmeyen bir hata nedeniyle yerleştirme yapılamadı",
+  parcel_in_transit:
+    "baskı, işi bırakan boyacıya çoktan gönderilmiş (kargo kaydı var); paket yoldayken iş otomatik devredilmez",
+};
+
+/** Yerleştirmenin sonucu: ya kapalı kümeden bir atlama, ya bir arıza. */
+export type PainterAssignOutcomeReason = PainterAssignSkip | PainterAssignFailure;
+
+/** Sebep kapalı kümeden mi geliyor? (Sözlük TEK kaynaktır; ikinci liste tutulmaz.) */
+export function isPainterAssignSkip(value: unknown): value is PainterAssignSkip {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(PAINTER_ASSIGN_SKIP_LABELS_TR, value)
+  );
+}
+
+/** Her sebebin Türkçesi; sözlükte olmayan bir değer bile boş cümle bırakmaz. */
+export function painterAssignReasonTr(reason: PainterAssignOutcomeReason): string {
+  if (isPainterAssignSkip(reason)) return PAINTER_ASSIGN_SKIP_LABELS_TR[reason];
+  return PAINTER_ASSIGN_FAILURE_LABELS_TR[reason] ?? "sebep bilinmiyor";
+}
+
+/**
+ * Boyacısız kalan siparişi bir İNSANIN görmesi gerekiyor mu?
+ *
+ * Ölçülen kusur: yerleştirme yapılmadığında yalnız `no_candidate` dalı admin'e
+ * not+e-posta yazıyordu. `flag_off` ve `paints_in_house` sessizce dönüyor,
+ * baskı üreticide, sipariş boyacısız ve kimsenin haberi olmadan bekliyordu.
+ *
+ * Cevap BAĞLAMA bağlıdır ve tek ayrım şudur: siparişten AZ ÖNCE bir boyacı
+ * koparıldı mı?
+ *
+ *  - Koparıldıysa (ret / 24 saat sessizlik) ortada sahibi belirsiz kalmış
+ *    FİZİKSEL bir baskı vardır; sebep ne olursa olsun bir insan bakmalıdır.
+ *  - Koparılmadıysa (QC onayı) boyamasız sipariş ya da kendi boyayan üretici
+ *    OLAĞAN akıştır; her QC onayında admin'e e-posta atmak, gerçek arızayı
+ *    gürültüye gömerdi. Burada yalnız "boyacıya gitmesi GEREKEN ama gidemeyen"
+ *    hâller insana çıkar.
+ *
+ * `already_assigned` iki bağlamda da sessizdir: iş ZATEN bir boyacıdadır.
+ */
+export function painterUnplacedNeedsAdmin(
+  reason: PainterAssignOutcomeReason,
+  ctx: { painterDetached: boolean }
+): boolean {
+  if (reason === "already_assigned") return false;
+  if (ctx.painterDetached) return true;
+  return (
+    reason === "flag_off" ||
+    reason === "no_candidate" ||
+    reason === "unexpected_error" ||
+    reason === "parcel_in_transit"
+  );
+}
+
+/** Paketin yolda olup olmadığını söyleyen sipariş alanları. */
+export interface PainterParcelShape {
+  painterHandoffTrackingNumber: string | null;
+  receivedByPainterAt: Date | null;
+}
+
+/**
+ * Baz baskı boyacıya ulaştı ya da ona doğru yola çıktı mı?
+ *
+ * SLA süpürmesinin kuralıyla AYNI cümle (painter-accept-sla.worker.ts ·
+ * `parcelOnTheWay`): iki ölçü ayrışırsa aynı sipariş bir yolda taşınır,
+ * diğerinde taşınmaz.
+ *
+ * Kargo FİRMASI bilerek kanıt sayılmaz: firma panelde paket çıkmadan da
+ * seçilebilir. Takip numarası ise ancak paket kargoya verildiğinde doğar.
+ */
+export function painterParcelOnTheWay(o: PainterParcelShape): boolean {
+  if (o.receivedByPainterAt) return true;
+  return (o.painterHandoffTrackingNumber ?? "").trim().length > 0;
 }

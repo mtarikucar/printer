@@ -399,6 +399,22 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   const [addressCopied, setAddressCopied] = useState(false);
   const [qcPhotoCount, setQcPhotoCount] = useState(qcPhotos.length);
   const [shipCarrier, setShipCarrier] = useState("yurtici");
+  /**
+   * BOYACIYA DEVİR uyarısı — devir OLDU, bir yan adım (karar kaydı) olmadı.
+   *
+   * Uyarı devir kartının DEĞİL, bu sayfanın hâlidir. Ölçülen kusur: kart yalnız
+   * sipariş henüz devredilmemişken çiziliyor (aşağıdaki `painterStatus`
+   * koşulu), devir ucu kendi order-changed olayını yayınlıyor ve
+   * ManufacturerRealtimeShell her sipariş olayında router.refresh() çağırıyor —
+   * tazeleme koşulu yanlışlayıp kartı söküyor, uyarı da onunla gidiyordu (24
+   * denemenin 1'inde okunabildi). Burada tutulan hâl tazelemeden sağ çıkar:
+   * router.refresh() sunucu verisini yeniler, istemci state'ini SIFIRLAMAZ.
+   * Üretici admin notlarını göremez; bu ekran onun TEK kanalı, bu yüzden cümle
+   * ancak üretici kapattığında gider.
+   */
+  const [painterHandoffWarning, setPainterHandoffWarning] = useState<string | null>(
+    null
+  );
 
   // ─── Actions ─────────────────────────────────────────────
   const performAction = async (
@@ -1644,12 +1660,37 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             </div>
           )}
 
+          {/* Devir GEÇERLİ, ama eksik kalan bir yan adım var. Bu blok devir
+              kartının DIŞINDADIR ve bilerek: kart devirden sonra ekrandan
+              kalkar, uyarı ise üretici okuyup kapatana kadar kalmalı. */}
+          {painterHandoffWarning && (
+            <div
+              role="alert"
+              className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+            >
+              <p className="font-semibold">
+                Sipariş boyacıya gönderildi — okumanız gereken bir uyarı var
+              </p>
+              <p className="mt-1">{painterHandoffWarning}</p>
+              <button
+                type="button"
+                onClick={() => setPainterHandoffWarning(null)}
+                className="mt-3 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+              >
+                Okudum, kapat
+              </button>
+            </div>
+          )}
+
           {/* Painting orders: hand off to a painter instead of shipping. */}
           {canShip &&
             !ackPending &&
             order.needsPainting &&
             (!order.painterStatus || order.painterStatus === "unassigned") && (
-              <SendToPainterPanel orderId={order.id} />
+              <SendToPainterPanel
+                orderId={order.id}
+                setWarning={setPainterHandoffWarning}
+              />
             )}
 
           {!refunded &&

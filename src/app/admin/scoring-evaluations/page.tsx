@@ -8,9 +8,12 @@ import {
   manufacturers,
   orderItems,
   orders,
+  painterAssignmentEvaluations,
+  painters,
 } from "@/lib/db/schema";
 import { getCanaryPercent, weightsVersion } from "@/lib/config/manufacturer-scoring";
 import {
+  PAINTER_MAX_DECLINES,
   classifyAutoAssignOrder,
   type AutoAssignOrderKind,
 } from "@/lib/config/flags";
@@ -31,6 +34,18 @@ import {
   type EvaluationSide,
   type OrderEvaluation,
 } from "./evaluation-view";
+import {
+  PAINTER_SCORE_KEYS,
+  PAINTER_SCORE_SHORT_LABELS_TR,
+  PAINTER_TRIGGER_LABELS_TR,
+  buildPainterEvaluation,
+  painterOutcomeReasonLabelTr,
+  painterPlacementDivergence,
+  painterPlacementLabel,
+  painterTriggerLabelTr,
+  type PainterEvaluation,
+} from "./painter-evaluation-view";
+import { painterTriggerIsHuman } from "@/lib/services/painter-evaluation";
 
 /**
  * Sıralama değerlendirmeleri: her KARARDA kararı veren (canlı) sıralamanın
@@ -115,11 +130,32 @@ function EvaluationReadNotice({ areas }: { areas: string[] }) {
 export default async function ScoringEvaluationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ fark?: string; tur?: string; krs?: string }>;
+  searchParams: Promise<{
+    fark?: string;
+    tur?: string;
+    krs?: string;
+    taraf?: string;
+    tetik?: string;
+  }>;
 }) {
-  const { fark, tur, krs } = await searchParams;
+  const { fark, tur, krs, taraf, tetik } = await searchParams;
   const onlyDiffer = fark === "1";
   const kindFilter = isKind(tur) ? tur : null;
+  /**
+   * Hangi KARAR TARAFI gösteriliyor: üretici ataması mı, boyacı ataması mı.
+   *
+   * Tek tabloda birleştirilmedi, çünkü iki karar aynı şey değil: üretici
+   * satırı bir A/B düellosu taşır (canlı + gölge sıralama, "geçiş yapalım mı"
+   * sorusu), boyacı satırı ise tek sıralamanın kararıdır ve asıl sorusu
+   * "bu iş neden bu boyacıya gitti / neden kimseye gitmedi"dir. Aynı tabloya
+   * koymak, iki farklı soruyu tek bir orana karıştırırdı.
+   *
+   * Seçilmeyen tarafın sorguları HİÇ çalışmaz: görünmeyen bir tablo için
+   * veritabanı taramak, sayfayı yavaşlatmaktan başka bir şey yapmazdı.
+   */
+  const painterSide = taraf === "boyaci";
+  const triggerFilter =
+    tetik && tetik in PAINTER_TRIGGER_LABELS_TR ? tetik : null;
 
   // ─── Dört JOIN ve bir EXISTS sorgudan ÇIKARILDI ──────────────────────────
   //
@@ -129,7 +165,9 @@ export default async function ScoringEvaluationsPage({
   // `manufacturers`, `orders` ya da `order_items` okunamadığında bu ekranın
   // TAMAMI 500 verirdi. Her biri artık AYRI ve KORUMALI okunur; biri bilinmiyorsa
   // tablo yine açılır, o sütun "—" olur ve şerit sebebini yazar.
-  const evaluationRead = await displayRead(
+  const evaluationRead = painterSide
+    ? []
+    : await displayRead(
     "değerlendirme kayıtları",
     db
       .select({
@@ -146,7 +184,7 @@ export default async function ScoringEvaluationsPage({
       .from(manufacturerAssignmentEvaluations)
       .orderBy(desc(manufacturerAssignmentEvaluations.createdAt))
       .limit(WINDOW)
-  );
+      );
   const evaluationRowsUnreadable = evaluationRead === null;
   const rows = evaluationRead ?? [];
 
@@ -221,6 +259,99 @@ export default async function ScoringEvaluationsPage({
     (nameRead ?? []).map((m) => [m.id, m.companyName])
   );
 
+  // ─── Boyacı atama kararları ──────────────────────────────────────────────
+  //
+  // Bir karar = BİR satır (üretici tarafındaki gibi çok satırlı değil: gölge
+  // sıralama yok). Satırlar yalnız GERÇEK bir kararda yazılır — bir boyacı
+  // yerleştiğinde ya da hiçbiri uygun olmadığı için iş admin kuyruğuna
+  // düştüğünde. Bu ekranı açmak satır yazmaz.
+  const painterEvaluationRead = painterSide
+    ? await displayRead(
+        "boyacı değerlendirme kayıtları",
+        db
+          .select({
+            id: painterAssignmentEvaluations.id,
+            orderId: painterAssignmentEvaluations.orderId,
+            createdAt: painterAssignmentEvaluations.createdAt,
+            weightsVersion: painterAssignmentEvaluations.weightsVersion,
+            trigger: painterAssignmentEvaluations.trigger,
+            winnerPainterId: painterAssignmentEvaluations.winnerPainterId,
+            placedPainterId: painterAssignmentEvaluations.placedPainterId,
+            excludedPainterIds: painterAssignmentEvaluations.excludedPainterIds,
+            outcomeReason: painterAssignmentEvaluations.outcomeReason,
+            candidates: painterAssignmentEvaluations.candidates,
+          })
+          .from(painterAssignmentEvaluations)
+          .orderBy(desc(painterAssignmentEvaluations.createdAt))
+          .limit(WINDOW)
+      )
+    : [];
+  const painterEvaluationRowsUnreadable = painterEvaluationRead === null;
+  const painterRows = painterEvaluationRead ?? [];
+
+  // Sipariş numarası ve boyacı adları AYRI ve KORUMALI okunur: yalnız gösterim
+  // içindirler, biri okunamadığında tablo yine açılmalı ve o sütun "—" olmalı.
+  const painterOrderIds = [...new Set(painterRows.map((r) => r.orderId))];
+  const painterNameIds = [
+    ...new Set(
+      painterRows
+        .flatMap((r) => [r.winnerPainterId, r.placedPainterId])
+        .filter((x): x is string => !!x)
+    ),
+  ];
+  const [painterOrderMetaRead, painterNameRead] = await Promise.all([
+    painterOrderIds.length
+      ? displayRead(
+          "boyacı kararlarının sipariş künyeleri",
+          db
+            .select({
+              id: orders.id,
+              orderNumber: orders.orderNumber,
+              painterId: orders.painterId,
+            })
+            .from(orders)
+            .where(inArray(orders.id, painterOrderIds))
+        )
+      : [],
+    painterNameIds.length
+      ? displayRead(
+          "boyacı adları",
+          db
+            .select({ id: painters.id, companyName: painters.companyName })
+            .from(painters)
+            .where(inArray(painters.id, painterNameIds))
+        )
+      : [],
+  ]);
+  const painterOrderMetaUnreadable = painterOrderMetaRead === null;
+  const painterNamesUnreadable = painterNameRead === null;
+  const painterOrderMetaById = new Map(
+    (painterOrderMetaRead ?? []).map((o) => [o.id, o])
+  );
+  const painterNames = new Map(
+    (painterNameRead ?? []).map((p) => [p.id, p.companyName])
+  );
+  const painterDecisions: PainterEvaluation[] = painterRows.map((r) =>
+    buildPainterEvaluation(r, (pid) => painterNames.get(pid) ?? null)
+  );
+  const painterFiltered = painterDecisions
+    .filter((d) => (triggerFilter ? d.trigger === triggerFilter : true))
+    .slice(0, SHOWN);
+  const painterPlacedCount = painterDecisions.filter((d) => d.placedPainterId).length;
+  const painterUnplacedCount = painterDecisions.length - painterPlacedCount;
+  // İNSAN YERLEŞTİRMESİ ÜÇ TETİKLEYİCİDİR, bir tanesi değil: admin'in elle
+  // ataması, admin'in boyacı değişimi ve üreticinin kendi devri. Sayaç yalnız
+  // `admin_manual`e bakarken, "elle" yapılmış kararların çoğunu otomatik
+  // kararların arasına karıştırıyordu — üstelik tam da bunu saydığını iddia
+  // eden bir başlığın altında. Ayrım tek kaynaktan gelir (PAINTER_HUMAN_TRIGGERS).
+  const painterManualCount = painterDecisions.filter((d) =>
+    painterTriggerIsHuman(d.trigger)
+  ).length;
+  // Yalnızca pencerede GERÇEKTEN görülen tetikleyiciler; boş süzgeç gösterme.
+  const painterTriggersPresent = [
+    ...new Set(painterDecisions.map((d) => d.trigger).filter((t): t is string => !!t)),
+  ];
+
   // Hangi bölüm BİLİNMİYOR: şerit tablonun üstünde durur.
   const unreadableAreas = [
     evaluationRowsUnreadable &&
@@ -231,6 +362,12 @@ export default async function ScoringEvaluationsPage({
       "Sepet kalemi işareti (sipariş TÜRÜ bu yüzden hiç hesaplanmadı: eksik girdiyle yapılan sınıflandırma, sepet alt siparişini katalog siparişi diye etiketlerdi)",
     manufacturerNamesUnreadable &&
       "Atölye adları (adlar yalnızca kayıttaki damgadan çözülebildiği kadar görünür)",
+    painterEvaluationRowsUnreadable &&
+      "Boyacı atama kayıtlarının kendisi (tablo BOŞ görünüyor; bu \"hiç boyacı kararı verilmemiş\" demek değildir)",
+    painterOrderMetaUnreadable &&
+      "Boyacı kararlarının sipariş künyesi (sipariş numarası ve siparişin bugünkü boyacısı bilinmiyor)",
+    painterNamesUnreadable &&
+      "Boyacı adları (adlar yalnızca kayıttaki damgadan çözülebildiği kadar görünür)",
   ].filter((x): x is string => typeof x === "string");
 
   /** Sipariş künyesi satırdan bir kez okunur; karar birden çok satırdan doğar. */
@@ -359,6 +496,9 @@ export default async function ScoringEvaluationsPage({
     if (nextFark) params.set("fark", nextFark);
     if (nextTur) params.set("tur", nextTur);
     if (nextKrs) params.set("krs", nextKrs);
+    // Taraf korunur: üretici süzgecine basınca boyacı tarafına düşmek (ya da
+    // tersi) admin'i her tıklamada başka bir ekrana atardı.
+    if (painterSide) params.set("taraf", "boyaci");
     const qs = params.toString();
     return qs ? `/admin/scoring-evaluations?${qs}` : "/admin/scoring-evaluations";
   };
@@ -374,18 +514,48 @@ export default async function ScoringEvaluationsPage({
         <h1 className="text-2xl font-bold text-gray-900">
           Sıralama değerlendirmeleri
         </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Her satır <strong>bir atama kararıdır</strong>: kararı veren{" "}
-          <strong>canlı</strong> sıralama bir kez, onunla aynı anda çalışan
-          gölge sıralamaların seçimleri de yan yana durur. Gölge sıralamayı
-          canlıya almadan önce &quot;farklı&quot; kararlara bakılır: iki taraf
-          farklı atölye seçiyorsa, değişiklik işi (ve geliri) başka ortaklara
-          kaydıracak demektir.
-        </p>
+        {painterSide ? (
+          <p className="mt-1 text-sm text-gray-500">
+            Her satır <strong>bir boyacı atama kararıdır</strong>: üretici QC&apos;si
+            onaylandığında (ya da bir ret / 24 saat cevapsızlık sonrası) sıralama
+            çalışır ve iş bir boyacıya verilir. Burada kararın kendi anında
+            yazılmış skorları durur; bugünkü yük ve güvenilirlikle yeniden
+            hesaplanmaz. &quot;Neden ben değil&quot; sorusunun cevabı yalnız bu
+            satırlardadır. Boyacı kimliği İÇ bilgidir: müşteriye görünen hiçbir
+            sayfada yer almaz.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-gray-500">
+            Her satır <strong>bir atama kararıdır</strong>: kararı veren{" "}
+            <strong>canlı</strong> sıralama bir kez, onunla aynı anda çalışan
+            gölge sıralamaların seçimleri de yan yana durur. Gölge sıralamayı
+            canlıya almadan önce &quot;farklı&quot; kararlara bakılır: iki taraf
+            farklı atölye seçiyorsa, değişiklik işi (ve geliri) başka ortaklara
+            kaydıracak demektir.
+          </p>
+        )}
+      </div>
+
+      {/* ─── Hangi karar tarafı ─────────────────────────────────────────── */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          Karar tarafı
+        </span>
+        <FilterChip href="/admin/scoring-evaluations" active={!painterSide}>
+          Üretici ataması
+        </FilterChip>
+        <FilterChip
+          href="/admin/scoring-evaluations?taraf=boyaci"
+          active={painterSide}
+        >
+          Boyacı ataması
+        </FilterChip>
       </div>
 
       <EvaluationReadNotice areas={unreadableAreas} />
 
+      {!painterSide && (
+        <>
       {/* ─── Karşılaştırma seçimi: sayaçlar hangi deneye ait? ─────────────── */}
       {comparisonVersions.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -683,6 +853,298 @@ export default async function ScoringEvaluationsPage({
         atama kararı birden çok kayıt yazar (her karşılaştırma için bir tane);
         bu ekranda hepsi tek satırda toplanır.
       </p>
+        </>
+      )}
+
+      {/* ─── Boyacı atama kararları ──────────────────────────────────────── */}
+      {/* Tablo OKUNAMADIĞINDA ekran tek şey söyler.
+          Eskiden şerit "BOŞ DEĞİL, BİLİNMİYOR" derken hemen altında "Henüz
+          boyacı atama kaydı yok" cümlesi ve dört sıfır sayaç duruyordu: aynı
+          ekran iki zıt şey söylüyor, sıfırlar da "hiç karar verilmemiş" diye
+          okunuyordu. Sipariş sayfası aynı arızada yalnız uyarıyı gösterip kartı
+          gizliyor; bu ekran da artık öyle — sayaç, süzgeç ve boş liste cümlesi
+          hiç render edilmez, çünkü üçü de okunamayan bir tablo hakkında İDDİA. */}
+      {painterSide && painterEvaluationRowsUnreadable && (
+        <div
+          role="alert"
+          className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-8 text-center text-sm text-amber-900"
+        >
+          <p className="font-semibold">
+            Boyacı atama kayıtları şu anda okunamadı (geçici sistem arızası)
+          </p>
+          <p className="mt-1 text-amber-900/80">
+            Bu liste BOŞ DEĞİL, BİLİNMİYOR: kayıtlar silinmedi, kaç karar
+            olduğunu da şu an söyleyemiyoruz. Sayaçlar ve süzgeçler bu yüzden
+            gösterilmiyor. Birkaç dakika sonra sayfayı yenileyin.
+          </p>
+        </div>
+      )}
+
+      {painterSide && !painterEvaluationRowsUnreadable && (
+        <>
+          <div className="mb-2 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Stat label="Penceredeki karar" value={painterDecisions.length} />
+            <Stat label="Boyacı yerleşti" value={painterPlacedCount} tone="green" />
+            <Stat
+              label="Kimse yerleşmedi"
+              value={painterUnplacedCount}
+              tone="amber"
+            />
+            <Stat label="İnsan yerleştirdi" value={painterManualCount} />
+          </div>
+          <p className="mb-6 text-xs text-gray-500">
+            &quot;Kimse yerleşmedi&quot; bir ARIZA değildir ama BİR İŞTİR: o
+            siparişler admin kuyruğunda bekliyor demektir (uygun boyacı yok,
+            ret üst sınırı — {PAINTER_MAX_DECLINES} ret — dolmuş olabilir).
+            Sebebi satırın kendisi söyler. &quot;İnsan yerleştirdi&quot;, boyacıyı
+            sıralayıcının değil bir kişinin seçtiği üç yolu birden sayar:
+            yöneticinin ataması, yöneticinin boyacı değişimi ve üreticinin kendi
+            devri.
+          </p>
+
+          {painterTriggersPresent.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Tetikleyici
+              </span>
+              <FilterChip
+                href="/admin/scoring-evaluations?taraf=boyaci"
+                active={!triggerFilter}
+              >
+                Tümü
+              </FilterChip>
+              {painterTriggersPresent.map((t) => (
+                <FilterChip
+                  key={t}
+                  href={`/admin/scoring-evaluations?taraf=boyaci&tetik=${encodeURIComponent(t)}`}
+                  active={triggerFilter === t}
+                >
+                  {painterTriggerLabelTr(t)}
+                </FilterChip>
+              ))}
+            </div>
+          )}
+
+          {painterFiltered.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 bg-white p-12 text-center">
+              <p className="text-gray-500">
+                {triggerFilter
+                  ? "Bu tetikleyiciyle eşleşen karar yok. Süzgeci kaldırıp tekrar bakın."
+                  : "Henüz boyacı atama kaydı yok. Kayıtlar yalnızca gerçek bir kararda yazılır: QC onayında otomatik yerleştirme, ret sonrası yeniden yerleştirme, 24 saat cevapsızlık, yöneticinin elle ataması, yöneticinin boyacı değişimi ve üreticinin kendi devri. Bu ekranı açmak kayıt yazmaz."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Sipariş</th>
+                    <th className="px-3 py-2 text-left">Tetikleyici</th>
+                    <th className="px-3 py-2 text-left">Sıralamanın birincisi</th>
+                    <th className="px-3 py-2 text-left">İşi alan</th>
+                    <th className="px-3 py-2 text-left">Zaman</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {painterFiltered.map((d) => {
+                    const meta = painterOrderMetaById.get(d.orderId);
+                    const placement = painterPlacementLabel(d);
+                    const divergence = painterPlacementDivergence({
+                      placedPainterId: d.placedPainterId,
+                      winnerPainterId: d.winnerPainterId,
+                      winnerName: d.winnerName,
+                      excludedPainterIds: d.excludedPainterIds,
+                      trigger: d.trigger,
+                    });
+                    const outcome = painterOutcomeReasonLabelTr(d.outcomeReason);
+                    return (
+                      <tr key={d.id} className="align-top hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">
+                          <Link
+                            href={`/admin/orders/${d.orderId}`}
+                            className="text-indigo-600 hover:underline"
+                          >
+                            {meta?.orderNumber ?? d.orderId.slice(0, 8)}
+                          </Link>
+                          <details className="mt-1 font-sans">
+                            <summary className="cursor-pointer text-[11px] text-gray-500 hover:text-gray-800">
+                              Skor dökümü
+                            </summary>
+                            <div className="mt-2 w-[520px] max-w-[70vw]">
+                              <PainterCandidateBreakdown decision={d} />
+                            </div>
+                          </details>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-700">
+                          {painterTriggerLabelTr(d.trigger)}
+                          {d.weightsVersion && (
+                            <code className="ml-1 rounded bg-gray-100 px-1 text-[10px]">
+                              {d.weightsVersion}
+                            </code>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-800">
+                          {d.winnerName ?? (d.winnerPainterId ? "adı çözülemedi" : "—")}
+                          {!d.winnerPainterId && (
+                            <span className="mt-0.5 block text-[10px] text-gray-500">
+                              {/* İnsan yollarında (elle atama, boyacı değişimi,
+                                  üreticinin devri) sıralayıcı HİÇ çalışmaz.
+                                  "Kimseyi seçemedi" demek, çalışmamış bir
+                                  sıralamayı başarısız göstermek olurdu. */}
+                              {painterTriggerIsHuman(d.trigger)
+                                ? "Sıralama çalışmadı: boyacıyı bir insan seçti."
+                                : "Sıralama kimseyi seçemedi."}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-700">
+                          {placement.kind === "named" && <span>{placement.name}</span>}
+                          {placement.kind === "unnamed" && (
+                            <>
+                              <span className="text-gray-500">adı çözülemedi</span>
+                              <span className="mt-0.5 block text-[10px] text-gray-500">
+                                Kayıtta bir boyacı var ama kaydı bulunamadı. Kimlik:{" "}
+                                <code className="rounded bg-gray-100 px-1">
+                                  {placement.shortId}…
+                                </code>
+                              </span>
+                            </>
+                          )}
+                          {placement.kind === "unrecorded" && (
+                            <>
+                              <span className="text-gray-500">yerleşmedi</span>
+                              {outcome && (
+                                <span className="mt-0.5 block text-[10px] text-gray-500">
+                                  {outcome}
+                                </span>
+                              )}
+                            </>
+                          )}
+                          {divergence && (
+                            <span className="mt-0.5 block text-[10px] font-medium text-amber-700">
+                              {divergence.kind === "excluded"
+                                ? "sıralamadan farklı — birinci dışlanmış (daha önce reddetmiş ya da cevapsız kalmış)"
+                                : divergence.kind === "manual"
+                                  ? "sıralamadan farklı — admin elle seçti"
+                                  : "sıralamadan farklı (sebep kayıtta yok)"}
+                            </span>
+                          )}
+                          {/* Siparişin BUGÜNKÜ boyacısı, bu kararın sonucu
+                              olmayabilir: iş karardan sonra devredilmiş olabilir. */}
+                          {d.placedPainterId &&
+                            meta?.painterId &&
+                            d.placedPainterId !== meta.painterId && (
+                              <span className="mt-0.5 block text-[10px] text-gray-500">
+                                sonradan devredildi:{" "}
+                                {painterNames.get(meta.painterId) ?? "—"}
+                              </span>
+                            )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-500">
+                          {formatDateTime(d.createdAt, "tr")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="mt-3 text-xs text-gray-500">
+            Son {WINDOW} kayıt taranır ({painterDecisions.length} karar),
+            süzgeçten geçen ilk {SHOWN} karar gösterilir. Şu an{" "}
+            {painterFiltered.length} karar listeleniyor. Boyacı tarafında bir
+            karar TEK kayıt yazar: gölge sıralama yoktur.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Bir boyacı kararının aday dökümü.
+ *
+ * "Seçilen" ile "işi alan" AYRI işaretlenir: admin elle başka birini seçtiğinde
+ * ikisi ayrışır ve tek bir rozet, kararı yanlış anlatırdı. Uygun olmayan adayın
+ * SEBEBİ de yazılır — sıralamaya girip elenmiş bir boyacıyı sessizce listede
+ * göstermek, "neden bu skorla seçilmedi" sorusunu cevapsız bırakıyordu.
+ */
+function PainterCandidateBreakdown({ decision }: { decision: PainterEvaluation }) {
+  if (decision.candidates.length === 0) {
+    return (
+      <div className="rounded-lg border border-gray-200 p-2">
+        <p className="text-[11px] text-gray-500">
+          Bu karar için aday dökümü kaydedilmemiş.
+          {decision.outcomeReason
+            ? ` Sonuç: ${painterOutcomeReasonLabelTr(decision.outcomeReason)}.`
+            : ""}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-gray-200 p-2">
+      <ul className="space-y-2">
+        {decision.candidates.map((c, i) => {
+          const isWinner = !!c.painterId && c.painterId === decision.winnerPainterId;
+          const isPlaced = !!c.painterId && c.painterId === decision.placedPainterId;
+          return (
+            <li
+              key={c.painterId ?? i}
+              className={`rounded-lg p-2 ${
+                isWinner ? "bg-emerald-50 ring-1 ring-emerald-200" : "bg-gray-50"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-gray-800">
+                  {c.companyName ?? "—"}
+                  {isWinner && (
+                    <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-700">
+                      seçilen
+                    </span>
+                  )}
+                  {isPlaced && !isWinner && (
+                    <span className="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-700">
+                      işi alan
+                    </span>
+                  )}
+                  {c.eligible === false && (
+                    <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-700">
+                      elendi
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs font-bold text-gray-700">
+                  {c.totalScore ?? "—"}
+                </span>
+              </div>
+              {c.eligible === false && c.ineligibleReason && (
+                <p className="mt-0.5 text-[10px] text-amber-700">
+                  {c.ineligibleReason}
+                </p>
+              )}
+              <div className="mt-1 flex flex-wrap gap-1">
+                {PAINTER_SCORE_KEYS.filter((k) => c.scores[k] !== undefined).map((k) => (
+                  <span
+                    key={k}
+                    className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-gray-600 ring-1 ring-gray-200"
+                  >
+                    {PAINTER_SCORE_SHORT_LABELS_TR[k]} {c.scores[k]}
+                  </span>
+                ))}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {decision.excludedPainterIds.length > 0 && (
+        <p className="mt-2 text-[10px] text-gray-500">
+          Bu denemede {decision.excludedPainterIds.length} boyacı sıralamaya hiç
+          sokulmadı (daha önce reddetmiş ya da 24 saat cevapsız kalmış).
+        </p>
+      )}
     </div>
   );
 }

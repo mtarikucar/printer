@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, manufacturers, painters, manufacturerActions } from "@/lib/db/schema";
@@ -7,13 +7,22 @@ import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { accrueEarning } from "@/lib/services/payouts";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { notifyPainter } from "@/lib/services/painter-notifications";
-import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
+// Kapasitenin TEK ölçüsü. Buradaki ham count(*) iade edilmiş işi de sayıyordu:
+// panelin "0/1 · uygun" diye SUNDUĞU boyacıyı bu uç 400 ile reddediyordu.
+import { painterCapacityGate } from "@/lib/services/painter-capacity";
 import { emitOrderChanged } from "@/lib/realtime/emit";
-import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
+// Koli kapısı: otomatik yolların kullandığı ölçünün AYNISI.
+import { painterParcelOnTheWay } from "@/lib/config/flags";
+import {
+  REFUNDED_ORDER_ERROR,
+  formatAdminNoteLine,
+  isRefunded,
+} from "@/lib/config/order-status-policy";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import { isPartnerOrderRefunded } from "@/lib/services/partner-order-refund";
 import { modelAckRefusal, readPartnerModelAck } from "@/lib/services/order-model-revision";
 import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
+import { recordPainterPlacementDecision } from "@/lib/services/painter-evaluation";
 
 /**
  * HER dal Türkçe bir mesaj taşır.
@@ -81,6 +90,9 @@ export async function POST(
         paintingPriceKurus: true, productionBaseKurus: true,
         needsPainting: true, manufacturerStatus: true,
         painterStatus: true, declinedPainterIds: true, paymentStatus: true,
+        // Kolinin nerede olduğunu söyleyen alanlar; koli kapısı bunları okur.
+        painterHandoffCarrier: true, painterHandoffTrackingNumber: true,
+        receivedByPainterAt: true,
       },
     });
     if (!order) return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
@@ -134,6 +146,32 @@ export async function POST(
       return NextResponse.json({ error: "Bu sipariş zaten bir boyacıya gönderildi" }, { status: 409 });
     }
 
+    // ── FİZİKSEL KOLİ SESSİZCE YENİDEN YÖNLENDİRİLMEZ ───────────────────────
+    //
+    // Boyacı reddettiğinde sipariş yeniden "boyacısız" olur ama kargo alanları
+    // BİLEREK durur: kutu yola çıktıysa tek izi odur. Bu uç o izin üstüne
+    // yazıyordu (takip numarası girilmezse `null`), yani baskı hâlâ ilk
+    // boyacıdayken ikinci bir devir kolinin kaydını siliyordu. Ret bildirimi
+    // üreticiye zaten "Yeni bir kargo çıkarmayın" diyor; kapı o cümlenin
+    // sunucu tarafıdır.
+    const parcelOnTheWay = painterParcelOnTheWay(order);
+    // Kanıt yalnız takip numarasıdır (flags.ts: kargo firması kanıt sayılmaz).
+    const newTracking = parsed.data.trackingNumber?.trim() || null;
+    if (parcelOnTheWay && !newTracking) {
+      return NextResponse.json(
+        {
+          // REDDİR (`error` + `code`); karar kaydı uyarısı ise 200 + `warning`.
+          error:
+            "Bu siparişin baskısı daha önce bir boyacıya gönderilmiş görünüyor ve " +
+            "kargo kaydı duruyor. Paket size geri ulaştıysa yeni kargo firması ve " +
+            "takip numarasını girerek gönderebilirsiniz; ulaşmadıysa yeni bir kargo " +
+            "çıkarmayın ve yöneticiyle iletişime geçin.",
+          code: "parcel_in_transit",
+        },
+        { status: 409 }
+      );
+    }
+
     // A painter who already refused this job must not be handed it again. The
     // admin path (assign-painter) always checked this; this one did not, so a job
     // could bounce straight back to the painter who just turned it down. A
@@ -152,23 +190,31 @@ export async function POST(
     // Selected painter must be active + accepting + under capacity.
     const painter = await db.query.painters.findFirst({
       where: eq(painters.id, parsed.data.painterId),
-      columns: { id: true, status: true, acceptingOrders: true, maxConcurrentOrders: true, companyName: true },
+      // maxConcurrentOrders BİLEREK OKUNMAZ: eşiği ortak ölçü kendi okur.
+      columns: { id: true, status: true, acceptingOrders: true, companyName: true },
     });
     if (!painter || painter.status !== "active" || !painter.acceptingOrders) {
       return NextResponse.json({ error: "Seçilen boyacı uygun değil" }, { status: 400 });
     }
-    const [{ count: activeCount }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.painterId, painter.id),
-          inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
-        )
-      );
-    if (activeCount >= painter.maxConcurrentOrders) {
-      return NextResponse.json({ error: "Seçilen boyacının kapasitesi dolu" }, { status: 400 });
+    // Kapasite ORTAK ölçüden sorulur. HTTP kodu bu ucun kendi kodudur (400);
+    // ortak olan yalnız ölçü ve Türkçe cümledir.
+    const gate = await painterCapacityGate(painter.id);
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: 400 });
     }
+
+    // Üstüne yazılan koli kaydı KAYBOLMAZ: eski sevkiyat siparişin admin notuna
+    // geçer (üretici panelinde admin notu görünmez, ama bu kayıt yöneticinin
+    // "kutu nerede" sorusunu cevapladığı yerdir).
+    const parcelNote = parcelOnTheWay
+      ? formatAdminNoteLine(
+          `[BOYACI KOLİSİ] Üretici yeni bir boyacıya devretti; önceki sevkiyat ` +
+            `kaydı değiştirildi — ${order.painterHandoffCarrier ?? "-"} / ` +
+            `${order.painterHandoffTrackingNumber ?? "-"}` +
+            `${order.receivedByPainterAt ? " (önceki boyacı teslim almıştı)" : ""} → ` +
+            `${parsed.data.carrier ?? "-"} / ${newTracking}.`
+        )
+      : null;
 
     // Atomic hand-off.
     const now = new Date();
@@ -179,8 +225,28 @@ export async function POST(
         painterStatus: "assigned",
         assignedToPainterAt: now,
         sentToPainterAt: now,
-        painterHandoffCarrier: parsed.data.carrier ?? null,
-        painterHandoffTrackingNumber: parsed.data.trackingNumber || null,
+        // HAYATTA KALAN KARGO KAYDININ ÜSTÜNE `null` YAZILMAZ: yeni sevkiyat
+        // bildirildiyse yazılır, bildirilmediyse (koli de yolda değilse)
+        // alanlara hiç dokunulmaz.
+        ...(newTracking
+          ? {
+              painterHandoffCarrier: parsed.data.carrier ?? null,
+              painterHandoffTrackingNumber: newTracking,
+            }
+          : parsed.data.carrier
+            ? { painterHandoffCarrier: parsed.data.carrier }
+            : {}),
+        // Bu iki damga ÖNCEKİ boyacının ilerlemesini anlatır; ret sonrası
+        // hayatta kalırlarsa yeni boyacı işi "teslim alınmış" görür ve "Teslim
+        // aldım" bir daha açılmaz. Koli yolda değilken ikisi de zaten NULL'dır.
+        receivedByPainterAt: null,
+        paintedAt: null,
+        ...(parcelNote
+          ? {
+              adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = ''
+                      THEN ${parcelNote} ELSE ${orders.adminNotes} || E'\n' || ${parcelNote} END`,
+            }
+          : {}),
         status: "painting",
         updatedAt: now,
       })
@@ -219,6 +285,25 @@ export async function POST(
       .values({ orderId: id, manufacturerId: session.manufacturerId, action: "send_to_painter", notes: painter.companyName })
       .catch((e) => console.error("manufacturerActions send_to_painter failed", e));
 
+    // BU YERLEŞTİRMENİN DE KARAR KAYDI VAR.
+    //
+    // Bu yol uzun süre hiçbir gerekçe kaydı yazmadı: iş boyacıya geçiyor ama
+    // "neden bu boyacıya gitti" sorusu yalnız üretici devrettiğinde
+    // cevapsız kalıyordu — yani kaydın varlığı, yerleştirmeyi KİMİN yaptığına
+    // bağlıydı. Sahibin kararı bunun tersi: her yerleştirme kendi kaydını yazar.
+    //
+    // Aday listesi boştur (sıralayıcı çalışmadı, boyacıyı üretici seçti), daha
+    // önce reddedenler damgalanır. Yazıcı fırlatmaz: hata hâlinde siparişe
+    // [BOYACI KAYDI] notu düşer ve cevap Türkçe uyarı taşır — devir GEÇERLİDİR,
+    // telemetri onu geri alamaz.
+    const evaluation = await recordPainterPlacementDecision({
+      orderId: id,
+      trigger: "manufacturer_handoff",
+      painterId: painter.id,
+      excludedPainterIds: declined,
+      doneTr: "Sipariş boyacıya gönderildi",
+    });
+
     // Manufacturer's earning accrues now on the print portion (idempotent).
     // `painterId` is set (we just handed off), so the base is the production
     // kalem total — never the painting share, which is the painter's.
@@ -250,7 +335,11 @@ export async function POST(
       manufacturerStatus: updated.manufacturerStatus,
     });
 
-    return NextResponse.json({ success: true });
+    // Uyarı düşse bile kaybolmaz: aynı cümle siparişin admin notundadır.
+    return NextResponse.json({
+      success: true,
+      ...(evaluation.warningTr ? { warning: evaluation.warningTr } : {}),
+    });
   } catch (e) {
     return handleRouteFailure(e, "POST /api/manufacturer/orders/[id]/send-to-painter", PARTNER_ACTION_FAILED_ERROR);
   }

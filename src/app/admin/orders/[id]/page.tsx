@@ -3,20 +3,31 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { and, eq, desc, inArray, asc, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, orderPhotos, previews, orderModelRevisions, orderModelFiles, orderModelApprovals, manufacturerAssignmentEvaluations, manufacturerEarnings, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
+import { orders, orderPhotos, previews, orderModelRevisions, orderModelFiles, orderModelApprovals, manufacturerAssignmentEvaluations, painterAssignmentEvaluations, manufacturerEarnings, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { OrderDetailClient } from "./client";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { rankForOrderPreview } from "@/lib/services/manufacturer-assignment-shadow";
+// Boyacı sıralayıcısı: ekrandaki sıra ile otomatik atamanın seçtiği boyacı TEK
+// kaynaktan gelsin diye (P4-C1). İki ayrı sıra olsaydı admin, sistemin neden
+// başkasını seçtiğini bu sayfadan asla anlayamazdı.
+import { rankPaintersForOrder } from "@/lib/services/painter-assignment";
 import { weightsVersion } from "@/lib/config/manufacturer-scoring";
 import {
   buildOrderEvaluation,
   groupEvaluationDecisions,
   parseEvaluationSide,
 } from "@/app/admin/scoring-evaluations/evaluation-view";
-import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
+import { buildPainterEvaluation } from "@/app/admin/scoring-evaluations/painter-evaluation-view";
+// KAPASİTE TEK ÖLÇÜDEN: aday kartı, üretici seçicisi ve yazma uçları aynı
+// fonksiyonu okur, yoksa ekran ucun reddedeceği boyacıyı sunar.
+import {
+  emptyPainterCapacity,
+  loadPainterCapacities,
+  painterLoadLabel,
+} from "@/lib/services/painter-capacity";
 import {
   modelUploadAllowed,
   modelUploadSideEffects,
@@ -541,36 +552,34 @@ export default async function AdminOrderDetailPage({
           .where(eq(painters.status, "active"))
           .orderBy(painters.companyName);
         if (rows.length === 0) return [];
-        const loads = await db
-          .select({
-            painterId: orders.painterId,
-            load: sql<number>`count(*)::int`,
-          })
-          .from(orders)
-          .where(
-            and(
-              sql`${orders.painterId} IS NOT NULL`,
-              inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
-            )
-          )
-          .groupBy(orders.painterId);
-        const loadMap = new Map(loads.map((l) => [l.painterId, l.load]));
+        // KAPASİTE, ORTAK ÖLÇÜDEN (services/painter-capacity.ts). Burada kendi
+        // sayımımız duruyordu ve iş SAYISI sayıyordu: bir PARTİ işi tutan
+        // boyacı (100 adet = 6 birim) sıralayıcıda dolu görünürken bu sayım
+        // onu boş sayıyordu ve kart, kapının kabul/reddiyle çelişiyordu
+        // (ölçüm: P4F-1 ve P4F-2 aynı ayrışmanın iki yönü).
+        const caps = await loadPainterCapacities(rows.map((p) => p.id));
         return rows.map((p) => {
-          const currentLoad = loadMap.get(p.id) ?? 0;
+          // Eksik anahtar "bilinmiyor" değil "boş tezgâh" demektir.
+          const cap =
+            caps.get(p.id) ?? emptyPainterCapacity(p.id, p.maxConcurrentOrders);
           const declined = declinedPainterIds.includes(p.id);
           return {
             id: p.id,
             companyName: p.companyName,
             contactPerson: p.contactPerson,
             phone: p.phone,
-            currentLoad,
-            maxConcurrentOrders: p.maxConcurrentOrders,
+            // GÖSTERİM: tezgâhtaki ayrı kutu sayısı. Alan adı korunuyor
+            // (istemci bunu okuyor) ama artık KAPI DEĞİL.
+            currentLoad: cap.activeJobs,
+            // KAPI: ağırlıklı yük ve onun tek boolean cevabı.
+            loadUnits: cap.loadUnits,
+            hasRoom: cap.hasRoom,
+            // Tek yük etiketi: "6/2 birim · 1 iş".
+            loadLabel: painterLoadLabel(cap),
+            maxConcurrentOrders: cap.maxConcurrentOrders,
             acceptingOrders: p.acceptingOrders,
             declined,
-            eligible:
-              p.acceptingOrders &&
-              !declined &&
-              currentLoad < p.maxConcurrentOrders,
+            eligible: p.acceptingOrders && !declined && cap.hasRoom,
           };
         });
         })()
@@ -593,6 +602,155 @@ export default async function AdminOrderDetailPage({
       : [];
   const painterDeclinedUnreadable = declinedPainterRead === null;
   const declinedPainters = declinedPainterRead ?? [];
+
+  // ─── Boyacı SIRALAMASI (P4-C1) ───────────────────────────────────────────
+  //
+  // Kutu eskiden alfabetikti ve yükü yalnız sayı olarak gösteriyordu: admin
+  // "hangisi daha iyi" sorusunu ekrandan cevaplayamıyordu, otomatik atama ise
+  // başka bir sıradan seçiyordu. Artık ikisi aynı sıralayıcıdan besleniyor.
+  //
+  // Sıralama bir TAVSİYEDİR, kapı değil: üretilemediğinde liste alfabetik
+  // kalır, elle atama açık kalır ve kart sırasız olduğunu SÖYLER.
+  //
+  // YALNIZ GEREKTİĞİNDE hesaplanır. Sıralayıcı boyacı başına geçmiş sorgusu
+  // açar (~2N+5 sorgu) ve bu, sipariş sayfasının HER render'ında koşuyordu:
+  // iade edilmiş, kargolanmış ya da boyaması çoktan bitmiş siparişlerde de,
+  // yani iki boyacı kutusunun da gizli olduğu ekranlarda. Kapılar istemcideki
+  // kutu koşullarının AYNISIDIR (client.tsx · "Boyacı ata" ve "Boyacıyı
+  // değiştir"); biri değişirse bu da değişmeli, yoksa kutu açılır ama sırası
+  // gelmez. Hesaplanmadığında liste sırasız kalır ve `painterRankingUnreadable`
+  // false kalır: sıralama BAŞARISIZ olmadı, hiç İSTENMEDİ — ekran "sıralama
+  // hesaplanamadı" uyarısını yalnız gerçek arızada göstermeli.
+  const painterRefunded = isRefunded(order);
+  const painterAssignBoxOpen =
+    (!order.painterStatus || order.painterStatus === "unassigned") &&
+    order.manufacturerStatus === "qc_approved";
+  const painterSwapBoxOpen =
+    !!order.painterStatus &&
+    order.painterStatus !== "unassigned" &&
+    order.painterStatus !== "shipped";
+  const painterRankingNeeded =
+    paintingRelevant &&
+    !painterRefunded &&
+    (painterAssignBoxOpen || painterSwapBoxOpen);
+  const painterRankingRead = painterRankingNeeded
+    ? await displayRead("boyacı sıralaması", id, rankPaintersForOrder(id))
+    : [];
+  const painterRankingUnreadable = painterRankingRead === null;
+  const painterRankById = new Map(
+    (painterRankingRead ?? []).map((c, i) => [c.painterId, { ...c, rank: i + 1 }])
+  );
+  // Kart verisi: kimlik/kapasite yerel okumadan, sıra ve skor bileşenleri
+  // sıralayıcıdan. Sırası bilinmeyen boyacı null taşır — sıfır DEĞİL; sıfır
+  // "en kötü aday" diye okunurdu.
+  const painterCandidateCards = painterCandidates
+    .map((c) => {
+      const ranked = painterRankById.get(c.id);
+      return {
+        ...c,
+        rank: ranked?.rank ?? null,
+        score: ranked?.score ?? null,
+        parts: ranked?.parts ?? null,
+        // AĞIRLIKLI yük KAPININ ölçüsüdür ve yerel okumadan gelir (`c.loadUnits`,
+        // yayılımla zaten taşınıyor); sıralamadan ALINMAZ, çünkü sıralama
+        // hesaplanamadığında kapının ölçüsü ekrandan kaybolurdu.
+        reasons: ranked?.reasons ?? [],
+        // EKRAN NEYİ KAPATIRSA UÇ ONU REDDEDER. Kart ile atama/devir uçları
+        // artık AYNI `painterHasRoom` cevabını okuyor: sunulan satır gerçekten
+        // kabul edilir, kilitlenen satır gerçekten kapalı bir kapıdır.
+        // Sıralayıcının kendi kapıları (ret kaydı, hesap durumu) üstüne binmeye
+        // devam eder; sıra okunamadığında yerel kapılar tek başına yeter.
+        eligible: ranked ? ranked.eligible && c.eligible : c.eligible,
+        // Gerekçe GERÇEK ölçüyü adıyla söyler: "1 iş" tutan bir boyacının neden
+        // dolu olduğu ancak BİRİM yazılınca anlaşılır.
+        ineligibleReason: c.declined
+          ? "Bu işi daha önce reddetti"
+          : !c.acceptingOrders
+            ? "Şu an iş almıyor"
+            : !c.hasRoom
+              ? `Kapasitesi dolu (${c.loadLabel})`
+              : (ranked?.ineligibleReason ?? null),
+        suggested: false,
+      };
+    })
+    .sort((a, b) => {
+      if (a.rank !== null && b.rank !== null) return a.rank - b.rank;
+      if (a.rank !== null) return -1;
+      if (b.rank !== null) return 1;
+      return a.companyName.localeCompare(b.companyName, "tr");
+    });
+  // ÖNERİ yalnız sıralama gerçekten okunduğunda verilir: sırasız bir listenin
+  // ilk satırını "önerilen" diye işaretlemek, alfabeyi tavsiye diye satardı.
+  const suggestedPainterCard = painterRankingUnreadable
+    ? undefined
+    : painterCandidateCards.find((c) => c.eligible && c.rank !== null);
+  if (suggestedPainterCard) suggestedPainterCard.suggested = true;
+
+  // ─── "Bu iş neden bu boyacıya gitti?" ────────────────────────────────────
+  //
+  // Kaynak, kararın ANINDA yazılmış satırlardır (painter_assignment_evaluations).
+  // Sayfa açılışında yeniden sıralamak, yük ve güvenilirlik o günden beri
+  // değiştiği için kararı AÇIKLAMAYAN — hatta onunla çelişen — bir tablo
+  // gösterirdi. Üretici ikizinden farklı olarak bir karar TEK satır yazar
+  // (gölge sıralama yok), bu yüzden limit doğrudan gösterilecek karar sayısıdır:
+  // bir iş DÖRT rete kadar (üç yeniden yerleştirme hakkı; config/flags.ts ·
+  // PAINTER_MAX_DECLINES) + SLA yeniden yerleştirmeleriyle birkaç kez el
+  // değiştirebilir ve kart bunların hepsini geçmiş olarak göstermelidir.
+  const painterEvaluationRead = paintingRelevant
+    ? await displayRead(
+        "boyacı atama değerlendirmeleri",
+        id,
+        db
+          .select({
+            id: painterAssignmentEvaluations.id,
+            orderId: painterAssignmentEvaluations.orderId,
+            createdAt: painterAssignmentEvaluations.createdAt,
+            weightsVersion: painterAssignmentEvaluations.weightsVersion,
+            trigger: painterAssignmentEvaluations.trigger,
+            winnerPainterId: painterAssignmentEvaluations.winnerPainterId,
+            placedPainterId: painterAssignmentEvaluations.placedPainterId,
+            excludedPainterIds: painterAssignmentEvaluations.excludedPainterIds,
+            outcomeReason: painterAssignmentEvaluations.outcomeReason,
+            candidates: painterAssignmentEvaluations.candidates,
+          })
+          .from(painterAssignmentEvaluations)
+          .where(eq(painterAssignmentEvaluations.orderId, id))
+          .orderBy(desc(painterAssignmentEvaluations.createdAt))
+          .limit(10)
+      )
+    : [];
+  const painterEvaluationRowsUnreadable = painterEvaluationRead === null;
+  const painterEvaluationRows = painterEvaluationRead ?? [];
+  // Adlar: kazanan ya da işi alan boyacı pasif/silinmiş olabilir, yani yukarıdaki
+  // aktif boyacı listesinde bulunmayabilir. Çözülmezse kartta çıplak uuid kalırdı.
+  const painterEvaluationIds = Array.from(
+    new Set(
+      painterEvaluationRows
+        .flatMap((r) => [r.winnerPainterId, r.placedPainterId])
+        .filter((x): x is string => !!x)
+    )
+  );
+  const painterEvaluationNameRead =
+    painterEvaluationIds.length > 0
+      ? await displayRead(
+          "değerlendirmedeki boyacı adları",
+          id,
+          db
+            .select({ id: painters.id, companyName: painters.companyName })
+            .from(painters)
+            .where(inArray(painters.id, painterEvaluationIds))
+        )
+      : [];
+  // Adlar okunamadıysa kart çıplak uuid göstermek yerine "okunamadı" der: yarım
+  // bir gerekçe, gerekçe değildir.
+  const painterAssignmentDecisionsUnreadable =
+    painterEvaluationRowsUnreadable || painterEvaluationNameRead === null;
+  const painterEvaluationNameMap = new Map(
+    (painterEvaluationNameRead ?? []).map((p) => [p.id, p.companyName])
+  );
+  const painterAssignmentDecisions = painterEvaluationRows.map((r) =>
+    buildPainterEvaluation(r, (pid) => painterEvaluationNameMap.get(pid) ?? null)
+  );
 
   // ─── Müşteri model onayı: turlar ve kararlar ─────────────────────────────
   // Sipariş sayfası onay turlarını hiç göstermiyordu: müşterinin ne zaman ne
@@ -938,6 +1096,13 @@ export default async function AdminOrderDetailPage({
     painterEarningUnreadable && "Boyacının hakediş kaydı",
     painterCandidatesUnreadable && "Boyacı listesi (boyacı atama kutusu boş kaldı)",
     painterDeclinedUnreadable && "Reddeden boyacı adları",
+    painterRankingUnreadable &&
+      "Boyacı öneri sıralaması (liste sırasız kaldı, önerilen boyacı gösterilemiyor; elle atama açık)",
+    painterEvaluationRowsUnreadable &&
+      "Boyacı atama değerlendirme kayıtları (bu işin neden bu boyacıya gittiği gösterilemiyor)",
+    !painterEvaluationRowsUnreadable &&
+      painterAssignmentDecisionsUnreadable &&
+      "Değerlendirmedeki boyacı adları",
     journeyUnreadable && "Yolculuk karekodu",
   ].filter((x): x is string => typeof x === "string");
 
@@ -1161,7 +1326,7 @@ export default async function AdminOrderDetailPage({
         adminEmail: r.adminEmail,
         createdAt: r.createdAt.toISOString(),
       })),
-      candidates: painterCandidates,
+      candidates: painterCandidateCards,
       declined: declinedPainters,
     },
     manufacturerActionsUnreadable,
@@ -1258,6 +1423,8 @@ export default async function AdminOrderDetailPage({
     candidates,
     // Why the chosen shop won. Already serialisable (dates as ISO strings).
     assignmentDecisions,
+    // Aynı soru boyacı için: kararlar en yenisi başta (her karar TEK satır).
+    painterAssignmentDecisions,
     // ─── Hangi GÖSTERİM tablosu okunamadı ───────────────────────────────
     // Her bayrak, o veriyi gösteren KARTIN kendi yerinde yazılır. Boş bir liste
     // "kayıt yok" demek değildir; bayrak olmadan ekran, yapılmamış bir okumanın
@@ -1283,6 +1450,8 @@ export default async function AdminOrderDetailPage({
       painterEarning: painterEarningUnreadable,
       painterCandidates: painterCandidatesUnreadable,
       painterDeclined: painterDeclinedUnreadable,
+      painterRanking: painterRankingUnreadable,
+      painterAssignmentDecisions: painterAssignmentDecisionsUnreadable,
     },
     // Already serialisable by contract (dates as ISO strings); null = loader failed.
     money,

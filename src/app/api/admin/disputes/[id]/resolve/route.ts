@@ -97,7 +97,14 @@ export async function POST(
         // yazılarak. Buradan fırlamak 500 + gövdesiz cevap demekti: yukarıdaki
         // geri alma raporu admin'e HİÇ ulaşmazdı, yani raporu yazmanın anlamı
         // kalmazdı.
-        await applyStrike(dispute.order.manufacturerId).catch((e) => {
+        // `orderId` GEÇİLİR: iade edilmiş siparişte ceza yazılmaz kuralının
+        // kapısı cezanın YAZILDIĞI yerdedir (strikes.ts) ama yalnız sipariş
+        // verildiğinde çalışır. Bu rota iade durumunu hiç sormuyordu, yani
+        // parası çoktan müşteriye dönmüş bir siparişte de ihlal yazabiliyordu —
+        // üstelik ceza, eşiğe gelmiş bir üreticiyi askıya aldırabilir.
+        await applyStrike(dispute.order.manufacturerId, {
+          orderId: dispute.order.id,
+        }).catch((e) => {
           console.error("applyStrike (clawback) failed", e);
           strikeFailed = true;
         });

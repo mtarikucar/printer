@@ -16,6 +16,7 @@ import { startWaInboundWorker } from "../src/lib/queue/workers/wa-inbound.worker
 import { startWaAgentWorker } from "../src/lib/queue/workers/wa-agent.worker";
 import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-approval-sla.worker";
 import { startWorkshopCloseWorker } from "../src/lib/queue/workers/workshop-close.worker";
+import { startPainterAcceptSlaWorker } from "../src/lib/queue/workers/painter-accept-sla.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -23,6 +24,7 @@ import {
   getAssignmentSlaQueue,
   getModelApprovalSlaQueue,
   getWorkshopCloseQueue,
+  getPainterAcceptSlaQueue,
 } from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
@@ -52,6 +54,12 @@ const modelApprovalSlaWorker = startModelApprovalSlaWorker();
 // donduran ve partiyi üreticiye düşüren süpürme. Aynı iş, açık seansların
 // koltuk sayacını katılımcı satırlarıyla mutabakata getirir.
 const workshopCloseWorker = startWorkshopCloseWorker();
+// Boyacıya atanan iş 24 saat yanıtsız kalırsa: OTOMATİK atanmışsa sıradaki
+// boyacıya devredilir (ceza yok, yeniden yerleştirme sınırına sayılır: üç
+// yeniden yerleştirme hakkı vardır, yani sınır DÖRDÜNCÜ rette tükenir —
+// config/flags.ts · PAINTER_MAX_DECLINES), elle atanmışsa yalnız bayraklanır.
+// Üretici ikizi (assignment-sla) hiçbir işi taşımaz.
+const painterAcceptSlaWorker = startPainterAcceptSlaWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -98,6 +106,14 @@ getWorkshopCloseQueue().upsertJobScheduler(
   { name: "workshop-close" }
 );
 
+// Boyacının 24 saatlik kabul süresini saatlik ölç: süresi dolan OTOMATİK
+// atamayı sıradaki boyacıya devret, kalanını admin için bayrakla.
+getPainterAcceptSlaQueue().upsertJobScheduler(
+  "painter-accept-sla-hourly",
+  { every: 3600000 },
+  { name: "painter-accept-sla" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -115,6 +131,7 @@ console.log("  - wa-inbound (concurrency: 4)");
 console.log("  - wa-agent (concurrency: 4, 30/min, attempts: 1)");
 console.log("  - model-approval-sla (repeatable: every 6h)");
 console.log("  - workshop-close (repeatable: every 1h)");
+console.log("  - painter-accept-sla (repeatable: every 1h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -135,6 +152,7 @@ async function shutdown() {
     waAgentWorker.close(),
     modelApprovalSlaWorker.close(),
     workshopCloseWorker.close(),
+    painterAcceptSlaWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

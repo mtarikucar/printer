@@ -7,6 +7,8 @@ import {
   manufacturerEarnings,
 } from "@/lib/db/schema";
 import { isRefunded } from "@/lib/config/order-status-policy";
+// Koli ölçüsü: üç yazma ucunun ve otomatik yolların kullandığı saf fonksiyon.
+import { painterParcelOnTheWay } from "@/lib/config/flags";
 import {
   isOrderRefunded,
   notRefundedGuard,
@@ -29,12 +31,15 @@ import { autoAssignIfEligible } from "@/lib/services/order-confirm";
  * marketplace/seller order).
  *
  * MONEY SAFETY — why this is NOT just painter-decline with a bigger blast
- * radius. painter-decline keeps the SAME manufacturer, so leaving a settled
- * earning row is harmless. Here we DETACH the manufacturer and re-queue for a
- * DIFFERENT one, and `manufacturer_earnings.order_id` is UNIQUE with
- * `accrueEarning` using onConflictDoNothing — so ANY surviving earning row
- * (even one already 'paid') would silently make the next manufacturer's accrual
- * a no-op and pay them ₺0. Therefore we reverse the earning FIRST and only
+ * radius. painter-decline keeps the SAME manufacturer, so leaving its earning
+ * row in place is not just harmless but REQUIRED (sahibin kararı: baskı
+ * hakedişi retten etkilenmez). Here we DETACH the manufacturer and re-queue for
+ * a DIFFERENT one, and `manufacturer_earnings.order_id` is UNIQUE — so ANY
+ * surviving earning row would stand between the next manufacturer and their
+ * money. `accrueEarning` no longer swallows that conflict: a row belonging to
+ * someone else is REFUSED loudly ("mismatch_refused" + admin note) instead of
+ * silently paying ₺0. Loud is better than silent, but it is still unpaid work —
+ * so the invariant stands unchanged: we reverse the earning FIRST and only
  * detach once we have PROVEN zero earning rows remain for the order:
  *  - a 'pending'/batched row reverses + deletes cleanly -> proceed;
  *  - a 'paid' (settled) row cannot be clawed back -> we refuse (`earning_settled`)
@@ -49,6 +54,43 @@ import { autoAssignIfEligible } from "@/lib/services/order-confirm";
  * her şey — geri sarma, iki kara liste, iki QC turu, otomatik atama — orada
  * yasaktır. Koparmayı çağıranın iade yolu yapar.
  */
+/**
+ * KOPARMA, KOLİNİN KAYDINI DA SİLMESİN.
+ *
+ * İki koparma yolu da (bu servis + rotanın iade dalı) devir izlerini temizler:
+ * `receivedByPainterAt`, `paintedAt`, `painterHandoffCarrier`,
+ * `painterHandoffTrackingNumber`. Bu DOĞRUDUR — sipariş sıradaki partnere
+ * sıfırdan gider ve eski damgalar yeni partnerin satırında yalan söylerdi.
+ * Ama fiziksel kutu hâlâ boyacıda ya da ona giden yolda olabilir ve silinen o
+ * dört alan, kutunun nerede olduğunu söyleyen TEK kayıttı: silindikten sonra
+ * kimse aramaya nereden başlayacağını bilemiyordu.
+ *
+ * Çare koparmayı ENGELLEMEK değil (tam koparma meşru bir işlem): gerçekleri
+ * kalıcı admin notuna taşımak ve admin'e kutunun hâlâ dışarıda olduğunu
+ * SÖYLEMEK. Ölçü üç yazma ucuyla ve otomatik yollarla aynıdır (flags.ts ·
+ * painterParcelOnTheWay); iki ölçü ayrışsaydı aynı sipariş bir yolda korunur,
+ * diğerinde sessizce silinirdi.
+ */
+export function painterParcelRevokeTrace(o: {
+  painterHandoffCarrier: string | null;
+  painterHandoffTrackingNumber: string | null;
+  receivedByPainterAt: Date | null;
+}): { noteClause: string; warningTr: string | null } {
+  if (!painterParcelOnTheWay(o)) return { noteClause: "", warningTr: null };
+  const carrier = o.painterHandoffCarrier ?? "-";
+  const tracking = o.painterHandoffTrackingNumber ?? "-";
+  const received = o.receivedByPainterAt ? " (boyacı teslim almıştı)" : "";
+  return {
+    noteClause:
+      ` KOLİ KAYDI (sipariş alanları temizlendi, kayıt bu notta durur): ` +
+      `${carrier} / ${tracking}${received}.`,
+    warningTr:
+      `Koparma yapıldı, ama BASKI HÂLÂ DIŞARIDA: kargo kaydı ${carrier} / ${tracking}${received}. ` +
+      `Siparişteki devir/kargo alanları temizlendi; kaydın kendisi sipariş notlarına yazıldı. ` +
+      `Kutunun geri gelmesini ya da yeni partnere ulaşmasını elle takip edin.`,
+  };
+}
+
 export const PAINTER_REVOCABLE_STATUSES = [
   "assigned",
   "accepted",
@@ -71,6 +113,12 @@ export type RevokeAfterPainterResult =
       orderStatus: string;
       /** Geri alınan sipariş otomatik olarak yeni bir üreticiye yerleşti mi. */
       autoAssigned: boolean;
+      /**
+       * Koparma sırasında fiziksel koli hâlâ dışarıdaysa admin'e söylenecek
+       * Türkçe cümle (yoksa null). İşlem BAŞARILIDIR; bu bir ret değil, eksik
+       * kalan gerçeğin duyurusudur.
+       */
+      parcelWarningTr: string | null;
     }
   | { code: "not_found" }
   | { code: "not_handed_to_painter" }
@@ -210,7 +258,10 @@ export async function revokeAfterPainterHandoff(args: {
     ? (order.declinedPainterIds as string[])
     : [];
 
-  const note = `[BOYACIDAN GERİ ALMA] Admin ${adminEmail} siparişi boyacıdan geri aldı (üretici: ${prevManufacturerStatus ?? "-"}, boyacı: ${prevPainterStatus}). Sebep: ${reason}`;
+  // Kutu dışarıdaysa kaydı nota taşı: aşağıdaki UPDATE dört kargo alanını da
+  // temizliyor ve bu cümle olmasa kutunun izi tamamen kaybolurdu.
+  const parcel = painterParcelRevokeTrace(order);
+  const note = `[BOYACIDAN GERİ ALMA] Admin ${adminEmail} siparişi boyacıdan geri aldı (üretici: ${prevManufacturerStatus ?? "-"}, boyacı: ${prevPainterStatus}).${parcel.noteClause} Sebep: ${reason}`;
 
   const [updated] = await db
     .update(orders)
@@ -291,13 +342,28 @@ export async function revokeAfterPainterHandoff(args: {
       return { code: "state_unreadable" as const };
     }
     if (!refundedNow && prevManufacturerId) {
-      await accrueEarning(orderId, prevManufacturerId, printBaseKurus).catch(
-        (e) =>
-          console.error(
-            "revoke-after-painter: re-accrue after lost race failed",
-            e
-          )
-      );
+      // Yeniden tahakkukun SONUCU yutulmaz. Yarışı kaybettiğimize göre siparişe
+      // araya giren biri dokunmuştur ve satır artık başkasına ait olabilir;
+      // accrueEarning bunu sessizce geçmez (`mismatch_refused`) ve siparişin
+      // admin notuna iz düşer. Buradaki günlük o izin yanına "hangi üretici,
+      // hangi tutar" bilgisini koyar — bu para geri sarılmış, yerine yenisi
+      // yazılamamış olabilir.
+      const re = await accrueEarning(
+        orderId,
+        prevManufacturerId,
+        printBaseKurus
+      ).catch((e) => {
+        console.error(
+          "revoke-after-painter: re-accrue after lost race failed",
+          e
+        );
+        return null;
+      });
+      if (re !== null && re !== "accrued" && re !== "already_accrued" && re !== "corrected") {
+        console.error(
+          `revoke-after-painter: ${orderId} baskı payı (${printBaseKurus} kuruş) yeniden yazılamadı (${re}) — üretici ${prevManufacturerId} EKSİK kalmış olabilir`
+        );
+      }
     }
     return refundedNow
       ? { code: "refunded" as const }
@@ -357,5 +423,6 @@ export async function revokeAfterPainterHandoff(args: {
     userId: order.userId,
     orderStatus: restoredStatus,
     autoAssigned,
+    parcelWarningTr: parcel.warningTr,
   };
 }

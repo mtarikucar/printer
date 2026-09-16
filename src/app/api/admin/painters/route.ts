@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, inArray, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { painters, orders } from "@/lib/db/schema";
-import { ACTIVE_PAINTER_ORDER_STATUSES } from "@/lib/services/painter-qc";
+import {
+  emptyPainterCapacity,
+  loadPainterCapacities,
+  painterLoadLabel,
+} from "@/lib/services/painter-capacity";
 import { handleRouteFailure, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export async function GET(_request: NextRequest) {
@@ -15,39 +17,44 @@ export async function GET(_request: NextRequest) {
       orderBy: (p, { desc }) => [desc(p.createdAt)],
     });
 
-    // Active painting-job counts per painter (assigned → painted; shipped = done).
-    const activeOrderCounts = await db
-      .select({
-        painterId: orders.painterId,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(orders)
-      .where(
-        and(
-          sql`${orders.painterId} IS NOT NULL`,
-          inArray(orders.painterStatus, [...ACTIVE_PAINTER_ORDER_STATUSES])
-        )
-      )
-      .groupBy(orders.painterId);
+    // KAPASİTE TEK ÖLÇÜDEN OKUNUR (services/painter-capacity.ts).
+    //
+    // Burada kendi `count(*)` sayımımız duruyordu ve İADE EDİLMİŞ işi de
+    // sayıyordu: tek işi iade edilmiş bir boyacı bu uçta "1 aktif iş",
+    // sipariş kartında ise "0/1" okunuyordu — admin, hangi ekrana baktığına
+    // göre aynı boyacıyı dolu ya da boş görüyordu. İade edilmiş sipariş
+    // kimsenin kapasitesini tüketmez; bu kural artık tek yerde duruyor.
+    const caps = await loadPainterCapacities(allPainters.map((p) => p.id));
 
-    const countMap = new Map(
-      activeOrderCounts.map((r) => [r.painterId, r.count])
-    );
-
-    const result = allPainters.map((p) => ({
-      id: p.id,
-      email: p.email,
-      companyName: p.companyName,
-      contactPerson: p.contactPerson,
-      phone: p.phone,
-      taxId: p.taxId,
-      taxIdType: p.taxIdType,
-      requiresManualTaxReview: p.requiresManualTaxReview,
-      status: p.status,
-      workSamplePhotoUploadedAt: p.workSamplePhotoUploadedAt,
-      activeOrderCount: countMap.get(p.id) ?? 0,
-      createdAt: p.createdAt,
-    }));
+    const result = allPainters.map((p) => {
+      // Satır her boyacı için gelir; yine de `??` duruyor, çünkü eksik anahtar
+      // "yük bilinmiyor" değil "boş tezgâh" demektir ve bunu tahmine bırakmak
+      // ekranda sıfırla dolu arasında sessiz bir fark yaratırdı.
+      const cap = caps.get(p.id) ?? emptyPainterCapacity(p.id, p.maxConcurrentOrders);
+      return {
+        id: p.id,
+        email: p.email,
+        companyName: p.companyName,
+        contactPerson: p.contactPerson,
+        phone: p.phone,
+        taxId: p.taxId,
+        taxIdType: p.taxIdType,
+        requiresManualTaxReview: p.requiresManualTaxReview,
+        status: p.status,
+        workSamplePhotoUploadedAt: p.workSamplePhotoUploadedAt,
+        // GÖSTERİM: tezgâhtaki ayrı iş (kutu) sayısı. KAPI DEĞİL.
+        activeOrderCount: cap.activeJobs,
+        // KAPI: yeni iş düşüp düşmeyeceğini belirleyen AĞIRLIKLI yük. Uçların
+        // uyguladığı ölçü budur, bu yüzden ekrana da bu gider.
+        loadUnits: cap.loadUnits,
+        maxConcurrentOrders: cap.maxConcurrentOrders,
+        hasRoom: cap.hasRoom,
+        // Tek yük etiketi ("4/5 birim · 1 iş"): iki admin ekranı aynı boyacı
+        // için farklı cümle yazmasın diye tek kaynaktan gelir.
+        loadLabel: painterLoadLabel(cap),
+        createdAt: p.createdAt,
+      };
+    });
 
     return NextResponse.json({ painters: result });
   } catch (e) {

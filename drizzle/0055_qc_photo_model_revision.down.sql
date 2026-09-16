@@ -51,12 +51,16 @@
 -- `created_at`ine bakar (drizzle-orm/pg-core/dialect.js: "order by created_at
 -- desc limit 1" + `lastDbMigration.created_at < migration.folderMillis`), yani
 -- 0055'ten SONRA kaydedilmiş bir satır (0056, 0057, …) dururken 0055 yeniden
--- uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER kendi down
--- dosyalarıyla ve kendi satırlarıyla geri alınır, sonra bu dosya çalıştırılır:
+-- uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN YENİDEN
+-- ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri alınır,
+-- sonra bu dosya çalıştırılır:
+--   \i drizzle/0057_painter_assignment_evaluations.down.sql
+--   -- 0057'nin down'ı KENDİ kaydını (created_at = 1789556775560) kendi içinde
+--   -- siler; onun için burada ayrıca DELETE yazmayın.
 --   \i drizzle/0056_order_partner_messages.down.sql
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789498291439;
 --   \i drizzle/0055_qc_photo_model_revision.down.sql
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789496039184;
---   npm run db:migrate   -- ikisini de yeniden uygular (ikisi de idempotent)
+--   npm run db:migrate   -- üçünü de yeniden uygular (üçü de idempotent)
 SET lock_timeout = '5s';
 ALTER TABLE "qc_photos" DROP COLUMN IF EXISTS "model_revision";

@@ -14,7 +14,7 @@ import {
   type RevokeResult,
 } from "@/lib/services/manufacturer-revoke";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
-import { applyStrike } from "@/lib/services/strikes";
+import { applyStrike, strikeSkipNoticeTr } from "@/lib/services/strikes";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
   ASSIGN_FAILURE_MESSAGES,
@@ -513,6 +513,56 @@ async function handleRevoke(
     autoAssigned = placement.assigned;
   }
 
+  // GÜVENİLİRLİK CEZASI — boyacı ikiziyle (revoke-painter) AYNI İKİ KATMAN.
+  //
+  // Ceza iade edilmiş siparişte ASLA yazılmaz: ceza "alınan işi yarıda
+  // bırakmak"ın bedelidir, oysa burada işi bitiren iadedir ve atölyenin bir
+  // kusuru yoktur. `refunded` birkaç satır yukarıda hesaplanıyor ama burada hiç
+  // sorulmuyordu; ekran kutuyu gizlediği için (client.tsx
+  // `strike: !refunded && revokeStrike`) canlıda görünmüyordu, ama uca doğrudan
+  // istek atan herhangi bir istemci cezayı yazdırabiliyordu. Kapı sunucuda
+  // durur.
+  //
+  // `orderId` DE GEÇİLİR ve bu ikinci katmandır: onsuz strikes.ts'in kendi iade
+  // kapısı (`opts.orderId` yokken hiç çalışmaz) ATIL kalıyordu ve bu rotanın
+  // kendi `refunded` okuması tek koruma oluyordu — o okuma ile cezanın yazıldığı
+  // an arasına düşen bir iade cezayı yine yazdırırdı. Kapı artık çağırandan
+  // bağımsız olarak da kapanıyor.
+  //
+  // SONUÇ OKUNUR VE SÖYLENİR: admin cezayı açıkça istediği hâlde yazılmadıysa
+  // (iade, sipariş okunamadı, partner bulunamadı, yazma hatası) bunu hem aşağıki
+  // denetim satırından hem de cevabın gövdesinden öğrenir. Dönen `StrikeOutcome`
+  // eskiden olduğu gibi atılıyordu: cevap `success: true` diyor, ceza yazılmıyor
+  // ve hiçbir yerde tek kelime bulunmuyordu.
+  let strikeApplied = false;
+  let strikeNoticeTr: string | null = null;
+  if (strike && !refunded) {
+    const strikeOutcome = await applyStrike(result.prevManufacturerId, {
+      orderId: id,
+    }).catch((e) => {
+      console.error("revoke: applyStrike failed", e);
+      return null;
+    });
+    if (!strikeOutcome) {
+      strikeNoticeTr = strikeSkipNoticeTr("write_failed");
+    } else if (strikeOutcome.skipped) {
+      strikeNoticeTr = strikeSkipNoticeTr(strikeOutcome.skipped);
+    } else {
+      strikeApplied = true;
+    }
+  } else if (strike) {
+    // Buraya yalnız iade dalı düşer (yukarıdaki koşulun tek olumsuzu).
+    strikeNoticeTr = strikeSkipNoticeTr("refunded");
+  }
+
+  // İstenmiş ama yazılmamış ceza KALICI ize de girer: cevabın gövdesi yalnız o
+  // an ekranda olan kişiye ulaşır.
+  const strikeNoteSuffix = strike
+    ? strikeApplied
+      ? " Güvenilirlik cezası uygulandı."
+      : ` ${strikeNoticeTr}`
+    : "";
+
   // Every side effect below is isolated: the order has already moved, so a
   // failing email or Redis must not turn this into a 500 the admin reads as
   // "nothing happened".
@@ -522,19 +572,21 @@ async function handleRevoke(
       orderId: id,
       action: "assign_manufacturer",
       adminEmail,
-      notes: reassigned
-        ? `Geri alındı: ${prevName} (${result.prevStatus}) → yeniden atandı: ${target!.companyName}${
+      notes:
+        (reassigned
+          ? `Geri alındı: ${prevName} (${result.prevStatus}) → yeniden atandı: ${target!.companyName}${
             sellerOverrideUsed
               ? " [MÜLKİYET DEVRİ: satıcının kendi katalog ürünü, admin onayıyla başka atölyeye verildi — satıcı ve gerekçe ayrı denetim satırında]"
               : ""
           }. Sebep: ${reason}`
-        : refunded
-          ? `Atama geri alındı: ${prevName} (${result.prevStatus}). Sipariş iade edildiği için kuyruğa dönmedi${target ? `, ${target.companyName} üreticisine devredilmedi` : ""}. Sebep: ${reason}`
-          : autoAssigned
-            ? `Atama geri alındı: ${prevName} (${result.prevStatus}) → otomatik olarak başka bir üreticiye atandı. Sebep: ${reason}`
-            : keepInQueue
-              ? `Atama geri alındı: ${prevName} (${result.prevStatus}) → admin isteğiyle kuyrukta bırakıldı (otomatik atama yapılmadı). Sebep: ${reason}`
-              : `Atama geri alındı: ${prevName} (${result.prevStatus}) → kuyruğa döndü. Sebep: ${reason}`,
+          : refunded
+            ? `Atama geri alındı: ${prevName} (${result.prevStatus}). Sipariş iade edildiği için kuyruğa dönmedi${target ? `, ${target.companyName} üreticisine devredilmedi` : ""}. Sebep: ${reason}`
+            : autoAssigned
+              ? `Atama geri alındı: ${prevName} (${result.prevStatus}) → otomatik olarak başka bir üreticiye atandı. Sebep: ${reason}`
+              : keepInQueue
+                ? `Atama geri alındı: ${prevName} (${result.prevStatus}) → admin isteğiyle kuyrukta bırakıldı (otomatik atama yapılmadı). Sebep: ${reason}`
+                : `Atama geri alındı: ${prevName} (${result.prevStatus}) → kuyruğa döndü. Sebep: ${reason}`) +
+        strikeNoteSuffix,
     })
     .catch((e) => console.error("revoke: adminActions insert failed", e));
 
@@ -592,19 +644,6 @@ async function handleRevoke(
     console.error("revoke: losing-manufacturer notify failed", e)
   );
 
-  // Güvenilirlik cezası iade edilmiş siparişte ASLA yazılmaz: ceza "alınan işi
-  // yarıda bırakmak"ın bedelidir, oysa burada işi bitiren iadedir ve atölyenin
-  // bir kusuru yoktur. `refunded` birkaç satır yukarıda hesaplanıyor ama burada
-  // hiç sorulmuyordu; ekran kutuyu gizlediği için (client.tsx
-  // `strike: !refunded && revokeStrike`) canlıda görünmüyordu, ama uca doğrudan
-  // istek atan herhangi bir istemci cezayı yazdırabiliyordu — üstelik ceza eşiğe
-  // gelmiş bir atölyeyi askıya aldırabilir. Kapı sunucuda durur.
-  if (strike && !refunded) {
-    await applyStrike(result.prevManufacturerId).catch((e) =>
-      console.error("revoke: applyStrike failed", e)
-    );
-  }
-
   // The old manufacturer's panel only listens on its own topic, so the drop
   // needs its own emit — a single event cannot reach both sides.
   await emitOrderChanged({
@@ -629,6 +668,11 @@ async function handleRevoke(
     keptInQueue: keepInQueue,
     prevStatus: result.prevStatus,
     prevManufacturer: prevName,
+    // Ceza GERÇEKTEN yazıldı mı. Admin kutuyu işaretlediği hâlde `false`
+    // dönüyorsa sebebini `strikeWarning` söyler; ikisi birlikte okunur (boyacı
+    // ikizindeki alanların aynısı).
+    strikeApplied,
+    ...(strikeNoticeTr ? { strikeWarning: strikeNoticeTr } : {}),
     // Devir neden olmadı: istemci "başkası aldı" diye yarışı suçlayıp
     // tekrar denemesin, gerçek sebebi göstersin.
     ...(handoffError ? { handoffError } : {}),

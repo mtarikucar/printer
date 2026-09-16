@@ -23,6 +23,7 @@ import {
   staleQcRevisionErrorTr,
 } from "@/lib/config/partner-model-ack";
 import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
+import { assignPainterAutomatically } from "@/lib/services/painter-auto-assign";
 
 /**
  * Turun fotoğraf tablosu OKUNAMADIĞINDA dönen cümle.
@@ -358,9 +359,45 @@ export async function POST(
       manufacturerStatus: next,
     });
 
+    // ── BOYACI BURADA OTOMATİK SEÇİLİR (Faz 4 · P4-C2) ──────────────────────
+    //
+    // QC onayı, baskının fiziksel olarak var olduğu ve müşteriye gitmeye hazır
+    // olduğu andır: boyalı bir siparişin boyacısı tam olarak burada belli olur.
+    // Eskiden bu adımın boyacı tarafı YOKTU — iş, üretici ya da admin birini
+    // seçene kadar kimsenin tezgâhında değildi.
+    //
+    // Çağrı, QC kararı COMMIT OLDUKTAN SONRA durur ve bu zorunludur:
+    // yerleştirmenin korumalı UPDATE'i siparişi `qc_approved` görmek zorunda.
+    // Boyama kalemi olmayan, üreticisi kendi boyayan ya da iade edilmiş sipariş
+    // kendiliğinden atlanır (painterAssignRowGate).
+    //
+    // ASLA FIRLATMAZ: QC onayı çoktan verildi, bir atama arızası admin'e
+    // "onaylanamadı" dedirtemez. Sonuç cevaba yazılır ki ekran ne olduğunu
+    // söyleyebilsin.
+    const painterPlacement = await assignPainterAutomatically(id, {
+      trigger: "qc_approve",
+    });
+
     return NextResponse.json({
       success: true,
       staleRevisionApproved: isStale,
+      painterAutoAssigned: painterPlacement.assigned,
+      // CEVAP HER ZAMAN SEBEP TAŞIR. Ölçülen kusur buydu: atama sessizce
+      // düştüğünde `skipped` boş dönüyor, ekran "atanmadı" diyebiliyor ama
+      // NEDEN atanmadığını söyleyemiyordu. `skipped` kapalı kümedir (P4-C2) ve
+      // arıza hâllerini taşıyamaz; `reason` + `message` o yüzden ayrı durur ve
+      // hiçbir zaman boş olmaz.
+      painterAssignSkipped: painterPlacement.skipped ?? null,
+      painterAssignReason: painterPlacement.reason,
+      painterAssignMessage: painterPlacement.messageTr,
+      // KARAR KAYDI YAZILAMADIYSA ANLIK KANAL DA KAYBOLMASIN. İnsan yolları
+      // (assign-painter / swap-painter) bu uyarıyı başarı gövdesinde `warning`
+      // olarak döndürüyor; otomatik yol onu düşürüyordu ve geriye yalnız
+      // siparişteki kalıcı [BOYACI KAYDI] notu kalıyordu — yani atamayı yapan
+      // admin, kaydın oluşmadığını ancak sipariş sayfasını okuyunca öğreniyordu.
+      ...(painterPlacement.recordWarningTr
+        ? { warning: painterPlacement.recordWarningTr }
+        : {}),
       // Hâl UYDURULMAZ: kanıt hesabı okunamayan tabloyu sıfır fotoğraf sanar.
       proof: photosReadFailed ? "photos_unreadable" : proof.failure,
       photosUnreadable: photosReadFailed,

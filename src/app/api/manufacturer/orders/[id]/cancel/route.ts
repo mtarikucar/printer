@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, manufacturers, manufacturerActions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
-import { applyStrike } from "@/lib/services/strikes";
+import { applyStrike, strikeSkipNoticeTr } from "@/lib/services/strikes";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { autoAssignIfEligible } from "@/lib/services/order-confirm";
@@ -196,8 +196,41 @@ export async function POST(
     // siparişte uygulanmaz: ceza, "alınan işi yarıda bırakmak"ın bedelidir; iade
     // edilmiş bir siparişte bırakılacak iş kalmamıştır ve ceza, eşiğe gelmiş bir
     // atölyeyi yapmadığı bir hatadan askıya aldırabilirdi.
+    //
+    // İKİ KATMAN, boyacı ikiziyle (revoke-painter) aynı:
+    //  • buradaki `!refunded` kapısı — kilitli işlemde okunan iade durumu;
+    //  • `orderId` — onsuz strikes.ts'in KENDİ iade kapısı hiç çalışmıyordu
+    //    (yalnız `opts.orderId` verildiğinde açılır) ve yukarıdaki okuma ile
+    //    cezanın yazıldığı an arasına düşen bir iade cezayı yine yazdırırdı.
+    //
+    // SONUÇ ATILMAZ. Ceza istendiği hâlde yazılmadıysa (araya giren iade,
+    // okunamayan sipariş, bulunamayan atölye, yazma hatası) bunu kimse
+    // öğrenemiyordu: `StrikeOutcome` olduğu gibi çöpe gidiyor, cevap yalnız
+    // "success" diyordu. Cümle tek kaynaktan (strikes.ts · STRIKE_SKIP_LABELS_TR)
+    // gelir ve cevabın gövdesine konur — ekran göstermese bile cevabın kendisi
+    // olan biteni doğru anlatır (bu rotanın zaten kendi kuralı).
+    //
+    // `.catch` bilerek: ceza son adım DEĞİL. Fırlatmasına izin vermek, iptal
+    // yazılmışken atölyeye "sonraki adımlar tamamlanamadı" dedirtir ve canlı
+    // yayın, admin e-postası, otomatik yerleştirme hiç çalışmazdı.
+    let strikeApplied = false;
+    let strikeNoticeTr: string | null = null;
     if (!refunded) {
-      await applyStrike(session.manufacturerId);
+      const strikeOutcome = await applyStrike(session.manufacturerId, {
+        orderId: id,
+      }).catch((e) => {
+        console.error("üretici iptali: applyStrike patladı", e);
+        return null;
+      });
+      if (!strikeOutcome) {
+        strikeNoticeTr = strikeSkipNoticeTr("write_failed");
+      } else if (strikeOutcome.skipped) {
+        strikeNoticeTr = strikeSkipNoticeTr(strikeOutcome.skipped);
+      } else {
+        strikeApplied = true;
+      }
+    } else {
+      strikeNoticeTr = strikeSkipNoticeTr("refunded");
     }
 
     await emitOrderChanged({
@@ -255,6 +288,10 @@ export async function POST(
     return NextResponse.json({
       success: true,
       autoAssigned: placement.assigned,
+      // Ceza gerçekten yazıldı mı, yazılmadıysa NEDEN. Atölyeye kendi
+      // siparişinde olan bitenin doğrusu söylenir.
+      strikeApplied,
+      ...(strikeNoticeTr ? { strikeWarning: strikeNoticeTr } : {}),
       ...(placement.skipped ? { autoAssignSkipped: placement.skipped } : {}),
       // Ne olduğunu söyleyen dürüst cevap: sipariş kuyruğa dönmedi, ceza da
       // yazılmadı. Ekran bu alanları göstermezse bile cevabın kendisi yalan

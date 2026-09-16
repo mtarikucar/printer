@@ -31,11 +31,14 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("ten flags, closed set", () => {
+test("eleven flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
     "auto_assign_cart_platform",
     "auto_assign_custom",
     "auto_assign_manual",
+    // Faz 4'ün tek boyacı anahtarı. Kapalı kümenin varlık sebebi tam olarak
+    // budur: yeni bir bayrak, adı buraya elle yazılmadan sisteme giremez.
+    "auto_assign_painter",
     "auto_assign_upload",
     "auto_assign_whatsapp_ai",
     "auto_model_enabled",

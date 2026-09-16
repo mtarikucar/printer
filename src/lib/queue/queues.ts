@@ -170,6 +170,7 @@ let scoringEvaluationsCleanupQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let analyticsCleanupQueue: Queue | null = null;
 let assignmentSlaQueue: Queue | null = null;
+let painterAcceptSlaQueue: Queue | null = null;
 let modelApprovalSlaQueue: Queue | null = null;
 let workshopCloseQueue: Queue | null = null;
 
@@ -345,6 +346,28 @@ export function getAssignmentSlaQueue(): Queue {
     });
   }
   return assignmentSlaQueue;
+}
+
+/**
+ * Saatlik süpürme: atanan boyacının 24 saatlik kabul/ret süresini aşan işler.
+ * Üretici ikizinden (assignment-sla) farkı, yalnız bayrak koymakla kalmayıp
+ * OTOMATİK atanmış işi sıradaki boyacıya devretmesidir.
+ */
+export function getPainterAcceptSlaQueue(): Queue {
+  if (!painterAcceptSlaQueue) {
+    painterAcceptSlaQueue = new Queue("painter-accept-sla", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // Tek deneme: süpürme idempotent (koparma korumalı UPDATE ile yazılır)
+        // ve bir saat sonra zaten tekrar koşuyor; yeniden denemek aynı
+        // siparişleri ikinci kez taramaktan başka bir şey yapmaz.
+        attempts: 1,
+        removeOnComplete: { count: 20 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return painterAcceptSlaQueue;
 }
 
 /**

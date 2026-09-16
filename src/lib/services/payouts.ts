@@ -1,11 +1,18 @@
 import { eq, and, ne, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { manufacturerEarnings, payouts, invoices, orders } from "@/lib/db/schema";
+import {
+  earningStatusEnum,
+  manufacturerEarnings,
+  payouts,
+  invoices,
+  orders,
+} from "@/lib/db/schema";
 import { computeEarning, computeKdv } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS, KDV_RATE_BPS } from "@/lib/config/prices";
 import { eInvoiceProvider } from "@/lib/services/e-invoice";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import { claimableEarningWhere, openEarningWhere } from "@/lib/services/earning-claimable";
+import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 import {
   claimEarningsIntoPayout,
   isPayoutLockBusy,
@@ -15,21 +22,240 @@ import {
 
 /**
  * What an accrual call did. Callers fire and forget (`.catch` + log), but why
- * an earning did NOT land has to be visible: "skipped because refunded" must
- * never read like "already there".
+ * an earning did NOT land — or landed SHORT — has to be visible: "skipped
+ * because refunded" must never read like "already there", and "the row is short
+ * and I could not fix it" must never read like "done".
  */
 export type AccrualOutcome =
+  /** Satır yeni yazıldı. */
   | "accrued"
+  /**
+   * Satır zaten vardı, tutarı DOĞRU ve satır hâlâ ödenebilir durumda (çift
+   * kargo / çift devir no-op'u). Geri çevrilmiş satır bu cevabı ALAMAZ: orada
+   * tutar tutsa da para ödenmeyecektir.
+   */
   | "already_accrued"
+  /** Satır vardı ama tutarı yanlıştı; doğru tutara çekildi. */
+  | "corrected"
+  /**
+   * Satır vardı ama TAHAKKUK ORAYA OTURAMADI: başka bir üreticiye ait, GERİ
+   * ÇEVRİLMİŞ, ya da ödeme partisine girmiş/ödenmiş. Partner EKSİK kalmış (ya
+   * da hiç ödenmeyecek) olabilir, o yüzden bu dal hem günlüğe hem siparişin
+   * admin notuna — kararı veren İŞLEMİN İÇİNDE — iz bırakır.
+   */
+  | "mismatch_refused"
   | "skipped_refunded"
   | "order_not_found";
+
+/**
+ * Siparişte ZATEN duran hakediş satırı ile yeni gelen tahakkuk arasındaki karar.
+ *
+ * `refuse` İKİ sebep taşır, çünkü satırın KENDİSİNDEN görülebilen engel ikidir:
+ * satırın SAHİBİ ve satırın GERİ ÇEVRİLMİŞ olması. Üçüncü engel — satırın ödeme
+ * partisine girmiş ya da ödenmiş olması — bu fonksiyondan GÖRÜLMEZ ve bilerek
+ * görülmez: ödenebilirlik kuralı tek yerde (earning-claimable.ts) yaşar ve
+ * düzeltmenin WHERE'inde `openEarningWhere` ile SQL tarafında sorulur. Burada
+ * ikinci bir kopyasını kurmak, o kuralın bir gün ayrışacağı ikinci yer olurdu.
+ */
+export type AccrualReconcileDecision =
+  | { action: "keep" }
+  | { action: "correct" }
+  | { action: "refuse"; reason: "other_manufacturer" | "reversed" };
+
+/**
+ * Hakediş satırının statüsü — şemadaki enum'ın TA KENDİSİ, elle kopyası değil:
+ * enum'a bir değer eklendiğinde aşağıdaki kararlar derlemede karşımıza çıksın.
+ */
+export type EarningRowStatus = (typeof earningStatusEnum.enumValues)[number];
+
+/**
+ * Çakışan tahakkukun kararı. SAF: DB yok, testten doğrudan çağrılır
+ * (scripts/test-cost-lines.ts).
+ *
+ * Tutar farklıysa DOĞRU olan yeni gelendir: taban her çağrıda siparişin GÜNCEL
+ * kalemlerinden ve boyamayı fiilen kimin yaptığından türetilir
+ * (earning-base.ts · manufacturerBaseKurus). Satırın taşıdığı tutar ise ancak
+ * geçmişte bir anın fotoğrafıdır.
+ *
+ * Satırın SAHİBİ asla değişmez: tutarı düzeltmek, parayı başka bir üreticiye
+ * yazmak DEĞİLDİR. Bir siparişte iki ayrı üretici görünüyorsa ortada tutar
+ * sorunu değil, koparma/devir sorunu vardır (revoke-after-painter.ts hakedişi
+ * çevirip SİLER, tam da bu yüzden).
+ */
+export function reconcileAccrual(args: {
+  existing: { manufacturerId: string; grossKurus: number; status: EarningRowStatus };
+  incoming: { manufacturerId: string; grossKurus: number };
+}): AccrualReconcileDecision {
+  // Sahiplik ÖNCE sorulur: başka üreticinin satırında tutarın da statünün de ne
+  // olduğu bu çağrıyı ilgilendirmez, satır zaten buradan düzeltilemez.
+  if (args.existing.manufacturerId !== args.incoming.manufacturerId) {
+    return { action: "refuse", reason: "other_manufacturer" };
+  }
+  if (args.existing.status === "reversed") {
+    return { action: "refuse", reason: "reversed" };
+  }
+  if (args.existing.grossKurus === args.incoming.grossKurus) return { action: "keep" };
+  return { action: "correct" };
+}
+
+/** Tahakkukun satıra oturamama sebebi; Türkçe metni bundan türer. */
+export type AccrualMismatchReason =
+  | "other_manufacturer"
+  | "reversed"
+  | "settled"
+  | "vanished";
+
+/**
+ * Reddin Türkçe anlatımı. SAF ve DIŞA AÇIK: metnin DOĞRULUĞU
+ * scripts/test-cost-lines.ts'de satırın gerçek durumuyla karşılaştırılarak
+ * sınanır.
+ *
+ * NEDEN HER SEBEP KENDİ CÜMLESİNİ YAZAR: bu not, parayı elden düzeltebilecek
+ * TEK kişinin okuduğu şeydir. Eskiden tek bir kalıp vardı ve `reversed` bir
+ * satır da "satır ödeme partisine girmiş ya da ödenmiş" diye bildiriliyordu:
+ * not, admin'i var olmayan bir partiyi aramaya /admin/payouts'a yolluyordu.
+ * Okuyanı yanlış yere gönderen bir iz, izsizlikten yalnızca biraz daha iyidir.
+ *
+ * `foundGrossKurus === null` YALNIZ "vanished" içindir: satır okunamadı. Eski
+ * metin orada da "satır 0 kuruş" yazıyordu — var olmayan bir satıra tutar
+ * uydurmak.
+ */
+export function accrualMismatchNote(args: {
+  manufacturerId: string;
+  wantedGrossKurus: number;
+  foundGrossKurus: number | null;
+  reason: AccrualMismatchReason;
+}): string {
+  const bas = `[HAKEDİŞ] Üreticinin (${args.manufacturerId}) hakedişi ${args.wantedGrossKurus} kuruş olmalıydı`;
+  const bulunan = `${args.foundGrossKurus} kuruşluk satır`;
+  switch (args.reason) {
+    case "other_manufacturer":
+      return (
+        `${bas} ama siparişteki ${bulunan} BAŞKA bir üreticiye ait; tutar düzeltilmedi. ` +
+        `Ortada tutar değil devir/koparma sorunu var — siparişin üretici atamasını kontrol edin.`
+      );
+    case "reversed":
+      return (
+        `${bas} ama siparişteki ${bulunan} "geri çevrildi" durumunda ve tahakkuk onu diriltmez. ` +
+        `Bu üretici bu siparişten HİÇ ödenmez (geri çevrilmiş satır ödeme partisine giremez) — ` +
+        `hakedişi elden yeniden açın.`
+      );
+    case "settled":
+      return (
+        `${bas} ama ${bulunan} ödeme partisine girmiş ya da ödenmiş; düzeltilemedi. ` +
+        `Üretici EKSİK ödenmiş olabilir — /admin/payouts üzerinden kontrol edin.`
+      );
+    case "vanished":
+      return (
+        `${bas} ama satır ne yazılabildi ne okunabildi (eşzamanlı silme); siparişte hakediş satırı YOK. ` +
+        `Üretici bu siparişten hiç ödenmez — hakedişi elden açın.`
+      );
+  }
+}
+
+/** accrueEarning'in işlem tutamacı: notu da AYNI işlem yazsın diye adlandırıldı. */
+type AccrualTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Reddi SİPARİŞİN admin notuna, KARARI VEREN İŞLEMİN İÇİNDE yazar.
+ *
+ * Neden not, neden yalnız günlük değil: bu dalda bir partner EKSİK ödenmiş (ya
+ * da hiç ödenmeyecek) olabilir ve sunucu günlüğünü kimse okumaz. Notu okuyan
+ * kişi (admin sipariş sayfası) düzeltmeyi elden yapabilecek tek kişidir.
+ *
+ * NEDEN `tx`, NEDEN `db` DEĞİL: red dalının yazdığı TEK şey bu nottur. Not
+ * işlemin DIŞINDA, başka bir bağlantıda ve hatası yutularak yazıldığı sürece
+ * bir red HİÇBİR kalıcı iz bırakmadan bitebiliyordu — tam da bu fonksiyonun
+ * reddettiği hâl. Aynı işlemde yazılınca not kararın commit'ini miras alır: ya
+ * ikisi birden olur, ya hiçbiri.
+ *
+ * NEDEN ARTIK YUTULMUYOR: not yazılamazsa işlem geri alınır ve çağıranın
+ * `.catch` günlüğüne bir HATA düşer. Red dalında geri alınacak bir para yazması
+ * zaten yoktur; kaybedilen tek şey "sessizce başarı" cevabıdır.
+ *
+ * İade koruması YOKTUR ve olmamalıdır: bu bir ileri işlem değil, olan bitenin
+ * KAYDIDIR. Bir izi iade yüzünden bastırmak, tam da görünmesi gereken hâli
+ * gizlemek olurdu. (Pratikte iade edilmiş sipariş zaten `skipped_refunded` ile
+ * çok önce döner.)
+ */
+async function writeMismatchNote(args: {
+  tx: AccrualTx;
+  orderId: string;
+  manufacturerId: string;
+  wantedGrossKurus: number;
+  foundGrossKurus: number | null;
+  reason: AccrualMismatchReason;
+}): Promise<void> {
+  const note = formatAdminNoteLine(accrualMismatchNote(args));
+  await args.tx
+    .update(orders)
+    .set({
+      adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = ''
+                      THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, args.orderId));
+}
+
+/** accrueEarning'in işleminden çıkan sonuç + izin gerektirdiği rakamlar. */
+type AccrualTxResult =
+  | { outcome: "accrued" | "already_accrued" | "skipped_refunded" | "order_not_found" }
+  | { outcome: "corrected"; fromGrossKurus: number; toGrossKurus: number }
+  | {
+      outcome: "mismatch_refused";
+      reason: AccrualMismatchReason;
+      /** `null` yalnız "vanished" dalında: satır okunamadı, tutarı da yok. */
+      foundGrossKurus: number | null;
+      wantedGrossKurus: number;
+    };
 
 /**
  * Accrue a manufacturer's earning. The single choke point for manufacturer
  * money: every manufacturer_earnings row is written here (ship, send-to-painter,
  * the admin painter hand-off, the workshop batch ship, the revoke-after-painter
- * re-accrual). Idempotent on orderId: the unique constraint and
- * onConflictDoNothing make a double-ship a no-op.
+ * re-accrual).
+ *
+ * TUTAR HER ZAMAN DOĞRU SATIRA OTURUR, YA DA GÜRÜLTÜYLE REDDEDİLİR. Satır
+ * `order_id` üzerinde TEKİLDİR ve çakışma eskiden sessizce yutuluyordu
+ * (`onConflictDoNothing`): siparişe bir kez KÜÇÜK bir tutar yazıldıktan sonra
+ * doğrusu artık yerine geçemiyordu. Ölçülen hâl (Faz 4): boyacıya devredilen
+ * sipariş baskı payıyla (üretim kalemi) tahakkuk ediyor; boyacı işi reddedince
+ * — sahibin kararı gereği — satır olduğu gibi KALIYOR; ret hakkı tükenince
+ * (DÖRDÜNCÜ ret: üç yeniden yerleştirme hakkı vardır ve işlenmekte olan ret de
+ * sayılır — config/flags.ts · PAINTER_MAX_DECLINES) iş boyacısız kalınca
+ * "kendim boyarım" üreticisi siparişi kendi boyayıp kargolayabiliyor ve
+ * tahakkuk TAM tutarla ikinci kez çağrılıyordu. İkinci çağrı no-op olduğu için
+ * üretici boyama payından sessizce mahrum kalıyordu:
+ * ne hata, ne günlük, ne de admin'in görebileceği tek bir iz.
+ *
+ * Kural artık DÖRT dala ayrılır ve dördü de İZ BIRAKIR:
+ *   • satır yok                 → yazılır ("accrued");
+ *   • satır GERİ ÇEVRİLMİŞ      → tutarı ne olursa olsun reddedilir
+ *     ("mismatch_refused", sebep "reversed"). "Aynı tutar" orada dururken bile
+ *     üretici o siparişten ÖDENMEZ: `reversed` satır hiçbir ödeme partisine
+ *     giremez (claimableEarningWhere). Statüye bakmayan eski karar buna
+ *     "already_accrued" diyordu — çağırana "para yerinde" demenin en sessiz
+ *     yolu. Diriltmek de bu çağrının işi DEĞİLDİR: çevirme bir insanın ya da
+ *     iadenin verdiği karardır ve net'i bekleyen partiden çoktan düşülmüştür;
+ *     tahakkukun onu sessizce geri alması iade edilmiş bir siparişi yeniden
+ *     ödenebilir yapmakla aynı şey olurdu;
+ *   • satır var, tutar aynı     → dokunulmaz ("already_accrued") — çift kargo,
+ *     çift devir ve yeniden devir hâlâ no-op'tur;
+ *   • satır var, tutar farklı   →
+ *       – AYNI üreticinin AÇIK satırıysa (bekleyen + partisiz) doğru tutara
+ *         çekilir ("corrected", günlüğe iki tutarla birlikte düşer);
+ *       – değilse HİÇBİR ŞEY yazılmaz: "mismatch_refused" döner, günlüğe düşer
+ *         ve siparişin admin notuna Türkçe bir satır — KARARI VEREN İŞLEMİN
+ *         İÇİNDE (writeMismatchNote) — eklenir: red ya iziyle birlikte commit
+ *         olur ya da hiç olmaz. Bir partneri eksik bırakmak yalnızca
+ *         GÖRÜLEBİLİR olduğunda kabul edilebilir.
+ *
+ * NEDEN DÜZELTME YALNIZ AÇIK SATIRDA: partinin toplamı (payouts.total_kurus)
+ * damga anındaki net'lerden yazılır. Partiye girmiş bir satırın tutarını
+ * değiştirmek partiyi arkasındaki hakedişlerle çelişik bırakır ve
+ * markPayoutPaid onu haklı olarak ÖDENEMEZ yapardı
+ * (payoutHoldsWhatItClaims) — bir para deliğini kapatırken partnerin bütün
+ * ödemesini kilitlemiş olurduk. Ödenmiş satır zaten geri alınamaz.
  *
  * A refunded order never accrues. The routes refuse forward actions on one, but
  * this is the backstop for whatever reaches it anyway: a refunded row that kept
@@ -45,7 +271,7 @@ export async function accrueEarning(
   manufacturerId: string,
   grossKurus: number
 ): Promise<AccrualOutcome> {
-  const outcome = await db.transaction(async (tx): Promise<AccrualOutcome> => {
+  const result = await db.transaction(async (tx): Promise<AccrualTxResult> => {
     // Bounded wait for the row lock. A caller already holding this order row
     // in its own open transaction would otherwise hang here forever: the wait
     // is on another connection, so Postgres sees no deadlock. After 5s it fails
@@ -69,7 +295,7 @@ export async function accrueEarning(
         .select({ id: orders.id })
         .from(orders)
         .where(eq(orders.id, orderId));
-      return exists ? "skipped_refunded" : "order_not_found";
+      return { outcome: exists ? "skipped_refunded" : "order_not_found" };
     }
     const rateBps = row.rate ?? PLATFORM_COMMISSION_RATE_BPS;
 
@@ -93,29 +319,139 @@ export async function accrueEarning(
     }
 
     const e = computeEarning(grossKurus, rateBps);
-    const inserted = await tx
-      .insert(manufacturerEarnings)
-      .values({
+
+    // Reddin izini TEK yerden bırakır: karar hangi dalda alınırsa alınsın iz
+    // aynı işlemde ve aynı biçimde yazılır — "iz yazmayı unutan dal" diye bir
+    // şey olmasın. Yazma başarısız olursa işlem geri alınır: red, kaydı
+    // olmadan commit edemez.
+    const refuse = async (
+      reason: AccrualMismatchReason,
+      foundGrossKurus: number | null
+    ): Promise<AccrualTxResult> => {
+      await writeMismatchNote({
+        tx,
         orderId,
         manufacturerId,
-        grossKurus: e.grossKurus,
-        commissionKurus: e.commissionKurus,
-        netKurus: e.netKurus,
-        commissionRateBps: e.commissionRateBps,
-      })
-      .onConflictDoNothing({ target: manufacturerEarnings.orderId })
-      .returning({ id: manufacturerEarnings.id });
-    return inserted.length > 0 ? "accrued" : "already_accrued";
+        reason,
+        foundGrossKurus,
+        wantedGrossKurus: e.grossKurus,
+      });
+      return {
+        outcome: "mismatch_refused",
+        reason,
+        foundGrossKurus,
+        wantedGrossKurus: e.grossKurus,
+      };
+    };
+
+    // İKİ DENEME. Birinci deneme çakışırsa satır KİLİTLİ okunur; okumadan hemen
+    // önce satır silinmiş olabilir (onu yalnız revoke-after-painter siler ve
+    // sildikten sonra yeni üreticiye yeniden tahakkuk yapılır), o zaman ikinci
+    // deneme satırı temiz yazar. Sonsuz döngü yok: iki denemede de yazamayıp
+    // okuyamamak, sessizce geçilecek değil BİLDİRİLECEK bir hâldir.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const inserted = await tx
+        .insert(manufacturerEarnings)
+        .values({
+          orderId,
+          manufacturerId,
+          grossKurus: e.grossKurus,
+          commissionKurus: e.commissionKurus,
+          netKurus: e.netKurus,
+          commissionRateBps: e.commissionRateBps,
+        })
+        .onConflictDoNothing({ target: manufacturerEarnings.orderId })
+        .returning({ id: manufacturerEarnings.id });
+      if (inserted.length > 0) return { outcome: "accrued" };
+
+      // Çakıştık: duran satırı KİLİTLEYEREK oku. Kilit şart, çünkü aşağıdaki
+      // karar bu satırın tutarına, SAHİBİNE ve STATÜSÜNE dayanıyor; kilitsiz
+      // okumada araya giren bir partileme ("artık düzeltilemez"), bir çevirme
+      // ("artık ödenmez") ya da bir silme kararı bayatlatırdı.
+      const [existing] = await tx
+        .select({
+          manufacturerId: manufacturerEarnings.manufacturerId,
+          grossKurus: manufacturerEarnings.grossKurus,
+          // Statü de kilit altında okunur: karar tutardan ÖNCE buna bakar,
+          // çünkü "geri çevrilmiş" satır doğru tutarı taşısa bile ödenmez.
+          status: manufacturerEarnings.status,
+        })
+        .from(manufacturerEarnings)
+        .where(eq(manufacturerEarnings.orderId, orderId))
+        .for("update");
+      if (!existing) continue;
+
+      const decision = reconcileAccrual({
+        existing,
+        incoming: { manufacturerId, grossKurus: e.grossKurus },
+      });
+      if (decision.action === "keep") return { outcome: "already_accrued" };
+      if (decision.action === "refuse") return refuse(decision.reason, existing.grossKurus);
+
+      const fixed = await tx
+        .update(manufacturerEarnings)
+        .set({
+          grossKurus: e.grossKurus,
+          commissionKurus: e.commissionKurus,
+          netKurus: e.netKurus,
+          commissionRateBps: e.commissionRateBps,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(manufacturerEarnings.orderId, orderId),
+            // Satırın SAHİBİ değişmez (yukarıdaki karar da bunu söyler); yüklem
+            // yazmanın kendisinde de durur, yoksa okuma ile yazma arasına giren
+            // bir devir parayı yanlış partnere sabitlerdi.
+            eq(manufacturerEarnings.manufacturerId, manufacturerId),
+            // Yalnız AÇIK satır düzeltilebilir — sebebi fonksiyon başlığında.
+            // Kural elle kurulmaz, tek kaynaktan okunur.
+            openEarningWhere(manufacturerEarnings)
+          )
+        )
+        .returning({ id: manufacturerEarnings.id });
+      if (fixed.length > 0) {
+        return {
+          outcome: "corrected",
+          fromGrossKurus: existing.grossKurus,
+          toGrossKurus: e.grossKurus,
+        };
+      }
+      // Yüklem tutmadı: satır partiye girmiş ya da ödenmiş. Düzeltmiyoruz ve
+      // SUSMUYORUZ. Sebep artık GERÇEKTEN bu: "geri çevrilmiş" satır yukarıdaki
+      // karardan geri döner, buraya hiç ulaşmaz.
+      return refuse("settled", existing.grossKurus);
+    }
+
+    // Bulunan tutar YOK: satır okunamadı. Uydurma bir 0 yazmak, olmayan bir
+    // satırın tutarını bildirmek olurdu.
+    return refuse("vanished", null);
   });
 
-  if (outcome === "skipped_refunded") {
+  if (result.outcome === "skipped_refunded") {
     console.warn(
       `[accrual] order ${orderId}: skipped: refunded — no manufacturer earning for ${manufacturerId}`
     );
-  } else if (outcome === "order_not_found") {
+  } else if (result.outcome === "order_not_found") {
     console.error(`[accrual] order ${orderId}: not found — no manufacturer earning accrued`);
+  } else if (result.outcome === "corrected") {
+    // Sessiz bir düzeltme de iz ister: tutarın DEĞİŞTİĞİ, ne iken ne olduğu
+    // okunabilmeli.
+    console.warn(
+      `[accrual] order ${orderId}: üretici ${manufacturerId} hakedişi ${result.fromGrossKurus} → ${result.toGrossKurus} kuruş olarak düzeltildi`
+    );
+  } else if (result.outcome === "mismatch_refused") {
+    // Kalıcı iz (siparişin admin notu) İŞLEMİN İÇİNDE yazıldı; buradaki günlük
+    // onun ikizi, yerine geçeni değil.
+    const bulunan =
+      result.foundGrossKurus === null
+        ? "satır okunamadı"
+        : `satır ${result.foundGrossKurus} kuruş`;
+    console.error(
+      `[accrual] order ${orderId}: hakediş ${result.wantedGrossKurus} kuruş olmalıydı, ${bulunan} ve düzeltilemedi (${result.reason}) — üretici ${manufacturerId}`
+    );
   }
-  return outcome;
+  return result.outcome;
 }
 
 // Clawback — used when an order is refunded / a dispute is resolved against the

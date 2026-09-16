@@ -8,12 +8,13 @@ import { getSessionUser } from "@/lib/services/customer-auth";
 import { normalizeFileUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const revisionSchema = z.object({
   note: z.string().min(1).max(1000),
 });
 
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -79,5 +80,18 @@ export async function POST(
       { error: d["common.error"] },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/preview/[id]/revision", CUSTOMER_ACTION_FAILED_ERROR);
   }
 }

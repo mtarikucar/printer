@@ -59,11 +59,40 @@ interface PickedFile {
   invalid?: string;
 }
 
+/** Sunucunun yüklemeyi yakaladığı aşamada GERÇEKTEN uyguladığı yan etkiler. */
+export interface OrderModelAppliedSideEffects {
+  qcReset: boolean;
+  qcRound: number | null;
+  approvalRoundOpened: boolean;
+  manufacturerAckRequired: boolean;
+  painterNotified: boolean;
+  customerNotified?: boolean;
+}
+
+/**
+ * P2-C2: yüklemenin sonucu, SUNUCUNUN söylediği gibi. Sayfa bunu tahmin etmez —
+ * yükleme anındaki aşama ile QC sıfırlamasının gerçekten olup olmadığı yalnız
+ * sunucuda bilinir (sıfırlama kargo yazısıyla aynı satırda yarışır ve
+ * kaybedebilir). Panel "QC sıfırlandı" derken sipariş çoktan kargolanmış
+ * olabilirdi.
+ */
+export interface OrderModelUploadOutcome {
+  revision?: number;
+  fileCount?: number;
+  carriedCount?: number;
+  stage?: string;
+  warning?: string;
+  appliedSideEffects?: OrderModelAppliedSideEffects;
+}
+
 interface UploadModelResponse {
   revision?: number;
   fileCount?: number;
   /** Önceki sürümden aynen taşınan parça sayısı ("koru" açıkken). */
   carriedCount?: number;
+  stage?: string;
+  warning?: string;
+  appliedSideEffects?: OrderModelAppliedSideEffects;
 }
 
 const KIND_BADGE: Record<OrderModelKind, string> = {
@@ -151,6 +180,8 @@ export function OrderModelUploader({
   orderId,
   variant,
   previousFiles,
+  note,
+  noteRequired,
   onUploaded,
 }: {
   orderId: string;
@@ -161,7 +192,20 @@ export function OrderModelUploader({
    * ve STL kaybı onayı bunlarla hesaplanır.
    */
   previousFiles?: { name: string; kind: string }[];
-  onUploaded: () => void;
+  /**
+   * Sürüm notu (neden yeniden yüklendi). Sayfa toplar, yükleyici gönderir:
+   * doluysa POST'a eklenir, boşsa alan hiç gönderilmez.
+   */
+  note?: string;
+  /**
+   * Bu aşamada gerekçe ZORUNLU mu (politika: üretici `accepted`'ın ötesinde).
+   * Sunucu zaten reddediyor; burada da bakılır çünkü dosyalar son POST'tan ÖNCE
+   * parça parça yükleniyor — notsuz bir denemede yüzlerce MB boşuna gider ve
+   * admin dakikalar sonra 400 görürdü.
+   */
+  noteRequired?: boolean;
+  /** P2-C2: sunucunun bildirdiği sonuç sayfaya AYNEN geçer. */
+  onUploaded: (result?: OrderModelUploadOutcome) => void;
 }) {
   const [list, dispatch] = useReducer(listReducer, undefined, emptyList);
   const files = list.files;
@@ -340,6 +384,13 @@ export function OrderModelUploader({
 
   async function upload() {
     if (valid.length === 0 || busy || overLimit) return;
+    const trimmedNote = (note ?? "").trim();
+    if (noteRequired && !trimmedNote) {
+      setError(
+        "Bu aşamada model değiştirmek için gerekçe zorunlu. Sürüm notunu yazıp tekrar deneyin."
+      );
+      return;
+    }
     if (invalidFiles.length > 0) {
       const shown = invalidFiles
         .slice(0, 5)
@@ -400,6 +451,9 @@ export function OrderModelUploader({
       fd.append("files", JSON.stringify(staged));
       // Yalnız önceki bir sürüm varken anlamlı; ilk yükleme her zaman tam settir.
       if (canCarry) fd.append("carryForward", carryForward ? "1" : "0");
+      // Not yalnız YAZILMIŞSA gönderilir: boş bir alan, sunucuda "gerekçe
+      // yazılmamış" ile aynı şeydir ama denetim satırına boş bir not eklerdi.
+      if (trimmedNote) fd.append("note", trimmedNote);
       const res = await uploadWithProgress<UploadModelResponse>(
         `/api/admin/orders/${orderId}/upload-model`,
         fd,
@@ -413,7 +467,16 @@ export function OrderModelUploader({
         `${res?.revision ? `Sürüm ${res.revision}` : "Model"} kaydedildi: ${toSend.length} dosya yüklendi` +
           (carried > 0 ? `, önceki sürümden ${carried} parça aynen taşındı.` : ".")
       );
-      onUploaded();
+      // Sayfa ne olduğunu TAHMİN etmesin: aşama ve uygulanan yan etkiler
+      // sunucudan geldiği gibi geçer (P2-C2).
+      onUploaded({
+        revision: res?.revision,
+        fileCount: res?.fileCount,
+        carriedCount: res?.carriedCount,
+        stage: res?.stage,
+        warning: res?.warning,
+        appliedSideEffects: res?.appliedSideEffects,
+      });
     } catch (e) {
       const err = e as UploadError;
       // İptal admin'in kendi işi — bağıracak bir hata değil.

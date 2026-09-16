@@ -6,6 +6,7 @@ import {
   SELLER_OVERRIDE_REASON_MIN_LENGTH,
   assignManufacturerToOrder,
 } from "@/lib/services/manufacturer-assign";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Admin'in tek siparişe elle üretici ataması.
@@ -57,86 +58,90 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-
-  const { id } = await params;
-
   try {
-    const parsed = schema.safeParse(await request.json().catch(() => null));
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: parsed.error.issues[0]?.message ?? "Üretici seçin." },
-        { status: 400 }
-      );
-    }
-    const { manufacturerId, overrideReason } = parsed.data;
-    const wantsOverride = parsed.data.allowSellerOverride === true;
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-    // Onay var ama gerekçe yok: kapı bunu zaten reddeder (denetlenemeyen aşma
-    // aşma değildir); admin'e sebebini burada söylemek, sessiz bir
-    // "seller_owned" reddinden anlaşılırdır.
-    if (wantsOverride && !overrideReason) {
-      return NextResponse.json(
-        {
-          error:
-            `Mülkiyet devri için gerekçe zorunludur (en az ${SELLER_OVERRIDE_REASON_MIN_LENGTH} karakter); ` +
-            "gerekçe denetim kaydına yazılır.",
-        },
-        { status: 400 }
-      );
-    }
+    const { id } = await params;
 
-    // Validation, the atomic unassigned-guarded update, the ownership rule, the
-    // audit row, the partner notification and the SSE emit all live in the
-    // shared service — the automatic (platform-product) and decline-reassign
-    // paths use the same one, so they can't drift apart.
-    const result = await assignManufacturerToOrder({
-      orderId: id,
-      manufacturerId,
-      adminEmail: a.session.user.email,
-      allowSellerOverride: wantsOverride,
-      ...(wantsOverride && overrideReason
-        ? { sellerOverrideReason: overrideReason }
-        : {}),
-    });
+    try {
+      const parsed = schema.safeParse(await request.json().catch(() => null));
+      if (!parsed.success) {
+        return NextResponse.json(
+          { error: parsed.error.issues[0]?.message ?? "Üretici seçin." },
+          { status: 400 }
+        );
+      }
+      const { manufacturerId, overrideReason } = parsed.data;
+      const wantsOverride = parsed.data.allowSellerOverride === true;
 
-    if (!result.ok) {
-      if (result.reason === "seller_owned") {
-        // Bu bir YARIŞ KAYBI değil: aynı isteği tekrar denemek hiçbir zaman
-        // işe yaramaz, admin'in KARAR vermesi gerekir. O yüzden 409 ve ekranın
-        // onay adımını açan açık bir işaret; satıcı da ADIYLA söylenir.
-        const sellerLabel = result.sellerName
-          ? `${result.sellerName} atölyesinin`
-          : "bir satıcının";
+      // Onay var ama gerekçe yok: kapı bunu zaten reddeder (denetlenemeyen aşma
+      // aşma değildir); admin'e sebebini burada söylemek, sessiz bir
+      // "seller_owned" reddinden anlaşılırdır.
+      if (wantsOverride && !overrideReason) {
         return NextResponse.json(
           {
             error:
-              `Bu sipariş ${sellerLabel} kendi kataloğundan çıktı: normalde yalnız o atölyeye atanabilir. ` +
-              `Yine de başka bir atölyeye vermek için onaylamanız ve gerekçe yazmanız gerekir; ` +
-              `gerekçe denetim kaydına geçer ve satıcıya bildirim gider.`,
-            reason: "seller_owned",
-            requiresSellerOverride: true,
-            sellerName: result.sellerName ?? null,
+              `Mülkiyet devri için gerekçe zorunludur (en az ${SELLER_OVERRIDE_REASON_MIN_LENGTH} karakter); ` +
+              "gerekçe denetim kaydına yazılır.",
           },
-          { status: 409 }
+          { status: 400 }
         );
       }
-      // Same copy as the bulk assign route (ASSIGN_FAILURE_MESSAGES). Every
-      // other reason is a 400, as before; a refunded order arrives as
-      // not_assignable.
+
+      // Validation, the atomic unassigned-guarded update, the ownership rule, the
+      // audit row, the partner notification and the SSE emit all live in the
+      // shared service — the automatic (platform-product) and decline-reassign
+      // paths use the same one, so they can't drift apart.
+      const result = await assignManufacturerToOrder({
+        orderId: id,
+        manufacturerId,
+        adminEmail: a.session.user.email,
+        allowSellerOverride: wantsOverride,
+        ...(wantsOverride && overrideReason
+          ? { sellerOverrideReason: overrideReason }
+          : {}),
+      });
+
+      if (!result.ok) {
+        if (result.reason === "seller_owned") {
+          // Bu bir YARIŞ KAYBI değil: aynı isteği tekrar denemek hiçbir zaman
+          // işe yaramaz, admin'in KARAR vermesi gerekir. O yüzden 409 ve ekranın
+          // onay adımını açan açık bir işaret; satıcı da ADIYLA söylenir.
+          const sellerLabel = result.sellerName
+            ? `${result.sellerName} atölyesinin`
+            : "bir satıcının";
+          return NextResponse.json(
+            {
+              error:
+                `Bu sipariş ${sellerLabel} kendi kataloğundan çıktı: normalde yalnız o atölyeye atanabilir. ` +
+                `Yine de başka bir atölyeye vermek için onaylamanız ve gerekçe yazmanız gerekir; ` +
+                `gerekçe denetim kaydına geçer ve satıcıya bildirim gider.`,
+              reason: "seller_owned",
+              requiresSellerOverride: true,
+              sellerName: result.sellerName ?? null,
+            },
+            { status: 409 }
+          );
+        }
+        // Same copy as the bulk assign route (ASSIGN_FAILURE_MESSAGES). Every
+        // other reason is a 400, as before; a refunded order arrives as
+        // not_assignable.
+        return NextResponse.json(
+          { error: ASSIGN_FAILURE_MESSAGES[result.reason] },
+          { status: 400 }
+        );
+      }
+
+      return NextResponse.json({ success: true });
+    } catch (error: unknown) {
+      console.error("Assign manufacturer failed:", error);
       return NextResponse.json(
-        { error: ASSIGN_FAILURE_MESSAGES[result.reason] },
-        { status: 400 }
+        { error: "Üretici atanamadı. Tekrar deneyin." },
+        { status: 500 }
       );
     }
-
-    return NextResponse.json({ success: true });
-  } catch (error: unknown) {
-    console.error("Assign manufacturer failed:", error);
-    return NextResponse.json(
-      { error: "Üretici atanamadı. Tekrar deneyin." },
-      { status: 500 }
-    );
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/orders/[id]/assign-manufacturer", ADMIN_ACTION_FAILED_ERROR);
   }
 }

@@ -7,6 +7,7 @@ import {
 import { recordInboundEvent } from "@/lib/services/whatsapp-conversation";
 import { getWaInboundQueue } from "@/lib/queue/queues";
 import { isFlagEnabled } from "@/lib/services/flags";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Node runtime: the signature is an HMAC over the raw body and the queue client
 // is an ioredis connection. Neither works on the edge.
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 /**
  * Meta's subscription handshake. Must echo the RAW challenge as plain text.
  */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const challenge = verifyWebhookHandshake(request.nextUrl.searchParams);
   if (!challenge) {
     return new NextResponse("forbidden", { status: 403 });
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
  *    down). An unconditional "always 200" would permanently discard a
  *    customer's message during a database outage.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const rawBody = await request.text();
 
   if (!verifyWebhookSignature(rawBody, request.headers.get("x-hub-signature-256"))) {
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
     // Redis or Postgres is unreachable. Ask Meta to retry rather than swallow
     // the customer's message.
     console.error("[whatsapp.webhook] enqueue failed; asking Meta to retry", err);
-    return NextResponse.json({ error: "temporary" }, { status: 500 });
+    return NextResponse.json({ error: "Mesaj şu anda işlenemedi; kısa süre sonra yeniden denenecek.", code: "temporary" }, { status: 500 });
   }
 }
 
@@ -159,4 +160,30 @@ interface WebhookPayload {
       };
     }>;
   }>;
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/webhooks/whatsapp", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/webhooks/whatsapp", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

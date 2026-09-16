@@ -1,10 +1,17 @@
-import { eq, and, ne, isNull, sql } from "drizzle-orm";
+import { eq, and, ne, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturerEarnings, payouts, invoices, orders } from "@/lib/db/schema";
 import { computeEarning, computeKdv } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS, KDV_RATE_BPS } from "@/lib/config/prices";
 import { eInvoiceProvider } from "@/lib/services/e-invoice";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
+import { claimableEarningWhere, openEarningWhere } from "@/lib/services/earning-claimable";
+import {
+  claimEarningsIntoPayout,
+  isPayoutLockBusy,
+  payoutHoldsWhatItClaims,
+  PayoutClaimRaceError,
+} from "@/lib/services/payout-claim";
 
 /**
  * What an accrual call did. Callers fire and forget (`.catch` + log), but why
@@ -119,6 +126,30 @@ export async function accrueEarning(
 // back to "paid" for) money on a refunded order.
 export async function reverseEarning(orderId: string): Promise<void> {
   await db.transaction(async (tx) => {
+    // Sınırlı bekleme: aşağıdaki okuma artık SATIR KİLİDİ alıyor, yani
+    // eşzamanlı bir partileme ya da "ödendi işaretle" varsa BEKLER. Sınırsız
+    // beklemek ucu askıda bırakırdı; 5s sonra hata çağıranın `.catch` günlüğüne
+    // düşer. Kilit sırası partilemeyle ters olduğu için 40P01 (deadlock) da
+    // mümkündür ve aynı yere düşer — ikisi de "para YAZILMADI" demektir.
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+
+    // OKUMA KİLİTLİDİR — KARDEŞİYLE AYNI KİLİT. Partileme sorgusu
+    // (createPayoutForManufacturer) aynı satırları `for update of` ile okur;
+    // parti üyeliğini DEĞİŞTİREN bu yol da aynı kilidi almak zorundadır.
+    //
+    // ÖLÇÜLEN HÂL (kilitsizken): iade `payout_id`yi NULL okur; araya giren
+    // partileme satırı P partisine damgalayıp commit eder; iadenin düşüm
+    // döngüsü P'yi HİÇ görmediği için düşümü ATLAR, ama aşağıdaki UPDATE satırı
+    // yine de `reversed` + `payout_id = null` yapar. P, artık TUTMADIĞI
+    // hakedişin parasını toplamında taşır: "iddia ettiği ≠ tuttuğu".
+    // markPayoutPaid bu partiyi (haklı olarak) kalıcı reddeder,
+    // deleteEmptyPayout da temizleyemez çünkü parti başka satırlar tutuyordur —
+    // GERÇEK bir parti çıkışsız kalırdı.
+    //
+    // Kilitle: partileme önce commit ederse Postgres yüklemi GÜNCEL satır
+    // üzerinde yeniden değerlendirir (EvalPlanQual) ve `payoutId` P olarak
+    // okunur; düşüm doğru partiye gider. Partileme sonra gelirse damgası bu
+    // işlem bitene kadar bekler ve yeni satır sürümünde eleyip geri alır.
     const toReverse = await tx
       .select({
         id: manufacturerEarnings.id,
@@ -132,29 +163,29 @@ export async function reverseEarning(orderId: string): Promise<void> {
           ne(manufacturerEarnings.status, "reversed"),
           ne(manufacturerEarnings.status, "paid")
         )
-      );
+      )
+      .for("update");
     if (toReverse.length === 0) return;
 
     // Back out each earning from any still-pending payout it was batched into.
+    //
+    // DÜŞÜM TEK İFADEDE, GÖRELİ YAPILIR (oku-değiştir-yaz DEĞİL). Eskiden parti
+    // toplamı önce okunup sonra yazılıyordu; aynı partideki iki hakediş aynı
+    // anda geri alındığında ikisi de AYNI toplamı okuyup kendi düşümünü yazıyor
+    // ve bir düşüm kayboluyordu. Sonuç tam da bu turun kapattığı hâldir: parti,
+    // arkasındaki hakedişlerden FARKLI bir tutar iddia eder — ve "Ödendi
+    // işaretle" artık böyle bir partiyi haklı olarak reddettiği için, kayıp
+    // düşüm partiyi ödenemez hâlde bırakırdı. `greatest(0, …)` eski kodun
+    // Math.max'ının aynısıdır: toplam negatife düşmesin.
     for (const e of toReverse) {
       if (!e.payoutId) continue;
-      const [p] = await tx
-        .select({
-          status: payouts.status,
-          totalKurus: payouts.totalKurus,
-          earningCount: payouts.earningCount,
+      await tx
+        .update(payouts)
+        .set({
+          totalKurus: sql`greatest(0, ${payouts.totalKurus} - ${e.netKurus})`,
+          earningCount: sql`greatest(0, ${payouts.earningCount} - 1)`,
         })
-        .from(payouts)
-        .where(eq(payouts.id, e.payoutId));
-      if (p && p.status === "pending") {
-        await tx
-          .update(payouts)
-          .set({
-            totalKurus: Math.max(0, p.totalKurus - e.netKurus),
-            earningCount: Math.max(0, p.earningCount - 1),
-          })
-          .where(eq(payouts.id, e.payoutId));
-      }
+        .where(and(eq(payouts.id, e.payoutId), eq(payouts.status, "pending")));
     }
 
     await tx
@@ -170,70 +201,209 @@ export async function reverseEarning(orderId: string): Promise<void> {
   });
 }
 
+/**
+ * Bir partileme denemesinin sonucu.
+ *
+ * `null` DEĞİL, AYRIŞTIRILMIŞ bir sonuç: "ödenecek bir şey yok" ile "başka bir
+ * ödeme işlemiyle çakıştı" aynı cevap olamaz. İlki partnere/admin'e "kuyruk
+ * boş" der; ikincisi "birazdan tekrar deneyin" der ve ekran ikisini ayırt
+ * edemezse yarışın kaybeden tarafı sebepsiz bir hata görürdü.
+ */
+export type PayoutCreateResult =
+  | { ok: true; payoutId: string; totalKurus: number; count: number }
+  | { ok: false; reason: "nothing_owed" | "busy" };
+
 // Batch a manufacturer's not-yet-batched pending earnings into one payout.
-// Returns null if nothing is owed.
+//
+// İADE FİLTRESİ BURADA ZORUNLUDUR. Bu sorgu eskiden siparişe hiç bakmadan her
+// `pending` + partilenmemiş satırı süpürüyordu; üreticinin kendi ekranı ise
+// iade edilen siparişleri "ödeme bekleyen" tutarından çıkarıyordu. Üretici
+// ekranda ₺838,20 görüp düğmeye bastığında partiye ₺1.676,40 giriyor, fark
+// parası müşteriye iade edilmiş bir siparişin hakedişi oluyordu: ekranın
+// ödenemez dediği para, ekranın kendi düğmesiyle ödeme kuyruğuna giriyordu.
+// Kural artık tek yerden okunur (claimableEarningWhere) — ekranın ödenebilir
+// dediği küme ile partiye giren küme tanım gereği aynıdır.
+//
+// PARTİLEME ATOMİKTİR. Algoritma ve NEDEN'i payout-claim.ts'de: sayım `for
+// update of` ile KİLİTLİ okunur (eşzamanlı ikinci partileme aynı satırları bir
+// daha alamaz) ve partinin toplamı damganın `returning`inden yazılır (parti,
+// tanım gereği tuttuğu parayı söyler). Kilit `of` ile yalnız hakediş tablosuna
+// verilir: kural siparişle sol birleşim ister, Postgres ise dış birleşimin
+// NULL üretebilen tarafını kilitletmez.
 export async function createPayoutForManufacturer(
   manufacturerId: string,
   adminEmail: string
-): Promise<{ payoutId: string; totalKurus: number; count: number } | null> {
+): Promise<PayoutCreateResult> {
+  try {
+    const batch = await db.transaction(async (tx) => {
+      // Sınırlı bekleme: eşzamanlı partileme kilidi bırakmazsa uç askıda
+      // kalmasın, Türkçe "birazdan tekrar deneyin" cevabına düşsün.
+      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+      return claimEarningsIntoPayout({
+        lockClaimable: async () =>
+          await tx
+            .select({
+              id: manufacturerEarnings.id,
+              netKurus: manufacturerEarnings.netKurus,
+            })
+            .from(manufacturerEarnings)
+            // Kural siparişin ödeme durumunu okur; birleşim olmadan kurulamaz.
+            .leftJoin(orders, eq(orders.id, manufacturerEarnings.orderId))
+            .where(
+              and(
+                eq(manufacturerEarnings.manufacturerId, manufacturerId),
+                claimableEarningWhere(manufacturerEarnings)
+              )
+            )
+            .for("update", { of: manufacturerEarnings }),
+        // Parti 0/0 açılır: damga için id (FK) şart, toplam ise ancak damga
+        // geri okunduktan sonra bilinir.
+        openBatch: async () => {
+          const [payout] = await tx
+            .insert(payouts)
+            .values({
+              manufacturerId,
+              totalKurus: 0,
+              earningCount: 0,
+              adminEmail,
+              status: "pending",
+            })
+            .returning({ id: payouts.id });
+          return payout.id;
+        },
+        // Damga TAM OLARAK sayılan satırlara vurulur (id listesi), aynı WHERE'i
+        // ikinci kez çalıştırmaya değil; `returning` ile de gerçekten damgalanan
+        // satırlar geri okunur.
+        //
+        // İD LİSTESİNİN YANINDA YÜKLEM DE DURUR. Liste, sayım anındaki bir
+        // FOTOĞRAFTIR; `openEarningWhere` satırın damga anında HÂLÂ açık
+        // (bekleyen + partisiz) olduğunu yeniden ileri sürer. Böylece "bir
+        // hakediş, tam olarak bir parti" kuralı SQL'de kendini korur ve yalnız
+        // kilide yaslanmaz: kilit bir gün delinirse yüklem satırı eler, damga
+        // eksik döner ve claimEarningsIntoPayout partiyi kurmadan geri alır.
+        // Yüklem olmasaydı başka bir partiye AİT satır sessizce ÇALINIRDI —
+        // sayım ile damga eşit kalacağı için algoritmanın son denetimi de bunu
+        // göremezdi (bkz. scripts/test-cost-lines.ts, "çalınan satır").
+        stamp: async (payoutId, ids) =>
+          await tx
+            .update(manufacturerEarnings)
+            .set({ payoutId, updatedAt: new Date() })
+            .where(
+              and(
+                inArray(manufacturerEarnings.id, ids),
+                openEarningWhere(manufacturerEarnings)
+              )
+            )
+            .returning({
+              id: manufacturerEarnings.id,
+              netKurus: manufacturerEarnings.netKurus,
+            }),
+        writeBatchTotals: async (payoutId, totalKurus, earningCount) => {
+          await tx
+            .update(payouts)
+            .set({ totalKurus, earningCount })
+            .where(eq(payouts.id, payoutId));
+        },
+      });
+    });
+    return batch ? { ok: true, ...batch } : { ok: false, reason: "nothing_owed" };
+  } catch (e) {
+    // Kilit beklemesi ya da sayım/damga ayrışması: işlem geri alındı, hiçbir
+    // parti kurulmadı. Ekranın gösterebileceği bir sebep dönmeli.
+    if (isPayoutLockBusy(e) || e instanceof PayoutClaimRaceError) {
+      console.warn(
+        `[payout] manufacturer ${manufacturerId}: parti kurulamadı (eşzamanlı ödeme işlemi)`,
+        e
+      );
+      return { ok: false, reason: "busy" };
+    }
+    throw e;
+  }
+}
+
+/**
+ * "Ödendi işaretle"nin sonucu.
+ *
+ * `mismatch`: partinin İDDİA ettiği tutar ile ARKASINDA duran hakedişler
+ * uyuşmuyor. Ölçülen hâl, yarışın bıraktığı hayalet partiydi: 0 hakediş tutan
+ * bir parti "6 sipariş · ₺12.600,00" diyordu ve işaretlenebiliyordu — ödeme
+ * bildirimi gidiyor, tek bir hakediş kapanmıyordu. Okuma bir kapıyı besliyor,
+ * o yüzden KAPALI tarafa düşer: uyuşmuyorsa hiçbir şey yazılmaz.
+ */
+export type PayoutPaidResult =
+  | { ok: true; manufacturerId: string; totalKurus: number }
+  | { ok: false; reason: "not_found" }
+  | {
+      ok: false;
+      reason: "mismatch";
+      statedKurus: number;
+      statedCount: number;
+      heldKurus: number;
+      heldCount: number;
+    };
+
+// Mark a pending payout paid → its earnings flip to "paid". Idempotent.
+export async function markPayoutPaid(
+  payoutId: string,
+  reference: string | null
+): Promise<PayoutPaidResult> {
   return db.transaction(async (tx) => {
-    const pending = await tx
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    // Parti satırı KİLİTLENEREK okunur: ödeme sırasında ne ikinci bir
+    // işaretleme ne de partinin silinmesi araya girebilsin.
+    const [payout] = await tx
       .select({
-        id: manufacturerEarnings.id,
-        netKurus: manufacturerEarnings.netKurus,
+        id: payouts.id,
+        manufacturerId: payouts.manufacturerId,
+        totalKurus: payouts.totalKurus,
+        earningCount: payouts.earningCount,
+      })
+      .from(payouts)
+      .where(and(eq(payouts.id, payoutId), eq(payouts.status, "pending")))
+      .for("update");
+    if (!payout) return { ok: false, reason: "not_found" };
+
+    // Partinin GERÇEKTEN kapatacağı para: `paid` yapılacak satırların aynısı
+    // (çevrilmiş satırlar dışarıda — onlar zaten `paid` olmayacak).
+    const [held] = await tx
+      .select({
+        heldCount: sql<number>`count(*)::int`,
+        heldKurus: sql<number>`coalesce(sum(${manufacturerEarnings.netKurus}), 0)::int`,
       })
       .from(manufacturerEarnings)
       .where(
         and(
-          eq(manufacturerEarnings.manufacturerId, manufacturerId),
-          eq(manufacturerEarnings.status, "pending"),
-          isNull(manufacturerEarnings.payoutId)
+          eq(manufacturerEarnings.payoutId, payoutId),
+          ne(manufacturerEarnings.status, "reversed")
         )
       );
-    if (pending.length === 0) return null;
-    const totalKurus = pending.reduce((s, e) => s + e.netKurus, 0);
-    const [payout] = await tx
-      .insert(payouts)
-      .values({
-        manufacturerId,
-        totalKurus,
-        earningCount: pending.length,
-        adminEmail,
-        status: "pending",
+    const heldCount = Number(held?.heldCount ?? 0);
+    const heldKurus = Number(held?.heldKurus ?? 0);
+    if (
+      !payoutHoldsWhatItClaims({
+        statedKurus: payout.totalKurus,
+        statedCount: payout.earningCount,
+        heldKurus,
+        heldCount,
       })
-      .returning({ id: payouts.id });
-    await tx
-      .update(manufacturerEarnings)
-      .set({ payoutId: payout.id, updatedAt: new Date() })
-      .where(
-        and(
-          eq(manufacturerEarnings.manufacturerId, manufacturerId),
-          eq(manufacturerEarnings.status, "pending"),
-          isNull(manufacturerEarnings.payoutId)
-        )
+    ) {
+      console.error(
+        `[payout] ${payoutId}: parti ${payout.totalKurus} kuruş / ${payout.earningCount} sipariş diyor ama ${heldKurus} kuruş / ${heldCount} sipariş tutuyor — ödendi işaretlenmedi`
       );
-    return { payoutId: payout.id, totalKurus, count: pending.length };
-  });
-}
+      return {
+        ok: false,
+        reason: "mismatch",
+        statedKurus: payout.totalKurus,
+        statedCount: payout.earningCount,
+        heldKurus,
+        heldCount,
+      };
+    }
 
-// Mark a pending payout paid → its earnings flip to "paid". Idempotent.
-// Returns the manufacturerId + total on success (for notification), or null if
-// the payout was not found / already paid.
-export async function markPayoutPaid(
-  payoutId: string,
-  reference: string | null
-): Promise<{ manufacturerId: string; totalKurus: number } | null> {
-  return db.transaction(async (tx) => {
-    const [payout] = await tx
+    await tx
       .update(payouts)
       .set({ status: "paid", paidAt: new Date(), reference })
-      .where(and(eq(payouts.id, payoutId), eq(payouts.status, "pending")))
-      .returning({
-        id: payouts.id,
-        manufacturerId: payouts.manufacturerId,
-        totalKurus: payouts.totalKurus,
-      });
-    if (!payout) return null;
+      .where(eq(payouts.id, payoutId));
     // Never resurrect an earning that was reversed (refund/clawback) after it
     // was batched — only flip the still-pending ones to paid.
     await tx
@@ -245,7 +415,52 @@ export async function markPayoutPaid(
           ne(manufacturerEarnings.status, "reversed")
         )
       );
-    return { manufacturerId: payout.manufacturerId, totalKurus: payout.totalKurus };
+    return { ok: true, manufacturerId: payout.manufacturerId, totalKurus: payout.totalKurus };
+  });
+}
+
+/**
+ * HİÇBİR HAK EDİŞ TUTMAYAN bekleyen partiyi siler.
+ *
+ * Neden var: "Ödendi işaretle" artık uyuşmayan partiyi reddediyor; reddedilen
+ * parti kuyrukta kalır ve admin'in elinde onu kapatacak hiçbir denetim
+ * olmazdı — ekranın sunduğu her denetimin cevap veren bir ucu olmalı. Silme
+ * bilerek DAR: yalnız `pending` ve arkasında TEK SATIR OLMAYAN parti. Para
+ * tutan bir parti asla silinmez (hakedişler de partisiz kalmaz); onlar için
+ * cevap yine rettir.
+ *
+ * İki kaynak üretir: (1) düzeltmeden önceki yarışın bıraktığı hayalet partiler,
+ * (2) bütün hakedişleri iade yüzünden geri alınmış, içi boşalmış partiler.
+ */
+export type PayoutDeleteResult =
+  | { ok: true; manufacturerId: string }
+  | { ok: false; reason: "not_found" | "already_paid" }
+  | { ok: false; reason: "has_earnings"; heldCount: number };
+
+export async function deleteEmptyPayout(payoutId: string): Promise<PayoutDeleteResult> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    const [payout] = await tx
+      .select({
+        id: payouts.id,
+        manufacturerId: payouts.manufacturerId,
+        status: payouts.status,
+      })
+      .from(payouts)
+      .where(eq(payouts.id, payoutId))
+      .for("update");
+    if (!payout) return { ok: false, reason: "not_found" };
+    if (payout.status !== "pending") return { ok: false, reason: "already_paid" };
+    // Çevrilmiş satır da sayılır: parti hâlâ ona referansla duruyor olabilir ve
+    // silmek yabancı anahtarı düşürürdü.
+    const [held] = await tx
+      .select({ heldCount: sql<number>`count(*)::int` })
+      .from(manufacturerEarnings)
+      .where(eq(manufacturerEarnings.payoutId, payoutId));
+    const heldCount = Number(held?.heldCount ?? 0);
+    if (heldCount > 0) return { ok: false, reason: "has_earnings", heldCount };
+    await tx.delete(payouts).where(eq(payouts.id, payoutId));
+    return { ok: true, manufacturerId: payout.manufacturerId };
   });
 }
 

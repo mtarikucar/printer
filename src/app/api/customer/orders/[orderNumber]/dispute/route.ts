@@ -4,13 +4,14 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, disputes } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 const schema = z.object({
   category: z.enum(["not_as_described", "damaged", "not_received", "other"]),
   description: z.string().trim().min(5).max(2000),
 });
 
-export async function GET(
+async function handleGET(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -41,7 +42,7 @@ export async function GET(
   });
 }
 
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -81,4 +82,30 @@ export async function POST(
     description: parsed.data.description,
   });
   return NextResponse.json({ success: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handleGET(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/orders/[orderNumber]/dispute", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/customer/orders/[orderNumber]/dispute", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

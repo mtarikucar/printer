@@ -156,6 +156,44 @@ export const ASSIGN_FAILURE_MESSAGES: Record<AssignFailure, string> = {
     "Bu sipariş bir satıcının kendi kataloğundan çıktı: yalnız o atölyeye atanabilir, başka bir atölyeye verilemez.",
 };
 
+/**
+ * Atamanın NEDEN bu atölyeye düştüğü — denetim satırının ikinci yarısı.
+ *
+ * "Kim atadı" sorusunun cevabı zaten `adminEmail`de duruyordu; "bu iş buraya
+ * nasıl seçildi" sorusununki hiçbir yerde durmuyordu. Eski yedek not bir de
+ * İNGİLİZCEYDİ ("Assigned to X") ve Türkçe sipariş geçmişinin tam ortasında
+ * öylece duruyordu — tarama yolu onu artık rutin olarak üretiyor.
+ *
+ * Varsayılan `admin_manual`dır, çünkü gerekçe GÖNDERMEYEN her çağıran (tek
+ * atama rotası, toplu atama, geri alma sonrası devir) admin'in ekranda
+ * seçtiği atölyeyi yazar. Otomatik yollar kendi üyelerini gönderir.
+ */
+export type AssignSelectionBasis =
+  | "admin_manual"
+  | "auto_ranking"
+  | "auto_seller"
+  | "decline_retry"
+  | "sweep_ranking"
+  | "sweep_seller"
+  | "sweep_screen_confirmed";
+
+/**
+ * Gerekçelerin Türkçe karşılığı. `AssignSelectionBasis` üzerine tiplenmiştir:
+ * yeni bir gerekçe eklemek, etiketi unutulduğunda DERLEME hatası verir —
+ * çalışma anında "undefined" yazan bir denetim notu değil.
+ */
+export const ASSIGN_SELECTION_BASIS_TR: Record<AssignSelectionBasis, string> = {
+  admin_manual: "admin elle seçti",
+  auto_ranking: "otomatik atama, sıralama seçti",
+  auto_seller: "otomatik atama, ürünün sahibi satıcı atölyesi (sıralama dışı)",
+  decline_retry: "önceki üretici reddetti, sıralama yeni atölyeyi seçti",
+  sweep_ranking: "atama taraması, sıralamanın önerdiği atölyeyi admin onayladı",
+  sweep_seller:
+    "atama taraması, ürünün sahibi satıcı atölyesi (sıralama dışı) — admin onayladı",
+  sweep_screen_confirmed:
+    "atama taraması, aynı onaydaki atamalar sıralamayı değiştirdi; admin'in ekranda onayladığı (hâlâ uygun) atölye kullanıldı",
+};
+
 /* ────────────────────────────────────────────────────────────────────────────
  * PAZARYERİ MÜLKİYET KURALI (E-C1)
  *
@@ -289,6 +327,11 @@ export interface AssignArgs {
   allowSellerOverride?: boolean;
   /** Aşmanın denetim satırına yazılan gerekçesi. Aşma varsa ZORUNLUDUR. */
   sellerOverrideReason?: string;
+  /**
+   * Bu atölye NASIL seçildi — denetim satırı bunu yazar. Gönderilmezse
+   * "admin elle seçti" varsayılır (ekrandan yapılan atamanın hâli budur).
+   */
+  selectionBasis?: AssignSelectionBasis;
 }
 
 /**
@@ -439,9 +482,12 @@ export async function assignManufacturerToOrder(
     // nasıl gitti" sorusunun cevabı yalnızca burada durur.
     const sellerLabel =
       ownership.sellerName ?? ownership.sellerManufacturerId ?? "bilinmeyen satıcı";
+    // Yedek not TÜRKÇEDİR ve atölyenin NASIL seçildiğini söyler: aynı listede
+    // duran diğer notlar ("Atama geri alındı: …") Türkçe ve sebepliyken, bu
+    // satır tek başına İngilizce ve sebepsizdi.
     const notes = sellerBreach
       ? `SATICI KURALI AŞILDI: ürünün sahibi ${sellerLabel}, sipariş ${manufacturer.companyName} atölyesine atandı. Gerekçe: ${overrideReason}`
-      : `Assigned to ${manufacturer.companyName}`;
+      : `Üretici atandı: ${manufacturer.companyName} — ${ASSIGN_SELECTION_BASIS_TR[args.selectionBasis ?? "admin_manual"]}.`;
     try {
       await db.insert(adminActions).values({
         orderId,

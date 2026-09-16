@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { painters } from "@/lib/db/schema";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 import { notifyPainter } from "@/lib/services/painter-notifications";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Admin, boyacının ATAMA GİRDİLERİNİ düzeltir. Üretici karşılığıyla aynı
@@ -88,134 +89,138 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-  const { id } = await params;
-  if (!UUID_RE.test(id)) {
-    return NextResponse.json({ error: "Boyacı bulunamadı" }, { status: 404 });
-  }
-
-  const parsed = patchSchema.safeParse(await request.json().catch(() => ({})));
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Geçersiz istek" },
-      { status: 400 }
-    );
-  }
-  const body = parsed.data;
-
-  const current = await db.query.painters.findFirst({
-    where: eq(painters.id, id),
-    columns: {
-      id: true,
-      status: true,
-      maxConcurrentOrders: true,
-      acceptingOrders: true,
-      capabilities: true,
-      notes: true,
-    },
-  });
-  if (!current) {
-    return NextResponse.json({ error: "Boyacı bulunamadı" }, { status: 404 });
-  }
-
-  const patch: Partial<typeof painters.$inferInsert> = {};
-  const changes: string[] = [];
-
-  if (
-    body.maxConcurrentOrders !== undefined &&
-    body.maxConcurrentOrders !== current.maxConcurrentOrders
-  ) {
-    patch.maxConcurrentOrders = body.maxConcurrentOrders;
-    changes.push(
-      `Eş zamanlı iş limiti: ${current.maxConcurrentOrders} → ${body.maxConcurrentOrders}`
-    );
-  }
-
-  if (body.acceptingOrders !== undefined && body.acceptingOrders !== current.acceptingOrders) {
-    patch.acceptingOrders = body.acceptingOrders;
-    changes.push(
-      `İş alıyor: ${current.acceptingOrders ? "Evet" : "Hayır"} → ${body.acceptingOrders ? "Evet" : "Hayır"}`
-    );
-  }
-
-  const currentTags = Array.isArray(current.capabilities)
-    ? current.capabilities.filter((t): t is string => typeof t === "string")
-    : [];
-  if (body.capabilities !== undefined) {
-    // Boyacıda capabilities SADECE teknik etiketi tutuyor (üreticinin aksine
-    // yönlendirme etiketi yok), bu yüzden gelen küme diziyi tamamen değiştirir.
-    const nextTags = [...new Set(body.capabilities)];
-    if ([...currentTags].sort().join(",") !== [...nextTags].sort().join(",")) {
-      patch.capabilities = nextTags;
-      changes.push(`Teknikler: ${techniqueText(currentTags)} → ${techniqueText(nextTags)}`);
+    const { id } = await params;
+    if (!UUID_RE.test(id)) {
+      return NextResponse.json({ error: "Boyacı bulunamadı" }, { status: 404 });
     }
-  }
 
-  // Hiçbir alan gerçekten değişmediyse iz satırı da bildirim de yazılmaz.
-  if (changes.length === 0) {
-    return NextResponse.json({
-      success: true,
-      changed: [],
-      message: "Değişen alan yok; kayıt aynı kaldı.",
-      painter: {
-        id: current.id,
-        maxConcurrentOrders: current.maxConcurrentOrders,
-        acceptingOrders: current.acceptingOrders,
-        capabilities: currentTags,
-        notes: current.notes,
+    const parsed = patchSchema.safeParse(await request.json().catch(() => ({})));
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Geçersiz istek" },
+        { status: 400 }
+      );
+    }
+    const body = parsed.data;
+
+    const current = await db.query.painters.findFirst({
+      where: eq(painters.id, id),
+      columns: {
+        id: true,
+        status: true,
+        maxConcurrentOrders: true,
+        acceptingOrders: true,
+        capabilities: true,
+        notes: true,
       },
     });
-  }
+    if (!current) {
+      return NextResponse.json({ error: "Boyacı bulunamadı" }, { status: 404 });
+    }
 
-  const line = formatAdminNoteLine(
-    `Atama girdileri güncellendi (${a.session.user.email}): ${changes.join("; ")} — Gerekçe: ${body.reason}`
-  );
+    const patch: Partial<typeof painters.$inferInsert> = {};
+    const changes: string[] = [];
 
-  const [updated] = await db
-    .update(painters)
-    .set({
-      ...patch,
-      // Birleştirme SQL tarafında: iki admin aynı anda kaydederse biri
-      // diğerinin notunu ezmesin (tax-review rotasıyla aynı kural).
-      notes: sql`CASE WHEN ${painters.notes} IS NULL OR ${painters.notes} = '' THEN ${line} ELSE ${painters.notes} || E'\n' || ${line} END`,
-      updatedAt: new Date(),
-    })
-    .where(eq(painters.id, id))
-    .returning({
-      id: painters.id,
-      maxConcurrentOrders: painters.maxConcurrentOrders,
-      acceptingOrders: painters.acceptingOrders,
-      capabilities: painters.capabilities,
-      notes: painters.notes,
+    if (
+      body.maxConcurrentOrders !== undefined &&
+      body.maxConcurrentOrders !== current.maxConcurrentOrders
+    ) {
+      patch.maxConcurrentOrders = body.maxConcurrentOrders;
+      changes.push(
+        `Eş zamanlı iş limiti: ${current.maxConcurrentOrders} → ${body.maxConcurrentOrders}`
+      );
+    }
+
+    if (body.acceptingOrders !== undefined && body.acceptingOrders !== current.acceptingOrders) {
+      patch.acceptingOrders = body.acceptingOrders;
+      changes.push(
+        `İş alıyor: ${current.acceptingOrders ? "Evet" : "Hayır"} → ${body.acceptingOrders ? "Evet" : "Hayır"}`
+      );
+    }
+
+    const currentTags = Array.isArray(current.capabilities)
+      ? current.capabilities.filter((t): t is string => typeof t === "string")
+      : [];
+    if (body.capabilities !== undefined) {
+      // Boyacıda capabilities SADECE teknik etiketi tutuyor (üreticinin aksine
+      // yönlendirme etiketi yok), bu yüzden gelen küme diziyi tamamen değiştirir.
+      const nextTags = [...new Set(body.capabilities)];
+      if ([...currentTags].sort().join(",") !== [...nextTags].sort().join(",")) {
+        patch.capabilities = nextTags;
+        changes.push(`Teknikler: ${techniqueText(currentTags)} → ${techniqueText(nextTags)}`);
+      }
+    }
+
+    // Hiçbir alan gerçekten değişmediyse iz satırı da bildirim de yazılmaz.
+    if (changes.length === 0) {
+      return NextResponse.json({
+        success: true,
+        changed: [],
+        message: "Değişen alan yok; kayıt aynı kaldı.",
+        painter: {
+          id: current.id,
+          maxConcurrentOrders: current.maxConcurrentOrders,
+          acceptingOrders: current.acceptingOrders,
+          capabilities: currentTags,
+          notes: current.notes,
+        },
+      });
+    }
+
+    const line = formatAdminNoteLine(
+      `Atama girdileri güncellendi (${a.session.user.email}): ${changes.join("; ")} — Gerekçe: ${body.reason}`
+    );
+
+    const [updated] = await db
+      .update(painters)
+      .set({
+        ...patch,
+        // Birleştirme SQL tarafında: iki admin aynı anda kaydederse biri
+        // diğerinin notunu ezmesin (tax-review rotasıyla aynı kural).
+        notes: sql`CASE WHEN ${painters.notes} IS NULL OR ${painters.notes} = '' THEN ${line} ELSE ${painters.notes} || E'\n' || ${line} END`,
+        updatedAt: new Date(),
+      })
+      .where(eq(painters.id, id))
+      .returning({
+        id: painters.id,
+        maxConcurrentOrders: painters.maxConcurrentOrders,
+        acceptingOrders: painters.acceptingOrders,
+        capabilities: painters.capabilities,
+        notes: painters.notes,
+      });
+
+    if (!updated) {
+      return NextResponse.json({ error: "Boyacı bulunamadı" }, { status: 404 });
+    }
+
+    // Reddedilmiş başvuruya bildirim gitmez — hesap kapalı, e-posta gürültü olur.
+    // Bildirim hatası yazmayı geri almaz (kayıt zaten tamamlandı).
+    if (current.status !== "rejected") {
+      await notifyPainter({
+        painterId: id,
+        type: "admin_message",
+        subject: "Boyama ayarlarınız güncellendi",
+        body:
+          `Yöneticimiz boyama ayarlarınızı güncelledi:\n\n` +
+          changes.map((c) => `• ${c}`).join("\n") +
+          `\n\nGerekçe: ${body.reason}\n\n` +
+          `Bu ayarlar size yönlendirilen iş sayısını doğrudan etkiler. Yanlış olduğunu düşünüyorsanız panelinizden düzeltebilir ya da bize yazabilirsiniz.`,
+      }).catch((e) => console.error("notifyPainter (ranker inputs) failed", e));
+    }
+
+    return NextResponse.json({
+      success: true,
+      changed: changes,
+      painter: {
+        ...updated,
+        capabilities: Array.isArray(updated.capabilities) ? updated.capabilities : [],
+      },
     });
-
-  if (!updated) {
-    return NextResponse.json({ error: "Boyacı bulunamadı" }, { status: 404 });
+  } catch (e) {
+    return handleRouteFailure(e, "PATCH /api/admin/painters/[id]", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  // Reddedilmiş başvuruya bildirim gitmez — hesap kapalı, e-posta gürültü olur.
-  // Bildirim hatası yazmayı geri almaz (kayıt zaten tamamlandı).
-  if (current.status !== "rejected") {
-    await notifyPainter({
-      painterId: id,
-      type: "admin_message",
-      subject: "Boyama ayarlarınız güncellendi",
-      body:
-        `Yöneticimiz boyama ayarlarınızı güncelledi:\n\n` +
-        changes.map((c) => `• ${c}`).join("\n") +
-        `\n\nGerekçe: ${body.reason}\n\n` +
-        `Bu ayarlar size yönlendirilen iş sayısını doğrudan etkiler. Yanlış olduğunu düşünüyorsanız panelinizden düzeltebilir ya da bize yazabilirsiniz.`,
-    }).catch((e) => console.error("notifyPainter (ranker inputs) failed", e));
-  }
-
-  return NextResponse.json({
-    success: true,
-    changed: changes,
-    painter: {
-      ...updated,
-      capabilities: Array.isArray(updated.capabilities) ? updated.capabilities : [],
-    },
-  });
 }

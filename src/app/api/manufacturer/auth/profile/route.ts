@@ -20,6 +20,7 @@ import {
   paintingImpact,
   type PaintingImpact,
 } from "@/lib/services/painting-impact";
+import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR, PARTNER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Yalnız biçimlendirme (para hesabı değil): partnere gösterilen tutar lira.
 const tl = (kurus: number) =>
@@ -78,212 +79,220 @@ const SENSITIVE_FIELDS = [
  * fonksiyondan (ve dolayısıyla kargo ucunun kullandığı tabandan) gelir.
  */
 export async function GET() {
-  const session = await getManufacturerSession();
-  if (!session) {
-    return NextResponse.json({ error: "Oturum açık değil." }, { status: 401 });
+  try {
+    const session = await getManufacturerSession();
+    if (!session) {
+      return NextResponse.json({ error: "Oturum açık değil." }, { status: 401 });
+    }
+    const current = await db.query.manufacturers.findFirst({
+      where: eq(manufacturers.id, session.manufacturerId),
+      columns: { id: true, paintsInHouse: true },
+    });
+    if (!current) {
+      return NextResponse.json({ error: "Üretici kaydı bulunamadı." }, { status: 404 });
+    }
+    // Tek anlamlı soru bayrağın TERSİ: form yalnız değeri çevirdiğinde sorar.
+    const impact = await paintingImpact(
+      current.id,
+      current.paintsInHouse,
+      !current.paintsInHouse
+    );
+    return NextResponse.json({ paintsInHouse: current.paintsInHouse, impact });
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/manufacturer/auth/profile", PARTNER_READ_FAILED_ERROR);
   }
-  const current = await db.query.manufacturers.findFirst({
-    where: eq(manufacturers.id, session.manufacturerId),
-    columns: { id: true, paintsInHouse: true },
-  });
-  if (!current) {
-    return NextResponse.json({ error: "Üretici kaydı bulunamadı." }, { status: 404 });
-  }
-  // Tek anlamlı soru bayrağın TERSİ: form yalnız değeri çevirdiğinde sorar.
-  const impact = await paintingImpact(
-    current.id,
-    current.paintsInHouse,
-    !current.paintsInHouse
-  );
-  return NextResponse.json({ paintsInHouse: current.paintsInHouse, impact });
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await getManufacturerSession();
-  if (!session) {
-    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
-  }
+  try {
+    const session = await getManufacturerSession();
+    if (!session) {
+      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+    }
 
-  const rl = await rateLimitAsync(
-    `mfr-profile:${session.manufacturerId}`,
-    30,
-    60 * 60 * 1000
-  );
-  if (!rl.success) {
-    return NextResponse.json(
-      { error: "Too many profile updates. Please wait." },
-      { status: 429 }
+    const rl = await rateLimitAsync(
+      `mfr-profile:${session.manufacturerId}`,
+      30,
+      60 * 60 * 1000
     );
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  let validated: z.infer<typeof profileSchema>;
-  try {
-    validated = profileSchema.parse(body);
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      // Name the offending field. A bare "Too small: expected string to have
-      // >=2 characters" tells a partner nothing about WHICH box to fix.
-      const issue = err.issues[0];
-      const field = issue?.path.join(".");
+    if (!rl.success) {
       return NextResponse.json(
-        {
-          error: issue
-            ? `${field ? `${field}: ` : ""}${issue.message}`
-            : "Validation failed",
-        },
-        { status: 400 }
+        { error: "Too many profile updates. Please wait." },
+        { status: 429 }
       );
     }
-    throw err;
-  }
 
-  // Load current row so we can check status and detect IBAN changes.
-  const current = await db.query.manufacturers.findFirst({
-    where: eq(manufacturers.id, session.manufacturerId),
-  });
-  if (!current) {
-    return NextResponse.json({ error: "Manufacturer not found" }, { status: 404 });
-  }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
 
-  const wantsSensitiveChange = SENSITIVE_FIELDS.some(
-    (k) => (validated as Record<string, unknown>)[k] !== undefined
-  );
-  if (wantsSensitiveChange && current.status !== "active") {
-    return NextResponse.json(
-      {
-        error:
-          "Hesabınız henüz aktif değil. Banka bilgileri ve sipariş ayarları yalnızca onaylı hesaplarda değiştirilebilir.",
-      },
-      { status: 403 }
+    let validated: z.infer<typeof profileSchema>;
+    try {
+      validated = profileSchema.parse(body);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        // Name the offending field. A bare "Too small: expected string to have
+        // >=2 characters" tells a partner nothing about WHICH box to fix.
+        const issue = err.issues[0];
+        const field = issue?.path.join(".");
+        return NextResponse.json(
+          {
+            error: issue
+              ? `${field ? `${field}: ` : ""}${issue.message}`
+              : "Validation failed",
+          },
+          { status: 400 }
+        );
+      }
+      throw err;
+    }
+
+    // Load current row so we can check status and detect IBAN changes.
+    const current = await db.query.manufacturers.findFirst({
+      where: eq(manufacturers.id, session.manufacturerId),
+    });
+    if (!current) {
+      return NextResponse.json({ error: "Manufacturer not found" }, { status: 404 });
+    }
+
+    const wantsSensitiveChange = SENSITIVE_FIELDS.some(
+      (k) => (validated as Record<string, unknown>)[k] !== undefined
     );
-  }
-
-  // PARA KAPISI — "kendi boyama" bir tercih kutusu değil, hakediş girdisidir:
-  // boyamalı siparişte üreticiye ödenecek taban bu bayraktan türer
-  // (services/earning-base.ts → manufacturerBaseKurus) ve kargo ucu bayrağı
-  // CANLI okur. Partner bayrağı kendi panelinden çevirdiğinde ELİNDE DURAN
-  // boyalı siparişlerin ödemesi de değişiyordu; üstelik uyarı, onay ve iz
-  // olmadan. Admin tarafındaki kuralın aynısı burada da işler: etkiyi göster,
-  // ayrı onay iste, iz bırak. Fark yalnız dilde — burada partnerin kendisi
-  // okuyor.
-  let paintingChange: PaintingImpact | null = null;
-  if (
-    validated.paintsInHouse !== undefined &&
-    validated.paintsInHouse !== current.paintsInHouse
-  ) {
-    const impact = await paintingImpact(
-      session.manufacturerId,
-      current.paintsInHouse,
-      validated.paintsInHouse
-    );
-    if (impact.count > 0 && validated.paintsInHouseAck !== true) {
+    if (wantsSensitiveChange && current.status !== "active") {
       return NextResponse.json(
         {
-          error: `Bu değişiklik devam eden ${impact.count} boyalı siparişinizde hakediş tabanınızı toplam ${tl(Math.abs(impact.totalDeltaKurus))} ${impact.totalDeltaKurus < 0 ? "azaltır" : "artırır"}. Kaydetmek için ödeme etkisini onaylayın.`,
-          needsPaintingAck: true,
-          impact,
+          error:
+            "Hesabınız henüz aktif değil. Banka bilgileri ve sipariş ayarları yalnızca onaylı hesaplarda değiştirilebilir.",
         },
-        { status: 409 }
+        { status: 403 }
       );
     }
-    paintingChange = impact;
-  }
 
-  const update: Partial<typeof manufacturers.$inferInsert> = {};
-  if (validated.contactPerson !== undefined) update.contactPerson = validated.contactPerson;
-  if (validated.phone !== undefined) update.phone = validated.phone;
-  if (validated.whatsappPhone !== undefined) update.whatsappPhone = validated.whatsappPhone;
-  if (validated.address) {
-    const a = validated.address;
-    update.address = {
-      adres: a.adres,
-      mahalle: a.mahalle,
-      ilce: a.ilce,
-      il: a.il,
-      postaKodu: a.postaKodu,
-      telefon: a.telefon,
-    } satisfies TurkishAddress;
-  }
-  // The live IBAN is NEVER written from here. It used to be: a changed IBAN
-  // went straight into the column payouts read, with only a tax-review flag as
-  // trace, so it skipped the admin review queue (/admin/kyc-queue) entirely.
-  // The profile page now sends IBAN changes to /api/manufacturer/iban. This
-  // branch only exists for a page loaded before that change, which still posts
-  // `iban`: a changed value is parked for review exactly as that route does,
-  // and the unchanged value the old page always echoes back is ignored.
-  // requiresManualTaxReview is no longer set here: the review IS the re-check,
-  // and the flag (which nothing could clear) cost the shop 40 ranking points.
-  let ibanPending = false;
-  if (
-    validated.iban !== undefined &&
-    validated.iban !== current.iban &&
-    !(current.ibanReviewStatus === "pending" && validated.iban === current.pendingIban)
-  ) {
-    update.pendingIban = validated.iban;
-    update.ibanReviewStatus = "pending";
-    ibanPending = true;
-  }
-  if (validated.bankAccountHolder !== undefined) update.bankAccountHolder = validated.bankAccountHolder;
-  if (validated.bankName !== undefined) update.bankName = validated.bankName;
-  if (validated.maxConcurrentOrders !== undefined) update.maxConcurrentOrders = validated.maxConcurrentOrders;
-  if (validated.acceptingOrders !== undefined) update.acceptingOrders = validated.acceptingOrders;
-  if (validated.paintsInHouse !== undefined) update.paintsInHouse = validated.paintsInHouse;
-  if (validated.materials !== undefined) {
-    // This form owns ONLY the material_* tags. The same column also holds
-    // routing tags the page never shows or sends (large_format, style_<style>,
-    // …): orderRequirements asks for them and the assignment ranker scores on
-    // them. Replacing the whole array wiped them on every save — and the page
-    // saves the profile after every IBAN change too — so a shop silently fell
-    // out of large-format / storybook routing. Keep everything else as is.
-    const materialTags = [...new Set(validated.materials)].map((m) => `material_${m}`);
-    const otherTags = (Array.isArray(current.capabilities) ? current.capabilities : []).filter(
-      (tag) => typeof tag === "string" && !tag.startsWith("material_")
-    );
-    update.capabilities = [...materialTags, ...otherTags];
-  }
-  update.updatedAt = new Date();
+    // PARA KAPISI — "kendi boyama" bir tercih kutusu değil, hakediş girdisidir:
+    // boyamalı siparişte üreticiye ödenecek taban bu bayraktan türer
+    // (services/earning-base.ts → manufacturerBaseKurus) ve kargo ucu bayrağı
+    // CANLI okur. Partner bayrağı kendi panelinden çevirdiğinde ELİNDE DURAN
+    // boyalı siparişlerin ödemesi de değişiyordu; üstelik uyarı, onay ve iz
+    // olmadan. Admin tarafındaki kuralın aynısı burada da işler: etkiyi göster,
+    // ayrı onay iste, iz bırak. Fark yalnız dilde — burada partnerin kendisi
+    // okuyor.
+    let paintingChange: PaintingImpact | null = null;
+    if (
+      validated.paintsInHouse !== undefined &&
+      validated.paintsInHouse !== current.paintsInHouse
+    ) {
+      const impact = await paintingImpact(
+        session.manufacturerId,
+        current.paintsInHouse,
+        validated.paintsInHouse
+      );
+      if (impact.count > 0 && validated.paintsInHouseAck !== true) {
+        return NextResponse.json(
+          {
+            error: `Bu değişiklik devam eden ${impact.count} boyalı siparişinizde hakediş tabanınızı toplam ${tl(Math.abs(impact.totalDeltaKurus))} ${impact.totalDeltaKurus < 0 ? "azaltır" : "artırır"}. Kaydetmek için ödeme etkisini onaylayın.`,
+            needsPaintingAck: true,
+            impact,
+          },
+          { status: 409 }
+        );
+      }
+      paintingChange = impact;
+    }
 
-  // Partnerin kendi yaptığı PARA etkili değişiklik de iz bırakmalı: admin bu
-  // satırı üretici kartında görür ve "bu siparişte taban neden değişti"
-  // sorusunun cevabı tam olarak budur. (admin_actions satırları bir sipariş
-  // istiyor; partner düzeyindeki kararların başka evi yok.)
-  const paintingNote = paintingChange
-    ? formatAdminNoteLine(
-        `Üretici kendi panelinden "kendi boyama" ayarını değiştirdi: ${current.paintsInHouse ? "Evet" : "Hayır"} → ${validated.paintsInHouse ? "Evet" : "Hayır"} (${impactSentence(paintingChange)})`
-      )
-    : null;
+    const update: Partial<typeof manufacturers.$inferInsert> = {};
+    if (validated.contactPerson !== undefined) update.contactPerson = validated.contactPerson;
+    if (validated.phone !== undefined) update.phone = validated.phone;
+    if (validated.whatsappPhone !== undefined) update.whatsappPhone = validated.whatsappPhone;
+    if (validated.address) {
+      const a = validated.address;
+      update.address = {
+        adres: a.adres,
+        mahalle: a.mahalle,
+        ilce: a.ilce,
+        il: a.il,
+        postaKodu: a.postaKodu,
+        telefon: a.telefon,
+      } satisfies TurkishAddress;
+    }
+    // The live IBAN is NEVER written from here. It used to be: a changed IBAN
+    // went straight into the column payouts read, with only a tax-review flag as
+    // trace, so it skipped the admin review queue (/admin/kyc-queue) entirely.
+    // The profile page now sends IBAN changes to /api/manufacturer/iban. This
+    // branch only exists for a page loaded before that change, which still posts
+    // `iban`: a changed value is parked for review exactly as that route does,
+    // and the unchanged value the old page always echoes back is ignored.
+    // requiresManualTaxReview is no longer set here: the review IS the re-check,
+    // and the flag (which nothing could clear) cost the shop 40 ranking points.
+    let ibanPending = false;
+    if (
+      validated.iban !== undefined &&
+      validated.iban !== current.iban &&
+      !(current.ibanReviewStatus === "pending" && validated.iban === current.pendingIban)
+    ) {
+      update.pendingIban = validated.iban;
+      update.ibanReviewStatus = "pending";
+      ibanPending = true;
+    }
+    if (validated.bankAccountHolder !== undefined) update.bankAccountHolder = validated.bankAccountHolder;
+    if (validated.bankName !== undefined) update.bankName = validated.bankName;
+    if (validated.maxConcurrentOrders !== undefined) update.maxConcurrentOrders = validated.maxConcurrentOrders;
+    if (validated.acceptingOrders !== undefined) update.acceptingOrders = validated.acceptingOrders;
+    if (validated.paintsInHouse !== undefined) update.paintsInHouse = validated.paintsInHouse;
+    if (validated.materials !== undefined) {
+      // This form owns ONLY the material_* tags. The same column also holds
+      // routing tags the page never shows or sends (large_format, style_<style>,
+      // …): orderRequirements asks for them and the assignment ranker scores on
+      // them. Replacing the whole array wiped them on every save — and the page
+      // saves the profile after every IBAN change too — so a shop silently fell
+      // out of large-format / storybook routing. Keep everything else as is.
+      const materialTags = [...new Set(validated.materials)].map((m) => `material_${m}`);
+      const otherTags = (Array.isArray(current.capabilities) ? current.capabilities : []).filter(
+        (tag) => typeof tag === "string" && !tag.startsWith("material_")
+      );
+      update.capabilities = [...materialTags, ...otherTags];
+    }
+    update.updatedAt = new Date();
 
-  await db
-    .update(manufacturers)
-    .set({
-      ...update,
-      // Not SQL tarafında eklenir: admin aynı anda yazarsa biri diğerinin
-      // notunu ezmesin (admin rotasıyla aynı kural).
-      ...(paintingNote
-        ? {
-            notes: sql`CASE WHEN ${manufacturers.notes} IS NULL OR ${manufacturers.notes} = '' THEN ${paintingNote} ELSE ${manufacturers.notes} || E'\n' || ${paintingNote} END`,
-          }
-        : {}),
-    })
-    .where(eq(manufacturers.id, session.manufacturerId));
+    // Partnerin kendi yaptığı PARA etkili değişiklik de iz bırakmalı: admin bu
+    // satırı üretici kartında görür ve "bu siparişte taban neden değişti"
+    // sorusunun cevabı tam olarak budur. (admin_actions satırları bir sipariş
+    // istiyor; partner düzeyindeki kararların başka evi yok.)
+    const paintingNote = paintingChange
+      ? formatAdminNoteLine(
+          `Üretici kendi panelinden "kendi boyama" ayarını değiştirdi: ${current.paintsInHouse ? "Evet" : "Hayır"} → ${validated.paintsInHouse ? "Evet" : "Hayır"} (${impactSentence(paintingChange)})`
+        )
+      : null;
 
-  return NextResponse.json({
-    success: true,
-    ibanPending,
-    // Kayıttan SONRA da söylenir: partner neyi onayladığını ekranda görmeli.
-    painting:
-      paintingChange && paintingChange.count > 0
-        ? {
-            count: paintingChange.count,
-            totalDeltaKurus: paintingChange.totalDeltaKurus,
-          }
-        : null,
-  });
+    await db
+      .update(manufacturers)
+      .set({
+        ...update,
+        // Not SQL tarafında eklenir: admin aynı anda yazarsa biri diğerinin
+        // notunu ezmesin (admin rotasıyla aynı kural).
+        ...(paintingNote
+          ? {
+              notes: sql`CASE WHEN ${manufacturers.notes} IS NULL OR ${manufacturers.notes} = '' THEN ${paintingNote} ELSE ${manufacturers.notes} || E'\n' || ${paintingNote} END`,
+            }
+          : {}),
+      })
+      .where(eq(manufacturers.id, session.manufacturerId));
+
+    return NextResponse.json({
+      success: true,
+      ibanPending,
+      // Kayıttan SONRA da söylenir: partner neyi onayladığını ekranda görmeli.
+      painting:
+        paintingChange && paintingChange.count > 0
+          ? {
+              count: paintingChange.count,
+              totalDeltaKurus: paintingChange.totalDeltaKurus,
+            }
+          : null,
+    });
+  } catch (e) {
+    return handleRouteFailure(e, "PATCH /api/manufacturer/auth/profile", PARTNER_ACTION_FAILED_ERROR);
+  }
 }

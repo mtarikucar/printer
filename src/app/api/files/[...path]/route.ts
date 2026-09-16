@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFileBuffer, verifyFileSignature } from "@/lib/services/storage";
 import { extname } from "path";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 const MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -38,7 +39,7 @@ const CORS_HEADERS: Record<string, string> = {
 // callers are migrated.
 const REQUIRE_SIGNATURE = process.env.FILES_REQUIRE_SIGNATURE === "1";
 
-export async function OPTIONS() {
+async function handleOPTIONS() {
   // Preflight for any cross-origin loader that adds a non-simple header
   // (e.g. Range). Simple GETs skip this, but answering it is cheap insurance.
   return new NextResponse(null, {
@@ -47,7 +48,7 @@ export async function OPTIONS() {
   });
 }
 
-export async function GET(
+async function handleGET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
@@ -143,9 +144,37 @@ export async function GET(
       },
     });
   } catch {
+    // Dosya okunamadı: ister gerçekten yok, ister disk/izin arızası. Ekrana
+    // (görsel, 3B görüntüleyici, e-postadaki bağlantı) giden tek metin budur.
     return NextResponse.json(
-      { error: "File not found" },
+      { error: "Dosya bulunamadı veya şu anda okunamıyor." },
       { status: 404, headers: CORS_HEADERS }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleOPTIONS` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function OPTIONS() {
+  try {
+    return await handleOPTIONS();
+  } catch (e) {
+    return handleRouteFailure(e, "OPTIONS /api/files/[...path]", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  try {
+    return await handleGET(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/files/[...path]", CUSTOMER_READ_FAILED_ERROR);
   }
 }

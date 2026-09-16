@@ -20,6 +20,7 @@ import {
   WORKSHOP_SHIP_PENDING_EXCLUDED_STATUSES,
 } from "@/lib/config/workshop";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { flagManualAssignment } from "@/lib/services/order-confirm";
 import {
   sellerOwnedPlacementBlocked,
   sellerPlacementGuard,
@@ -508,6 +509,36 @@ export async function closeSession(
           : "seansta üretici yok") +
         `) — atama admin'e kaldı`
     );
+  }
+
+  // MÜLKİYET KURALININ ELEDİĞİ SİPARİŞ, SEBEBİYLE BİRLİKTE admin'e gider.
+  //
+  // Bu siparişler ödenmiş, oranları donmuş ve hiçbir tezgâha yazılmamıştır;
+  // tek çıkışları admin'in elle atamasıdır. Sebebi SÖYLEMEK şart: seansın
+  // üreticisi VARDIR, o yüzden "seansa bir üretici atayın" demek yanlış olurdu
+  // — atanacak üretici zaten var, sadece bu ürünü o basamaz (ürün başka bir
+  // satıcının kataloğundan çıktı). Bildirim parti tamamen elendiğinde de,
+  // kısmen elendiğinde de gider: sipariş, kardeşleri basılıyor diye daha az
+  // öksüz değildir.
+  //
+  // Aynı cümleyi ikinci kez yazmıyoruz: otomatik atamanın "elle atama gerekiyor"
+  // yardımcısı çağrılır (siparişin admin notu + admin e-postası), böylece sahibi
+  // hangi yoldan gelirse gelsin aynı yerde görür. Fırlatmaz.
+  for (const order of outcome.skipped) {
+    await flagManualAssignment({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      reason:
+        "atölye seansı partisi kapandı, ama bu sipariş bir satıcının kendi kataloğundan çıktığı için " +
+        "partinin üreticisine yazılamadı (seansın üreticisi ürünün sahibi değil)",
+    });
+  }
+
+  // Seans DÜZEYİNDEKİ "üreticisiz kapandı" e-postası yalnız gerçekten üretici
+  // yokken gider. Metni ("seansta ön rezerve üretici yok", "seansa bir üretici
+  // atayın") tam olarak o hâli anlatır; mülkiyet kuralına takılan parti için
+  // aynı metni göndermek admin'e var olmayan bir sorunu tarif ederdi.
+  if (outcome.orderCount > 0 && placedCount === 0 && !outcome.manufacturerId) {
     await notifyAdminSessionWithoutManufacturer(sessionId, outcome.orderCount);
   }
 

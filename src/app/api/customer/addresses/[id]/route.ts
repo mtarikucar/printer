@@ -8,6 +8,7 @@ import {
   updateAddress,
 } from "@/lib/services/address-book";
 import { phoneField } from "@/lib/phone";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 const updateSchema = z.object({
   label: z.string().trim().min(1).max(50),
@@ -28,7 +29,7 @@ const patchSchema = z.union([
   z.object({ makeDefault: z.literal(true) }),
 ]);
 
-export async function GET(
+async function handleGET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -44,7 +45,7 @@ export async function GET(
   return NextResponse.json({ address });
 }
 
-export async function PATCH(
+async function handlePATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -77,7 +78,7 @@ export async function PATCH(
   return NextResponse.json({ address: updated });
 }
 
-export async function DELETE(
+async function handleDELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -91,4 +92,43 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   return NextResponse.json({ success: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handleGET(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/addresses/[id]", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePATCH` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handlePATCH(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "PATCH /api/customer/addresses/[id]", CUSTOMER_ACTION_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleDELETE` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function DELETE(_request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handleDELETE(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "DELETE /api/customer/addresses/[id]", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

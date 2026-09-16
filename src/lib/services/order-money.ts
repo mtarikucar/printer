@@ -1,6 +1,7 @@
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, like, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  adminActions,
   manufacturerEarnings,
   manufacturers,
   orderItems,
@@ -11,8 +12,11 @@ import {
   payouts,
 } from "@/lib/db/schema";
 import {
+  SHIP_REVERT_AUDIT_PREFIX,
+  SHIP_REVERT_EARNING_REVERSED_MARKERS,
   deriveOrderMoneyBreakdown,
   type EarningMoneySnapshot,
+  type MoneyReversalRecord,
   type MoneySiblingSnapshot,
   type OrderMoneyBreakdown,
   type OrderMoneySnapshot,
@@ -32,6 +36,62 @@ import { loadCostLineBases } from "@/lib/services/product-cost-lines";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+/**
+ * Denetim kayıtlarından hakediş geri almanın sebebini OKUR (saf; DB yok).
+ *
+ * Kayıtta aranan şey, kargo geri almanın hakedişi GERÇEKTEN çevirdiğini söyleyen
+ * TAM cümledir (SHIP_REVERT_EARNING_REVERSED_MARKERS, cümleyi yazan rotayla
+ * paylaşılan sabit). Cümlenin parçasını aramak, devamı onu yalanlayan bir kaydı
+ * ("…zaten geri çevrilmişti; bu geri alma para tarafında hiçbir şeyi
+ * değiştirmedi") olmuş bir geri çevirme gibi okurdu.
+ *
+ * Satırlar EN YENİSİ ÖNCE beklenir: sipariş birkaç kez geri alındıysa satırın
+ * bugünkü hâlini açıklayan sonuncusudur. Dokunmayan bir geri alma kaydı atlanır,
+ * altındaki gerçek kayıt yine bulunur.
+ */
+export function shipRevertCauseFromAuditNotes(
+  rows: ReadonlyArray<{ notes: string | null; createdAt: Date | string | null }>
+): MoneyReversalRecord | null {
+  for (const r of rows) {
+    const notes = r.notes;
+    if (!notes) continue;
+    const hit = SHIP_REVERT_EARNING_REVERSED_MARKERS.find((m) => notes.includes(m.sentence));
+    if (!hit) continue;
+    return {
+      cause: "ship_revert",
+      party: hit.party,
+      at: r.createdAt instanceof Date ? iso(r.createdAt) : r.createdAt ?? null,
+    };
+  }
+  return null;
+}
+
+/**
+ * Bir siparişin hakediş geri alma sebebi, denetim kaydından.
+ *
+ * Üç ayrı cevap: nesne = kayıtlı sebep; `null` = bakıldı, kayıt yok;
+ * `undefined` = OKUNAMADI. Üçü farklı cümle üretir (earningReversalCause) —
+ * okunamayan bir kayıt hakkında "kayıtlı değil" demek olumsuz bir iddia olurdu.
+ */
+export async function loadEarningReversalRecord(
+  orderId: string
+): Promise<MoneyReversalRecord | null | undefined> {
+  try {
+    const rows = await db
+      .select({ notes: adminActions.notes, createdAt: adminActions.createdAt })
+      .from(adminActions)
+      .where(
+        and(eq(adminActions.orderId, orderId), like(adminActions.notes, `${SHIP_REVERT_AUDIT_PREFIX}%`))
+      )
+      .orderBy(desc(adminActions.createdAt))
+      .limit(20);
+    return shipRevertCauseFromAuditNotes(rows);
+  } catch (err) {
+    console.error("[order-money] reversal cause could not be read", err);
+    return undefined;
+  }
+}
 
 export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMoneySnapshot | null> {
   // Geçersiz bir id Postgres'te "invalid input syntax for type uuid" 500'üne
@@ -176,6 +236,14 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
 
   const isCart = items.length > 0 || order.parentReference !== null;
 
+  // Geri alınmış hakedişin SEBEBİ satırda yazmaz (hakediş tablolarında sebep
+  // kolonu yok, bu faz migration açmıyor). Yalnızca geri alınmış satır varken
+  // sorulur — başka her siparişte bu sorgu boşuna olurdu.
+  let earningReversal: OrderMoneySnapshot["earningReversal"];
+  if (mfrRows[0]?.status === "reversed" || painterRows[0]?.status === "reversed") {
+    earningReversal = await loadEarningReversalRecord(order.id);
+  }
+
   // Tek ürünlü siparişte ürünün BUGÜNKÜ kalem toplamları: yalnızca boyama
   // payının ürünün kendi kaleminden mi, yoksa sonradan admin "Boyama ekle"siyle
   // üretimden mi ayrıldığını ayırt etmek için (bkz.
@@ -223,6 +291,7 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
     painterName: order.painter?.companyName ?? null,
     painterStatus: order.painterStatus,
     shippedAt: iso(order.shippedAt),
+    earningReversal,
     items: items.map((it) => ({
       title: it.title,
       quantity: it.quantity,

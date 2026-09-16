@@ -19,6 +19,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, getTemplate } from "@/lib/create/design-templates";
 import { eq, count } from "drizzle-orm";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Exported for scripts/test-api-contracts.ts. `figurineSize` here is shared with
 // `createOrderSchema`, and narrowing SIZE_PRESET_KEYS to the ONE sellable preset
@@ -42,7 +43,7 @@ export const generateSchema = z.object({
   modifiers: z.array(z.enum(["pixel_art"])).optional().default([]),
 });
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
@@ -212,5 +213,18 @@ export async function POST(request: NextRequest) {
       { error: d["api.order.createFailed"] },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/preview/generate", CUSTOMER_ACTION_FAILED_ERROR);
   }
 }

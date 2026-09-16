@@ -23,6 +23,23 @@ import { emitOrderChanged } from "@/lib/realtime/emit";
 const MAX_DECLINES_BEFORE_ADMIN = 3;
 
 /**
+ * İade edilmiş siparişte reddin admin'e görünen TEK izi.
+ *
+ * O dalda puana giren `decline` satırı bilerek yazılmıyor (ceza olurdu) ve
+ * sipariş kuyruğa da dönmüyor; geriye hiçbir kayıt kalmayınca üreticinin işi
+ * bıraktığı olayı veriden yeniden kurmak imkânsız hâle geliyordu. Cümle
+ * iptalin iade ikizinden (CANCEL_NOTE_REFUNDED) ayrı: orada "kabul sonrası
+ * bıraktı", burada "atama kabul edilmeden reddedildi" yazıyor ve ikisi de
+ * kuyruğa DÖNMEDİĞİNİ söylüyor — admin var olmayan bir kuyruk satırını
+ * aramasın.
+ *
+ * Not, koparmayı yazan İŞLEMİN İÇİNDE yazılır: tek kalıcı iz, anlattığı
+ * koparma kadar dayanıklı olmalı.
+ */
+const DECLINE_NOTE_REFUNDED =
+  "[RET] Üretici atanan işi reddetti — sipariş iade edilmiş olduğu için atama kuyruğuna DÖNMEDİ, iş kapandı. Güvenilirlik cezası uygulanmadı.";
+
+/**
  * Admin notunu EKLER, üzerine YAZMAZ.
  *
  * Dört ayrı çıkış (satıcı kuralı, ret üst sınırı, aday kalmadı, satıcının
@@ -140,23 +157,51 @@ export async function declineOrder(args: {
       ? declinedList
       : [...declinedList, manufacturerId];
 
+    // Read under this transaction's row lock, so it is the payment state the
+    // detach saw. A refund landing after the commit is caught at the assign.
+    const refunded = isRefunded(order);
+
     await tx
       .update(orders)
       .set({
         manufacturerId: null,
         manufacturerStatus: "unassigned",
         assignedToManufacturerAt: null,
-        declinedManufacturerIds: nextDeclined,
+        // İade edilmiş siparişte KOPARMA hepsi budur: kara liste kaydı
+        // DÜŞÜLMEZ. O liste "bu siparişi bir daha bu atölyeye verme" demektir;
+        // iade edilmiş sipariş zaten hiç kimseye verilmeyecek (her atama yolu
+        // onu reddediyor), yani kayıt korunacak hiçbir şey korumaz — yalnız
+        // atölyenin siciline iz bırakır.
+        ...(refunded
+          ? {
+              // İZ, KOPARMANIN KENDİ İFADESİNDE. Bu dalın tek kalıcı kaydı bu
+              // nottur — puana giren eylem satırı ve kara liste bilerek
+              // yazılmıyor. Not eskiden commit'ten SONRA, en iyi çaba olarak
+              // yazılıyordu ve hatası yutuluyordu: bir DB tökezlemesinde koparma
+              // duruyor, onu anlatan TEK kayıt hiç oluşmuyordu. Aynı UPDATE'e
+              // alınınca not, anlattığı koparma kadar dayanıklı olur — boyacı
+              // ikizindeki (painter decline) gibi. Yazma BİRLEŞTİRMEDİR, üzerine
+              // yazma değil: araya giren [SLA]/[ATAMA] bayrakları korunur.
+              adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${DECLINE_NOTE_REFUNDED} ELSE ${orders.adminNotes} || E'\n' || ${DECLINE_NOTE_REFUNDED} END`,
+            }
+          : { declinedManufacturerIds: nextDeclined }),
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
 
-    await tx.insert(manufacturerActions).values({
-      orderId,
-      manufacturerId,
-      action: "decline",
-      notes: reason?.slice(0, 500) ?? null,
-    });
+    // Aynı sebeple ret satırı da yazılmaz: `decline`, güvenilirlik puanını
+    // düşüren eylemlerden biridir (manufacturer-assignment.ts BAD_ACTIONS) ve
+    // parası zaten geri verilmiş bir işi bırakan atölyeyi cezalandırmak olurdu.
+    // Olan biten kayıtsız kalmaz: YUKARIDAKİ aynı UPDATE siparişe
+    // DECLINE_NOTE_REFUNDED notunu yazar (bu, o dalın tek kalıcı izidir).
+    if (!refunded) {
+      await tx.insert(manufacturerActions).values({
+        orderId,
+        manufacturerId,
+        action: "decline",
+        notes: reason?.slice(0, 500) ?? null,
+      });
+    }
 
     return {
       code: "ok" as const,
@@ -177,9 +222,7 @@ export async function declineOrder(args: {
       attributionChannel: order.attributionChannel,
       productId: order.productId,
       parentReference: order.parentReference,
-      // Read under this transaction's row lock, so it is the payment state the
-      // detach saw. A refund landing after the commit is caught at the assign.
-      refunded: isRefunded(order),
+      refunded,
     };
   });
 
@@ -210,6 +253,9 @@ export async function declineOrder(args: {
   // placement / cap branches email the admin to assign or refund an order
   // that is already refunded.
   if (result.refunded) {
+    // Not BURADA YAZILMAZ: koparmanın kendi UPDATE'ine alındı (yukarıya bakın).
+    // Eskiden burada, commit'ten sonra, en iyi çaba olarak yazılıyordu; hatası
+    // yutulduğu için koparma durup onu anlatan tek kayıt hiç oluşmayabiliyordu.
     return { ok: true, action: "released", reason: "refunded" };
   }
 

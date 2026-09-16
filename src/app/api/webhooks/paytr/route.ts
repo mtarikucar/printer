@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
@@ -18,7 +19,7 @@ function okResponse() {
   });
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   let form: FormData;
   try {
     form = await request.formData();
@@ -182,4 +183,24 @@ export async function POST(request: NextRequest) {
   // status === "failed" — leave draft in pending so the customer can retry from the
   // track page. Expiry worker / admin cleans up if abandoned.
   return okResponse();
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap — ama bu ucun karşısında EKRAN değil
+ * PayTR vardır, o yüzden gövde Türkçe cümle değil sağlayıcının kendi kelimesi
+ * olur: "PAYTR internal" + 500, PayTR'a "teslimatı TEKRAR DENE" demektir.
+ *
+ * Boş gövdeli bir 500 burada yalnız sessiz değil, TEHLİKELİDİR: ödemesi alınmış
+ * bir taslak terfi ettirilemeden kalır ve tekrar denenmesi gereken teslimat,
+ * gövdesizliği yüzünden tanımsız bir hâlde bırakılır. "OK" dönmek ise daha da
+ * kötüsü olurdu — PayTR tekrar denemeyi keser ve sipariş SONSUZA DEK kaybolur.
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error("[paytr.webhook] beklenmeyen hata — PayTR tekrar denemeli", e);
+    return new Response("PAYTR internal", { status: 500 });
+  }
 }

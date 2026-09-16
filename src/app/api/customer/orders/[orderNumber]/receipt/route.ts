@@ -10,6 +10,7 @@ import { getDekontOcrQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { RECEIPT_MAX_SIZE_BYTES } from "@/lib/config/payment";
+import { handleRouteFailure, CUSTOMER_PAYMENT_FAILED_ERROR } from "@/lib/api/route-error";
 
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46]; // %PDF
 
@@ -44,7 +45,7 @@ function extForType(mime: string): string {
  * `orderNumber` here is actually the draft reference (same string format pre- and post-promotion).
  * Receipts can only be uploaded against pending bank_transfer drafts.
  */
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -179,4 +180,17 @@ export async function POST(
     receiptUrl: `/api/customer/orders/${draft.reference}/receipt/view`,
     status: "scanning",
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/customer/orders/[orderNumber]/receipt", CUSTOMER_PAYMENT_FAILED_ERROR);
+  }
 }

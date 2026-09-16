@@ -6,88 +6,101 @@ import { giftCards } from "@/lib/db/schema";
 import { desc, eq, and, inArray } from "drizzle-orm";
 import { createAdminGiftCardSchema } from "@/lib/validators/gift-card";
 import { createGiftCard } from "@/lib/services/gift-card";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export async function GET() {
-  const a = await requireAdmin();
+  try {
+    const a = await requireAdmin();
 
-  if ("response" in a) return a.response;
+    if ("response" in a) return a.response;
 
-  const cards = await db
-    .select()
-    .from(giftCards)
-    .orderBy(desc(giftCards.createdAt));
+    const cards = await db
+      .select()
+      .from(giftCards)
+      .orderBy(desc(giftCards.createdAt));
 
-  return NextResponse.json({ giftCards: cards });
+    return NextResponse.json({ giftCards: cards });
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/admin/gift-cards", ADMIN_READ_FAILED_ERROR);
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-
   try {
-    const body = await request.json();
-    const validated = createAdminGiftCardSchema().parse(body);
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-    const amountKurus = Math.round(validated.amountTL * 100);
+    try {
+      const body = await request.json();
+      const validated = createAdminGiftCardSchema().parse(body);
 
-    const { card } = await createGiftCard({
-      code: validated.code || undefined,
-      amountKurus,
-      note: validated.note || undefined,
-      recipientName: validated.recipientName || undefined,
-      recipientEmail: validated.recipientEmail || undefined,
-      expirationDays: validated.expirationDays,
-      maxRedemptions: validated.maxRedemptions,
-    });
+      const amountKurus = Math.round(validated.amountTL * 100);
 
-    return NextResponse.json({ card });
-  } catch (error: unknown) {
-    if (error instanceof Error && error.name === "ZodError") {
-      const errors = (error as Error & { errors?: unknown }).errors;
-      return NextResponse.json({ error: errors }, { status: 400 });
+      const { card } = await createGiftCard({
+        code: validated.code || undefined,
+        amountKurus,
+        note: validated.note || undefined,
+        recipientName: validated.recipientName || undefined,
+        recipientEmail: validated.recipientEmail || undefined,
+        expirationDays: validated.expirationDays,
+        maxRedemptions: validated.maxRedemptions,
+      });
+
+      return NextResponse.json({ card });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === "ZodError") {
+        const errors = (error as Error & { errors?: unknown }).errors;
+        return NextResponse.json({ error: errors }, { status: 400 });
+      }
+      const pgErr = error as { code?: string; constraint_name?: string };
+      if (pgErr?.code === "23505" && pgErr.constraint_name?.includes("code")) {
+        return NextResponse.json({ error: "Bu kod zaten kullanılıyor" }, { status: 409 });
+      }
+      console.error("Gift card creation failed:", error);
+      return NextResponse.json(
+        { error: "Hediye kartı oluşturulamadı. Sayfayı yenileyip tekrar deneyin; sorun sürerse sunucu günlüklerine bakın." },
+        { status: 500 }
+      );
     }
-    const pgErr = error as { code?: string; constraint_name?: string };
-    if (pgErr?.code === "23505" && pgErr.constraint_name?.includes("code")) {
-      return NextResponse.json({ error: "Bu kod zaten kullanılıyor" }, { status: 409 });
-    }
-    console.error("Gift card creation failed:", error);
-    return NextResponse.json(
-      { error: "Gift card creation failed" },
-      { status: 500 }
-    );
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/gift-cards", ADMIN_ACTION_FAILED_ERROR);
   }
 }
 
 export async function PATCH(request: NextRequest) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-
   try {
-    const patchSchema = z.object({ id: z.string().uuid(), action: z.enum(["deactivate"]) });
-    const { id, action } = patchSchema.parse(await request.json());
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-    if (action === "deactivate") {
-      const [updated] = await db
-        .update(giftCards)
-        .set({ status: "expired", updatedAt: new Date() })
-        .where(
-          and(
-            eq(giftCards.id, id),
-            inArray(giftCards.status, ["active", "partially_used"])
+    try {
+      const patchSchema = z.object({ id: z.string().uuid(), action: z.enum(["deactivate"]) });
+      const { id, action } = patchSchema.parse(await request.json());
+
+      if (action === "deactivate") {
+        const [updated] = await db
+          .update(giftCards)
+          .set({ status: "expired", updatedAt: new Date() })
+          .where(
+            and(
+              eq(giftCards.id, id),
+              inArray(giftCards.status, ["active", "partially_used"])
+            )
           )
-        )
-        .returning();
+          .returning();
 
-      if (!updated) {
-        return NextResponse.json({ error: "Not found or already inactive" }, { status: 404 });
+        if (!updated) {
+          return NextResponse.json({ error: "Not found or already inactive" }, { status: 404 });
+        }
+
+        return NextResponse.json({ success: true });
       }
 
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+    } catch (error) {
+      console.error("Gift card update failed:", error);
+      return NextResponse.json({ error: "Hediye kartı güncellenemedi. Kartın son durumunu görmek için sayfayı yenileyin; sorun sürerse sunucu günlüklerine bakın." }, { status: 500 });
     }
-
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-  } catch (error) {
-    console.error("Gift card update failed:", error);
-    return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  } catch (e) {
+    return handleRouteFailure(e, "PATCH /api/admin/gift-cards", ADMIN_ACTION_FAILED_ERROR);
   }
 }

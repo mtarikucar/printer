@@ -8,9 +8,10 @@ export type RealtimeEvent =
       orderNumber: string;
       status?: string | null;
       manufacturerStatus?: string | null;
+      painterStatus?: string | null;
     }
   | { kind: "message"; orderId: string; channel: string; senderType: string }
-  | { kind: "notification"; scope: "customer" | "manufacturer" }
+  | { kind: "notification"; scope: "customer" | "manufacturer" | "painter" }
   | { kind: "badge" };
 
 // A connection subscribes to a SET of topics; an event is published with the
@@ -20,6 +21,9 @@ export const topics = {
   order: (orderId: string) => `order:${orderId}`,
   admin: () => `admin`,
   manufacturer: (manufacturerId: string) => `manufacturer:${manufacturerId}`,
+  // Boyacı konusu: üretici konusunun aynısı. Boyacı panelinin de canlı
+  // güncellenmesi gerekiyor (yeni model sürümü, boyacı değişimi, admin mesajı).
+  painter: (painterId: string) => `painter:${painterId}`,
   customer: (userId: string) => `customer:${userId}`,
   track: (orderNumber: string) => `track:${orderNumber}`,
 };

@@ -16,6 +16,11 @@ import { QC_MIN_PHOTOS } from "@/lib/config/qc";
 import { sizeDisplay } from "@/lib/config/sizes";
 import { formatModelSize } from "@/lib/config/order-model";
 import { isRefunded } from "@/lib/config/order-status-policy";
+import {
+  EARNING_REVERSAL_PARTNER_SENTENCES,
+  earningReversalCause,
+  type MoneyReversalRecord,
+} from "@/lib/config/order-money";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -50,6 +55,8 @@ interface OrderData {
     current: number;
     total: number;
     uploadedAt: string | null;
+    /** Yöneticinin sürüm notu: neden yeniden yüklendi. */
+    note: string | null;
   } | null;
   status: string;
   /** "refunded" → the page offers no forward action and promises no earning. */
@@ -73,6 +80,15 @@ interface OrderData {
   /** Expected split of grossKurus — computed on the server (computeEarning). */
   commissionKurus: number;
   netEarningKurus: number;
+  /**
+   * Hakediş geri alındıysa geri almanın KAYITLI sebebi — admin para kartıyla
+   * AYNI kaynaktan (services/order-money.ts → loadEarningReversalRecord,
+   * denetim kaydını okur):
+   *   - nesne: kayıtlı sebep;
+   *   - null: kayda bakıldı, bu pay için sebep yok;
+   *   - undefined: okunamadı / sunucu göndermedi → ekran sebebi BİLMEDİĞİNİ söyler.
+   */
+  earningReversal?: MoneyReversalRecord | null;
   /** The accrued earning row once it exists: what will actually be paid. */
   accruedEarning: {
     grossKurus: number;
@@ -148,6 +164,31 @@ interface Props {
     /** Güncel model sürümünün TÜM parçaları (bir iş 12-13 ayrı STL olabilir). */
     modelFiles: { id: string; name: string; kind: string; sizeBytes: number | null }[];
     modelFilesRevision: number | null;
+    /**
+     * Üretim bağlamı (sipariş kalemleri / ürün kaydı / üretim künyesi) OKUNAMADI.
+     * Boş liste ile BİLİNMİYOR aynı şey değildir: sunucu bunu ayırt eder
+     * (page.tsx), çünkü bilinmeyen bir kalem listesine bakarak baskıya başlayan
+     * atölye siparişin görünmeyen parçalarını hiç üretmemiş olur.
+     */
+    productionGateClosed: boolean;
+    /**
+     * Yeni model sürümü onay kapısı (partner-model-ack.ts). `pending` iken
+     * üretim ve kargo adımları kapalıdır: baskı sırasında yüklenen yeni bir
+     * modeli üreticinin GÖRDÜĞÜNÜ onaylaması gerekir (late-model-upload).
+     */
+    modelAck: {
+      announcedRevision: number | null;
+      acknowledgedRevision: number | null;
+      acknowledgedAt: string | null;
+      pending: boolean;
+      /**
+       * Onay günlüğü OKUNAMADI. `pending` bu durumda da true'dur (kapı temkinle
+       * kapalı kalır) ama sebebi bir KARAR değil ARIZAdır: sürüm numaraları
+       * bilinmez. İkisini ayırmayan ekran, olmamış bir yüklemeyi anlatıp
+       * partneri null sürümlü bir onay düğmesine yolluyordu.
+       */
+      readFailed: boolean;
+    };
     actions: {
       id: string;
       action: string;
@@ -212,7 +253,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, actions } = data;
+  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, productionGateClosed, modelAck, actions } = data;
   // Çok parçalı iş: tek "STL indir" düğmesi yalnız İLK parçayı verirdi ve
   // üretici 13 parçanın 12'sini hiç görmeden baskıya başlardı.
   const stlParts = modelFiles.filter((f) => f.kind === "stl");
@@ -399,15 +440,72 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
     }
   };
 
+  // İade edilmiş işi bırakma. performAction kullanılmaz: koparma commit olunca
+  // sipariş artık bu atölyenin değildir ve sayfa sorgusu manufacturerId ile
+  // kapsandığı için yenileme 404 verir. Onun yerine iş listesine dönülür —
+  // atölye sonucu orada (işin düşmüş olmasında) görür.
+  const releaseRefundedOrder = async () => {
+    if (!refundedExit) return;
+    setLoading(refundedExit);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/manufacturer/orders/${order.id}/${refundedExit}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      );
+      if (!res.ok) {
+        const data: { error?: unknown } | null = await res.json().catch(() => null);
+        setError(
+          typeof data?.error === "string" && data.error
+            ? data.error
+            : `İşlem tamamlanamadı (HTTP ${res.status}). Lütfen tekrar deneyin.`
+        );
+        return;
+      }
+      router.push("/manufacturer/orders");
+      router.refresh();
+    } catch {
+      setError("İşlem tamamlanamadı. Lütfen tekrar deneyin.");
+    } finally {
+      setLoading(null);
+    }
+  };
+
   // A refunded order keeps its sub-status (the badge may still say "Baskıda"),
   // but the job is cancelled: every forward step is switched off so the page
   // never walks the workshop into printing, QC, a painter hand-off or a
   // shipment nobody will pay for.
+  // Yeni model sürümü onay bekliyor: üretim ve teslim adımları kapanır.
+  // Kabul ve iptal/ret KASITLI olarak açık kalır — işi hiç almamış bir
+  // atölyeyi onaya zorlamak onu kilitler, çıkış yolunu kapatmak siparişi
+  // dondurur (bkz. config/partner-model-ack.ts). Sunucu ucu da aynı kapıyı
+  // uygular; bu ekran onun aynadaki karşılığıdır.
+  const ackPending = !refunded && modelAck.pending;
+  // Kapı kapalı ama SEBEBİ bilinmiyor: günlük okunamadı. Aynı kapı, ayrı cümle.
+  const ackUnreadable = ackPending && modelAck.readFailed;
+  // Üretim bağlamı BİLİNMİYOR (kalem listesi / ürün kaydı / üretim künyesi
+  // okunamadı): kapı KAPANIR. Aynı karar, aynı gerekçe — bilinmezlik "kalem
+  // yok" değildir; sunucu bu ayrımı yapar (page.tsx), ekran ona uyar.
+  const contextUnreadable = !refunded && productionGateClosed;
   const canAccept = !refunded && order.manufacturerStatus === "assigned";
-  const canStartPrinting = !refunded && order.manufacturerStatus === "accepted";
-  const canFinishPrinting = !refunded && order.manufacturerStatus === "printing";
+  const canStartPrinting =
+    !refunded &&
+    !ackPending &&
+    !contextUnreadable &&
+    order.manufacturerStatus === "accepted";
+  const canFinishPrinting =
+    !refunded &&
+    !ackPending &&
+    !contextUnreadable &&
+    order.manufacturerStatus === "printing";
   const canSubmitQc =
     !refunded &&
+    !ackPending &&
+    !contextUnreadable &&
     (order.manufacturerStatus === "printed" ||
       order.manufacturerStatus === "qc_rejected");
   const isQcPending = !refunded && order.manufacturerStatus === "qc_pending";
@@ -422,9 +520,9 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   // sevki 409 ile reddediyor. Formu göstermek üreticiyi doğrudan o duvara
   // yollamak olurdu; yerine ne olacağını anlatan bir kart konur (aşağıda).
   const canShipDirect =
-    canShip && !order.isWorkshop && (!order.needsPainting || inHousePaint);
+    canShip && !ackPending && !order.isWorkshop && (!order.needsPainting || inHousePaint);
   const isShipped = order.manufacturerStatus === "shipped";
-  const canCancel = !refunded && [
+  const cancellableStatus = [
     "accepted",
     "printing",
     "printed",
@@ -432,6 +530,22 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
     "qc_rejected",
     "qc_approved",
   ].includes(order.manufacturerStatus || "");
+  const canCancel = !refunded && cancellableStatus;
+  // İade edilmiş siparişte ileri adım yok ama ÇIKIŞ var: iptal ve ret uçları
+  // orada bilerek AÇIK (temizlik) ve iş atölyenin panelinden düşüyor. Panel
+  // hepsini birden gizlediği için iade edilmiş bir işin üstünde oturan atölyenin
+  // hiçbir düğmesi kalmıyordu. Hangi uç gerçekten çalışıyorsa o gösterilir:
+  //  • `assigned` iken RET (declineOrder yalnız o alt durumu kabul eder),
+  //  • kabul sonrası İPTAL (cancel rotasının CANCELLABLE listesi),
+  //  • boyacıya devredilmiş işte HİÇBİRİ — cancel rotası 400 "boyacıya
+  //    devredildi" veriyor, düğme koymak atölyeyi doğrudan o duvara yollardı.
+  const refundedExit: "decline" | "cancel" | null = !refunded
+    ? null
+    : order.manufacturerStatus === "assigned"
+      ? "decline"
+      : cancellableStatus && !order.handedToPainter
+        ? "cancel"
+        : null;
 
   // The earning card's status line. What the earning row says wins, then the
   // refund, then the stage the job is at. The accrual points it names are the
@@ -441,7 +555,17 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
   // row instead of promising a future accrual next to a "Kargolandı" badge.
   const paidSuffix = accrued?.paidAt ? ` (${formatDateTime(accrued.paidAt, loc)})` : "";
   const earningStatusLine = earningReversed
-    ? "Bu siparişin hak edişi geri alındı (iade / itiraz); ödenmeyecek."
+    ? // Sebep BURADA uydurulmaz. Buradaki sabit cümle her geri alınan hakedişe
+      // "iade ya da itiraz" diyordu; admin kargo kaydını geri aldığında üretici
+      // olmamış bir iadeyle suçlanıyordu. Sebep artık admin para kartının
+      // okuduğu tek türetimden gelir ve kayıt yoksa kayıtsız olduğunu söyler.
+      EARNING_REVERSAL_PARTNER_SENTENCES[
+        earningReversalCause({
+          party: "manufacturer",
+          reversal: order.earningReversal,
+          refunded,
+        })
+      ]
     : refunded
       ? refundedButPaid
         ? `Sipariş iade edildi; hak edişiniz iadeden önce ödenmişti${paidSuffix}.`
@@ -563,12 +687,24 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {order.modelRevision && order.modelRevision.total > 1 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
-              ⚠ Model güncellendi — v{order.modelRevision.current}
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                ackPending
+                  ? "border-amber-400 bg-amber-100 text-amber-900"
+                  : "border-gray-200 bg-gray-50 text-gray-600"
+              }`}
+            >
+              ⚠ Model v{order.modelRevision.current}
               {order.modelRevision.uploadedAt
                 ? ` · ${formatDateTime(order.modelRevision.uploadedAt, loc)}`
                 : ""}
-              . Yeni dosyayı indirin.
+              {ackUnreadable
+                ? " · onay kaydı okunamadı"
+                : ackPending
+                  ? " · onayınız bekleniyor"
+                  : modelAck.acknowledgedRevision != null
+                    ? ` · v${modelAck.acknowledgedRevision} onayladınız`
+                    : ""}
             </span>
           )}
           {glbUrl && (
@@ -669,7 +805,127 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
             Baskı, kalite kontrol, boyacıya devir ve kargo adımları kapatıldı.
             Sorunuz varsa aşağıdaki mesajlaşmadan bize yazın.
           </p>
+          {refundedExit && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-white p-4">
+              <p className="text-red-900/80">
+                Bu işi bırakabilirsiniz: sipariş panelinizden düşer, başka bir
+                üreticiye yönlendirilmez ve bu işlem güvenilirlik puanınıza
+                işlenmez. Bıraktığınızda bu sayfaya erişiminiz de kapanır.
+              </p>
+              {error && (
+                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
+                  {error}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={releaseRefundedOrder}
+                disabled={loading !== null}
+                className="mt-3 rounded-xl bg-gray-800 px-5 py-2.5 font-semibold text-white hover:bg-gray-900 disabled:bg-gray-400"
+              >
+                {loading === refundedExit ? "Bırakılıyor…" : "İşi bırak"}
+              </button>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Yeni model sürümü: eskiden yalnız pasif bir rozet vardı ("Model
+          güncellendi — yeni dosyayı indirin"), kimse okuduğunu bilmiyordu ve
+          eski sürümle basılan iş QC'den geçip kargolanabiliyordu. Artık
+          onaylanana kadar ileri adımlar kapalı. */}
+      {/* Onay günlüğü OKUNAMADI: kapı yine kapalı (fail closed), gerekçe ayrı.
+          Buraya "Yeni model sürümü yüklendi (vnull)" yazmak sistemin bilmediği
+          bir olayı anlatmak olurdu; düğme de null sürümü POST edip "Geçersiz
+          sürüm numarası." alıyordu. Onay düğmesi bilerek YOK: yazma ucu da aynı
+          arızada 503 döner (ackWriteFailureRefusal), yani basılacak bir şey
+          yok. Sunucu uçları bu durumda 503 + ack_log_unreadable veriyor; bu
+          panel onların aynadaki karşılığıdır. */}
+      {/* Kapı kapalı, sebep AYRI: üretim bağlamı okunamadı. Buraya "kalem yok"
+          yazmak, yapılmamış bir okumanın iddiası olurdu; şeritte hangi tablonun
+          bilinmediği isim isim yazıyor. Kabul ve iptal/ret bilerek açık kalır. */}
+      {contextUnreadable && (
+        <div
+          role="alert"
+          className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"
+        >
+          <p className="font-semibold">
+            Bu siparişin üretim bilgileri şu anda okunamıyor (geçici sistem
+            arızası)
+          </p>
+          <p className="mt-1 text-amber-900/80">
+            Siparişin kaç kalemden oluştuğunu ve her kalemin üretim künyesini şu
+            anda göremiyoruz. Aşağıda görünen liste EKSİK olabilir; bu yüzden
+            güvenlik gereği baskı başlatma, baskıyı bitirme ve kalite kontrole
+            gönderme adımları geçici olarak kapatıldı. Baskıya başlamayın. Birkaç
+            dakika sonra sayfayı yenileyin; sürerse aşağıdaki mesajlaşmadan bize
+            yazın.
+          </p>
+        </div>
+      )}
+      {ackUnreadable && (
+        <div
+          role="alert"
+          className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"
+        >
+          <p className="font-semibold">
+            Model onay kaydınız şu anda okunamıyor (geçici sistem arızası)
+          </p>
+          <p className="mt-1 text-amber-900/80">
+            Yeni bir model sürümü yüklenip yüklenmediğini şu anda söyleyemiyoruz.
+            Güvenlik gereği baskı başlatma, baskıyı bitirme, kalite kontrole
+            gönderme, boyacıya devir ve kargo adımları geçici olarak kapatıldı.
+            Birkaç dakika sonra sayfayı yenileyin; sürerse aşağıdaki mesajlaşmadan
+            bize yazın.
+          </p>
+        </div>
+      )}
+      {ackPending && !ackUnreadable && (
+        <div
+          role="alert"
+          className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"
+        >
+          <p className="font-semibold">
+            Yeni model sürümü yüklendi (v{modelAck.announcedRevision}) — onayınız
+            bekleniyor
+          </p>
+          <p className="mt-1 text-amber-900/80">
+            Yeni dosyayı indirip baskıyı bu sürümle yapın. Onaylayana kadar baskı
+            başlatma, baskıyı bitirme, kalite kontrole gönderme, boyacıya devir ve
+            kargo adımları kapalıdır. Bir sorun varsa aşağıdaki mesajlaşmadan bize
+            yazın.
+          </p>
+          {order.modelRevision?.note && (
+            <p className="mt-2 whitespace-pre-wrap rounded-lg border border-amber-200 bg-white/70 p-3 text-amber-900">
+              <span className="font-semibold">Yönetici notu: </span>
+              {order.modelRevision.note}
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
+              {error}
+            </p>
+          )}
+          <button
+            onClick={() =>
+              performAction("ack-model", { revision: modelAck.announcedRevision })
+            }
+            disabled={loading === "ack-model"}
+            className="mt-3 rounded-xl bg-amber-600 px-5 py-2.5 font-semibold text-white hover:bg-amber-700 disabled:bg-amber-400"
+          >
+            {loading === "ack-model"
+              ? "Kaydediliyor…"
+              : `Yeni sürümü gördüm (v${modelAck.announcedRevision})`}
+          </button>
+        </div>
+      )}
+      {!ackPending && modelAck.acknowledgedRevision != null && (
+        <p className="mb-4 text-xs text-gray-500">
+          Onayladığınız model sürümü: v{modelAck.acknowledgedRevision}
+          {modelAck.acknowledgedAt
+            ? ` · ${formatDateTime(modelAck.acknowledgedAt, loc)}`
+            : ""}
+        </p>
       )}
 
       {/* Çok parçalı işin dosyaları başlığın EYLEM satırında değil kendi bloğunda:
@@ -1390,6 +1646,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
 
           {/* Painting orders: hand off to a painter instead of shipping. */}
           {canShip &&
+            !ackPending &&
             order.needsPainting &&
             (!order.painterStatus || order.painterStatus === "unassigned") && (
               <SendToPainterPanel orderId={order.id} />
@@ -1528,6 +1785,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           )}
 
           {!refunded &&
+            !ackPending &&
             !canAccept &&
             !canStartPrinting &&
             !canFinishPrinting &&

@@ -1,8 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { desc, eq, inArray, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   manufacturerAssignmentEvaluations,
@@ -79,6 +78,40 @@ interface DecisionItem extends EvaluationDecision {
   assignedName: string | null;
 }
 
+/**
+ * GÖSTERİM amaçlı okuma: sonucu ekranda yalnızca GÖSTERİLİR. Arıza YUTULMAZ —
+ * null döner ve null "kayıt yok" değil "BİLİNMİYOR" demektir; bayrak sayfanın
+ * üstündeki şeritte yazılır.
+ */
+async function displayRead<T>(label: string, query: PromiseLike<T>): Promise<T | null> {
+  try {
+    return await query;
+  } catch (e) {
+    console.error(`[sıralama değerlendirmeleri] ${label} okunamadı`, e);
+    return null;
+  }
+}
+
+/** Sayfanın üstünde duran arıza şeridi. */
+function EvaluationReadNotice({ areas }: { areas: string[] }) {
+  if (areas.length === 0) return null;
+  return (
+    <div
+      role="alert"
+      className="mb-6 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+    >
+      <p className="font-semibold">
+        Bu ekranın bazı kayıtları şu anda okunamıyor (geçici sistem arızası)
+      </p>
+      <p className="mt-1 text-amber-900/80">
+        Aşağıdakiler gerçek kayıtlardır; ama şu bölümler BOŞ DEĞİL, BİLİNMİYOR:{" "}
+        {areas.join(" · ")}. Eksik bir tabloya bakarak gölge sıralamayı canlıya
+        almayın; birkaç dakika sonra sayfayı yenileyin.
+      </p>
+    </div>
+  );
+}
+
 export default async function ScoringEvaluationsPage({
   searchParams,
 }: {
@@ -88,73 +121,117 @@ export default async function ScoringEvaluationsPage({
   const onlyDiffer = fark === "1";
   const kindFilter = isKind(tur) ? tur : null;
 
-  const v1Mfg = alias(manufacturers, "v1_mfg");
-  const v2Mfg = alias(manufacturers, "v2_mfg");
-  const assignedMfg = alias(manufacturers, "assigned_mfg");
-
-  const rows = await db
-    .select({
-      id: manufacturerAssignmentEvaluations.id,
-      orderId: manufacturerAssignmentEvaluations.orderId,
-      createdAt: manufacturerAssignmentEvaluations.createdAt,
-      weightsVersion: manufacturerAssignmentEvaluations.weightsVersion,
-      authoritative: manufacturerAssignmentEvaluations.authoritative,
-      v1WinnerId: manufacturerAssignmentEvaluations.v1WinnerId,
-      v2WinnerId: manufacturerAssignmentEvaluations.v2WinnerId,
-      v1Scores: manufacturerAssignmentEvaluations.v1Scores,
-      v2Scores: manufacturerAssignmentEvaluations.v2Scores,
-      v1WinnerName: v1Mfg.companyName,
-      v2WinnerName: v2Mfg.companyName,
-      orderNumber: orders.orderNumber,
-      orderType: orders.orderType,
-      parentReference: orders.parentReference,
-      workshopSessionId: orders.workshopSessionId,
-      attributionChannel: orders.attributionChannel,
-      productId: orders.productId,
-      assignedId: orders.manufacturerId,
-      assignedName: assignedMfg.companyName,
-      // Sepet alt siparişini katalog siparişinden ayıran tek işaret; sınıflandırma
-      // (config/flags.ts) bunu istiyor. Satır başına sorgu yerine tek EXISTS.
-      hasOrderItems: sql<boolean>`EXISTS (SELECT 1 FROM ${orderItems} WHERE ${orderItems.orderId} = ${orders.id})`,
-    })
-    .from(manufacturerAssignmentEvaluations)
-    .leftJoin(orders, eq(manufacturerAssignmentEvaluations.orderId, orders.id))
-    .leftJoin(v1Mfg, eq(manufacturerAssignmentEvaluations.v1WinnerId, v1Mfg.id))
-    .leftJoin(v2Mfg, eq(manufacturerAssignmentEvaluations.v2WinnerId, v2Mfg.id))
-    .leftJoin(assignedMfg, eq(orders.manufacturerId, assignedMfg.id))
-    .orderBy(desc(manufacturerAssignmentEvaluations.createdAt))
-    .limit(WINDOW);
+  // ─── Dört JOIN ve bir EXISTS sorgudan ÇIKARILDI ──────────────────────────
+  //
+  // Sayfanın verisi `manufacturer_assignment_evaluations`. Atölye ADLARI (üç
+  // takma adlı JOIN), siparişin künyesi ve "sepet kalemi var mı" EXISTS'i
+  // yalnızca GÖSTERİM ya da etiket içindi — ama hepsi TEK ifadedeydi:
+  // `manufacturers`, `orders` ya da `order_items` okunamadığında bu ekranın
+  // TAMAMI 500 verirdi. Her biri artık AYRI ve KORUMALI okunur; biri bilinmiyorsa
+  // tablo yine açılır, o sütun "—" olur ve şerit sebebini yazar.
+  const evaluationRead = await displayRead(
+    "değerlendirme kayıtları",
+    db
+      .select({
+        id: manufacturerAssignmentEvaluations.id,
+        orderId: manufacturerAssignmentEvaluations.orderId,
+        createdAt: manufacturerAssignmentEvaluations.createdAt,
+        weightsVersion: manufacturerAssignmentEvaluations.weightsVersion,
+        authoritative: manufacturerAssignmentEvaluations.authoritative,
+        v1WinnerId: manufacturerAssignmentEvaluations.v1WinnerId,
+        v2WinnerId: manufacturerAssignmentEvaluations.v2WinnerId,
+        v1Scores: manufacturerAssignmentEvaluations.v1Scores,
+        v2Scores: manufacturerAssignmentEvaluations.v2Scores,
+      })
+      .from(manufacturerAssignmentEvaluations)
+      .orderBy(desc(manufacturerAssignmentEvaluations.createdAt))
+      .limit(WINDOW)
+  );
+  const evaluationRowsUnreadable = evaluationRead === null;
+  const rows = evaluationRead ?? [];
 
   // Mesafe gölgesi satırında sütunların anlamı farklıdır (v1 = canlı seçim,
   // v2 = sürekli mesafeli meydan okuyan), okuyucuya damgayı söylemek gerekir.
   const distanceShadowVersion = weightsVersion("v3");
 
-  // ─── Yerleşen atölyenin ADI ──────────────────────────────────────────────
-  // Kararın işi verdiği atölye, sıralamanın kazananı olmak zorunda değildir
-  // (geri alma sonrası dışlama, elle atama), bu yüzden JOIN'den gelen iki
-  // kazanan adı onu çözmeye yetmiyordu: ad çözülemeyince hücre siparişin
-  // BUGÜNKÜ üreticisine düşüyor ve kararın verdiği atölye yerine BAŞKA bir
-  // atölyenin adını yazıyordu — üstelik hemen altında "sonradan devredildi:
-  // <aynı ad>" satırıyla birlikte. Kimlikler jsonb damgasından toplanıp tek
-  // sorguda çözülür (sipariş sayfası da aynısını yapıyor).
-  const placedIds = new Set<string>();
+  const orderIds = [...new Set(rows.map((r) => r.orderId))];
+  const [orderMetaRead, cartFlagRead] = await Promise.all([
+    orderIds.length
+      ? displayRead(
+          "sipariş künyeleri",
+          db
+            .select({
+              id: orders.id,
+              orderNumber: orders.orderNumber,
+              orderType: orders.orderType,
+              parentReference: orders.parentReference,
+              workshopSessionId: orders.workshopSessionId,
+              attributionChannel: orders.attributionChannel,
+              productId: orders.productId,
+              manufacturerId: orders.manufacturerId,
+            })
+            .from(orders)
+            .where(inArray(orders.id, orderIds))
+        )
+      : [],
+    // Sepet alt siparişini katalog siparişinden ayıran tek işaret; sınıflandırma
+    // (config/flags.ts) bunu istiyor. Satır başına sorgu yerine tek tarama.
+    orderIds.length
+      ? displayRead(
+          "sepet kalemi işareti",
+          db
+            .selectDistinct({ orderId: orderItems.orderId })
+            .from(orderItems)
+            .where(inArray(orderItems.orderId, orderIds))
+        )
+      : [],
+  ]);
+  const orderMetaUnreadable = orderMetaRead === null;
+  const cartFlagUnreadable = cartFlagRead === null;
+  const orderMetaById = new Map((orderMetaRead ?? []).map((o) => [o.id, o]));
+  const ordersWithItems = new Set((cartFlagRead ?? []).map((r) => r.orderId));
+
+  // ─── Atölye ADLARI: tek sorgu ────────────────────────────────────────────
+  // Kazananlar, kararın YERLEŞTİĞİ atölye (sıralamanın kazananı olmayabilir:
+  // geri alma sonrası dışlama, elle atama) ve siparişin BUGÜNKÜ üreticisi aynı
+  // haritadan çözülür — üç takma adlı JOIN yerine tek okuma.
+  const nameIds = new Set<string>();
   for (const r of rows) {
+    if (r.v1WinnerId) nameIds.add(r.v1WinnerId);
+    if (r.v2WinnerId) nameIds.add(r.v2WinnerId);
     for (const raw of [r.v1Scores, r.v2Scores]) {
       const placed = parseEvaluationSide(raw).placedManufacturerId;
-      if (placed) placedIds.add(placed);
+      if (placed) nameIds.add(placed);
     }
   }
-  const placedNameRows =
-    placedIds.size > 0
-      ? await db
-          .select({
-            id: manufacturers.id,
-            companyName: manufacturers.companyName,
-          })
+  for (const m of orderMetaById.values()) {
+    if (m.manufacturerId) nameIds.add(m.manufacturerId);
+  }
+  const nameRead = nameIds.size
+    ? await displayRead(
+        "atölye adları",
+        db
+          .select({ id: manufacturers.id, companyName: manufacturers.companyName })
           .from(manufacturers)
-          .where(inArray(manufacturers.id, Array.from(placedIds)))
-      : [];
-  const placedNames = new Map(placedNameRows.map((m) => [m.id, m.companyName]));
+          .where(inArray(manufacturers.id, [...nameIds]))
+      )
+    : [];
+  const manufacturerNamesUnreadable = nameRead === null;
+  const manufacturerNames = new Map(
+    (nameRead ?? []).map((m) => [m.id, m.companyName])
+  );
+
+  // Hangi bölüm BİLİNMİYOR: şerit tablonun üstünde durur.
+  const unreadableAreas = [
+    evaluationRowsUnreadable &&
+      "Değerlendirme kayıtlarının kendisi (tablo BOŞ görünüyor; bu \"hiç karar verilmemiş\" demek değildir)",
+    orderMetaUnreadable &&
+      "Siparişlerin künyesi (sipariş numarası, türü ve gerçekleşen atama sütunları bilinmiyor)",
+    cartFlagUnreadable &&
+      "Sepet kalemi işareti (sipariş TÜRÜ bu yüzden hiç hesaplanmadı: eksik girdiyle yapılan sınıflandırma, sepet alt siparişini katalog siparişi diye etiketlerdi)",
+    manufacturerNamesUnreadable &&
+      "Atölye adları (adlar yalnızca kayıttaki damgadan çözülebildiği kadar görünür)",
+  ].filter((x): x is string => typeof x === "string");
 
   /** Sipariş künyesi satırdan bir kez okunur; karar birden çok satırdan doğar. */
   interface OrderMeta {
@@ -167,29 +244,34 @@ export default async function ScoringEvaluationsPage({
 
   const evaluations: OrderEvaluation[] = rows.map((r) => {
     if (!metaByOrder.has(r.orderId)) {
+      const meta = orderMetaById.get(r.orderId);
       metaByOrder.set(r.orderId, {
-        orderNumber: r.orderNumber,
-        kind: r.orderType
-          ? classifyAutoAssignOrder({
-              orderType: r.orderType,
-              parentReference: r.parentReference,
-              workshopSessionId: r.workshopSessionId,
-              attributionChannel: r.attributionChannel,
-              productId: r.productId,
-              hasOrderItems: !!r.hasOrderItems,
-            })
+        orderNumber: meta?.orderNumber ?? null,
+        // Sınıflandırma İKİ okumaya dayanır (sipariş künyesi + sepet kalemi
+        // işareti). Biri BİLİNMİYORSA tür de bilinmiyordur: eksik girdiyle
+        // yapılan sınıflandırma sessizce yanlış etiket üretir (sepet alt
+        // siparişi → katalog siparişi) ve tür süzgeci yanlış kümeyi gösterirdi.
+        // Bilinmeyen tür "—" olarak kalır.
+        kind:
+          meta?.orderType && !cartFlagUnreadable
+            ? classifyAutoAssignOrder({
+                orderType: meta.orderType,
+                parentReference: meta.parentReference,
+                workshopSessionId: meta.workshopSessionId,
+                attributionChannel: meta.attributionChannel,
+                productId: meta.productId,
+                hasOrderItems: ordersWithItems.has(r.orderId),
+              })
+            : null,
+        assignedId: meta?.manufacturerId ?? null,
+        assignedName: meta?.manufacturerId
+          ? manufacturerNames.get(meta.manufacturerId) ?? null
           : null,
-        assignedId: r.assignedId,
-        assignedName: r.assignedName,
       });
     }
-    // Kazanan adları JOIN'den; yerleşen atölyenin adı yukarıdaki tek sorgudan.
-    const nameOf = (id: string) =>
-      id === r.v1WinnerId
-        ? r.v1WinnerName
-        : id === r.v2WinnerId
-          ? r.v2WinnerName
-          : (placedNames.get(id) ?? null);
+    // Adlar tek haritadan; çözülemeyen bir kimlik için buildOrderEvaluation
+    // kayıttaki jsonb damgasına düşer (yarım ad yerine dürüst boşluk).
+    const nameOf = (id: string) => manufacturerNames.get(id) ?? null;
     return buildOrderEvaluation(r, nameOf, { distanceShadowVersion });
   });
 
@@ -301,6 +383,8 @@ export default async function ScoringEvaluationsPage({
           kaydıracak demektir.
         </p>
       </div>
+
+      <EvaluationReadNotice areas={unreadableAreas} />
 
       {/* ─── Karşılaştırma seçimi: sayaçlar hangi deneye ait? ─────────────── */}
       {comparisonVersions.length > 0 && (

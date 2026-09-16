@@ -2,13 +2,18 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { painters, painterNotifications } from "@/lib/db/schema";
 import { sendRawEmail, escHtml } from "@/lib/services/email";
+import { emitPainterNotification } from "@/lib/realtime/emit";
 
 export type PainterNotificationType =
   | "order_assigned"
   | "admin_message"
   | "system_announcement"
   | "payout"
-  | "qc_result";
+  | "qc_result"
+  // Siparişin modeline yeni bir sürüm yüklendi. Boyacı için bu, ELİNDEKİ
+  // baskının eski sürüme ait olabileceği anlamına gelir; dosyayı sessizce
+  // değiştirmek yerine haber verilir (partner-model-ack.ts).
+  | "model_revision";
 
 interface NotifyArgs {
   painterId: string;
@@ -26,8 +31,10 @@ interface NotifyArgs {
  *     fails we still return the row id — the caller's main operation (e.g.
  *     order assignment / payout) shouldn't roll back because of an SMTP blip.
  *   - Mirrors `notifyManufacturer`, but sends via the generic `sendRawEmail`
- *     path (composing simple HTML) instead of the templated `sendEmail` union,
- *     and skips the realtime/SSE nudge (painter SSE is deferred).
+ *     path (composing simple HTML) instead of the templated `sendEmail` union.
+ *   - The realtime nudge is no longer deferred: the painter panel now has its
+ *     own SSE topic (realtime/events.ts `topics.painter`), so an inbox row
+ *     reaches an open panel without waiting for a manual refresh.
  *   - `emailSentAt` / `emailFailedReason` are stamped inline after dispatch.
  */
 export async function notifyPainter({
@@ -53,6 +60,10 @@ export async function notifyPainter({
       body,
     })
     .returning({ id: painterNotifications.id });
+
+  // Realtime: nudge the painter's notification surface to refetch. Best-effort,
+  // exactly like notifyManufacturer — the inbox row is the source of truth.
+  await emitPainterNotification(painterId).catch(() => {});
 
   try {
     await sendRawEmail({

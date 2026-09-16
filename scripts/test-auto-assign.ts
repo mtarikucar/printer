@@ -596,6 +596,13 @@ const WORKER_CHAIN = [
   "src/lib/services/order-confirm.ts",
   "src/lib/services/manufacturer-assign.ts",
   "src/lib/services/model-approval.ts",
+  // Saatlik temizlik işçisi de aynı süreçte koşar (workers/start.ts →
+  // preview-cleanup.worker.ts) ve dosya silme nöbetçisini içeri alır. Liste
+  // eksik kaldığı için bu iki dosya import güvenliği taramasının DIŞINDA
+  // kalıyordu: birine eklenecek bir `server-only` importu worker'ı crash-loop'a
+  // sokar ve testler yeşil kalırdı.
+  "src/lib/queue/workers/preview-cleanup.worker.ts",
+  "src/lib/services/photo-file-retention.ts",
 ];
 for (const rel of WORKER_CHAIN) {
   // BullMQ worker'ı standalone Node'da koşar; `server-only` importu Next
@@ -1390,6 +1397,245 @@ for (const rel of placementPathRels) {
       );
     }
   }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Faz 1 artıkları: denetim notu, toplu uygulama ve ATAMADAN SONRAKİ defter işi
+ * ════════════════════════════════════════════════════════════════════════ */
+
+const SWEEP_REL = "src/app/api/admin/assignment-sweep/route.ts";
+const CONFIRM_REL = "src/lib/services/order-confirm.ts";
+const sweepSrc = read(SWEEP_REL);
+
+// ─── Denetim notu: Türkçe ve atölyenin NASIL seçildiğini söyler ─────────────
+// Her yerleştirme, ortak kapıdan geçtiği için aynı notu yazıyordu: "Assigned to
+// X". Türkçe sipariş geçmişinin ortasında İngilizce duruyordu ve asıl soruyu
+// ("bu iş buraya nasıl seçildi") cevapsız bırakıyordu — tarama yolu onu artık
+// rutin olarak üretiyor.
+console.log("denetim notu: atama gerekçesi");
+{
+  const src = read(CHOKEPOINT_REL);
+  ok(
+    "İngilizce yedek not kalmadı",
+    !/Assigned to \$\{/.test(src),
+    src.match(/.*Assigned to.*/)?.[0]
+  );
+  ok(
+    "yedek not Türkçe ve atölyeyi adıyla yazar",
+    /Üretici atandı: \$\{manufacturer\.companyName\}/.test(src)
+  );
+  ok("not, atölyenin NASIL seçildiğini de yazar", /ASSIGN_SELECTION_BASIS_TR\[/.test(src));
+  ok(
+    "gerekçe gönderilmeyen çağrıda 'admin elle seçti' varsayılır",
+    /args\.selectionBasis \?\? "admin_manual"/.test(src)
+  );
+
+  const members = [
+    ...(src.match(/export type AssignSelectionBasis =([\s\S]*?);\n/)?.[1] ?? "").matchAll(
+      /"([a-z_]+)"/g
+    ),
+  ].map((m) => m[1]);
+  ok("gerekçe kümesi okunabildi", members.length >= 5, members);
+  const mapBody =
+    src.match(
+      /ASSIGN_SELECTION_BASIS_TR: Record<AssignSelectionBasis, string> = \{([\s\S]*?)\n\};/
+    )?.[1] ?? "";
+  const labels = new Map<string, string>();
+  for (const m of mapBody.matchAll(/([a-z_]+):\s*\n?\s*"([^"]+)"/g)) labels.set(m[1], m[2]);
+  ok(
+    "her gerekçenin Türkçe bir etiketi var",
+    members.length > 0 && members.every((m) => (labels.get(m) ?? "").trim().length >= 8),
+    members.filter((m) => (labels.get(m) ?? "").trim().length < 8)
+  );
+  ok(
+    "etiketler İngilizce kalmadı",
+    ![...labels.values()].some((v) => /assign|select|to /i.test(v)),
+    [...labels.values()].filter((v) => /assign|select|to /i.test(v))
+  );
+  // Üç kaynak AYRI AYRI adlandırılır: sıralama, mülkiyet, insan kararı. Aynı
+  // etiketi paylaşsalardı not yine "nasıl seçildi"yi söylemezdi.
+  ok(
+    "sıralama, mülkiyet ve admin seçimi ayrı cümlelerdir",
+    labels.get("auto_ranking") !== labels.get("auto_seller") &&
+      labels.get("admin_manual") !== labels.get("sweep_ranking"),
+    [...labels]
+  );
+  ok(
+    "otomatik atama kendi gerekçesini gönderir",
+    /selectionBasis: ranked \? "auto_ranking" : "auto_seller"/.test(confirmSrc)
+  );
+  ok("tarama gerekçeyi gönderir", /selectionBasis: basis/.test(sweepSrc));
+}
+
+// ─── Toplu uygulama tek onayla biter: kayma BİZDEN ise atama yapılır ───────
+// Uygulama her satırı yeniden sıralar ve kazanan değiştiyse atamaz. Kural
+// doğru, ama bir atölye ekranda iki satırı birden kazandığında ilk atama onun
+// yükünü artırıyor, ikinci satır "Aday değişti" diye atlanıyor ve admin'in
+// onayladığı toplu işlem satır başına bir tarama yenilemesine dönüşüyordu.
+console.log("atama taraması: toplu uygulama");
+{
+  ok(
+    "istekte yapılan atamalar izlenir",
+    /const placedInThisRequest = new Set<string>\(\)/.test(sweepSrc)
+  );
+  ok(
+    "başarılı atamadan sonra kümeye yazılır",
+    /placedInThisRequest\.add\(targetManufacturerId\)/.test(sweepSrc)
+  );
+  ok(
+    "kaymanın sebebi sorulur: bu isteğin kendi ataması mı",
+    /placedInThisRequest\.has\(approved\.manufacturerId\)/.test(sweepSrc)
+  );
+  ok(
+    "onaylanan atölye hâlâ uygunsa iş ona verilir (yeniden tarama istenmez)",
+    /approved\?\.eligible && placedInThisRequest\.has\(/.test(sweepSrc)
+  );
+  // Kararı sıralama vermedi: taslak düşer ve `ranked` kapanır, yoksa bu
+  // yerleştirme sıralamanın kararıymış gibi kaydedilirdi.
+  ok(
+    "bu dalda sıralamanın kararı KAYDEDİLMEZ",
+    /discardAssignmentEvaluation\(base\.orderId\);\n\s+ranked = false;/.test(sweepSrc)
+  );
+  ok(
+    "onaylanan atölye artık alamıyorsa gerekçesi satırda yazar",
+    /artık alamıyor/.test(sweepSrc) && /ineligibleReason/.test(sweepSrc)
+  );
+  ok(
+    "dışarıdan gelen kaymada 'aday değişti' cevabı korunur",
+    /Aday değişti: en uygun üretici artık/.test(sweepSrc)
+  );
+  ok(
+    "üç dalın üçü de kendi denetim gerekçesini koyar",
+    ["sweep_seller", "sweep_ranking", "sweep_screen_confirmed"].every((b) =>
+      sweepSrc.includes(`basis = "${b}"`)
+    )
+  );
+}
+
+// ─── Atamadan SONRAKİ defter işi, rapor edilen sonucu değiştiremez ─────────
+// Korumalı UPDATE commit olduktan sonra sipariş üreticinin tezgâhındadır.
+// Telemetri kaydı o noktadan sonra çalışır ve fonksiyonun DIŞ yakalaması
+// "atanmadı" döndürüyordu: bir kayıt hatası, GERÇEKLEŞMİŞ bir atamayı admin'e
+// "otomatik atanmadı" diye gösterip onu ikinci kez atamaya itiyordu.
+console.log("atamadan sonraki defter işi");
+
+/** Çağrıyı saran EN YAKIN `try` — fonksiyon sınırında durur. */
+function enclosingTry(call: ts.Node): ts.TryStatement | null {
+  let child: ts.Node = call;
+  for (let p: ts.Node | undefined = call.parent; p; child = p, p = p.parent) {
+    if (ts.isTryStatement(p) && p.tryBlock === child) return p;
+    if (
+      ts.isFunctionDeclaration(p) ||
+      ts.isFunctionExpression(p) ||
+      ts.isArrowFunction(p) ||
+      ts.isMethodDeclaration(p)
+    ) {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * `name` çağrısı KENDİ try/catch'inde mi ve o catch sonucu yazmıyor mu?
+ *
+ * "Kendi": en yakın saran try. "Sonucu yazmıyor": catch bloğunda ne `return`
+ * var ne de bir `push` — yani hata yalnız loglanır, çağırana anlatılan sonucu
+ * değiştiremez.
+ */
+function bookkeepingCannotChangeOutcome(sf: ts.SourceFile, name: string): boolean {
+  const calls = callsOf(sf, name);
+  if (calls.length === 0) return false;
+  return calls.every((c) => {
+    const t = enclosingTry(c);
+    if (!t?.catchClause) return false;
+    let leaks = false;
+    forEachNode(t.catchClause.block, (n) => {
+      if (ts.isReturnStatement(n)) leaks = true;
+      if (
+        ts.isCallExpression(n) &&
+        ((ts.isIdentifier(n.expression) && n.expression.text === "push") ||
+          (ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "push"))
+      ) {
+        leaks = true;
+      }
+    });
+    return !leaks;
+  });
+}
+
+{
+  const synth = (src: string) =>
+    ts.createSourceFile("t.ts", src, ts.ScriptTarget.Latest, /* setParentNodes */ true);
+  ok(
+    "denetleyici: sonucu yazan dış try'ın içindeki kayıt REDDEDİLİR",
+    !bookkeepingCannotChangeOutcome(
+      synth(
+        "async function f(){ try { await a(); await commitAssignmentEvaluation(id, m); return { assigned: true }; } catch (e) { return { assigned: false }; } }"
+      ),
+      "commitAssignmentEvaluation"
+    )
+  );
+  ok(
+    "denetleyici: kendi try/catch'indeki kayıt KABUL EDİLİR",
+    bookkeepingCannotChangeOutcome(
+      synth(
+        "async function f(){ try { await a(); try { await commitAssignmentEvaluation(id, m); } catch (e) { console.error(e); } return { assigned: true }; } catch (e) { return { assigned: false }; } }"
+      ),
+      "commitAssignmentEvaluation"
+    )
+  );
+  ok(
+    "denetleyici: catch sonucu PUSH ediyorsa da reddedilir",
+    !bookkeepingCannotChangeOutcome(
+      synth(
+        "async function f(){ for (const i of items) { try { await commitAssignmentEvaluation(id, m); } catch (e) { results.push({ ok: false }); } } }"
+      ),
+      "commitAssignmentEvaluation"
+    )
+  );
+}
+
+for (const rel of [CONFIRM_REL, SWEEP_REL]) {
+  ok(
+    `${rel}: değerlendirme kaydı kendi try/catch'inde (atamadan sonraki hata sonucu değiştiremez)`,
+    bookkeepingCannotChangeOutcome(parse(rel), "commitAssignmentEvaluation")
+  );
+}
+ok(
+  "tarama, atamadan sonraki hatada atamayı OLMUŞ gibi raporlar",
+  /if \(placed\) \{/.test(sweepSrc) && /ok: true,\n\s+manufacturerName: placed\.name/.test(sweepSrc)
+);
+
+// ─── Atölye partisi: elenen siparişin sebebi admin'e DOĞRU söylenir ────────
+// Seansın üreticisi varken partinin tamamı mülkiyet kuralına takılırsa, admin'e
+// giden e-posta "seansta ön rezerve üretici yok, seansa bir üretici atayın"
+// diyordu: üretici zaten vardı, atanacak bir şey de yoktu.
+console.log("atölye partisi: elenen siparişin sebebi");
+{
+  const src = read(WORKSHOP_REL);
+  const sf = parse(WORKSHOP_REL);
+  ok(
+    "mülkiyet kuralının elediği HER sipariş elle atama kuyruğuna düşer",
+    /for \(const order of outcome\.skipped\)/.test(src) && src.includes("flagManualAssignment(")
+  );
+  ok(
+    "sebep siparişin kendi notunda adıyla durur",
+    /satıcının kendi kataloğundan çıktığı için/.test(src)
+  );
+  const notifies = callsOf(sf, "notifyAdminSessionWithoutManufacturer");
+  ok("seans düzeyindeki 'üreticisiz kapandı' e-postası tek çağrıdır", notifies.length === 1, notifies.length);
+  ok(
+    "o e-posta YALNIZ gerçekten üretici yokken gider",
+    notifies.length === 1 && guardTrail(notifies[0]).join(" && ").includes("!outcome.manufacturerId"),
+    notifies.length === 1 ? guardTrail(notifies[0]) : notifies.length
+  );
+  ok(
+    "ikinci bir kopya yok: otomatik atamanın yardımcısı dışa açık ve tek yerde",
+    /export async function flagManualAssignment\(/.test(confirmSrc) &&
+      (confirmSrc.match(/async function flagManualAssignment\(/g) ?? []).length === 1
+  );
 }
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");

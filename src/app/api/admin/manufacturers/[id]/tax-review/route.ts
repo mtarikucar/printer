@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { manufacturers } from "@/lib/db/schema";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Admin closes a manufacturer's manual tax review.
@@ -42,53 +43,57 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-  const { id } = await params;
-  // A malformed id names no manufacturer. Unchecked it reached Postgres as an
-  // invalid uuid and came back as a 500.
-  if (!UUID_RE.test(id)) {
-    return NextResponse.json({ error: "Üretici bulunamadı" }, { status: 404 });
-  }
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const { id } = await params;
+    // A malformed id names no manufacturer. Unchecked it reached Postgres as an
+    // invalid uuid and came back as a 500.
+    if (!UUID_RE.test(id)) {
+      return NextResponse.json({ error: "Üretici bulunamadı" }, { status: 404 });
+    }
 
-  const parsed = schema.safeParse(await request.json().catch(() => ({})));
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Geçersiz istek" },
-      { status: 400 }
+    const parsed = schema.safeParse(await request.json().catch(() => ({})));
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Geçersiz istek" },
+        { status: 400 }
+      );
+    }
+
+    const line = formatAdminNoteLine(
+      `Vergi incelemesi kapatıldı (${a.session.user.email}): ${parsed.data.note}`
     );
+
+    // Guarded on the flag still being set, so a double click (or two admins)
+    // writes one audit line, not two.
+    const [updated] = await db
+      .update(manufacturers)
+      .set({
+        requiresManualTaxReview: false,
+        notes: sql`CASE WHEN ${manufacturers.notes} IS NULL OR ${manufacturers.notes} = '' THEN ${line} ELSE ${manufacturers.notes} || E'\n' || ${line} END`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(manufacturers.id, id), eq(manufacturers.requiresManualTaxReview, true))
+      )
+      .returning({ id: manufacturers.id });
+
+    if (!updated) {
+      const exists = await db.query.manufacturers.findFirst({
+        where: eq(manufacturers.id, id),
+        columns: { id: true },
+      });
+      return exists
+        ? NextResponse.json(
+            { error: "Bu üreticinin açık bir vergi incelemesi yok." },
+            { status: 409 }
+          )
+        : NextResponse.json({ error: "Üretici bulunamadı" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/manufacturers/[id]/tax-review", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  const line = formatAdminNoteLine(
-    `Vergi incelemesi kapatıldı (${a.session.user.email}): ${parsed.data.note}`
-  );
-
-  // Guarded on the flag still being set, so a double click (or two admins)
-  // writes one audit line, not two.
-  const [updated] = await db
-    .update(manufacturers)
-    .set({
-      requiresManualTaxReview: false,
-      notes: sql`CASE WHEN ${manufacturers.notes} IS NULL OR ${manufacturers.notes} = '' THEN ${line} ELSE ${manufacturers.notes} || E'\n' || ${line} END`,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(manufacturers.id, id), eq(manufacturers.requiresManualTaxReview, true))
-    )
-    .returning({ id: manufacturers.id });
-
-  if (!updated) {
-    const exists = await db.query.manufacturers.findFirst({
-      where: eq(manufacturers.id, id),
-      columns: { id: true },
-    });
-    return exists
-      ? NextResponse.json(
-          { error: "Bu üreticinin açık bir vergi incelemesi yok." },
-          { status: 409 }
-        )
-      : NextResponse.json({ error: "Üretici bulunamadı" }, { status: 404 });
-  }
-
-  return NextResponse.json({ success: true });
 }

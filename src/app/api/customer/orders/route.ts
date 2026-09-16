@@ -6,8 +6,9 @@ import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { normalizeFileUrl } from "@/lib/services/storage";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
@@ -59,4 +60,17 @@ export async function GET(request: NextRequest) {
   }));
 
   return NextResponse.json({ orders: result });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/orders", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

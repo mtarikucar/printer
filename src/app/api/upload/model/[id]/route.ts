@@ -4,12 +4,13 @@ import { db } from "@/lib/db";
 import { uploadedModels } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { handleRouteFailure, UPLOAD_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 
 // GET — model details for the customer quote page (/quote/[id]). The UUID is the
 // capability (mirrors /api/preview/[id]).
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -36,7 +37,7 @@ export async function GET(
 
 // POST — submit a quote request: attach a contact email so an admin can reply
 // (guest uploads carry no userId). Claims the row for the session user if any.
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -68,4 +69,30 @@ export async function POST(
     })
     .where(eq(uploadedModels.id, id));
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handleGET(_req, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/upload/model/[id]", UPLOAD_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handlePOST(req, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/upload/model/[id]", UPLOAD_FAILED_ERROR);
+  }
 }

@@ -6,6 +6,7 @@ import { findDraftByReference } from "@/lib/services/order-draft";
 import { createPaytrToken, type PaytrBasketItem } from "@/lib/services/paytr";
 import { getClientIp } from "@/lib/utils/request";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
+import { handleRouteFailure, CUSTOMER_PAYMENT_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Mint a PayTR token for a pending draft, keyed ONLY by its reference — no
@@ -21,7 +22,7 @@ import { rateLimitAsync } from "@/lib/services/rate-limit";
  * a coarser per-ref cap) so it can't be spammed to grief an in-flight payment or
  * abuse PayTR's token API.
  */
-export async function POST(
+async function handlePOST(
   _request: NextRequest,
   { params }: { params: Promise<{ reference: string }> }
 ) {
@@ -100,5 +101,18 @@ export async function POST(
       { error: "Ödeme başlatılamadı, lütfen tekrar deneyin." },
       { status: 502 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(_request: NextRequest, ctx: { params: Promise<{ reference: string }> }) {
+  try {
+    return await handlePOST(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/pay/[reference]/paytr", CUSTOMER_PAYMENT_FAILED_ERROR);
   }
 }

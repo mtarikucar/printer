@@ -70,31 +70,57 @@ function LoadingSpinner() {
 }
 
 /**
- * Contains WebGL failures to the viewer. If <Canvas> (or anything under it)
- * throws — most importantly `Error creating WebGL context` during renderer
- * init on a browser where WebGL slipped past the pre-check but still fails —
- * we render the fallback instead of letting the error bubble to the root
- * boundary and blank the whole page.
+ * Görüntüleyici iki ayrı sebeple düşer ve ikisine AYNI cümleyi yazmak yanlış
+ * teşhistir:
+ *
+ *  - WebGL yok: <Canvas> rendererı kurarken "Error creating WebGL context"
+ *    fırlatır. Sorun TARAYICIDADIR, dosya sağlamdır.
+ *  - Model okunamadı: sunucu yüklemede yalnız GLB İMZASINI doğrular (dosyalar
+ *    yüz MB'ye çıkabildiği için tamamı ayrıştırılmaz), bu yüzden bozuk ya da
+ *    yarım bir dosya görüntüleyiciye kadar gelir ve ayrıştırma/klonlama
+ *    sırasında hata fırlatır. Sorun DOSYADADIR, tarayıcı sağlamdır.
+ *
+ * R3F'in <Canvas> içindeki kendi sınırı, yakaladığı hatayı DOM ağacında yeniden
+ * fırlatır (fiber: `if (error) throw error`), yani her ikisi de buraya düşer;
+ * hangisi olduğu mesajdan ayrılır.
  */
-class WebGLBoundary extends Component<
-  { fallback: ReactNode; children: ReactNode },
-  { failed: boolean }
-> {
-  state = { failed: false };
+type ViewerFailure = "webgl" | "model";
 
-  static getDerivedStateFromError() {
-    return { failed: true };
+function classifyViewerFailure(error: unknown): ViewerFailure {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  // three.js'in tarayıcı hatası tek bir cümledir: "Error creating WebGL
+  // context". Yükleyici/ayrıştırıcı hataları dosyayı anlatır ("Could not load
+  // …", "Unsupported asset…"). Varsayılan bilerek "model": bilinmeyen bir
+  // hatada tarayıcıyı suçlamak, kullanıcıyı olmayan bir sorunu aramaya yollar.
+  return /webgl|context/i.test(message) ? "webgl" : "model";
+}
+
+class CanvasBoundary extends Component<
+  {
+    renderFallback: (kind: ViewerFailure) => ReactNode;
+    onFail?: (kind: ViewerFailure) => void;
+    children: ReactNode;
+  },
+  { failed: ViewerFailure | null }
+> {
+  state: { failed: ViewerFailure | null } = { failed: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { failed: classifyViewerFailure(error) };
   }
 
   componentDidCatch(error: unknown) {
-    console.warn(
-      "[ModelViewer] 3D preview disabled — WebGL unavailable:",
-      error
-    );
+    // Hata KONSOLDA kalır: sayfayı düşürmemek, hatayı gizlemek değildir.
+    console.warn("[ModelViewer] 3D önizleme düştü:", error);
+    // Fallback'i sınırın kendisi basar (boş kare görünmesin); üstteki bileşen de
+    // haber alır ki artık işlemeyen döndür/sıfırla düğmelerini göstermesin.
+    this.props.onFail?.(classifyViewerFailure(error));
   }
 
   render() {
-    return this.state.failed ? this.props.fallback : this.props.children;
+    return this.state.failed
+      ? this.props.renderFallback(this.state.failed)
+      : this.props.children;
   }
 }
 
@@ -103,12 +129,21 @@ export function ModelViewer({
   className,
   autoRotate,
   previewMode = false,
+  errorFallback,
   background = "#F3F2EC",
 }: {
   url: string;
   className?: string;
   autoRotate?: boolean;
   previewMode?: boolean;
+  /**
+   * Model dosyası okunamadığında (eksik, bozuk, ayrıştırılamaz) basılacak kutu.
+   * Verilmezse nötr bir Türkçe cümle basılır. Çağıranın kendi cümlesini
+   * geçebilmesi şart: yönetici sipariş ekranı burada "dosyayı indir" bağlantısı
+   * da veriyor ve o bilgi bu bileşende yok. WebGL cümlesi bunun yerine
+   * geçemez — bozuk bir dosya için tarayıcıyı suçlamış olurduk.
+   */
+  errorFallback?: ReactNode;
   /**
    * Scene + placeholder colour. Defaults to the warm light the storefront and
    * admin surfaces use; the journey page passes its own ink so the viewer sits
@@ -131,6 +166,48 @@ export function ModelViewer({
     setWebgl(isWebGLAvailable());
   }, []);
 
+  // Dosyanın KENDİSİ orada mı? Eksik bir GLB'de three.js yükleyicisi
+  // "Could not load …" ile reddediyor; bu ret React'in renderının dışında,
+  // YAKALANMAMIŞ bir sayfa hatası olarak düşüyor (sayfa çalışmaya devam etse de
+  // hata izlemede gürültü). Gövdesiz tek bir HEAD isteği bunu yükleyici hiç
+  // başlamadan ayırır. Yalnız AÇIK bir HTTP reddi "dosya yok" sayılır:
+  // HEAD'i yanıtlamayan bir sunucu (405/501) ya da ağ/CORS hatası dosya
+  // hakkında bir şey söylemez — o hallerde yükleyici yine denenir ve hata
+  // sınırda yakalanır.
+  //
+  // Hem yoklamanın hem düşmenin sonucu ADRESİYLE birlikte tutulur ve okurken
+  // adres karşılaştırılır. Adres değişince durumu bir efektte sıfırlamak, her
+  // model değişiminde fazladan bir render turu açardı; bu haliyle yeni bir
+  // adres zaten "ölçülmedi" demektir.
+  const [probe, setProbe] = useState<{ url: string; reachable: boolean } | null>(null);
+  const reachable = probe && probe.url === url ? probe.reachable : null;
+  const [failed, setFailed] = useState<{ url: string; kind: ViewerFailure } | null>(null);
+  const failure = failed && failed.url === url ? failed.kind : null;
+  useEffect(() => {
+    let cancelled = false;
+    fetch(url, { method: "HEAD" })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 405 || res.status === 501) {
+          setProbe({ url, reachable: true });
+          return;
+        }
+        if (!res.ok) {
+          console.warn(
+            `[ModelViewer] model dosyası okunamadı (HTTP ${res.status}):`,
+            url
+          );
+        }
+        setProbe({ url, reachable: res.ok });
+      })
+      .catch(() => {
+        if (!cancelled) setProbe({ url, reachable: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
   const resetView = () => {
     if (controlsRef.current) {
       controlsRef.current.reset();
@@ -142,7 +219,7 @@ export function ModelViewer({
     ? "w-full h-[300px] sm:h-[400px] md:h-[500px] rounded-2xl overflow-hidden"
     : "w-full h-96 rounded-lg";
 
-  const fallback = (
+  const webglFallback = (
     <div
       className="flex h-full w-full items-center justify-center p-6 text-center"
       style={{ background }}
@@ -153,17 +230,47 @@ export function ModelViewer({
     </div>
   );
 
+  // Dosya kaynaklı başarısızlık: metin sözlükten DEĞİL çağrıandan ya da
+  // buradan gelir (uygulama yalnız Türkçe; sözlük dosyaları bu değişikliğin
+  // kapsamı dışında).
+  const modelFallback = errorFallback ?? (
+    <div
+      className="flex h-full w-full items-center justify-center p-6 text-center"
+      style={{ background }}
+    >
+      <p className="text-sm text-gray-500">
+        3D önizleme oluşturulamadı: model dosyası okunamadı ya da bozuk.
+      </p>
+    </div>
+  );
+
+  const fallbackFor = (kind: ViewerFailure) =>
+    kind === "webgl" ? webglFallback : modelFallback;
+
+  // Sahne gerçekten çalışıyor mu? Yalnız o zaman döndür/sıfırla düğmeleri
+  // anlamlıdır; fallback kutusunun üstünde duran bir "Görünümü sıfırla"
+  // düğmesi hiçbir şey yapmıyordu.
+  const canvasLive = webgl === true && reachable === true && failure === null;
+
   return (
     <div className="relative h-full">
       {previewMode && (
         <div className="h-1 bg-gradient-to-r from-green-500 to-green-800 rounded-t-2xl" />
       )}
       <div className={className || defaultClass}>
-        {webgl === null ? (
+        {webgl === null || (webgl && reachable === null) ? (
           // Pre-probe placeholder — identical on server + first client render.
           <div className="h-full w-full" style={{ background }} />
-        ) : webgl ? (
-          <WebGLBoundary fallback={fallback}>
+        ) : !webgl ? (
+          webglFallback
+        ) : reachable === false ? (
+          modelFallback
+        ) : (
+          <CanvasBoundary
+            key={url}
+            renderFallback={fallbackFor}
+            onFail={(kind) => setFailed({ url, kind })}
+          >
             <Canvas
               camera={{ position: CAM_POS, fov: 45, near: 0.05, far: 100 }}
             >
@@ -193,12 +300,10 @@ export function ModelViewer({
                 maxDistance={MAX_DISTANCE}
               />
             </Canvas>
-          </WebGLBoundary>
-        ) : (
-          fallback
+          </CanvasBoundary>
         )}
       </div>
-      {!previewMode && webgl && (
+      {!previewMode && canvasLive && (
         // Inspection surfaces get a reset affordance too — after zooming into a
         // detail there was previously no way back to the framed view.
         <button
@@ -209,7 +314,7 @@ export function ModelViewer({
           {d["model.viewer.resetView"]}
         </button>
       )}
-      {previewMode && webgl && (
+      {previewMode && canvasLive && (
         <>
           {/* Hint overlay */}
           <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-sm text-white rounded-full px-3 py-1 text-xs">

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getRedisConnection } from "@/lib/queue/connection";
 import { getAllFlags } from "@/lib/services/flags";
 import { spentCentsSince } from "@/lib/services/spend-guard";
+import { handleRouteFailure, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
  * monitoring probe can distinguish "the app is down" from "the app is up and
  * telling you Redis is down". The deploy gate reads `ok`.
  */
-export async function GET() {
+async function handleGET() {
   const started = Date.now();
 
   const [dbOk, redisOk, flags, spend24h, diskFreeMb] = await Promise.all([
@@ -65,4 +66,17 @@ export async function GET() {
     },
     { status: 200, headers: { "cache-control": "no-store" } }
   );
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET() {
+  try {
+    return await handleGET();
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/health", ADMIN_READ_FAILED_ERROR);
+  }
 }

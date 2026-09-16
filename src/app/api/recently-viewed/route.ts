@@ -7,6 +7,7 @@ import { getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRedisConnection } from "@/lib/queue/connection";
 import type { ProductListItem } from "@/components/product-card";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 
@@ -56,7 +57,7 @@ function respond(data: unknown, newCookie?: string) {
   return res;
 }
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const { key, newCookie } = await resolveKey(req);
   const ids = await getIds(key);
   if (ids.length === 0) return respond({ items: [] }, newCookie);
@@ -92,7 +93,7 @@ export async function GET(req: NextRequest) {
 
 // Record a product view — prepend (dedup), cap at MAX_ITEMS. Fire-and-forget
 // from the product detail page.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { key, newCookie } = await resolveKey(req);
   const body = await req.json().catch(() => ({}));
   const productId = String(body?.productId ?? "");
@@ -104,4 +105,30 @@ export async function POST(req: NextRequest) {
   );
   await setIds(key, next);
   return respond({ ok: true }, newCookie);
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(req: NextRequest) {
+  try {
+    return await handleGET(req);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/recently-viewed", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(req: NextRequest) {
+  try {
+    return await handlePOST(req);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/recently-viewed", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

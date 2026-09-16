@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orderDrafts, orders } from "@/lib/db/schema";
 import { getFileBuffer } from "@/lib/services/storage";
+import { handleRouteFailure, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 const MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -22,51 +23,55 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-  const { id } = await params;
+    const { id } = await params;
 
-  // Try draft first (admins review unpaid dekonts there).
-  let receiptKey: string | null = null;
-  const draft = await db.query.orderDrafts.findFirst({
-    where: eq(orderDrafts.id, id),
-    columns: { bankTransferReceiptKey: true },
-  });
-  if (draft?.bankTransferReceiptKey) {
-    receiptKey = draft.bankTransferReceiptKey;
-  } else {
-    const order = await db.query.orders.findFirst({
-      where: eq(orders.id, id),
-      columns: { draftId: true },
+    // Try draft first (admins review unpaid dekonts there).
+    let receiptKey: string | null = null;
+    const draft = await db.query.orderDrafts.findFirst({
+      where: eq(orderDrafts.id, id),
+      columns: { bankTransferReceiptKey: true },
     });
-    if (order?.draftId) {
-      const linked = await db.query.orderDrafts.findFirst({
-        where: eq(orderDrafts.id, order.draftId),
-        columns: { bankTransferReceiptKey: true },
+    if (draft?.bankTransferReceiptKey) {
+      receiptKey = draft.bankTransferReceiptKey;
+    } else {
+      const order = await db.query.orders.findFirst({
+        where: eq(orders.id, id),
+        columns: { draftId: true },
       });
-      if (linked?.bankTransferReceiptKey) {
-        receiptKey = linked.bankTransferReceiptKey;
+      if (order?.draftId) {
+        const linked = await db.query.orderDrafts.findFirst({
+          where: eq(orderDrafts.id, order.draftId),
+          columns: { bankTransferReceiptKey: true },
+        });
+        if (linked?.bankTransferReceiptKey) {
+          receiptKey = linked.bankTransferReceiptKey;
+        }
       }
     }
-  }
 
-  if (!receiptKey) {
-    return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
-  }
+    if (!receiptKey) {
+      return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+    }
 
-  try {
-    const buffer = await getFileBuffer(receiptKey);
-    const ext = extname(receiptKey).toLowerCase();
-    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+    try {
+      const buffer = await getFileBuffer(receiptKey);
+      const ext = extname(receiptKey).toLowerCase();
+      const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
-    return new NextResponse(new Uint8Array(buffer), {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "private, max-age=0, must-revalidate",
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+      return new NextResponse(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "private, max-age=0, must-revalidate",
+        },
+      });
+    } catch {
+      return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+    }
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/admin/orders/[id]/receipt", ADMIN_READ_FAILED_ERROR);
   }
 }

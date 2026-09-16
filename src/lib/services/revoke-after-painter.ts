@@ -6,6 +6,11 @@ import {
   painterActions,
   manufacturerEarnings,
 } from "@/lib/db/schema";
+import { isRefunded } from "@/lib/config/order-status-policy";
+import {
+  isOrderRefunded,
+  notRefundedGuard,
+} from "@/lib/services/manufacturer-assign";
 import { reverseEarning, accrueEarning } from "@/lib/services/payouts";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { autoAssignIfEligible } from "@/lib/services/order-confirm";
@@ -36,7 +41,13 @@ import { autoAssignIfEligible } from "@/lib/services/order-confirm";
  *    and leave the order untouched so the admin uses the refund/dispute flow;
  *  - a reversal failure aborts before any detach (`reverse_failed`), order intact.
  * If the atomic detach then loses a race (painter shipped meanwhile) after we
- * already reversed, we re-accrue so the manufacturer is not underpaid.
+ * already reversed, we re-accrue so the manufacturer is not underpaid — unless
+ * the race was lost to a REFUND, in which case re-accruing would write a
+ * payable earning onto an order whose money went back to the customer.
+ *
+ * İADE: bu servis iade edilmiş siparişi HİÇ işlemez (`refunded`), çünkü yaptığı
+ * her şey — geri sarma, iki kara liste, iki QC turu, otomatik atama — orada
+ * yasaktır. Koparmayı çağıranın iade yolu yapar.
  */
 export const PAINTER_REVOCABLE_STATUSES = [
   "assigned",
@@ -67,7 +78,19 @@ export type RevokeAfterPainterResult =
   | { code: "wrong_status"; status: string }
   | { code: "earning_settled" }
   | { code: "reverse_failed" }
-  | { code: "lost_race" };
+  | { code: "lost_race" }
+  /**
+   * Sipariş iade edilmiş: bu servis HİÇBİR ŞEY yazmadan (ve paraya dokunmadan)
+   * çekilir. Koparmayı çağıranın iade yolu yapar (rotadaki
+   * `detachRefundedFromPainter`).
+   */
+  | { code: "refunded" }
+  /**
+   * Koparma yarışı kaybedildi VE siparişin ödeme durumu okunamadı: baskı
+   * hakedişi geri alınmıştı, yeniden tahakkuk KAPALI TARAFA düşülerek
+   * yapılmadı. Çağıran bunu admin'e olduğu gibi söylemek zorundadır.
+   */
+  | { code: "state_unreadable" };
 
 export async function revokeAfterPainterHandoff(args: {
   orderId: string;
@@ -96,6 +119,15 @@ export async function revokeAfterPainterHandoff(args: {
     where: eq(orders.id, orderId),
   });
   if (!order) return { code: "not_found" as const };
+  // İADE TERMİNAL, VE BURADAN AŞAĞISI SİPARİŞİ KIMILDATIR: hakedişi çevirir,
+  // durumu atama aşamasına geri sarar, İKİ kara listeyi birden işler, İKİ QC
+  // turunu birden artırır ve sonunda otomatik atamayı tetikler. İade edilmiş
+  // siparişte hepsi yasaktır (order-status-policy.ts). Kontrol en başta, ilk
+  // yan etkiden (reverseEarning) ÖNCE durur: buradan `refunded` dönüldüğünde
+  // sipariş de para da el değmemiş olur. Koparmayı rotanın iade yolu yapar;
+  // parayı da orada çevirmeyiz, hakediş geri alma iadenin kendi işidir
+  // (order-refund.ts).
+  if (isRefunded(order)) return { code: "refunded" as const };
   if (order.shippedAt != null) return { code: "already_shipped" as const };
   if (
     !order.painterId ||
@@ -229,16 +261,36 @@ export async function revokeAfterPainterHandoff(args: {
         // acted between the read and here, this matches 0 rows.
         eq(orders.painterId, prevPainterId),
         inArray(orders.painterStatus, [...PAINTER_REVOCABLE_STATUSES]),
-        isNull(orders.shippedAt)
+        isNull(orders.shippedAt),
+        // Yukarıdaki iade kontrolünün SQL karşılığı: okuma ile bu yazma
+        // arasına düşen bir iade geri sarmayı ve iki kara listeyi yine
+        // işletirdi. Yarış burada kapanır.
+        notRefundedGuard()
       )
     )
     .returning();
 
   if (!updated) {
-    // We already reversed the earning but lost the detach race (painter shipped
-    // or another admin acted). Restore the print earning so the manufacturer is
-    // not left unpaid for an order that progressed instead of coming back.
-    if (prevManufacturerId) {
+    // Hakediş ÇEVRİLDİ ama koparma yarışı kaybedildi. Artık iki ayrı sebebi
+    // var ve tedavileri ZIT:
+    //  • sipariş ilerledi (boyacı kargoladı, başka bir admin araya girdi) →
+    //    üretici baskısının parasını hak ediyor, yeniden tahakkuk edilir;
+    //  • araya İADE düştü (yukarıdaki yeni WHERE koşulu) → para müşteriye geri
+    //    gitti; yeniden tahakkuk, iade edilmiş siparişin üstüne ÖDENEBİLİR bir
+    //    hakediş yazmak olurdu (ödeme talebi toplu batch'e alır) — yapılmaz.
+    // Ödeme durumu okunamazsa KAPALI TARAFA düşülür: yeniden tahakkuk
+    // yapılmaz ve bu, çağırana `state_unreadable` olarak AÇIKÇA söylenir —
+    // eksik bir hakediş admin ekranından telafi edilebilir, iade edilmiş
+    // siparişe yazılmış ödenebilir bir hakediş sessizce ödenir.
+    const refundedNow = await isOrderRefunded(orderId).catch(() => null);
+    if (refundedNow === null) {
+      console.error(
+        "revoke-after-painter: lost race and payment state unreadable; earning left reversed",
+        orderId
+      );
+      return { code: "state_unreadable" as const };
+    }
+    if (!refundedNow && prevManufacturerId) {
       await accrueEarning(orderId, prevManufacturerId, printBaseKurus).catch(
         (e) =>
           console.error(
@@ -247,7 +299,9 @@ export async function revokeAfterPainterHandoff(args: {
           )
       );
     }
-    return { code: "lost_race" as const };
+    return refundedNow
+      ? { code: "refunded" as const }
+      : { code: "lost_race" as const };
   }
 
   // Audit trail on both partner ledgers. Deliberately "admin_revoked" (not

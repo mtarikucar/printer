@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq, and, ne, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { products } from "@/lib/db/schema";
+import { categories, manufacturers, productImages, products } from "@/lib/db/schema";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
@@ -27,11 +27,9 @@ async function loadProduct(slug: string) {
       eq(products.status, "active"),
       sellerNotSuspended()
     ),
-    with: {
-      images: true,
-      manufacturer: { columns: { companyName: true } },
-      categoryNode: { columns: { path: true, name: true } },
-    },
+    // `with:` BİLEREK YOK: görseller, satıcı adı ve kategori düğümü yalnızca
+    // GÖSTERİLİYOR, ama ilişkisel sorgu TEK ifadedir — biri okunamadığında ürün
+    // sayfası tamamen 500 verir, yani ürün SATIN ALINAMAZ hâle gelirdi.
   });
 }
 
@@ -61,6 +59,42 @@ export default async function ProductDetailPage({
   const product = await loadProduct(slug);
   if (!product) notFound();
 
+  // ─── Yalnız GÖSTERİLEN yan okumalar: ayrı ve korumalı ────────────────────
+  const [imageRead, sellerRead, categoryRead] = await Promise.all([
+    db
+      .select()
+      .from(productImages)
+      .where(eq(productImages.productId, product.id))
+      .catch((e) => {
+        console.error("shop: ürün görselleri okunamadı", e);
+        return null;
+      }),
+    product.manufacturerId
+      ? db
+          .select({ companyName: manufacturers.companyName })
+          .from(manufacturers)
+          .where(eq(manufacturers.id, product.manufacturerId))
+          .catch((e) => {
+            console.error("shop: satıcı adı okunamadı", e);
+            return null;
+          })
+      : [],
+    product.categoryId
+      ? db
+          .select({ path: categories.path, name: categories.name })
+          .from(categories)
+          .where(eq(categories.id, product.categoryId))
+          .catch((e) => {
+            console.error("shop: kategori okunamadı", e);
+            return null;
+          })
+      : [],
+  ]);
+  const imagesUnreadable = imageRead === null;
+  const productImageRows = imageRead ?? [];
+  const sellerName = sellerRead?.[0]?.companyName ?? null;
+  const categoryNode = categoryRead?.[0] ?? null;
+
   // Rendered server-side so the HTML a crawler receives carries the reviews and
   // the rating, instead of contradicting the card that shows them.
   const reviewData = await loadProductReviews(product.id);
@@ -68,7 +102,7 @@ export default async function ProductDetailPage({
   // Default gallery = images with no option choice (the unpainted set). Images
   // tagged to a choice (e.g. "El boyaması" painted set) are grouped separately
   // so the buyer page can swap the gallery when that option is selected.
-  const sortedImages = [...product.images].sort(
+  const sortedImages = [...productImageRows].sort(
     (a, b) => a.sortOrder - b.sortOrder
   );
   const images = sortedImages
@@ -90,7 +124,7 @@ export default async function ProductDetailPage({
 
   // Cross-sell: a few more active products from the same category node.
   const relatedRows = product.categoryId
-    ? await db.query.products.findMany({
+    ? (await db.query.products.findMany({
         where: and(
           eq(products.status, "active"),
           eq(products.categoryId, product.categoryId),
@@ -103,7 +137,12 @@ export default async function ProductDetailPage({
           manufacturer: { columns: { companyName: true } },
           categoryNode: { columns: { path: true, name: true } },
         },
-      })
+      }).catch((e) => {
+        // Çapraz satış rafı bu sayfanın KONUSU değildir: okunamadığında raf
+        // görünmez, ürünün kendisi satılmaya devam eder.
+        console.error("shop: benzer ürünler okunamadı", e);
+        return [];
+      }))
     : [];
   const related: ProductListItem[] = relatedRows.map((p) => ({
     id: p.id,
@@ -131,19 +170,19 @@ export default async function ProductDetailPage({
     description: product.description,
     priceKurus: product.priceKurus,
     images,
-    sellerName: product.manufacturer?.companyName ?? null,
+    sellerName: sellerName,
     material: product.material ?? null,
     leadTimeDays: product.leadTimeDays ?? null,
     ratingAvg: reviewData.avg,
     ratingCount: reviewData.count,
-    categoryName: product.categoryNode?.name ?? null,
-    categoryPath: product.categoryNode?.path ?? null,
+    categoryName: categoryNode?.name ?? null,
+    categoryPath: categoryNode?.path ?? null,
   });
   const breadcrumbJsonLd = buildProductBreadcrumbJsonLd({
     slug: product.slug ?? slug,
     title: product.title,
-    categoryName: product.categoryNode?.name ?? null,
-    categoryPath: product.categoryNode?.path ?? null,
+    categoryName: categoryNode?.name ?? null,
+    categoryPath: categoryNode?.path ?? null,
   });
 
   return (
@@ -160,6 +199,16 @@ export default async function ProductDetailPage({
         >
           ← {d["shop.backToShop" as keyof typeof d] || "Mağazaya dön"}
         </Link>
+        {imagesUnreadable && (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          >
+            Ürün görselleri şu anda yüklenemedi (geçici bir sistem arızası).
+            Ürün satışta ve bilgileri doğrudur; görselleri görmek için birkaç
+            dakika sonra sayfayı yenileyin.
+          </p>
+        )}
         <ProductDetailClient
           product={{
             id: product.id,
@@ -168,7 +217,7 @@ export default async function ProductDetailPage({
             priceKurus: product.priceKurus,
             material: product.material,
             leadTimeDays: product.leadTimeDays,
-            sellerName: product.manufacturer?.companyName ?? null,
+            sellerName: sellerName,
             images: defaultImages,
             boxContents: publicSpec.boxContents,
             optionGroups: optionConfig.optionGroups,
@@ -187,8 +236,8 @@ export default async function ProductDetailPage({
           title={d["related.title" as keyof typeof d] || "Benzer ürünler"}
           products={related}
           viewAllHref={
-            product.categoryNode
-              ? `/shop?category=${encodeURIComponent(product.categoryNode.path)}`
+            categoryNode
+              ? `/shop?category=${encodeURIComponent(categoryNode.path)}`
               : "/shop"
           }
         />

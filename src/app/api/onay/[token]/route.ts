@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { decideModelApproval } from "@/lib/services/model-approval";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { getClientIpFromRequest } from "@/lib/utils/request";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const DECISIONS = new Set(["approved", "revision", "cancelled"]);
 
@@ -13,7 +14,7 @@ const DECISIONS = new Set(["approved", "revision", "cancelled"]);
  * `awaiting_customer_approval`, so a double tap or a retried request is a
  * friendly no-op rather than a second state change.
  */
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
@@ -53,4 +54,17 @@ export async function POST(
     // for a decision that was never recorded.
     refunded: result.refunded ?? false,
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ token: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/onay/[token]", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

@@ -56,6 +56,20 @@ interface LeftBehindRow {
 }
 
 /**
+ * Parti kargo bilgisi düzeltme ucunun raporu.
+ *
+ * `untouched`: partide sevk edilmiş ama DÜZELTİLEN kaydı taşımayan sipariş
+ * sayısı — kısmi sevkte önceki konsinye kendi takip numarasını korur. Sessizce
+ * atlanırsa admin hepsini düzelttiğini sanır.
+ */
+interface BatchCorrectionResult {
+  changed: string[];
+  corrected: number;
+  untouched: number;
+  customersNotified: boolean;
+}
+
+/**
  * Seans iptal ucunun raporu. `alreadyShipped` ve `failed` boş DEĞİLSE bu
  * ekranda uyarı olarak durur: sessizce yutulan bir iade, geri ödenmemiş
  * müşteri parası demektir.
@@ -223,6 +237,25 @@ export function SessionClient({
   const [carrier, setCarrier] = useState("yurtici");
   const [trackingNumber, setTrackingNumber] = useState("");
 
+  // ─── Yapılmış sevkiyatın kargo bilgisi düzeltmesi ───────────────────────
+  //
+  // Atölye siparişinin kargosu TEK TEK düzeltilemez: siparişin kendi ucu
+  // (PATCH /api/admin/orders/[id]/ship), kargo geri alma ve üreticinin kendi
+  // kargo ucu atölye siparişini reddeder, çünkü takip numarası siparişin değil
+  // PARTİNİN kaydıdır. O kapılar konduğunda düzeltmenin yapılabileceği hiçbir
+  // yer kalmamıştı — her ret "parti sevkiyatı üzerinden düzeltin" diyordu ama
+  // partiyi yazan bu ekran onu yalnızca gösteriyordu. Düzeltme, kaydın
+  // yaşadığı yerde: burada.
+  const [correctOpen, setCorrectOpen] = useState(false);
+  const [correctCarrier, setCorrectCarrier] = useState(session.batchCarrier ?? "yurtici");
+  const [correctTracking, setCorrectTracking] = useState(session.batchTrackingNumber ?? "");
+  // Müşteriye haber verme KARARI admin'indir ve varsayılan HAYIR: katılımcı
+  // figürünü kargodan değil seansta mekandan alır ve ona hiç takip numarası
+  // gönderilmemiştir.
+  const [correctNotify, setCorrectNotify] = useState(false);
+  const [correctError, setCorrectError] = useState<string | null>(null);
+  const [correctResult, setCorrectResult] = useState<BatchCorrectionResult | null>(null);
+
   // ─── Üretici devri (üreticisiz kapanmış parti) ──────────────────────────
   const [assignManufacturerId, setAssignManufacturerId] = useState("");
 
@@ -370,6 +403,62 @@ export function SessionClient({
       // catch olmadan `finally` yine de busy'yi kapatır ama hata mesajı
       // hiç görünmez, admin buton neden pasifleşti anlamaz.
       setError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Yapılmış parti sevkiyatının firmasını/takip numarasını düzeltir.
+   *
+   * Gönderilen alanlar sunucuda mevcut kayıtla kıyaslanır; değişen yoksa uç
+   * hiçbir şey yazmaz. Sipariş aşaması ve para DEĞİŞMEZ — bu bir hareket değil,
+   * yanlış yazılmış bir numaranın düzeltilmesidir.
+   */
+  const submitShipCorrection = async () => {
+    setCorrectError(null);
+    const tracking = correctTracking.trim();
+    if (correctCarrier !== "elden" && !tracking) {
+      setCorrectError("Kargoyla sevkte takip numarası zorunludur.");
+      return;
+    }
+    if (
+      correctNotify &&
+      !confirm(
+        "Düzeltme katılımcılara bildirilsin mi?\n\n" +
+          "Katılımcı figürünü seansta MEKANDAN alır ve kendisine hiç takip " +
+          "numarası gönderilmedi; bildirim yalnızca gerçekten kargoyla giden " +
+          "bir partide anlamlıdır."
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/workshop-sessions/${session.id}/batch-shipping`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          carrier: correctCarrier,
+          // "elden"de numara anlamsız; uç da onu temizler.
+          trackingNumber: correctCarrier === "elden" ? "" : tracking,
+          notifyCustomers: correctNotify,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCorrectError(payload.error || "Kargo bilgisi düzeltilemedi.");
+        return;
+      }
+      setCorrectResult({
+        changed: Array.isArray(payload.changed) ? payload.changed : [],
+        corrected: Number(payload.corrected) || 0,
+        untouched: Number(payload.untouched) || 0,
+        customersNotified: payload.customersNotified === true,
+      });
+      setCorrectOpen(false);
+      router.refresh();
+    } catch {
+      setCorrectError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
     } finally {
       setBusy(false);
     }
@@ -677,15 +766,133 @@ export function SessionClient({
       )}
 
       {/* Toplu sevk / teslim */}
-      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
+      {/* id: atölye siparişinin kendi ekranı kargo düzeltmesini reddederken
+          buraya bağlanır (#parti-sevkiyati) — yönergeyi tekrar etmek yerine işi
+          yapabilen bölümü açar. scroll-mt, çıpayla gelindiğinde başlığın yapışkan
+          üst çubuğun altında kalmamasını sağlar. */}
+      <div id="parti-sevkiyati" className="mt-6 scroll-mt-24 rounded-2xl border border-gray-200 bg-white p-5">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Sevkiyat</h3>
 
         {session.batchShippedAt && (
-          <p className="text-sm text-gray-700 mb-2">
-            Sevk edildi: {formatDateTime(session.batchShippedAt)} ·{" "}
-            {session.batchCarrier ? CARRIER_LABELS[session.batchCarrier] ?? session.batchCarrier : "—"}
-            {session.batchTrackingNumber ? ` · Takip: ${session.batchTrackingNumber}` : ""}
-          </p>
+          <>
+            <p className="text-sm text-gray-700 mb-2">
+              Sevk edildi: {formatDateTime(session.batchShippedAt)} ·{" "}
+              {session.batchCarrier ? CARRIER_LABELS[session.batchCarrier] ?? session.batchCarrier : "—"}
+              {session.batchTrackingNumber ? ` · Takip: ${session.batchTrackingNumber}` : ""}
+              {!correctOpen && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCorrectCarrier(session.batchCarrier ?? "yurtici");
+                    setCorrectTracking(session.batchTrackingNumber ?? "");
+                    setCorrectNotify(false);
+                    setCorrectError(null);
+                    setCorrectResult(null);
+                    setCorrectOpen(true);
+                  }}
+                  className="ml-2 text-xs font-medium text-blue-600 hover:text-blue-800"
+                >
+                  Düzelt
+                </button>
+              )}
+            </p>
+
+            {correctResult && (
+              <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                <p className="font-medium">
+                  {correctResult.changed.length > 0
+                    ? `Parti kargo bilgisi düzeltildi (${correctResult.changed.join(", ")}).`
+                    : "Değişen bir bilgi yoktu."}
+                </p>
+                <p className="mt-0.5">
+                  {correctResult.corrected} siparişin kaydı güncellendi.
+                  {/* Eski metin "onları kendi sevkiyatları üzerinden düzeltin"
+                      diyordu; böyle bir yol YOK: atölye siparişinin kargosu
+                      tek tek düzeltilemez (siparişin kendi ucu da, geri alma da,
+                      üreticinin ucu da reddeder). Ekran olmayan bir ekrana
+                      yollamaz; ne olduğunu söyler. */}
+                  {correctResult.untouched > 0
+                    ? ` ${correctResult.untouched} sipariş bu kaydı taşımıyordu (önceki konsinye) ve dokunulmadı: onlar kendi konsinyelerinin takip numarasını taşımaya devam eder. Bu düzeltme yalnızca yukarıdaki parti kaydını taşıyan siparişleri kapsar.`
+                    : ""}
+                </p>
+                <p className="mt-0.5">
+                  {correctResult.customersNotified
+                    ? "Katılımcılara bildirim gönderildi."
+                    : "Katılımcılara bildirim gönderilmedi."}
+                </p>
+              </div>
+            )}
+
+            {correctOpen && (
+              <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+                <p className="mb-2 text-xs text-blue-900">
+                  Yanlış girilmiş takip numarası ya da firma buradan düzeltilir. Parti kaydı ve
+                  AYNI kaydı taşıyan siparişler birlikte güncellenir; siparişlerin aşaması,
+                  durumu ve hakedişler değişmez. İşlem her siparişin denetim kaydına yazılır.
+                  İade edilmiş siparişler partinin dışındadır: kayıtları olduğu gibi kalır ve
+                  aşağıdaki sayılara girmez.
+                </p>
+                {correctError && <p className="mb-2 text-xs text-red-600">{correctError}</p>}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr] sm:items-end">
+                  <FormField label="Kargo">
+                    <Select
+                      value={correctCarrier}
+                      onChange={(e) => setCorrectCarrier(e.target.value)}
+                    >
+                      {Object.entries(CARRIER_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField
+                    label={`Takip numarası${correctCarrier === "elden" ? " (gerekmez)" : ""}`}
+                  >
+                    <Input
+                      value={correctTracking}
+                      onChange={(e) => setCorrectTracking(e.target.value)}
+                      disabled={correctCarrier === "elden"}
+                      placeholder={
+                        correctCarrier === "elden"
+                          ? "Elden teslimde gerekmez"
+                          : "Takip numarası"
+                      }
+                    />
+                  </FormField>
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-xs text-blue-900">
+                  <input
+                    type="checkbox"
+                    checked={correctNotify}
+                    onChange={(e) => setCorrectNotify(e.target.checked)}
+                  />
+                  Katılımcılara güncel sevkiyat bilgisini bildir (varsayılan: bildirme —
+                  figürler seansta mekanda teslim edilir)
+                </label>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={submitShipCorrection}
+                    disabled={busy}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {busy ? "Kaydediliyor…" : "Kargo bilgisini düzelt"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCorrectOpen(false);
+                      setCorrectError(null);
+                    }}
+                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
         {session.batchDeliveredAt && (
           <p className="text-sm text-gray-700 mb-2">

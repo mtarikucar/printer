@@ -12,6 +12,8 @@
  * dosyası) ya da yalnız GLB (görüntüleme) geçerli bir yüklemedir.
  */
 
+import type { ModelUploadStage } from "./order-model-policy";
+
 export const ORDER_MODEL_FORMATS = ["stl", "glb"] as const;
 export type OrderModelKind = (typeof ORDER_MODEL_FORMATS)[number];
 
@@ -211,4 +213,123 @@ export function mergeRevisionFiles(
   });
   for (const f of incoming) if (!replaced.has(key(f.name))) out.push(f);
   return out;
+}
+
+// ─── Hangi sürüm GEÇERLİ ─────────────────────────────────────────────────────
+
+/** Bir sürüm başlığının, "hangisi geçerli" sorusu için okunan tek alanı. */
+export interface RevisionNumber {
+  revision: number;
+}
+
+/**
+ * Siparişin GEÇERLİ (canlı) sürümü: EN YÜKSEK numaralı sürüm. Tek kural budur.
+ *
+ * NEDEN DOSYA ANAHTARINA BAKILMIYOR: "önceki parçaları koru" ile açılan sürüm,
+ * taşıdığı parçanın dosya anahtarını bir öncekiyle PAYLAŞIR (disk kopyası yok),
+ * yani bir anahtar birden çok sürüm başlığıyla eşleşir. Anahtar eşlemesi bu
+ * yüzden "hangi sürüm geçerli" sorusunu cevaplayamaz: eşleşenlerden hangisini
+ * seçerseniz seçin bir senaryoda yanılır. Yanıldığında da gürültü çıkarmaz —
+ * QC kapısı (qcPhotosMatchCurrentRevision) SESSİZCE terk edilmiş sürümü izler
+ * ve eski modelin baskısı onaydan geçer.
+ *
+ * Kuralın ayakta kalması, "hangi sürüm canlı" sorusunun cevabını değiştiren HER
+ * yolun en üste yeni bir sürüm YAZMASINA bağlıdır:
+ *   - yükleme (attachOrderModelFiles) → N+1 açar,
+ *   - "bu sürümü geçerli yap" (setCurrentModelRevision) → eski sürümün dosya
+ *     kümesini AYNI anahtarlarla N+1 olarak yeniden yayımlar,
+ *   - en üstteki sürümün silinmesi (deleteModelRevision) → bir alttakini en üst
+ *     yapar ve siparişin canlı kolonlarını ona çeker.
+ * Böylece üreticinin indirdiği (MAX sürüm), QC'nin kıyasladığı ve admin
+ * ekranının "GÜNCEL" dediği sürüm AYNI sayıdır; ayrışacak ikinci bir kural yok.
+ */
+export function resolveCurrentRevision(revisions: RevisionNumber[]): number | null {
+  let highest: number | null = null;
+  for (const r of revisions) {
+    if (highest === null || r.revision > highest) highest = r.revision;
+  }
+  return highest;
+}
+
+/**
+ * Diskten GERÇEKTEN kaldırılabilecek dosya anahtarları.
+ *
+ * Taşınan parçalar aynı `file_key`i paylaşır: silinen sürümün bir anahtarı
+ * başka bir sürümün ya da SİPARİŞİN KENDİ canlı kolonlarının gösterdiği dosya
+ * olabilir. Hâlâ gösterilen bir anahtarı diskten kaldırmak, ekranda duran ama
+ * indirilince 404 veren bir model bırakır — sessiz veri kaybı. Kural: yalnız
+ * hiçbir yerden gösterilmeyen anahtar kaldırılır.
+ *
+ * Tekrarlı anahtarlar tekilleşir (aynı dosya iki kez silinmeye çalışılmasın).
+ */
+export function unlinkableKeys(
+  doomed: Iterable<string>,
+  stillReferenced: Iterable<string | null | undefined>
+): string[] {
+  const kept = new Set<string>();
+  for (const k of stillReferenced) if (k) kept.add(k);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const k of doomed) {
+    if (!k || kept.has(k) || seen.has(k)) continue;
+    seen.add(k);
+    out.push(k);
+  }
+  return out;
+}
+
+/**
+ * GEÇERLİ sürüm silindiğinde siparişin bir tür (GLB/STL) için göstereceği
+ * anahtar: adaylar SIRAYLA denenir, diskten az önce kaldırılanlar atlanır.
+ *
+ * Çağıranın verdiği sıra kasıtlıdır — geri düşülen sürümün KENDİ dosya satırı,
+ * sonra o sürümün BAŞLIK anahtarı, en sonda siparişin o anki canlı anahtarı:
+ *
+ *  - BAŞLIK adımı olmadan, dosya satırı olmayan ESKİ sürümler (sürüm tablosu
+ *    0031'de, dosya tablosu 0053'te geldi) geri düşüş hedefi olduğunda sipariş
+ *    MODELSİZ kalıyordu: dosya araması boş dönüyor, geriye tek aday olarak
+ *    siparişin canlı anahtarı kalıyor, o da SİLİNEN sürümün dosyasını
+ *    gösterdiği için az önce unlink edilmiş oluyordu. Başlığında kullanılabilir
+ *    bir model duran sipariş boş görüntüleyiciye ve "not_ready" müşteri
+ *    indirmesine düşüyordu.
+ *  - Siparişin canlı anahtarı yine de SON aday olarak kalır: geri düşülen sürüm
+ *    bir türü hiç taşımıyorsa (yalnız-STL sürüm) o tür önceki sürümden korunur.
+ *
+ * Unlink edilmiş bir anahtara işaret etmek, ekranda duran ama indirilince 404
+ * veren bir model bırakır; bu yüzden her aday o elemeden geçer.
+ */
+export function fallbackModelKey(
+  candidates: readonly (string | null | undefined)[],
+  unlinked: ReadonlySet<string>
+): string | null {
+  for (const key of candidates) {
+    if (key && !unlinked.has(key)) return key;
+  }
+  return null;
+}
+
+/**
+ * Bir sürümün SİLİNEMEYECEĞİ aşamalar: birinin elinde o sürümden basılmış
+ * fiziksel bir iş vardır. Dosyayı altından çekmek, partnerin ekranını boşaltmak
+ * ve neyi bastığını kaydsız bırakmaktır.
+ *
+ * Aşama, politikanın kendi `modelUploadStage`inden gelir — üretici DURUMUNDAN
+ * değil. Sebep: admin'in kendi bastığı (üreticisi olmayan) sipariş yalnız
+ * `orders.status='printing'` taşır, `manufacturerStatus` NULL'dur; üretici
+ * durumunu okuyan nöbetçi o baskıyı hiç görmüyordu ve sürüm baskı sürerken
+ * silinebiliyordu. Politika `isPrinting()` ile ikisini de sayar.
+ *
+ * Burada (politika modülünde değil) durmasının sebebi: bu, yükleme
+ * politikasının değil SÜRÜM YÖNETİMİNİN kuralıdır; politikanın aşama tablosunu
+ * yalnız OKUR.
+ */
+export const REVISION_LOCKED_STAGES: readonly ModelUploadStage[] = [
+  "printing",
+  "printed_or_qc",
+  "painting",
+  "shipped_or_delivered",
+];
+
+export function revisionLockedByStage(stage: ModelUploadStage): boolean {
+  return REVISION_LOCKED_STAGES.includes(stage);
 }

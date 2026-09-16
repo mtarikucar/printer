@@ -3,6 +3,7 @@ import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { joinSessionSchema } from "@/lib/validators/workshop";
 import { joinSession } from "@/lib/services/workshop-participant";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Public atölye katılımı: `/atolye/katil/<token>` formunun gönderim ucu.
@@ -11,7 +12,7 @@ import { getSessionUser } from "@/lib/services/customer-auth";
  * taslak ve katılımcı kaydı servistedir (workshop-participant.ts); burada
  * yalnızca sınırlama, doğrulama ve HTTP eşlemesi yapılır.
  */
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
@@ -98,5 +99,18 @@ export async function POST(
       { error: "Katılım kaydedilemedi. Lütfen tekrar deneyin." },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ token: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/workshop/join/[token]", CUSTOMER_ACTION_FAILED_ERROR);
   }
 }

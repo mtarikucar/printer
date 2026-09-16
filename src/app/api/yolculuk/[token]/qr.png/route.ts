@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { journeyUrl, loadJourney } from "@/lib/services/order-journey";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,7 @@ export const runtime = "nodejs";
  * it is the same capability as the link itself. The token is still validated so
  * this can't be used to mint QR codes for arbitrary strings.
  */
-export async function GET(
+async function handleGET(
   _request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
@@ -24,7 +25,7 @@ export async function GET(
 
   const journey = await loadJourney(token);
   if (!journey) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: "Karekod bulunamadı." }, { status: 404 });
   }
 
   const png = await QRCode.toBuffer(journeyUrl(token), {
@@ -47,4 +48,17 @@ export async function GET(
       "X-Robots-Tag": "noindex, noimageindex",
     },
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_request: NextRequest, ctx: { params: Promise<{ token: string }> }) {
+  try {
+    return await handleGET(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/yolculuk/[token]/qr.png", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

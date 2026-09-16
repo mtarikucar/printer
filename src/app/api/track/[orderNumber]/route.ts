@@ -6,13 +6,14 @@ import { normalizeFileUrl, getPublicUrl } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getBankDetails } from "@/lib/config/payment";
 import { currentModelUrl, orderHasOwnModel } from "@/lib/config/order-model-presence";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Track endpoint resolves either a confirmed order or a pending draft (same reference string).
  * Pre-payment drafts return synthetic status `pending_payment` so the UI can render the
  * payment-pending experience without leaking that drafts/orders are different tables.
  */
-export async function GET(
+async function handleGET(
   _request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -187,4 +188,17 @@ export async function GET(
       : null,
     bankTransferHistory: null,
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handleGET(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/track/[orderNumber]", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

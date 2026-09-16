@@ -13,15 +13,22 @@ import { zipSync, strToU8 } from "fflate";
 import {
   MAX_ORDER_MODEL_FILES,
   dedupeFileNames,
+  fallbackModelKey,
   formatModelSize,
   orderModelKindOf,
   safeModelFileName,
   verifyModelHead,
   mergeRevisionFiles,
+  resolveCurrentRevision,
+  revisionLockedByStage,
+  unlinkableKeys,
   zipSizeProblem,
+  REVISION_LOCKED_STAGES,
   ZIP_LIMIT_BYTES,
   type RevisionFileLike,
 } from "../src/lib/config/order-model";
+import { modelUploadStage } from "../src/lib/config/order-model-policy";
+import { modelAckState } from "../src/lib/config/partner-model-ack";
 import { extractModelEntriesFromZip, scanModelZip } from "../src/lib/services/model-bundle";
 import {
   carvePaintingShare,
@@ -287,6 +294,333 @@ check("yükleme route'u carryForward'ı okur ve doğrulama SONRASI hatada taşı
   assert.match(route, /formData\.get\("carryForward"\) === "1"/);
   assert.match(route, /carryForward,\s*\n\s*source:/);
   assert.match(route, /inputs\.map\(\(f\) => deleteFile\(f\.key\)/);
+});
+
+// ─── Hangi sürüm GEÇERLİ ────────────────────────────────────────────────────
+// TEK KURAL: en yüksek numaralı sürüm geçerlidir. Anahtar eşlemesi bu soruyu
+// cevaplayamaz, çünkü "önceki parçaları koru" taşınan parçayı KOPYALAMAZ: iki
+// sürüm başlığı aynı dosya anahtarını taşır. Aşağıdaki ilk test o dizilişi
+// (hatayı gizleyen diziliş) gerçek merge çıktısından üretir.
+check("geçerli sürüm: EN YÜKSEK sürüm kazanır (sıra karışık gelse de)", () => {
+  assert.equal(resolveCurrentRevision([{ revision: 1 }, { revision: 2 }]), 2);
+  assert.equal(resolveCurrentRevision([{ revision: 3 }, { revision: 1 }, { revision: 2 }]), 3);
+  assert.equal(resolveCurrentRevision([{ revision: 7 }]), 7);
+  assert.equal(resolveCurrentRevision([]), null, "sürüm yoksa null");
+});
+
+check("carryForward dizilişi: taşınan parça anahtarı PAYLAŞIR, kural yine de yeni sürümü seçer", () => {
+  // Sürüm 1: gövde + kol. Sürüm 2 yalnız kolu düzeltir, gövde TAŞINIR.
+  const rev1 = [part("govde.stl", "stl", "k-govde"), part("kol.stl", "stl", "k-kol")];
+  const rev2 = mergeRevisionFiles(rev1, [part("kol.stl", "stl", "k-kol-v2")]);
+  assert.deepEqual(rev2.map((f) => f.key), ["k-govde", "k-kol-v2"]);
+  // İki sürümün BİRİNCİL STL'i (ilk STL) aynı anahtar: "k-govde".
+  const primary = (files: RevisionFileLike[]) => files.find((f) => f.kind === "stl")!.key;
+  assert.equal(primary(rev1), primary(rev2), "taşınan birincil parça anahtarı paylaşılıyor");
+  // Anahtar eşlemesi bu yüzden iki sürümü birden gösterirdi; sayı göstermez.
+  assert.equal(resolveCurrentRevision([{ revision: 1 }, { revision: 2 }]), 2);
+});
+
+check("eski sürüme dönüş: geri getirme en üste yazdığı için kural değişmeden çalışır", () => {
+  // Sürüm 1 geri getirildi → dosya kümesi sürüm 3 olarak yeniden yayımlandı.
+  // Terk edilen sürüm 2 hâlâ listede, ama geçerli olan 3'tür.
+  assert.equal(resolveCurrentRevision([{ revision: 1 }, { revision: 2 }, { revision: 3 }]), 3);
+});
+
+// ─── Diskten hangi dosya kaldırılabilir ─────────────────────────────────────
+check("unlink: paylaşılan, siparişin gösterdiği ve tekrarlı anahtarlar korunur", () => {
+  assert.deepEqual(unlinkableKeys(["a", "b"], ["b"]), ["a"], "başka sürümün taşıdığı dosya kalır");
+  assert.deepEqual(unlinkableKeys(["a"], ["a"]), [], "hâlâ gösterilen anahtar silinmez");
+  assert.deepEqual(unlinkableKeys(["a", "a", "c"], []), ["a", "c"], "tekrarlar tekilleşir");
+  assert.deepEqual(unlinkableKeys(["a"], [null, undefined]), ["a"], "boş referanslar sayılmaz");
+  // Asıl kayıp senaryosu: silinen sürüm GEÇERLİ DEĞİL ama siparişin canlı GLB'si
+  // onun dosyasını gösteriyor (yalnız-STL sürümden sonra korunan GLB).
+  assert.deepEqual(unlinkableKeys(["k-glb", "k-stl"], ["k-glb"]), ["k-stl"]);
+});
+
+// ─── Sürüm silme nöbetçisi: "baskıda mı" politikadan gelir ──────────────────
+check("silme kilidi: admin'in KENDİ bastığı sipariş (üretici yok) de kilitli", () => {
+  const inHouse = modelUploadStage({
+    status: "printing",
+    manufacturerStatus: null,
+    painterStatus: null,
+    paymentStatus: "succeeded",
+  });
+  assert.equal(inHouse, "printing");
+  assert.equal(revisionLockedByStage(inHouse), true, "üreticisiz baskı korumasız kalıyor");
+  const withMfg = modelUploadStage({
+    status: "printing",
+    manufacturerStatus: "printing",
+    painterStatus: null,
+    paymentStatus: "succeeded",
+  });
+  assert.equal(revisionLockedByStage(withMfg), true);
+  // Üretim başlamadan silmek serbesttir: ortada basılmış bir iş yok.
+  const before = modelUploadStage({
+    status: "approved",
+    manufacturerStatus: "accepted",
+    painterStatus: null,
+    paymentStatus: "succeeded",
+  });
+  assert.equal(before, "before_production");
+  assert.equal(revisionLockedByStage(before), false);
+  assert.deepEqual([...REVISION_LOCKED_STAGES], [
+    "printing",
+    "printed_or_qc",
+    "painting",
+    "shipped_or_delivered",
+  ]);
+});
+
+// ─── Sürümün taşımadığı birincil dosya (P2A-1) ──────────────────────────────
+check("yalnız-STL sürüm siparişin GLB anahtarını DÜŞÜRMEZ (müşteri onay kapısı)", () => {
+  const svc = read("src/lib/services/order-model.ts");
+  assert.match(svc, /const liveGlbKey = primaryGlb\?\.key \?\? order\.modelGlbKey/);
+  assert.match(svc, /modelGlbKey: liveGlbKey/);
+  assert.doesNotMatch(
+    svc,
+    /modelGlbKey: primaryGlb\?\.key \?\? null/,
+    "sürümün taşımadığı GLB null'lanıyor: meshy_auto onay kapısı düşer"
+  );
+  assert.doesNotMatch(svc, /modelStlKey: primaryStl\?\.key \?\? null/);
+  // Sürüm BAŞLIĞI yine de dürüst kalır: sürüm neyi taşıyorsa onu yazar.
+  assert.match(svc, /glbKey: primaryGlb\?\.key \?\? null/);
+});
+
+check("eski sürümü geçerli yapmak da taşınmayan türü boşaltmaz", () => {
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = svc.slice(svc.indexOf("export async function setCurrentModelRevision"));
+  assert.match(fn, /const liveGlbKey = primaryGlb\?\.fileKey \?\? order\.modelGlbKey/);
+  assert.match(fn, /const liveStlKey = primaryStl\?\.fileKey \?\? order\.modelStlKey/);
+});
+
+// ─── "Bu sürümü geçerli yap" GERÇEKTEN değiştirmeli ────────────────────────
+// Yalnız siparişin canlı kolonlarını oynatmak hiçbir partner yüzeyini
+// değiştirmiyordu: hepsi EN YÜKSEK sürümü okur. Geri getirme bu yüzden kaynak
+// sürümün kümesini en üste yeniden yayımlar.
+check("geri getirme: kaynak sürümün kümesini EN ÜSTE yeni sürüm olarak yayımlar", () => {
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = svc.slice(
+    svc.indexOf("export async function setCurrentModelRevision"),
+    svc.indexOf("export interface DeleteRevisionResult")
+  );
+  assert.match(fn, /const nextRev = current \+ 1/, "yeni sürüm numarası en üstün bir fazlası değil");
+  assert.match(fn, /tx\.insert\(orderModelRevisions\)/, "sürüm başlığı yazılmıyor");
+  assert.match(fn, /tx\.insert\(orderModelFiles\)/, "dosya satırları yazılmıyor");
+  // Disk kopyası YOK: yeni satırlar kaynağın anahtarlarını gösterir.
+  assert.match(fn, /fileKey: f\.fileKey/);
+  assert.match(fn, /Sürüm \$\{revision\} yeniden geçerli yapıldı/, "geçmiş neden değiştiğini söylemiyor");
+  // Zaten geçerli olan sürüme basmak kopya üretmez.
+  assert.match(fn, /if \(revision === current\)/);
+  assert.match(fn, /newRevision: null/);
+  // İade nöbetçisi tutarsa sürüm satırları da geri alınmalı.
+  assert.match(fn, /if \(!updated\) throw new Error/);
+  // Dosyasız bir sürümü en üste yayımlamak üreticinin parça listesini boşaltır.
+  assert.match(fn, /ModelRevisionEmptyError/);
+});
+
+check("geçerli sürüm TEK yerde çözülür: numara, anahtar eşlemesi değil", () => {
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = svc.slice(
+    svc.indexOf("export async function currentModelRevision"),
+    svc.indexOf("export interface SetCurrentRevisionResult")
+  );
+  assert.match(fn, /resolveCurrentRevision\(revs\)/, "karar saf kuraldan gelmiyor");
+  assert.doesNotMatch(fn, /glbKey/, "hâlâ dosya anahtarı eşleştiriliyor");
+  // İkinci uygulama kalmadı: QC ucunun çağırdığı isim buraya devrediyor.
+  const rev = read("src/lib/services/order-model-revision.ts");
+  const dele = rev.slice(rev.indexOf("export async function currentOrderModelRevision"));
+  assert.match(dele, /return currentModelRevision\(orderId\)/);
+  assert.doesNotMatch(dele, /orderModelRevisions/, "ikinci bir sorgu hâlâ burada");
+});
+
+check("duyuru siparişin GEÇERLİ sürümünü anar (geri getirme onay kapısını açar)", () => {
+  const rev = read("src/lib/services/order-model-revision.ts");
+  const fn = rev.slice(
+    rev.indexOf("export async function notifyOrderModelRevision"),
+    rev.indexOf("/** Partnerin bu siparişteki duyuru")
+  );
+  assert.match(fn, /const revision = Math\.max\(args\.revision, live \?\? args\.revision\)/);
+});
+
+check("her partner/müşteri dosya yüzeyi AYNI kuralı okur (latestModelFiles)", () => {
+  for (const f of [
+    "src/app/manufacturer/orders/[id]/page.tsx",
+    "src/app/api/manufacturer/orders/[id]/model-files/[fileId]/route.ts",
+    "src/app/api/manufacturer/orders/[id]/model-files/zip/route.ts",
+    "src/app/api/customer/orders/[orderNumber]/download/[format]/route.ts",
+    "src/app/api/admin/orders/[id]/model-files/zip/route.ts",
+  ]) {
+    assert.match(read(f), /latestModelFiles\(/, `${f} güncel sürümü başka yoldan çözüyor`);
+  }
+  // latestModelFiles = dosya satırlarının EN YÜKSEK sürümü; kuralla aynı cevap.
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = svc.slice(svc.indexOf("export async function latestModelFiles"));
+  assert.match(fn, /max\(\$\{orderModelFiles\.revision\}\)/);
+});
+
+check("sürüm silme: nöbetçi politikanın aşamasını okur, siparişin dosyası koparılmaz", () => {
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = svc.slice(svc.indexOf("export async function deleteModelRevision"));
+  assert.match(fn, /resolveCurrentRevision\(revs\)/, "geçerli sürüm sayıyla çözülmüyor");
+  assert.doesNotMatch(fn, /const currentMatch = revs\.find\(/, "hâlâ anahtar eşlemesi");
+  // "Baskıda mı" sorusu üretici durumundan DEĞİL politikadan gelir: admin'in
+  // kendi bastığı siparişte manufacturerStatus NULL'dur.
+  assert.match(fn, /revisionLockedByStage\(stage\)/);
+  assert.doesNotMatch(fn, /order\.manufacturerStatus === "printing"/, "üretici durumu tek başına okunuyor");
+  // Veri kaybı: koruma artık GEÇERLİ OLMAYAN sürümün silinmesinde de çalışır.
+  assert.match(fn, /unlinkableKeys\(/);
+  assert.match(fn, /if \(current !== revision\) stillUsed\.push\(order\.glbKey, order\.stlKey\)/);
+  assert.match(fn, /stillUsed\.push\(r\.glbKey, r\.stlKey\)/, "hayatta kalan sürüm başlıkları korunmuyor");
+  assert.match(fn, /fallbackModelKey\(/, "silinen dosyaya işaret kalabilir");
+  assert.doesNotMatch(fn, /const keep = \(key: string \| null\)/, "eleme kuralının ikinci kopyası");
+});
+
+// ─── Geçerli sürüm silinince sipariş neyi gösterir ──────────────────────────
+// Dilim fonksiyonun SONUNDA biter: sınırsız dilim dosyanın devamındaki
+// resetQcForNewRevision'ın UPDATE'ini yakalayıp yanlış yeri sınıyordu.
+const deleteFn = (svc: string) =>
+  svc.slice(
+    svc.indexOf("export async function deleteModelRevision"),
+    svc.indexOf("export interface QcResetResult")
+  );
+
+check("fallbackModelKey: sıra dosya → başlık → siparişin canlısı; unlink edilen atlanır", () => {
+  const none = new Set<string>();
+  assert.equal(fallbackModelKey(["k-dosya", "k-baslik", "k-canli"], none), "k-dosya");
+  // ESKİ sürüm (0031 ile 0053 arası): başlığı var, dosya satırı yok.
+  assert.equal(fallbackModelKey([undefined, "k-baslik", "k-canli"], none), "k-baslik");
+  // Geri düşülen sürüm bu türü hiç taşımıyor (yalnız-STL sürüm): canlı korunur.
+  assert.equal(fallbackModelKey([undefined, null, "k-canli"], none), "k-canli");
+  // Az önce diskten kaldırılan aday hiçbir sırada seçilemez.
+  assert.equal(fallbackModelKey(["k-dosya"], new Set(["k-dosya"])), null);
+  assert.equal(fallbackModelKey([undefined, null, "k-canli"], new Set(["k-canli"])), null);
+  assert.equal(fallbackModelKey(["k-dosya", "k-baslik"], new Set(["k-dosya"])), "k-baslik");
+  assert.equal(fallbackModelKey([], none), null);
+});
+
+check("geçerli sürüm silinince DOSYASIZ eski sürüme düşüş siparişi modelsiz bırakmaz", () => {
+  // Kayıp senaryosu: geri düşülen sürüm 0053 öncesinden kalma (başlık var,
+  // order_model_files satırı yok). Adaylar yalnız "dosya satırı" ve "siparişin
+  // canlı anahtarı" olsaydı, canlı anahtar SİLİNEN sürümün dosyasını gösterdiği
+  // için az önce unlink edilmiş olur ve sipariş kullanılabilir bir sürüm
+  // dururken modelsiz kalırdı.
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = deleteFn(svc);
+  assert.match(fn, /next\.glbKey/, "geri düşülen sürümün BAŞLIK GLB'si aday değil");
+  assert.match(fn, /next\.stlKey/, "geri düşülen sürümün BAŞLIK STL'i aday değil");
+  const glb = fn.slice(fn.indexOf("glbKey = fallbackModelKey("));
+  const adaylar = glb.slice(0, glb.indexOf("]"));
+  assert.ok(
+    adaylar.indexOf("files.find") < adaylar.indexOf("next.glbKey") &&
+      adaylar.indexOf("next.glbKey") < adaylar.indexOf("order.glbKey"),
+    "aday sırası bozuk: dosya → başlık → canlı olmalı"
+  );
+  // setCurrentModelRevision aynı eski biçimi zaten kurtarıyordu; iki yol ayrışmasın.
+  const set = svc.slice(
+    svc.indexOf("export async function setCurrentModelRevision"),
+    svc.indexOf("export interface DeleteRevisionResult")
+  );
+  assert.match(set, /source\.glbKey/, "geçerli yapma yolu başlıktan kurtarmayı bırakmış");
+});
+
+check("sürüm silme: iade yarışında işaret yazılamazsa HER ŞEY geri alınır", () => {
+  // İade, bu işlem satırı kilitlemeden hemen önce girebilir. Nöbetçinin sonucu
+  // okunmazsa satırlar silinmiş, rota dosyaları diskten kaldırmış ve sipariş
+  // kaldırılan dosyaları gösteriyor olurdu — silmenin önlemek için var olduğu
+  // kaybın ta kendisi. Kardeş setCurrentModelRevision bunu zaten fırlatarak
+  // kapatıyordu; iki dal ayrışmamalı.
+  const svc = read("src/lib/services/order-model.ts");
+  const fn = deleteFn(svc);
+  const repoint = fn.slice(fn.lastIndexOf(".update(orders)"));
+  assert.match(repoint, /notRefundedGuard\(\)/, "işaret yazması iade nöbetçisiz");
+  assert.match(repoint, /\.returning\(/, "nöbetçinin sonucu hiç okunmuyor");
+  assert.match(repoint, /if \(!repointed\)[\s\S]{0,120}throw new Error/, "tutulan nöbetçi sessiz geçiliyor");
+  const set = svc.slice(
+    svc.indexOf("export async function setCurrentModelRevision"),
+    svc.indexOf("export interface DeleteRevisionResult")
+  );
+  assert.match(set, /if \(!updated\) throw new Error/, "kardeş dal artık fırlatmıyor");
+});
+
+// ─── Onay kapısı arızada KAPALI kalır ───────────────────────────────────────
+check("onay kapısı: eylem günlüğü OKUNAMAZSA kapı kapalı kalır (fail closed)", () => {
+  // Kapının açık kalmasının bedeli: eski modele basılmış iş QC'den geçip
+  // kargolanır. Boş satır listesi "duyuru yok" demektir — yani yutulan bir hata
+  // kapıyı tam da bu şekilde açardı:
+  assert.equal(modelAckState([]).pending, false, "boş liste zaten 'onay gerekmiyor' diyor");
+  const rev = read("src/lib/services/order-model-revision.ts");
+  const fn = rev.slice(
+    rev.indexOf("export async function readPartnerModelAck"),
+    rev.indexOf("export type RecordAckResult")
+  );
+  assert.doesNotMatch(fn, /return \[\] as/, "hata yine boş listeye çevriliyor: kapı açılır");
+  const fail = fn.slice(fn.indexOf("catch"));
+  assert.match(fail, /pending: true/, "arızada kapı kapanmıyor");
+  assert.match(fail, /readFailed: true/, "arıza, karardan ayırt edilemiyor");
+  assert.match(fail, /announcedRevision: null/, "bilinmeyen sürüm numarası uyduruluyor");
+  // Kapıyı okuyan uçlar durumu ya ortak yardımcıdan (modelAckRefusal — arıza
+  // dalını da kapsar, 503) ya da eski biçimde doğrudan `ack.pending`ten okur.
+  // İkisi de yoksa kapı o uçta HİÇ yok demektir.
+  for (const f of [
+    "src/app/api/manufacturer/orders/[id]/start-printing/route.ts",
+    "src/app/api/manufacturer/orders/[id]/ship/route.ts",
+    "src/app/api/painter/orders/[id]/ship/route.ts",
+  ]) {
+    assert.match(read(f), /modelAckRefusal\(|ack\.pending/, `${f} kapıyı okumuyor`);
+  }
+  // Admin'in "partner adına" yolunda BİÇİM değil DAVRANIŞ sabitlenir: kapı
+  // okunmalı ve kapalıyken ret dönmeli. Ret ister ortak yardımcıdan
+  // (modelAckRefusal — arıza dalını da kapsar, 503) ister eski `ack.pending`
+  // biçiminden gelsin, güvence aynıdır. Literal `!ack.pending` beklemek, tam da
+  // istenen düzeltmeyi (ortak yardımcıya geçiş) imkânsız kılıyordu: testi
+  // düzeltmeden fix yazılamıyordu.
+  const onBehalf = read("src/lib/services/on-behalf.ts");
+  const gateStart = onBehalf.indexOf("async function modelAckGate");
+  const gateEnd = onBehalf.indexOf("export interface OnBehalfPreflight");
+  assert.ok(gateStart >= 0 && gateEnd > gateStart, "on-behalf model onay kapısı bulunamadı");
+  const gate = onBehalf.slice(gateStart, gateEnd);
+  assert.match(gate, /readPartnerModelAck\(/, "admin adına yolu kapıyı hiç sormuyor");
+  assert.match(gate, /modelAckRefusal\(|ack\.pending/, "kapı okunuyor ama rette kullanılmıyor");
+  assert.match(gate, /fail\(/, "kapı kapalıyken ret dönülmüyor");
+});
+
+check("onay YAZIMI da arızada durur: okunamayan günlüğe 'zaten onaylı' denmez", () => {
+  const rev = read("src/lib/services/order-model-revision.ts");
+  const fn = rev.slice(rev.indexOf("export async function recordPartnerModelAck"));
+  const read_ = fn.indexOf("readPartnerModelAck(");
+  const guard = fn.indexOf("if (state.readFailed)");
+  const insert = fn.indexOf("db.insert(");
+  assert.ok(guard > read_ && guard >= 0, "arıza kontrolü yok");
+  assert.ok(guard < insert, "onay satırı arıza kontrolünden ÖNCE yazılıyor");
+  assert.match(fn.slice(guard, insert), /throw new Error/, "arızada sessizce devam ediliyor");
+});
+
+// ─── Yükleme route'u: kimlik, not ve duyuru kuralı ──────────────────────────
+check("bozuk sipariş kimliği route'un kendi 404'üne düşer (DB hatası değil)", () => {
+  const route = read("src/app/api/admin/orders/[id]/upload-model/route.ts");
+  assert.match(route, /UUID_RE/);
+  assert.ok(
+    route.indexOf("UUID_RE.test(orderId)") < route.indexOf("db.query.orders.findFirst"),
+    "kimlik denetimi ilk sorgudan sonra"
+  );
+  // POST'ta `fail` kullanılır: hazırlanmış parçalar da atılır.
+  assert.match(route, /if \(!UUID_RE\.test\(orderId\)\) return fail\(404/);
+});
+
+check("kargo sonrası: partnerlere duyuru YOK, dijital dosya müşterisine VAR", () => {
+  const route = read("src/app/api/admin/orders/[id]/upload-model/route.ts");
+  assert.match(route, /const announced = effects\.recordOnly/);
+  assert.match(route, /: await notifyOrderModelRevision\(/);
+  assert.match(route, /notifyDigitalFilesCustomer\(/);
+  assert.match(route, /includes\("digital_files"\)/);
+});
+
+check("yükleyici gerekçeyi GÖNDERİR ve sunucunun sonucunu sayfaya geçirir (P2-C2)", () => {
+  const ui = read("src/components/admin/order-model-uploader.tsx");
+  assert.match(ui, /if \(trimmedNote\) fd\.append\("note", trimmedNote\)/);
+  assert.match(ui, /noteRequired && !trimmedNote/, "notsuz yükleme sunucuya gidiyor");
+  assert.match(ui, /appliedSideEffects: res\?\.appliedSideEffects/);
+  assert.match(ui, /stage: res\?\.stage/);
 });
 
 console.log(`\n${pass} geçti, ${fail} kaldı`);

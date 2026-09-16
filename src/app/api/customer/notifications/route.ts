@@ -3,8 +3,9 @@ import { and, eq, desc, isNull, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerNotifications } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
-export async function GET() {
+async function handleGET() {
   const session = await getSessionUser();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -36,4 +37,17 @@ export async function GET() {
     })),
     unreadCount: Number(unread[0]?.value ?? 0),
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET() {
+  try {
+    return await handleGET();
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/notifications", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

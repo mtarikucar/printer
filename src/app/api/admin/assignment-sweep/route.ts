@@ -9,6 +9,7 @@ import {
   ASSIGN_FAILURE_MESSAGES,
   assignManufacturerToOrder,
   orderHasPrintableContent,
+  type AssignSelectionBasis,
 } from "@/lib/services/manufacturer-assign";
 import {
   commitAssignmentEvaluation,
@@ -37,6 +38,7 @@ import {
   type SweepApplyResult,
   type SweepDryRunResponse,
 } from "@/app/admin/assignment-sweep/types";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Atama taraması — tek seferlik "birikeni erit" ucu.
@@ -90,32 +92,36 @@ function parseLimit(raw: string | null): number {
 }
 
 export async function GET(request: NextRequest) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-
-  const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
-
   try {
-    const switches = await loadAutoAssignSwitches();
-    const [total, pending] = await Promise.all([
-      countPendingSweepOrders(),
-      loadPendingSweepOrders(limit, switches),
-    ]);
-    const rows = await evaluateSweepOrders(pending);
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-    const payload: SweepDryRunResponse = {
-      scannedAt: new Date().toISOString(),
-      total,
-      limit,
-      rows,
-    };
-    return NextResponse.json(payload);
-  } catch (error: unknown) {
-    console.error("[ATAMA taraması] kuru tarama hata verdi:", error);
-    return NextResponse.json(
-      { error: "Tarama yapılamadı. Tekrar deneyin." },
-      { status: 500 }
-    );
+    const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
+
+    try {
+      const switches = await loadAutoAssignSwitches();
+      const [total, pending] = await Promise.all([
+        countPendingSweepOrders(),
+        loadPendingSweepOrders(limit, switches),
+      ]);
+      const rows = await evaluateSweepOrders(pending);
+
+      const payload: SweepDryRunResponse = {
+        scannedAt: new Date().toISOString(),
+        total,
+        limit,
+        rows,
+      };
+      return NextResponse.json(payload);
+    } catch (error: unknown) {
+      console.error("[ATAMA taraması] kuru tarama hata verdi:", error);
+      return NextResponse.json(
+        { error: "Tarama yapılamadı. Tekrar deneyin." },
+        { status: 500 }
+      );
+    }
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/admin/assignment-sweep", ADMIN_READ_FAILED_ERROR);
   }
 }
 
@@ -152,7 +158,7 @@ const applySchema = z.object(
   { error: "Geçersiz istek." }
 );
 
-export async function POST(request: NextRequest) {
+async function handleAssignmentSweep(request: NextRequest) {
   const a = await requireAdmin();
   if ("response" in a) return a.response;
 
@@ -177,6 +183,20 @@ export async function POST(request: NextRequest) {
 
   const results: SweepApplyResult[] = [];
 
+  /**
+   * BU İSTEKTE gerçekten iş verdiğimiz atölyeler.
+   *
+   * Uygulama her satırı yeniden sıralar ve kazanan değiştiyse atamaz — doğru
+   * kural, ama tek başına şunu yapıyordu: bir atölye ekranda iki satırı birden
+   * kazandığında ilk atama onun YÜKÜNÜ artırıyor, ikinci satırın sıralaması
+   * başka bir atölyeyi öne çıkarıyor ve sipariş "Aday değişti" diye atlanıyordu.
+   * Admin'in onayladığı toplu işlem, satır başına bir tarama yenilemesine
+   * dönüşüyordu. Bu küme, kaymanın SEBEBİNİ ayırt etmemizi sağlar: kendi
+   * atamamızsa admin'in onayı hâlâ geçerlidir, dışarıdan bir değişiklikse
+   * ekran gerçekten bayatlamıştır.
+   */
+  const placedInThisRequest = new Set<string>();
+
   // Sırayla: her atama bildirim ve gerçek zamanlı yayın tetikler, 50 siparişi
   // paralel işlemek ne hızlandırır ne de güvenlidir.
   for (const item of items) {
@@ -185,6 +205,15 @@ export async function POST(request: NextRequest) {
     // kalırsa 2,5 sn'lik gecikmeli doğrulama, bu arada BAŞKASININ yaptığı
     // atamayı bizim sıralamamızın kararıymış gibi kaydeder.
     let ranked = false;
+    /**
+     * Korumalı UPDATE geçtikten SONRA doldurulur. Ondan sonraki her adım
+     * (değerlendirme kaydı, kapalı anahtar denetim satırı) defter işidir ve
+     * ATAMAYI GERİ ALMAZ; bu yüzden aşağıdaki `catch` de, bir şey patlarsa
+     * "beklenmeyen hata" demek yerine olmuş atamayı olduğu gibi raporlar.
+     * Admin'e olmuş bir atamayı olmamış göstermek, onu siparişi ikinci kez
+     * atamaya çalıştırır.
+     */
+    let placed: { orderNumber: string; name: string; message: string } | null = null;
     try {
       const pending = await loadSweepOrderById(item.orderId, switches);
       if (!pending) {
@@ -252,6 +281,11 @@ export async function POST(request: NextRequest) {
 
       let targetManufacturerId: string;
       let targetName: string;
+      // Denetim satırı atölyenin NASIL seçildiğini yazar (mülkiyet / sıralama /
+      // ekran onayı). Üç dalın üçü de kendi gerekçesini koyar.
+      let basis: AssignSelectionBasis;
+      // Başarı cümlesi bazı dallarda fazladan bir şey söyler; boşsa düz cümle.
+      let successMessage: string | null = null;
 
       if (plan.kind === "seller") {
         if (item.manufacturerId !== plan.manufacturerId) {
@@ -271,6 +305,7 @@ export async function POST(request: NextRequest) {
         }
         targetManufacturerId = plan.manufacturerId;
         targetName = shop.companyName;
+        basis = "sweep_seller";
       } else {
         // Uygulama anında gölge sarmalayıcısı: bu GERÇEK bir atama kararıdır, o
         // yüzden değerlendirme satırı da düşmelidir (Faz 1: kayıt yalnızca atama
@@ -291,21 +326,60 @@ export async function POST(request: NextRequest) {
         }
 
         if (best.manufacturerId !== item.manufacturerId) {
-          // Tarama ile onay arasında bir şey değişti (yeni sipariş, dolan
-          // kapasite, kapatılan atölye). Admin'in görmediği üreticiye sipariş
-          // göndermeyiz — ve vazgeçtiğimiz için ortada kaydedilecek bir karar
-          // da yoktur.
-          discardAssignmentEvaluation(base.orderId);
-          push(
-            false,
-            `Aday değişti: en uygun üretici artık ${best.companyName}. Taramayı yenileyip tekrar onaylayın.`,
-            null,
-            true
+          // Kazanan değişti. Admin'in görmediği üreticiye sipariş göndermeyiz;
+          // ama önce SEBEBİNE bakarız, çünkü sebeplerden biri bizzat bu istek.
+          const approved = candidates.find(
+            (c) => c.manufacturerId === item.manufacturerId
           );
-          continue;
+          if (approved?.eligible && placedInThisRequest.has(approved.manufacturerId)) {
+            // Kayma BİZİM yaptığımız atamadan: aynı onayda bu atölyeye iş
+            // verdik, yükü arttı ve sıralamada geriye düştü. Admin bu satır
+            // için o atölyeyi ZATEN onayladı ve atölye hâlâ uygun — onaylanan
+            // atamayı yapıyoruz. "Taramayı yenileyin" demek, admin'e aynı
+            // ekranı ikinci kez onaylatmaktan başka bir şey yapmıyordu.
+            //
+            // Kararı SIRALAMA vermedi: taslak düşer ve `ranked` kapanır, yoksa
+            // bu yerleştirme sıralamanın kararıymış gibi kaydedilirdi.
+            discardAssignmentEvaluation(base.orderId);
+            ranked = false;
+            targetManufacturerId = approved.manufacturerId;
+            targetName = approved.companyName;
+            basis = "sweep_screen_confirmed";
+            successMessage =
+              `${approved.companyName} üreticisine atandı. Bu onayda daha önce yapılan atamalar sıralamayı ` +
+              `değiştirdi (şu an en uygun: ${best.companyName}), ama ekranda onayladığınız atölye hâlâ ` +
+              `uygun olduğu için iş ona verildi.`;
+          } else if (approved && !approved.eligible) {
+            // Onaylanan atölye artık ALAMIYOR. Sebebi satır satır söylenir:
+            // "aday değişti" demek, admin'e yanlış soruyu sordururdu.
+            discardAssignmentEvaluation(base.orderId);
+            push(
+              false,
+              `Ekranda onayladığınız ${approved.companyName} bu siparişi artık alamıyor: ` +
+                `${approved.ineligibleReason ?? "gerekçe yok"}. En uygun üretici şimdi ` +
+                `${best.companyName}. Taramayı yenileyip tekrar onaylayın.`,
+              null,
+              true
+            );
+            continue;
+          } else {
+            // Kayma DIŞARIDAN: yeni sipariş, kapatılan atölye, başka bir
+            // adminin ataması. Ekran gerçekten bayat — ve vazgeçtiğimiz için
+            // ortada kaydedilecek bir karar da yok.
+            discardAssignmentEvaluation(base.orderId);
+            push(
+              false,
+              `Aday değişti: en uygun üretici artık ${best.companyName}. Taramayı yenileyip tekrar onaylayın.`,
+              null,
+              true
+            );
+            continue;
+          }
+        } else {
+          targetManufacturerId = best.manufacturerId;
+          targetName = best.companyName;
+          basis = "sweep_ranking";
         }
-        targetManufacturerId = best.manufacturerId;
-        targetName = best.companyName;
       }
 
       const result = await assignManufacturerToOrder({
@@ -316,6 +390,8 @@ export async function POST(request: NextRequest) {
         adminEmail: a.session.user.email,
         // Hemen yukarıda kanıtlandı; sıralayıcı da aynı siparişi okudu.
         skipPrintableCheck: true,
+        // "Bu iş buraya nasıl seçildi" sorusunun cevabı denetim satırına düşer.
+        selectionBasis: basis,
         notification: {
           subject: `Yeni sipariş atandı: ${base.orderNumber}`,
           body: `${base.orderNumber} numaralı sipariş size atandı.\n\nÜretici panelinizden 24 saat içinde kabul veya reddedin.`,
@@ -336,11 +412,34 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Korumalı UPDATE geçti: kararı yaratan sıralama ile kararın kendisi
-      // ancak BURADA birbirine bağlanır. Satırı 2,5 sn'lik gecikmeli
-      // doğrulamaya bırakmıyoruz: o zamanlayıcı unref'li ve yalnız siparişin
-      // KENDİ satırına bakar, yani "bu atamayı biz mi yaptık" sorusunu soramaz.
-      if (ranked) await commitAssignmentEvaluation(base.orderId, targetManufacturerId);
+      /* ────────────────────────────────────────────────────────────────────
+       * BURADAN SONRASI DEFTER İŞİ: atama COMMIT oldu, sipariş üreticinin
+       * tezgâhında. Buradan sızacak bir hata atamayı geri almaz, yalnız
+       * admin'e "atanamadı" yalanını söylerdi — o yüzden sonuç ŞİMDİ yazılır
+       * ve aşağıdaki adımların hiçbiri onu değiştiremez.
+       * ──────────────────────────────────────────────────────────────────── */
+      placedInThisRequest.add(targetManufacturerId);
+      placed = {
+        orderNumber: base.orderNumber,
+        name: targetName,
+        message: successMessage ?? `${targetName} üreticisine atandı.`,
+      };
+
+      // Kararı yaratan sıralama ile kararın kendisi ancak BURADA birbirine
+      // bağlanır. Satırı 2,5 sn'lik gecikmeli doğrulamaya bırakmıyoruz: o
+      // zamanlayıcı unref'li ve yalnız siparişin KENDİ satırına bakar, yani
+      // "bu atamayı biz mi yaptık" sorusunu soramaz. Kendi try/catch'i var:
+      // telemetri hatası, olmuş bir atamayı "hata" diye raporlayamaz.
+      if (ranked) {
+        try {
+          await commitAssignmentEvaluation(base.orderId, targetManufacturerId);
+        } catch (err) {
+          console.error(
+            `[ATAMA taraması] ${base.orderNumber}: değerlendirme kaydı yazılamadı (atama yapıldı)`,
+            err
+          );
+        }
+      }
 
       if (!base.autoAssignEnabled) {
         // Anahtar kapalıyken yapılan atama ayrıca iz bırakır: servisin kendi
@@ -360,12 +459,24 @@ export async function POST(request: NextRequest) {
           );
       }
 
-      push(true, `${targetName} üreticisine atandı.`, targetName);
+      push(true, placed.message, targetName);
     } catch (error: unknown) {
       // Sıraladıktan sonra patladıysak da taslak düşmeli: atamanın gerçekten
       // yazılıp yazılmadığını bilmiyoruz, bilinmeyeni karar diye kaydetmeyiz.
       if (ranked) discardAssignmentEvaluation(item.orderId);
       console.error(`[ATAMA taraması] ${item.orderId} atanamadı:`, error);
+      if (placed) {
+        // Atama COMMIT oldu, hata ondan SONRAKİ defter işinde. Sonucu "hata"
+        // diye yazmak admin'i olmuş bir atamayı tekrar yapmaya iterdi.
+        results.push({
+          orderId: item.orderId,
+          orderNumber: placed.orderNumber,
+          ok: true,
+          manufacturerName: placed.name,
+          message: `${placed.message} (Atamadan sonraki kayıt adımında bir hata oluştu; atama geçerli, sunucu günlüğüne bakın.)`,
+        });
+        continue;
+      }
       results.push({
         orderId: item.orderId,
         orderNumber: null,
@@ -382,4 +493,23 @@ export async function POST(request: NextRequest) {
     results,
   };
   return NextResponse.json(payload);
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap; ama sarmalayıcı AYRI bir fonksiyondur.
+ *
+ * NEDEN AYRI: tarama, sıralama yaptığı her sipariş için bir değerlendirme
+ * taslağı açar ve sıralamadan SONRAKİ her çıkış o taslağı ya işlemek
+ * (commitAssignmentEvaluation) ya da düşürmek (discardAssignmentEvaluation)
+ * zorundadır — kural scripts/test-auto-assign.ts'te pinli. Yakalama aynı
+ * fonksiyonun içine konursa taslağı KAPATMAYAN yeni bir çıkış doğar: ranking
+ * defteri açık kalır. İşi kendi fonksiyonunda tutmak iki kuralı da korur —
+ * taslak disiplini burada değişmez, hata zarfı ise dışarıda durur.
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handleAssignmentSweep(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/assignment-sweep", ADMIN_ACTION_FAILED_ERROR);
+  }
 }

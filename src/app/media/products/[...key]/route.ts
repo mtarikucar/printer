@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extname } from "path";
 import { getFileBuffer, isPublicUnsignedKey } from "@/lib/services/storage";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Public, unsigned, immutable delivery for storefront product photos.
@@ -22,7 +23,7 @@ const MIME_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-export async function GET(
+async function handleGET(
   _request: NextRequest,
   { params }: { params: Promise<{ key: string[] }> }
 ) {
@@ -32,14 +33,14 @@ export async function GET(
   // Defence in depth: the route is already scoped to /media/products, but a
   // traversal segment could still climb out of it.
   if (!isPublicUnsignedKey(relativePath)) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: "Görsel bulunamadı." }, { status: 404 });
   }
 
   const ext = extname(relativePath).toLowerCase();
   const contentType = MIME_TYPES[ext];
   // Only image types are public here. A .glb/.stl under products/ must not leak.
   if (!contentType) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: "Görsel bulunamadı." }, { status: 404 });
   }
 
   // `getFileBuffer` throws (ENOENT, or `assertSafePath` rejecting a traversal
@@ -49,7 +50,7 @@ export async function GET(
   try {
     buffer = await getFileBuffer(relativePath);
   } catch {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: "Görsel bulunamadı." }, { status: 404 });
   }
 
   return new NextResponse(new Uint8Array(buffer), {
@@ -61,4 +62,25 @@ export async function GET(
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap.
+ *
+ * NEDEN BU ROTADA DA: bir rota işleyicisi src/app/api ALTINDA olmak zorunda
+ * değil ve kural klasörün değil, UCUN kuralıdır. Burada `await params` ile
+ * anahtar kapısı her türlü korumanın DIŞINDAydı: fırladığında Next'in sıfır
+ * baytlık 500'ü dönüyordu — üstelik mağazanın herkese açık ürün görseli
+ * yolunda. Şimdi en dış yakalama TÜRKÇE bir gövde döndürür
+ * (bkz. src/lib/api/route-error.ts).
+ */
+export async function GET(
+  request: NextRequest,
+  ctx: { params: Promise<{ key: string[] }> }
+) {
+  try {
+    return await handleGET(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /media/products/[...key]", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

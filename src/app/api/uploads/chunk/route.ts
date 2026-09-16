@@ -10,6 +10,7 @@ import {
   isValidUploadId,
   stagedSize,
 } from "@/lib/services/chunked-upload";
+import { handleRouteFailure, UPLOAD_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Streaming route: never let Next try to buffer or cache the body.
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ async function isAuthenticated(): Promise<boolean> {
 }
 
 /** POST /api/uploads/chunk → { uploadId, chunkSize } */
-export async function PUT() {
+async function handlePUT() {
   if (!(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -42,7 +43,7 @@ export async function PUT() {
  * POST /api/uploads/chunk?uploadId=…&offset=…
  * Body is the raw chunk (not multipart — multipart would defeat the point).
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   if (!(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
 }
 
 /** GET /api/uploads/chunk?uploadId=… → how many bytes we already hold. */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   if (!(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -83,4 +84,43 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Bulunamadı" }, { status: 404 });
   }
   return NextResponse.json({ size });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePUT` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function PUT() {
+  try {
+    return await handlePUT();
+  } catch (e) {
+    return handleRouteFailure(e, "PUT /api/uploads/chunk", UPLOAD_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/uploads/chunk", UPLOAD_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/uploads/chunk", UPLOAD_FAILED_ERROR);
+  }
 }

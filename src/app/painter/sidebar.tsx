@@ -3,19 +3,29 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 export function PainterSidebar({
   newJobCount,
   unreadNotificationCount,
 }: {
-  newJobCount: number;
-  unreadNotificationCount: number;
+  /**
+   * null = sayı OKUNAMADI (bkz. painter/layout.tsx). 0 ile aynı şey DEĞİLDİR:
+   * 0 "bekleyen iş yok" der, null "bilmiyoruz" der ve rozet "?" gösterir.
+   * Sayının okunamaması artık panelin açılmasını engellemiyor.
+   */
+  newJobCount: number | null;
+  unreadNotificationCount: number | null;
 }) {
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const links = [
+  const links: {
+    href: string;
+    label: string;
+    icon: ReactNode;
+    badge: number | null;
+  }[] = [
     {
       href: "/painter/dashboard",
       label: "Panel",
@@ -138,11 +148,22 @@ export function PainterSidebar({
                 </svg>
                 {link.label}
               </span>
-              {link.badge > 0 && (
+              {/* Sayı BİLİNMİYORSA (null) rozet "?" gösterir. Rozeti gizlemek ya
+                  da 0 yazmak, yapılmamış bir sayımı "bekleyen iş yok" diye
+                  göstermek olurdu; sebep sayfanın üstündeki şeritte yazıyor. */}
+              {link.badge === null ? (
+                <span
+                  title="Bu sayı şu anda okunamadı (geçici sistem arızası); sıfır demek değildir."
+                  aria-label={`${link.label}: sayı okunamadı`}
+                  className="bg-amber-100 text-amber-800 ring-1 ring-amber-300 text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center"
+                >
+                  ?
+                </span>
+              ) : link.badge > 0 ? (
                 <span className="bg-indigo-500 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
                   {link.badge}
                 </span>
-              )}
+              ) : null}
             </Link>
           );
         })}

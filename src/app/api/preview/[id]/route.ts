@@ -5,8 +5,9 @@ import { previews } from "@/lib/db/schema";
 import { normalizeFileUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
-export async function GET(
+async function handleGET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -63,4 +64,17 @@ export async function GET(
     createdAt: preview.createdAt,
     photoKey: preview.photoKey,
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handleGET(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/preview/[id]", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

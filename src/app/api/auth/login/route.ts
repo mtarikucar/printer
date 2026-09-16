@@ -10,6 +10,7 @@ import {
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { handleRouteFailure, AUTH_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Sentinel bcrypt hash used to keep the comparison branch's timing constant
 // when the user doesn't exist. Pre-computed with bcrypt cost 12 so its work
@@ -19,7 +20,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 const SENTINEL_BCRYPT =
   "$2b$12$RZK0p3CzMMqfMcU0VFqgvuKuUC4MQ3NQAvqWqOUiEDmlnsZ4n.gXq";
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
@@ -106,5 +107,18 @@ export async function POST(request: NextRequest) {
       { error: d["api.auth.loginFailed"] },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/auth/login", AUTH_ACTION_FAILED_ERROR);
   }
 }

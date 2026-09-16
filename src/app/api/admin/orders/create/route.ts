@@ -13,6 +13,7 @@ import { buildDraftReference } from "@/lib/services/order-draft";
 import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
 import { COST_LINE_KINDS, splitCostLines } from "@/lib/config/cost-lines";
 import { orderNeedsPainting } from "@/lib/services/earning-base";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Admin creates an order on a customer's behalf (e.g. an order negotiated over
@@ -102,199 +103,203 @@ const schema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
 
-  const body = await request.json().catch(() => null);
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Geçersiz form verisi.", issues: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-  const input = parsed.data;
-
-  // Size is free text; normalize it here (the client normalizes too, for
-  // instant feedback, but the server is the trust boundary).
-  let sizeValue: string | null = null;
-  if (input.figurineSize) {
-    const normalized = normalizeSizeInput(input.figurineSize);
-    if (!normalized.ok) {
-      return NextResponse.json({ error: normalized.error }, { status: 400 });
+    const body = await request.json().catch(() => null);
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Geçersiz form verisi.", issues: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
-    sizeValue = normalized.value || null;
-  }
+    const input = parsed.data;
 
-  // Resolve the buyer the same way guest checkout does (returning-guest attach,
-  // new-guest create) — but as an ADMIN taking the order on the customer's
-  // behalf (WhatsApp), attaching to an EXISTING registered account is legitimate
-  // and expected, so we opt out of the guest-checkout "email_registered" refusal.
-  // That refusal exists to stop a stranger on the public checkout from attaching
-  // orders to someone else's account; an authenticated admin is not that threat.
-  const guest = await resolveOrCreateGuestUser({
-    email: input.email,
-    name: input.customerName,
-    phone: input.shippingAddress.telefon,
-    allowExistingAccount: true,
-  });
-  if (!guest.ok) {
-    return NextResponse.json(
-      {
-        error: "Müşteri hesabı çözümlenemedi. Lütfen tekrar deneyin.",
-        code: "user_resolve_failed",
-      },
-      { status: 409 }
+    // Size is free text; normalize it here (the client normalizes too, for
+    // instant feedback, but the server is the trust boundary).
+    let sizeValue: string | null = null;
+    if (input.figurineSize) {
+      const normalized = normalizeSizeInput(input.figurineSize);
+      if (!normalized.ok) {
+        return NextResponse.json({ error: normalized.error }, { status: 400 });
+      }
+      sizeValue = normalized.value || null;
+    }
+
+    // Resolve the buyer the same way guest checkout does (returning-guest attach,
+    // new-guest create) — but as an ADMIN taking the order on the customer's
+    // behalf (WhatsApp), attaching to an EXISTING registered account is legitimate
+    // and expected, so we opt out of the guest-checkout "email_registered" refusal.
+    // That refusal exists to stop a stranger on the public checkout from attaching
+    // orders to someone else's account; an authenticated admin is not that threat.
+    const guest = await resolveOrCreateGuestUser({
+      email: input.email,
+      name: input.customerName,
+      phone: input.shippingAddress.telefon,
+      allowExistingAccount: true,
+    });
+    if (!guest.ok) {
+      return NextResponse.json(
+        {
+          error: "Müşteri hesabı çözümlenemedi. Lütfen tekrar deneyin.",
+          code: "user_resolve_failed",
+        },
+        { status: 409 }
+      );
+    }
+    const user = guest.user;
+
+    // Each line item becomes a {name, priceKurus} addon row — the column type
+    // fits exactly and it doubles as the PayTR basket on the pay page. priceKurus
+    // is the LINE total (unit × qty).
+    const lineItems = input.lineItems.map((li) => ({
+      name: li.quantity > 1 ? `${li.description} × ${li.quantity}` : li.description,
+      priceKurus: Math.round(li.unitPriceTry * 100) * li.quantity,
+      kind: li.kind,
+    }));
+    const amountKurus = lineItems.reduce((s, li) => s + li.priceKurus, 0);
+
+    // Kalem türlerinden iki hakediş tabanı. Toplamları TANIM GEREĞİ amountKurus'a
+    // eşit (ikisi de aynı kalem listesinden geliyor), bu yüzden partner payları
+    // sipariş tutarını geçemez. Bu, manuel siparişleri ilk kez boyacı hattına
+    // sokan şey: önceden needsPainting hiç yazılmıyordu, o yüzden "El Boyaması"
+    // seçilse bile sipariş boyacıya devredilemiyor ve boyama payı üreticinin
+    // tabanına gömülüyordu.
+    const { productionKurus, paintingKurus } = splitCostLines(
+      lineItems.map((li) => ({ kind: li.kind, amountKurus: li.priceKurus }))
     );
-  }
-  const user = guest.user;
 
-  // Each line item becomes a {name, priceKurus} addon row — the column type
-  // fits exactly and it doubles as the PayTR basket on the pay page. priceKurus
-  // is the LINE total (unit × qty).
-  const lineItems = input.lineItems.map((li) => ({
-    name: li.quantity > 1 ? `${li.description} × ${li.quantity}` : li.description,
-    priceKurus: Math.round(li.unitPriceTry * 100) * li.quantity,
-    kind: li.kind,
-  }));
-  const amountKurus = lineItems.reduce((s, li) => s + li.priceKurus, 0);
+    // Yüzey el boyaması ise boyama kalemi ZORUNLU. İstemci de kontrol ediyor ama
+    // istemci kontrolü atlanabilir; boyacı payı olmadan yazılan bir el boyaması
+    // siparişi hiçbir boyacıya yönlendirilemez (send-to-painter ve assign-painter
+    // boyama payı olmayanı reddeder) ve müşterinin ödediği boyama parası
+    // üreticinin tabanına gömülür. Bu, kalem modelinin kapatmak için var olduğu
+    // hatanın ta kendisi — sunucuda da kapatılmalı.
+    if (
+      (input.finish === "hand_painted" || input.finish === "luxe_display") &&
+      paintingKurus <= 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Yüzey el boyaması seçildi ama boyama kalemi yok. Boyacının hakediş tabanı oluşmaz — bir 'Boyama' kalemi ekleyin ya da yüzeyi değiştirin.",
+        },
+        { status: 400 }
+      );
+    }
+    // Upper bound keeps the total within Postgres int4 (amount_kurus column) and
+    // turns an otherwise opaque "integer out of range" 500 into a clear 400.
+    // Shared with customer checkout via config/prices.ts so the two can't drift.
+    if (amountKurus <= 0 || amountKurus > MAX_AMOUNT_KURUS) {
+      return NextResponse.json(
+        { error: "Tutar geçersiz (0 ile ₺2.000.000 arasında olmalı)." },
+        { status: 400 }
+      );
+    }
 
-  // Kalem türlerinden iki hakediş tabanı. Toplamları TANIM GEREĞİ amountKurus'a
-  // eşit (ikisi de aynı kalem listesinden geliyor), bu yüzden partner payları
-  // sipariş tutarını geçemez. Bu, manuel siparişleri ilk kez boyacı hattına
-  // sokan şey: önceden needsPainting hiç yazılmıyordu, o yüzden "El Boyaması"
-  // seçilse bile sipariş boyacıya devredilemiyor ve boyama payı üreticinin
-  // tabanına gömülüyordu.
-  const { productionKurus, paintingKurus } = splitCostLines(
-    lineItems.map((li) => ({ kind: li.kind, amountKurus: li.priceKurus }))
-  );
+    const reference = buildDraftReference();
+    const isCard = input.paymentMethod === "card";
+    // Generous, informational deadline for manual havale orders (the customer is
+    // mid-negotiation on WhatsApp). No bullmq expire/reminder job is scheduled —
+    // admin manages these manually.
+    const bankTransferDeadline = isCard
+      ? null
+      : new Date(Date.now() + 14 * 24 * 3600 * 1000);
 
-  // Yüzey el boyaması ise boyama kalemi ZORUNLU. İstemci de kontrol ediyor ama
-  // istemci kontrolü atlanabilir; boyacı payı olmadan yazılan bir el boyaması
-  // siparişi hiçbir boyacıya yönlendirilemez (send-to-painter ve assign-painter
-  // boyama payı olmayanı reddeder) ve müşterinin ödediği boyama parası
-  // üreticinin tabanına gömülür. Bu, kalem modelinin kapatmak için var olduğu
-  // hatanın ta kendisi — sunucuda da kapatılmalı.
-  if (
-    (input.finish === "hand_painted" || input.finish === "luxe_display") &&
-    paintingKurus <= 0
-  ) {
-    return NextResponse.json(
-      {
-        error:
-          "Yüzey el boyaması seçildi ama boyama kalemi yok. Boyacının hakediş tabanı oluşmaz — bir 'Boyama' kalemi ekleyin ya da yüzeyi değiştirin.",
-      },
-      { status: 400 }
-    );
-  }
-  // Upper bound keeps the total within Postgres int4 (amount_kurus column) and
-  // turns an otherwise opaque "integer out of range" 500 into a clear 400.
-  // Shared with customer checkout via config/prices.ts so the two can't drift.
-  if (amountKurus <= 0 || amountKurus > MAX_AMOUNT_KURUS) {
-    return NextResponse.json(
-      { error: "Tutar geçersiz (0 ile ₺2.000.000 arasında olmalı)." },
-      { status: 400 }
-    );
-  }
+    const productTitleSnapshot =
+      input.lineItems.length === 1
+        ? input.lineItems[0].description
+        : `Özel sipariş (${input.lineItems.length} kalem)`;
 
-  const reference = buildDraftReference();
-  const isCard = input.paymentMethod === "card";
-  // Generous, informational deadline for manual havale orders (the customer is
-  // mid-negotiation on WhatsApp). No bullmq expire/reminder job is scheduled —
-  // admin manages these manually.
-  const bankTransferDeadline = isCard
-    ? null
-    : new Date(Date.now() + 14 * 24 * 3600 * 1000);
+    // The spec the manufacturer prints from. Typed choices are mirrored into
+    // selectedOptions (priceDelta 0 — the price is already in the line items) so
+    // a manual order carries an EXPLICIT spec list; the typed columns alone
+    // cannot be told apart from their defaults once stored.
+    const specOptions: {
+      groupName: string;
+      choiceName: string;
+      priceDeltaKurus: number;
+    }[] = [];
+    if (sizeValue)
+      specOptions.push({
+        groupName: "Boyut",
+        choiceName: sizeDisplayTr(sizeValue),
+        priceDeltaKurus: 0,
+      });
+    if (input.material)
+      specOptions.push({
+        groupName: "Malzeme",
+        choiceName: MATERIAL_LABELS[input.material],
+        priceDeltaKurus: 0,
+      });
+    if (input.finish)
+      specOptions.push({
+        groupName: "Boyama / Yüzey",
+        choiceName: FINISH_LABELS[input.finish],
+        priceDeltaKurus: 0,
+      });
+    // The typed fields above own these group names — a free-form row with the
+    // same name would show up as a second, contradictory "Boyut" on the
+    // manufacturer's spec card.
+    const RESERVED_SPEC_GROUPS = ["boyut", "malzeme", "boyama / yüzey"];
+    for (const attr of input.attributes ?? []) {
+      if (RESERVED_SPEC_GROUPS.includes(attr.name.toLocaleLowerCase("tr"))) continue;
+      specOptions.push({
+        groupName: attr.name,
+        choiceName: attr.value,
+        priceDeltaKurus: 0,
+      });
+    }
 
-  const productTitleSnapshot =
-    input.lineItems.length === 1
-      ? input.lineItems[0].description
-      : `Özel sipariş (${input.lineItems.length} kalem)`;
-
-  // The spec the manufacturer prints from. Typed choices are mirrored into
-  // selectedOptions (priceDelta 0 — the price is already in the line items) so
-  // a manual order carries an EXPLICIT spec list; the typed columns alone
-  // cannot be told apart from their defaults once stored.
-  const specOptions: {
-    groupName: string;
-    choiceName: string;
-    priceDeltaKurus: number;
-  }[] = [];
-  if (sizeValue)
-    specOptions.push({
-      groupName: "Boyut",
-      choiceName: sizeDisplayTr(sizeValue),
-      priceDeltaKurus: 0,
+    // orderType "marketplace" (not "custom"): a manual order is a physical,
+    // admin-fulfilled item with NO photo/preview. The "marketplace" promote path
+    // skips AI generation entirely and, with no seller assigned, leaves the order
+    // in the admin queue. A "custom" draft would instead hit kickOffOrderProcessing
+    // and — finding no preview/photo — mark itself failed_generation.
+    //
+    // Ödeme alındıktan sonra bu sipariş `awaiting_model`'da BEKLER ve otomatik
+    // atamaya girmez (manual-orders-without-model kararı): aşağıdaki kalemler bir
+    // fiyat anlaşmasıdır, basılacak bir dosya değil, ve üreticiye kalem listesi
+    // gönderilirse partner siparişi açıp basacak bir şey bulamaz
+    // (orderHasPrintableContent artık kalemleri saymaz). Admin 3D modeli
+    // /api/admin/orders/[id]/upload-model ile yüklediğinde sipariş `approved`
+    // olur ve o rota otomatik atamayı çağırır — yani model indiği anda yerleşir.
+    await db.insert(orderDrafts).values({
+      reference,
+      userId: user.id,
+      email: user.email,
+      customerName: user.fullName,
+      phone: input.shippingAddress.telefon,
+      orderType: "marketplace",
+      productTitleSnapshot,
+      selectedAddons: lineItems,
+      selectedOptions: specOptions.length > 0 ? specOptions : null,
+      // Typed columns stay null/default when the admin left them unset; the
+      // material filter in manufacturer assignment reads these.
+      ...(sizeValue ? { figurineSize: sizeValue } : {}),
+      ...(input.material ? { material: input.material } : {}),
+      ...(input.finish ? { finish: input.finish } : {}),
+      photoKeys: input.photoKeys && input.photoKeys.length > 0 ? input.photoKeys : null,
+      shippingAddress: input.shippingAddress,
+      amountKurus,
+      productionBaseKurus: productionKurus,
+      paintingPriceKurus: paintingKurus,
+      needsPainting: orderNeedsPainting(paintingKurus),
+      paymentMethod: input.paymentMethod,
+      status: "pending",
+      bankTransferDeadline,
+      attributionChannel: "whatsapp",
     });
-  if (input.material)
-    specOptions.push({
-      groupName: "Malzeme",
-      choiceName: MATERIAL_LABELS[input.material],
-      priceDeltaKurus: 0,
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://figurunica.com";
+    return NextResponse.json({
+      reference,
+      amountKurus,
+      payUrl: `${appUrl}/pay/${reference}`,
     });
-  if (input.finish)
-    specOptions.push({
-      groupName: "Boyama / Yüzey",
-      choiceName: FINISH_LABELS[input.finish],
-      priceDeltaKurus: 0,
-    });
-  // The typed fields above own these group names — a free-form row with the
-  // same name would show up as a second, contradictory "Boyut" on the
-  // manufacturer's spec card.
-  const RESERVED_SPEC_GROUPS = ["boyut", "malzeme", "boyama / yüzey"];
-  for (const attr of input.attributes ?? []) {
-    if (RESERVED_SPEC_GROUPS.includes(attr.name.toLocaleLowerCase("tr"))) continue;
-    specOptions.push({
-      groupName: attr.name,
-      choiceName: attr.value,
-      priceDeltaKurus: 0,
-    });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/orders/create", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  // orderType "marketplace" (not "custom"): a manual order is a physical,
-  // admin-fulfilled item with NO photo/preview. The "marketplace" promote path
-  // skips AI generation entirely and, with no seller assigned, leaves the order
-  // in the admin queue. A "custom" draft would instead hit kickOffOrderProcessing
-  // and — finding no preview/photo — mark itself failed_generation.
-  //
-  // Ödeme alındıktan sonra bu sipariş `awaiting_model`'da BEKLER ve otomatik
-  // atamaya girmez (manual-orders-without-model kararı): aşağıdaki kalemler bir
-  // fiyat anlaşmasıdır, basılacak bir dosya değil, ve üreticiye kalem listesi
-  // gönderilirse partner siparişi açıp basacak bir şey bulamaz
-  // (orderHasPrintableContent artık kalemleri saymaz). Admin 3D modeli
-  // /api/admin/orders/[id]/upload-model ile yüklediğinde sipariş `approved`
-  // olur ve o rota otomatik atamayı çağırır — yani model indiği anda yerleşir.
-  await db.insert(orderDrafts).values({
-    reference,
-    userId: user.id,
-    email: user.email,
-    customerName: user.fullName,
-    phone: input.shippingAddress.telefon,
-    orderType: "marketplace",
-    productTitleSnapshot,
-    selectedAddons: lineItems,
-    selectedOptions: specOptions.length > 0 ? specOptions : null,
-    // Typed columns stay null/default when the admin left them unset; the
-    // material filter in manufacturer assignment reads these.
-    ...(sizeValue ? { figurineSize: sizeValue } : {}),
-    ...(input.material ? { material: input.material } : {}),
-    ...(input.finish ? { finish: input.finish } : {}),
-    photoKeys: input.photoKeys && input.photoKeys.length > 0 ? input.photoKeys : null,
-    shippingAddress: input.shippingAddress,
-    amountKurus,
-    productionBaseKurus: productionKurus,
-    paintingPriceKurus: paintingKurus,
-    needsPainting: orderNeedsPainting(paintingKurus),
-    paymentMethod: input.paymentMethod,
-    status: "pending",
-    bankTransferDeadline,
-    attributionChannel: "whatsapp",
-  });
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://figurunica.com";
-  return NextResponse.json({
-    reference,
-    amountKurus,
-    payUrl: `${appUrl}/pay/${reference}`,
-  });
 }

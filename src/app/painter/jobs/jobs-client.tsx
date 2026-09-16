@@ -13,8 +13,9 @@ import {
 } from "@/lib/upload-with-progress";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import { ModelViewer } from "@/components/model-viewer";
-import { formatCurrency } from "@/lib/i18n/format";
+import { formatCurrency, formatDateTime } from "@/lib/i18n/format";
 import { isRefunded } from "@/lib/config/order-status-policy";
+import { JobChat } from "./job-chat";
 
 interface Job {
   id: string;
@@ -49,6 +50,42 @@ interface Job {
   qcPhotoCount: number;
   qcPhotoUrls: string[];
   glbUrl: string | null;
+  /**
+   * Yeni model sürümü duyurusu ve boyacının onayı (partner-model-ack.ts).
+   * `pending` iken elindeki baskı ESKİ sürüme ait olabilir: QC'ye gönderme ve
+   * kargo kapalıdır (sunucu da aynı kapıyı uygular).
+   */
+  modelAck: {
+    announcedRevision: number | null;
+    acknowledgedRevision: number | null;
+    pending: boolean;
+    /**
+     * Onay günlüğü OKUNAMADI (geçici arıza). `pending` bu durumda da true'dur
+     * — kapı temkinle kapalı kalır — ama sebebi bir KARAR değil ARIZAdır ve
+     * sürüm numarası BİLİNMEZ. İkisini ayırmayan kart, olmamış bir yüklemeyi
+     * ("Modelin yeni sürümü yüklendi (v)") duyurup boyacıyı hiçbir şey
+     * yapmayan bir onay düğmesine yolluyordu.
+     */
+    readFailed: boolean;
+  };
+  /** Yöneticiden gelen okunmamış mesaj sayısı. */
+  adminUnreadCount: number;
+  /**
+   * Boyacının kendi eylem günlüğü (painter_actions), yeniden eskiye.
+   *
+   * Üretici panelinde bu günlük "İşlem geçmişi" kartı olarak zaten vardı;
+   * boyacıda hiç yoktu. Yönetici bir adımı boyacı ADINA kaydedebildiği için
+   * (on-behalf) bu eksik, boyacının kendi işinde ne olduğunu panelinden
+   * göremediği anlamına geliyordu — yalnızca bildirim kutusunu okursa.
+   */
+  actions: {
+    id: string;
+    action: string;
+    notes: string | null;
+    createdAt: string;
+    /** Yönetici bu adımı boyacı adına kaydetti (notun "[Admin adına:" damgası). */
+    byAdmin: boolean;
+  }[];
   customerNote: string | null;
   quantity: number;
   /** The styled image the customer signed off on — the painting reference. */
@@ -93,6 +130,40 @@ const STATUS_LABEL: Record<string, string> = {
   qc_rejected: "QC reddedildi",
   qc_approved: "QC onaylandı",
   shipped: "Kargolandı",
+};
+
+/**
+ * Eylem günlüğü etiketleri. Metinler KİŞİSİZ ("kabul edildi", "kargolandı")
+ * çünkü aynı satırı yönetici de boyacı adına yazmış olabilir; "kabul ettiniz"
+ * demek o satırda yalan olurdu. Kimin yaptığı ayrı bir rozette söylenir.
+ */
+const PAINTER_ACTION_LABELS: Record<string, string> = {
+  accept: "İş kabul edildi",
+  decline: "İş reddedildi",
+  received: "Baskı teslim alındı",
+  painted: "Boyama tamamlandı",
+  submit_qc: "Kalite kontrole gönderildi",
+  ship: "Kargolandı",
+  admin_assigned: "Yönetici işi size atadı",
+  admin_revoked: "Yönetici işi sizden geri aldı",
+  admin_swapped_out: "Yönetici işi başka bir boyacıya verdi",
+  // partner-model-ack.ts sabitleri (model_revision / model_ack).
+  model_revision: "Yeni model sürümü duyuruldu",
+  model_ack: "Yeni model sürümü onaylandı",
+};
+
+const PAINTER_ACTION_DOTS: Record<string, string> = {
+  accept: "bg-indigo-500",
+  decline: "bg-red-500",
+  received: "bg-blue-500",
+  painted: "bg-amber-500",
+  submit_qc: "bg-purple-500",
+  ship: "bg-emerald-500",
+  admin_assigned: "bg-indigo-500",
+  admin_revoked: "bg-red-500",
+  admin_swapped_out: "bg-red-500",
+  model_revision: "bg-amber-500",
+  model_ack: "bg-emerald-500",
 };
 
 const TABS: { value: string | null; label: string }[] = [
@@ -140,6 +211,10 @@ export function PainterJobsClient({
   const [qcUploaded, setQcUploaded] = useState<Record<string, number>>(() =>
     Object.fromEntries(jobs.map((j) => [j.id, j.qcPhotoCount]))
   );
+  // Sunucunun dürüst cevabı ekranda KALIR. İade edilmiş bir işi bırakınca kart
+  // listeden düşüyor ve "iş kapandı, başka boyacıya gitmeyecek, ceza yazılmadı"
+  // cümlesini taşıyan tek şey o cevap: yenileme onu da siliyordu.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const call = async (id: string, action: string, payload?: Record<string, unknown>) => {
     setBusy(`${action}-${id}`);
@@ -154,6 +229,10 @@ export function PainterJobsClient({
         alert(e.error || "İşlem başarısız");
         return;
       }
+      const data = await res.json().catch(() => null);
+      if (data && typeof data.message === "string" && data.message) {
+        setNotice(data.message);
+      }
       router.refresh();
     } finally {
       setQcProgress(null);
@@ -164,6 +243,33 @@ export function PainterJobsClient({
   const decline = (id: string) => {
     const reason = prompt("Reddetme sebebi (opsiyonel):") ?? undefined;
     call(id, "decline", { reason });
+  };
+
+  // İade edilmiş işin TEK çalışan çıkışı — ve panelde hiç yoktu: iade dalı
+  // bütün düğmeleri birden gizlediği için boyacı, sunucunun KABUL ettiği bu
+  // işlemi hiçbir yerden yapamıyordu. Sunucuda ret bir temizliktir: iş
+  // boyacıdan koparılır, başka bir boyacıya yönlendirilmez ve sicile ceza
+  // yazılmaz. Sebep SORULMAZ — gerekçelendirilecek bir ret yok, sipariş zaten
+  // kapandı; cümlenin tamamı onay kutusunda ve sunucunun cevabında duruyor.
+  const releaseRefunded = (id: string) => {
+    if (
+      !confirm(
+        "Bu sipariş iade edildi. İşi bırakırsanız iş listenizden düşer; " +
+          "başka bir boyacıya yönlendirilmez ve bu bırakma güvenilirlik " +
+          "puanınıza işlenmez."
+      )
+    ) {
+      return;
+    }
+    call(id, "decline");
+  };
+
+  // "Yeni sürümü gördüm": onay, boyacının kendi eylem günlüğüne yazılır ve
+  // QC/kargo kapısını açar. Sürüm numarası gönderilir ki iki sekme açıkken
+  // görülmemiş bir sürüm onaylanmasın (sunucu eşleşmezse 409 döner).
+  const ackModel = (j: Job) => {
+    if (j.modelAck.announcedRevision == null) return;
+    call(j.id, "ack-model", { revision: j.modelAck.announcedRevision });
   };
 
   const uploadQcPhoto = async (id: string, file: File) => {
@@ -216,6 +322,22 @@ export function PainterJobsClient({
           Size atanan profesyonel boyama işleri.
         </p>
       </div>
+
+      {notice && (
+        <div
+          role="status"
+          className="mb-5 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800"
+        >
+          <p className="flex-1">{notice}</p>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="text-xs font-medium text-gray-500 hover:text-gray-800"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 mb-5">
         {TABS.map((t) => {
@@ -410,16 +532,97 @@ export function PainterJobsClient({
                   </div>
                 )}
 
+              {/* Yeni model sürümü: dosya SESSİZCE değişmez. Boyacı, elindeki
+                  baskının eski sürüme ait olabileceğini okur ve onaylayana
+                  kadar QC/kargo kapalıdır. */}
+              {/* Onay günlüğü OKUNAMADI: kapı yine kapalı ama gerekçe ayrı.
+                  Buraya "Modelin yeni sürümü yüklendi (v)" yazmak sistemin
+                  BİLMEDİĞİ bir olayı anlatmak olurdu — kartların çoğunda öyle
+                  bir duyuru hiç yok. Onay düğmesi de bilerek YOK: sürüm
+                  numarası bilinmediği için tıklama sessizce hiçbir şey
+                  yapmıyordu (ackModel null sürümde erken dönüyor) ve yazma ucu
+                  aynı arızada zaten 503 veriyor. Üretici panelindeki ikizi:
+                  manufacturer/orders/[id]/client.tsx · ackUnreadable. */}
+              {!isRefunded(j) && j.modelAck.pending && j.modelAck.readFailed && (
+                <div
+                  role="alert"
+                  className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"
+                >
+                  <p className="font-semibold">
+                    Model onay kaydınız şu anda okunamıyor (geçici sistem arızası)
+                  </p>
+                  <p className="mt-1">
+                    Bu iş için yeni bir model sürümü yüklenip yüklenmediğini şu
+                    anda söyleyemiyoruz. Güvenlik gereği QC&apos;ye gönderme ve
+                    kargolama kapatıldı. Onaylanacak bir sürüm bilinmediği için
+                    onay düğmesi de gösterilmiyor; birkaç dakika sonra sayfayı
+                    yenileyin.
+                  </p>
+                </div>
+              )}
+              {!isRefunded(j) && j.modelAck.pending && !j.modelAck.readFailed && (
+                <div
+                  role="alert"
+                  className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"
+                >
+                  <p className="font-semibold">
+                    Modelin yeni sürümü yüklendi (v{j.modelAck.announcedRevision})
+                  </p>
+                  <p className="mt-1">
+                    Elinizdeki baskı ESKİ sürüme ait olabilir. Devam etmeden önce
+                    yeni sürümü gördüğünüzü onaylayın; gerekiyorsa yönetici ile
+                    aşağıdaki mesajlaşmadan teyitleşin. Onaylayana kadar QC&apos;ye
+                    gönderme ve kargolama kapalıdır.
+                  </p>
+                  <button
+                    onClick={() => ackModel(j)}
+                    disabled={busy !== null}
+                    className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    Yeni sürümü gördüm (v{j.modelAck.announcedRevision})
+                  </button>
+                </div>
+              )}
+              {!isRefunded(j) &&
+                !j.modelAck.pending &&
+                j.modelAck.acknowledgedRevision != null && (
+                  <p className="mb-3 text-[11px] text-gray-500">
+                    Onayladığınız model sürümü: v{j.modelAck.acknowledgedRevision}
+                  </p>
+                )}
+
               {/* Refunded: the job is cancelled. Same treatment as the
                   manufacturer order page — a clear banner instead of accept /
                   QC / ship buttons, and no earning promised. */}
               {isRefunded(j) ? (
-                <p
+                <div
                   role="alert"
-                  className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800"
+                  className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
                 >
-                  Bu sipariş iade edildi. İş iptal; hakediş oluşmaz.
-                </p>
+                  <p className="font-medium">
+                    Bu sipariş iade edildi. İş iptal; hakediş oluşmaz.
+                  </p>
+                  {/* İleri adım yok ama ÇIKIŞ var: ret ucu iade edilmiş işte
+                      bilerek açık (temizlik) ve yalnız `assigned` iken çalışır —
+                      sonraki alt durumlarda sunucu 400 verir, o yüzden orada
+                      düğme de yok. */}
+                  {j.painterStatus === "assigned" && (
+                    <div className="mt-3">
+                      <p className="text-xs text-red-800/80">
+                        Bu işi bırakabilirsiniz: iş listenizden düşer, başka bir
+                        boyacıya yönlendirilmez ve bırakma güvenilirlik puanınıza
+                        işlenmez.
+                      </p>
+                      <button
+                        onClick={() => releaseRefunded(j.id)}
+                        disabled={busy !== null}
+                        className="mt-2 rounded-lg bg-gray-800 px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+                      >
+                        İşi bırak
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   {j.painterStatus === "assigned" && (
@@ -493,7 +696,11 @@ export function PainterJobsClient({
                       <button
                         onClick={() => submitQc(j.id)}
                         disabled={
-                          busy !== null || (qcUploaded[j.id] ?? 0) < QC_MIN_PHOTOS
+                          busy !== null ||
+                          (qcUploaded[j.id] ?? 0) < QC_MIN_PHOTOS ||
+                          // Onaylanmamış yeni model sürümü varsa QC turu
+                          // açılmamalı: onaylanan tur işi kargoya açar.
+                          j.modelAck.pending
                         }
                         className="px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
                       >
@@ -528,7 +735,7 @@ export function PainterJobsClient({
                       </select>
                       <button
                         onClick={() => ship(j.id)}
-                        disabled={busy !== null}
+                        disabled={busy !== null || j.modelAck.pending}
                         className="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
                       >
                         Kargola
@@ -540,6 +747,16 @@ export function PainterJobsClient({
                   )}
                 </div>
               )}
+
+              {/* Üretici panelindeki "İşlem geçmişi" kartının boyacı karşılığı:
+                  yöneticinin boyacı adına yaptığı adımların görünür olduğu tek
+                  yer. */}
+              <JobTimeline actions={j.actions} locale={locale} />
+
+              {/* Boyacının yöneticiye ulaşacak tek kanalı buydu eksik: hasarlı
+                  parça, eksik bilgi ya da renk sorusu artık iş kartından
+                  yazılıyor. */}
+              <JobChat orderId={j.id} unreadCount={j.adminUnreadCount} />
             </div>
           ))}
         </div>
@@ -565,6 +782,86 @@ export function PainterJobsClient({
             >
               Sonraki
             </Link>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * İş kartındaki işlem geçmişi (painter_actions).
+ *
+ * KAPALI başlar: iş listesinde 20 kart olabiliyor ve her birinin geçmişi
+ * kartı uzatırdı. Başlık her zaman görünür; yönetici adına yapılmış adım
+ * varsa başlıkta sayısıyla birlikte bir rozet durur, böylece boyacı paneli
+ * açmadan da "burada benim yapmadığım bir şey olmuş" diyebilir.
+ */
+function JobTimeline({
+  actions,
+  locale,
+}: {
+  actions: Job["actions"];
+  locale: Locale;
+}) {
+  const [open, setOpen] = useState(false);
+  const adminCount = actions.filter((a) => a.byAdmin).length;
+
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold text-gray-600 hover:bg-gray-50"
+      >
+        <span>İşlem geçmişi{actions.length > 0 ? ` (${actions.length})` : ""}</span>
+        <span className="flex items-center gap-2">
+          {adminCount > 0 && !open && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+              {adminCount} yönetici işlemi
+            </span>
+          )}
+          <span className="text-gray-400">{open ? "Kapat" : "Aç"}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-100 p-3">
+          {actions.length === 0 ? (
+            <p className="text-xs text-gray-400">Bu işte henüz kayıtlı işlem yok.</p>
+          ) : (
+            <div className="relative">
+              {actions.map((a, i) => (
+                <div key={a.id} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${
+                        PAINTER_ACTION_DOTS[a.action] ?? "bg-gray-400"
+                      }`}
+                    />
+                    {i < actions.length - 1 && (
+                      <div className="my-1 w-px flex-1 bg-gray-200" />
+                    )}
+                  </div>
+                  <div className="min-w-0 pb-3">
+                    <p className="text-xs font-semibold leading-tight text-gray-900">
+                      {PAINTER_ACTION_LABELS[a.action] ?? a.action.replace(/_/g, " ")}
+                    </p>
+                    {a.byAdmin && (
+                      <p className="mt-0.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                        Yönetici sizin adınıza yaptı
+                      </p>
+                    )}
+                    {a.notes && (
+                      <p className="mt-0.5 break-words text-[11px] text-gray-500">{a.notes}</p>
+                    )}
+                    <p className="mt-0.5 text-[11px] text-gray-400">
+                      {formatDateTime(a.createdAt, locale)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}

@@ -1,17 +1,35 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  EARNING_REVERSAL_PARTNER_SENTENCES,
   MONEY_LINE_KIND_LABELS_TR,
+  SHIP_REVERT_AUDIT_PREFIX,
+  SHIP_REVERT_EARNING_AUDIT,
+  SHIP_REVERT_EARNING_REVERSED_MARKERS,
   cashCollectedKurus,
   countsAsRevenue,
+  earningReversalAdminWarning,
+  earningReversalCause,
+  isEarningPaidOut,
   revenueKurus,
   classifyMoneyOrder,
   deriveOrderMoneyBreakdown,
   formatTry,
+  shipRevertEarningAuditSentence,
   type EarningMoneySnapshot,
+  type EarningReversalCause,
   type MoneyLine,
+  type MoneyReversalParty,
+  type MoneyReversalRecord,
   type OrderMoneyBreakdown,
   type OrderMoneySnapshot,
+  type ShipRevertEarningOutcome,
 } from "../src/lib/config/order-money";
+// Yükleyicinin KENDİSİ import edilir: denetim kaydını okuyan kod ile o kaydı
+// yazan rotanın aynı cümleyi paylaştığı burada kanıtlanır. (Modül @/lib/db'yi
+// import eder ama bu testte hiçbir sorgu çalışmaz; havuz bağlantı açmaz.)
+import { shipRevertCauseFromAuditNotes } from "../src/lib/services/order-money";
 import {
   carvePaintingShare,
   effectiveProductionBaseKurus,
@@ -1834,7 +1852,13 @@ test("KİMLİK: tahsilat = partner netleri + platform neti (fuzz, başarılı ö
       const assigned = sh.party === "manufacturer" ? s.manufacturerId !== null : s.painterId !== null;
       return a + (assigned ? sh.expectedNetKurus : 0);
     }, 0);
-    assert.equal(partnerNet + b.platform.netKurus, b.collection.cashCollectedKurus, ctx);
+    // Kimlik üç terimlidir: geri alınmış taban platform netine KATILMAZ, kendi
+    // kovasında durur (bu fuzz turu geri alınmış satır üretmez, terim 0'dır).
+    assert.equal(
+      partnerNet + b.platform.netKurus + b.platform.reversedBaseKurus,
+      b.collection.cashCollectedKurus,
+      ctx
+    );
     assert.equal(b.collection.revenueKurus, b.collection.cashCollectedKurus);
     if (b.shares.some((x) => x.includesPainting)) {
       assert.equal(share(b, "painter"), undefined, `kendi boyamada boyacı payı: ${ctx}`);
@@ -1842,16 +1866,419 @@ test("KİMLİK: tahsilat = partner netleri + platform neti (fuzz, başarılı ö
   }
 });
 
-test("geri alınmış hakediş: uyarı + platform hesabına girmez", () => {
+test("geri alınmış hakediş: platform GELİRİNE girmez, ayrı kovada raporlanır", () => {
   const b = derive(
     snap({
       paintingPriceKurus: 0,
       productionBaseKurus: 349900,
       manufacturerEarning: earning(349900, { status: "reversed" }),
+      earningReversal: null,
     })
   );
   assert.ok(hasWarning(b, "geri alındı"));
-  assert.equal(b.platform.unassignedBaseKurus, 349900);
+  // Geri alınmış taban "partneri olmayan taban" DEĞİLDİR: o hiç kimsenin
+  // kazanmadığı tabandır, bu ise kazanılmış ama geri alınmıştır. Platform, hiç
+  // kalmadığı parayı kâr yazmaz (canlı siparişte tüm tutar kâr görünüyordu).
+  assert.equal(b.platform.reversedBaseKurus, 349900);
+  assert.equal(b.platform.unassignedBaseKurus, 0);
+  assert.ok(Object.is(b.platform.netKurus, 0), "geri alınmış taban platform neti değil");
+  assert.ok(hasWarning(b, "platform gelirine yazılmadı"));
+});
+
+// ─── Geri almanın sebebi: yalnızca KAYITLI olan söylenir ────────────────────
+
+/** Kargo geri alma denetim kaydı (yükleyici admin_actions'tan doldurur). */
+const SHIP_REVERT_RECORD = {
+  cause: "ship_revert",
+  // Geri alma yalnızca KARGOLAYAN partnerin hakedişini çevirir; kayıt hangi paya
+  // dokunduğunu taşır.
+  party: "manufacturer",
+  at: "2026-09-12T08:00:00.000Z",
+} as const;
+
+test("geri alma sebebi: kayıtlı kargo geri alma, sipariş YENİDEN KARGOLANDIKTAN sonra da aynı sebeptir", () => {
+  // Kargo damgası geri almadan sonra yeniden basılır. Sebebi damgadan tahmin
+  // eden kart, aynı satıra önce "kargo geri alma" sonra "iade" diyordu.
+  for (const shippedAt of [null, SHIPPED_AT]) {
+    const ctx = shippedAt === null ? "geri alınmış" : "yeniden kargolanmış";
+    const b = derive(
+      snap({
+        shippedAt,
+        manufacturerEarning: earning(249900, { status: "reversed" }),
+        earningReversal: SHIP_REVERT_RECORD,
+      }),
+      ctx
+    );
+    assert.ok(hasWarning(b, "(kargo kaydı geri alındığı için)"), ctx);
+    assert.ok(hasWarning(b, "elle düzeltilir"), ctx);
+    assert.ok(!hasWarning(b, "iade"), `iade edilmemiş sipariş iade diye anılmaz: ${ctx}`);
+    // Sebep cümlesi değişse de tutar tek satırdan gelir.
+    assert.ok(hasWarning(b, formatTry(earning(249900).netKurus)), ctx);
+  }
+});
+
+test("geri alma sebebi: kayıt yoksa sebep UYDURULMAZ", () => {
+  // Eski kart bu şekli (iade değil + kargo damgası yok + partner bağlı) kargo
+  // geri alma SANIYORDU; oysa itiraz clawback'i de tam olarak böyle görünür.
+  const b = derive(
+    snap({
+      shippedAt: null,
+      manufacturerEarning: earning(249900, { status: "reversed" }),
+      earningReversal: null,
+    })
+  );
+  assert.ok(hasWarning(b, "Sebebi kayıtlı değil"));
+  assert.ok(!hasWarning(b, "kargo kaydı geri alındığı için"));
+  assert.ok(!hasWarning(b, "iade"));
+});
+
+test("geri alma sebebi: sebep kaydı OKUNAMADIYSA 'kayıtlı değil' denmez", () => {
+  // undefined = bakılmadı/okunamadı. "Kayıtlı değil" demek, bakılmamış bir şey
+  // hakkında olumsuz bir iddiadır.
+  const b = derive(snap({ manufacturerEarning: earning(249900, { status: "reversed" }) }));
+  assert.ok(hasWarning(b, "Sebep kaydı okunamadı"));
+  assert.ok(!hasWarning(b, "Sebebi kayıtlı değil"));
+});
+
+test("geri alma sebebi: iade edilmiş siparişte sebep iadedir; geri alınmış taban ayrıca raporlanmaz", () => {
+  const b = derive(
+    snap({
+      ...DETACHED,
+      manufacturerEarning: earning(249900, { status: "reversed" }),
+      earningReversal: null,
+    })
+  );
+  assert.ok(hasWarning(b, "(sipariş iade edildiği için)"));
+  // İadede ileriye dönük bekleyen tutar yoktur: para müşteriye döndü.
+  assert.equal(b.platform.reversedBaseKurus, 0);
+  assert.ok(Object.is(b.platform.netKurus, 0));
+  assert.ok(!hasWarning(b, "platform gelirine yazılmadı"));
+});
+
+test("geri alma sebebi: iki kayıt da varsa ikisi de yazılır", () => {
+  const b = derive(
+    snap({
+      ...DETACHED,
+      manufacturerEarning: earning(249900, { status: "reversed" }),
+      earningReversal: SHIP_REVERT_RECORD,
+    })
+  );
+  assert.ok(hasWarning(b, "kayıtlı sebepler: kargo kaydının geri alınması ve iade"));
+});
+
+test("KİMLİK: geri alınmış hakediş kimliği bozmaz — tahsilat = partner netleri + platform neti + geri alınmış taban (fuzz)", () => {
+  const next = rng(90210);
+  for (let i = 0; i < 1500; i++) {
+    const totalKurus = next(2_000_000) + 1;
+    const bases = allocateBases({
+      productionKurus: next(400000),
+      paintingKurus: next(400000),
+      totalKurus,
+    });
+    const rate = [3500, 4000, 4500][next(3)];
+    const gift = next(3) === 0 ? next(totalKurus) : 0;
+    const havale = next(2) === 0 ? Math.floor((totalKurus - gift) * 0.03) : 0;
+    const painterAssigned = next(2) === 0;
+    // Kargo damgası: geri alma sonrası yeniden kargolanmış olabilir.
+    const reshipped = next(2) === 0;
+    const recorded = next(2) === 0;
+    const me: EarningMoneySnapshot = {
+      partnerId: "m1",
+      partnerName: "A",
+      ...computeEarning(bases.productionKurus, rate),
+      rateBps: rate,
+      status: "reversed",
+      payout: null,
+    };
+    const s = snap({
+      amountKurus: totalKurus,
+      productionBaseKurus: bases.productionKurus,
+      paintingPriceKurus: bases.paintingKurus,
+      giftCardAmountKurus: gift,
+      havaleDiscountKurus: havale,
+      commissionRateBps: rate,
+      painterId: painterAssigned ? "p1" : null,
+      shippedAt: reshipped ? SHIPPED_AT : null,
+      manufacturerEarning: me,
+      earningReversal: recorded ? SHIP_REVERT_RECORD : null,
+    });
+    const ctx = JSON.stringify({ totalKurus, bases, gift, havale, rate, painterAssigned, reshipped, recorded });
+    const b = derive(s, ctx);
+    const partnerNet = b.shares.reduce((a, sh) => {
+      if (sh.earning) return a + (sh.earning.status === "reversed" ? 0 : sh.earning.netKurus);
+      const assigned = sh.party === "manufacturer" ? s.manufacturerId !== null : s.painterId !== null;
+      return a + (assigned ? sh.expectedNetKurus : 0);
+    }, 0);
+    assert.equal(
+      partnerNet + b.platform.netKurus + b.platform.reversedBaseKurus,
+      b.collection.cashCollectedKurus,
+      ctx
+    );
+    assert.equal(b.platform.reversedBaseKurus, me.grossKurus, ctx);
+    // Sebep KAYITTAN gelir; kargo damgasından değil.
+    assert.equal(hasWarning(b, "(kargo kaydı geri alındığı için)"), recorded, ctx);
+    assert.equal(hasWarning(b, "Sebebi kayıtlı değil"), !recorded, ctx);
+  }
+});
+
+// ─── Geri alma kaydı: YAZAN ile OKUYAN aynı cümleyi paylaşır ───────────────
+
+const REPO_ROOT = join(import.meta.dirname, "..");
+const readSrc = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf8");
+const SHIP_ROUTE = "src/app/api/admin/orders/[id]/ship/route.ts";
+const MONEY_LOADER = "src/lib/services/order-money.ts";
+const MANUFACTURER_PANEL = "src/app/manufacturer/orders/[id]/client.tsx";
+
+/** DELETE /ship'in yazdığı denetim notunun aynısı. */
+const auditNote = (outcome: ShipRevertEarningOutcome, party: MoneyReversalParty | null) =>
+  `${SHIP_REVERT_AUDIT_PREFIX} → "qc_approved". Takip numarası ve kargo firması temizlendi. ` +
+  shipRevertEarningAuditSentence(outcome, party) +
+  " Gerekçe: yanlış takip numarası";
+
+const NOTE_AT = new Date("2026-09-12T08:00:00.000Z");
+
+test("denetim kaydı: HAKEDİŞE DOKUNMAYAN geri alma sebep sayılmaz (tam cümle okunur)", () => {
+  // P2I: "Partner hakedişi zaten geri çevrilmişti" imzası cümlenin devamıyla
+  // ("bu geri alma para tarafında hiçbir şeyi değiştirmedi") tam TERSİNİ
+  // söylüyordu; kart yine de "kargo kaydı geri alındığı için" diyordu.
+  const rows = (outcome: ShipRevertEarningOutcome, party: MoneyReversalParty | null) => [
+    { notes: auditNote(outcome, party), createdAt: NOTE_AT },
+  ];
+  assert.deepEqual(shipRevertCauseFromAuditNotes(rows("reversed", "manufacturer")), {
+    cause: "ship_revert",
+    party: "manufacturer",
+    at: NOTE_AT.toISOString(),
+  });
+  assert.deepEqual(shipRevertCauseFromAuditNotes(rows("reversed", "painter")), {
+    cause: "ship_revert",
+    party: "painter",
+    at: NOTE_AT.toISOString(),
+  });
+  for (const outcome of ["already_reversed", "none", "failed"] as const) {
+    assert.equal(
+      shipRevertCauseFromAuditNotes(rows(outcome, "manufacturer")),
+      null,
+      `${outcome} bir geri çevirme DEĞİLDİR`
+    );
+  }
+  // İmza, cümlenin devamı onu yalanlayamayacak kadar TAM olmalı.
+  for (const other of [
+    SHIP_REVERT_EARNING_AUDIT.already_reversed,
+    SHIP_REVERT_EARNING_AUDIT.none,
+    SHIP_REVERT_EARNING_AUDIT.failed,
+  ]) {
+    for (const m of SHIP_REVERT_EARNING_REVERSED_MARKERS) {
+      assert.ok(!other.includes(m.sentence), `dokunmayan cümle imzayı içeriyor: ${other}`);
+      assert.ok(m.sentence.endsWith("."), "imza tam cümledir");
+    }
+  }
+});
+
+test("denetim kaydı: en yeni kayıt kazanır, dokunmayan kayıt atlanır, boş not çökertmez", () => {
+  const older = { notes: auditNote("reversed", "manufacturer"), createdAt: NOTE_AT };
+  const newerUntouched = {
+    notes: auditNote("already_reversed", "manufacturer"),
+    createdAt: new Date("2026-09-13T08:00:00.000Z"),
+  };
+  // Yükleyici en yeniyi önce verir: dokunmayan kayıt atlanır, altındaki gerçek
+  // sebep yine bulunur.
+  assert.deepEqual(shipRevertCauseFromAuditNotes([newerUntouched, older]), {
+    cause: "ship_revert",
+    party: "manufacturer",
+    at: NOTE_AT.toISOString(),
+  });
+  // İki gerçek geri alma varsa sebep SONUNCUSUDUR.
+  const newerPainter = {
+    notes: auditNote("reversed", "painter"),
+    createdAt: new Date("2026-09-14T08:00:00.000Z"),
+  };
+  assert.equal(shipRevertCauseFromAuditNotes([newerPainter, older])?.party, "painter");
+  assert.equal(shipRevertCauseFromAuditNotes([]), null);
+  assert.equal(shipRevertCauseFromAuditNotes([{ notes: null, createdAt: NOTE_AT }]), null);
+  // Zaman damgası okunamasa da sebep kaybolmaz.
+  assert.deepEqual(
+    shipRevertCauseFromAuditNotes([{ notes: auditNote("reversed", "painter"), createdAt: null }]),
+    { cause: "ship_revert", party: "painter", at: null }
+  );
+});
+
+test("denetim cümlesi TEK kaynaktan: rota yazar, yükleyici okur, ikisi de kopyalamaz", () => {
+  const route = readSrc(SHIP_ROUTE);
+  const loader = readSrc(MONEY_LOADER);
+  assert.ok(route.includes("shipRevertEarningAuditSentence("), "rota cümleyi türetimden almalı");
+  assert.ok(
+    loader.includes("SHIP_REVERT_EARNING_REVERSED_MARKERS"),
+    "yükleyici imzayı türetimden almalı"
+  );
+  const sentences = [
+    ...SHIP_REVERT_EARNING_REVERSED_MARKERS.map((m) => m.sentence),
+    SHIP_REVERT_EARNING_AUDIT.already_reversed,
+    SHIP_REVERT_EARNING_AUDIT.none,
+    SHIP_REVERT_EARNING_AUDIT.failed,
+  ];
+  for (const file of [SHIP_ROUTE, MONEY_LOADER]) {
+    const text = readSrc(file);
+    for (const sentence of sentences) {
+      assert.ok(!text.includes(sentence), `${file} cümleyi elle kopyalamış: ${sentence}`);
+    }
+  }
+});
+
+// ─── Sebep: tek türetim, doğru PAY ─────────────────────────────────────────
+
+test("sebep türetimi: kayıt yalnızca DOKUNDUĞU payın sebebidir", () => {
+  const rec = (party: MoneyReversalParty): MoneyReversalRecord => ({
+    cause: "ship_revert",
+    party,
+    at: NOTE_AT.toISOString(),
+  });
+  const cause = (
+    party: MoneyReversalParty,
+    reversal: MoneyReversalRecord | null | undefined,
+    refunded = false
+  ) => earningReversalCause({ party, reversal, refunded });
+  assert.equal(cause("manufacturer", rec("manufacturer")), "ship_revert");
+  assert.equal(cause("painter", rec("painter")), "ship_revert");
+  // Boyacı kargosunun geri alınması, devirde doğmuş ÜRETİCİ hakedişini açıklamaz.
+  assert.equal(cause("manufacturer", rec("painter")), "unrecorded");
+  assert.equal(cause("painter", rec("manufacturer")), "unrecorded");
+  assert.equal(cause("manufacturer", rec("manufacturer"), true), "ship_revert_and_refund");
+  assert.equal(cause("manufacturer", rec("painter"), true), "refund");
+  assert.equal(cause("manufacturer", null), "unrecorded");
+  // undefined = kayda BAKILAMADI; "kayıtlı değil" olumsuz bir iddia olurdu.
+  assert.equal(cause("manufacturer", undefined), "unreadable");
+  assert.equal(cause("manufacturer", undefined, true), "refund");
+});
+
+test("sebep türetimi: boyacının geri alınan kargosu üreticinin satırına sebep yazmaz", () => {
+  const b = derive(
+    snap({
+      painterId: "p1",
+      painterName: "Boya Evi",
+      painterStatus: "shipped",
+      shippedAt: SHIPPED_AT,
+      manufacturerEarning: earning(249900, { status: "reversed" }),
+      painterEarning: earning(100000, {
+        partnerId: "p1",
+        partnerName: "Boya Evi",
+        status: "reversed",
+      }),
+      earningReversal: { cause: "ship_revert", party: "painter", at: NOTE_AT.toISOString() },
+    })
+  );
+  assert.ok(hasWarning(b, "Boyacı hakedişi geri alındı (kargo kaydı geri alındığı için)"));
+  assert.ok(hasWarning(b, "Üretici hakedişi geri alındı — "));
+  assert.ok(
+    !hasWarning(b, "Üretici hakedişi geri alındı (kargo kaydı geri alındığı için)"),
+    "dokunulmamış pay için sebep uydurulmaz"
+  );
+  assert.ok(hasWarning(b, "Sebebi kayıtlı değil"));
+});
+
+// ─── Partner ekranı: aynı sebep, partnere söylenen hâli ─────────────────────
+
+test("partner cümlesi: üretici paneli sebebi admin kartıyla AYNI türetimden alır", () => {
+  const panel = readSrc(MANUFACTURER_PANEL);
+  assert.ok(
+    panel.includes("EARNING_REVERSAL_PARTNER_SENTENCES["),
+    "panel cümleyi paylaşılan haritadan almalı"
+  );
+  assert.ok(panel.includes("earningReversalCause("), "panel sebebi tek türetimden sormalı");
+  // Eski sabit cümle: kargo kaydı geri alındığında üreticiye olmamış bir iadeyi
+  // ya da itirazı anlatıyordu. Aranan şey CÜMLENİN KENDİSİDİR; parçası (dosyanın
+  // kendi açıklamasında da geçebilir) bir kopya kanıtı değildir.
+  assert.ok(
+    !panel.includes("Bu siparişin hak edişi geri alındı (iade / itiraz); ödenmeyecek."),
+    "sabitlenmiş sebep cümlesi geri gelmiş"
+  );
+  const causes: EarningReversalCause[] = [
+    "ship_revert_and_refund",
+    "ship_revert",
+    "refund",
+    "unrecorded",
+    "unreadable",
+  ];
+  const seen = new Set<string>();
+  for (const c of causes) {
+    const line = EARNING_REVERSAL_PARTNER_SENTENCES[c];
+    assert.ok(line && line.length > 20, `partner cümlesi eksik: ${c}`);
+    assert.ok(!seen.has(line), `iki sebep aynı cümleyi veriyor: ${c}`);
+    seen.add(line);
+  }
+  // Sebebi bilinmeyen iki hâl, bilmediğini SÖYLER.
+  assert.ok(EARNING_REVERSAL_PARTNER_SENTENCES.unrecorded.includes("kayıtlı değil"));
+  assert.ok(EARNING_REVERSAL_PARTNER_SENTENCES.unreadable.includes("okunamadı"));
+  // Kargo geri almada partnere iade/itiraz denmez.
+  for (const c of ["ship_revert", "unrecorded", "unreadable"] as const) {
+    assert.ok(!EARNING_REVERSAL_PARTNER_SENTENCES[c].includes("iade edildiği"));
+  }
+  // Admin ile partner AYNI sebebi anlatır (aynı olayda iki panel ayrışmaz).
+  const adminLine = earningReversalAdminWarning({
+    cause: "ship_revert",
+    who: "Üretici",
+    amountText: formatTry(149940),
+  });
+  assert.ok(adminLine.includes("kargo kaydı geri alındığı için"));
+  assert.ok(EARNING_REVERSAL_PARTNER_SENTENCES.ship_revert.includes("kargo kaydı geri alındığı için"));
+});
+
+// ─── İade: yalnızca GERÇEKTEN ödenen zarardır ───────────────────────────────
+
+test("ödenmişlik tek tanım: satır 'paid' ya da girdiği ödeme partisi ödendi", () => {
+  assert.equal(isEarningPaidOut(null), false);
+  assert.equal(isEarningPaidOut(undefined), false);
+  assert.equal(isEarningPaidOut(earning(249900, { status: "pending" })), false);
+  assert.equal(isEarningPaidOut(earning(249900, { status: "reversed" })), false);
+  // Partiye girmiş ama partisi ödenmemiş satır geri çevrilebilir → ödenmiş değil.
+  assert.equal(
+    isEarningPaidOut(
+      earning(249900, {
+        status: "pending",
+        payout: { id: "po2", status: "pending", reference: null, paidAt: null },
+      })
+    ),
+    false
+  );
+  assert.equal(isEarningPaidOut(earning(249900, { status: "paid" })), true);
+  assert.equal(isEarningPaidOut(earning(249900, { status: "pending", payout: PAID_PAYOUT })), true);
+});
+
+test("iade: BEKLEYEN hakediş ödenmiş sayılmaz — platform zararı değil, açık risk", () => {
+  // P2I: iadenin geri çevirmeyi kaçırdığı satır "ödenmiş" sayılıp platform
+  // zararı yazılıyordu; aynı kartın pay bloğu ise doğru olanı ("ödenmedi,
+  // partiye girerse ödenir") söylüyordu.
+  for (const payout of [null, { id: "po2", status: "pending", reference: null, paidAt: null }]) {
+    const pending = earning(249900, { status: "pending", payout });
+    const b = derive(snap({ ...DETACHED, manufacturerEarning: pending }), JSON.stringify(payout));
+    assert.ok(Object.is(b.platform.netKurus, 0), "ödenmemiş tutar platform zararı değil");
+    assert.ok(!hasWarning(b, "platform zararı"));
+    assert.ok(hasWarning(b, "geri alınmamış bekleyen partner hakedişi var"));
+    assert.ok(hasWarning(b, formatTry(pending.netKurus)));
+  }
+});
+
+test("iade: ödenmiş zarar ile bekleyen risk aynı kartta AYRI satırlardır", () => {
+  const paid = earning(249900, { status: "paid", payout: PAID_PAYOUT });
+  const pendingPainter = earning(100000, {
+    partnerId: "p1",
+    partnerName: "Boya Evi",
+    status: "pending",
+  });
+  const b = derive(
+    snap({ ...DETACHED, painterId: null, manufacturerEarning: paid, painterEarning: pendingPainter })
+  );
+  assert.equal(b.platform.netKurus, -paid.netKurus, "zarar YALNIZ ödenen tutardır");
+  assert.ok(hasWarning(b, `İadeye rağmen ödenmiş partner hakedişi geri alınmadı: ${formatTry(paid.netKurus)}`));
+  assert.ok(
+    hasWarning(b, `geri alınmamış bekleyen partner hakedişi var: ${formatTry(pendingPainter.netKurus)}`)
+  );
+});
+
+test("iade: geri çevrilmiş satır ne zarardır ne risk", () => {
+  const b = derive(snap({ ...DETACHED, manufacturerEarning: earning(249900, { status: "reversed" }) }));
+  assert.ok(Object.is(b.platform.netKurus, 0));
+  assert.ok(!hasWarning(b, "platform zararı"));
+  assert.ok(!hasWarning(b, "geri alınmamış bekleyen"));
 });
 
 // ─── Biçim ─────────────────────────────────────────────────────────────────

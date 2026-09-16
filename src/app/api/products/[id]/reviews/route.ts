@@ -4,11 +4,12 @@ import { db } from "@/lib/db";
 import { productReviews, orders, orderItems, products } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { loadProductReviews } from "@/lib/services/product-reviews";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 
 // GET — approved reviews + average for a product.
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -20,7 +21,7 @@ export async function GET(
 
 // POST — leave a review. Gated: the user must have a DELIVERED order containing
 // the product (single-item order.productId OR a cart sub-order's orderItems).
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -107,4 +108,30 @@ export async function POST(
     .where(eq(products.id, id));
 
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handleGET(_req, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/products/[id]/reviews", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handlePOST(req, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/products/[id]/reviews", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

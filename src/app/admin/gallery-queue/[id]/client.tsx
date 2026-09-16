@@ -41,7 +41,24 @@ const CATEGORIES = [
   "custom",
 ];
 
-export function GalleryReviewClient({ review }: { review: ReviewData }) {
+export function GalleryReviewClient({
+  review,
+  photoUnreadable,
+  modelUnreadable,
+}: {
+  review: ReviewData;
+  /**
+   * order_photos OKUNAMADI (sunucu doldurur: page.tsx · photoRead === null).
+   *
+   * Bu ekranın kararı TAM OLARAK bu fotoğrafa dayanır: onay onu galeride
+   * yayımlar, ret gerekçesi müşteriye gider. `photoUrl: null` iki ayrı hâli
+   * temsil ediyordu — "fotoğraf yok" ve "fotoğraf okunamadı" — ve ekran ikisine
+   * de aynı şeyi diyordu.
+   */
+  photoUnreadable: boolean;
+  /** Eski üretim denemesi okunamadı: 3B önizleme "yok" DEĞİL, bilinmiyor. */
+  modelUnreadable: boolean;
+}) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState(review.publicDisplayName ?? "");
   const [category, setCategory] = useState(review.galleryCategory ?? "");
@@ -191,6 +208,11 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
               alt={review.orderNumber}
               className="w-full rounded-lg object-cover max-h-96 bg-gray-50"
             />
+          ) : photoUnreadable ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Fotoğraf okunamadı: BOŞ değil, bilinmiyor. Müşterinin yüklediği
+              görsel silinmedi.
+            </p>
           ) : (
             <p className="text-sm text-gray-400">Fotoğraf yok</p>
           )}
@@ -209,6 +231,11 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
               3D önizleme yok — bu siparişin modelinde GLB bulunmuyor (yalnız
               baskı dosyası yüklenmiş). Galeri fotoğrafla yayınlanır; onay için
               GLB gerekmez.
+            </p>
+          ) : modelUnreadable ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Eski üretim denemesi okunamadı: bu siparişin 3B önizlemesi olup
+              olmadığı bilinmiyor.
             </p>
           ) : (
             <p className="text-sm text-gray-400">GLB hazır değil</p>
@@ -266,59 +293,84 @@ export function GalleryReviewClient({ review }: { review: ReviewData }) {
             </div>
           )}
 
-          <div className="border-t border-gray-100 pt-4">
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={approve}
-                disabled={loading !== null}
-                className="px-5 py-2 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 disabled:bg-gray-300"
-              >
-                {loading === "approve" ? "Onaylanıyor..." : "Onayla ve yayınla"}
-              </button>
-              <div className="inline-flex gap-2 items-center">
-                <input
-                  type="number"
-                  min={10}
-                  max={2000}
-                  step={10}
-                  value={rewardAmount}
-                  onChange={(e) => setRewardAmount(Number(e.target.value))}
-                  className="w-24 px-3 py-2 border border-gray-200 rounded-xl text-sm"
-                />
-                <span className="text-sm text-gray-500">TL</span>
+          {/* KONTROL YA ÇALIŞIR YA DA SEBEBİYLE KAYBOLUR.
+              Üç kararın da tek dayanağı müşterinin fotoğrafı: onay onu galeride
+              YAYIMLAR, hediye çeki üstüne para verir, ret gerekçesi müşteriye
+              aynen gider. Fotoğraf okunamazken üçü de görülmemiş bir görsel
+              hakkında karar vermek olur — üstelik sayfanın kendi şeridi zaten
+              "görselleri GÖRMEDEN karar vermeyin" diyordu. Uç çalışıyor;
+              eksik olan KANIT, o yüzden kapanan kontrol. */}
+          {photoUnreadable ? (
+            <div
+              role="alert"
+              className="border-t border-gray-100 pt-4 text-sm text-amber-900"
+            >
+              <p className="font-semibold">Yayın kararı geçici olarak kapatıldı</p>
+              <p className="mt-1 text-amber-900/80">
+                Onay, hediye çeki ve ret bu sipariş için kapalı: fotoğraf okunana
+                kadar neyi yayımlayacağınızı göremezsiniz. Sipariş kuyrukta DURUYOR
+                ve müşteriye hiçbir bildirim gitmedi; okuma düzelince karar bu
+                sayfada verilebilir. Red gerekçesi müşteriye aynen iletildiği için,
+                görülmemiş bir görsel hakkında yazılmamalı.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="border-t border-gray-100 pt-4">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={approve}
+                    disabled={loading !== null}
+                    className="px-5 py-2 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 disabled:bg-gray-300"
+                  >
+                    {loading === "approve" ? "Onaylanıyor..." : "Onayla ve yayınla"}
+                  </button>
+                  <div className="inline-flex gap-2 items-center">
+                    <input
+                      type="number"
+                      min={10}
+                      max={2000}
+                      step={10}
+                      value={rewardAmount}
+                      onChange={(e) => setRewardAmount(Number(e.target.value))}
+                      className="w-24 px-3 py-2 border border-gray-200 rounded-xl text-sm"
+                    />
+                    <span className="text-sm text-gray-500">TL</span>
+                    <button
+                      onClick={reward}
+                      disabled={loading !== null}
+                      className="px-5 py-2 bg-amber-500 text-white rounded-xl text-sm font-semibold hover:bg-amber-600 disabled:bg-gray-300"
+                    >
+                      {loading === "reward"
+                        ? "Hediye ediliyor..."
+                        : "Hediye çeki + onayla"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 pt-4">
+                <label className="text-sm block mb-2">
+                  <span className="text-gray-700">Red sebebi (müşteri görür)</span>
+                  <textarea
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    rows={2}
+                    maxLength={500}
+                    placeholder="Örn: Fotoğraf telif hakkı korumalı içerik içeriyor"
+                    className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl text-sm resize-none"
+                  />
+                </label>
                 <button
-                  onClick={reward}
-                  disabled={loading !== null}
-                  className="px-5 py-2 bg-amber-500 text-white rounded-xl text-sm font-semibold hover:bg-amber-600 disabled:bg-gray-300"
+                  onClick={reject}
+                  disabled={loading !== null || !rejectReason.trim()}
+                  className="px-5 py-2 bg-red-100 text-red-700 rounded-xl text-sm font-semibold hover:bg-red-200 disabled:bg-gray-100"
                 >
-                  {loading === "reward"
-                    ? "Hediye ediliyor..."
-                    : "Hediye çeki + onayla"}
+                  {loading === "reject" ? "Reddediliyor..." : "Reddet"}
                 </button>
               </div>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-100 pt-4">
-            <label className="text-sm block mb-2">
-              <span className="text-gray-700">Red sebebi (müşteri görür)</span>
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                rows={2}
-                maxLength={500}
-                placeholder="Örn: Fotoğraf telif hakkı korumalı içerik içeriyor"
-                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl text-sm resize-none"
-              />
-            </label>
-            <button
-              onClick={reject}
-              disabled={loading !== null || !rejectReason.trim()}
-              className="px-5 py-2 bg-red-100 text-red-700 rounded-xl text-sm font-semibold hover:bg-red-200 disabled:bg-gray-100"
-            >
-              {loading === "reject" ? "Reddediliyor..." : "Reddet"}
-            </button>
-          </div>
+            </>
+          )}
         </section>
       )}
     </div>

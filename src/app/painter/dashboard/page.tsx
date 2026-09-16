@@ -10,6 +10,12 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { isRefunded } from "@/lib/config/order-status-policy";
+import {
+  claimableEarningWhere,
+  inPayoutEarningWhere,
+  refundedOpenEarningWhere,
+  refundedInPayoutEarningWhere,
+} from "@/lib/services/earning-claimable";
 
 // Turkish labels for the per-order painting sub-lifecycle
 // (painterOrderStatusEnum). Hardcoded — the painter realm carries no i18n keys.
@@ -110,22 +116,24 @@ export default async function PainterDashboardPage() {
         .select({ c: count() })
         .from(orders)
         .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "painting"))),
-      // "Bekleyen kazanç" = pending AND not yet batched into a payout — the
-      // same filter as the admin queue and the manufacturer earnings page.
-      // Summing every pending row double-showed money the painter had already
-      // requested (batched, awaiting the transfer) as still owed.
+      // "Bekleyen kazanç" = TALEP EDİLEBİLİR para, kuralı ortak yerden okur
+      // (earning-claimable.ts). İki ayrı hata vardı: tahakkuk etmiş her satırı
+      // toplamak, boyacının zaten talep ettiği (partilenmiş, transferi bekleyen)
+      // parayı ikinci kez "bekliyor" gibi gösteriyordu; iade terimi olmaması ise
+      // /painter/earnings'in "talep edilebilir" rakamından çıkardığı iade
+      // hakedişini bu panelde ödenecekmiş gibi gösteriyordu — aynı boyacı, iki
+      // ekran, iki farklı rakam. Kural siparişin ödeme durumunu okur: birleşim
+      // olmadan kurulamaz.
       db
         .select({
-          s: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${painterEarnings.payoutId} is null), 0)::int`,
-          inPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${painterEarnings.payoutId} is not null), 0)::int`,
+          s: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${claimableEarningWhere(painterEarnings)}), 0)::int`,
+          inPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${inPayoutEarningWhere(painterEarnings)}), 0)::int`,
+          refundedOpen: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${refundedOpenEarningWhere(painterEarnings)}), 0)::int`,
+          refundedInPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${refundedInPayoutEarningWhere(painterEarnings)}), 0)::int`,
         })
         .from(painterEarnings)
-        .where(
-          and(
-            eq(painterEarnings.painterId, pid),
-            eq(painterEarnings.status, "pending")
-          )
-        ),
+        .leftJoin(orders, eq(orders.id, painterEarnings.orderId))
+        .where(eq(painterEarnings.painterId, pid)),
       db.query.orders.findMany({
         where: and(eq(orders.painterId, pid), eq(orders.needsPainting, true)),
         orderBy: [desc(orders.assignedToPainterAt)],
@@ -145,6 +153,9 @@ export default async function PainterDashboardPage() {
 
   const pendingEarnings = Number(pending?.s ?? 0);
   const inPayoutKurus = Number(pending?.inPayout ?? 0);
+  // "Bekleyen kazanç"tan DIŞARIDA kalan para: sebebi rakamın yanında yazsın.
+  const refundedUnpayable =
+    Number(pending?.refundedOpen ?? 0) + Number(pending?.refundedInPayout ?? 0);
   const inProgress = (assigned?.c ?? 0) + (accepted?.c ?? 0) + (painting?.c ?? 0);
 
   const stats: Array<{ label: string; value: string | number }> = [
@@ -183,6 +194,22 @@ export default async function PainterDashboardPage() {
           </div>
         ))}
       </div>
+
+      {refundedUnpayable > 0 && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"
+        >
+          İade edilen siparişlerden kapanmamış{" "}
+          {formatCurrency(refundedUnpayable, locale)} hakediş var. Bu tutar yukarıdaki
+          &quot;Bekleyen kazanç&quot; rakamına dâhil değildir ve ödeme partisine girmez;
+          kaydı yönetici kapatır.{" "}
+          <Link href="/painter/earnings" className="font-medium underline">
+            Kazançlar
+          </Link>{" "}
+          sayfasında sipariş sipariş görebilirsiniz.
+        </p>
+      )}
 
       <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
         <p className="text-xs uppercase tracking-wide text-gray-500">

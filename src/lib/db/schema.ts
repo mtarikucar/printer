@@ -901,6 +901,16 @@ export const qcPhotos = pgTable("qc_photos", {
     .notNull()
     .references(() => manufacturers.id),
   round: integer("round").notNull().default(1),
+  // Hangi MODEL SÜRÜMÜNÜN baskısını gösteriyor (migration 0055). Tur numarası
+  // tek başına yetmiyordu: admin üretim sırasında yeni bir sürüm yükleyince QC
+  // sıfırlanır (tur artar, üretici `printing`e döner) ama üretici yeni turda da
+  // ESKİ baskının fotoğraflarını yükleyebilir — o baskı QC'den geçerse eski
+  // model kargoya çıkar. Sürüm damgası bu ikisini ayırt eder.
+  //
+  // NULL = 0055 öncesi satır ya da hiç sürümü olmayan sipariş; "eski" sayılmaz
+  // (bkz. qcPhotosMatchCurrentRevision), yoksa geçmiş siparişlerin QC'si
+  // topluca kilitlenirdi.
+  modelRevision: integer("model_revision"),
   storageKey: text("storage_key").notNull(),
   thumbnailKey: text("thumbnail_key"),
   reviewStatus: qcPhotoReviewStatusEnum("review_status")
@@ -3108,3 +3118,40 @@ export const agentOrderSpecs = pgTable("agent_order_specs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Partner ↔ yönetici sohbeti (bugün BOYACI kanalı).
+//
+// NEDEN `messages` DEĞİL: `messages.channel` ve `messages.sender_type` birer pg
+// enum. "painter_admin" / "painter" değerlerini eklemek, geri alma
+// migration'ının temiz kaldıramayacağı iki enum değeri demekti (Faz 2 kuralı:
+// kaldırılabilmesi gereken bir şey için pg enum'a değer EKLENMEZ). Kanal bu
+// yüzden `text` ayırıcıları olan kendi tablosunda yaşıyor; yeni bir partner
+// türü eklemek migration istemez.
+//
+// `partner_id`de FK YOK: partner_type'a göre painters ya da manufacturers'ı
+// gösterir ve tek kolon iki tabloya FK veremez. Bütünlüğü, kanalı açan rotanın
+// oturum kimliği sağlar (partner kendi id'sinden başkasını yazamaz).
+export const orderPartnerMessages = pgTable(
+  "order_partner_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id),
+    partnerType: text("partner_type").notNull(),
+    partnerId: uuid("partner_id").notNull(),
+    sender: text("sender").notNull(),
+    senderEmail: text("sender_email"),
+    body: text("body").notNull(),
+    readByAdminAt: timestamp("read_by_admin_at"),
+    readByPartnerAt: timestamp("read_by_partner_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byOrderPartner: index("order_partner_messages_order_idx").on(
+      t.orderId,
+      t.partnerType,
+      t.createdAt
+    ),
+  })
+);

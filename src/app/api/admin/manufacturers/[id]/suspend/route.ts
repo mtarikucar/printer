@@ -6,43 +6,48 @@ import { manufacturers } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
+  try {
+    const a = await requireAdmin();
 
-  if ("response" in a) return a.response;
+    if ("response" in a) return a.response;
 
-  const { id } = await params;
+    const { id } = await params;
 
-  const [manufacturer] = await db
-    .update(manufacturers)
-    .set({ status: "suspended", updatedAt: new Date() })
-    .where(
-      and(
-        eq(manufacturers.id, id),
-        eq(manufacturers.status, "active")
+    const [manufacturer] = await db
+      .update(manufacturers)
+      .set({ status: "suspended", updatedAt: new Date() })
+      .where(
+        and(
+          eq(manufacturers.id, id),
+          eq(manufacturers.status, "active")
+        )
       )
-    )
-    .returning();
+      .returning();
 
-  if (!manufacturer) {
-    return NextResponse.json(
-      { error: "Manufacturer not found or not active" },
-      { status: 400 }
-    );
+    if (!manufacturer) {
+      return NextResponse.json(
+        { error: "Manufacturer not found or not active" },
+        { status: 400 }
+      );
+    }
+
+    await publishRealtime([topics.admin()], { kind: "badge" });
+
+    await notifyManufacturer({
+      manufacturerId: id,
+      type: "system_announcement",
+      subject: "Hesabınız askıya alındı",
+      body: "Üretici hesabınız geçici olarak askıya alındı. Yeni sipariş alamaz ve ürün satışı yapamazsınız. Ayrıntılar için lütfen bizimle iletişime geçin.",
+    }).catch((e) => console.error("notifyManufacturer (suspend) failed", e));
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/manufacturers/[id]/suspend", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  await publishRealtime([topics.admin()], { kind: "badge" });
-
-  await notifyManufacturer({
-    manufacturerId: id,
-    type: "system_announcement",
-    subject: "Hesabınız askıya alındı",
-    body: "Üretici hesabınız geçici olarak askıya alındı. Yeni sipariş alamaz ve ürün satışı yapamazsınız. Ayrıntılar için lütfen bizimle iletişime geçin.",
-  }).catch((e) => console.error("notifyManufacturer (suspend) failed", e));
-
-  return NextResponse.json({ success: true });
 }

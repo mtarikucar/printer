@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import { eq } from "drizzle-orm";
@@ -53,7 +54,7 @@ function verifyState(state: string): { redirect: string } | null {
   }
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
   const errorParam = request.nextUrl.searchParams.get("error");
@@ -164,6 +165,24 @@ export async function GET(request: NextRequest) {
     console.error("Google OAuth callback error:", error);
     return NextResponse.redirect(
       `${APP_URL()}/login?error=google_verify_failed`
+    );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap; tarayıcı gezinmesi olduğu için gövde
+ * yerine EKRANA yönlendirilir (yukarıdaki iç yakalamanın yaptığı gibi). Bu dış
+ * kat, yönlendirme adresini kuran kodun kendisi patlarsa (ortam değişkeni,
+ * durum çözümü) devreye girer; o hâl eskiden boş bir sayfaya düşüyordu.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error("google geri dönüşü işlenemedi", e);
+    return NextResponse.redirect(
+      new URL("/login?error=google_verify_failed", request.url)
     );
   }
 }

@@ -5,6 +5,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { phoneField } from "@/lib/phone";
 import { SIZE_PRESET_KEYS } from "@/lib/config/sizes";
 import { isValidTemplateSlug, DEFAULT_TEMPLATE_SLUG, priceKindForStyle } from "@/lib/create/design-templates";
+import { CARRIERS, type Carrier } from "@/lib/services/carriers";
 
 // Finish packages are split per price-kind: character figures vs geometry
 // objects. The server is the trust boundary — a finish must belong to the
@@ -179,6 +180,151 @@ export function createShipOrderSchema(locale: Locale = defaultLocale) {
     trackingNumber: z.string().min(1, d["validator.tracking.required"]),
     carrier: z
       .enum(["yurtici", "aras", "mng", "ptt", "surat", "other"])
+      .optional(),
+  });
+}
+
+/**
+ * Kargo firması listesi TEK kaynaktan gelir (services/carriers.ts); takip
+ * derin-bağlantısını da o modül kurar. Zod bir tuple beklediği için tek yerde
+ * daraltılır — liste büyüdüğünde burada değişecek bir şey yoktur.
+ */
+const CARRIER_VALUES = CARRIERS as unknown as [Carrier, ...Carrier[]];
+
+/**
+ * ADMIN'in elle kargolaması.
+ *
+ * Partner rotalarının kullandığı `createShipOrderSchema`'dan tek farkı: kargo
+ * firması ZORUNLUDUR. Admin kargoladığında firma kaydedilmiyordu; takip
+ * numarası vardı ama hangi firmaya ait olduğu yazılmadığı için müşteriye
+ * gösterilen takip bağlantısı kurulamıyordu (trackingUrl firmasız null döner).
+ *
+ * `reason`: sipariş bir partnerin elindeyse kargo onun ADINA yapılır ve
+ * gerekçe zorunlu hâle gelir (P2-C4). Zorunluluk serviste denetlenir; burada
+ * yalnız biçim sınırı vardır.
+ */
+export function createAdminShipOrderSchema(locale: Locale = defaultLocale) {
+  const d = getDictionary(locale);
+  return z.object({
+    trackingNumber: z
+      .string({ error: d["validator.tracking.required"] })
+      .trim()
+      .min(1, d["validator.tracking.required"])
+      .max(60, "Takip numarası en fazla 60 karakter olabilir."),
+    carrier: z.enum(CARRIER_VALUES, { error: "Kargo firmasını seçin." }),
+    reason: z.string().trim().max(500, "Gerekçe en fazla 500 karakter olabilir.").optional(),
+  });
+}
+
+/**
+ * KARGO / TESLİM KAYDINI GERİ ALMA GEREKÇESİ.
+ *
+ * Geri alma, müşteriye çoktan gitmiş bir "kargolandı" ya da "teslim edildi"
+ * bildirimini yalanlayan ve partner hakedişini geri çeviren bir adımdır; altı
+ * ay sonra "bu neden geri alınmış" sorusunun cevabı yalnız denetim kaydında
+ * durur. Bu yüzden gerekçe ZORUNLUDUR — eskiden isteğe bağlıydı ve boş
+ * gönderilen her geri alma sebepsiz bir satır bırakıyordu.
+ *
+ * SAF: DB'ye ve isteğe dokunmaz; iki uç (DELETE /ship, DELETE /deliver) aynı
+ * metni döndürsün diye tek yerde durur.
+ */
+export const REVERT_REASON_MIN_LENGTH = 3;
+export const REVERT_REASON_MAX_LENGTH = 500;
+
+export function revertReasonError(reason: unknown): string | null {
+  if (typeof reason !== "string" || !reason.trim()) {
+    return "Geri alma gerekçesi zorunludur; denetim kaydına bu metin yazılır.";
+  }
+  const text = reason.trim();
+  if (text.length < REVERT_REASON_MIN_LENGTH) {
+    return `Gerekçe en az ${REVERT_REASON_MIN_LENGTH} karakter olmalı; denetim kaydına bu metin yazılır.`;
+  }
+  if (text.length > REVERT_REASON_MAX_LENGTH) {
+    return `Gerekçe en fazla ${REVERT_REASON_MAX_LENGTH} karakter olabilir.`;
+  }
+  return null;
+}
+
+/**
+ * Bir model SÜRÜMÜNÜN notu (neden yeniden yüklendi).
+ *
+ * Not yükleme anında yazılır; bu şema sonradan DÜZELTMEK içindir (yanlış
+ * yazılmış ya da hiç yazılmamış bir sürüm notu). Boş dize "notu temizle"
+ * demektir, bu yüzden `min(1)` YOKTUR.
+ */
+export function createModelRevisionNoteSchema() {
+  return z.object({
+    note: z
+      .string()
+      .trim()
+      .max(500, "Sürüm notu en fazla 500 karakter olabilir.")
+      .nullable()
+      .optional(),
+  });
+}
+
+/**
+ * MÜŞTERİNİN BAŞKA KANALDAN VERDİĞİ model onayı kararını kaydetme.
+ *
+ * Müşteri kararını çoğu zaman telefonda ya da WhatsApp'ta söylüyor ve o karar
+ * hiçbir yere yazılamıyordu: sipariş, müşteri "olur" demiş olmasına rağmen
+ * onay kapısında bekliyordu. Kararı admin giriyorsa kanalın ve girenin kaydı
+ * kalmalıdır — mesafeli sözleşmede üretimin şartı müşterinin onayıdır ve
+ * kanıtı bu satırdır.
+ *
+ * `revision` kararında not ZORUNLU: müşterinin ne istediği yazılmazsa
+ * üreticiye/boyacıya iletilecek bir şey kalmaz.
+ */
+export function createApprovalRecordSchema() {
+  return z
+    .object({
+      decision: z.enum(["approved", "revision"], {
+        error: "Kararı seçin: onay ya da revizyon.",
+      }),
+      channel: z.enum(["phone", "whatsapp"], {
+        error: "Kararın geldiği kanalı seçin: telefon ya da WhatsApp.",
+      }),
+      note: z
+        .string()
+        .trim()
+        .max(2000, "Not en fazla 2000 karakter olabilir.")
+        .optional(),
+    })
+    .refine((v) => v.decision !== "revision" || (v.note ?? "").length >= 3, {
+      message: "Müşterinin istediği değişikliği yazın; bu metin üretime iletilir.",
+      path: ["note"],
+    });
+}
+
+/**
+ * Admin'in sipariş üstünde düzeltebildiği MÜŞTERİ alanları.
+ *
+ * Elle açılan ve WhatsApp siparişlerinde bu alanlar çoğu zaman eksik ya da
+ * yanlış girilir; düzeltilemedikleri sürece fatura yanlış isme kesilir, kargo
+ * bildirimi yanlış adrese/telefona gider. `null` = alanı temizle, `undefined` =
+ * bu istekte düzenlenmiyor. Telefon E.164'e rotada çevrilir (normalizePhone).
+ */
+export function createOrderCustomerEditSchema() {
+  return z.object({
+    customerName: z
+      .string()
+      .trim()
+      .min(2, "Ad soyad en az 2 karakter olmalı.")
+      .max(120, "Ad soyad en fazla 120 karakter olabilir.")
+      .optional(),
+    email: z
+      .string()
+      .trim()
+      .max(200, "E-posta en fazla 200 karakter olabilir.")
+      .email("Geçerli bir e-posta adresi girin.")
+      .optional(),
+    // Boş dize "temizle" demektir; doğrulama rotadaki normalizePhone'da.
+    phone: z.string().trim().max(30, "Telefon en fazla 30 karakter olabilir.").nullable().optional(),
+    customerNote: z
+      .string()
+      .trim()
+      .max(2000, "Müşteri notu en fazla 2000 karakter olabilir.")
+      .nullable()
       .optional(),
   });
 }

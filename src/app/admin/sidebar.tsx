@@ -3,11 +3,40 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useDictionary } from "@/lib/i18n/locale-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { signOutAction } from "./actions";
 
+/**
+ * Menü metinleri SUNUCUDAN PROP olarak gelir, context'ten DEĞİL.
+ *
+ * Kenar çubuğu /admin/* altındaki HER sayfanın kabuğudur: burada atılan bir
+ * hata tek bir kartı değil sayfanın tamamını 500'e düşürür. Panelde tam olarak
+ * bu yaşandı — üç ayrı siparişte "useDictionary must be used within
+ * LocaleProvider" (sidebar.tsx → useDictionary), yani kabuk sağlayıcıyı
+ * göremeden render edildi. Sözlüğü, düzeni render eden SUNUCU bileşeni çözüp
+ * hazır metin olarak verdiğinde kenar çubuğu hiçbir sağlayıcıya bağlı kalmaz.
+ * Çeviri gizlenmiyor: metinler gerçek sözlükten gelir (bkz. admin/layout.tsx),
+ * eksik bir anahtar yine derleme zamanında yakalanır.
+ */
+export interface AdminSidebarLabels {
+  groupGeneral: string;
+  groupOrders: string;
+  groupManufacturers: string;
+  groupCustomer: string;
+  groupContent: string;
+  groupAdvanced: string;
+  dashboard: string;
+  orders: string;
+  manufacturingQueue: string;
+  qcQueue: string;
+  manufacturers: string;
+  products: string;
+  giftCards: string;
+  logout: string;
+}
+
 export function AdminSidebar({
+  labels,
   awaitingModelCount,
   awaitingManufacturerCount,
   assignmentSweepCount,
@@ -21,32 +50,36 @@ export function AdminSidebar({
   painterQcPendingCount,
   waAwaitingReplyCount,
 }: {
-  awaitingModelCount: number;
-  awaitingManufacturerCount: number;
-  assignmentSweepCount: number;
-  awaitingManufacturerBulkCount: number;
-  pendingManufacturerCount: number;
-  pendingProductCount: number;
-  draftReviewCount: number;
-  qcPendingCount: number;
-  workshopPendingCount: number;
-  pendingPainterCount: number;
-  painterQcPendingCount: number;
-  waAwaitingReplyCount: number;
+  labels: AdminSidebarLabels;
+  awaitingModelCount: number | null;
+  awaitingManufacturerCount: number | null;
+  assignmentSweepCount: number | null;
+  awaitingManufacturerBulkCount: number | null;
+  pendingManufacturerCount: number | null;
+  pendingProductCount: number | null;
+  draftReviewCount: number | null;
+  qcPendingCount: number | null;
+  workshopPendingCount: number | null;
+  pendingPainterCount: number | null;
+  painterQcPendingCount: number | null;
+  waAwaitingReplyCount: number | null;
 }) {
   const pathname = usePathname();
-  const d = useDictionary();
 
   const groups: {
-    titleKey: keyof typeof d;
-    links: { href: string; label: string; icon: ReactNode; badge: number }[];
+    id: string;
+    title: string;
+    // badge null = sayı OKUNAMADI (bkz. admin/layout.tsx). 0 ile aynı şey
+    // değildir: biri "bekleyen iş yok", öbürü "bilinmiyor".
+    links: { href: string; label: string; icon: ReactNode; badge: number | null }[];
   }[] = [
     {
-      titleKey: "admin.nav.group.general",
+      id: "general",
+      title: labels.groupGeneral,
       links: [
         {
           href: "/admin/dashboard",
-          label: d["admin.nav.dashboard"],
+          label: labels.dashboard,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />,
           badge: 0,
         },
@@ -59,17 +92,24 @@ export function AdminSidebar({
       ],
     },
     {
-      titleKey: "admin.nav.group.orders",
+      id: "orders",
+      title: labels.groupOrders,
       links: [
         {
           href: "/admin/orders",
-          label: d["admin.nav.orders"],
+          label: labels.orders,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />,
           // Both kinds of "waiting on the admin", refunded orders out: a model
           // to upload, and paid work with no manufacturer (the same definition
           // as the "Üretici bekliyor" bucket). The two sets are disjoint; see
           // admin/layout.tsx.
-          badge: awaitingModelCount + awaitingManufacturerCount,
+          // İki sayının TOPLAMI: biri bilinmiyorsa toplam da bilinmiyordur.
+          // Eksik bir toplamı doğru sayı gibi göstermek, admin'e gerçekte
+          // bekleyen işten daha azını gösterirdi.
+          badge:
+            awaitingModelCount === null || awaitingManufacturerCount === null
+              ? null
+              : awaitingModelCount + awaitingManufacturerCount,
         },
         {
           href: "/admin/assignment-sweep",
@@ -100,13 +140,13 @@ export function AdminSidebar({
         },
         {
           href: "/admin/print-queue",
-          label: d["admin.manufacturingQueue.title"],
+          label: labels.manufacturingQueue,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z" />,
           badge: 0,
         },
         {
           href: "/admin/qc-queue",
-          label: d["admin.nav.qcQueue"],
+          label: labels.qcQueue,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />,
           badge: qcPendingCount,
         },
@@ -125,17 +165,18 @@ export function AdminSidebar({
       ],
     },
     {
-      titleKey: "admin.nav.group.manufacturers",
+      id: "manufacturers",
+      title: labels.groupManufacturers,
       links: [
         {
           href: "/admin/manufacturers",
-          label: d["admin.nav.manufacturers"],
+          label: labels.manufacturers,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />,
           badge: pendingManufacturerCount,
         },
         {
           href: "/admin/products",
-          label: d["admin.nav.products" as keyof typeof d] || "Ürünler",
+          label: labels.products,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />,
           badge: pendingProductCount,
         },
@@ -172,7 +213,8 @@ export function AdminSidebar({
       ],
     },
     {
-      titleKey: "admin.nav.group.customer",
+      id: "customer",
+      title: labels.groupCustomer,
       links: [
         {
           href: "/admin/workshop-requests",
@@ -206,14 +248,15 @@ export function AdminSidebar({
         },
         {
           href: "/admin/gift-cards",
-          label: d["admin.nav.giftCards"],
+          label: labels.giftCards,
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />,
           badge: 0,
         },
       ],
     },
     {
-      titleKey: "admin.nav.group.content",
+      id: "content",
+      title: labels.groupContent,
       links: [
         {
           // Merged: single Galeri entry. Queue + Published live under /admin/gallery?tab=
@@ -225,7 +268,8 @@ export function AdminSidebar({
       ],
     },
     {
-      titleKey: "admin.nav.group.advanced",
+      id: "advanced",
+      title: labels.groupAdvanced,
       links: [
         {
           href: "/admin/scoring-evaluations",
@@ -249,9 +293,9 @@ export function AdminSidebar({
       </div>
       <nav className="flex-1 p-4 space-y-5 overflow-y-auto">
         {groups.map((group) => (
-          <div key={group.titleKey} className="space-y-1">
+          <div key={group.id} className="space-y-1">
             <h2 className="px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-              {d[group.titleKey]}
+              {group.title}
             </h2>
             {group.links.map((link) => {
               const isActive =
@@ -268,11 +312,22 @@ export function AdminSidebar({
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">{link.icon}</svg>
                     {link.label}
                   </span>
-                  {link.badge > 0 && (
+                  {/* Sayı BİLİNMİYORSA (null) rozet "?" gösterir. Rozeti gizlemek
+                      ya da 0 yazmak, yapılmamış bir sayımı "bekleyen iş yok" diye
+                      göstermek olurdu; sebep sayfanın üstündeki şeritte yazıyor. */}
+                  {link.badge === null ? (
+                    <span
+                      title="Bu sayı şu anda okunamadı (geçici sistem arızası); sıfır demek değildir."
+                      aria-label={`${link.label}: sayı okunamadı`}
+                      className="bg-amber-100 text-amber-800 ring-1 ring-amber-300 text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center"
+                    >
+                      ?
+                    </span>
+                  ) : link.badge > 0 ? (
                     <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
                       {link.badge}
                     </span>
-                  )}
+                  ) : null}
                 </Link>
               );
             })}
@@ -291,7 +346,7 @@ export function AdminSidebar({
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
-            {d["common.logout"]}
+            {labels.logout}
           </button>
         </form>
       </div>

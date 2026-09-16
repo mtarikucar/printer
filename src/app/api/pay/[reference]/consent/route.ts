@@ -10,6 +10,7 @@ import {
 } from "@/lib/config/distance-contract";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { getClientIp } from "@/lib/utils/request";
+import { handleRouteFailure, CUSTOMER_PAYMENT_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Record the customer's image/likeness + KVKK consent on a WhatsApp order draft.
@@ -24,7 +25,7 @@ import { getClientIp } from "@/lib/utils/request";
  * reference is the unguessable secret in the WhatsApp link. Rate-limited so the
  * endpoint can't be used to probe which references exist.
  */
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ reference: string }> }
 ) {
@@ -81,4 +82,17 @@ export async function POST(
   }
 
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ reference: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/pay/[reference]/consent", CUSTOMER_PAYMENT_FAILED_ERROR);
+  }
 }

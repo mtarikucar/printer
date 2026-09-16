@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import crypto from "crypto";
 
 const GOOGLE_CLIENT_ID = () => process.env.GOOGLE_CLIENT_ID!;
@@ -11,7 +12,7 @@ function signState(data: string): string {
     .digest("hex");
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   let redirect = request.nextUrl.searchParams.get("redirect") || "/account";
   // Prevent open redirect: only allow relative paths
   if (!redirect.startsWith("/") || redirect.startsWith("//")) {
@@ -37,4 +38,27 @@ export async function GET(request: NextRequest) {
   return NextResponse.redirect(
     `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
   );
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap; ama bu uca JSON okuyan bir istemci
+ * değil TARAYICI girer (sayfa gezinmesi). Orada doğru cevap, cümlenin
+ * gösterilebileceği EKRANA yönlendirmektir: `/login?error=google_verify_failed`
+ * kodunu giriş ekranı Türkçe cümleye çevirir (src/app/login/page.tsx).
+ * Sıfır baytlık bir 500 ise kullanıcıyı bomboş bir sayfada bırakırdı.
+ *
+ * Hedef `request.url`den türetilir: ortam değişkeni eksik olsa bile geçerli bir
+ * URL çıkar — yakalamanın içinde ikinci bir hata fırlatmak, düzeltmeyi baştan
+ * anlamsız kılardı.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error("google ile giriş başlatılamadı", e);
+    return NextResponse.redirect(
+      new URL("/login?error=google_verify_failed", request.url)
+    );
+  }
 }

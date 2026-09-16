@@ -13,6 +13,7 @@ import {
   CONSUMER_REQUEST_MESSAGE_MIN,
   CONSUMER_REQUEST_MESSAGE_MAX,
 } from "@/lib/config/consumer-requests";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Tüketici talep kanalı — MSY m.12/A.
@@ -23,7 +24,7 @@ import {
  * iletemezdi.
  */
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const ip = await getClientIp();
   // Talep kanalı kapatılamaz ama kötüye kullanıma da açık bırakılamaz; kayıt
   // açmak e-posta gönderiyor. Sipariş+IP başına dar, IP başına geniş sınır.
@@ -108,7 +109,7 @@ export async function POST(request: NextRequest) {
 }
 
 /** Takip — m.12/A'nın "takip edilebilir" şartı. */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const reference = request.nextUrl.searchParams.get("reference")?.trim() ?? "";
   const email = request.nextUrl.searchParams.get("email")?.trim() ?? "";
   if (!reference || !email) {
@@ -140,4 +141,30 @@ export async function GET(request: NextRequest) {
     resolvedAt: found.resolvedAt,
     createdAt: found.createdAt,
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/consumer-requests", CUSTOMER_ACTION_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/consumer-requests", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

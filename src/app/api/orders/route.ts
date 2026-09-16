@@ -77,6 +77,7 @@ import {
   loadCostLineBases,
   basesForLineTotal,
 } from "@/lib/services/product-cost-lines";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Rate limit + idempotency in front of order creation.
@@ -89,7 +90,7 @@ import {
  * Only 2xx responses are memoised. A 4xx is the caller's input problem — the
  * claim is released so they can fix it and retry immediately.
  */
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handlePOST(request: NextRequest): Promise<NextResponse> {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
 
@@ -1120,5 +1121,18 @@ async function handleCreateOrder(
       { error: d["api.order.createFailed"] },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/orders", CUSTOMER_ACTION_FAILED_ERROR);
   }
 }

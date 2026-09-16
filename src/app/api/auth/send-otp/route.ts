@@ -4,12 +4,13 @@ import { getSessionUser } from "@/lib/services/customer-auth";
 import { sendPhoneOtp } from "@/lib/services/phone-otp";
 import { normalizePhone } from "@/lib/phone";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
+import { handleRouteFailure, AUTH_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const bodySchema = z.object({ phone: z.string().min(5) });
 
 // Send a phone-OTP SMS to the logged-in customer. SMS is a toll-fraud target,
 // so it's tightly rate-limited per user and per IP.
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const session = await getSessionUser();
   if (!session) {
     return NextResponse.json({ error: "auth_required" }, { status: 401 });
@@ -41,4 +42,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "send_failed", code: "send_failed" }, { status: 502 });
   }
   return NextResponse.json({ success: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/auth/send-otp", AUTH_ACTION_FAILED_ERROR);
+  }
 }

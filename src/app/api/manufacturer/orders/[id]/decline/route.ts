@@ -13,7 +13,7 @@ const declineSchema = z
   })
   .strict();
 
-export async function POST(
+async function handleDecline(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -75,5 +75,50 @@ export async function POST(
     ...(result.action === "reassigned"
       ? {}
       : { reason: result.reason }),
+    // `released` = sipariş iade edilmişti, ret yalnız koparma oldu. Üreticiye
+    // "başka bir üreticiye yönlendirilecek" ya da "admin atayacak" demek burada
+    // yalan olurdu; ceza da yazılmadığı için onu da söylüyoruz
+    // (manufacturer-decline.ts, iade dalı).
+    ...(result.action === "released"
+      ? {
+          message:
+            "Bu sipariş iade edilmiş. İşi reddettiniz ve sipariş panelinizden düştü; " +
+            "başka bir üreticiye yönlendirilmeyecek ve bu ret güvenilirlik puanınıza işlenmedi.",
+        }
+      : {}),
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap.
+ *
+ * Kabul/iptal ikizlerinde ölçülen hâl burada da açıktı: bir okuma ya da ret
+ * işlemi fırlarsa Next'in varsayılan 500'üne düşülüyor ve atölye paneline SIFIR
+ * BAYT gidiyordu — panel o zaman kendi yedek cümlesini ("İşlem tamamlanamadı
+ * (HTTP 500)") gösterir, yani ekranda ne olduğuna dair tek kelime yoktur.
+ *
+ * Cümle İKİYE BÖLÜNMÜYOR, çünkü bu uçta iki hâli dürüstçe ayıramayız: ret,
+ * servisin (manufacturer-decline.ts) kilitli işleminde yazılır ve rota,
+ * fırlayan hatanın o işlemden ÖNCE mi sonra mı geldiğini bilemez. Bu yüzden
+ * cümle atölyeye BAKILACAK YERİ söyler: listede duruyorsa ret yazılmamıştır ve
+ * tekrar denenebilir, düşmüşse ret alınmıştır. Uydurulmuş bir kesinlik
+ * ("işleminiz alınamadı"), olmuş bir reddi ikinci kez denettirirdi.
+ */
+export async function POST(
+  request: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  try {
+    return await handleDecline(request, ctx);
+  } catch (e) {
+    console.error("üretici reddi: beklenmeyen hata", e);
+    return NextResponse.json(
+      {
+        error:
+          "Beklenmeyen bir hata nedeniyle ret işlemi tamamlanamadı. Sipariş listenizi yenileyin: sipariş hâlâ listenizdeyse ret kaydedilmemiştir ve birkaç dakika sonra tekrar deneyebilirsiniz; listeden düştüyse ret alınmıştır ve yapmanız gereken bir şey yok.",
+        reason: "unexpected_error",
+      },
+      { status: 500 }
+    );
+  }
 }

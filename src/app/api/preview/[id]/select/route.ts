@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { previews } from "@/lib/db/schema";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const bodySchema = z.object({ url: z.string().min(1) });
 
@@ -10,7 +11,7 @@ const bodySchema = z.object({ url: z.string().min(1) });
 // image the order is placed against; there is no automatic 3D — the admin
 // sculpts and uploads the model after payment. The preview id is an unguessable
 // UUID, so no extra auth (matches the poll GET).
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -40,4 +41,17 @@ export async function POST(
     .where(eq(previews.id, id));
 
   return NextResponse.json({ status: "approved", selectedStyledImageUrl: url });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/preview/[id]/select", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

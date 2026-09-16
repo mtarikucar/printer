@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers, workshopSessions } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
+import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Üretici, kendisine ön rezerve edilmiş bir atölye seansının tarihini TAAHHÜT
@@ -29,43 +30,47 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getManufacturerSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const session = await getManufacturerSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const manufacturer = await db.query.manufacturers.findFirst({
-    where: eq(manufacturers.id, session.manufacturerId),
-    columns: { status: true },
-  });
-  if (!manufacturer || manufacturer.status !== "active") {
-    return NextResponse.json({ error: "Hesabınız aktif değil" }, { status: 403 });
-  }
-
-  const { id } = await params;
-  const now = new Date();
-  const [updated] = await db
-    .update(workshopSessions)
-    .set({
-      manufacturerCommittedAt: sql`COALESCE(${workshopSessions.manufacturerCommittedAt}, ${now.toISOString()}::timestamp)`,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(workshopSessions.id, id),
-        eq(workshopSessions.manufacturerId, session.manufacturerId),
-        inArray(workshopSessions.status, ["draft", "open"])
-      )
-    )
-    .returning({
-      id: workshopSessions.id,
-      committedAt: workshopSessions.manufacturerCommittedAt,
+    const manufacturer = await db.query.manufacturers.findFirst({
+      where: eq(manufacturers.id, session.manufacturerId),
+      columns: { status: true },
     });
+    if (!manufacturer || manufacturer.status !== "active") {
+      return NextResponse.json({ error: "Hesabınız aktif değil" }, { status: 403 });
+    }
 
-  // Seans yok, başkasına ait ya da artık taahhüt edilebilir durumda değil —
-  // üçü de aynı yanıtı döner: başkasının seansının varlığı sızdırılmaz.
-  if (!updated) {
-    return NextResponse.json({ error: "Seans bulunamadı" }, { status: 404 });
+    const { id } = await params;
+    const now = new Date();
+    const [updated] = await db
+      .update(workshopSessions)
+      .set({
+        manufacturerCommittedAt: sql`COALESCE(${workshopSessions.manufacturerCommittedAt}, ${now.toISOString()}::timestamp)`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(workshopSessions.id, id),
+          eq(workshopSessions.manufacturerId, session.manufacturerId),
+          inArray(workshopSessions.status, ["draft", "open"])
+        )
+      )
+      .returning({
+        id: workshopSessions.id,
+        committedAt: workshopSessions.manufacturerCommittedAt,
+      });
+
+    // Seans yok, başkasına ait ya da artık taahhüt edilebilir durumda değil —
+    // üçü de aynı yanıtı döner: başkasının seansının varlığı sızdırılmaz.
+    if (!updated) {
+      return NextResponse.json({ error: "Seans bulunamadı" }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, committedAt: updated.committedAt });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/manufacturer/workshop-sessions/[id]/commit", PARTNER_ACTION_FAILED_ERROR);
   }
-  return NextResponse.json({ success: true, committedAt: updated.committedAt });
 }

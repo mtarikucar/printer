@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { issuePasswordResetToken } from "@/lib/services/password-reset";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
+import { handleRouteFailure, AUTH_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * POST /api/auth/forgot-password
@@ -18,7 +19,7 @@ const schema = z.object({
   email: z.string().email(),
 });
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const ip = extractClientIp(request);
   const rl = await rateLimitAsync(
     `forgot-password:ip:${ip}`,
@@ -57,4 +58,17 @@ export async function POST(request: NextRequest) {
   await issuePasswordResetToken(parsed.data.email, appUrl);
 
   return NextResponse.json({ sent: true });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/auth/forgot-password", AUTH_ACTION_FAILED_ERROR);
+  }
 }

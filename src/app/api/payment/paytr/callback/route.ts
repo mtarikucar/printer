@@ -17,10 +17,20 @@
  * signature validation.
  */
 import type { NextRequest } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { POST as canonicalPOST } from "../../../webhooks/paytr/route";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  return canonicalPOST(request);
+  try {
+    return await canonicalPOST(request);
+  } catch (e) {
+    unstable_rethrow(e);
+    // Kanonik yöntem kendi yakalamasını taşıyor; bu ikinci kat, takma adın
+    // ileride başka bir şey çağırması hâlinde bile boş gövdeli 500'ü imkânsız
+    // kılar. Gövde yine PayTR'ın kelimesi (500 = tekrar dene).
+    console.error("[paytr.callback] beklenmeyen hata — PayTR tekrar denemeli", e);
+    return new Response("PAYTR internal", { status: 500 });
+  }
 }

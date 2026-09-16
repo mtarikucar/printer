@@ -8,6 +8,7 @@ import { getSessionUser } from "@/lib/services/customer-auth";
 import { getRedisConnection } from "@/lib/queue/connection";
 import { resolveOrderLines } from "@/lib/services/product-options";
 import { ABSOLUTE_MAX_LINE_QTY, effectiveMaxQty } from "@/lib/config/bulk";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 
@@ -264,7 +265,7 @@ async function persistAndRespond(
   return respond(publicView(h), newCookie);
 }
 
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
   return respond(publicView(await hydrate(await getLines(key))), newCookie);
 }
@@ -273,7 +274,7 @@ export async function GET(req: NextRequest) {
 // Accepts either a single {productId, quantity, …} or a batch {items:[…]} —
 // the batch form is what /toplu-siparis uses, so adding N products costs one
 // hydrate round trip instead of N.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
   const body = await req.json().catch(() => ({}));
 
@@ -319,7 +320,7 @@ export async function POST(req: NextRequest) {
 }
 
 // Set an exact quantity for a line (0 removes it). Keyed by line id.
-export async function PATCH(req: NextRequest) {
+async function handlePATCH(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
   const body = await req.json().catch(() => ({}));
   const id = String(body.id ?? "");
@@ -337,11 +338,63 @@ export async function PATCH(req: NextRequest) {
   return persistAndRespond(key, lines, newCookie);
 }
 
-export async function DELETE(req: NextRequest) {
+async function handleDELETE(req: NextRequest) {
   const { key, newCookie } = await resolveCartKey(req);
   await setLines(key, []);
   return respond(
     { items: [], totalKurus: 0, count: 0, bulkSavingsKurus: 0, clamped: false },
     newCookie
   );
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(req: NextRequest) {
+  try {
+    return await handleGET(req);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/cart", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(req: NextRequest) {
+  try {
+    return await handlePOST(req);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/cart", CUSTOMER_ACTION_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePATCH` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    return await handlePATCH(req);
+  } catch (e) {
+    return handleRouteFailure(e, "PATCH /api/cart", CUSTOMER_ACTION_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleDELETE` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    return await handleDELETE(req);
+  } catch (e) {
+    return handleRouteFailure(e, "DELETE /api/cart", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

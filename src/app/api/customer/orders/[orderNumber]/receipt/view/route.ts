@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orderDrafts, orders } from "@/lib/db/schema";
 import { getFileBuffer } from "@/lib/services/storage";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { handleRouteFailure, CUSTOMER_PAYMENT_FAILED_ERROR } from "@/lib/api/route-error";
 
 const MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -19,7 +20,7 @@ const MIME_TYPES: Record<string, string> = {
  * The `orderNumber` param matches either an active draft reference (pre-payment) or a
  * confirmed order number (post-payment; same string).
  */
-export async function GET(
+async function handleGET(
   _request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -63,7 +64,10 @@ export async function GET(
   }
 
   if (!receiptKey) {
-    return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Dekont bulunamadı veya şu anda görüntülenemiyor." },
+      { status: 404 }
+    );
   }
 
   try {
@@ -79,5 +83,18 @@ export async function GET(
     });
   } catch {
     return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handleGET(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/orders/[orderNumber]/receipt/view", CUSTOMER_PAYMENT_FAILED_ERROR);
   }
 }

@@ -7,6 +7,7 @@ import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { saveFile, getPublicUrl, deleteFile } from "@/lib/services/storage";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
 import { optimizeDisplayImage } from "@/lib/services/image-optimize";
+import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const MAX_IMAGES = 8;
 
@@ -26,69 +27,73 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const guard = await requireActiveSeller();
-  if ("error" in guard) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
-  }
-  const { id } = await params;
-
-  const product = await ensureOwned(id, guard.manufacturerId);
-  if (!product) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (product.images.length >= MAX_IMAGES) {
-    return NextResponse.json(
-      { error: `At most ${MAX_IMAGES} images allowed` },
-      { status: 400 }
-    );
-  }
-
-  const formData = await request.formData();
-  const file = formData.get("file") as File | null;
-  if (!file) {
-    return NextResponse.json({ error: "No file" }, { status: 400 });
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    return NextResponse.json({ error: "File too large" }, { status: 400 });
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const detectedType = validateImageMagicBytes(buffer);
-  if (!detectedType || !["image/jpeg", "image/png"].includes(detectedType)) {
-    return NextResponse.json({ error: "Invalid image format" }, { status: 400 });
-  }
-
-  // Re-encode to a capped-size WebP so storefront grids load ~200 KB instead
-  // of the multi-MB original. Falls back to the validated original if sharp
-  // can't process it.
-  let storeBuffer: Buffer = buffer;
-  let ext = detectedType === "image/png" ? "png" : "jpg";
   try {
-    const optimized = await optimizeDisplayImage(buffer);
-    storeBuffer = optimized.buffer;
-    ext = optimized.ext;
-  } catch {
-    /* keep original */
+    const guard = await requireActiveSeller();
+    if ("error" in guard) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+    const { id } = await params;
+
+    const product = await ensureOwned(id, guard.manufacturerId);
+    if (!product) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (product.images.length >= MAX_IMAGES) {
+      return NextResponse.json(
+        { error: `At most ${MAX_IMAGES} images allowed` },
+        { status: 400 }
+      );
+    }
+
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) {
+      return NextResponse.json({ error: "No file" }, { status: 400 });
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "File too large" }, { status: 400 });
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const detectedType = validateImageMagicBytes(buffer);
+    if (!detectedType || !["image/jpeg", "image/png"].includes(detectedType)) {
+      return NextResponse.json({ error: "Invalid image format" }, { status: 400 });
+    }
+
+    // Re-encode to a capped-size WebP so storefront grids load ~200 KB instead
+    // of the multi-MB original. Falls back to the validated original if sharp
+    // can't process it.
+    let storeBuffer: Buffer = buffer;
+    let ext = detectedType === "image/png" ? "png" : "jpg";
+    try {
+      const optimized = await optimizeDisplayImage(buffer);
+      storeBuffer = optimized.buffer;
+      ext = optimized.ext;
+    } catch {
+      /* keep original */
+    }
+    const storageKey = await saveFile(storeBuffer, "products", `${nanoid()}.${ext}`);
+
+    const nextSort = product.images.length;
+    const [image] = await db
+      .insert(productImages)
+      .values({ productId: id, storageKey, sortOrder: nextSort })
+      .returning();
+
+    // First image becomes the denormalized cover.
+    if (product.images.length === 0) {
+      await db
+        .update(products)
+        .set({ primaryImageKey: storageKey, updatedAt: new Date() })
+        .where(eq(products.id, id));
+    }
+
+    return NextResponse.json({
+      image: { id: image.id, url: getPublicUrl(storageKey) },
+    });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/manufacturer/products/[id]/images", PARTNER_ACTION_FAILED_ERROR);
   }
-  const storageKey = await saveFile(storeBuffer, "products", `${nanoid()}.${ext}`);
-
-  const nextSort = product.images.length;
-  const [image] = await db
-    .insert(productImages)
-    .values({ productId: id, storageKey, sortOrder: nextSort })
-    .returning();
-
-  // First image becomes the denormalized cover.
-  if (product.images.length === 0) {
-    await db
-      .update(products)
-      .set({ primaryImageKey: storageKey, updatedAt: new Date() })
-      .where(eq(products.id, id));
-  }
-
-  return NextResponse.json({
-    image: { id: image.id, url: getPublicUrl(storageKey) },
-  });
 }
 
 // Remove a product image (?imageId=...). Re-points primaryImageKey if needed.
@@ -96,41 +101,45 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const guard = await requireActiveSeller();
-  if ("error" in guard) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
-  }
-  const { id } = await params;
-  const imageId = request.nextUrl.searchParams.get("imageId");
-  if (!imageId) {
-    return NextResponse.json({ error: "imageId required" }, { status: 400 });
-  }
+  try {
+    const guard = await requireActiveSeller();
+    if ("error" in guard) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+    const { id } = await params;
+    const imageId = request.nextUrl.searchParams.get("imageId");
+    if (!imageId) {
+      return NextResponse.json({ error: "imageId required" }, { status: 400 });
+    }
 
-  const product = await ensureOwned(id, guard.manufacturerId);
-  if (!product) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const target = product.images.find((img) => img.id === imageId);
-  if (!target) {
-    return NextResponse.json({ error: "Image not found" }, { status: 404 });
-  }
+    const product = await ensureOwned(id, guard.manufacturerId);
+    if (!product) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const target = product.images.find((img) => img.id === imageId);
+    if (!target) {
+      return NextResponse.json({ error: "Image not found" }, { status: 404 });
+    }
 
-  await db.delete(productImages).where(eq(productImages.id, imageId));
-  await deleteFile(target.storageKey).catch(() => {});
+    await db.delete(productImages).where(eq(productImages.id, imageId));
+    await deleteFile(target.storageKey).catch(() => {});
 
-  // If we removed the cover, promote the next remaining image (lowest sort).
-  if (product.primaryImageKey === target.storageKey) {
-    const [next] = await db
-      .select()
-      .from(productImages)
-      .where(eq(productImages.productId, id))
-      .orderBy(asc(productImages.sortOrder))
-      .limit(1);
-    await db
-      .update(products)
-      .set({ primaryImageKey: next?.storageKey ?? null, updatedAt: new Date() })
-      .where(eq(products.id, id));
+    // If we removed the cover, promote the next remaining image (lowest sort).
+    if (product.primaryImageKey === target.storageKey) {
+      const [next] = await db
+        .select()
+        .from(productImages)
+        .where(eq(productImages.productId, id))
+        .orderBy(asc(productImages.sortOrder))
+        .limit(1);
+      await db
+        .update(products)
+        .set({ primaryImageKey: next?.storageKey ?? null, updatedAt: new Date() })
+        .where(eq(products.id, id));
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return handleRouteFailure(e, "DELETE /api/manufacturer/products/[id]/images", PARTNER_ACTION_FAILED_ERROR);
   }
-
-  return NextResponse.json({ success: true });
 }

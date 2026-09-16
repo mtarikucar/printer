@@ -10,6 +10,7 @@ import {
   validateCostLines,
   replaceCostLines,
 } from "@/lib/services/product-cost-lines";
+import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR, PARTNER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Seller product management. Only `active` (KYC-complete) manufacturers may
@@ -17,82 +18,90 @@ import {
  * admin review via the [id]/submit route.
  */
 export async function GET() {
-  const guard = await requireActiveSeller();
-  if ("error" in guard) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
+  try {
+    const guard = await requireActiveSeller();
+    if ("error" in guard) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    const rows = await db.query.products.findMany({
+      where: eq(products.manufacturerId, guard.manufacturerId),
+      orderBy: [desc(products.createdAt)],
+      with: { images: true },
+    });
+
+    return NextResponse.json({ products: rows });
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/manufacturer/products", PARTNER_READ_FAILED_ERROR);
   }
-
-  const rows = await db.query.products.findMany({
-    where: eq(products.manufacturerId, guard.manufacturerId),
-    orderBy: [desc(products.createdAt)],
-    with: { images: true },
-  });
-
-  return NextResponse.json({ products: rows });
 }
 
 export async function POST(request: NextRequest) {
-  const guard = await requireActiveSeller();
-  if ("error" in guard) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
-  }
-
-  const locale = getRequestLocale(request);
   try {
-    const body = await request.json();
-    const input = createProductSchema(locale).parse(body);
-
-    const costLineError = validateCostLines(input.costLines ?? [], input.priceKurus);
-    if (costLineError) {
-      return NextResponse.json({ error: costLineError }, { status: 400 });
+    const guard = await requireActiveSeller();
+    if ("error" in guard) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
-    let categoryId: string | null;
+    const locale = getRequestLocale(request);
     try {
-      categoryId = await resolveProductCategoryId(input.categoryId);
-    } catch {
-      return NextResponse.json({ error: "invalid category" }, { status: 400 });
-    }
+      const body = await request.json();
+      const input = createProductSchema(locale).parse(body);
 
-    // Ürün ve kırılımı TEK transaction'da — düzenleme yolundaki ile aynı gerekçe:
-    // ayrı yazıldığında araya giren bir hata, fiyatı olan ama hiç kalemi olmayan
-    // bir ürün bırakır ve o satır "kırılımsız eski ürün"den ayırt edilemez.
-    const created = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(products)
-        .values({
-          ownerType: "seller",
-          manufacturerId: guard.manufacturerId,
-          title: input.title,
-          description: input.description,
-          priceKurus: input.priceKurus,
-          material: input.material ?? null,
-          categoryId,
-          leadTimeDays: input.leadTimeDays,
-          status: "draft",
-        })
-        .returning();
-      if (input.costLines?.length) {
-        await replaceCostLines(row.id, input.costLines, tx);
+      const costLineError = validateCostLines(input.costLines ?? [], input.priceKurus);
+      if (costLineError) {
+        return NextResponse.json({ error: costLineError }, { status: 400 });
       }
-      return row;
-    });
 
-    return NextResponse.json({ product: created });
-  } catch (error) {
-    if (error instanceof Error && error.name === "ZodError") {
-      // zod v4 sorunları `.issues`'ta tutar; `.errors` undefined'dır — bu yüzden
-      // doğrulama hatası istemciye boş dönüyor ve kullanıcı neyin yanlış
-      // olduğunu asla göremiyordu (yalnızca genel "kaydedilemedi").
-      const issues = (error as Error & {
-        issues?: Array<{ path?: (string | number)[]; message?: string }>;
-      }).issues;
-      const message =
-        issues?.map((i) => i.message).filter(Boolean).join(" · ") ||
-        "Gönderilen bilgiler geçersiz.";
-      return NextResponse.json({ error: message, issues }, { status: 400 });
+      let categoryId: string | null;
+      try {
+        categoryId = await resolveProductCategoryId(input.categoryId);
+      } catch {
+        return NextResponse.json({ error: "invalid category" }, { status: 400 });
+      }
+
+      // Ürün ve kırılımı TEK transaction'da — düzenleme yolundaki ile aynı gerekçe:
+      // ayrı yazıldığında araya giren bir hata, fiyatı olan ama hiç kalemi olmayan
+      // bir ürün bırakır ve o satır "kırılımsız eski ürün"den ayırt edilemez.
+      const created = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(products)
+          .values({
+            ownerType: "seller",
+            manufacturerId: guard.manufacturerId,
+            title: input.title,
+            description: input.description,
+            priceKurus: input.priceKurus,
+            material: input.material ?? null,
+            categoryId,
+            leadTimeDays: input.leadTimeDays,
+            status: "draft",
+          })
+          .returning();
+        if (input.costLines?.length) {
+          await replaceCostLines(row.id, input.costLines, tx);
+        }
+        return row;
+      });
+
+      return NextResponse.json({ product: created });
+    } catch (error) {
+      if (error instanceof Error && error.name === "ZodError") {
+        // zod v4 sorunları `.issues`'ta tutar; `.errors` undefined'dır — bu yüzden
+        // doğrulama hatası istemciye boş dönüyor ve kullanıcı neyin yanlış
+        // olduğunu asla göremiyordu (yalnızca genel "kaydedilemedi").
+        const issues = (error as Error & {
+          issues?: Array<{ path?: (string | number)[]; message?: string }>;
+        }).issues;
+        const message =
+          issues?.map((i) => i.message).filter(Boolean).join(" · ") ||
+          "Gönderilen bilgiler geçersiz.";
+        return NextResponse.json({ error: message, issues }, { status: 400 });
+      }
+      console.error("Product create failed:", error);
+      return NextResponse.json({ error: "Ürün oluşturulamadı. Ürünün kaydedilip kaydedilmediğini görmek için ürün listenizi yenileyin; sorun sürerse yöneticiye bildirin." }, { status: 500 });
     }
-    console.error("Product create failed:", error);
-    return NextResponse.json({ error: "Product create failed" }, { status: 500 });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/manufacturer/products", PARTNER_ACTION_FAILED_ERROR);
   }
 }

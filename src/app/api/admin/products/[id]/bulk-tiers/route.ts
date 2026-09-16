@@ -11,6 +11,7 @@ import {
   tierErrorMessage,
   validateTiers,
 } from "@/lib/services/product-tiers";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Toplu sipariş settings + the volume ladder for one product. Admin-only by
 // design: a tier cuts the seller's 60% payout, so in v1 only platform-owned
@@ -21,22 +22,26 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-  const { id } = await params;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const { id } = await params;
 
-  const product = await getProductBulkSettings(id);
-  if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const product = await getProductBulkSettings(id);
+    if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json({
-    ownerType: product.ownerType,
-    priceKurus: product.priceKurus,
-    bulkEnabled: product.bulkEnabled,
-    boxEligible: product.boxEligible,
-    bulkMaxQuantity: product.bulkMaxQuantity,
-    bulkLeadTimeDays: product.bulkLeadTimeDays,
-    tiers: await listTiers(id),
-  });
+    return NextResponse.json({
+      ownerType: product.ownerType,
+      priceKurus: product.priceKurus,
+      bulkEnabled: product.bulkEnabled,
+      boxEligible: product.boxEligible,
+      bulkMaxQuantity: product.bulkMaxQuantity,
+      bulkLeadTimeDays: product.bulkLeadTimeDays,
+      tiers: await listTiers(id),
+    });
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/admin/products/[id]/bulk-tiers", ADMIN_READ_FAILED_ERROR);
+  }
 }
 
 // Atomic replace of the whole ladder plus the product's bulk settings. Partial
@@ -46,68 +51,72 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-  const { id } = await params;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const { id } = await params;
 
-  const product = await getProductBulkSettings(id);
-  if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const product = await getProductBulkSettings(id);
+    if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const body = await request.json().catch(() => ({}));
-  const parsed = updateProductBulkSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Geçersiz veri" },
-      { status: 400 }
-    );
-  }
-  const input = parsed.data;
+    const body = await request.json().catch(() => ({}));
+    const parsed = updateProductBulkSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Geçersiz veri" },
+        { status: 400 }
+      );
+    }
+    const input = parsed.data;
 
-  const validation = validateTiers({
-    basePriceKurus: product.priceKurus,
-    tiers: input.tiers,
-    bulkMaxQuantity: input.bulkMaxQuantity,
-    bulkEnabled: input.bulkEnabled,
-    ownerType: product.ownerType,
-  });
-  if (!validation.ok) {
-    return NextResponse.json(
-      { error: tierErrorMessage(validation.error) },
-      { status: 400 }
-    );
-  }
+    const validation = validateTiers({
+      basePriceKurus: product.priceKurus,
+      tiers: input.tiers,
+      bulkMaxQuantity: input.bulkMaxQuantity,
+      bulkEnabled: input.bulkEnabled,
+      ownerType: product.ownerType,
+    });
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: tierErrorMessage(validation.error) },
+        { status: 400 }
+      );
+    }
 
-  // The box applies ONE per-piece price across every design in it, so putting a
-  // seller's listing in a box would cut their payout without consent — the same
-  // reason bulk tiers are admin-only.
-  if (input.boxEligible && product.ownerType !== "admin") {
-    return NextResponse.json(
-      {
-        error:
-          "Kutuya uygun işareti yalnızca platform ürünlerinde kullanılabilir.",
-      },
-      { status: 400 }
-    );
-  }
+    // The box applies ONE per-piece price across every design in it, so putting a
+    // seller's listing in a box would cut their payout without consent — the same
+    // reason bulk tiers are admin-only.
+    if (input.boxEligible && product.ownerType !== "admin") {
+      return NextResponse.json(
+        {
+          error:
+            "Kutuya uygun işareti yalnızca platform ürünlerinde kullanılabilir.",
+        },
+        { status: 400 }
+      );
+    }
 
-  await replaceTiers(id, validation.tiers);
-  await db
-    .update(products)
-    .set({
+    await replaceTiers(id, validation.tiers);
+    await db
+      .update(products)
+      .set({
+        bulkEnabled: input.bulkEnabled,
+        boxEligible: input.boxEligible,
+        bulkMaxQuantity: input.bulkMaxQuantity,
+        bulkLeadTimeDays: input.bulkLeadTimeDays,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, id));
+
+    return NextResponse.json({
+      success: true,
       bulkEnabled: input.bulkEnabled,
       boxEligible: input.boxEligible,
       bulkMaxQuantity: input.bulkMaxQuantity,
       bulkLeadTimeDays: input.bulkLeadTimeDays,
-      updatedAt: new Date(),
-    })
-    .where(eq(products.id, id));
-
-  return NextResponse.json({
-    success: true,
-    bulkEnabled: input.bulkEnabled,
-    boxEligible: input.boxEligible,
-    bulkMaxQuantity: input.bulkMaxQuantity,
-    bulkLeadTimeDays: input.bulkLeadTimeDays,
-    tiers: validation.tiers,
-  });
+      tiers: validation.tiers,
+    });
+  } catch (e) {
+    return handleRouteFailure(e, "PUT /api/admin/products/[id]/bulk-tiers", ADMIN_ACTION_FAILED_ERROR);
+  }
 }

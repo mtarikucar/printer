@@ -33,6 +33,18 @@ export function useLocale(): Locale {
   return ctx.locale;
 }
 
+/**
+ * Sözlüğü OKUYAN taraf. Sağlayıcı yoksa BİLEREK hata atar.
+ *
+ * Hata yutulmuyor: eksik bir sağlayıcı, sessizce yanlış dilde (ya da anahtar
+ * adıyla) metin göstermekten iyidir. Bunun bedeli, sağlayıcının gerçekten her
+ * ağaçta bulunmasıdır — bu yüzden PANEL DÜZENLERİNİN HER BİRİ sağlayıcıyı
+ * kendisi kurar (admin/layout.tsx, manufacturer/layout.tsx,
+ * painter/layout.tsx) ve kök düzenden miras beklemez. /admin bunu yapmayan tek
+ * paneldi ve kenar çubuğu üç kez sağlayıcısız render edilip sayfayı 500'e
+ * düşürdü; panelin kabuğu (AdminSidebar) artık metinlerini sunucudan prop
+ * olarak alıyor, yani kabuk hiçbir koşulda bu hatayı atamaz.
+ */
 export function useDictionary(): Dictionary {
   const ctx = useContext(LocaleContext);
   if (!ctx)

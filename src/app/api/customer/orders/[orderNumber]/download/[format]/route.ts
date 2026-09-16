@@ -7,6 +7,7 @@ import { getFileBuffer, normalizeFileUrl } from "@/lib/services/storage";
 import { latestModelFiles } from "@/lib/services/order-model";
 import { modelFilesZipResponse } from "@/lib/services/model-file-download";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Customer download of the print-ready STL/OBJ for an order — the paid
@@ -20,18 +21,18 @@ import { currentModelUrl } from "@/lib/config/order-model-presence";
  * public URL. Note: the image-first flow produces STL only (no OBJ) — OBJ is
  * legacy-attempt-only.
  */
-export async function GET(
+async function handleGET(
   _request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string; format: string }> }
 ) {
   const { orderNumber, format } = await params;
   if (format !== "stl" && format !== "obj") {
-    return NextResponse.json({ error: "Unsupported format" }, { status: 400 });
+    return NextResponse.json({ error: "Bu dosya biçimi desteklenmiyor." }, { status: 400 });
   }
 
   const session = await getSessionUser();
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Bu dosyayı indirmek için giriş yapmalısınız." }, { status: 401 });
   }
 
   const order = await db.query.orders.findFirst({
@@ -61,7 +62,7 @@ export async function GET(
   });
 
   if (!order) {
-    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    return NextResponse.json({ error: "Sipariş bulunamadı." }, { status: 404 });
   }
 
   // Entitlement: must have paid and bought the digital_files add-on.
@@ -70,7 +71,7 @@ export async function GET(
     (order.upsells ?? []).includes("digital_files");
   if (!entitled) {
     return NextResponse.json(
-      { error: "not_entitled", code: "not_entitled" },
+      { error: "Bu sipariş dijital dosya indirmeyi kapsamıyor.", code: "not_entitled" },
       { status: 403 }
     );
   }
@@ -103,14 +104,14 @@ export async function GET(
     // Paid but the final file isn't ready yet (generation still running) or
     // this format wasn't produced.
     return NextResponse.json(
-      { error: "not_ready", code: "not_ready" },
+      { error: "Dosyanız henüz hazır değil. Hazır olduğunda sipariş takip sayfanızda görünecek.", code: "not_ready" },
       { status: 409 }
     );
   }
 
   const keyMatch = fileUrl.match(/\/api\/files\/(.+)$/);
   if (!keyMatch) {
-    return NextResponse.json({ error: "Invalid file reference" }, { status: 500 });
+    return NextResponse.json({ error: "Dosya adresi geçersiz. Bu bir sistem hatasıdır; bizimle iletişime geçin." }, { status: 500 });
   }
   const fileKey = decodeURIComponent(keyMatch[1].split("?")[0]);
 
@@ -125,6 +126,22 @@ export async function GET(
     });
   } catch (error) {
     console.error("Customer digital download failed:", error);
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Dosya bulunamadı veya şu anda indirilemiyor. Birkaç dakika sonra tekrar deneyin; sorun sürerse bizimle iletişime geçin." },
+      { status: 404 }
+    );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_request: NextRequest, ctx: { params: Promise<{ orderNumber: string; format: string }> }) {
+  try {
+    return await handleGET(_request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/orders/[orderNumber]/download/[format]", CUSTOMER_READ_FAILED_ERROR);
   }
 }

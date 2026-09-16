@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
 import { giftCards, giftCardRedemptions } from "@/lib/db/schema";
-import { desc, eq, count } from "drizzle-orm";
+import { desc, count } from "drizzle-orm";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
@@ -13,7 +13,7 @@ export default async function AdminGiftCardsPage() {
   const locale = await getLocale();
   const d = getDictionary(locale);
 
-  const cards = await db
+  const cardRows = await db
     .select({
       id: giftCards.id,
       code: giftCards.code,
@@ -27,17 +27,57 @@ export default async function AdminGiftCardsPage() {
       recipientEmail: giftCards.recipientEmail,
       expiresAt: giftCards.expiresAt,
       createdAt: giftCards.createdAt,
-      redemptionCount: count(giftCardRedemptions.id),
     })
     .from(giftCards)
-    .leftJoin(giftCardRedemptions, eq(giftCards.id, giftCardRedemptions.giftCardId))
-    .groupBy(giftCards.id)
     .orderBy(desc(giftCards.createdAt));
+
+  // `leftJoin(giftCardRedemptions)` + `groupBy` KALDIRILDI: kullanım SAYISI
+  // yalnızca gösteriliyor, ama join TEK ifadedir — kullanım tablosu
+  // okunamadığında hediye kartlarının TAMAMI (kod, bakiye, durum, son kullanma)
+  // ekrandan kaybolurdu. Sayı artık ayrı ve korumalı okunur.
+  const redemptionRead = await db
+    .select({
+      giftCardId: giftCardRedemptions.giftCardId,
+      used: count(giftCardRedemptions.id),
+    })
+    .from(giftCardRedemptions)
+    .groupBy(giftCardRedemptions.giftCardId)
+    .catch((e) => {
+      console.error("hediye kartları: kullanım sayıları okunamadı", e);
+      return null;
+    });
+  const redemptionCountsUnreadable = redemptionRead === null;
+  const redemptionById = new Map(
+    (redemptionRead ?? []).map((r) => [r.giftCardId, r.used])
+  );
+  // Sayı BİLİNMİYORKEN sıfır yazmak, kullanılmış bir kartı "hiç kullanılmadı"
+  // diye göstermek olurdu; aşağıdaki uyarı tam olarak bunu söyler.
+  const cards = cardRows.map((c) => ({
+    ...c,
+    redemptionCount: redemptionById.get(c.id) ?? 0,
+  }));
 
   return (
     <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900">{d["admin.giftCards.title"]}</h1>
       <p className="text-gray-500 mt-1">{d["admin.giftCards.subtitle"]}</p>
+
+      {redemptionCountsUnreadable && (
+        <div
+          role="alert"
+          className="mt-4 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"
+        >
+          <p className="font-semibold">
+            Kullanım sayıları şu anda okunamıyor (geçici sistem arızası)
+          </p>
+          <p className="mt-1 text-amber-900/80">
+            Tabloda her kart &quot;0 kullanım&quot; görünüyor; bu bir ÖLÇÜM değil,
+            okunamayan bir kayıttır. Kartların kodu, bakiyesi ve durumu gerçek
+            kayıtlardır — kullanılmış bir kartı kullanılmamış sanıp yeniden
+            vermeyin.
+          </p>
+        </div>
+      )}
 
       <div className="mt-6">
         <CreateGiftCardForm d={d} />

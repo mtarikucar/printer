@@ -22,10 +22,11 @@ import {
   updateOptionChoice,
   updateOptionGroup,
 } from "@/lib/services/product-options";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Unified product options/add-ons management — used by BOTH the admin and the
 // seller product editors (canEditProduct allows admin-any / seller-own).
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -47,7 +48,7 @@ export async function GET(
   return NextResponse.json({ config, images });
 }
 
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -187,4 +188,30 @@ export async function POST(
 
 function forbid() {
   return NextResponse.json({ error: "forbidden" }, { status: 403 });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handleGET(_req, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/products/[id]/options", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    return await handlePOST(req, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/products/[id]/options", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

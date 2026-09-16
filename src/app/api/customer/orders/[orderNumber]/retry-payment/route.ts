@@ -9,6 +9,7 @@ import { getClientIp } from "@/lib/utils/request";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplay } from "@/lib/config/sizes";
+import { handleRouteFailure, CUSTOMER_PAYMENT_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Retry a failed card payment on an existing draft (the customer pressed "try again"
@@ -16,7 +17,7 @@ import { sizeDisplay } from "@/lib/config/sizes";
  * The request body is currently ignored — card is the only supported retry path; if we
  * ever allow switching methods on retry, parse + validate the body here.
  */
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -142,5 +143,18 @@ export async function POST(
       },
       { status: 502 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/customer/orders/[orderNumber]/retry-payment", CUSTOMER_PAYMENT_FAILED_ERROR);
   }
 }

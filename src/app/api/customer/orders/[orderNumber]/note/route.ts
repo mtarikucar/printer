@@ -3,10 +3,11 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Customer adds/edits the special-instructions note on their own order. Allowed
 // until the order ships; the manufacturer sees it read-only on the order detail.
-export async function PATCH(
+async function handlePATCH(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -37,4 +38,17 @@ export async function PATCH(
     );
   }
   return NextResponse.json({ success: true, note });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePATCH` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function PATCH(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handlePATCH(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "PATCH /api/customer/orders/[orderNumber]/note", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

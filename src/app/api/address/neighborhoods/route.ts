@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 let cachedData: Record<string, Record<string, string[]>> | null = null;
 
@@ -12,7 +13,7 @@ async function getNeighborhoodData() {
   return cachedData!;
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const il = searchParams.get("il");
   const ilce = searchParams.get("ilce");
@@ -29,5 +30,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ neighborhoods });
   } catch {
     return NextResponse.json({ neighborhoods: [] });
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    return await handleGET(request);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/address/neighborhoods", CUSTOMER_READ_FAILED_ERROR);
   }
 }

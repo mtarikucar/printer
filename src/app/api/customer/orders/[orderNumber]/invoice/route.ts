@@ -4,9 +4,10 @@ import { db } from "@/lib/db";
 import { orders } from "@/lib/db/schema";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { getOrCreateInvoice } from "@/lib/services/payouts";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Customer fetches (lazily creating) the KDV invoice for their paid order.
-export async function GET(
+async function handleGET(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -35,7 +36,7 @@ export async function GET(
 
   const invoice = await getOrCreateInvoice(order);
   if (!invoice) {
-    return NextResponse.json({ error: "Could not create invoice" }, { status: 500 });
+    return NextResponse.json({ error: "Fatura şu anda oluşturulamadı. Birkaç dakika sonra tekrar deneyin; sorun sürerse bizimle iletişime geçin." }, { status: 500 });
   }
   return NextResponse.json({
     invoiceNumber: invoice.invoiceNumber,
@@ -47,4 +48,17 @@ export async function GET(
     orderNumber: order.orderNumber,
     customerName: order.customerName,
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handleGET(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/orders/[orderNumber]/invoice", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

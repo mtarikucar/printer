@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { manufacturerDocuments } from "@/lib/db/schema";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const schema = z.object({
   action: z.enum(["approve", "reject"]),
@@ -24,42 +25,46 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ docId: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-  const { docId } = await params;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const { docId } = await params;
 
-  const body = await request.json().catch(() => ({}));
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    const body = await request.json().catch(() => ({}));
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    }
+
+    const [row] = await db
+      .update(manufacturerDocuments)
+      .set({
+        status: parsed.data.action === "approve" ? "approved" : "rejected",
+        reviewNote: parsed.data.note ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(manufacturerDocuments.id, docId))
+      .returning({
+        id: manufacturerDocuments.id,
+        manufacturerId: manufacturerDocuments.manufacturerId,
+        type: manufacturerDocuments.type,
+      });
+
+    if (!row) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+
+    const docLabel = DOC_LABELS[row.type] ?? "Belge";
+    const approved = parsed.data.action === "approve";
+    await notifyManufacturer({
+      manufacturerId: row.manufacturerId,
+      type: "system_announcement",
+      subject: approved ? `${docLabel} onaylandı` : `${docLabel} reddedildi`,
+      body: approved
+        ? `Yüklediğiniz "${docLabel}" belgesi onaylandı.`
+        : `Yüklediğiniz "${docLabel}" belgesi reddedildi.${parsed.data.note ? `\n\nNot: ${parsed.data.note}` : ""}\n\nLütfen belgeyi kontrol edip yeniden yükleyin.`,
+    }).catch((e) => console.error("notifyManufacturer (kyc doc) failed", e));
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/documents/[docId]/review", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  const [row] = await db
-    .update(manufacturerDocuments)
-    .set({
-      status: parsed.data.action === "approve" ? "approved" : "rejected",
-      reviewNote: parsed.data.note ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(manufacturerDocuments.id, docId))
-    .returning({
-      id: manufacturerDocuments.id,
-      manufacturerId: manufacturerDocuments.manufacturerId,
-      type: manufacturerDocuments.type,
-    });
-
-  if (!row) return NextResponse.json({ error: "Document not found" }, { status: 404 });
-
-  const docLabel = DOC_LABELS[row.type] ?? "Belge";
-  const approved = parsed.data.action === "approve";
-  await notifyManufacturer({
-    manufacturerId: row.manufacturerId,
-    type: "system_announcement",
-    subject: approved ? `${docLabel} onaylandı` : `${docLabel} reddedildi`,
-    body: approved
-      ? `Yüklediğiniz "${docLabel}" belgesi onaylandı.`
-      : `Yüklediğiniz "${docLabel}" belgesi reddedildi.${parsed.data.note ? `\n\nNot: ${parsed.data.note}` : ""}\n\nLütfen belgeyi kontrol edip yeniden yükleyin.`,
-  }).catch((e) => console.error("notifyManufacturer (kyc doc) failed", e));
-
-  return NextResponse.json({ success: true });
 }

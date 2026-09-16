@@ -8,6 +8,7 @@ import { failDraft, promoteDraftToOrder } from "@/lib/services/order-draft";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
+import { handleRouteFailure, CUSTOMER_PAYMENT_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Out-of-band verification for a PayTR card draft. Queries PayTR for the canonical
@@ -38,7 +39,7 @@ function safeForLog(s: string): string {
   return s.replace(/[\r\n\t]/g, "_").slice(0, 64);
 }
 
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -233,4 +234,17 @@ export async function POST(
     },
     { status: 502 }
   );
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/customer/orders/[orderNumber]/verify-payment", CUSTOMER_PAYMENT_FAILED_ERROR);
+  }
 }

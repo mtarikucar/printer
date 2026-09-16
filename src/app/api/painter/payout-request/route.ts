@@ -1,68 +1,70 @@
 import { NextResponse } from "next/server";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { painters, painterEarnings, painterPayouts } from "@/lib/db/schema";
+import { painters } from "@/lib/db/schema";
 import { getPainterSession } from "@/lib/services/painter-auth";
+import { createPayoutForPainter } from "@/lib/services/painter-payouts";
+import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
-// A painter requests payout of their pending earnings. Mirrors the manufacturer
-// payout-request + createPayoutForManufacturer batching, against
-// painterEarnings / painterPayouts. The payout lands in the admin payouts queue
-// to be paid. Returns null → nothing owed.
+// A painter requests payout of their pending earnings. The payout lands in the
+// admin payouts queue to be paid.
+//
+// BU UÇ ARTIK KENDİ PARTİLEMESİNİ KURMAZ. Eskiden createPayoutForPainter'ın
+// birebir kopyası buradaydı ve iki kopya ayrı ayrı bakım istiyordu: ödenebilirlik
+// kuralı bir turda yalnız birinde düzeltilmişti. Şimdi tek yol var
+// (painter-payouts.ts) ve o yol ATOMİK: sayım `for update of` ile kilitli
+// okunur, partinin toplamı damganın kendisinden yazılır. Boyacının talebi ile
+// admin'in "Ödeme oluştur"u aynı anda çalıştığında artık ikisi de başarılı
+// dönüp aynı hakedişleri iki partiye yazamaz.
 export async function POST() {
-  const session = await getPainterSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const painter = await db.query.painters.findFirst({
-    where: eq(painters.id, session.painterId),
-    columns: { status: true },
-  });
-  if (!painter || painter.status !== "active") {
-    return NextResponse.json({ error: "Account not active" }, { status: 403 });
-  }
-
-  // Batch this painter's not-yet-batched pending earnings into one payout.
-  const result = await db.transaction(async (tx) => {
-    const pending = await tx
-      .select({
-        id: painterEarnings.id,
-        netKurus: painterEarnings.netKurus,
-      })
-      .from(painterEarnings)
-      .where(
-        and(
-          eq(painterEarnings.painterId, session.painterId),
-          eq(painterEarnings.status, "pending"),
-          isNull(painterEarnings.payoutId)
-        )
+  try {
+    const session = await getPainterSession();
+    if (!session) {
+      return NextResponse.json(
+        { error: "unauthorized", message: "Oturumunuz sona ermiş. Yeniden giriş yapın." },
+        { status: 401 }
       );
-    if (pending.length === 0) return null;
-    const totalKurus = pending.reduce((s, e) => s + e.netKurus, 0);
-    const [payout] = await tx
-      .insert(painterPayouts)
-      .values({
-        painterId: session.painterId,
-        totalKurus,
-        earningCount: pending.length,
-        adminEmail: "painter-request",
-        status: "pending",
-      })
-      .returning({ id: painterPayouts.id });
-    await tx
-      .update(painterEarnings)
-      .set({ payoutId: payout.id, updatedAt: new Date() })
-      .where(
-        and(
-          eq(painterEarnings.painterId, session.painterId),
-          eq(painterEarnings.status, "pending"),
-          isNull(painterEarnings.payoutId)
-        )
+    }
+    const painter = await db.query.painters.findFirst({
+      where: eq(painters.id, session.painterId),
+      columns: { status: true },
+    });
+    if (!painter || painter.status !== "active") {
+      return NextResponse.json(
+        {
+          error: "not_active",
+          message: "Hesabınız şu anda aktif değil; ödeme talebi oluşturulamaz.",
+        },
+        { status: 403 }
       );
-    return { payoutId: payout.id, totalKurus, count: pending.length };
-  });
+    }
 
-  if (!result) {
-    return NextResponse.json({ error: "nothing_owed" }, { status: 400 });
+    // `adminEmail` = "painter-request": /admin/payouts bu partiyi "Boyacı talebi"
+    // rozetiyle gösterir.
+    const result = await createPayoutForPainter(session.painterId, "painter-request");
+    if (!result.ok) {
+      if (result.reason === "busy") {
+        return NextResponse.json(
+          {
+            error: "payout_busy",
+            message:
+              "Ödemeniz şu anda oluşturuluyor (yöneticinin ya da sizin önceki talebiniz olabilir). Birkaç saniye sonra sayfayı yenileyin; kazancınız kaybolmaz.",
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json(
+        { error: "nothing_owed", message: "Talep edilecek bekleyen kazanç yok." },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      payoutId: result.payoutId,
+      totalKurus: result.totalKurus,
+      count: result.count,
+    });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/painter/payout-request", PARTNER_ACTION_FAILED_ERROR);
   }
-  return NextResponse.json({ ok: true, ...result });
 }

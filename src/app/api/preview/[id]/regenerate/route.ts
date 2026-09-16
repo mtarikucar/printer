@@ -11,6 +11,7 @@ import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { getClientIpFromRequest } from "@/lib/utils/request";
 import { reserveSpend, releaseSpend } from "@/lib/services/spend-guard";
 import { isFlagEnabled } from "@/lib/services/flags";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Bound regenerate cost: each round is N image-to-image calls. Customer gets the
 // initial round + up to 3 retries.
@@ -20,7 +21,7 @@ const MAX_VARIATION_ROUNDS = 4;
 const ROUND_COST_CENTS = 8;
 
 // Customer disliked both variations → re-run Stage A with a fresh round.
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -63,14 +64,22 @@ export async function POST(
   const perIp = await rateLimitAsync(`regen:ip:${ip}`, 20, 60 * 60 * 1000);
   if (!perPreview.success || !perIp.success) {
     return NextResponse.json(
-      { error: "too many requests", code: "rate_limited" },
+      {
+        error:
+          "Çok fazla deneme yaptınız. Bir süre bekleyip tekrar deneyin.",
+        code: "rate_limited",
+      },
       { status: 429 },
     );
   }
 
   if (!(await isFlagEnabled("fal_enabled"))) {
     return NextResponse.json(
-      { error: "generation is temporarily unavailable", code: "disabled" },
+      {
+        error:
+          "Görsel üretimi şu anda geçici olarak kapalı. Kısa süre sonra tekrar deneyin.",
+        code: "disabled",
+      },
       { status: 503 },
     );
   }
@@ -81,11 +90,19 @@ export async function POST(
   });
   if (!reservation.ok) {
     return NextResponse.json(
-      { error: "budget exhausted", code: reservation.reason },
+      {
+        error:
+          "Görsel üretimi şu anda yoğun. Kısa süre sonra tekrar deneyin.",
+        code: reservation.reason,
+      },
       { status: 429 },
     );
   }
 
+  // Nereye kadar gelindi: TUR AÇILDI MI? Beklenmeyen bir hatada müşteriye ne
+  // diyeceğimizi bu ayrım belirler — sayaç arttıysa "hiçbir şey değişmedi"
+  // demek yalan olur (müşterinin 4 turluk hakkından biri gitmiştir).
+  let roundOpened = false;
   try {
     await db
       .update(previews)
@@ -96,6 +113,7 @@ export async function POST(
         updatedAt: new Date(),
       })
       .where(eq(previews.id, id));
+    roundOpened = true;
 
     await getPreviewGenerationQueue().add("generate-variations", {
       previewId: id,
@@ -106,9 +124,47 @@ export async function POST(
       modifiers: preview.modifiers ?? [],
     } satisfies PreviewGenerationJobData);
   } catch (err) {
-    await releaseSpend(reservation.reservationId);
-    throw err;
+    console.error("preview yeniden üretim: tur başlatılamadı", err);
+    // Rezervasyon telafisi: tur başlamadığına göre ayrılan bütçe geri verilir.
+    // Kendi hatasını yutar — telafinin patlaması, müşteriye söylenecek cümleyi
+    // yine boş bırakırdı.
+    await releaseSpend(reservation.reservationId).catch((e) =>
+      console.error("preview yeniden üretim: rezervasyon geri verilemedi", e)
+    );
+    // Burada eskiden `throw err` vardı: Next onu SIFIR BAYTLIK bir 500'e
+    // çeviriyor, /create ekranı da kendi yedek cümlesini gösteriyordu. Müşteri
+    // ne olduğunu, turunun yanıp yanmadığını ve ne yapacağını okuyamıyordu.
+    return NextResponse.json(
+      {
+        error: roundOpened
+          ? "Yeni tur açıldı ancak görsel üretimi sıraya alınamadı. Bu tur birkaç dakika içinde başarısız olarak işaretlenecek; sonrasında yeniden deneyebilirsiniz."
+          : "Beklenmeyen bir hata nedeniyle yeni tur başlatılamadı; görselleriniz ve deneme hakkınız olduğu gibi duruyor, tekrar deneyebilirsiniz.",
+        reason: "unexpected_error",
+      },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ status: "generating" });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. Ön okumalar (oturum, önizleme, hız
+ * sınırı, bütçe rezervasyonu) da bu yakalamanın içinde kalsın diye işin tamamı
+ * `handlePOST` üzerinden geçer — biri patlarsa müşteriye yine Türkçe bir cümle
+ * gider (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(
+  request: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(
+      e,
+      "POST /api/preview/[id]/regenerate",
+      CUSTOMER_ACTION_FAILED_ERROR
+    );
+  }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ModelViewer } from "@/components/model-viewer";
@@ -25,6 +25,30 @@ import { formatModelSize } from "@/lib/config/order-model";
 import { parseTryToKurus } from "@/lib/config/cost-lines";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
 import { REJECTABLE_STATUSES, isRefunded } from "@/lib/config/order-status-policy";
+import type {
+  ModelUploadSideEffects,
+  ModelUploadStage,
+  QcRoundProof,
+  QcRoundProofFailure,
+} from "@/lib/config/order-model-policy";
+// Turun neden onaylanamadığını anlatan CÜMLELER ekranda uydurulmaz: uç hangi
+// cümleyi 409 gövdesinde döndürüyorsa kart da onu gösterir. Saf modül (db yok,
+// "server-only" yok), bu yüzden istemci bileşeni onu import edebilir.
+import {
+  QC_PROOF_FAILURE_LABEL_TR,
+  qcRoundProofErrorTr,
+} from "@/lib/config/order-model-policy";
+// Eski sürümün baskısını bilerek onaylama kapısının sabitleri. Saf modül
+// (db yok, "server-only" yok), bu yüzden istemci bileşeni sunucunun KENDİ
+// eşiğini ve KENDİ cümlesini kullanır; iki taraf ayrışamaz.
+import {
+  PARTNER_MODEL_ACK_ACTION,
+  PARTNER_MODEL_REVISION_ACTION,
+  STALE_QC_OVERRIDE_REASON_ERROR,
+  STALE_QC_OVERRIDE_REASON_MIN,
+  staleQcRevisionErrorTr,
+} from "@/lib/config/partner-model-ack";
+import { CARRIERS, trackingUrl } from "@/lib/services/carriers";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import {
   MONEY_LINE_KIND_LABELS_TR,
@@ -49,6 +73,110 @@ import {
 } from "@/app/admin/scoring-evaluations/evaluation-view";
 
 /**
+ * Canlı QC turunun KANIT durumu — sayfanın serileştirdiği hâli
+ * (src/app/admin/orders/[id]/page.tsx · qcProof).
+ */
+type QcProofData = {
+  failure: QcRoundProofFailure | null;
+  oldestStampedRevision: number | null;
+  unstampedCount: number;
+  photoCount: number;
+  currentRevision: number | null;
+};
+
+/** Kartın bir turu reddederken söylediği her cümle, TEK sebepten türer. */
+type QcProofRefusalView = {
+  /** Kırmızı kutu: uçun aynı hâl için döndürdüğü cümlenin ta kendisi. */
+  banner: string;
+  /** Kapalı onay düğmesinin başlığı (sebebin kısa hâli). */
+  gateTitle: string;
+  /** Denetimli istisnayı açan bağlantı: NEYİ kabul ettiğini söyler. */
+  overrideLink: string;
+  /** Onayın ne açtığı + gerekçenin denetim kaydına hangi adla geçeceği. */
+  overrideEffect: string;
+};
+
+/**
+ * Tur neden onaylanamıyor?
+ *
+ * Kart eskiden dört ayrı hâlin HEPSİNE "GÜNCEL sürümden daha eski bir baskı"
+ * diyordu. Damgasız bir tur "eski" DEĞİL "bilinmiyor" demektir; fotoğrafsız
+ * turda ortada baskı bile yoktur; sürüm okunamadığında kıyas hiç yapılamamıştır.
+ * Ekran ancak kaydın GERÇEKTEN yazdığı sebebi söyleyebilir — yoksa admin'den,
+ * verinin doğrulamadığı bir olguyu gerekçeyle imzalaması isteniyordu.
+ *
+ * Cümleler bu yüzden burada yazılmaz, uçla ORTAK saf modüllerden okunur
+ * (qcRoundProofErrorTr · staleQcRevisionErrorTr): ekran ile uç aynı hâle aynı
+ * adı verir, ayrışmaları imkânsızdır.
+ *
+ * Sebep hiç gelmediyse (alan taşımayan eski yük) kart sebep UYDURMAZ: kapının
+ * kapalı olduğunu ve sebebi okuyamadığını birlikte söyler.
+ */
+function qcProofRefusalView(proof: QcProofData | null | undefined): QcProofRefusalView {
+  const failure = proof?.failure ?? null;
+  const current = proof?.currentRevision ?? null;
+  // Gerekçenin nereye, hangi ADLA yazılacağı: denetim kaydındaki etiket ile
+  // ekrandaki istisna aynı şeyi anmalı.
+  const auditNote = failure
+    ? `Gerekçe denetim kaydına [${QC_PROOF_FAILURE_LABEL_TR[failure]}] olarak, QC turu kaydına ve üreticiye giden bildirime aynen yazılır.`
+    : "Gerekçe denetim kaydına, QC turu kaydına ve üreticiye giden bildirime aynen yazılır.";
+  const accrual = "üreticinin hakedişi tahakkuk eder";
+  // Uçun cümle üreticisi tam kanıt nesnesi ister; ekranın elindeki alanlar
+  // (sayım + en eski damga) bunun için yeterlidir.
+  const asProof = (f: QcRoundProofFailure): QcRoundProof => ({
+    proven: false,
+    failure: f,
+    oldestStampedRevision: proof?.oldestStampedRevision ?? null,
+    unstampedCount: proof?.unstampedCount ?? 0,
+    photoCount: proof?.photoCount ?? 0,
+  });
+
+  switch (failure) {
+    case "stale":
+      return {
+        banner: staleQcRevisionErrorTr(current, proof?.oldestStampedRevision ?? null),
+        gateTitle: "Bu tur ESKİ bir sürümün baskısını gösteriyor; onaylanamaz.",
+        overrideLink: "Yine de onayla: eski sürümün baskısını gerekçeyle kabul et",
+        overrideEffect: `Bu onay ESKİ modelin baskısını kargoya açar ve ${accrual}. ${auditNote}`,
+      };
+    case "unstamped":
+      return {
+        banner: qcRoundProofErrorTr(asProof("unstamped"), current),
+        gateTitle:
+          "Bu turdaki fotoğraflar sürüm damgası taşımıyor; hangi baskı olduğu doğrulanamadan onaylanamaz.",
+        overrideLink: "Yine de onayla: sürümü doğrulanamayan baskıyı gerekçeyle kabul et",
+        overrideEffect: `Bu onay, hangi sürümün basıldığı DOĞRULANMADAN baskıyı kargoya açar ve ${accrual}. ${auditNote}`,
+      };
+    case "no_photos":
+      return {
+        banner: qcRoundProofErrorTr(asProof("no_photos"), current),
+        gateTitle: "Bu turda hiç QC fotoğrafı yok; onaylanacak bir kanıt bulunmuyor.",
+        overrideLink: "Yine de onayla: fotoğrafsız turu gerekçeyle kabul et",
+        overrideEffect: `Bu onay, turun TEK bir QC fotoğrafı olmadan baskıyı kargoya açar ve ${accrual}. ${auditNote}`,
+      };
+    case "revision_unreadable":
+      return {
+        banner: qcRoundProofErrorTr(asProof("revision_unreadable"), current),
+        gateTitle: "Siparişin güncel model sürümü okunamadı; hangi sürümün basıldığı doğrulanamıyor.",
+        overrideLink: "Yine de onayla: sürümü okunamayan turu gerekçeyle kabul et",
+        overrideEffect: `Bu onay, güncel sürüm OKUNAMADAN baskıyı kargoya açar ve ${accrual}. ${auditNote}`,
+      };
+    default:
+      // Kapı kapalı ama sebebi bu ekran okuyamadı: ikisi de söylenir, biri
+      // diğerinin yerine uydurulmaz.
+      return {
+        banner:
+          "Bu turun GÜNCEL sürümün baskısını gösterdiği doğrulanamadı; tur onaylanamaz. " +
+          "Ret sebebi bu ekranda okunamadı (sayfayı yenileyin); yine de onaylayacaksanız " +
+          "gerekçe yazarak bilinçli onayı kullanın.",
+        gateTitle: "Bu turun güncel sürümün baskısı olduğu doğrulanamadı; onaylanamaz.",
+        overrideLink: "Yine de onayla: doğrulanamayan turu gerekçeyle kabul et",
+        overrideEffect: `Bu onay, tur DOĞRULANMADAN baskıyı kargoya açar ve ${accrual}. ${auditNote}`,
+      };
+  }
+}
+
+/**
  * Everything the painting leg of an order is doing. Populated only for orders
  * that need painting or already have a painter; an ordinary print job gets an
  * empty shell and the panel stays hidden.
@@ -67,6 +195,7 @@ interface PaintingData {
   assignedAt: string | null;
   sentAt: string | null;
   receivedAt: string | null;
+  paintedAt: string | null;
   handoffCarrier: string | null;
   handoffTrackingNumber: string | null;
   earning: {
@@ -76,7 +205,16 @@ interface PaintingData {
     status: string;
   } | null;
   actions: { id: string; action: string; notes: string | null; createdAt: string }[];
-  qcPhotos: { id: string; url: string; reviewStatus: string }[];
+  /** Boyacının işlem günlüğü okunamadı: liste BOŞ değil, BİLİNMİYOR. */
+  actionsUnreadable: boolean;
+  /** HER turun fotoğrafları; ekran canlı turu ayırır. */
+  qcPhotos: {
+    id: string;
+    url: string;
+    reviewStatus: string;
+    round: number;
+    createdAt: string;
+  }[];
   qcReviews: {
     id: string;
     round: number;
@@ -123,9 +261,23 @@ const PAINTER_STATUS_LABEL: Record<string, string> = {
   shipped: "Kargolandı",
 };
 
+/**
+ * Boyacının HESAP durumu (painters.status) — sipariş içindeki iş durumu
+ * (PAINTER_STATUS_LABEL) ile karıştırılmamalı. Kart bunu ham enum olarak
+ * basıyordu: admin Türkçe bir kartın ortasında "active" / "suspended" okuyordu.
+ */
+const PARTNER_ACCOUNT_STATUS_LABEL: Record<string, string> = {
+  pending_approval: "Onay bekliyor",
+  conditionally_approved: "Şartlı onaylı",
+  active: "Aktif",
+  suspended: "Askıya alındı",
+  rejected: "Reddedildi",
+};
+
 const PAINTER_ACTION_LABEL: Record<string, string> = {
   assigned: "Atandı",
   admin_assigned: "Admin tarafından atandı",
+  admin_swapped_out: "Admin başka boyacıya devretti",
   accept: "İşi kabul etti",
   decline: "İşi reddetti",
   received: "Baskıyı teslim aldı",
@@ -133,7 +285,89 @@ const PAINTER_ACTION_LABEL: Record<string, string> = {
   submit_qc: "QC fotoğrafı gönderdi",
   ship: "Kargoladı",
   admin_revoked: "Admin geri aldı",
+  // Anahtarlar, satırı YAZAN modülün sabitlerinden gelir: elle kopyalanan bir
+  // dize bir gün yazanla ayrışır ve ekran yine ham İngilizce eylem adını basar.
+  [PARTNER_MODEL_REVISION_ACTION]: "Yeni model sürümü duyuruldu",
+  [PARTNER_MODEL_ACK_ACTION]: "Yeni sürümü gördüğünü onayladı",
 };
+
+/**
+ * Üreticinin sipariş durumu (manufacturer_order_status) — ekranda TÜRKÇE.
+ *
+ * Bu değerler ham enum olarak basılıyordu: admin "printed", "qc approved",
+ * "shipped" ve üretici yokken düpedüz "unassigned" okuyordu — üstelik biri
+ * Türkçe bir cümlenin ortasında ("üretici: printing"). Boyacı tarafının
+ * sözlüğü (PAINTER_STATUS_LABEL) zaten vardı; bu onun üretici ikizidir.
+ */
+const MANUFACTURER_STATUS_LABEL: Record<string, string> = {
+  unassigned: "Atanmadı",
+  assigned: "Atandı, kabul bekleniyor",
+  accepted: "Kabul edildi",
+  printing: "Basılıyor",
+  printed: "Baskı bitti",
+  qc_pending: "QC onayı bekliyor",
+  qc_rejected: "QC reddedildi — yeniden basıyor",
+  qc_approved: "QC onaylandı",
+  shipped: "Kargolandı",
+};
+
+/** Üretici atanmamışsa da bir cümle gerekir; tanınmayan değer ham basılmaz. */
+function manufacturerStatusLabel(status: string | null | undefined): string {
+  if (!status) return MANUFACTURER_STATUS_LABEL.unassigned;
+  return MANUFACTURER_STATUS_LABEL[status] ?? status.replace(/_/g, " ");
+}
+
+/** Üretici eylem günlüğü satırları — PAINTER_ACTION_LABEL'ın üretici ikizi. */
+const MANUFACTURER_ACTION_LABEL: Record<string, string> = {
+  assigned: "Atandı",
+  admin_assigned: "Admin tarafından atandı",
+  admin_revoked: "Admin atamayı geri aldı",
+  admin_swapped_out: "Admin başka üreticiye devretti",
+  accept: "İşi kabul etti",
+  decline: "İşi reddetti",
+  cancel_after_accept: "Kabul ettikten sonra bıraktı",
+  start_printing: "Baskıya başladı",
+  finish_printing: "Baskıyı bitirdi",
+  submit_qc: "QC fotoğrafı gönderdi",
+  send_to_painter: "Boyacıya devretti",
+  ship: "Kargoladı",
+  [PARTNER_MODEL_REVISION_ACTION]: "Yeni model sürümü duyuruldu",
+  [PARTNER_MODEL_ACK_ACTION]: "Yeni sürümü gördüğünü onayladı",
+};
+
+function manufacturerActionLabel(action: string): string {
+  return MANUFACTURER_ACTION_LABEL[action] ?? action.replace(/_/g, " ");
+}
+
+/**
+ * Boyacı eylem günlüğü satırı — manufacturerActionLabel'ın boyacı ikizi.
+ * Sözlük doğrudan indekslenince tanınmayan bir değer ham enum olarak ("submit_qc")
+ * basılıyordu; etiketin TEK okuma yolu bu yardımcıdır.
+ */
+function painterActionLabel(action: string): string {
+  return PAINTER_ACTION_LABEL[action] ?? action.replace(/_/g, " ");
+}
+
+/**
+ * Kargo kaydının kuralı hakkında SUNUCUNUN cevabı
+ * (GET /api/admin/orders/[id]/ship). `reason` doğrudan gösterilebilir Türkçe
+ * bir cümledir; ekran kendi gerekçesini yazmaz.
+ *
+ * `unknown`: cevap alınamadı. Bu durumda düğmeler AÇILMAZ — bilinmeyen bir
+ * kuralı "serbest" saymak, ekranın kendi (daha dar) kopyasını tutmasının başka
+ * bir biçimi olurdu.
+ */
+type ShipRuleState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "unknown" }
+  | { phase: "ready"; canRevert: boolean; code: string; reason: string | null };
+
+/** Cevap HANGİ duruma ait: sipariş değiştiyse bayat cevapla düğme açılmasın. */
+interface ShipRuleAnswer {
+  key: string;
+  value: ShipRuleState;
+}
 
 /**
  * Mülkiyet devri gerekçesini soran kutu (hem atama hem geri alma kullanır).
@@ -164,11 +398,75 @@ function promptSellerOverrideReason(
   return trimmed ? trimmed : null;
 }
 
+/**
+ * 3D önizlemeyi sayfanın geri kalanından yalıtır.
+ *
+ * Sunucu, yüklemede yalnız GLB İMZASINI doğrular (dosyalar yüz MB'ye çıkabildiği
+ * için tamamı ayrıştırılmaz — config/order-model.ts · verifyModelHead). Yani
+ * imzası doğru ama içi bozuk/yarım bir GLB görüntüleyiciye kadar gelir;
+ * ayrıştırma sahne üretmezse sahne klonlanırken hata fırlar. Yakalanmazsa bu
+ * hata sipariş sayfasının tamamını düşürür: admin ne dosyaları indirebilir ne
+ * de siparişi ilerletebilir. Burada durur, admin önizlemenin oluşturulamadığını
+ * okur; sürüm listesi, dosya bağlantıları ve para dökümü yerinde kalır.
+ *
+ * Görüntüleyicinin KENDİSİ de artık eksik ya da okunamayan dosyayı içeride
+ * yakalayıp aynı kutuyu basıyor (ModelViewer · errorFallback); bu sınır dış ağ
+ * olarak kalır. Hangisi yakalarsa yakalasın admin aynı cümleyi okur.
+ *
+ * `key` olarak model adresi verilir: yeni bir sürüm yüklendiğinde sınır
+ * sıfırlanır, yoksa bir kez düşen önizleme sayfa yenilense de kapalı kalırdı.
+ */
+function ModelPreviewFallback({ downloadUrl }: { downloadUrl?: string | null }) {
+  return (
+    <div className="flex h-72 w-full flex-col items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 text-center">
+      <p className="text-xs text-amber-900">
+        3D önizleme oluşturulamadı: dosya okunamıyor ya da bozuk olabilir. Dosyayı
+        indirip kontrol edin, gerekirse yeni bir sürüm yükleyin.
+      </p>
+      {downloadUrl && (
+        <a
+          href={downloadUrl}
+          download
+          className="text-xs font-semibold text-amber-900 underline"
+        >
+          Model dosyasını indir
+        </a>
+      )}
+    </div>
+  );
+}
+
+class ModelPreviewBoundary extends Component<
+  { children: ReactNode; downloadUrl?: string | null },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn("[admin order] 3D önizleme oluşturulamadı:", error);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <ModelPreviewFallback downloadUrl={this.props.downloadUrl} />;
+  }
+}
+
 // ─── Types ───────────────────────────────────────────────────
 interface OrderData {
   id: string;
   orderNumber: string;
   orderType: "custom" | "marketplace" | "upload";
+  /**
+   * Sipariş bir atölye partisiyle sevk edildiyse parti kimliği. Kargo geri alma
+   * (DELETE /ship) atölye siparişini her zaman 409 ile reddeder; düğme bu alana
+   * bakarak gizlenir.
+   */
+  workshopSessionId: string | null;
   sellerManufacturerId: string | null;
   painterStatus: string | null;
   needsPainting: boolean;
@@ -190,7 +488,9 @@ interface OrderData {
   giftCardAmountKurus: number;
   paidAt: string | null;
   shippedAt: string | null;
+  deliveredAt: string | null;
   trackingNumber: string | null;
+  carrier: string | null;
   adminNotes: string | null;
   failureReason: string | null;
   retryCount: number;
@@ -247,15 +547,38 @@ interface Props {
       uploadedByEmail: string | null;
       note: string | null;
       createdAt: string;
+      /**
+       * Siparişin GEÇERLİ modeli bu sürüm mü. Kararı sunucu verir ve tek kural
+       * vardır: en yüksek numaralı sürüm (resolveCurrentRevision). Sürümü
+       * değiştiren her yol en üste yeni bir sürüm yazar, bu yüzden "en yenisi
+       * ama geçerli değil" diye bir hâl yoktur.
+       */
+      isCurrent: boolean;
+      /** Yüklemenin denetim satırı: kim, ne zaman, sipariş hangi durumdayken. */
+      audit: { notes: string | null; adminEmail: string; createdAt: string } | null;
       /** Sürümün TÜM parçaları; bir iş 12-13 ayrı STL olabilir. */
       files: { id: string; name: string; kind: string; sizeBytes: number | null; url: string }[];
     }[];
+    /**
+     * Sürüm tablosu okunamadı: liste BOŞ değil, BİLİNMİYOR. Aynı arıza QC
+     * turunu da kanıtlanamaz yapar (qcProof.failure = "revision_unreadable").
+     */
+    modelRevisionsUnreadable?: boolean;
     latestGeneration: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; costCents: number | null; durationMs: number | null; createdAt: string } | null;
     latestReport: { isWatertight: boolean; isVolume: boolean; vertexCount: number; faceCount: number; componentCount: number; boundingBox: any; baseAdded: boolean; repairsApplied: string[] | null } | null;
     generationAttempts: { id: string; provider: string; status: string; outputGlbUrl: string | null; outputStlUrl: string | null; errorMessage: string | null; costCents: number | null; durationMs: number | null; createdAt: string }[];
     adminActions: { id: string; action: string; adminEmail: string; notes: string | null; createdAt: string }[];
     adminMessages: { id: string; subject: string | null; body: string; templateKey: string | null; adminEmail: string; sentAt: string }[];
-    manufacturer?: { id: string; companyName: string; contactPerson: string; status: string } | null;
+    manufacturer?: {
+      id: string;
+      companyName: string;
+      contactPerson: string;
+      status: string;
+      phone: string | null;
+      email: string | null;
+      city: string | null;
+      district: string | null;
+    } | null;
     painter?: {
       id: string;
       companyName: string;
@@ -278,12 +601,63 @@ interface Props {
       qrUrl: string | null;
     };
     manufacturerActions?: { id: string; action: string; notes: string | null; createdAt: string }[];
+    /** Üreticinin işlem günlüğü okunamadı: liste BOŞ değil, BİLİNMİYOR. */
+    manufacturerActionsUnreadable?: boolean;
     manufacturerStatus?: string | null;
     qcRound?: number;
-    qcPhotos?: { id: string; url: string; reviewStatus: string }[];
+    qcPhotos?: {
+      id: string;
+      url: string;
+      reviewStatus: string;
+      round: number;
+      /** Fotoğrafın gösterdiği baskının model sürümü (eski satırlarda null). */
+      modelRevision: number | null;
+      createdAt: string;
+    }[];
+    /**
+     * Canlı QC turu, GÜNCEL sürümün baskısı olduğunu KANITLAYAMIYOR (kapı
+     * fail-closed). Sebebi tek başına söylemez; onu `qcProof` taşır.
+     */
+    qcRevisionMismatch?: boolean;
+    /** Aynı kapının SEBEBİ: tur neden kanıtlanamadı (dört hâl, adıyla). */
+    qcProof?: QcProofData;
     qcReviews?: { id: string; round: number; decision: string; reason: string | null; adminEmail: string; createdAt: string }[];
     assignedToManufacturerAt?: string | null;
+    manufacturerAcceptedAt?: string | null;
+    manufacturerPrintedAt?: string | null;
     assignmentAgeHours?: number | null;
+    /** Bu siparişi reddetmiş üreticiler (kimlik değil, ad). */
+    declinedManufacturers?: { id: string; companyName: string }[];
+    /** P2-C1: yükleme bu aşamada neyi tetikler (sunucu hesaplar). */
+    modelUpload?: {
+      stage: ModelUploadStage;
+      allowed: boolean;
+      effects: ModelUploadSideEffects;
+    };
+    /** Müşterinin model onay turları ve kararları. */
+    modelApproval?: {
+      open: boolean;
+      url: string | null;
+      approvedAt: string | null;
+      revisionNote: string | null;
+      rounds: {
+        id: string;
+        revision: number;
+        channel: string;
+        shownAt: string;
+        reminderSentAt: string | null;
+        decidedAt: string | null;
+        decision: string | null;
+        note: string | null;
+      }[];
+    };
+    /** Partner yeni model sürümünü gördüğünü onayladı mı. */
+    partnerAck?: {
+      manufacturer: PartnerAckState;
+      painter: PartnerAckState;
+    };
+    /** Siparişi şu an tutan partner (on-behalf adımları buna göre). */
+    onBehalfHolder?: "manufacturer" | "painter" | "none";
     activeManufacturers?: { id: string; companyName: string }[];
     candidates?: {
       manufacturerId: string;
@@ -311,8 +685,56 @@ interface Props {
      * otomatik olsa bile değerlendirme satırı yazmaz (order-confirm.ts).
      */
     assignmentDecisions?: EvaluationDecision[];
+    /**
+     * Hangi GÖSTERİM tablosu OKUNAMADI (sunucu doldurur: page.tsx · displayRead).
+     *
+     * Bayrak olmadan bu ekran, yapılmamış bir okumanın sonucunu gerçek bir kayıt
+     * gibi gösteriyordu: boş liste "kayıt yok", eksik sayı "tahakkuk etmedi"
+     * diye okunuyordu. Her bayrak, veriyi gösteren KARTIN kendi yerinde yazılır.
+     */
+    readFailures?: {
+      /** Sipariş fotoğrafları okunamadı: kart "boş" değil, bilinmiyor. */
+      photos?: boolean;
+      /** Üretici KAYDI okunamadı: sipariş atanmamış SAYILMAZ. */
+      manufacturer?: boolean;
+      /** QC fotoğrafları okunamadı: tur "fotoğrafsız" değil, bilinmiyor. */
+      qcPhotos?: boolean;
+      /** Ölçüm kaydı okunamadı: baskı kapısı gerekçeli onaya çekilir. */
+      printGateReport?: boolean;
+      candidates?: boolean;
+      activeManufacturers?: boolean;
+      modelFiles?: boolean;
+      modelApprovalRounds?: boolean;
+      manufacturerDeclined?: boolean;
+      assignmentDecisions?: boolean;
+      journey?: boolean;
+      painterQcPhotos?: boolean;
+      painterQcReviews?: boolean;
+      painterEarning?: boolean;
+      painterCandidates?: boolean;
+      painterDeclined?: boolean;
+    };
   };
   locale: string;
+}
+
+/**
+ * GÖSTERİM amaçlı bir tablo okunamadığında kartın KENDİ yerinde söylenen cümle.
+ *
+ * Ayrı bir bileşen, çünkü kural tek: boş bir liste "kayıt yok" demek değildir
+ * ve sessizlik de bir iddiadır. Sunucu artık her gösterim okumasını koruyor
+ * (page.tsx · displayRead), yani sayfa arızada da AÇILIYOR — açılan sayfanın
+ * yalan söylememesi bu uyarıya bağlı.
+ */
+function ReadFailedNotice({ children }: { children: ReactNode }) {
+  return (
+    <p
+      role="alert"
+      className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+    >
+      {children}
+    </p>
+  );
 }
 
 // Each status keeps the hue it has in the orders list (orders-client.tsx), in
@@ -1073,6 +1495,20 @@ function MoneyBreakdownCard({
                     valueClass={platform.unassignedBaseKurus < 0 ? "text-red-700" : undefined}
                   />
                 )}
+                {/* Geri alınmış hakediş tabanı AYRI bir satırdır: "partneri
+                    olmayan taban" hiç kimsenin kazanmadığı tabandır, bu ise
+                    kazanılmış sonra geri alınmış olandır. Türetim (order-money.ts)
+                    bu tutarı platform NET'ine KATMAZ; satır da bunu söyler.
+                    Satır olmadan tutar yalnızca uyarı cümlesinde geçiyordu:
+                    admin "Platform net ₺0,00" okuyup parayı kartın hiçbir
+                    yerinde göremiyordu. Hiçbir tutar değişmez, yalnız görünür. */}
+                {platform.reversedBaseKurus !== 0 && (
+                  <MoneyRow
+                    label="Geri alınmış hakediş tabanı (gelire yazılmadı)"
+                    value={fc(platform.reversedBaseKurus)}
+                    valueClass="text-amber-700"
+                  />
+                )}
                 {collection.giftCardKurus > 0 && (
                   <MoneyRow label="Hediye kartı" value={`−${fc(collection.giftCardKurus)}`} />
                 )}
@@ -1575,9 +2011,419 @@ function AssignmentEvaluationCard({
   );
 }
 
+/** Partnerin sürüm onay durumu (sunucuda partner-model-ack.ts hesaplar). */
+interface PartnerAckState {
+  announcedRevision: number | null;
+  acknowledgedRevision: number | null;
+  pending: boolean;
+  /**
+   * Partnerin eylem günlüğü OKUNAMADI (geçici arıza). `pending: true` ile
+   * birlikte gelir ama ikisi AYNI ŞEY DEĞİLDİR: bekleyen onay gerçek bir
+   * duyuruya dayanır, bu ise hiçbir şey bilmediğimiz anlamına gelir. Kart önce
+   * buna bakar; yoksa "null. sürümü onaylamadı" gibi olmamış bir olayı
+   * anlatırdı.
+   */
+  readFailed?: boolean;
+}
+
+// ─── Faz 2: her aşamada model yükleme ────────────────────────
+// Kuralın kendisi SUNUCUDA (config/order-model-policy.ts) ve sayfaya hazır
+// geliyor; burada yalnız ekran karşılıkları durur. İstemcide ikinci bir kural
+// kopyası tutmak, kapıyla ekranın ayrı düşmesi demekti — aynı hata "Reddet"
+// butonunda bir kez yaşandı (order-status-policy.ts).
+const MODEL_UPLOAD_STAGE_LABEL: Record<ModelUploadStage, string> = {
+  before_production: "Üretim başlamadı",
+  printing: "Üretici basıyor",
+  printed_or_qc: "Baskı bitti / kalite kontrol",
+  painting: "Parça boyacıda",
+  awaiting_customer_approval: "Müşteri onayı bekleniyor",
+  shipped_or_delivered: "Kargolandı / teslim edildi",
+  blocked: "Yükleme kapalı",
+};
+
+/**
+ * Yeni sürümün bu aşamada NE yaptığı. Kutu (önce) ile sonuç paneli (sonra) aynı
+ * cümleleri kullanır: admin ne olacağını okuyup onayladıysa, ne olduğunu da
+ * aynı kelimelerle görür.
+ */
+function sideEffectLines(e: ModelUploadSideEffects): string[] {
+  const lines: string[] = [];
+  if (e.resetsQc) {
+    lines.push(
+      "Kalite kontrol sıfırlanır: tur artar, bekleyen QC fotoğrafları reddedilir, üretici baskı aşamasına döner ve yeni sürüm QC geçmeden kargolayamaz."
+    );
+  }
+  if (e.needsManufacturerAck) {
+    // Hangi adımların kapandığı TAM olarak yazılır: kapıyı uygulayan liste
+    // MANUFACTURER_ACK_BLOCKED_ACTIONS (partner-model-ack.ts). "Baskı, QC ve
+    // kargo" demek kabul/ret adımlarını da kapalı sanmaya yol açıyordu.
+    lines.push(
+      "Üreticinin yeni sürümü gördüğünü onaylaması istenir; onaylayana kadar baskıya başlama, baskıyı bitirme, QC'ye gönderme, boyacıya devretme ve kargolama adımları kapalıdır (üretici adına yapılan işlemler dahil). İşi kabul etmesi ve reddetmesi kapanmaz."
+    );
+  }
+  if (e.notifiesPainter) {
+    lines.push("Boyacı bilgilendirilir: elindeki baskı eski sürüme ait olabilir.");
+  }
+  if (e.newApprovalRound) {
+    lines.push("Müşteriye yeni bir onay turu açılır; eski onay geçerli sayılmaz.");
+  }
+  if (e.recordOnly) {
+    lines.push(
+      "Üretim etkilenmez; yükleme kayda geçer ve dijital dosya satın alan müşteri yeni sürümü indirebilir."
+    );
+  }
+  return lines;
+}
+
+/**
+ * Sunucunun GERÇEKTEN uyguladığı yan etkiler (upload-model yanıtı, P2-C2).
+ *
+ * Politika "ne olmalı"yı söyler, bu nesne "ne oldu"yu — ve ikisi ayrılabilir:
+ * QC sıfırlaması tek bir koşullu UPDATE'tir, sipariş o arada QC aşamasından
+ * çıktıysa uygulanmaz. Paneli politikadan yeniden kurmak, tam da bu durumu
+ * admin'e "başarılı" diye gösteriyordu.
+ */
+interface AppliedModelSideEffects {
+  qcReset: boolean;
+  qcRound: number | null;
+  approvalRoundOpened: boolean;
+  manufacturerAckRequired: boolean;
+  painterNotified: boolean;
+}
+
+interface ModelUploadServerResult {
+  stage: ModelUploadStage | null;
+  warning: string | null;
+  /** Yayımlanan (CANLI) sürüm. */
+  revision: number | null;
+  /** Geri getirmede KAYNAK sürüm (upload-model PATCH); yüklemede yoktur. */
+  sourceRevision: number | null;
+  /**
+   * Geri getirme gerçekten yeni bir sürüm yayımladı mı? `false` = sürüm zaten
+   * geçerliydi, sunucu HİÇBİR yan etki uygulamadı. Yüklemede alan yoktur.
+   */
+  republished: boolean | null;
+  applied: AppliedModelSideEffects | null;
+}
+
+/** Yükleyicinin ilettiği ham yanıtı okur; tanımadığı her şeyi düşürür. */
+function parseUploadResult(raw: unknown): ModelUploadServerResult {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const stage =
+    typeof o.stage === "string" && o.stage in MODEL_UPLOAD_STAGE_LABEL
+      ? (o.stage as ModelUploadStage)
+      : null;
+  const a = (o.appliedSideEffects ?? null) as Record<string, unknown> | null;
+  return {
+    stage,
+    warning: typeof o.warning === "string" && o.warning ? o.warning : null,
+    revision: typeof o.revision === "number" ? o.revision : null,
+    sourceRevision: typeof o.sourceRevision === "number" ? o.sourceRevision : null,
+    republished: typeof o.republished === "boolean" ? o.republished : null,
+    applied: a
+      ? {
+          qcReset: a.qcReset === true,
+          qcRound: typeof a.qcRound === "number" ? a.qcRound : null,
+          approvalRoundOpened: a.approvalRoundOpened === true,
+          manufacturerAckRequired: a.manufacturerAckRequired === true,
+          painterNotified: a.painterNotified === true,
+        }
+      : null,
+  };
+}
+
+/** Sunucunun bildirdiği sonucun ekran karşılıkları: ne OLDU. */
+function appliedEffectLines(a: AppliedModelSideEffects): string[] {
+  const lines: string[] = [];
+  if (a.qcReset) {
+    lines.push(
+      `Kalite kontrol sıfırlandı${a.qcRound != null ? ` (tur ${a.qcRound})` : ""}: bekleyen QC fotoğrafları düştü, üretici baskı aşamasına döndü.`
+    );
+  }
+  if (a.manufacturerAckRequired) {
+    lines.push("Üreticiden yeni sürümü gördüğüne dair onay istendi.");
+  }
+  if (a.painterNotified) lines.push("Boyacı bilgilendirildi.");
+  if (a.approvalRoundOpened) lines.push("Müşteriye yeni onay turu açıldı.");
+  return lines;
+}
+
+/**
+ * Beklenen ama UYGULANMAYAN yan etkiler. P2-C2 tam olarak bunun için var:
+ * sessizce "başarılı" demek, eski modelin baskısını onaya açık bırakır.
+ */
+function missedEffectLines(
+  expected: ModelUploadSideEffects | null,
+  a: AppliedModelSideEffects
+): string[] {
+  const lines: string[] = [];
+  if (expected?.resetsQc && !a.qcReset) {
+    lines.push(
+      "Kalite kontrol SIFIRLANMADI: sipariş bu sırada QC aşamasından çıkmış olabilir (ör. kargolandı). Üretim tarafını elle kontrol edin."
+    );
+  }
+  if (expected?.needsManufacturerAck && !a.manufacturerAckRequired) {
+    lines.push("Üretici onayı İSTENMEDİ: siparişte işi tutan bir üretici görünmüyor.");
+  }
+  if (expected?.notifiesPainter && !a.painterNotified) {
+    lines.push("Boyacıya bildirim GİTMEDİ: siparişte işi tutan bir boyacı görünmüyor.");
+  }
+  return lines;
+}
+
+/**
+ * Sonuç panelinin başlığı. Yükleme ile GERİ GETİRME aynı paneli kullanır (uç de
+ * aynı: upload-model POST/PATCH), ama üç ayrı sonucu vardır ve üçü de admin'e
+ * farklı şey söyler: yeni sürüm yüklendi, eski sürüm yeni numarayla yayımlandı,
+ * ya da sürüm zaten geçerliydi ve hiçbir şey olmadı.
+ */
+function uploadResultTitle(r: {
+  kind: "upload" | "restore";
+  server: ModelUploadServerResult | null;
+}): string {
+  const live = r.server?.revision ?? null;
+  const source = r.server?.sourceRevision ?? null;
+  if (r.kind === "restore") {
+    if (r.server?.republished === false) {
+      return source != null
+        ? `Sürüm ${source} zaten geçerliydi; değişiklik yapılmadı`
+        : "Sürüm zaten geçerliydi; değişiklik yapılmadı";
+    }
+    if (source != null && live != null) {
+      return `Sürüm ${source} geri getirildi (sürüm ${live} olarak yayımlandı)`;
+    }
+    return live != null ? `Sürüm geri getirildi (sürüm ${live})` : "Sürüm geri getirildi";
+  }
+  return live != null ? `Yeni sürüm kaydedildi (sürüm ${live})` : "Yeni sürüm kaydedildi";
+}
+
+/**
+ * Sunucu hiçbir yan etki uygulamadığında yazılacak cümle. Yayımlamayan bir geri
+ * getirmede "doğrudan geçerli model oldu" demek, OLMAYAN bir değişikliği
+ * anlatmak olurdu.
+ */
+function noAppliedEffectsLine(
+  kind: "upload" | "restore",
+  republished: boolean | null
+): string {
+  if (kind === "restore" && republished === false) {
+    return "Bu sürüm zaten geçerliydi: dosyalar değişmedi, QC sıfırlanmadı, üretici ve boyacıya bildirim gitmedi.";
+  }
+  if (kind === "restore") {
+    return "Sunucu başka bir yan etki uygulamadı; geri getirilen sürüm doğrudan geçerli model oldu.";
+  }
+  return "Sunucu başka bir yan etki uygulamadı; yeni sürüm doğrudan geçerli model oldu.";
+}
+
+/** Admin'in partner adına yapabileceği adımlar (P2-C4 ile aynı adlar). */
+type OnBehalfAction = "accept" | "start_printing" | "printed" | "submit_qc" | "ship";
+
+const ON_BEHALF_LABELS: Record<"manufacturer" | "painter", Record<OnBehalfAction, string>> = {
+  manufacturer: {
+    accept: "İşi kabul etti olarak işaretle",
+    start_printing: "Baskıya başladı olarak işaretle",
+    printed: "Baskıyı bitirdi olarak işaretle",
+    submit_qc: "Kalite kontrole gönder",
+    ship: "Kargoladı olarak işaretle (takip numarasıyla)",
+  },
+  painter: {
+    accept: "İşi kabul etti olarak işaretle",
+    // Boyacıda "baskıyı başlat" adımı YOK: servis bunu unsupported_step ile
+    // reddeder ve aşağıdaki seçenek listesi boyacı için hiç önermez. Etiket
+    // yalnız tipin bütünlüğü için durur.
+    start_printing: "—",
+    printed: "Boyamayı bitirdi olarak işaretle",
+    submit_qc: "Kalite kontrole gönder",
+    ship: "Kargoladı olarak işaretle (takip numarasıyla)",
+  },
+};
+
+/** Gerekçe barajı: sunucudaki ON_BEHALF_REASON_MIN_LENGTH ile aynı sayı. */
+const ON_BEHALF_REASON_MIN = 10;
+
+const APPROVAL_DECISION_LABEL: Record<string, string> = {
+  approved: "Onayladı",
+  revision: "Revizyon istedi",
+  cancelled: "İptal etti",
+  auto_approved: "Süre doldu, otomatik onaylandı",
+};
+
+const CARRIER_LABEL: Record<string, string> = {
+  yurtici: "Yurtiçi Kargo",
+  aras: "Aras Kargo",
+  mng: "MNG Kargo",
+  ptt: "PTT Kargo",
+  surat: "Sürat Kargo",
+  other: "Diğer",
+  elden: "Elden teslim",
+};
+
+interface PartnerChatMessage {
+  id: string;
+  sender: string;
+  senderEmail: string | null;
+  body: string;
+  createdAt: string;
+  mine: boolean;
+}
+
+/**
+ * Boyacı ↔ yönetici sohbeti.
+ *
+ * Neden OrderChat DEĞİL: o bileşen `messages` tablosunun kanallarını konuşur
+ * (senderType + FormData + görsel eki). Boyacı kanalı ayrı bir tabloda yaşıyor
+ * (order_partner_messages — `messages.channel` bir pg enum ve geri alınabilir
+ * olması gereken bir şey için enum'a değer eklenmez), gövdesi düz JSON ve eki
+ * yok. Tek bileşene sığdırmak ikisini de yanlış anlatırdı.
+ */
+function PartnerChatPanel({ orderId, loc }: { orderId: string; loc: Locale }) {
+  const [messages, setMessages] = useState<PartnerChatMessage[]>([]);
+  const [text, setText] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const url = `/api/admin/orders/${orderId}/partner-messages?partner=painter`;
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(url);
+      const data = (await res.json().catch(() => ({}))) as {
+        messages?: PartnerChatMessage[];
+        unavailable?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setNotice(data.error ?? "Mesajlar okunamadı.");
+        setLoaded(true);
+        return;
+      }
+      setMessages(Array.isArray(data.messages) ? data.messages : []);
+      setNotice(data.unavailable ?? null);
+      setLoaded(true);
+    } catch {
+      setNotice("Mesajlar okunamadı.");
+      setLoaded(true);
+    }
+  }, [url]);
+
+  useEffect(() => {
+    void load();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setNotice(data.error ?? "Mesaj gönderilemedi.");
+        return;
+      }
+      setText("");
+      await load();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col">
+      <div className="h-80 space-y-3 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50 p-3">
+        {!loaded ? (
+          <p className="py-8 text-center text-sm text-gray-400">Yükleniyor…</p>
+        ) : messages.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-400">Henüz mesaj yok.</p>
+        ) : (
+          messages.map((m) => (
+            <div key={m.id} className={`flex ${m.mine ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+                  m.mine
+                    ? "bg-indigo-600 text-white"
+                    : "border border-gray-200 bg-white text-gray-800"
+                }`}
+              >
+                {!m.mine && (
+                  <p className="mb-0.5 text-[10px] font-semibold opacity-70">Boyacı</p>
+                )}
+                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                <p className={`mt-0.5 text-[10px] ${m.mine ? "text-indigo-200" : "text-gray-400"}`}>
+                  {formatDateTime(m.createdAt, loc)}
+                </p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      {notice && (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{notice}</p>
+      )}
+      <div className="mt-2 flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          maxLength={4000}
+          placeholder="Boyacıya mesaj yaz…"
+          className="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+        />
+        <button
+          type="button"
+          onClick={() => void send()}
+          disabled={!text.trim() || sending}
+          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:bg-gray-300"
+        >
+          {sending ? "Gönderiliyor…" : "Gönder"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, printGate, approvedImageUrl, photos, modelRevisions, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerStatus, painting, journey, qcPhotos, qcReviews, assignedToManufacturerAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, money } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures } = data;
+  // Turun onaylanamama sebebi TEK yerde cümleye çevrilir: kırmızı kutu, kapalı
+  // onay düğmesinin başlığı, denetimli istisnanın bağlantısı ve onay kutusu
+  // aynı sebebi anlatsın. Dördü ayrı ayrı yazıldığında ekran "eski baskı"
+  // derken veri yalnızca "doğrulanamadı" diyordu.
+  const qcProofView = qcProofRefusalView(qcProof);
+  // FOTOĞRAF TABLOSU OKUNAMADIĞINDA DENETİMİN ADI DA DEĞİŞİR.
+  //
+  // qcProof okunamayan tabloyu SIFIR fotoğraf olarak görür ve hâli "fotoğrafsız
+  // tur" diye adlandırır; oysa ortada yapılmamış bir okuma vardır. Kapı iki
+  // hâlde de kapalı, ama admin'e imzalatılan cümle aynı olamaz: "tek bir
+  // fotoğraf olmadan onayladım" ile "fotoğrafları göremeden onayladım" farklı
+  // şeylerdir ve gerekçe denetim kaydına bu adla düşer. Uç da aynı ayrımı
+  // yapıyor (qc-approve · proof: "photos_unreadable") ve gerekçeli onayı bu
+  // arızada da KABUL ediyor — yani ekranın sunduğu denetimin çalışan bir ucu var.
+  const qcCardView: QcProofRefusalView = readFailures?.qcPhotos
+    ? {
+        banner: qcProofView.banner,
+        gateTitle:
+          "Bu turun QC fotoğrafları okunamadı; kanıt görülemediği için onay kapalı tutuldu.",
+        overrideLink: "Yine de onayla: fotoğrafları okunamayan turu gerekçeyle kabul et",
+        overrideEffect:
+          "Bu onay, turun QC fotoğrafları GÖRÜLMEDEN baskıyı kargoya açar ve üreticinin hakedişi " +
+          "tahakkuk eder. Fotoğraflar silinmedi, yalnızca okunamıyor. Gerekçe denetim kaydına " +
+          "[QC fotoğrafları okunamadı] olarak, QC turu kaydına ve üreticiye giden bildirime aynen yazılır.",
+      }
+    : qcProofView;
   const router = useRouter();
   const d = useDictionary();
   const loc = locale as Locale;
@@ -1585,6 +2431,10 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   const [loading, setLoading] = useState<string | null>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
+  // Elle kargolama taşıyıcısı: POST /ship şemasında `carrier` ZORUNLU (firmasız
+  // takip numarası müşteriye açılmayan bir bağlantı demek), o yüzden alan
+  // ekranda da vardır — düğme onsuz 400 alıyordu.
+  const [manualShipCarrier, setManualShipCarrier] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedManufacturerId, setSelectedManufacturerId] = useState("");
   // Revoke controls (unresponsive / wrong manufacturer).
@@ -1616,10 +2466,75 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [showAddPainting, setShowAddPainting] = useState(false);
   const [journeyCopied, setJourneyCopied] = useState(false);
   const [qcRejectReason, setQcRejectReason] = useState("");
-  const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin">("customer_admin");
+  // Denetimli ESKİ SÜRÜM onayı (qc-approve · overrideStaleRevision): gerekçe
+  // zorunlu olduğu için kutu bilerek açılır, tek tıkla geçilemez.
+  const [staleOverrideOpen, setStaleOverrideOpen] = useState(false);
+  const [staleOverrideReason, setStaleOverrideReason] = useState("");
+  // Boyacı kanalı ayrı bir tabloda yaşıyor (order_partner_messages); sekme
+  // aynı yerde durur, bileşen farklıdır.
+  const [chatTab, setChatTab] = useState<"customer_admin" | "manufacturer_admin" | "painter_admin">(
+    "customer_admin"
+  );
   // Refund card: collapsed by default; opens to the warning + reason field.
   const [refundOpen, setRefundOpen] = useState(false);
   const [refundReason, setRefundReason] = useState("");
+
+  // ─── Faz 2: her aşamada model yükleme ────────────────────
+  // Yükleyici doğrudan açılmaz: aşama uyarısı okunur, kutu bilerek açılır ve
+  // gereken aşamalarda gerekçe yazılmadan dosya seçilemez.
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadNote, setUploadNote] = useState("");
+  const [uploadResult, setUploadResult] = useState<{
+    /** Yeni dosya yüklemesi mi, eski bir sürümün geri getirilmesi mi? */
+    kind: "upload" | "restore";
+    stage: ModelUploadStage;
+    /** Yükleme anında BEKLENEN etkiler; sunucununkiyle karşılaştırmak için. */
+    effects: ModelUploadSideEffects;
+    note: string;
+    /** Sunucunun bildirdiği sonuç (P2-C2). Okunamazsa null. */
+    server: ModelUploadServerResult | null;
+  } | null>(null);
+  // Sürüm yönetimi: not düzenleme kutusu (tek seferde tek sürüm).
+  const [revisionNoteDraft, setRevisionNoteDraft] = useState<{
+    revision: number;
+    text: string;
+  } | null>(null);
+  // Müşteri bilgileri (ad, e-posta, telefon, müşteri notu).
+  const [customerEditing, setCustomerEditing] = useState(false);
+  const [custName, setCustName] = useState(order.customerName);
+  const [custEmail, setCustEmail] = useState(order.email);
+  const [custPhoneCountry, setCustPhoneCountry] = useState<CountryCode>(
+    () => e164ToPhoneInput(order.phone).country
+  );
+  const [custPhoneNational, setCustPhoneNational] = useState(
+    () => e164ToPhoneInput(order.phone).nationalNumber
+  );
+  const [custNote, setCustNote] = useState(order.customerNote ?? "");
+  // Kargo: taşıyıcı + takip numarası düzeltme, kargo/teslim kaydını geri alma.
+  const [shipEditing, setShipEditing] = useState(false);
+  const [shipCarrier, setShipCarrier] = useState(order.carrier ?? "");
+  const [shipTracking, setShipTracking] = useState(order.trackingNumber ?? "");
+  const [shipNotify, setShipNotify] = useState(true);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [revertReason, setRevertReason] = useState("");
+  // Müşteri model onayı: telefonla/WhatsApp ile gelen kararı kaydetme.
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [recordDecision, setRecordDecision] = useState<"approved" | "revision">("approved");
+  const [recordChannel, setRecordChannel] = useState<"phone" | "whatsapp">("phone");
+  const [recordNote, setRecordNote] = useState("");
+  // Partner adına işlem (P2-C4): gerekçe ZORUNLU.
+  const [onBehalfAction, setOnBehalfAction] = useState<OnBehalfAction | "">("");
+  const [onBehalfReason, setOnBehalfReason] = useState("");
+  const [onBehalfTracking, setOnBehalfTracking] = useState("");
+  const [onBehalfCarrier, setOnBehalfCarrier] = useState("");
+  // Boyacı QC kararı + yalnız boyacıyı değiştirme.
+  const [painterQcReason, setPainterQcReason] = useState("");
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [swapPainterId, setSwapPainterId] = useState("");
+  const [swapReason, setSwapReason] = useState("");
+  const [swapBlocklist, setSwapBlocklist] = useState(true);
+  // Yeni uçların hatası: sayfanın üstünde tek bir yerde görünür.
+  const [actionError, setActionError] = useState<string | null>(null);
 
 
   // Edit state
@@ -1697,6 +2612,456 @@ export function OrderDetailClient({ data, locale }: Props) {
     }
   };
 
+  /**
+   * Denetimli ESKİ SÜRÜM QC onayı (POST qc-approve · overrideStaleRevision).
+   *
+   * Normal onay yolu uyuşmazlıkta kapalıdır ve öyle kalır. Karar
+   * (late-model-upload) yine de bilinçli bir istisnaya izin veriyor: tek bir
+   * yanlış damgalanmış fotoğraf yüzünden turun tek çıkışı qc-reject olmasın.
+   * Bedava değildir — gerekçeyi SUNUCU şart koşar
+   * (STALE_QC_OVERRIDE_REASON_MIN) ve denetim kaydına, QC turu kaydına ve
+   * üreticiye giden bildirime aynen yazar. Buradaki kontrol yalnız, reddedileceği
+   * baştan belli bir isteği hiç göndermemek içindir.
+   */
+  const approveStaleQc = async () => {
+    const reason = staleOverrideReason.trim();
+    if (reason.length < STALE_QC_OVERRIDE_REASON_MIN) {
+      alert(STALE_QC_OVERRIDE_REASON_ERROR);
+      return;
+    }
+    const ok = window.confirm(
+      [
+        // Damgasız ya da fotoğrafsız bir tura "eski baskı" demek, admin'e
+        // olmayan bir olguyu imzalatmak olurdu: cümle sebebe göre değişir.
+        qcCardView.gateTitle,
+        qcCardView.overrideEffect,
+        `Gerekçe: ${reason}`,
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    await performAction("qc-approve", {
+      overrideStaleRevision: true,
+      overrideReason: reason,
+    });
+    setStaleOverrideOpen(false);
+    setStaleOverrideReason("");
+  };
+
+  /**
+   * Faz 2 uçları tek tek yayına giriyor. Eksik bir uç 404 + HTML döndürür ve
+   * JSON'a çevrilemeyen yanıt eskiden ekranda hiçbir iz bırakmıyordu
+   * ("tıkladım, bir şey olmadı"). Sebep her hâlde yazılır.
+   */
+  const callApi = async (
+    path: string,
+    init: RequestInit
+  ): Promise<{ ok: boolean; error: string; data: Record<string, unknown> }> => {
+    let res: Response;
+    try {
+      res = await fetch(path, init);
+    } catch {
+      return { ok: false, error: "Sunucuya ulaşılamadı.", data: {} };
+    }
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (res.ok) return { ok: true, error: "", data };
+    const message =
+      typeof data.error === "string" && data.error
+        ? data.error
+        : res.status === 404
+          ? "Bu işlemin sunucu ucu bu kurulumda yok."
+          : `${d["admin.orderDetail.actionFailed"]} (HTTP ${res.status})`;
+    return { ok: false, error: message, data };
+  };
+
+  const jsonInit = (body: unknown, method = "POST"): RequestInit => ({
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  /** Tek bir uç çağrısı: kilit, hata kutusu ve tazeleme aynı yerde. */
+  const runApi = async (
+    key: string,
+    path: string,
+    init: RequestInit,
+    // Sunucunun yanıtı çağırana GEÇER: bir işlemin gerçekte ne yaptığını
+    // (aşama, uygulanan yan etkiler) yalnız yanıt biliyor.
+    onDone?: (data: Record<string, unknown>) => void
+  ): Promise<boolean> => {
+    setLoading(key);
+    setActionError(null);
+    try {
+      const r = await callApi(path, init);
+      if (!r.ok) {
+        setActionError(r.error);
+        // Reddin dayandığı durumu göster: sayfa büyük ihtimalle bayat.
+        router.refresh();
+        return false;
+      }
+      onDone?.(r.data);
+      router.refresh();
+      return true;
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  // ─── Müşteri bilgileri ───────────────────────────────────────────
+  const saveCustomer = async () => {
+    const phoneE164 = phoneInputToE164(custPhoneCountry, custPhoneNational);
+    if (custPhoneNational.trim() !== "" && phoneE164 === null) {
+      alert("Geçerli bir telefon numarası girin.");
+      return;
+    }
+    if (!custName.trim() || !custEmail.trim()) {
+      alert("Ad ve e-posta boş bırakılamaz.");
+      return;
+    }
+    if (custEmail.trim() !== order.email) {
+      const ok = window.confirm(
+        [
+          "E-posta adresi değişiyor.",
+          `${order.email} → ${custEmail.trim()}`,
+          "",
+          "Bundan sonraki sipariş bildirimleri (kargo, teslim, onay bağlantısı) yeni adrese gider.",
+          "",
+          "Devam edilsin mi?",
+        ].join("\n")
+      );
+      if (!ok) return;
+    }
+    await runApi(
+      "customer",
+      `/api/admin/orders/${order.id}/edit`,
+      jsonInit({
+        customerName: custName.trim(),
+        email: custEmail.trim(),
+        phone: phoneE164,
+        customerNote: custNote,
+      }),
+      () => setCustomerEditing(false)
+    );
+  };
+
+  // ─── Kargo ───────────────────────────────────────────────────────
+  /**
+   * Kargo kaydının düzeltilmesi: PATCH /ship (F-C1'in tek yolu).
+   *
+   * Yalnız DEĞİŞTİRİLEN alan gönderilir: sunucu `undefined` alanı "bu istekte
+   * düzenlenmiyor" sayar, boş bir takip numarasını ve tanımadığı bir taşıyıcıyı
+   * 400 ile geri çevirir. Bu yüzden boş değerler hiç yollanmaz — eskiden
+   * `carrier: null` gönderiliyordu ve uç bunu geçersiz firma sayardı.
+   *
+   * Taşıyıcı DEĞİŞMEDİYSE hiç gönderilmez: PATCH /ship taşıyıcıyı isCarrier()
+   * ile doğrular ve kayıtta duran değer o listede olmayabilir (`elden` — elden
+   * teslimin takip bağlantısı yok). Değişmemiş taşıyıcıyı da yollamak, admin
+   * yalnız takip numarasını düzeltirken bile "Geçersiz kargo firması." ile
+   * reddettiriyordu.
+   *
+   * NOT: bunu ilk ortaya çıkaran atölye siparişiydi, ama atölye siparişi artık
+   * bu forma HİÇ gelmiyor (uç onu 409 code "workshop" ile reddediyor, form da
+   * açılmıyor); düzeltmesi seans ekranındaki parti sevkiyatındadır. Kural
+   * burada eski/elle girilmiş kayıtlar için durur.
+   */
+  const saveShipping = async () => {
+    const tracking = shipTracking.trim();
+    const body: Record<string, unknown> = { notify: shipNotify };
+    if (shipCarrier && shipCarrier !== order.carrier) body.carrier = shipCarrier;
+    if (tracking && tracking !== order.trackingNumber) body.trackingNumber = tracking;
+    await runApi(
+      "shipping",
+      `/api/admin/orders/${order.id}/ship`,
+      jsonInit(body, "PATCH"),
+      () => setShipEditing(false)
+    );
+  };
+
+  const revertShipping = async (target: "shipped" | "in_production") => {
+    const reason = revertReason.trim();
+    if (reason.length < 3) {
+      alert("Geri alma gerekçesi zorunludur.");
+      return;
+    }
+    const ok = window.confirm(
+      [
+        target === "shipped"
+          ? "Teslim kaydı geri alınacak; sipariş kargolandı durumuna döner."
+          : "Kargo kaydı geri alınacak; sipariş üretim tarafına döner ve takip numarası kaldırılır.",
+        "Müşteriye gönderilmiş kargo/teslim e-postası geri alınamaz.",
+        "İşlem denetim kaydına yazılır.",
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    // İki ayrı uç, tek düğme grubu (F-C1): teslim kaydı DELETE /deliver ile,
+    // kargo kaydı DELETE /ship ile geri alınır. Gerekçe her ikisinde de gövdede
+    // gider ve denetim kaydına yazılır.
+    await runApi(
+      "ship-revert",
+      target === "shipped"
+        ? `/api/admin/orders/${order.id}/deliver`
+        : `/api/admin/orders/${order.id}/ship`,
+      jsonInit({ reason }, "DELETE"),
+      () => {
+        setRevertOpen(false);
+        setRevertReason("");
+      }
+    );
+  };
+
+  // ─── Müşteri model onayı ─────────────────────────────────────────
+  const resendApproval = async () => {
+    await runApi(
+      "approval-resend",
+      `/api/admin/orders/${order.id}/model-approval/resend`,
+      jsonInit({})
+    );
+  };
+
+  const recordApprovalDecision = async () => {
+    const note = recordNote.trim();
+    if (recordDecision === "revision" && note.length < 3) {
+      alert("Müşterinin istediği değişikliği yazın; boyacıya ve üreticiye bu metin gider.");
+      return;
+    }
+    const ok = window.confirm(
+      [
+        recordDecision === "approved"
+          ? "Müşterinin ONAYI kaydedilecek: sipariş üretime açılır."
+          : "Müşterinin REVİZYON isteği kaydedilecek: sipariş incelemeye döner.",
+        `Kanal: ${recordChannel === "phone" ? "Telefon" : "WhatsApp"}`,
+        "Kararı müşterinin kendisi tıklamadı; kaydı siz giriyorsunuz ve denetim kaydında adınız kalır.",
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    await runApi(
+      "approval-record",
+      `/api/admin/orders/${order.id}/model-approval/record`,
+      jsonInit({
+        decision: recordDecision,
+        channel: recordChannel,
+        note: note || undefined,
+      }),
+      () => {
+        setRecordOpen(false);
+        setRecordNote("");
+      }
+    );
+  };
+
+  // ─── Sürüm yönetimi ──────────────────────────────────────────────
+  // Not: "geçerli yap" ile "sil", yükleme ucunun PATCH/DELETE yöntemleridir;
+  // ikisi de aynı politikayı (gerekçe zorunluluğu dahil) uygular.
+  const makeRevisionCurrent = async (revision: number) => {
+    const needsNote = modelUpload?.effects.requiresNote ?? false;
+    const typed = window.prompt(
+      needsNote
+        ? `Sürüm ${revision} geçerli model yapılacak. Bu aşamada gerekçe ZORUNLU (denetim kaydına yazılır, partnerlere bildirilir):`
+        : `Sürüm ${revision} geçerli model yapılacak. Gerekçe (isteğe bağlı):`,
+      ""
+    );
+    if (typed === null) return;
+    if (needsNote && typed.trim().length < 3) {
+      alert("Bu aşamada gerekçe zorunludur.");
+      return;
+    }
+    const note = typed.trim();
+    await runApi(
+      `rev-current-${revision}`,
+      `/api/admin/orders/${order.id}/upload-model`,
+      jsonInit({ revision, note: note || undefined }, "PATCH"),
+      // Geri getirme de bir YÜKLEMEDİR ve uç bunu öyle yanıtlar: aşama +
+      // GERÇEKTEN uygulanan yan etkiler (QC sıfırlaması dahil, yayımlanmadıysa
+      // hiçbiri). Kuru bir "başarılı", QC'nin sıfırlanıp sıfırlanmadığını
+      // admin'den saklıyordu; panel yüklemeyle aynı cümleleri bassın.
+      (data) => {
+        if (!modelUpload) return;
+        const server = parseUploadResult(data);
+        setUploadResult({
+          kind: "restore",
+          stage: server.stage ?? modelUpload.stage,
+          effects: modelUpload.effects,
+          note,
+          server,
+        });
+      }
+    );
+  };
+
+  const deleteRevision = async (revision: number) => {
+    const ok = window.confirm(
+      [
+        `Sürüm ${revision} ve dosyaları kalıcı olarak silinecek.`,
+        "Üretici bu sürümü basıyorsa işlem reddedilir.",
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    await runApi(
+      `rev-delete-${revision}`,
+      `/api/admin/orders/${order.id}/upload-model`,
+      jsonInit({ revision }, "DELETE")
+    );
+  };
+
+  const saveRevisionNote = async (revision: number, text: string) => {
+    await runApi(
+      `rev-note-${revision}`,
+      `/api/admin/orders/${order.id}/model-revisions/${revision}`,
+      jsonInit({ note: text.trim() }, "PATCH"),
+      () => setRevisionNoteDraft(null)
+    );
+  };
+
+  /**
+   * Yükleme bittikten sonra: sonuç paneli açılır ve sayfa tazelenir.
+   *
+   * Panel, yükleme ANINDAKİ aşamanın yan etkilerini gösterir (tazelenen sayfa
+   * artık yeni aşamayı taşır), altında da siparişin GÜNCEL durumu okunur.
+   */
+  const afterUpload = (raw?: unknown) => {
+    // Aşama ve yan etkiler SUNUCUDAN okunur (P2-C2). Yükleyici eski sürümse
+    // (sonucu iletmiyorsa) politikaya düşülür ve panel bunu açıkça söyler.
+    const server = raw === undefined || raw === null ? null : parseUploadResult(raw);
+    if (modelUpload) {
+      setUploadResult({
+        kind: "upload",
+        stage: server?.stage ?? modelUpload.stage,
+        effects: modelUpload.effects,
+        note: uploadNote.trim(),
+        server,
+      });
+    }
+    setUploadOpen(false);
+    setUploadNote("");
+    setTab("production");
+    router.refresh();
+  };
+
+  // ─── Partner adına işlem (P2-C4) ─────────────────────────────────
+  const runOnBehalf = async () => {
+    if (!onBehalfAction) return;
+    const reason = onBehalfReason.trim();
+    if (reason.length < ON_BEHALF_REASON_MIN) {
+      alert(
+        `Gerekçe en az ${ON_BEHALF_REASON_MIN} karakter olmalı; denetim kaydına ve partnerin kendi zaman çizelgesine bu metin yazılır.`
+      );
+      return;
+    }
+    if (onBehalfAction === "ship" && !onBehalfTracking.trim()) {
+      alert("Kargo takip numarası zorunludur.");
+      return;
+    }
+    // Taşıyıcı da ZORUNLU (services/on-behalf.ts · carrier_required):
+    // firmasız bir takip numarasından müşteriye takip bağlantısı kurulamıyor.
+    // Form bunu "ops." diye gösterdiği sürece her tıklama garanti 400'dü.
+    if (onBehalfAction === "ship" && !onBehalfCarrier) {
+      alert(
+        "Kargo firmasını seçin; firmasız takip numarasından müşteriye takip bağlantısı kurulamıyor."
+      );
+      return;
+    }
+    const who = onBehalfHolder === "painter" ? "boyacı" : "üretici";
+    const ok = window.confirm(
+      [
+        `Bu adım ${who.toUpperCase()} ADINA yapılacak ve partnerin kendi işlemiyle aynı sonucu doğuracak (hakediş dahil).`,
+        `İşlem: ${ON_BEHALF_LABELS[onBehalfHolder === "painter" ? "painter" : "manufacturer"][onBehalfAction]}`,
+        `Gerekçe: ${reason}`,
+        "Gerekçe denetim kaydına ve partnerin zaman çizelgesine yazılır.",
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    await runApi(
+      "on-behalf",
+      `/api/admin/orders/${order.id}/on-behalf`,
+      jsonInit({
+        action: onBehalfAction,
+        reason,
+        ...(onBehalfAction === "ship"
+          ? { trackingNumber: onBehalfTracking.trim(), carrier: onBehalfCarrier }
+          : {}),
+      }),
+      () => {
+        setOnBehalfAction("");
+        setOnBehalfReason("");
+        setOnBehalfTracking("");
+        setOnBehalfCarrier("");
+      }
+    );
+  };
+
+  // ─── Boyacı QC + boyacı değiştirme ───────────────────────────────
+  const painterQcDecision = async (decision: "approve" | "reject") => {
+    if (decision === "reject" && painterQcReason.trim().length < 3) {
+      alert("Ret gerekçesi zorunludur; boyacıya aynen iletilir.");
+      return;
+    }
+    await runApi(
+      `painter-qc-${decision}`,
+      `/api/admin/painter-qc/${order.id}/${decision}`,
+      jsonInit(decision === "reject" ? { reason: painterQcReason.trim() } : {}),
+      (data) => {
+        setPainterQcReason("");
+        // KARAR GEÇTİ, FOTOĞRAF DAMGALAMASI DÜŞTÜ.
+        //
+        // Uç bunu bilerek ayrı bir bayrakla söylüyor (photoStampFailed) çünkü
+        // kararın kendisi UYGULANDI ve onu "başarısız" diye anlatmak admin'i
+        // yapılmış bir işi tekrar yapmaya iterdi. Ama bayrağı hiçbir ekran
+        // okumuyordu: arıza, turun fotoğraf satırlarında "bekliyor" olarak
+        // sessizce kalıyor ve sonraki bakan bunun arıza mı gerçek bir durum mu
+        // olduğunu ayırt edemiyordu. Her arıza, bir ekranın gösterebileceği bir
+        // cümle taşımalı — bu onun yeri.
+        if (Boolean(data.photoStampFailed)) {
+          setActionError(
+            decision === "approve"
+              ? "Boyama onayı UYGULANDI: boyacının kargosu açıldı. Ancak turun QC fotoğraf satırları damgalanamadı; fotoğraflar 'bekliyor' görünmeye devam edebilir. Karar geçerlidir, tekrar onaylamayın."
+              : "Boyama reddi UYGULANDI: boyacı yeniden boyamaya gönderildi ve gerekçeniz kendisine iletildi. Ancak turun QC fotoğraf satırları damgalanamadı; fotoğraflar 'bekliyor' görünmeye devam edebilir. Karar geçerlidir, tekrar reddetmeyin."
+          );
+        }
+      }
+    );
+  };
+
+  const swapPainter = async () => {
+    if (!swapPainterId) return;
+    if (swapReason.trim().length < 3) {
+      alert("Gerekçe zorunludur.");
+      return;
+    }
+    const ok = window.confirm(
+      [
+        "İş yalnız YENİ BOYACIYA geçecek.",
+        "Üretici, üretici durumu ve tahakkuk etmiş baskı hakedişi olduğu gibi kalır.",
+        "Baskı hâlâ eski boyacının elinde: devir kargosu ve gerekirse yeniden baskı elle mutabakatla kapatılır.",
+        "",
+        "Devam edilsin mi?",
+      ].join("\n")
+    );
+    if (!ok) return;
+    await runApi(
+      "swap-painter",
+      `/api/admin/orders/${order.id}/swap-painter`,
+      jsonInit({
+        painterId: swapPainterId,
+        reason: swapReason.trim(),
+        blocklistPainter: swapBlocklist,
+      }),
+      () => {
+        setSwapOpen(false);
+        setSwapPainterId("");
+        setSwapReason("");
+      }
+    );
+  };
+
   // ─── Reference photo management (admin-fulfilled / WhatsApp orders) ───
   const [photoBusy, setPhotoBusy] = useState(false);
   const addOrderPhotos = async (files: FileList | null) => {
@@ -1765,17 +3130,32 @@ export function OrderDetailClient({ data, locale }: Props) {
       : editAddress;
     setLoading("edit");
     try {
-      const res = await fetch(`/api/admin/orders/${order.id}/edit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminNotes: editNotes, shippingAddress: addressToSave }),
-      });
-      if (res.ok) {
+      // Kargolandıktan sonra adres değişikliği sunucuda ayrı onay ister
+      // (409 + code=address_after_shipping): paket yola çıkmıştır, yeni adres
+      // kutunun gideceği yeri değiştirmez. Admin bunu bilerek yapıyorsa kayıt
+      // tutulur; tek tıkla sessizce olmaz.
+      const send = (confirmAfterShipping: boolean) =>
+        callApi(
+          `/api/admin/orders/${order.id}/edit`,
+          jsonInit({
+            adminNotes: editNotes,
+            shippingAddress: addressToSave,
+            ...(confirmAfterShipping ? { confirmAfterShipping: true } : {}),
+          })
+        );
+      let r = await send(false);
+      if (!r.ok && r.data.code === "address_after_shipping") {
+        const ok = window.confirm(
+          `${r.error}\n\nDevam edilsin mi?`
+        );
+        if (!ok) return;
+        r = await send(true);
+      }
+      if (r.ok) {
         setEditing(false);
         router.refresh();
       } else {
-        const data = await res.json().catch(() => ({}));
-        reportFailure(data.error || d["admin.orderDetail.actionFailed"]);
+        reportFailure(r.error);
       }
     } finally {
       setLoading(null);
@@ -1898,17 +3278,130 @@ export function OrderDetailClient({ data, locale }: Props) {
   // One list for this button and the reject route (order-status-policy). The
   // button used to offer awaiting_model while the route refused it with a 400.
   const canReject = REJECTABLE_STATUSES.includes(order.status);
-  const canForceReview = ["paid", "generating", "processing_mesh"].includes(order.status);
+  // İade edilmiş sipariş HİÇBİR YÖNE kımıldamaz: incelemeye çekmek de bir
+  // ilerletmedir (paid/generating → review) ve bu satır, kardeşlerinin
+  // (canApprove, canStartPrinting, canShip) taşıdığı iade şartını taşımıyordu.
+  const canForceReview =
+    ["paid", "generating", "processing_mesh"].includes(order.status) && !refunded;
   const canStartPrinting = order.status === "approved" && !hasManufacturer && !refunded;
   const canShip = order.status === "printing" && !hasManufacturer && !refunded;
-  const canDeliver = order.status === "shipped";
+  // Teslim DAMGASI da bir harekettir ve iade edilmiş siparişte atılmaz: müşteriye
+  // parası geri verilmiş bir gönderi için "siparişiniz teslim edildi" bildirimi
+  // ve e-postası gidiyordu, üstelik damga geri de alınamıyordu (DELETE /deliver
+  // iadeyi 409 ile reddediyor). Paket yine de ulaştıysa kaydı denetim notuna
+  // yazmak doğru yoldur.
+  const canDeliver = order.status === "shipped" && !refunded;
+  // Düzeltilecek bir kargo kaydı ancak kargolanmış/teslim edilmiş siparişte
+  // vardır — PATCH /ship de tam olarak bu iki durumu kabul eder. Düğmeyi daha
+  // erken göstermek, admin'e sunucunun 400 ile kapattığı bir form açıyordu.
+  const hasShippingRecord = order.status === "shipped" || order.status === "delivered";
+  // ─── Kargo kaydının kuralını SUNUCU söyler ─────────────────────────
+  //
+  // Geri almanın koşulu TEK yerde yaşıyor: GET /api/admin/orders/[id]/ship
+  // (loadShipRevertState) — iade, durum, atölye partisi ve ÖDENMİŞ hakediş.
+  // Sayfa aynı kuralı kendi içinde yeniden kuruyordu ve kopya DARDI: ödenmiş
+  // hakedişi hiç bilmiyordu. Hakedişi ödenmiş bir siparişte "Kargoyu geri al"
+  // açık görünüyor, admin gerekçesini yazıp onay kutusunu da geçtikten sonra
+  // 409 alıyordu — tam olarak bu ucun engellemek için var olduğu ayrışma.
+  // Kopya kaldırıldı: hem düğme hem reddin gerekçesi sunucunun cevabından gelir.
+  const [shipRuleAnswer, setShipRuleAnswer] = useState<ShipRuleAnswer | null>(null);
+  // Yeniden sorma sayacı: cevap alınamazsa admin'in elinde bir "tekrar dene"
+  // olmalı, yoksa geçici bir ağ hatası kargo kutusunu kalıcı kilitler.
+  const [shipRuleReload, setShipRuleReload] = useState(0);
+  // Cevabın ait olduğu durum: sipariş değiştiyse (iade, geri alma, teslim) eski
+  // cevap "yükleniyor" sayılır — bayat bir "evet" düğmeyi açmasın.
+  const shipRuleKey = `${order.id}|${order.status}|${order.paymentStatus}|${shipRuleReload}`;
+  useEffect(() => {
+    // Kargo kaydı yoksa sorulacak bir şey de yok (uç 400 döner).
+    if (order.status !== "shipped" && order.status !== "delivered") return;
+    let alive = true;
+    void (async () => {
+      let value: ShipRuleState;
+      try {
+        const res = await fetch(`/api/admin/orders/${order.id}/ship`);
+        const data = (await res.json().catch(() => ({}))) as {
+          canRevert?: boolean;
+          code?: string;
+          reason?: string | null;
+        };
+        value = res.ok
+          ? {
+              phase: "ready",
+              canRevert: data.canRevert === true,
+              code: typeof data.code === "string" ? data.code : "ok",
+              reason: typeof data.reason === "string" ? data.reason : null,
+            }
+          : { phase: "unknown" };
+      } catch {
+        value = { phase: "unknown" };
+      }
+      if (alive) setShipRuleAnswer({ key: shipRuleKey, value });
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [order.id, order.status, shipRuleKey]);
+
+  const shipRule: ShipRuleState = !hasShippingRecord
+    ? { phase: "idle" }
+    : shipRuleAnswer && shipRuleAnswer.key === shipRuleKey
+      ? shipRuleAnswer.value
+      : { phase: "loading" };
+  const shipRuleCode = shipRule.phase === "ready" ? shipRule.code : null;
+  const canRevertShipping = shipRule.phase === "ready" && shipRule.canRevert;
+  // Atölye partisi: PATCH /ship de DELETE /ship de reddeder. GET /ship bunu
+  // yalnız "kargolandı" durumunda `workshop` koduyla söyler (teslim edilmişte
+  // önce durum kapısına düşer), bu yüzden partinin varlığı siparişin KENDİ
+  // satırından okunur — bu bir kural kopyası değil, rotanın baktığı alanın ta
+  // kendisi (`order.workshopSessionId`).
+  const workshopShippingLocked = hasShippingRecord && !!order.workshopSessionId;
+  // Düzeltmenin (PATCH /ship) kapıları geri almanınkiyle AYNI değildir: durum ve
+  // ödenmiş hakediş yalnız geri almayı kapatır — takip numarasını düzeltmek ne
+  // parayı ne aşamayı hareket ettirir ve teslim edilmiş siparişte de serbesttir.
+  // Düzeltmeyi kapatan iki şey: iade ve atölye partisi (ucun kendi iki kapısı).
+  const canEditShipping =
+    hasShippingRecord &&
+    shipRule.phase === "ready" &&
+    shipRuleCode !== "refunded" &&
+    !workshopShippingLocked;
+  // Reddin GEREKÇESİ de sunucudan gelir; ekran kendi cümlesini uydurmaz.
+  const shipRuleBlockNotice =
+    shipRule.phase === "ready" &&
+    !shipRule.canRevert &&
+    shipRule.reason &&
+    (shipRuleCode === "refunded" ||
+      shipRuleCode === "workshop" ||
+      shipRuleCode === "earning_paid")
+      ? shipRule.reason
+      : null;
+  // Teslim kaydını geri almanın kuralı BAŞKA bir ucun (DELETE /deliver) ve o uç
+  // da iade edilmiş siparişi 409 ile reddeder.
+  const canRevertDelivery = order.status === "delivered" && !refunded;
+  const shipRuleSectionVisible =
+    hasShippingRecord &&
+    (shipRule.phase !== "ready" ||
+      canRevertDelivery ||
+      canRevertShipping ||
+      workshopShippingLocked ||
+      shipRuleBlockNotice !== null);
+  // Uç, taşıyıcıyı isCarrier() ile doğrular: "elden" geçmez. Kayıtta bunlardan
+  // biri yoksa (eski elden teslim) o değer listede KALIR, yoksa düzenleme onu
+  // sessizce başka bir firmaya çevirirdi.
+  const shipCarrierOptions: string[] =
+    order.carrier && !(CARRIERS as string[]).includes(order.carrier)
+      ? [...CARRIERS, order.carrier]
+      : [...CARRIERS];
   // Mirror the API's own gate (assign-manufacturer route): marketplace orders
   // are assignable straight from "paid".
   const statusAssignable =
     order.status === "approved" ||
     (order.status === "paid" && order.orderType === "marketplace");
+  // Üretici KAYDI okunamadığında `manufacturer` null gelir ve bu kapı, atanmış
+  // bir siparişe yeniden atama açardı — "kaydı okuyamadım" ile "atanmamış" aynı
+  // şey değildir. Bilinmezlikte kapı kapalı tarafta kalır (uç zaten reddeder).
   const canAssignManufacturer =
     !refunded &&
+    !readFailures?.manufacturer &&
     statusAssignable && (!manufacturerStatus || manufacturerStatus === "unassigned");
   // Refund is possible at every stage the money is still with us. It used to sit
   // in the reject/force-review row and vanished once an order was printing, in
@@ -1982,7 +3475,73 @@ export function OrderDetailClient({ data, locale }: Props) {
     !refunded &&
     (order.status === "awaiting_model" ||
       (order.status === "paid" && order.orderType === "marketplace" && !hasManufacturer));
-  const canUploadRevision = !refunded && ["approved", "review"].includes(order.status);
+  // Faz 2 (late-model-upload): sürüm yükleme bir durum listesine değil
+  // POLİTİKAYA bağlı — reddedilmiş ve iade edilmiş sipariş dışında her
+  // aşamada açıktır, yan etkileri aşamaya göre değişir (P2-C1).
+  const canUploadRevision = modelUpload?.allowed ?? false;
+  const uploadEffects = modelUpload?.effects ?? null;
+  const uploadNoteRequired = uploadEffects?.requiresNote ?? false;
+  // Gerekçe gereken aşamada dosya seçtirmeden önce gerekçe istenir; sunucu
+  // da aynı kuralı uygular (upload-model route, effects.requiresNote).
+  const uploadReady = uploadOpen && (!uploadNoteRequired || uploadNote.trim().length >= 10);
+  // Güncel sürümün PARÇA listesi bilinmiyor mu: sürüm başlıkları ya da parça
+  // tablosu okunamadıysa "önceki parçaları koru" kararının dayanağı yoktur.
+  const revisionPartsUnknown = !!modelRevisionsUnreadable || !!readFailures?.modelFiles;
+  // QC fotoğrafları artık HER turu taşıyor; kartlar kendi turunu süzer.
+  const liveQcPhotos = (qcPhotos ?? []).filter((p) => p.round === (qcRound ?? 1));
+  const painterLiveQc = (painting?.qcPhotos ?? []).filter(
+    (p) => p.round === (painting?.qcRound ?? 1)
+  );
+  const painterOldQc = (painting?.qcPhotos ?? []).filter(
+    (p) => p.round !== (painting?.qcRound ?? 1)
+  );
+  // Siparişi şu an tutan partner: adım onun adına yapılır (sunucudaki
+  // partnerHoldingOrder ile aynı cevap — sayfa onu çağırıp gönderiyor).
+  const holder = onBehalfHolder ?? "none";
+  const holderLabel = holder === "painter" ? "Boyacı" : "Üretici";
+  // Hangi adım sırada: sunucu son sözü söyler, bu liste yalnız öneridir.
+  const onBehalfOptions: OnBehalfAction[] = refunded
+    ? []
+    : holder === "painter"
+      ? ((): OnBehalfAction[] => {
+          switch (painting?.painterStatus ?? order.painterStatus ?? "") {
+            case "assigned":
+              return ["accept"];
+            case "accepted":
+            case "painting":
+              return ["printed"];
+            case "painted":
+            case "qc_rejected":
+              return ["submit_qc"];
+            case "qc_approved":
+              return ["ship"];
+            default:
+              return [];
+          }
+        })()
+      : holder === "manufacturer"
+        ? ((): OnBehalfAction[] => {
+            switch (manufacturerStatus ?? "") {
+              case "assigned":
+                return ["accept"];
+              // Üretici işi aldı ama başlamadı: sıradaki adım BASKIYI BAŞLATMA
+              // (on-behalf.ts: accepted → printing). "Baskıyı bitirdi" adımını
+              // sunucu yalnız "baskıda" durumundan kabul ettiği için burada
+              // onu önermek garanti reddedilen bir tıklamaydı.
+              case "accepted":
+                return ["start_printing"];
+              case "printing":
+                return ["printed"];
+              case "printed":
+              case "qc_rejected":
+                return ["submit_qc"];
+              case "qc_approved":
+                return ["ship"];
+              default:
+                return [];
+            }
+          })()
+        : [];
   const addr = order.shippingAddress;
 
   /**
@@ -2215,6 +3774,11 @@ export function OrderDetailClient({ data, locale }: Props) {
    * Pull a painting order back from the painter to the assignment queue. Detaches
    * both the painter and the manufacturer and reverses the manufacturer's accrued
    * print earning (server-side).
+   *
+   * İADE EDİLMİŞ siparişte yol BAŞKADIR (revoke-painter/route.ts ·
+   * detachRefundedFromPainter): yalnız koparır — durum korunur, kuyruğa dönmez,
+   * otomatik atama yapılmaz, kara liste yazılmaz ve PARAYA DOKUNULMAZ. Kartın
+   * metni de, gönderilen alanlar da bu ayrımı izler.
    */
   const revokePainter = async () => {
     if (revokePainterReason.trim().length < 3) {
@@ -2228,7 +3792,10 @@ export function OrderDetailClient({ data, locale }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reason: revokePainterReason.trim(),
-          blocklistManufacturer: revokePainterBlocklist,
+          // İade edilmiş siparişte ceza YOKTUR: rota bu alanı hiç okumaz ve
+          // ekran da onu sormaz (kutu gizli). Gönderilen değer, kaydın
+          // gerçeğiyle aynı kalsın diye burada da kapatılır.
+          blocklistManufacturer: refunded ? false : revokePainterBlocklist,
           // Admin'in açık isteği: yerleştirme yapılmasın. Rotanın kabul ettiği
           // alan (revoke-painter/route.ts) buraya kadar bağlanmamıştı, bu yüzden
           // seçenek ekranda hiç yoktu.
@@ -2504,8 +4071,10 @@ export function OrderDetailClient({ data, locale }: Props) {
               </h2>
               <p className="mt-0.5 text-sm text-red-800">
                 Bu siparişin ödemesi iade edildi. Durumu ({statusLabel(order.status)}) kayıt için
-                korunur; onay, model yükleme, üretici atama, baskı, kargo, boyacı atama ve boyama
-                ekleme kapalıdır. Teslim ve ret açık kalır.
+                korunur; onay, model yükleme, üretici atama, baskı, kargo, boyacı atama, boyama
+                ekleme ve TESLİM damgası kapalıdır — iade edilmiş sipariş hiçbir yöne kımıldamaz.
+                Paket müşteriye ulaştıysa bunu denetim notuna yazın. Yalnız siparişi reddetme
+                (kapatma) açık kalır.
               </p>
               {refundRecord && (
                 <p className="mt-2 text-xs text-red-700">
@@ -2534,6 +4103,39 @@ export function OrderDetailClient({ data, locale }: Props) {
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ─── Yeni uçların hatası ────────────────────────────
+          Reddin sebebi tek yerde toplanır: her kart kendi hatasını ayrı ayrı
+          saklayınca admin "tıkladım, bir şey olmadı" ile kalıyordu. */}
+      {actionError && (
+        <div
+          role="alert"
+          className="mb-5 flex items-start justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
+        >
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="shrink-0 text-xs font-medium underline"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
+
+      {/* ─── Müşteri notu ───────────────────────────────────
+          Sipariş verilirken yazılan not (hediye paketi, fatura istemiyorum,
+          teslimat saati…) sayfaya GELİYOR ama hiçbir yerde basılmıyordu. En
+          üstte durur: üretimi ve kargoyu doğrudan etkileyen tek müşteri
+          cümlesi odur. */}
+      {order.customerNote && (
+        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-amber-900">
+            Müşteri notu
+          </h2>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-amber-900">{order.customerNote}</p>
         </div>
       )}
 
@@ -2609,6 +4211,17 @@ export function OrderDetailClient({ data, locale }: Props) {
               ? d["admin.gate.mode.enforce"]
               : d["admin.gate.mode.shadow"]}
           </p>
+          {/* Ölçüm kaydı OKUNAMADI: "ölçüm yok" (yeni sipariş) ile aynı şey
+              değil. Sunucu kapıyı gerekçeli onaya çekti; kart sebebini söyler,
+              yoksa admin boş bir karara bakıp "ölçülmemiş" sanırdı. */}
+          {readFailures?.printGateReport && (
+            <ReadFailedNotice>
+              Bu siparişin ölçüm kaydı (baskı raporu) şu anda okunamadı (geçici sistem
+              arızası). Aşağıdaki karar ve ölçümler EKSİK değil, BİLİNMİYOR: hiçbir
+              ölçüm yapılmamış gibi görünmesi bir okuma arızasıdır. Onay bu yüzden
+              gerekçe ister; birkaç dakika sonra sayfayı yenileyin.
+            </ReadFailedNotice>
+          )}
 
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             {/* Reasons */}
@@ -2843,11 +4456,37 @@ export function OrderDetailClient({ data, locale }: Props) {
                       <span className="text-xs text-emerald-500 font-medium">{d["admin.orderDetail.orManual"]}</span>
                       <div className="flex-1 border-t border-emerald-200" />
                     </div>
-                    <div className="flex gap-2 mt-3">
-                      <input type="text" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow" placeholder={d["admin.orderDetail.trackingPlaceholder"]} />
-                      <button onClick={() => { if (trackingNumber.trim()) performAction("ship", { trackingNumber: trackingNumber.trim() }); }} disabled={!!loading || !trackingNumber.trim()} className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-xl hover:bg-gray-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors">
-                        {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
-                      </button>
+                    <div className="mt-3 space-y-2">
+                      <select
+                        value={manualShipCarrier}
+                        onChange={(e) => setManualShipCarrier(e.target.value)}
+                        aria-label="Kargo firması"
+                        className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow"
+                      >
+                        <option value="">Kargo firmasını seçin…</option>
+                        {CARRIERS.map((c) => (
+                          <option key={c} value={c}>
+                            {CARRIER_LABEL[c] ?? c}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <input type="text" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-shadow" placeholder={d["admin.orderDetail.trackingPlaceholder"]} />
+                        <button
+                          onClick={() => {
+                            if (trackingNumber.trim() && manualShipCarrier) {
+                              performAction("ship", {
+                                trackingNumber: trackingNumber.trim(),
+                                carrier: manualShipCarrier,
+                              });
+                            }
+                          }}
+                          disabled={!!loading || !trackingNumber.trim() || !manualShipCarrier}
+                          className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-xl hover:bg-gray-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors"
+                        >
+                          {loading === "ship" ? d["admin.orderDetail.shipping"] : d["admin.orderDetail.ship"]}
+                        </button>
+                      </div>
                     </div>
                     {/* Undo an accidental self-print: back to the assignment stage
                         so the admin can hand the job to a manufacturer instead. */}
@@ -2887,6 +4526,24 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {/* Sıralama ÜRETİLEMEDİ: aday listesi boş değil, YOK. Bu ayrımı
+            söylemeyen ekran, "hiç uygun atölye yok" diye hiç yapılmamış bir
+            değerlendirmenin sonucunu duyurmuş olurdu. */}
+        {canAssignManufacturer && readFailures?.candidates && (
+          <ReadFailedNotice>
+            Üretici öneri sıralaması şu anda üretilemedi (geçici sistem arızası): atölye skorları
+            hesaplanamadığı için öneri kartı gösterilemiyor. Bu, &quot;uygun atölye yok&quot; demek
+            DEĞİLDİR. Atama kapalı değil — aşağıdaki listeden elle atayabilirsiniz; atama ucu
+            skorlardan bağımsız çalışır. Birkaç dakika sonra sayfayı yenileyin.
+          </ReadFailedNotice>
+        )}
+        {canAssignManufacturer && readFailures?.activeManufacturers && (
+          <ReadFailedNotice>
+            Aktif üretici listesi şu anda okunamadı (geçici sistem arızası); atama kutusu bu yüzden
+            boş görünüyor. Kayıtlı atölyeler silinmedi. Birkaç dakika sonra sayfayı yenileyin.
+          </ReadFailedNotice>
         )}
 
         {/* Manufacturer Assignment — ranked recommendations */}
@@ -3049,7 +4706,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                 Üretici ataması
               </h3>
               <span className="text-xs text-gray-500">
-                {manufacturer?.companyName} · {manufacturerStatus}
+                {manufacturer?.companyName} · {manufacturerStatusLabel(manufacturerStatus)}
               </span>
             </div>
 
@@ -3297,6 +4954,13 @@ export function OrderDetailClient({ data, locale }: Props) {
         )}
 
         {/* ─── Atama gerekçesi: kararın kendi anındaki skorları ───────────── */}
+        {readFailures?.assignmentDecisions && (
+          <ReadFailedNotice>
+            Atama değerlendirme kayıtları şu anda okunamadı (geçici sistem arızası): bu siparişin
+            &quot;neden bu atölyeye gitti&quot; dökümü gösterilemiyor. Kayıtlar silinmedi; bu kart boş
+            DEĞİL, bilinmiyor.
+          </ReadFailedNotice>
+        )}
         {assignmentDecisions && assignmentDecisions.length > 0 && (
           <AssignmentEvaluationCard
             decisions={assignmentDecisions}
@@ -3321,6 +4985,13 @@ export function OrderDetailClient({ data, locale }: Props) {
             )}
           </div>
 
+          {readFailures?.journey && (
+            <ReadFailedNotice>
+              Hatıra karekodu kaydı şu anda okunamadı (geçici sistem arızası): bu siparişin
+              karekodu var mı, yok mu söyleyemiyoruz. Kutuya konmuş bir karekod geçerliliğini
+              YİTİRMEDİ. Birkaç dakika sonra sayfayı yenileyin.
+            </ReadFailedNotice>
+          )}
           {journey?.qrUrl && journey.url ? (
             <div className="mt-3 flex flex-wrap items-start gap-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -3527,7 +5198,8 @@ export function OrderDetailClient({ data, locale }: Props) {
                   <span
                     className={`text-xs ${painter.status === "active" ? "text-green-700" : "text-red-700"}`}
                   >
-                    {painter.status}
+                    {PARTNER_ACCOUNT_STATUS_LABEL[painter.status] ??
+                      painter.status.replace(/_/g, " ")}
                     {!painter.acceptingOrders && " · iş almıyor"}
                   </span>
                 </div>
@@ -3584,11 +5256,16 @@ export function OrderDetailClient({ data, locale }: Props) {
                 <div className="col-span-2">
                   <p className="text-xs text-gray-500">Boyacı hakedişi</p>
                   <p className="text-gray-600">
-                    {refunded
-                      ? "İade edildi — hakediş oluşmaz"
-                      : paintsInHouseShare
-                        ? "Boyama üreticide — boyama payı üreticinin hakedişinde"
-                        : "Henüz tahakkuk etmedi (boyacı kargoladığında oluşur)"}
+                    {/* Okunamayan kayıt "tahakkuk etmedi" DEĞİLDİR: tahakkuk
+                        etmiş bir parayı "henüz oluşmadı" diye göstermek, para
+                        hakkında yapılmamış bir okumanın iddiasıdır. */}
+                    {readFailures?.painterEarning
+                      ? "Hakediş kaydı şu anda okunamadı (geçici sistem arızası) — tahakkuk edip etmediği bilinmiyor"
+                      : refunded
+                        ? "İade edildi — hakediş oluşmaz"
+                        : paintsInHouseShare
+                          ? "Boyama üreticide — boyama payı üreticinin hakedişinde"
+                          : "Henüz tahakkuk etmedi (boyacı kargoladığında oluşur)"}
                   </p>
                 </div>
               )}
@@ -3651,6 +5328,12 @@ export function OrderDetailClient({ data, locale }: Props) {
                       </div>
                     )
                   )}
+                  {painting.paintedAt && (
+                    <div className="flex gap-2">
+                      <dt className="w-32 shrink-0 text-gray-500">Boyama bitti</dt>
+                      <dd>{formatDateTime(painting.paintedAt, loc)}</dd>
+                    </div>
+                  )}
                   {painting.qcRound > 1 && (
                     <div className="flex gap-2">
                       <dt className="w-32 shrink-0 text-gray-500">QC turu</dt>
@@ -3663,33 +5346,192 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
 
-            {/* Painter QC photos for the live round */}
-            {painting.qcPhotos.length > 0 && (
-              <div className="mt-4">
+            {/* Boyacı yeni model sürümünü gördü mü. Günlük okunamadıysa kapı
+                yine kapalı ama SEBEP başkadır: duyurulan sürüm numarasını
+                bilmiyoruz, o yüzden burada bir numara YAZILMAZ. */}
+            {partnerAck?.painter.readFailed ? (
+              <p
+                role="alert"
+                className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              >
+                Boyacının model onay kaydı şu anda okunamadı (geçici sistem arızası): yeni bir
+                sürümün duyurulup duyurulmadığını ve boyacının onaylayıp onaylamadığını
+                söyleyemiyoruz. Güvenlik gereği boyacının QC&apos;ye gönderme ve kargolama adımları
+                — boyacı adına yapılanlar dahil — kapalı tutuldu. Birkaç dakika sonra sayfayı
+                yenileyin.
+              </p>
+            ) : partnerAck?.painter.pending ? (
+              <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Boyacı {partnerAck.painter.announcedRevision}. sürümü henüz onaylamadı; elindeki
+                baskı eski sürüme ait olabilir. QC&apos;ye gönderme ve kargolama adımları onaya
+                kadar kapalı — boyacı adına yapılan işlemler dahil.
+              </p>
+            ) : null}
+
+            {/* ─── Boyacı QC: fotoğraflar + YERİNDE onay / ret ──────────
+                Karar buradan verilebilmeli: admin siparişi bırakıp QC kuyruğuna
+                gidiyor, orada da hangi siparişe baktığını başka bir ekrandan
+                hatırlamak zorunda kalıyordu. */}
+            {(painterLiveQc.length > 0 || painting.painterStatus === "qc_pending") && (
+              <div className="mt-4 rounded-xl border border-gray-200 p-3">
                 <p className="mb-1.5 text-xs font-medium text-gray-600">
                   Boyacı QC fotoğrafları ({painting.qcRound}. tur)
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {painting.qcPhotos.map((p) => (
-                    <a
-                      key={p.id}
-                      href={p.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block h-20 w-20 overflow-hidden rounded-lg border border-gray-200"
+                {painterLiveQc.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {painterLiveQc.map((p) => (
+                      <a
+                        key={p.id}
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={formatDateTime(p.createdAt, loc)}
+                        className="block h-20 w-20 overflow-hidden rounded-lg border border-gray-200"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt="" className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                ) : readFailures?.painterQcPhotos ? (
+                  <ReadFailedNotice>
+                    Bu turun boyacı QC fotoğrafları şu anda okunamadı (geçici sistem arızası); bu,
+                    &quot;fotoğraf yüklenmedi&quot; demek DEĞİLDİR. Görmediğiniz fotoğraflara dayanarak
+                    onaylamayın — birkaç dakika sonra sayfayı yenileyin.
+                  </ReadFailedNotice>
+                ) : (
+                  <p className="text-xs text-gray-500">Bu turda henüz fotoğraf yüklenmedi.</p>
+                )}
+
+                {/* KONTROL YA ÇALIŞIR YA DA SEBEBİYLE KAYBOLUR.
+                    Kart, fotoğraflar okunamazken yukarıda "görmediğiniz
+                    fotoğraflara dayanarak onaylamayın" diyor ve hemen altında
+                    aynı onayı tek tıkla sunuyordu: ekran kendi uyarısının
+                    tersini öneriyordu. Onay boyacının kargosunu ve hakedişine
+                    giden yolu açar, ret ise turu artırıp işi yeniden boyamaya
+                    yollar; ikisinin de tek dayanağı bu fotoğraflar. Kapı bu
+                    yüzden kapanır — uç çalışıyor, sunulacak KANIT yok. */}
+                {!refunded &&
+                  painting.painterStatus === "qc_pending" &&
+                  (readFailures?.painterQcPhotos ? (
+                    <div
+                      role="alert"
+                      className="mt-3 border-t border-gray-100 pt-3 text-xs text-amber-900"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.url} alt="" className="h-full w-full object-cover" />
-                    </a>
+                      <p className="font-semibold">Boyama onayı ve reddi kapatıldı</p>
+                      <p className="mt-0.5 text-amber-900/80">
+                        Fotoğraflar okunana kadar bu turda karar verilemez. Boyacıya
+                        hiçbir şey iletilmedi ve iş QC kuyruğunda duruyor; okuma
+                        düzelince karar burada ya da boyacı QC kuyruğunda verilebilir.
+                        Karar acilse önce arızanın geçmesini bekleyin — ret gerekçesi de
+                        onay da geri alınamaz.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => painterQcDecision("approve")}
+                        disabled={!!loading}
+                        className="w-full rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
+                      >
+                        {loading === "painter-qc-approve"
+                          ? "İşleniyor…"
+                          : "Boyamayı onayla (boyacının kargosu açılır)"}
+                      </button>
+                      <textarea
+                        value={painterQcReason}
+                        onChange={(e) => setPainterQcReason(e.target.value)}
+                        rows={2}
+                        maxLength={2000}
+                        placeholder="Ret gerekçesi — boyacıya aynen iletilir"
+                        className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => painterQcDecision("reject")}
+                        disabled={!!loading || painterQcReason.trim().length < 3}
+                        className="w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:bg-gray-300 disabled:text-gray-500"
+                      >
+                        {loading === "painter-qc-reject" ? "İşleniyor…" : "Reddet ve yeniden boyat"}
+                      </button>
+                    </div>
                   ))}
-                </div>
+
                 <a
                   href="/admin/painter-qc-queue"
-                  className="mt-1.5 inline-block text-xs text-blue-700 hover:underline"
+                  className="mt-2 inline-block text-xs text-blue-700 hover:underline"
                 >
-                  Boyacı QC kuyruğunda onayla/reddet →
+                  Boyacı QC kuyruğu →
                 </a>
               </div>
+            )}
+
+            {/* QC geçmişi: kararlar + reddedilen turların fotoğrafları. Bir
+                reddin NEYE bakılarak verildiği sayfada kalmalı. */}
+            {(readFailures?.painterQcPhotos || readFailures?.painterQcReviews) && (
+              <ReadFailedNotice>
+                Boyacı QC geçmişi şu anda okunamadı (geçici sistem arızası): önceki turların
+                fotoğrafları ve onay/ret kararları gösterilemiyor. Bu kart boş DEĞİL, bilinmiyor.
+              </ReadFailedNotice>
+            )}
+            {(painting.qcReviews.length > 0 || painterOldQc.length > 0) && (
+              <div className="mt-4">
+                <p className="mb-1.5 text-xs font-medium text-gray-600">Boyacı QC geçmişi</p>
+                {painting.qcReviews.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {painting.qcReviews.map((r) => (
+                      <li key={r.id} className="flex items-start gap-2 text-xs">
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 font-semibold ${
+                            r.decision === "approved"
+                              ? "bg-green-50 text-green-700"
+                              : "bg-red-50 text-red-700"
+                          }`}
+                        >
+                          {r.decision === "approved" ? "Onaylandı" : "Reddedildi"}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-gray-500">
+                            {r.round}. tur · {formatDateTime(r.createdAt, loc)} · {r.adminEmail}
+                          </p>
+                          {r.reason && <p className="mt-0.5 text-gray-700">{r.reason}</p>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {painterOldQc.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {painterOldQc.map((p) => (
+                      <a
+                        key={p.id}
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`${p.round}. tur · ${formatDateTime(p.createdAt, loc)}`}
+                        className="block h-14 w-14 overflow-hidden rounded-lg border border-gray-200 opacity-70"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt="" className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Günlük okunamadıysa liste boş kalır; sessizlik de bir iddiadır
+                ("boyacı hiçbir şey yapmamış"), o yüzden sebep yazılır. */}
+            {painting.actionsUnreadable && (
+              <p
+                role="alert"
+                className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              >
+                Boyacı hareketleri şu anda okunamadı (geçici sistem arızası); bu kart boş DEĞİL,
+                bilinmiyor. Sayfanın geri kalanı gerçek kayıtlardır. Birkaç dakika sonra sayfayı
+                yenileyin.
+              </p>
             )}
 
             {/* What has happened, in the painter's own log */}
@@ -3705,7 +5547,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                         {formatDateTime(x.createdAt, loc)}
                       </span>
                       <span className="font-medium text-gray-800">
-                        {PAINTER_ACTION_LABEL[x.action] ?? x.action}
+                        {painterActionLabel(x.action)}
                       </span>
                       {x.notes && <span className="text-gray-500">{x.notes}</span>}
                     </li>
@@ -3714,6 +5556,13 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
 
+            {readFailures?.painterDeclined && (
+              <ReadFailedNotice>
+                Bu işi reddeden boyacıların listesi şu anda okunamadı (geçici sistem arızası);
+                burada kimsenin görünmemesi &quot;kimse reddetmedi&quot; demek DEĞİLDİR. Ret kaydı
+                sunucuda duruyor ve atama yine reddedenleri atlar.
+              </ReadFailedNotice>
+            )}
             {painting.declined.length > 0 && (
               <p className="mt-3 text-xs text-gray-500">
                 Reddedenler:{" "}
@@ -3721,6 +5570,97 @@ export function OrderDetailClient({ data, locale }: Props) {
                 boyacılara tekrar atanamaz.
               </p>
             )}
+
+            {/* ─── Yalnız boyacıyı değiştir ──────────────────────────────
+                Tek çıkış yolu "boyacıdan geri al" idi: o yol ÜRETİCİYİ de
+                koparır ve tahakkuk etmiş baskı hakedişini geri alır. Oysa çoğu
+                vakada üreticide sorun yoktur. Bu kart yalnız boyacıyı değiştirir;
+                parça hâlâ eski boyacıdadır ve devir kargosu ile (gerekirse)
+                yeniden baskı bugün ELLE mutabakatla kapatılır — bu ekran para
+                sözü vermez. */}
+            {!refunded &&
+              !!painting.painterStatus &&
+              painting.painterStatus !== "unassigned" &&
+              painting.painterStatus !== "shipped" && (
+                <div className="mt-4 border-t border-gray-200 pt-4">
+                  {!swapOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setSwapOpen(true)}
+                      className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
+                    >
+                      Boyacıyı değiştir (üretici kalsın)
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-[11px] text-fuchsia-900">
+                        Üretici, üretici durumu ve tahakkuk etmiş baskı hakedişi olduğu gibi kalır;
+                        iş yalnız yeni boyacıya geçer ve boyacı QC turu sıfırlanır. Baskı hâlâ eski
+                        boyacının elinde: devir kargosu ve gerekirse yeniden baskı elle mutabakatla
+                        kapatılır.
+                      </p>
+                      <select
+                        value={swapPainterId}
+                        onChange={(e) => setSwapPainterId(e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Yeni boyacı seçin…</option>
+                        {painting.candidates
+                          .filter((c) => c.id !== painter?.id)
+                          .map((c) => (
+                            <option key={c.id} value={c.id} disabled={!c.eligible}>
+                              {c.companyName} — {c.currentLoad}/{c.maxConcurrentOrders}
+                              {c.declined
+                                ? " (reddetti)"
+                                : !c.acceptingOrders
+                                  ? " (iş almıyor)"
+                                  : c.currentLoad >= c.maxConcurrentOrders
+                                    ? " (kapasite dolu)"
+                                    : ""}
+                            </option>
+                          ))}
+                      </select>
+                      <textarea
+                        value={swapReason}
+                        onChange={(e) => setSwapReason(e.target.value)}
+                        rows={2}
+                        maxLength={500}
+                        placeholder="Gerekçe (zorunlu) — örn. boyacı işi bıraktı, iki haftadır cevap yok"
+                        className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                      />
+                      <label className="flex items-center gap-1.5 text-xs text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={swapBlocklist}
+                          onChange={(e) => setSwapBlocklist(e.target.checked)}
+                        />
+                        Eski boyacıyı bu sipariş için bir daha önerme
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={swapPainter}
+                          disabled={!!loading || !swapPainterId || swapReason.trim().length < 3}
+                          className="rounded-xl bg-fuchsia-600 px-4 py-2 text-xs font-semibold text-white hover:bg-fuchsia-700 disabled:bg-gray-300 disabled:text-gray-500"
+                        >
+                          {loading === "swap-painter" ? "Değiştiriliyor…" : "Boyacıyı değiştir"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSwapOpen(false);
+                            setSwapPainterId("");
+                            setSwapReason("");
+                          }}
+                          className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                        >
+                          Vazgeç
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
             {/* Assign / reassign. Only while nobody holds the job and the print
                 has cleared QC — the same gate the manufacturer's hand-off uses. */}
@@ -3734,11 +5674,17 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {manufacturerStatus !== "qc_approved" ? (
                   <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
                     Atama, üretici QC onayından sonra açılır. Şu anki üretici
-                    durumu: <strong>{manufacturerStatus ?? "—"}</strong>.{" "}
+                    durumu: <strong>{manufacturerStatusLabel(manufacturerStatus)}</strong>.{" "}
                     <a href="/admin/qc-queue" className="text-blue-700 hover:underline">
                       QC kuyruğuna git
                     </a>
                   </p>
+                ) : readFailures?.painterCandidates ? (
+                  <ReadFailedNotice>
+                    Boyacı listesi şu anda okunamadı (geçici sistem arızası); bu, &quot;aktif boyacı
+                    yok&quot; demek DEĞİLDİR. Atama kutusu doldurulamadığı için boyacı ataması geçici
+                    olarak yapılamıyor. Birkaç dakika sonra sayfayı yenileyin.
+                  </ReadFailedNotice>
                 ) : painting.candidates.length === 0 ? (
                   <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
                     Aktif boyacı yok.{" "}
@@ -3822,6 +5768,23 @@ export function OrderDetailClient({ data, locale }: Props) {
               </span>
             </div>
 
+            {/* İade edilmiş siparişte kart ne YAPILDIĞINI söyler. Eski metin
+                kuyruğa dönüş, otomatik yeniden atama ve hakedişin geri
+                alınmasını vaat ediyordu; iade dalı (revoke-painter/route.ts ·
+                detachRefundedFromPainter) bunların HİÇBİRİNİ yapmaz — yalnız
+                koparır. En ağırı para cümlesiydi: admin, geri alınmamış bir
+                baskı hakedişini geri alınmış sanıyordu. */}
+            {refunded ? (
+              <p className="mt-2 rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-900">
+                ⚠ Sipariş iade edilmiş: bu işlem yalnız <strong>koparır</strong>. Boyacı ve üretici
+                siparişten çıkarılır; sipariş durumu ({statusLabel(order.status)}) DEĞİŞMEZ, atama
+                kuyruğuna dönmez ve otomatik olarak yeni bir üreticiye gitmez. Hiçbir hakediş geri
+                alınmaz, ters kayıt atılmaz (iadenin parası kendi akışında görülür) ve hiçbir
+                partner cezalandırılmaz — kimsenin kusuru yok. İz kalır: iki partnerin de işlem
+                geçmişine &quot;admin geri aldı&quot; kaydı, sipariş notlarına da sebebiyle
+                birlikte bir satır yazılır.
+              </p>
+            ) : (
             <p className="mt-2 rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-900">
               ⚠ Bu işlem hem <strong>boyacıyı</strong> hem <strong>üreticiyi</strong> çıkarır ve
               sipariş tekrar atama kuyruğuna (onaylı) döner; aşağıdaki kutuyu
@@ -3844,8 +5807,9 @@ export function OrderDetailClient({ data, locale }: Props) {
                 )}
               </strong>
               {" "}brüt) geri alınır; yeni bir üretici sıfırdan basar. Hakediş zaten
-              ödenmişse (payout kapanmış) işlem reddedilir — iade akışını kullanın.
+              ödenmişse (ödeme partisi kapanmış) işlem reddedilir — iade akışını kullanın.
             </p>
+            )}
 
             {!revokePainterOpen ? (
               <button
@@ -3869,19 +5833,21 @@ export function OrderDetailClient({ data, locale }: Props) {
                     className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
                   />
                 </div>
-                <div className="flex flex-wrap gap-4 text-xs text-gray-700">
-                  <label className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={revokePainterBlocklist}
-                      onChange={(e) => setRevokePainterBlocklist(e.target.checked)}
-                    />
-                    Bu üreticiyi bu sipariş için bir daha önerme
-                  </label>
-                  {/* İade edilen siparişte hiçbir şekilde atama yapılmaz, bu
-                      yüzden orada seçeneğin karşılığı yok (üretici geri
-                      almasındaki kuralın aynısı). */}
-                  {!refunded && (
+                {/* İade edilen siparişte İKİ kutunun da karşılığı yok: kara
+                    liste bir SONRAKİ partner içindir ve sonraki partner
+                    olmayacak; atama da hiç yapılmaz. Rota ikisini de okumaz
+                    (detachRefundedFromPainter), yani ekranda durmaları
+                    yapılmayacak bir işi vaat etmek olurdu. */}
+                {!refunded && (
+                  <div className="flex flex-wrap gap-4 text-xs text-gray-700">
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={revokePainterBlocklist}
+                        onChange={(e) => setRevokePainterBlocklist(e.target.checked)}
+                      />
+                      Bu üreticiyi bu sipariş için bir daha önerme
+                    </label>
                     <label className="flex items-center gap-1.5">
                       <input
                         type="checkbox"
@@ -3892,8 +5858,8 @@ export function OrderDetailClient({ data, locale }: Props) {
                       />
                       Kuyruğumda kalsın (otomatik atama yapılmasın)
                     </label>
-                  )}
-                </div>
+                  </div>
+                )}
                 {!refunded && (
                   <p className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-600">
                     {/* Üretici geri almasındaki kuralın aynısı: yerleştirme
@@ -3951,12 +5917,37 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             </div>
 
-            {qcPhotos && qcPhotos.length > 0 ? (
+            {/* Tur onaylanamıyorsa SEBEBİNİ yazar. Kart eskiden dört ayrı hâle
+                de "GÜNCEL sürümden daha eski bir baskı" diyordu: damgasız tur
+                "eski" değil "bilinmiyor" demek, fotoğrafsız turda ise ortada
+                baskı bile yok. Cümle uçla ortak modülden gelir
+                (qcProofRefusalView), yani ekran kaydın yazmadığı bir sebebi
+                iddia edemez. Fotoğrafın hangi sürüme ait olduğu ayrıca her
+                rozette yazar. */}
+            {qcRevisionMismatch && (
+              <p role="alert" className="mb-4 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900">
+                {/* Fotoğraf tablosu OKUNAMADIYSA kanıt "yok" değil BİLİNMİYOR:
+                    qcProof sıfır fotoğraf gördüğü için "fotoğrafsız tur" der,
+                    oysa ortada yapılmamış bir okuma var. Kapı iki dalda da
+                    kapalı; ayrışan yalnız anlatılan sebep. */}
+                {readFailures?.qcPhotos
+                  ? "Bu turun QC fotoğrafları şu anda okunamadı (geçici sistem arızası): tur FOTOĞRAFSIZ DEĞİL, kaç fotoğraf olduğu bilinmiyor. Kanıt görülemediği için onay kapalı tutuldu. Fotoğraflar silinmedi — üreticiden yeniden yükleme istemeyin, birkaç dakika sonra sayfayı yenileyin."
+                  : qcProofView.banner}
+              </p>
+            )}
+            {readFailures?.qcPhotos ? (
+              <ReadFailedNotice>
+                QC fotoğrafları okunamadı; bu alan boş DEĞİL, bilinmiyor.
+              </ReadFailedNotice>
+            ) : liveQcPhotos.length > 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
-                {qcPhotos.map((p) => (
-                  <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer">
+                {liveQcPhotos.map((p) => (
+                  <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="relative block">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.url} alt="" className="w-full h-32 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                    <span className="absolute left-1 top-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      {p.modelRevision != null ? `Sürüm ${p.modelRevision}` : "Sürüm bilinmiyor"}
+                    </span>
                   </a>
                 ))}
               </div>
@@ -3965,13 +5956,86 @@ export function OrderDetailClient({ data, locale }: Props) {
             )}
 
             <div className="flex flex-col gap-3">
+              {/* Eski sürümün baskısı NORMAL yoldan onaylanamaz: sunucu da bu
+                  turu reddeder, ekran da açmaz. Tek taraflı bir "uyarı"
+                  bırakmak, onayı tek tıkla geçilebilir kılıyordu.
+                  Kararın (late-model-upload) izin verdiği DENETİMLİ istisna
+                  aşağıda ayrı bir düğmededir: uç onu overrideStaleRevision +
+                  gerekçe ile destekliyor ve ret mesajı admin'e "yine de
+                  onaylayacaksanız eski sürüm onayını kullanın" diyordu — ama
+                  ekranda o yol hiç yoktu, yani yanlış damgalanmış tek bir
+                  fotoğrafın tek çıkışı qc-reject oluyordu. */}
               <button
                 onClick={() => performAction("qc-approve")}
-                disabled={!!loading}
+                disabled={!!loading || qcRevisionMismatch}
+                title={
+                  qcRevisionMismatch ? qcCardView.gateTitle : undefined
+                }
                 className="w-full px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
               >
                 {loading === "qc-approve" ? d["admin.qc.processing"] : d["admin.qc.approve"]}
               </button>
+
+              {qcRevisionMismatch && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+                  {!staleOverrideOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setStaleOverrideOpen(true)}
+                      className="text-xs font-semibold text-red-800 underline hover:text-red-900"
+                    >
+                      {qcCardView.overrideLink}
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-red-900">{qcCardView.overrideEffect}</p>
+                      <label
+                        htmlFor="stale-qc-reason"
+                        className="block text-xs font-medium text-red-900"
+                      >
+                        Gerekçe <span className="text-red-600">*</span>
+                      </label>
+                      <textarea
+                        id="stale-qc-reason"
+                        rows={2}
+                        maxLength={500}
+                        value={staleOverrideReason}
+                        onChange={(e) => setStaleOverrideReason(e.target.value)}
+                        placeholder="örn. fark yalnız kaide altında, müşteri gördü ve onayladı; yeniden baskı yapılmayacak"
+                        className="w-full resize-none rounded-xl border border-red-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                      />
+                      <p className="text-[11px] text-red-800">
+                        En az {STALE_QC_OVERRIDE_REASON_MIN} karakter.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={approveStaleQc}
+                          disabled={
+                            !!loading ||
+                            staleOverrideReason.trim().length < STALE_QC_OVERRIDE_REASON_MIN
+                          }
+                          className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:bg-gray-300 disabled:text-gray-500"
+                        >
+                          {loading === "qc-approve"
+                            ? d["admin.qc.processing"]
+                            : "Gerekçeli onayı uygula"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStaleOverrideOpen(false);
+                            setStaleOverrideReason("");
+                          }}
+                          className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                        >
+                          Vazgeç
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="border-t border-gray-100 pt-3">
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">{d["admin.qc.rejectReason"]}</label>
                 <textarea
@@ -4148,7 +6212,13 @@ export function OrderDetailClient({ data, locale }: Props) {
                   />
                 </label>
               </div>
-              {photos.length === 0 ? (
+              {readFailures?.photos ? (
+                <ReadFailedNotice>
+                  Referans fotoğraflar şu anda okunamadı (geçici sistem arızası); bu kart BOŞ
+                  DEĞİL, bilinmiyor. Fotoğraflar silinmedi — yeniden yüklemeyin, birkaç dakika
+                  sonra sayfayı yenileyin.
+                </ReadFailedNotice>
+              ) : photos.length === 0 ? (
                 <p className="text-sm text-gray-400">Henüz fotoğraf yok.</p>
               ) : (
                 <div className="flex flex-wrap gap-3">
@@ -4189,7 +6259,16 @@ export function OrderDetailClient({ data, locale }: Props) {
                   {displayGlbUrl && (
                     <div className={`p-5 ${photos[0] ? "sm:w-1/2" : "w-full"}`}>
                       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{d["admin.orderDetail.modelPreview"]}</h3>
-                      <ModelViewer url={displayGlbUrl} className="w-full h-72 rounded-xl" />
+                      <ModelPreviewBoundary key={displayGlbUrl} downloadUrl={displayGlbUrl}>
+                        <ModelViewer
+                          url={displayGlbUrl}
+                          className="w-full h-72 rounded-xl"
+                          // Dosya eksikse ya da okunamıyorsa görüntüleyici
+                          // kendi içinde durur; WebGL teşhisi yerine (tarayıcıyı
+                          // suçlayan yanlış cümle) bu kutuyu basar.
+                          errorFallback={<ModelPreviewFallback downloadUrl={displayGlbUrl} />}
+                        />
+                      </ModelPreviewBoundary>
                     </div>
                   )}
                 </div>
@@ -4216,7 +6295,18 @@ export function OrderDetailClient({ data, locale }: Props) {
 
             {/* Customer Card */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">{d["admin.orderDetail.customerInfo"]}</h3>
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{d["admin.orderDetail.customerInfo"]}</h3>
+                {!customerEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomerEditing(true)}
+                    className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-800"
+                  >
+                    Düzenle
+                  </button>
+                )}
+              </div>
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
                   {initials}
@@ -4239,6 +6329,102 @@ export function OrderDetailClient({ data, locale }: Props) {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                 </a>
               </div>
+
+              {/* Müşteri kimliği satır içi düzenlenir: elle açılan ve WhatsApp
+                  siparişlerinde ad/e-posta/telefon eksik ya da yanlış girilir ve
+                  bugüne kadar düzeltmenin yolu yoktu — fatura yanlış isme
+                  kesiliyor, bildirimler yanlış adrese gidiyordu. */}
+              {customerEditing ? (
+                <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400" htmlFor="cust-name">
+                      Ad Soyad
+                    </label>
+                    <input
+                      id="cust-name"
+                      type="text"
+                      value={custName}
+                      onChange={(e) => setCustName(e.target.value)}
+                      maxLength={120}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400" htmlFor="cust-email">
+                      E-posta
+                    </label>
+                    <input
+                      id="cust-email"
+                      type="email"
+                      value={custEmail}
+                      onChange={(e) => setCustEmail(e.target.value)}
+                      maxLength={200}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400">Telefon</label>
+                    <PhoneInput
+                      country={custPhoneCountry}
+                      nationalNumber={custPhoneNational}
+                      onCountryChange={setCustPhoneCountry}
+                      onNationalNumberChange={setCustPhoneNational}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400" htmlFor="cust-note">
+                      Müşteri notu
+                    </label>
+                    <textarea
+                      id="cust-note"
+                      rows={3}
+                      maxLength={2000}
+                      value={custNote}
+                      onChange={(e) => setCustNote(e.target.value)}
+                      placeholder="Müşterinin siparişte belirttiği istek"
+                      className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    E-posta değişirse bundan sonraki bildirimler (kargo, teslim, onay bağlantısı)
+                    yeni adrese gider. Yalnız gerçekten değişen alanlar kaydedilir.
+                  </p>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={saveCustomer}
+                      disabled={loading === "customer"}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:bg-gray-400"
+                    >
+                      {loading === "customer" ? d["admin.orderDetail.saving"] : d["admin.orderDetail.saveChanges"]}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomerEditing(false);
+                        setCustName(order.customerName);
+                        setCustEmail(order.email);
+                        const seed = e164ToPhoneInput(order.phone);
+                        setCustPhoneCountry(seed.country);
+                        setCustPhoneNational(seed.nationalNumber);
+                        setCustNote(order.customerNote ?? "");
+                      }}
+                      className="rounded-xl bg-gray-100 px-4 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200"
+                    >
+                      {d["admin.orderDetail.cancel"]}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                order.customerNote && (
+                  <div className="mt-4 border-t border-gray-100 pt-4">
+                    <p className="text-xs font-medium text-gray-400">Müşteri notu</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
+                      {order.customerNote}
+                    </p>
+                  </div>
+                )
+              )}
             </div>
 
             {/* Order Details Card */}
@@ -4390,6 +6576,271 @@ export function OrderDetailClient({ data, locale }: Props) {
               </dl>
             </div>
 
+            {/* ─── Kargo ─────────────────────────────────────────
+                Taşıyıcı ve takip numarası düzeltilebilir olmalı: numara elle
+                giriliyor ve yanlış girildiğinde müşteriye çalışmayan bir takip
+                bağlantısı gidiyordu, düzeltmenin de yolu yoktu. Yanlışlıkla
+                kargolandı/teslim edildi işaretlenen sipariş de geri alınabilir. */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Kargo
+                </h3>
+                {!shipEditing && canEditShipping && (
+                  <button
+                    type="button"
+                    onClick={() => setShipEditing(true)}
+                    className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-800"
+                  >
+                    Düzenle
+                  </button>
+                )}
+              </div>
+
+              {shipEditing && canEditShipping ? (
+                <div className="space-y-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400" htmlFor="ship-carrier">
+                      Taşıyıcı
+                    </label>
+                    <select
+                      id="ship-carrier"
+                      value={shipCarrier}
+                      onChange={(e) => setShipCarrier(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    >
+                      {/* Boş seçenek SEÇİLEMEZ: uç taşıyıcıyı temizlemeyi
+                          desteklemiyor, yalnız değiştirmeyi. */}
+                      <option value="" disabled>
+                        Seçin…
+                      </option>
+                      {shipCarrierOptions.map((c) => (
+                        <option key={c} value={c}>
+                          {CARRIER_LABEL[c] ?? c}
+                        </option>
+                      ))}
+                    </select>
+                    {/* Uç taşıyıcıyı isCarrier() ile doğrular; atölye toplu
+                        tesliminin yazdığı "elden" o listede yok. Kayıt olduğu
+                        gibi bırakılırsa korunur (istek taşıyıcıyı hiç
+                        taşımaz), o yüzden burada ne olduğu açıkça yazılır. */}
+                    {order.carrier && !(CARRIERS as string[]).includes(order.carrier) && (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Bu siparişin taşıyıcısı ({CARRIER_LABEL[order.carrier] ?? order.carrier})
+                        standart kargo firmalarından biri değil (atölye teslimi). Olduğu gibi
+                        bırakırsanız korunur; takip numarasını yine de düzeltebilirsiniz.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-400" htmlFor="ship-tracking">
+                      Takip numarası
+                    </label>
+                    <input
+                      id="ship-tracking"
+                      type="text"
+                      value={shipTracking}
+                      onChange={(e) => setShipTracking(e.target.value)}
+                      maxLength={60}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={shipNotify}
+                      onChange={(e) => setShipNotify(e.target.checked)}
+                    />
+                    Müşteriye güncel takip bilgisini yeniden gönder
+                  </label>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={saveShipping}
+                      disabled={loading === "shipping"}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:bg-gray-400"
+                    >
+                      {loading === "shipping" ? d["admin.orderDetail.saving"] : d["admin.orderDetail.saveChanges"]}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShipEditing(false);
+                        setShipCarrier(order.carrier ?? "");
+                        setShipTracking(order.trackingNumber ?? "");
+                      }}
+                      className="rounded-xl bg-gray-100 px-4 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200"
+                    >
+                      {d["admin.orderDetail.cancel"]}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <dl className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Taşıyıcı</dt>
+                    <dd className="font-medium text-gray-900">
+                      {order.carrier ? CARRIER_LABEL[order.carrier] ?? order.carrier : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="text-gray-400">Takip numarası</dt>
+                    <dd className="text-right">
+                      {order.trackingNumber ? (
+                        (() => {
+                          const url = trackingUrl(order.carrier, order.trackingNumber);
+                          return url ? (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded bg-gray-50 px-2 py-0.5 font-mono text-xs text-blue-700 hover:underline"
+                            >
+                              {order.trackingNumber}
+                            </a>
+                          ) : (
+                            <span className="rounded bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-900">
+                              {order.trackingNumber}
+                            </span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Kargolandı</dt>
+                    <dd className="text-gray-700">
+                      {order.shippedAt ? formatDateTime(order.shippedAt, loc) : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Teslim edildi</dt>
+                    <dd className="text-gray-700">
+                      {order.deliveredAt ? formatDateTime(order.deliveredAt, loc) : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+
+              {/* Geri alma, uçların kendi koşuluyla aynı: DELETE /deliver yalnız
+                  "teslim edildi", DELETE /ship yalnız "kargolandı" durumunda
+                  çalışır. Zaman damgasına bakmak, geri alınmış bir siparişte
+                  çalışmayan düğme bırakıyordu. Atölye partisiyle sevk edilmiş
+                  sipariş de ucun kendi kapısına uyar: kargo geri alınamaz,
+                  kutuda düğme yerine nereden düzeltileceği yazar. */}
+              {shipRuleSectionVisible && (
+                <div className="mt-4 space-y-2 border-t border-gray-100 pt-3">
+                  {workshopShippingLocked && (
+                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
+                      {/* Yönerge TEK kez yazılır. Sunucunun gerekçesi zaten
+                          WORKSHOP_BATCH_FIX_HINT ile bitiyor ("düzeltmeyi atölye
+                          seansı ekranından, parti sevkiyatı üzerinden yapın");
+                          ekran onu ikinci kez tekrarlamaz, yalnız işi GERÇEKTEN
+                          yapabilen yere — seans ekranının parti sevkiyatı
+                          bölümüne — bağlantı verir (düzeltme ucu artık var:
+                          PATCH /api/admin/workshop-sessions/[id]/batch-shipping).
+                          Sunucu cevabı okunamadıysa cümlenin tek kopyası aşağıdaki
+                          yedek metindir. */}
+                      {shipRuleBlockNotice ??
+                        "Bu sipariş bir atölye partisiyle sevk edildi; kargo bilgisi tek tek düzeltilemez. Takip numarası ve kargo firması partinin kendi kaydından gelir: düzeltmeyi atölye seansı ekranından, parti sevkiyatı üzerinden yapın."}{" "}
+                      {order.workshopSessionId && (
+                        <Link
+                          href={`/admin/workshops/sessions/${order.workshopSessionId}#parti-sevkiyati`}
+                          className="font-medium underline"
+                        >
+                          Parti sevkiyatını düzelt
+                        </Link>
+                      )}
+                    </p>
+                  )}
+                  {shipRule.phase === "loading" ? (
+                    <p className="text-[11px] text-gray-500">
+                      Kargo kaydının geri alınıp alınamayacağı sunucuya soruluyor…
+                    </p>
+                  ) : shipRule.phase === "unknown" ? (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                      Kargo kuralı sunucudan okunamadı; düzeltme ve geri alma bu yüzden
+                      kapalı — ekran bu kararı kendi başına vermez.{" "}
+                      <button
+                        type="button"
+                        onClick={() => setShipRuleReload((n) => n + 1)}
+                        className="font-medium underline"
+                      >
+                        Tekrar dene
+                      </button>
+                    </p>
+                  ) : shipRuleBlockNotice && !workshopShippingLocked ? (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
+                      <p>{shipRuleBlockNotice}</p>
+                      {shipRuleCode === "refunded" && (
+                        <p className="mt-1">
+                          Paket yine de ulaştıysa kaydı denetim notuna yazın: iade edilmiş
+                          sipariş hiçbir yöne kımıldamaz, teslim damgası da atılmaz.
+                        </p>
+                      )}
+                    </div>
+                  ) : !canRevertDelivery && !canRevertShipping ? null : !revertOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setRevertOpen(true)}
+                      className="text-xs font-medium text-red-600 hover:underline"
+                    >
+                      Kargo / teslim kaydını geri al
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-900">
+                        Yalnız yanlış işaretlenmiş bir kaydı düzeltmek içindir. Müşteriye gitmiş
+                        kargo ya da teslim e-postası geri alınmaz; işlem denetim kaydına yazılır.
+                      </p>
+                      <textarea
+                        value={revertReason}
+                        onChange={(e) => setRevertReason(e.target.value)}
+                        rows={2}
+                        maxLength={500}
+                        placeholder="Gerekçe (zorunlu) — örn. yanlış siparişte kargolandı işaretlendi"
+                        className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {canRevertDelivery && (
+                          <button
+                            type="button"
+                            onClick={() => revertShipping("shipped")}
+                            disabled={!!loading || revertReason.trim().length < 3}
+                            className="rounded-xl bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:bg-gray-300 disabled:text-gray-500"
+                          >
+                            Teslimi geri al
+                          </button>
+                        )}
+                        {canRevertShipping && (
+                          <button
+                            type="button"
+                            onClick={() => revertShipping("in_production")}
+                            disabled={!!loading || revertReason.trim().length < 3}
+                            className="rounded-xl bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 disabled:bg-gray-300 disabled:text-gray-500"
+                          >
+                            Kargoyu geri al
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRevertOpen(false);
+                            setRevertReason("");
+                          }}
+                          className="rounded-xl bg-white px-3 py-1.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                        >
+                          Vazgeç
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Shipping Address */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">{d["admin.orderDetail.shippingAddress"]}</h3>
@@ -4410,6 +6861,13 @@ export function OrderDetailClient({ data, locale }: Props) {
                       onNationalNumberChange={setEditTelefonNational}
                     />
                   </div>
+                  {(order.shippedAt || order.deliveredAt) && (
+                    <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                      Bu sipariş kargolandı. Adres değişikliği gönderilen paketin gideceği yeri
+                      DEĞİŞTİRMEZ; kayıt için kaydedebilirsiniz, kaydetmeden önce ayrıca onay
+                      istenir.
+                    </p>
+                  )}
                   {/* Admin notes */}
                   <div className="pt-2">
                     <label className="block text-xs text-gray-400 mb-1">{d["admin.orderDetail.adminNote"]}</label>
@@ -4600,28 +7058,70 @@ export function OrderDetailClient({ data, locale }: Props) {
               sürüm olarak saklanır; eski dosyalar silinmez.
             </p>
 
-            {modelRevisions.length === 0 ? (
+            {/* Okunamayan sürüm tablosu "model yok" DEMEK DEĞİLDİR: boş listeyi
+                "Henüz model yüklenmedi" diye basmak, yapılmamış bir okumanın
+                iddiasıdır. Aynı arızada sunucu QC turunu da kanıtlanamaz
+                sayar (qcProof.failure = revision_unreadable), yani onay kapısı
+                da kapalıdır — yukarıdaki QC kutusu sebebi ayrıca yazar. */}
+            {/* Sürüm BAŞLIKLARI okunabildi ama PARÇA listesi okunamadı: sürümler
+                gerçek, parçaları bilinmiyor. Ayrı bayrak, çünkü ayrı tablo. */}
+            {!modelRevisionsUnreadable && readFailures?.modelFiles && (
+              <ReadFailedNotice>
+                Sürümlerin parça listesi şu anda okunamadı (geçici sistem arızası): aşağıdaki
+                sürümler gerçek, ama hangi dosyalardan oluştukları gösterilemiyor ve toplu indirme
+                bağlantıları bu yüzden görünmüyor. Dosyalar SİLİNMEDİ. Birkaç dakika sonra sayfayı
+                yenileyin.
+              </ReadFailedNotice>
+            )}
+            {modelRevisionsUnreadable ? (
+              <p
+                role="alert"
+                className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              >
+                Model sürümleri şu anda okunamadı (geçici sistem arızası). Bu siparişin sürüm
+                listesi gösterilemiyor; bu, &quot;model yüklenmedi&quot; demek DEĞİLDİR. Güncel
+                sürümün hangisi olduğu bilinmediği için QC turu onayı da kapalı tutuldu. Birkaç
+                dakika sonra sayfayı yenileyin.
+              </p>
+            ) : modelRevisions.length === 0 ? (
               <p className="text-sm text-gray-400 mb-4">Henüz model yüklenmedi.</p>
             ) : (
               <div className="space-y-2 mb-4">
-                {modelRevisions.map((r, idx) => (
+                {modelRevisions.map((r) => (
                   <div
                     key={r.id}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-gray-100 p-3"
                   >
                     <span className="text-sm font-medium text-gray-900">
                       Sürüm {r.revision}
-                      {idx === 0 && (
+                      {/* "GÜNCEL" = en yüksek numaralı sürüm; tek kural bu
+                          (config/order-model.ts · resolveCurrentRevision) ve
+                          sunucu da aynı sayıyı kullanır. Sürümü değiştiren her
+                          yol en üste YENİ bir sürüm yazdığından "en yenisi ama
+                          geçerli değil" diye bir hâl kalmadı; o hâli anlatan
+                          rozet, hiç görünemeyeceği için kaldırıldı. */}
+                      {r.isCurrent && (
                         <span className="ml-1.5 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
                           GÜNCEL
                         </span>
                       )}
                     </span>
                     <span className="text-xs text-gray-400">{formatDateTime(r.createdAt, loc)}</span>
-                    {r.uploadedByEmail && (
-                      <span className="text-xs text-gray-400">· {r.uploadedByEmail}</span>
+                    <span className="text-xs text-gray-400">
+                      · Yükleyen: {r.uploadedByEmail ?? r.audit?.adminEmail ?? "bilinmiyor"}
+                    </span>
+                    {r.note ? (
+                      <span className="basis-full text-xs italic text-gray-600">Not: {r.note}</span>
+                    ) : (
+                      <span className="basis-full text-[11px] text-gray-400">Not yazılmamış.</span>
                     )}
-                    {r.note && <span className="text-xs text-gray-400 italic">· {r.note}</span>}
+                    {/* Siparişin yükleme ANINDAKİ durumu: denetim satırı aşama,
+                        sipariş durumu, üretici ve boyacı durumunu birlikte yazar. */}
+                    {r.audit?.notes && (
+                      <span className="basis-full text-[11px] text-gray-500">
+                        Yükleme kaydı: {r.audit.notes}
+                      </span>
+                    )}
                     <div className="flex gap-2 ml-auto">
                       {r.files.length > 1 && (
                         <a
@@ -4670,28 +7170,567 @@ export function OrderDetailClient({ data, locale }: Props) {
                         ))}
                       </ul>
                     )}
+
+                    {/* Bu sürümün baskısından çekilmiş QC fotoğrafları: hangi
+                        turun hangi modeli gösterdiği ancak burada okunur. */}
+                    {(qcPhotos ?? []).filter((p) => p.modelRevision === r.revision).length > 0 && (
+                      <div className="basis-full mt-2">
+                        <p className="text-[11px] text-gray-500">
+                          Bu sürümün baskısından QC fotoğrafları
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {(qcPhotos ?? [])
+                            .filter((p) => p.modelRevision === r.revision)
+                            .map((p) => (
+                              <a
+                                key={p.id}
+                                href={p.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={`${p.round}. tur · ${formatDateTime(p.createdAt, loc)}`}
+                                className="block h-16 w-16 overflow-hidden rounded-lg border border-gray-200"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={p.url} alt="" className="h-full w-full object-cover" />
+                              </a>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!refunded && (
+                      <div className="basis-full mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2">
+                        {revisionNoteDraft?.revision === r.revision ? (
+                          <>
+                            <input
+                              type="text"
+                              value={revisionNoteDraft.text}
+                              onChange={(e) =>
+                                setRevisionNoteDraft({ revision: r.revision, text: e.target.value })
+                              }
+                              maxLength={500}
+                              placeholder="Sürüm notu"
+                              className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-gray-200"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => saveRevisionNote(r.revision, revisionNoteDraft.text)}
+                              disabled={!!loading}
+                              className="rounded-lg bg-gray-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-gray-800 disabled:bg-gray-300"
+                            >
+                              Notu kaydet
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRevisionNoteDraft(null)}
+                              className="text-[11px] text-gray-500 underline"
+                            >
+                              Vazgeç
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRevisionNoteDraft({ revision: r.revision, text: r.note ?? "" })
+                            }
+                            className="text-[11px] font-medium text-blue-700 hover:underline"
+                          >
+                            {r.note ? "Notu düzenle" : "Not ekle"}
+                          </button>
+                        )}
+                        {!r.isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => makeRevisionCurrent(r.revision)}
+                            disabled={!!loading}
+                            className="rounded-lg border border-emerald-300 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            {loading === `rev-current-${r.revision}`
+                              ? "Uygulanıyor…"
+                              : "Bu sürümü geçerli yap"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => deleteRevision(r.revision)}
+                          disabled={!!loading}
+                          className="rounded-lg border border-red-200 px-2.5 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          {loading === `rev-delete-${r.revision}` ? "Siliniyor…" : "Yanlış yüklemeyi sil"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
 
-            {canUploadRevision && (
+            {/* ─── Yeni model sürümü: HER aşamada ────────────────────────
+                Karar (late-model-upload): model her aşamada yüklenebilir ve
+                herkes haberdar edilir. Aşamanın ne tetiklediğini SUNUCU söyler
+                (P2-C1); kutu önce onu okutur, sonra bilerek açtırır, gereken
+                yerde gerekçe ister. Yeniden baskının bedeli bu ekranda VAAT
+                EDİLMEZ: düzeltme kaydı Faz 6'da geliyor, bugün elle çözülüyor. */}
+            {modelUpload && (
               <div className="border-t border-gray-100 pt-4">
-                <p className="text-xs font-medium text-gray-700 mb-2">
-                  Yeni sürüm yükle — yalnız değişen parçaları yükleyebilirsin. &quot;Önceki
-                  parçaları koru&quot; açıkken aynı adlı parça yenisiyle değişir, diğerleri aynen
-                  taşınır; kapatırsan yüklediğin dosyalar tüm setin yerine geçer. Üretici yalnız
-                  güncel sürümün dosyalarını görür.
-                </p>
-                <OrderModelUploader
-                  orderId={order.id}
-                  variant="revision"
-                  previousFiles={(modelRevisions[0]?.files ?? []).map((f) => ({ name: f.name, kind: f.kind }))}
-                  onUploaded={() => router.refresh()}
-                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-gray-700">Yeni sürüm yükle</p>
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                    Aşama: {MODEL_UPLOAD_STAGE_LABEL[modelUpload.stage]}
+                  </span>
+                </div>
+
+                {!canUploadRevision ? (
+                  <p className="mt-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                    {modelUpload.effects.warningTr}
+                  </p>
+                ) : (
+                  <>
+                    <p
+                      className={`mt-2 rounded-xl px-3 py-2 text-xs ${
+                        uploadEffects?.resetsQc || uploadEffects?.notifiesPainter
+                          ? "border border-amber-300 bg-amber-50 text-amber-900"
+                          : uploadEffects?.recordOnly
+                            ? "border border-gray-200 bg-gray-50 text-gray-700"
+                            : "border border-indigo-200 bg-indigo-50 text-indigo-900"
+                      }`}
+                    >
+                      {modelUpload.effects.warningTr}
+                    </p>
+
+                    {sideEffectLines(modelUpload.effects).length > 0 && (
+                      <ul className="mt-2 space-y-1 text-xs text-gray-700">
+                        {sideEffectLines(modelUpload.effects).map((line) => (
+                          <li key={line} className="flex gap-2">
+                            <span aria-hidden>•</span>
+                            <span>{line}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {!uploadOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => setUploadOpen(true)}
+                        className="mt-3 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
+                      >
+                        Yeni sürüm yüklemeyi aç
+                      </button>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        <div>
+                          <label
+                            htmlFor="upload-note"
+                            className="mb-1 block text-xs font-medium text-gray-600"
+                          >
+                            Sürüm notu{" "}
+                            {uploadNoteRequired && <span className="text-red-500">*</span>}
+                          </label>
+                          <textarea
+                            id="upload-note"
+                            rows={2}
+                            maxLength={500}
+                            value={uploadNote}
+                            onChange={(e) => setUploadNote(e.target.value)}
+                            placeholder="örn. kaide kalınlaştırıldı, sol kol yeniden modellendi"
+                            className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                          />
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            {uploadNoteRequired
+                              ? "Bu aşamada gerekçe zorunlu (en az 10 karakter): not sürüme yazılır, üretici ve boyacı bildirimlerinde görünür."
+                              : "İsteğe bağlı. Not sürüme yazılır ve partner bildirimlerinde görünür."}
+                          </p>
+                        </div>
+
+                        {uploadReady && revisionPartsUnknown ? (
+                          /* TAŞIMA KARARI, SAYFANIN SAHİP OLMADIĞI VERİYLE
+                             VERİLEMEZ. "Önceki parçaları koru" güncel sürümün
+                             PARÇA listesine bakar; liste okunamadığında bu ekran
+                             yükleyiciye boş bir liste geçiyor, yükleyici taşımayı
+                             sessizce kapatıyor ve yeni sürüm yalnızca yüklenen
+                             dosyalardan oluşuyordu: 13 parçalı bir işten 12 parça,
+                             kimseye söylenmeden düşebilirdi. Kapı kapalı tarafa
+                             düşer ve sebebi burada yazılır. */
+                          <p
+                            role="alert"
+                            className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                          >
+                            Güncel sürümün parça listesi şu anda okunamıyor (geçici sistem arızası),
+                            bu yüzden yeni sürüm yükleme geçici olarak kapatıldı.{" "}
+                            <strong>&quot;Önceki parçaları koru&quot; kararı bu listeye dayanır</strong>:
+                            liste bilinmeden yüklenen bir sürüm, taşınması gereken parçaları sessizce
+                            düşürebilir ve üretici eksik dosyayla baskıya başlayabilirdi. Birkaç
+                            dakika sonra sayfayı yenileyin; liste okunur okunmaz yükleme yeniden
+                            açılır.
+                          </p>
+                        ) : uploadReady ? (
+                          <>
+                            <p className="text-[11px] text-gray-600">
+                              Yalnız değişen parçaları yükleyebilirsin. &quot;Önceki parçaları
+                              koru&quot; açıkken aynı adlı parça yenisiyle değişir, diğerleri aynen
+                              taşınır; kapatırsan yüklediğin dosyalar tüm setin yerine geçer.
+                              Üretici yalnız güncel sürümün dosyalarını görür.
+                            </p>
+                            <OrderModelUploader
+                              orderId={order.id}
+                              variant="revision"
+                              previousFiles={(modelRevisions[0]?.files ?? []).map((f) => ({
+                                name: f.name,
+                                kind: f.kind,
+                              }))}
+                              // Gerekçe yükleyiciye GEÇER: yoksa POST notsuz
+                              // gider ve üretici `accepted`'ın ötesindeyken
+                              // (baskı, QC, boyama, kargo sonrası) uç 400 ile
+                              // reddeder — yani yukarıdaki kutuya yazılan not
+                              // hiçbir işe yaramaz. Zorunluluğu da veriyoruz
+                              // çünkü dosyalar son POST'tan ÖNCE parça parça
+                              // yükleniyor: notsuz bir denemede yüzlerce MB
+                              // boşuna gider ve admin reddi dakikalar sonra
+                              // görürdü. Son söz yine SUNUCUNUN: aşama
+                              // değiştiyse isteği o reddeder.
+                              note={uploadNote}
+                              noteRequired={uploadNoteRequired}
+                              onUploaded={afterUpload}
+                            />
+                          </>
+                        ) : (
+                          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            Devam etmek için en az 10 karakterlik bir gerekçe yazın.
+                          </p>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadOpen(false);
+                            setUploadNote("");
+                          }}
+                          className="text-xs text-gray-500 underline hover:text-gray-700"
+                        >
+                          Vazgeç
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Sonuç: yüklemenin GERÇEKTEN ne yaptığı, aşamanın kendi
+                    cümleleriyle + siparişin tazelenmiş durumu. */}
+                {uploadResult && (
+                  <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
+                    <p className="text-sm font-semibold text-emerald-900">
+                      {uploadResultTitle(uploadResult)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-emerald-800">
+                      {uploadResult.kind === "restore"
+                        ? "Geri getirme anındaki aşama: "
+                        : "Yükleme anındaki aşama: "}
+                      {MODEL_UPLOAD_STAGE_LABEL[uploadResult.stage]}
+                      {uploadResult.note ? ` · Not: ${uploadResult.note}` : ""}
+                    </p>
+                    {uploadResult.server?.applied ? (
+                      <>
+                        {appliedEffectLines(uploadResult.server.applied).length > 0 ? (
+                          <ul className="mt-2 space-y-1 text-xs text-emerald-900">
+                            {appliedEffectLines(uploadResult.server.applied).map((line) => (
+                              <li key={line}>✓ {line}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-2 text-xs text-emerald-800">
+                            {noAppliedEffectsLine(
+                              uploadResult.kind,
+                              uploadResult.server.republished
+                            )}
+                          </p>
+                        )}
+                        {missedEffectLines(
+                          // Yayımlamayan bir geri getirmede BEKLENEN etki yoktur:
+                          // "QC SIFIRLANMADI" alarmı, hiç yapılmamış bir
+                          // değişikliğin eksiğini bağırırdı.
+                          uploadResult.server.republished === false
+                            ? null
+                            : uploadResult.effects,
+                          uploadResult.server.applied
+                        ).map(
+                          (line) => (
+                            <p
+                              key={line}
+                              role="alert"
+                              className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900"
+                            >
+                              {line}
+                            </p>
+                          )
+                        )}
+                        {uploadResult.server.warning && (
+                          <p className="mt-2 text-xs text-emerald-900">
+                            {uploadResult.server.warning}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {sideEffectLines(uploadResult.effects).length > 0 && (
+                          <ul className="mt-2 space-y-1 text-xs text-emerald-900">
+                            {sideEffectLines(uploadResult.effects).map((line) => (
+                              <li key={line}>• {line}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          Sunucunun uyguladığı yan etkiler okunamadı; yukarıdakiler bu aşamada
+                          BEKLENEN etkilerdir. Aşağıdaki güncel durumu esas alın.
+                        </p>
+                      </>
+                    )}
+                    <p className="mt-2 text-xs text-emerald-800">
+                      Şu anki durum: QC turu {qcRound ?? 1}
+                      {manufacturerStatus
+                        ? `, üretici: ${manufacturerStatusLabel(manufacturerStatus)}`
+                        : ""}
+                      {/* Okunamayan günlük "onay bekleniyor" DEĞİLDİR: kapı
+                          aynı kapı, bilgi yok. */}
+                      {partnerAck?.manufacturer.readFailed
+                        ? ", üretici onay kaydı okunamadı"
+                        : partnerAck?.manufacturer.pending
+                          ? ", üretici onayı bekleniyor"
+                          : ""}
+                      {partnerAck?.painter.readFailed
+                        ? ", boyacı onay kaydı okunamadı"
+                        : partnerAck?.painter.pending
+                          ? ", boyacı onayı bekleniyor"
+                          : ""}
+                      {modelApproval && modelApproval.rounds.length > 0
+                        ? `, müşteri onay turu: ${modelApproval.rounds[0].revision}`
+                        : ""}
+                      .
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setUploadResult(null)}
+                      className="mt-2 text-xs text-emerald-800 underline"
+                    >
+                      Kapat
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
+
+          {/* ─── Müşteri model onayı ──────────────────────────────────
+              Turlar, kararlar ve müşterinin revizyon notu sipariş sayfasında
+              hiç görünmüyordu: onayın izi yalnız /onay ekranında ve e-postadaydı,
+              telefonla gelen bir karar da hiçbir yere yazılamıyordu. */}
+          {modelApproval &&
+            (modelApproval.rounds.length > 0 ||
+              modelApproval.open ||
+              !!modelApproval.url ||
+              // Turlar OKUNAMADIYSA kartın hiç çıkmaması, "onay turu yok"
+              // demenin sessiz hâli olurdu.
+              !!readFailures?.modelApprovalRounds) && (
+              <div className="bg-white rounded-2xl shadow-sm border border-cyan-200 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-gray-900">Müşteri model onayı</h3>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      modelApproval.open
+                        ? "bg-cyan-50 text-cyan-800 ring-1 ring-cyan-200"
+                        : modelApproval.approvedAt
+                          ? "bg-green-50 text-green-700 ring-1 ring-green-200"
+                          : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {modelApproval.open
+                      ? "Müşterinin kararı bekleniyor"
+                      : modelApproval.approvedAt
+                        ? "Onaylandı"
+                        : "Açık tur yok"}
+                  </span>
+                </div>
+
+                {modelApproval.approvedAt && (
+                  <p className="mt-1 text-xs text-gray-600">
+                    Onay: {formatDateTime(modelApproval.approvedAt, loc)}
+                  </p>
+                )}
+
+                {modelApproval.revisionNote && (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-xs font-semibold text-amber-900">
+                      Müşterinin istediği değişiklik
+                    </p>
+                    <p className="mt-0.5 whitespace-pre-wrap text-sm text-amber-900">
+                      {modelApproval.revisionNote}
+                    </p>
+                  </div>
+                )}
+
+                {readFailures?.modelApprovalRounds ? (
+                  <ReadFailedNotice>
+                    Müşteri onay turları şu anda okunamadı (geçici sistem arızası): bu siparişte tur
+                    açılıp açılmadığını ve müşterinin ne karar verdiğini söyleyemiyoruz. Bu,
+                    &quot;onay turu yok&quot; demek DEĞİLDİR. Birkaç dakika sonra sayfayı yenileyin.
+                  </ReadFailedNotice>
+                ) : modelApproval.rounds.length === 0 ? (
+                  <p className="mt-3 text-sm text-gray-400">
+                    Bu siparişte müşteriye hiç onay turu açılmadı.
+                  </p>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {modelApproval.rounds.map((r) => (
+                      <li key={r.id} className="rounded-xl border border-gray-100 p-3 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-sm font-medium text-gray-900">{r.revision}. tur</span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 font-semibold ${
+                              r.decision === "approved" || r.decision === "auto_approved"
+                                ? "bg-green-50 text-green-700"
+                                : r.decision === "revision"
+                                  ? "bg-amber-50 text-amber-700"
+                                  : r.decision
+                                    ? "bg-red-50 text-red-700"
+                                    : "bg-gray-100 text-gray-600"
+                            }`}
+                          >
+                            {r.decision
+                              ? APPROVAL_DECISION_LABEL[r.decision] ?? r.decision
+                              : "Karar yok"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-gray-500">
+                          Gönderildi: {formatDateTime(r.shownAt, loc)} ·{" "}
+                          {r.channel === "whatsapp" ? "WhatsApp" : "E-posta"}
+                          {r.reminderSentAt
+                            ? ` · hatırlatma: ${formatDateTime(r.reminderSentAt, loc)}`
+                            : ""}
+                          {r.decidedAt ? ` · karar: ${formatDateTime(r.decidedAt, loc)}` : ""}
+                        </p>
+                        {r.note && <p className="mt-1 text-gray-700">Müşteri notu: {r.note}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {modelApproval.url && (
+                  <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] text-gray-500">Müşterinin onay bağlantısı</p>
+                    <p className="mt-0.5 break-all font-mono text-[11px] text-gray-700">
+                      {modelApproval.url}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(modelApproval.url ?? "").catch(() => {});
+                        }}
+                        className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                      >
+                        Bağlantıyı kopyala
+                      </button>
+                      {/* Yeniden gönderme yalnız AÇIK turda çalışır: uç,
+                          sipariş `awaiting_customer_approval` değilse 400
+                          döner. Jeton karar verildikten sonra da duruyor, o
+                          yüzden bağlantı görünür kalır ama düğme kapanır —
+                          eskiden her kapanmış onayda canlı görünüp her
+                          tıklamada reddediliyordu. */}
+                      {!refunded && modelApproval.open && (
+                        <button
+                          type="button"
+                          onClick={resendApproval}
+                          disabled={!!loading}
+                          className="rounded-lg border border-cyan-300 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-50 disabled:opacity-50"
+                        >
+                          {loading === "approval-resend"
+                            ? "Gönderiliyor…"
+                            : "Onay bağlantısını yeniden gönder"}
+                        </button>
+                      )}
+                    </div>
+                    {!refunded && !modelApproval.open && (
+                      <p className="mt-2 text-[11px] text-gray-500">
+                        Açık onay turu yok; bağlantı yeniden gönderilemez. Yeni bir tur ancak
+                        müşteriye gösterilen modeli değiştiren bir yükleme ile açılır.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!refunded && modelApproval.open && (
+                  <div className="mt-3 border-t border-gray-100 pt-3">
+                    {!recordOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => setRecordOpen(true)}
+                        className="text-xs font-medium text-blue-700 hover:underline"
+                      >
+                        Telefonla ya da WhatsApp ile gelen kararı kaydet
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
+                          Kararı müşterinin kendisi tıklamadı; kaydı siz giriyorsunuz. Denetim
+                          kaydında sizin adınız kalır ve onay turu bu kararla kapanır.
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <select
+                            value={recordDecision}
+                            onChange={(e) =>
+                              setRecordDecision(e.target.value === "revision" ? "revision" : "approved")
+                            }
+                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          >
+                            <option value="approved">Müşteri onayladı</option>
+                            <option value="revision">Müşteri revizyon istedi</option>
+                          </select>
+                          <select
+                            value={recordChannel}
+                            onChange={(e) =>
+                              setRecordChannel(e.target.value === "whatsapp" ? "whatsapp" : "phone")
+                            }
+                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          >
+                            <option value="phone">Telefon</option>
+                            <option value="whatsapp">WhatsApp</option>
+                          </select>
+                        </div>
+                        <textarea
+                          value={recordNote}
+                          onChange={(e) => setRecordNote(e.target.value)}
+                          rows={2}
+                          maxLength={1000}
+                          placeholder="Müşterinin söyledikleri (revizyon isteğinde zorunlu)"
+                          className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={recordApprovalDecision}
+                            disabled={!!loading}
+                            className="rounded-xl bg-cyan-700 px-4 py-2 text-xs font-semibold text-white hover:bg-cyan-800 disabled:bg-gray-300"
+                          >
+                            {loading === "approval-record" ? "Kaydediliyor…" : "Kararı kaydet"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRecordOpen(false);
+                              setRecordNote("");
+                            }}
+                            className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                          >
+                            Vazgeç
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
           {/* ─── Manufacturer Section ─────────────────── */}
           {hasManufacturer && (
@@ -4710,13 +7749,127 @@ export function OrderDetailClient({ data, locale }: Props) {
                   manufacturerStatus === "assigned" ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" :
                   "bg-gray-50 text-gray-700 ring-1 ring-gray-200"
                 }`}>
-                  {manufacturerStatus?.replace(/_/g, " ") || "unassigned"}
+                  {manufacturerStatusLabel(manufacturerStatus)}
                 </span>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 flex items-center gap-2">
                 <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <p className="text-xs text-blue-700 font-medium">{d["admin.orderDetail.managedByManufacturer"]}</p>
               </div>
+
+              {/* Atölyeye ULAŞMAK için gerekenler ve işin damgaları. Admin
+                  bugüne kadar üreticiyi aramak için /admin/manufacturers'a gidip
+                  aratıyor, "ne zaman kabul etti / ne zaman bitirdi" sorusunu ise
+                  hiçbir yerden okuyamıyordu. */}
+              <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-gray-400">Telefon</dt>
+                  <dd className="text-gray-900">
+                    {manufacturer.phone ? (
+                      <a href={`tel:${manufacturer.phone}`} className="text-blue-700 hover:underline">
+                        {manufacturer.phone}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-gray-400">E-posta</dt>
+                  <dd className="truncate text-gray-900">
+                    {manufacturer.email ? (
+                      <a
+                        href={`mailto:${manufacturer.email}`}
+                        className="text-blue-700 hover:underline"
+                      >
+                        {manufacturer.email}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-400">Şehir</dt>
+                  <dd className="text-gray-900">
+                    {manufacturer.city ?? "—"}
+                    {manufacturer.district ? ` / ${manufacturer.district}` : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-400">Atandı</dt>
+                  <dd className="text-gray-900">
+                    {assignedToManufacturerAt ? formatDateTime(assignedToManufacturerAt, loc) : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-400">Kabul etti</dt>
+                  <dd className="text-gray-900">
+                    {manufacturerAcceptedAt ? formatDateTime(manufacturerAcceptedAt, loc) : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-gray-400">Baskıyı bitirdi</dt>
+                  <dd className="text-gray-900">
+                    {manufacturerPrintedAt ? formatDateTime(manufacturerPrintedAt, loc) : "—"}
+                  </dd>
+                </div>
+              </dl>
+
+              {/* Yeni model sürümünü gördüğünü onayladı mı: onaylamadan baskı,
+                  QC ve kargo adımları kapalıdır (late-model-upload kararı). */}
+              {partnerAck?.manufacturer.readFailed ? (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                >
+                  Üreticinin model onay kaydı şu anda okunamadı (geçici sistem arızası): yeni bir
+                  sürümün duyurulup duyurulmadığını ve üreticinin onaylayıp onaylamadığını
+                  söyleyemiyoruz. Güvenlik gereği baskıya başlama, baskıyı bitirme, QC&apos;ye
+                  gönderme, boyacıya devretme ve kargolama adımları — üretici adına yapılanlar
+                  dahil — kapalı tutuldu. Birkaç dakika sonra sayfayı yenileyin.
+                </p>
+              ) : partnerAck?.manufacturer.pending ? (
+                <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  Üretici {partnerAck.manufacturer.announcedRevision}. sürümü henüz onaylamadı;
+                  onaylayana kadar baskıya başlama, baskıyı bitirme, QC&apos;ye gönderme, boyacıya
+                  devretme ve kargolama adımları kapalı. Bu kapı ÜRETİCİ ADINA yapılan işlemlerde
+                  de geçerlidir: onay gelmeden bu adımlar buradan da ilerletilemez. Üreticiye
+                  ulaşıp yeni sürümü kendi ekranından onaylamasını isteyin.
+                </p>
+              ) : null}
+              {partnerAck?.manufacturer.acknowledgedRevision != null &&
+                !partnerAck.manufacturer.pending && (
+                  <p className="mt-3 text-xs text-green-700">
+                    Üretici {partnerAck.manufacturer.acknowledgedRevision}. sürümü gördüğünü
+                    onayladı.
+                  </p>
+                )}
+
+              {declinedManufacturers && declinedManufacturers.length > 0 && (
+                <p className="mt-3 text-xs text-gray-500">
+                  Bu siparişi reddedenler:{" "}
+                  {declinedManufacturers.map((m) => m.companyName).join(", ")} — bu atölyelere
+                  tekrar önerilmez.
+                </p>
+              )}
+              {readFailures?.manufacturerDeclined && (
+                <ReadFailedNotice>
+                  Bu siparişi reddeden üreticilerin listesi şu anda okunamadı (geçici sistem
+                  arızası); burada kimsenin görünmemesi &quot;kimse reddetmedi&quot; demek DEĞİLDİR.
+                  Otomatik atama yine de reddedenleri atlar — ret kaydı sunucuda duruyor.
+                </ReadFailedNotice>
+              )}
+              {manufacturerActionsUnreadable && (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                >
+                  Üreticinin işlem geçmişi şu anda okunamadı (geçici sistem arızası); bu kart boş
+                  DEĞİL, bilinmiyor. Aynı arıza yüzünden model onay durumu da bilinmiyor. Sayfanın
+                  geri kalanı gerçek kayıtlardır. Birkaç dakika sonra sayfayı yenileyin.
+                </p>
+              )}
               {mfgActions && mfgActions.length > 0 && (
                 <div className="mt-4 space-y-0">
                   {mfgActions.map((action, i) => (
@@ -4726,12 +7879,155 @@ export function OrderDetailClient({ data, locale }: Props) {
                         {i < mfgActions.length - 1 && <div className="w-px flex-1 bg-purple-200 my-0.5" />}
                       </div>
                       <div className="pb-3 min-w-0">
-                        <p className="text-xs font-medium text-gray-700 capitalize">{action.action.replace(/_/g, " ")}</p>
+                        <p className="text-xs font-medium text-gray-700">
+                          {manufacturerActionLabel(action.action)}
+                        </p>
                         {action.notes && <p className="text-xs text-gray-500 mt-0.5">{action.notes}</p>}
                         <p className="text-[10px] text-gray-400 mt-0.5">{formatDateTime(action.createdAt, loc)}</p>
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Üretici yokken de reddedenler görünmeli: sipariş kuyrukta
+              beklerken "kimse almıyor mu, kimler reddetti" sorusu tam burada
+              soruluyor. */}
+          {!hasManufacturer && readFailures?.manufacturerDeclined && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Bu siparişi reddeden üreticiler
+              </h3>
+              <ReadFailedNotice>
+                Liste şu anda okunamadı (geçici sistem arızası); bu kart boş DEĞİL, bilinmiyor.
+                Otomatik atama yine de reddedenleri atlar.
+              </ReadFailedNotice>
+            </div>
+          )}
+
+          {!hasManufacturer && declinedManufacturers && declinedManufacturers.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Bu siparişi reddeden üreticiler
+              </h3>
+              <p className="mt-2 text-sm text-gray-700">
+                {declinedManufacturers.map((m) => m.companyName).join(", ")}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                Otomatik atama bu atölyeleri bu sipariş için atlar.
+              </p>
+            </div>
+          )}
+
+          {/* ─── Partner adına işlem (P2-C4) ────────────────────────────
+              Admin, siparişi tutan partnerin KENDİ adımını onun yerine yapar ve
+              adım partnerin kendi servisinden geçer: hakediş birebir aynı şekilde
+              tahakkuk eder. Bu yüzden gerekçe zorunludur ve gerekçe hem denetim
+              kaydına hem partnerin kendi zaman çizelgesine yazılır. */}
+          {holder !== "none" && !refunded && (
+            <div className="bg-white rounded-2xl shadow-sm border border-orange-200 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  {holderLabel} adına işlem
+                </h3>
+                <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-800 ring-1 ring-orange-200">
+                  Partner adına
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-gray-600">
+                Bu adımlar {holderLabel.toLocaleLowerCase("tr")}nin kendi ekranındaki adımlarla
+                AYNI işlemi çalıştırır: durum, bildirimler ve hakediş birebir aynı şekilde oluşur.
+                Yalnız partner ulaşılamadığında ya da ekranı kullanamadığında kullanın.
+              </p>
+
+              {onBehalfOptions.length === 0 ? (
+                <p className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  Şu anki durumda {holderLabel.toLocaleLowerCase("tr")} adına yapılacak bir adım
+                  yok. Sıradaki adım sizde olabilir (ör. QC onayı) ya da iş zaten ilerlemiş
+                  olabilir.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <select
+                    value={onBehalfAction}
+                    onChange={(e) => setOnBehalfAction((e.target.value || "") as OnBehalfAction | "")}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">İşlem seçin…</option>
+                    {onBehalfOptions.map((a) => (
+                      <option key={a} value={a}>
+                        {ON_BEHALF_LABELS[holder === "painter" ? "painter" : "manufacturer"][a]}
+                      </option>
+                    ))}
+                  </select>
+
+                  {onBehalfAction === "ship" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={onBehalfCarrier}
+                        onChange={(e) => setOnBehalfCarrier(e.target.value)}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Taşıyıcı seçin… (zorunlu)</option>
+                        {CARRIERS.map((c) => (
+                          <option key={c} value={c}>
+                            {CARRIER_LABEL[c] ?? c}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        value={onBehalfTracking}
+                        onChange={(e) => setOnBehalfTracking(e.target.value)}
+                        maxLength={60}
+                        placeholder="Takip numarası (zorunlu)"
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label
+                      htmlFor="on-behalf-reason"
+                      className="mb-1 block text-xs font-medium text-gray-600"
+                    >
+                      Gerekçe <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      id="on-behalf-reason"
+                      rows={2}
+                      maxLength={500}
+                      value={onBehalfReason}
+                      onChange={(e) => setOnBehalfReason(e.target.value)}
+                      placeholder="örn. üretici telefonla bildirdi, panele giremiyor"
+                      className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      En az {ON_BEHALF_REASON_MIN} karakter. Gerekçe denetim kaydına ve partnerin
+                      kendi zaman çizelgesine yazılır; partner bu adımı sizin yaptığınızı görür.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={runOnBehalf}
+                    disabled={
+                      !!loading ||
+                      !onBehalfAction ||
+                      onBehalfReason.trim().length < ON_BEHALF_REASON_MIN ||
+                      // Kargo adımında taşıyıcı ve takip numarası olmadan
+                      // servis zaten reddediyor (carrier_required /
+                      // tracking_required); düğme de o isteği hiç göndermez.
+                      (onBehalfAction === "ship" &&
+                        (!onBehalfCarrier || !onBehalfTracking.trim()))
+                    }
+                    className="w-full rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:bg-gray-300 disabled:text-gray-500"
+                  >
+                    {loading === "on-behalf"
+                      ? "Uygulanıyor…"
+                      : `${holderLabel} adına uygula`}
+                  </button>
                 </div>
               )}
             </div>
@@ -4854,9 +8150,23 @@ export function OrderDetailClient({ data, locale }: Props) {
               >
                 {d["admin.chat.manufacturerTab"]}
               </button>
+              <button
+                onClick={() => setChatTab("painter_admin")}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${chatTab === "painter_admin" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                Boyacı
+              </button>
             </div>
             {chatTab === "manufacturer_admin" && !manufacturer ? (
               <p className="text-sm text-gray-400 py-4">{d["admin.chat.noManufacturer"]}</p>
+            ) : chatTab === "painter_admin" ? (
+              painter ? (
+                <PartnerChatPanel orderId={order.id} loc={loc} />
+              ) : (
+                <p className="py-4 text-sm text-gray-400">
+                  Bu siparişte boyacı yok; kanal boyacı atandığında açılır.
+                </p>
+              )
             ) : (
               <OrderChat
                 key={chatTab}
@@ -4982,7 +8292,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                     <div className="pb-3 flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-gray-700 capitalize">{d[`admin.timeline.${action.action}` as keyof typeof d] || action.action}</span>
+                        <span className="text-sm font-medium text-gray-700">{d[`admin.timeline.${action.action}` as keyof typeof d] || action.action.replace(/_/g, " ")}</span>
                         <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDateTime(action.createdAt, loc)}</span>
                       </div>
                       <p className="text-[10px] text-gray-400">{action.adminEmail}</p>
@@ -4991,6 +8301,23 @@ export function OrderDetailClient({ data, locale }: Props) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Üretici kartı yokken günlük okunamazsa hiçbir şey render edilmez
+              ve ekran "üretici hiç işlem yapmamış" izlenimi bırakırdı. */}
+          {!hasManufacturer && manufacturerActionsUnreadable && (
+            <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-5">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                {d["admin.orderDetail.manufacturerActions"]}
+              </h3>
+              <p
+                role="alert"
+                className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              >
+                Üreticinin işlem geçmişi şu anda okunamadı (geçici sistem arızası); bu kart boş
+                DEĞİL, bilinmiyor. Birkaç dakika sonra sayfayı yenileyin.
+              </p>
             </div>
           )}
 
@@ -5007,7 +8334,9 @@ export function OrderDetailClient({ data, locale }: Props) {
                     </div>
                     <div className="pb-3 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-gray-700 capitalize">{action.action.replace(/_/g, " ")}</span>
+                        <span className="text-sm font-medium text-gray-700">
+                          {manufacturerActionLabel(action.action)}
+                        </span>
                         <span className="text-[10px] text-gray-400 whitespace-nowrap">{formatDateTime(action.createdAt, loc)}</span>
                       </div>
                       {action.notes && <p className="text-xs text-gray-500 mt-0.5">{action.notes}</p>}

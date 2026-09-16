@@ -6,6 +6,7 @@ import { requireActiveSeller } from "@/lib/services/manufacturer-guard";
 import { countProductFiles } from "@/lib/services/product-spec";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
+import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Submit a draft/rejected product for admin moderation: -> pending_review.
@@ -15,58 +16,62 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const guard = await requireActiveSeller();
-  if ("error" in guard) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
-  }
-  const { id } = await params;
+  try {
+    const guard = await requireActiveSeller();
+    if ("error" in guard) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+    const { id } = await params;
 
-  const product = await db.query.products.findFirst({
-    where: and(
-      eq(products.id, id),
-      eq(products.manufacturerId, guard.manufacturerId)
-    ),
-    with: { images: true },
-  });
-  if (!product) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (product.images.length === 0) {
-    return NextResponse.json(
-      { error: "Add at least one image before submitting", code: "no_images" },
-      { status: 400 }
-    );
-  }
-  // Every listing must carry the printable geometry the manufacturer needs.
-  if ((await countProductFiles(id)) === 0) {
-    return NextResponse.json(
-      { error: "Add at least one print file before submitting", code: "no_files" },
-      { status: 400 }
-    );
-  }
-
-  // Atomic transition guarded on the current state so a double-submit is a no-op.
-  const [updated] = await db
-    .update(products)
-    .set({ status: "pending_review", submittedAt: new Date(), updatedAt: new Date() })
-    .where(
-      and(
+    const product = await db.query.products.findFirst({
+      where: and(
         eq(products.id, id),
-        eq(products.manufacturerId, guard.manufacturerId),
-        inArray(products.status, ["draft", "rejected"])
+        eq(products.manufacturerId, guard.manufacturerId)
+      ),
+      with: { images: true },
+    });
+    if (!product) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (product.images.length === 0) {
+      return NextResponse.json(
+        { error: "Add at least one image before submitting", code: "no_images" },
+        { status: 400 }
+      );
+    }
+    // Every listing must carry the printable geometry the manufacturer needs.
+    if ((await countProductFiles(id)) === 0) {
+      return NextResponse.json(
+        { error: "Add at least one print file before submitting", code: "no_files" },
+        { status: 400 }
+      );
+    }
+
+    // Atomic transition guarded on the current state so a double-submit is a no-op.
+    const [updated] = await db
+      .update(products)
+      .set({ status: "pending_review", submittedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(products.id, id),
+          eq(products.manufacturerId, guard.manufacturerId),
+          inArray(products.status, ["draft", "rejected"])
+        )
       )
-    )
-    .returning();
+      .returning();
 
-  if (!updated) {
-    return NextResponse.json(
-      { error: "Product is not in a submittable state" },
-      { status: 400 }
-    );
+    if (!updated) {
+      return NextResponse.json(
+        { error: "Product is not in a submittable state" },
+        { status: 400 }
+      );
+    }
+
+    // Nudge the admin moderation badge.
+    await publishRealtime([topics.admin()], { kind: "badge" }).catch(() => {});
+
+    return NextResponse.json({ product: updated });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/manufacturer/products/[id]/submit", PARTNER_ACTION_FAILED_ERROR);
   }
-
-  // Nudge the admin moderation badge.
-  await publishRealtime([topics.admin()], { kind: "badge" }).catch(() => {});
-
-  return NextResponse.json({ product: updated });
 }

@@ -6,6 +6,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { createAddress, listAddresses } from "@/lib/services/address-book";
 import { phoneField } from "@/lib/phone";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 const addressSchema = z.object({
   label: z.string().trim().min(1).max(50),
@@ -19,7 +20,7 @@ const addressSchema = z.object({
   isDefault: z.boolean().optional(),
 });
 
-export async function GET() {
+async function handleGET() {
   const session = await getSessionUser();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,7 +29,7 @@ export async function GET() {
   return NextResponse.json({ addresses });
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const locale = getRequestLocale(request);
   const d = getDictionary(locale);
   const session = await getSessionUser();
@@ -60,4 +61,30 @@ export async function POST(request: NextRequest) {
 
   const created = await createAddress(session.userId, parsed.data);
   return NextResponse.json({ address: created }, { status: 201 });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET() {
+  try {
+    return await handleGET();
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/addresses", CUSTOMER_READ_FAILED_ERROR);
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/customer/addresses", CUSTOMER_ACTION_FAILED_ERROR);
+  }
 }

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { and, eq, isNull, like, desc, inArray } from "drizzle-orm";
 import { db } from "../src/lib/db";
+import { claimableEarningWhere } from "../src/lib/services/earning-claimable";
 import {
   products,
   orders,
@@ -485,10 +486,20 @@ async function main() {
   );
 
   section("7) Kazanç + ödeme talebi → admin öder");
+  // Ön koşul, ödeme talebinin KENDİ kuralıyla aynı olmalı (earning-claimable.ts):
+  // elle kurulan `pending + payout_id is null` yüklemi iade edilmiş bir hakedişi
+  // de "bekleyen kazanç var" sayar, sonra talebin kendisi onu haklı olarak
+  // dışarıda bırakıp 400 döner ve e2e sebepsiz kırmızıya döner.
   const pending = await db
-    .select()
+    .select({ id: manufacturerEarnings.id })
     .from(manufacturerEarnings)
-    .where(and(eq(manufacturerEarnings.manufacturerId, mfgId), eq(manufacturerEarnings.status, "pending"), isNull(manufacturerEarnings.payoutId)));
+    .leftJoin(orders, eq(orders.id, manufacturerEarnings.orderId))
+    .where(
+      and(
+        eq(manufacturerEarnings.manufacturerId, mfgId),
+        claimableEarningWhere(manufacturerEarnings)
+      )
+    );
   if (pending.length === 0) {
     bad("payout: bekleyen kazanç bulunamadı (platform alt-siparişi kargolanamadıysa beklenebilir)");
   } else {

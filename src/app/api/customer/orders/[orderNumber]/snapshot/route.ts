@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/services/customer-auth";
 import { getPublicUrl } from "@/lib/services/storage";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { handleRouteFailure, CUSTOMER_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
 const PHOTO_KEY_REGEX = /\/(photos\/[^?#]+)$/;
 
@@ -20,7 +21,7 @@ const PHOTO_KEY_REGEX = /\/(photos\/[^?#]+)$/;
  * form) or gift card code (intentionally not carried over — must be
  * re-applied to validate balance).
  */
-export async function GET(
+async function handleGET(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -77,4 +78,17 @@ export async function GET(
     style: order.style,
     modifiers: order.modifiers ?? [],
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handleGET` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function GET(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handleGET(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "GET /api/customer/orders/[orderNumber]/snapshot", CUSTOMER_READ_FAILED_ERROR);
+  }
 }

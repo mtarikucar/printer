@@ -23,16 +23,29 @@ export interface EarningLine {
   commissionKurus: number;
   netKurus: number;
   status: string;
+  /** Siparişin parası müşteriye iade edilmiş: bu hakediş ödenmez. */
+  refunded: boolean;
   createdAt: string;
 }
 
+/**
+ * Bir partnerin AÇIK hakedişleri, ödenebilir olan ve olmayan diye ayrılmış.
+ *
+ * `owedKurus`/`count` "Ödeme oluştur"un yaratacağı partinin TA KENDİSİDİR
+ * (ortak kural, earning-claimable.ts); `refunded*` ise aynı kuyrukta duran ama
+ * ödenmeyecek para. İkisi ayrı taşınır çünkü tek toplamda birleştirmek, ekranın
+ * partnere "ödenmez" dediği tutarı admin'e "ödenecek" diye göstermekti.
+ */
 export interface OwedPartner {
   partnerId: string;
   name: string;
   owedKurus: number;
   count: number;
+  refundedKurus: number;
+  refundedCount: number;
   bank: BankInfo;
   earnings: EarningLine[];
+  refundedEarnings: EarningLine[];
 }
 
 export interface PayoutRow {
@@ -182,6 +195,14 @@ function EarningsDetails({ earnings, label }: { earnings: EarningLine[]; label: 
                   <Link href={`/admin/orders/${e.orderId}`} className="font-mono text-indigo-600 hover:underline">
                     {e.orderNumber}
                   </Link>
+                  {/* Parti kurulduktan SONRA da görünür kalır: bir hakedişin
+                      iade olduğu, tam da parası gönderilmek üzereyken
+                      okunabilmeli. */}
+                  {e.refunded && (
+                    <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                      İade edildi
+                    </span>
+                  )}
                 </td>
                 <td className="py-1 pr-3 text-gray-500">{day(e.createdAt)}</td>
                 <td className="py-1 pr-3 text-right text-gray-500">{fmt(e.grossKurus)}</td>
@@ -259,9 +280,24 @@ export function PayoutsClient({
     );
   };
 
+  // Bir ödeme partisinin içindeki iade edilmiş (ödenmemesi gereken) para.
+  const refundedInPayout = (p: PayoutRow) => {
+    const rows = p.earnings.filter((e) => e.refunded);
+    return rows.length
+      ? { count: rows.length, kurus: rows.reduce((a, e) => a + e.netKurus, 0) }
+      : null;
+  };
+
   // Adım 1 — para GÖNDERMEZ; bekleyen hakedişleri tek bir bekleyen ödemede toplar.
   const createPayout = async (o: OwedPartner) => {
     const warn = bankWarnings(o.bank).map((w) => `- ${w.text}`);
+    // Onay kutusunda yazan rakam ile oluşan parti artık aynı; aradaki farkın
+    // nereye gittiği de burada yazar, sessizce düşmez.
+    if (o.refundedCount > 0) {
+      warn.push(
+        `- İade edilen ${o.refundedCount} sipariş (${fmt(o.refundedKurus)}) bu ödemeye GİRMEZ.`
+      );
+    }
     const msg =
       `${o.name} için ${fmt(o.owedKurus)} tutarında ödeme (${o.count} sipariş) oluşturulsun mu?` +
       (warn.length ? `\n\nDikkat:\n${warn.join("\n")}` : "") +
@@ -283,6 +319,17 @@ export function PayoutsClient({
 
   // Adım 2 — banka transferi yapıldıktan sonra.
   const markPaid = async (p: PayoutRow) => {
+    // Eski kurala göre kurulmuş partilerde iade edilmiş hakediş bulunabilir;
+    // "Ödendi" onu `paid` yapar ve para gerçekten ödenmiş sayılır.
+    const refunded = refundedInPayout(p);
+    if (
+      refunded &&
+      !confirm(
+        `${p.name} — bu ödemedeki ${refunded.count} siparişin parası müşteriye iade edilmiş (${fmt(refunded.kurus)}). Bu tutar ödenmemeli. Yine de ödendi işaretlensin mi?`
+      )
+    ) {
+      return;
+    }
     if (
       p.bank.ibanReviewPending &&
       !confirm(
@@ -312,9 +359,64 @@ export function PayoutsClient({
     }
   };
 
+  /**
+   * Partinin ARKASINDA duran para: "Ödendi" işaretlendiğinde gerçekten
+   * kapanacak satırların toplamı. Çevrilmiş (iade/clawback) satırlar hariç,
+   * çünkü onlar `paid` olmaz — uç de tam bu kümeyi karşılaştırır, böylece
+   * ekranın uyardığı hâl ile ucun reddettiği hâl AYNIDIR.
+   */
+  const heldBy = (p: PayoutRow) => {
+    const rows = p.earnings.filter((e) => e.status !== "reversed");
+    return { count: rows.length, kurus: rows.reduce((a, e) => a + e.netKurus, 0) };
+  };
+
+  /**
+   * Parti iddia ettiği parayı tutuyor mu?
+   *
+   * KAPANAN HATA: uyarı `p.earnings.length > 0` koşuluna bağlıydı, yani tam da
+   * EN TEHLİKELİ hâlde susuyordu — bütün satırları eşzamanlı başka bir partiye
+   * kaçmış bir parti ("6 sipariş · ₺12.600,00" yazan ama arkasında tek satır
+   * olmayan hayalet) hiçbir işaret göstermeden, yanındaki gerçek partiyle
+   * birebir aynı görünüyordu. Uyuşmazlığı ÖLÇMEYİ imkânsız kılan durum, en az
+   * uyuşmazlık kadar açık yazılmalı.
+   */
   const payoutMismatch = (p: PayoutRow) => {
-    const s = p.earnings.reduce((a, e) => a + e.netKurus, 0);
-    return p.earnings.length > 0 && s !== p.totalKurus ? s : null;
+    const held = heldBy(p);
+    return held.kurus !== p.totalKurus || held.count !== p.earningCount ? held : null;
+  };
+  /** Parti hiç hak ediş tutmuyor: ödenemez, ama kuyruktan silinebilir. */
+  const holdsNothing = (p: PayoutRow) => heldBy(p).count === 0;
+
+  const mismatchText = (p: PayoutRow, held: { count: number; kurus: number }) =>
+    held.count === 0
+      ? `Bu parti ${p.earningCount} sipariş · ${fmt(p.totalKurus)} diyor ama ARKASINDA TEK BİR HAK EDİŞ YOK. Eşzamanlı bir ödeme oluşturma sırasında satırlar başka bir partiye girmiş olabilir: TRANSFER YAPMAYIN. Ödendi işaretlenemez; partnerin güncel hak edişlerine bakıp boş partiyi silin.`
+      : `Bu parti ${p.earningCount} sipariş · ${fmt(p.totalKurus)} diyor ama arkasında ${held.count} sipariş · ${fmt(held.kurus)} var. Tutarsız parti ödendi işaretlenemez; siparişleri aşağıdan kontrol edin.`;
+
+  // Yalnız BOŞ ve bekleyen partiyi siler; uç de aynı kuralı uygular.
+  const deleteEmptyPayout = async (p: PayoutRow) => {
+    if (
+      !confirm(
+        `${p.name} — bu parti hiçbir hak ediş tutmuyor (üzerinde ${p.earningCount} sipariş · ${fmt(p.totalKurus)} yazıyor). Parti kuyruktan silinsin mi?\n\nHak edişler etkilenmez: ödenmemiş olanlar yeniden partilenebilir. Silinen parti geri alınamaz.`
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-${p.id}`);
+    try {
+      const res = await fetch(`/api/admin/payouts/${p.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: tab }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || "Parti silinemedi");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -363,17 +465,37 @@ export function PayoutsClient({
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="font-semibold text-gray-900">{fmt(o.owedKurus)}</span>
-                  <button
-                    type="button"
-                    onClick={() => createPayout(o)}
-                    disabled={busy === `create-${o.partnerId}`}
-                    className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-gray-400"
-                  >
-                    {busy === `create-${o.partnerId}` ? "…" : "Ödeme oluştur"}
-                  </button>
+                  {o.count > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => createPayout(o)}
+                      disabled={busy === `create-${o.partnerId}`}
+                      className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-gray-400"
+                    >
+                      {busy === `create-${o.partnerId}` ? "…" : "Ödeme oluştur"}
+                    </button>
+                  ) : (
+                    // Ödenebilir satır yok (kuyrukta yalnız iade hakedişi var).
+                    // Düğme yine de sunuluyordu ve servis 400 ile reddediyordu:
+                    // ölü düğme. Sebebi yazılı olarak duruyor.
+                    <span className="rounded-lg bg-gray-100 px-4 py-1.5 text-sm text-gray-500">
+                      Ödenecek hak ediş yok
+                    </span>
+                  )}
                 </div>
               </div>
+              {o.refundedCount > 0 && (
+                <p className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+                  İade edilen {o.refundedCount} sipariş · {fmt(o.refundedKurus)} — ödenmez, ödeme
+                  oluşturduğunuzda partiye girmez. Partnerin kendi ekranı da bu tutarı talep
+                  edilebilir saymıyor.
+                </p>
+              )}
               <EarningsDetails earnings={o.earnings} label="Siparişleri göster" />
+              <EarningsDetails
+                earnings={o.refundedEarnings}
+                label="İade edilen siparişleri göster"
+              />
             </div>
           ))}
         </div>
@@ -386,6 +508,7 @@ export function PayoutsClient({
         <div className="mb-8 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
           {pendingPayouts.map((p) => {
             const mismatch = payoutMismatch(p);
+            const refunded = refundedInPayout(p);
             return (
               <div key={p.id} className="px-4 py-3 text-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -399,21 +522,57 @@ export function PayoutsClient({
                     </p>
                     <BankBlock bank={p.bank} reviewHref={cfg.reviewHref} />
                     {mismatch !== null && (
+                      <p
+                        role="alert"
+                        className="mt-1 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700"
+                      >
+                        {mismatchText(p, mismatch)}
+                      </p>
+                    )}
+                    {mismatch === null && holdsNothing(p) && (
+                      // Tutarlı ama BOŞ parti: bütün hak edişleri geri alınmış
+                      // (iade). Ödenecek bir şey yok; kuyruğu tıkamasın.
                       <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                        Ödeme toplamı {fmt(p.totalKurus)}, içindeki siparişlerin toplamı {fmt(mismatch)}.
+                        Bu parti boş: içindeki hak edişlerin tamamı geri alınmış. Ödenecek tutar
+                        yok, partiyi kuyruktan silebilirsiniz.
+                      </p>
+                    )}
+                    {refunded !== null && (
+                      <p className="mt-1 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+                        Bu ödemedeki {refunded.count} siparişin parası müşteriye iade edilmiş:{" "}
+                        {fmt(refunded.kurus)} ödenmemeli. Transferi yapmadan önce tutarı düşün ve
+                        partnere bilgi verin.
                       </p>
                     )}
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-semibold text-gray-900">{fmt(p.totalKurus)}</span>
-                    <button
-                      type="button"
-                      onClick={() => markPaid(p)}
-                      disabled={busy === `paid-${p.id}`}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-400"
-                    >
-                      {busy === `paid-${p.id}` ? "…" : "Ödendi işaretle"}
-                    </button>
+                    {/* Ekran, ucun REDDEDECEĞİ denetimi sunmaz: tuttuğu parayı
+                        söylemeyen ya da hiç hak ediş tutmayan parti için tek
+                        anlamlı iş, partiyi kuyruktan kaldırmaktır. */}
+                    {mismatch === null && !holdsNothing(p) ? (
+                      <button
+                        type="button"
+                        onClick={() => markPaid(p)}
+                        disabled={busy === `paid-${p.id}`}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-400"
+                      >
+                        {busy === `paid-${p.id}` ? "…" : "Ödendi işaretle"}
+                      </button>
+                    ) : holdsNothing(p) ? (
+                      <button
+                        type="button"
+                        onClick={() => deleteEmptyPayout(p)}
+                        disabled={busy === `delete-${p.id}`}
+                        className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:text-gray-400"
+                      >
+                        {busy === `delete-${p.id}` ? "…" : "Boş partiyi sil"}
+                      </button>
+                    ) : (
+                      <span className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-500">
+                        Ödendi işaretlenemez
+                      </span>
+                    )}
                   </div>
                 </div>
                 <EarningsDetails earnings={p.earnings} label="Siparişleri göster" />
@@ -449,6 +608,19 @@ export function PayoutsClient({
                   </span>
                 </div>
               </div>
+              {/* Geçmişte de susmaz: düzeltmeden ÖNCE ödenmiş bir hayalet parti
+                  ("ödendi" yazan ama arkasında hak ediş olmayan) yalnız burada
+                  görünür ve muhasebe ile partnerin ekranı ancak böyle
+                  uzlaştırılabilir. */}
+              {payoutMismatch(p) !== null && (
+                <p
+                  role="alert"
+                  className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700"
+                >
+                  {mismatchText(p, heldBy(p))} Bu parti ödendi işaretlenmiş: gerçekten gönderilen
+                  tutarı banka kaydından doğrulayın.
+                </p>
+              )}
               <EarningsDetails earnings={p.earnings} label="Siparişleri göster" />
             </div>
           ))}

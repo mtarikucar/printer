@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
 import { queryPaytrTransactionStatus } from "@/lib/services/paytr";
 import { failDraft, promoteDraftToOrder } from "@/lib/services/order-draft";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Admin-triggered PayTR status reconciliation. Used to recover card drafts whose
@@ -18,86 +19,91 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
+  try {
+    const a = await requireAdmin();
 
-  if ("response" in a) return a.response;
+    if ("response" in a) return a.response;
 
-  const { id } = await params;
-  const draft = await db.query.orderDrafts.findFirst({
-    where: eq(orderDrafts.id, id),
-  });
-  if (!draft) {
-    return NextResponse.json({ error: "Draft not found" }, { status: 404 });
-  }
-
-  if (draft.paymentMethod !== "card") {
-    return NextResponse.json(
-      { error: "Only card drafts support PayTR verification" },
-      { status: 400 }
-    );
-  }
-
-  if (!draft.paytrMerchantOid) {
-    return NextResponse.json(
-      { error: "Draft has no PayTR merchant_oid — payment was never started" },
-      { status: 400 }
-    );
-  }
-
-  if (draft.status === "confirmed" && draft.promotedOrderId) {
-    return NextResponse.json({
-      state: "confirmed",
-      orderId: draft.promotedOrderId,
-      orderNumber: draft.reference,
+    const { id } = await params;
+    const draft = await db.query.orderDrafts.findFirst({
+      where: eq(orderDrafts.id, id),
     });
-  }
+    if (!draft) {
+      return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+    }
 
-  const result = await queryPaytrTransactionStatus(draft.paytrMerchantOid);
-
-  if (result.status === "success") {
-    try {
-      const promoted = await promoteDraftToOrder(draft.id);
-      return NextResponse.json({
-        state: "confirmed",
-        orderId: promoted.orderId,
-        orderNumber: promoted.orderNumber,
-        paytr: {
-          paymentAmount: result.paymentAmount,
-          paymentType: result.paymentType,
-          testMode: result.testMode,
-        },
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "promotion_failed";
-      console.error(
-        `[admin.verify-paytr] promotion failed for ${draft.reference}`,
-        err
-      );
+    if (draft.paymentMethod !== "card") {
       return NextResponse.json(
-        { state: "verify_error", error: msg },
-        { status: 500 }
+        { error: "Only card drafts support PayTR verification" },
+        { status: 400 }
       );
     }
-  }
 
-  if (result.status === "failed") {
-    const reason =
-      [result.failedReasonCode, result.failedReasonMsg]
-        .filter(Boolean)
-        .join(" — ") || "PayTR rejected the payment";
-    await failDraft(draft.id, reason);
-    return NextResponse.json({ state: "failed", reason });
-  }
+    if (!draft.paytrMerchantOid) {
+      return NextResponse.json(
+        { error: "Draft has no PayTR merchant_oid — payment was never started" },
+        { status: 400 }
+      );
+    }
 
-  if (result.status === "waiting") {
-    return NextResponse.json({ state: "waiting" });
-  }
+    if (draft.status === "confirmed" && draft.promotedOrderId) {
+      return NextResponse.json({
+        state: "confirmed",
+        orderId: draft.promotedOrderId,
+        orderNumber: draft.reference,
+      });
+    }
 
-  return NextResponse.json(
-    {
-      state: "verify_error",
-      error: result.failedReasonMsg || "PayTR status query failed",
-    },
-    { status: 502 }
-  );
+    const result = await queryPaytrTransactionStatus(draft.paytrMerchantOid);
+
+    if (result.status === "success") {
+      try {
+        const promoted = await promoteDraftToOrder(draft.id);
+        return NextResponse.json({
+          state: "confirmed",
+          orderId: promoted.orderId,
+          orderNumber: promoted.orderNumber,
+          paytr: {
+            paymentAmount: result.paymentAmount,
+            paymentType: result.paymentType,
+            testMode: result.testMode,
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "promotion_failed";
+        console.error(
+          `[admin.verify-paytr] promotion failed for ${draft.reference}`,
+          err
+        );
+        return NextResponse.json(
+          { state: "verify_error", error: msg },
+          { status: 500 }
+        );
+      }
+    }
+
+    if (result.status === "failed") {
+      const reason =
+        [result.failedReasonCode, result.failedReasonMsg]
+          .filter(Boolean)
+          .join(" — ") || "PayTR rejected the payment";
+      await failDraft(draft.id, reason);
+      return NextResponse.json({ state: "failed", reason });
+    }
+
+    if (result.status === "waiting") {
+      return NextResponse.json({ state: "waiting" });
+    }
+
+    return NextResponse.json(
+      {
+        state: "verify_error",
+        error: result.failedReasonMsg ||
+          "PayTR ödeme durumu sorgulanamadı. Birkaç dakika sonra tekrar deneyin.",
+      },
+      { status: 502 }
+    );
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/drafts/[id]/verify-paytr", ADMIN_ACTION_FAILED_ERROR);
+  }
 }

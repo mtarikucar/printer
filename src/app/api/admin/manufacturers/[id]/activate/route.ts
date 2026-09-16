@@ -6,46 +6,51 @@ import { manufacturers } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
+  try {
+    const a = await requireAdmin();
 
-  if ("response" in a) return a.response;
+    if ("response" in a) return a.response;
 
-  const { id } = await params;
+    const { id } = await params;
 
-  const [manufacturer] = await db
-    .update(manufacturers)
-    // Clear the strikes too: leaving the count at the suspend threshold means
-    // the very next strike re-suspends the account instantly, so a
-    // reactivation would be meaningless.
-    .set({ status: "active", strikeCount: 0, updatedAt: new Date() })
-    .where(
-      and(
-        eq(manufacturers.id, id),
-        eq(manufacturers.status, "suspended")
+    const [manufacturer] = await db
+      .update(manufacturers)
+      // Clear the strikes too: leaving the count at the suspend threshold means
+      // the very next strike re-suspends the account instantly, so a
+      // reactivation would be meaningless.
+      .set({ status: "active", strikeCount: 0, updatedAt: new Date() })
+      .where(
+        and(
+          eq(manufacturers.id, id),
+          eq(manufacturers.status, "suspended")
+        )
       )
-    )
-    .returning();
+      .returning();
 
-  if (!manufacturer) {
-    return NextResponse.json(
-      { error: "Manufacturer not found or not suspended" },
-      { status: 400 }
-    );
+    if (!manufacturer) {
+      return NextResponse.json(
+        { error: "Manufacturer not found or not suspended" },
+        { status: 400 }
+      );
+    }
+
+    await publishRealtime([topics.admin()], { kind: "badge" });
+
+    await notifyManufacturer({
+      manufacturerId: id,
+      type: "system_announcement",
+      subject: "Hesabınız yeniden aktif edildi",
+      body: "Üretici hesabınızdaki askı kaldırıldı. Yeniden sipariş alabilir ve ürün satabilirsiniz. Tekrar aramızda olmanıza sevindik!",
+    }).catch((e) => console.error("notifyManufacturer (reactivate) failed", e));
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/manufacturers/[id]/activate", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  await publishRealtime([topics.admin()], { kind: "badge" });
-
-  await notifyManufacturer({
-    manufacturerId: id,
-    type: "system_announcement",
-    subject: "Hesabınız yeniden aktif edildi",
-    body: "Üretici hesabınızdaki askı kaldırıldı. Yeniden sipariş alabilir ve ürün satabilirsiniz. Tekrar aramızda olmanıza sevindik!",
-  }).catch((e) => console.error("notifyManufacturer (reactivate) failed", e));
-
-  return NextResponse.json({ success: true });
 }

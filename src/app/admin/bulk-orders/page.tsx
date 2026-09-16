@@ -46,72 +46,169 @@ const OPEN_STATUSES = [
   "painting",
 ] as const;
 
+/**
+ * Sayfanın en üstünde duran arıza şeridi.
+ *
+ * NEDEN: yalnızca GÖSTERİLEN bir tablo (ürün adı, üretici adı) okunamadığında
+ * kuyruk ekranı artık açılıyor — ama sessizce eksik bir kuyruk, dolu bir kuyruktan
+ * ayırt edilemez. Şerit, adminin fiilen baktığı yerde neyin BİLİNMEDİĞİNİ söyler.
+ */
+function QueueReadNotice({ areas }: { areas: string[] }) {
+  if (areas.length === 0) return null;
+  return (
+    <div
+      role="alert"
+      className="mt-4 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+    >
+      <p className="font-semibold">
+        Bu kuyruğun bazı kayıtları şu anda okunamıyor (geçici sistem arızası)
+      </p>
+      <p className="mt-1 text-amber-900/80">
+        Aşağıdakiler gerçek kayıtlardır; ama şu bölümler BOŞ DEĞİL, BİLİNMİYOR:{" "}
+        {areas.join(" · ")}. Eksik görünen bir kuyruğa göre atama yapmayın; birkaç
+        dakika sonra sayfayı yenileyin.
+      </p>
+    </div>
+  );
+}
+
 export default async function AdminBulkOrdersPage() {
   // One row per (product, order) so we can aggregate units per product and
   // still know which orders are unassigned. Covers both order shapes: cart
   // sub-orders carry products on order_items, single-product orders on the
   // orders row itself.
-  const lineRows = await db
-    .select({
-      orderId: orders.id,
-      orderNumber: orders.orderNumber,
-      createdAt: orders.createdAt,
-      manufacturerId: orders.manufacturerId,
-      manufacturerName: manufacturers.companyName,
-      manufacturerStatus: orders.manufacturerStatus,
-      productId: orderItems.productId,
-      productTitle: products.title,
-      productImageKey: products.primaryImageKey,
-      units: orderItems.quantity,
-      assignable: ASSIGNABLE,
-    })
-    .from(orderItems)
-    .innerJoin(orders, eq(orderItems.orderId, orders.id))
-    .innerJoin(products, eq(orderItems.productId, products.id))
-    .leftJoin(manufacturers, eq(orders.manufacturerId, manufacturers.id))
-    .where(
-      and(
-        eq(orders.isBulk, true),
-        inArray(orders.status, [...OPEN_STATUSES]),
-        NOT_REFUNDED,
-        sql`${orderItems.appliedTierMinQuantity} IS NOT NULL`
+  // ─── Kuyruk: yalnız orders/order_items ───────────────────────────────────
+  //
+  // Ürün adı/görseli ve üretici adı YALNIZCA GÖSTERİLİYOR, ama innerJoin/leftJoin
+  // TEK ifadedir: `products` ya da `manufacturers` okunamadığında toplu üretim
+  // kuyruğunun TAMAMI 500 veriyordu — oysa kuyruğun kendisi (hangi sipariş, kaç
+  // adet, atanabilir mi) orders/order_items'ta duruyor. Adlar artık AYRI ve
+  // KORUMALI okunur; okunamazsa satır KAYBOLMAZ, yalnız adı "okunamadı" der.
+  //
+  // innerJoin(products) aynı zamanda SÜZÜYORDU (ürün satırı olmayan kalem
+  // düşerdi). Süzgeç korunuyor: kalemlerde `productId` boş olan satır zaten
+  // atlanıyor, tekil siparişlere de `product_id IS NOT NULL` koşulu eklendi.
+  // Ürün satırı gerçekten yoksa iş artık "Ürün bulunamadı" diye GÖRÜNÜR — bir
+  // toplu siparişi kuyruktan sessizce düşürmek, üretime hiç girmemesi demekti.
+  const [lineRead, scalarRead] = await Promise.all([
+    db
+      .select({
+        orderId: orders.id,
+        orderNumber: orders.orderNumber,
+        createdAt: orders.createdAt,
+        manufacturerId: orders.manufacturerId,
+        manufacturerStatus: orders.manufacturerStatus,
+        productId: orderItems.productId,
+        units: orderItems.quantity,
+        assignable: ASSIGNABLE,
+      })
+      .from(orderItems)
+      .innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.isBulk, true),
+          inArray(orders.status, [...OPEN_STATUSES]),
+          NOT_REFUNDED,
+          sql`${orderItems.appliedTierMinQuantity} IS NOT NULL`
+        )
       )
-    );
+      .catch((e) => {
+        console.error("toplu üretim: sipariş kalemleri okunamadı", e);
+        return null;
+      }),
+    db
+      .select({
+        orderId: orders.id,
+        orderNumber: orders.orderNumber,
+        createdAt: orders.createdAt,
+        manufacturerId: orders.manufacturerId,
+        manufacturerStatus: orders.manufacturerStatus,
+        productId: orders.productId,
+        units: orders.quantity,
+        assignable: ASSIGNABLE,
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.isBulk, true),
+          inArray(orders.status, [...OPEN_STATUSES]),
+          NOT_REFUNDED,
+          sql`${orders.productId} IS NOT NULL`
+        )
+      )
+      .catch((e) => {
+        console.error("toplu üretim: tekil ürünlü siparişler okunamadı", e);
+        return null;
+      }),
+  ]);
+  const lineRowsUnreadable = lineRead === null;
+  const scalarRowsUnreadable = scalarRead === null;
+  const lineRows = lineRead ?? [];
+  const scalarRows = scalarRead ?? [];
 
-  const scalarRows = await db
-    .select({
-      orderId: orders.id,
-      orderNumber: orders.orderNumber,
-      createdAt: orders.createdAt,
-      manufacturerId: orders.manufacturerId,
-      manufacturerName: manufacturers.companyName,
-      manufacturerStatus: orders.manufacturerStatus,
-      productId: orders.productId,
-      productTitle: products.title,
-      productImageKey: products.primaryImageKey,
-      units: orders.quantity,
-      assignable: ASSIGNABLE,
-    })
-    .from(orders)
-    .innerJoin(products, eq(orders.productId, products.id))
-    .leftJoin(manufacturers, eq(orders.manufacturerId, manufacturers.id))
-    .where(
-      and(
-        eq(orders.isBulk, true),
-        inArray(orders.status, [...OPEN_STATUSES]),
-        NOT_REFUNDED
-      )
-    );
+  const productIds = [
+    ...new Set(
+      [...lineRows, ...scalarRows]
+        .map((r) => r.productId)
+        .filter((x): x is string => !!x)
+    ),
+  ];
+  const assignedManufacturerIds = [
+    ...new Set(
+      [...lineRows, ...scalarRows]
+        .map((r) => r.manufacturerId)
+        .filter((x): x is string => !!x)
+    ),
+  ];
+  const [productRead, manufacturerNameRead] = await Promise.all([
+    productIds.length
+      ? db
+          .select({
+            id: products.id,
+            title: products.title,
+            primaryImageKey: products.primaryImageKey,
+          })
+          .from(products)
+          .where(inArray(products.id, productIds))
+          .catch((e) => {
+            console.error("toplu üretim: ürün adları okunamadı", e);
+            return null;
+          })
+      : [],
+    assignedManufacturerIds.length
+      ? db
+          .select({ id: manufacturers.id, companyName: manufacturers.companyName })
+          .from(manufacturers)
+          .where(inArray(manufacturers.id, assignedManufacturerIds))
+          .catch((e) => {
+            console.error("toplu üretim: atanmış üretici adları okunamadı", e);
+            return null;
+          })
+      : [],
+  ]);
+  const productNamesUnreadable = productRead === null;
+  const productById = new Map((productRead ?? []).map((pr) => [pr.id, pr]));
+  const manufacturerNamesUnreadable = manufacturerNameRead === null;
+  const manufacturerNameById = new Map(
+    (manufacturerNameRead ?? []).map((m) => [m.id, m.companyName])
+  );
 
   const groups = new Map<string, BulkProductGroup>();
   for (const row of [...lineRows, ...scalarRows]) {
     if (!row.productId) continue;
     let g = groups.get(row.productId);
     if (!g) {
+      const product = productById.get(row.productId);
       g = {
         productId: row.productId,
-        title: row.productTitle,
-        imageUrl: row.productImageKey ? getPublicUrl(row.productImageKey) : null,
+        // Ad okunamadıysa "bilinmiyor" denir: boş bir başlık, ürünün adı yokmuş
+        // gibi okunurdu.
+        title:
+          product?.title ??
+          (productNamesUnreadable ? "Ürün adı okunamadı" : "Ürün bulunamadı"),
+        imageUrl: product?.primaryImageKey
+          ? getPublicUrl(product.primaryImageKey)
+          : null,
         totalUnits: 0,
         assignableUnits: 0,
         notYetAssignableUnits: 0,
@@ -133,7 +230,10 @@ export default async function AdminBulkOrdersPage() {
       orderNumber: row.orderNumber,
       units: row.units,
       createdAt: row.createdAt.toISOString(),
-      manufacturerName: row.manufacturerName ?? null,
+      manufacturerName: row.manufacturerId
+        ? manufacturerNameById.get(row.manufacturerId) ??
+          (manufacturerNamesUnreadable ? "Üretici adı okunamadı" : null)
+        : null,
       unassigned,
       assignable,
     });
@@ -159,7 +259,10 @@ export default async function AdminBulkOrdersPage() {
     (a, b) => b.assignableUnits - a.assignableUnits || b.totalUnits - a.totalUnits
   );
 
-  const activeManufacturers = await db
+  // Atama kutusunun listesi: okunamazsa kutu BOŞ kalır ve "ata" düğmesi seçim
+  // yapılamadığı için pasif durur — kapı kapalı tarafta. Sebebini şerit yazar,
+  // yoksa admin boş bir açılır listeye bakıp "üretici kalmamış" sanırdı.
+  const activeManufacturerRead = await db
     .select({
       id: manufacturers.id,
       companyName: manufacturers.companyName,
@@ -167,16 +270,20 @@ export default async function AdminBulkOrdersPage() {
     })
     .from(manufacturers)
     .where(eq(manufacturers.status, "active"))
-    .orderBy(manufacturers.companyName);
+    .orderBy(manufacturers.companyName)
+    .catch((e) => {
+      console.error("toplu üretim: aktif üretici listesi okunamadı", e);
+      return null;
+    });
+  const manufacturerListUnreadable = activeManufacturerRead === null;
+  const activeManufacturers = activeManufacturerRead ?? [];
 
   // Header figures, one scan over the bulk orders.
   //  - awaiting: AWAITING_MANUFACTURER ∧ isBulk, exactly the set the
-  //    "Toplu üretim" nav badge counts (admin/layout.tsx). The header used to
-  //    count every open bulk order with no manufacturer, awaiting_model and
-  //    unapproved ones included, so it read higher than the badge linking here.
+  //    "Toplu üretim" nav badge counts (admin/layout.tsx).
   //  - notYet: the rest of that old figure (open, not refunded, no
   //    manufacturer, not assignable yet), shown apart so it is not lost.
-  const [{ awaiting: awaitingCount, notYet: notYetAssignableCount }] = await db
+  const headerRead = await db
     .select({
       awaiting: sql<number>`(count(*) FILTER (WHERE ${AWAITING_MANUFACTURER}))::int`,
       notYet: sql<number>`(count(*) FILTER (WHERE NOT ${ASSIGNABLE}
@@ -185,11 +292,33 @@ export default async function AdminBulkOrdersPage() {
         AND (${orders.manufacturerStatus} IS NULL OR ${orders.manufacturerStatus} = 'unassigned')))::int`,
     })
     .from(orders)
-    .where(eq(orders.isBulk, true));
+    .where(eq(orders.isBulk, true))
+    .catch((e) => {
+      console.error("toplu üretim: başlık sayıları okunamadı", e);
+      return null;
+    });
+  const headerUnreadable = headerRead === null;
+  const awaitingCount = headerRead?.[0]?.awaiting ?? 0;
+  const notYetAssignableCount = headerRead?.[0]?.notYet ?? 0;
+
+  // Hangi bölüm BİLİNMİYOR: şerit sayfanın en üstünde, başlığın hemen altında.
+  const unreadableAreas = [
+    lineRowsUnreadable &&
+      "Sepet kalemli toplu siparişler (kuyruk EKSİK görünüyor; okunamayan satırlar \"sipariş yok\" demek değildir)",
+    scalarRowsUnreadable &&
+      "Tekil ürünlü toplu siparişler (kuyruk EKSİK görünüyor)",
+    productNamesUnreadable && "Ürün adları ve görselleri",
+    manufacturerNamesUnreadable && "Atanmış üretici adları",
+    manufacturerListUnreadable &&
+      "Aktif üretici listesi (atama kutusu boş kaldı; bu yüzden şu an atama yapılamıyor)",
+    headerUnreadable &&
+      "Başlıktaki sayılar (\"üretici bekliyor\" ve \"henüz atanamaz\" sayıları gösterilemiyor)",
+  ].filter((x): x is string => typeof x === "string");
 
   return (
     <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900">Toplu üretim kuyruğu</h1>
+      <QueueReadNotice areas={unreadableAreas} />
       <p className="mt-1 text-sm text-gray-600">
         Açık toplu siparişler ürün bazında toplanmıştır. Aynı ürünün siparişlerini
         tek üreticiye vererek kalıp/tezgâh kurulumunu bir kez yaptırabilirsiniz.

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { manufacturers, products } from "@/lib/db/schema";
 import { SiteHeader } from "@/components/site-header";
@@ -33,20 +33,44 @@ export default async function AnahtarlikKutusuPage() {
         priceKurus: products.priceKurus,
         primaryImageKey: products.primaryImageKey,
         ownerType: products.ownerType,
-        manufacturerStatus: manufacturers.status,
+        manufacturerId: products.manufacturerId,
       })
       .from(products)
-      .leftJoin(manufacturers, eq(products.manufacturerId, manufacturers.id))
       .where(and(eq(products.boxEligible, true), eq(products.status, "active")))
       .orderBy(asc(products.priceKurus), asc(products.title)),
     listBoxTiers(),
   ]);
 
+  // `leftJoin(manufacturers)` KALDIRILDI: join TEK ifadedir, `manufacturers`
+  // okunamadığında kutu sayfası tamamen 500 verirdi — oysa ürünler
+  // okunabiliyordu. Satıcı durumu AYRI ve korumalı okunur.
+  //
+  // Bu okuma GÖSTERİM DEĞİL, bir KAPININ girdisi: askıya alınmış satıcının
+  // ürünü satışa çıkamaz. Okunamadığında kapı AÇIK varsayılamaz, bu yüzden
+  // yalnız platformun KENDİ (admin) tasarımları listelenir — kural zaten bu
+  // sayfadaki ürünlerin admin'e ait olmasını söylüyor, yani kayıp beklenmez.
+  const sellerIds = [
+    ...new Set(rows.map((r) => r.manufacturerId).filter((x): x is string => !!x)),
+  ];
+  const sellerRead = sellerIds.length
+    ? await db
+        .select({ id: manufacturers.id, status: manufacturers.status })
+        .from(manufacturers)
+        .where(inArray(manufacturers.id, sellerIds))
+        .catch((e) => {
+          console.error("kutu: satıcı durumları okunamadı", e);
+          return null;
+        })
+    : [];
+  const sellerStatusById = new Map((sellerRead ?? []).map((m) => [m.id, m.status]));
+
   // Same suspended-seller gate the storefront applies. Box-eligible products
   // are admin-owned by policy, so this is belt-and-braces against a stray flag.
   const designs: BoxDesign[] = rows
     .filter(
-      (p) => p.ownerType === "admin" || p.manufacturerStatus === "active"
+      (p) =>
+        p.ownerType === "admin" ||
+        sellerStatusById.get(p.manufacturerId ?? "") === "active"
     )
     .map((p) => ({
       id: p.id,

@@ -25,6 +25,7 @@ import {
   discardStagedUpload,
   stagedSize,
 } from "@/lib/services/chunked-upload";
+import { handleRouteFailure, UPLOAD_FAILED_ERROR } from "@/lib/api/route-error";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -36,7 +37,7 @@ const execFileAsync = promisify(execFile);
 // flag it for a manual quote. Processing is synchronous for v1 with a graceful
 // fallback: any failure (trimesh missing, non-watertight, oversized) → quote
 // rather than a hard error (the plan's quote-bridge-first sequencing).
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const ip =
     req.headers.get("cf-connecting-ip") ??
     req.headers.get("x-forwarded-for") ??
@@ -222,4 +223,17 @@ async function present(id: string) {
     targetHeightMm: row.targetHeightMm,
     material: row.material,
   };
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(req: NextRequest) {
+  try {
+    return await handlePOST(req);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/upload/model", UPLOAD_FAILED_ERROR);
+  }
 }

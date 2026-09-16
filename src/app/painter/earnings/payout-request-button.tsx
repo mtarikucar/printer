@@ -46,10 +46,14 @@ export function PainterPayoutRequestButton({
         return;
       }
       const d = await r.json().catch(() => ({}));
+      // Sunucunun Türkçe mesajı varsa o gösterilir (401/403 de dahil); kod
+      // eşleştirmesi yalnızca mesajsız eski yanıtlar için yedektir.
       setError(
-        d.error === "nothing_owed"
-          ? "Talep edilecek bekleyen kazanç yok."
-          : "Talep oluşturulamadı. Lütfen tekrar deneyin."
+        typeof d.message === "string" && d.message
+          ? d.message
+          : d.error === "nothing_owed"
+            ? "Talep edilecek bekleyen kazanç yok."
+            : "Talep oluşturulamadı. Lütfen tekrar deneyin."
       );
     } catch {
       setError("Talep oluşturulamadı. Lütfen tekrar deneyin.");

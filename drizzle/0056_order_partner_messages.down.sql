@@ -1,0 +1,45 @@
+-- 0056 geri alma.
+--
+-- `order_partner_messages` tablosu düşer. DİKKAT: tablodaki YAZIŞMALAR da
+-- gider ve geri gelmez — kolon değil, tablonun tamamıdır. Geri almadan önce
+-- yedek al.
+--
+-- Uygulamayı KIRMAZ: sohbet servisi tablonun yokluğunu (42P01) zaten yakalar
+-- ve Türkçe bir "henüz etkinleştirilmedi" mesajına çevirir
+-- (isPartnerChatUnavailable, services/order-partner-chat.ts), yani panel 500
+-- vermez — 0056 öncesi davranışa döner.
+--
+-- Index ve `order_id` FK'si tablonun parçası oldukları için ayrıca
+-- düşürülmez; DROP TABLE ikisini de alır.
+--
+-- Tekrar çalıştırılabilir (IF EXISTS) ve yalnız up'ın yarattığı tabloya
+-- dokunur.
+--
+-- ─── DRIZZLE KAYIT SATIRI: KENDİ SATIRINI SİL, "EN YENİSİNİ" DEĞİL ─────────
+--
+-- `drizzle-kit migrate` uygulanmış her migration'ı kendi tablosunda tutar; bu
+-- dosyadan sonra 0056'nın yeniden uygulanabilmesi için KAYDININ da silinmesi
+-- gerekir. 0050-0054'ten kopyalanan tarif "en son eklenen satırı sil" diyordu
+-- (ORDER BY created_at DESC LIMIT 1); 0055 o tarifi kendi dosyasında düzeltti,
+-- bu dosya ise hâlâ taşıyordu. O tarif yalnız 0056 EN YENİ migration olduğu
+-- sürece doğrudur: üstüne 0057 eklendiği an başkasının satırını siler, 0056'nın
+-- kaydı yerinde kalır ve 0056 bir daha asla uygulanmaz — migrate "başarılı"
+-- der, tablo düşük kalır ve sohbet sessizce "henüz etkinleştirilmedi"de takılı
+-- kalır.
+--
+-- Bu yüzden satır KENDİ ETİKETİYLE silinir. Etiketin kimliği `created_at`tir:
+-- drizzle oraya journal'daki `when` değerini yazar
+-- (drizzle/meta/_journal.json · idx 56 · tag 0056_order_partner_messages ·
+-- when 1789498291439). `hash` ile SİLME: hash dosya İÇERİĞİNİN sha256'sıdır,
+-- dosya her düzeltildiğinde değişir ve kayıttaki eski hash'le eşleşmez.
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789498291439;
+--
+-- SIRA ÖNEMLİ — 0056 en yeni DEĞİLSE tek başına bu silme yetmez. Migrator
+-- yalnız EN YENİ kaydın `created_at`ine bakar (drizzle-orm/pg-core/dialect.js:
+-- "order by created_at desc limit 1" + `lastDbMigration.created_at <
+-- migration.folderMillis`), yani 0056'dan SONRA kaydedilmiş bir satır (0057, …)
+-- dururken 0056 yeniden uygulanmaz. Önce ÜSTÜNDEKİLER kendi down dosyalarıyla
+-- ve kendi satırlarıyla geri alınır, sonra bu dosya çalıştırılır; ardından:
+--   npm run db:migrate   -- hepsini yeniden uygular (hepsi idempotent)
+SET lock_timeout = '5s';
+DROP TABLE IF EXISTS "order_partner_messages";

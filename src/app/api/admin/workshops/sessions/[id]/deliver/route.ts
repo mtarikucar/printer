@@ -5,6 +5,7 @@ import { orders, workshopSessions, workshopParticipants, adminActions } from "@/
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { batchDeliverPending, batchOrderFilter } from "@/lib/services/workshop-session";
 import { emitOrderChanged } from "@/lib/realtime/emit";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Bir siparişin partide HÂLÂ teslim edilmeyi beklediğini söyleyen tanım —
@@ -39,114 +40,118 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-  const adminEmail = a.session.user.email;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const adminEmail = a.session.user.email;
 
-  const { id } = await params;
-  const now = new Date();
+    const { id } = await params;
+    const now = new Date();
 
-  // Sipariş + seans + katılımcı damgaları TEK işlemde: üçü asla birbirinden
-  // ayrı düşmemeli (bkz. ship ucundaki aynı ilke).
-  const { delivered, sessionNowDelivered } = await db.transaction(async (tx) => {
-    const rows = await tx
-      .update(orders)
-      .set({ status: "delivered", deliveredAt: now, updatedAt: now })
-      // `batchOrderFilter` burada da: sevk edildikten SONRA iade edilmiş bir
-      // siparişi "mekana teslim edildi" diye damgalamak, parası geri verilmiş
-      // bir figürü katılımcıya teslim etmiş gibi göstermek olurdu.
-      .where(and(batchOrderFilter(id), eq(orders.status, "shipped")))
-      .returning({
-        id: orders.id,
-        orderNumber: orders.orderNumber,
-        userId: orders.userId,
-        manufacturerId: orders.manufacturerId,
-        status: orders.status,
-        manufacturerStatus: orders.manufacturerStatus,
-      });
+    // Sipariş + seans + katılımcı damgaları TEK işlemde: üçü asla birbirinden
+    // ayrı düşmemeli (bkz. ship ucundaki aynı ilke).
+    const { delivered, sessionNowDelivered } = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(orders)
+        .set({ status: "delivered", deliveredAt: now, updatedAt: now })
+        // `batchOrderFilter` burada da: sevk edildikten SONRA iade edilmiş bir
+        // siparişi "mekana teslim edildi" diye damgalamak, parası geri verilmiş
+        // bir figürü katılımcıya teslim etmiş gibi göstermek olurdu.
+        .where(and(batchOrderFilter(id), eq(orders.status, "shipped")))
+        .returning({
+          id: orders.id,
+          orderNumber: orders.orderNumber,
+          userId: orders.userId,
+          manufacturerId: orders.manufacturerId,
+          status: orders.status,
+          manufacturerStatus: orders.manufacturerStatus,
+        });
 
-    if (rows.length > 0) {
-      await tx
-        .update(workshopParticipants)
-        .set({ status: "delivered", updatedAt: now })
-        .where(
-          inArray(
-            workshopParticipants.orderId,
-            rows.map((r) => r.id)
-          )
-        );
+      if (rows.length > 0) {
+        await tx
+          .update(workshopParticipants)
+          .set({ status: "delivered", updatedAt: now })
+          .where(
+            inArray(
+              workshopParticipants.orderId,
+              rows.map((r) => r.id)
+            )
+          );
+      }
+
+      // Partide (bu çağrıdan ÖNCE ya da bu çağrıyla) teslim edilmemiş sipariş
+      // kaldı mı? UPDATE'ten SONRA okunduğu için bu çağrının kendi teslimatını
+      // da doğal olarak düşer.
+      const pendingRows = await tx
+        .select({ id: orders.id })
+        .from(orders)
+        .where(deliverPending(id));
+
+      // Partide EN AZ bir teslim edilmiş sipariş var mı (bu çağrıdan önce ya
+      // da bu çağrıyla)? "Hiç teslimat olmadı ama her şey iade edildi" durumunu
+      // yanlışlıkla `delivered`e çevirmemek için.
+      const anyDeliveredRows = await tx
+        .select({ id: orders.id })
+        .from(orders)
+        .where(and(eq(orders.workshopSessionId, id), eq(orders.status, "delivered")))
+        .limit(1);
+      const batchComplete = pendingRows.length === 0 && anyDeliveredRows.length > 0;
+
+      // `batchDeliveredAt` YALNIZCA bu çağrı gerçekten bir şey teslim ettiyse
+      // güncellenir — ship ucundaki aynı ilke (bkz. o dosyadaki yorum): geride
+      // kalanlar sonradan iade edildiği için parti tamamlanan bir çağrıda
+      // (aşağıdaki `else if`) BU ÇAĞRININ taşımadığı bir teslimat damgası
+      // uydurulmaz, yalnızca seans durumu ilerler.
+      if (rows.length > 0) {
+        await tx
+          .update(workshopSessions)
+          .set({
+            batchDeliveredAt: now,
+            updatedAt: now,
+            ...(batchComplete ? { status: "delivered" as const } : {}),
+          })
+          .where(eq(workshopSessions.id, id));
+      } else if (batchComplete) {
+        await tx
+          .update(workshopSessions)
+          .set({ status: "delivered", updatedAt: now })
+          .where(eq(workshopSessions.id, id));
+      }
+
+      return { delivered: rows, sessionNowDelivered: batchComplete };
+    });
+
+    if (delivered.length === 0 && !sessionNowDelivered) {
+      return NextResponse.json(
+        { error: "Teslim edilecek, sevk edilmiş sipariş bulunamadı." },
+        { status: 400 }
+      );
     }
 
-    // Partide (bu çağrıdan ÖNCE ya da bu çağrıyla) teslim edilmemiş sipariş
-    // kaldı mı? UPDATE'ten SONRA okunduğu için bu çağrının kendi teslimatını
-    // da doğal olarak düşer.
-    const pendingRows = await tx
-      .select({ id: orders.id })
-      .from(orders)
-      .where(deliverPending(id));
-
-    // Partide EN AZ bir teslim edilmiş sipariş var mı (bu çağrıdan önce ya
-    // da bu çağrıyla)? "Hiç teslimat olmadı ama her şey iade edildi" durumunu
-    // yanlışlıkla `delivered`e çevirmemek için.
-    const anyDeliveredRows = await tx
-      .select({ id: orders.id })
-      .from(orders)
-      .where(and(eq(orders.workshopSessionId, id), eq(orders.status, "delivered")))
-      .limit(1);
-    const batchComplete = pendingRows.length === 0 && anyDeliveredRows.length > 0;
-
-    // `batchDeliveredAt` YALNIZCA bu çağrı gerçekten bir şey teslim ettiyse
-    // güncellenir — ship ucundaki aynı ilke (bkz. o dosyadaki yorum): geride
-    // kalanlar sonradan iade edildiği için parti tamamlanan bir çağrıda
-    // (aşağıdaki `else if`) BU ÇAĞRININ taşımadığı bir teslimat damgası
-    // uydurulmaz, yalnızca seans durumu ilerler.
-    if (rows.length > 0) {
-      await tx
-        .update(workshopSessions)
-        .set({
-          batchDeliveredAt: now,
-          updatedAt: now,
-          ...(batchComplete ? { status: "delivered" as const } : {}),
+    // Yan etkiler işlem COMMIT ettikten SONRA (ship ucundaki aynı ilke).
+    for (const o of delivered) {
+      await db
+        .insert(adminActions)
+        .values({
+          orderId: o.id,
+          action: "deliver",
+          adminEmail,
+          notes: `Atölye toplu teslim (seans ${id})`,
         })
-        .where(eq(workshopSessions.id, id));
-    } else if (batchComplete) {
-      await tx
-        .update(workshopSessions)
-        .set({ status: "delivered", updatedAt: now })
-        .where(eq(workshopSessions.id, id));
+        .catch((e) => console.error(`workshop deliver: adminActions insert ${o.id} failed`, e));
+
+      await emitOrderChanged({
+        orderId: o.id,
+        orderNumber: o.orderNumber,
+        userId: o.userId,
+        manufacturerId: o.manufacturerId,
+        status: o.status,
+        manufacturerStatus: o.manufacturerStatus,
+      }).catch(() => {});
     }
 
-    return { delivered: rows, sessionNowDelivered: batchComplete };
-  });
-
-  if (delivered.length === 0 && !sessionNowDelivered) {
-    return NextResponse.json(
-      { error: "Teslim edilecek, sevk edilmiş sipariş bulunamadı." },
-      { status: 400 }
-    );
+    return NextResponse.json({ delivered: delivered.length });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/workshops/sessions/[id]/deliver", ADMIN_ACTION_FAILED_ERROR);
   }
-
-  // Yan etkiler işlem COMMIT ettikten SONRA (ship ucundaki aynı ilke).
-  for (const o of delivered) {
-    await db
-      .insert(adminActions)
-      .values({
-        orderId: o.id,
-        action: "deliver",
-        adminEmail,
-        notes: `Atölye toplu teslim (seans ${id})`,
-      })
-      .catch((e) => console.error(`workshop deliver: adminActions insert ${o.id} failed`, e));
-
-    await emitOrderChanged({
-      orderId: o.id,
-      orderNumber: o.orderNumber,
-      userId: o.userId,
-      manufacturerId: o.manufacturerId,
-      status: o.status,
-      manufacturerStatus: o.manufacturerStatus,
-    }).catch(() => {});
-  }
-
-  return NextResponse.json({ delivered: delivered.length });
 }

@@ -30,6 +30,7 @@ import { getClientIp } from "@/lib/utils/request";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplay } from "@/lib/config/sizes";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 const reorderSchema = z.object({
   paymentMethod: z.enum(["card", "bank_transfer"]).default("card"),
@@ -84,7 +85,7 @@ export function reorderBlocked(order: {
  * action — otherwise we'd need to re-validate the code, handle expired/used cards, and
  * leak gift-card balance from a paid order's snapshot.
  */
-export async function POST(
+async function handlePOST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
@@ -348,5 +349,18 @@ export async function POST(
       },
       { status: 502 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest, ctx: { params: Promise<{ orderNumber: string }> }) {
+  try {
+    return await handlePOST(request, ctx);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/customer/orders/[orderNumber]/reorder", CUSTOMER_ACTION_FAILED_ERROR);
   }
 }

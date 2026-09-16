@@ -3,13 +3,14 @@ import { removeBackground } from "@/lib/services/background-removal";
 import { rateLimitAsync, extractClientIp } from "@/lib/services/rate-limit";
 import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import { validateImageMagicBytes } from "@/lib/services/file-validation";
+import { handleRouteFailure, UPLOAD_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Allow up to 5 minutes for model loading + inference on CPU
 export const maxDuration = 300;
 
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     // Rate limit by IP to prevent DoS — Redis-backed so multi-instance
     // deploys share the bucket.
@@ -68,9 +69,24 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Background removal failed:", error);
+    // Son çare: buradan sonra müşteriye gidecek tek metin budur, o yüzden
+    // Türkçe ve ne yapacağını söyleyen bir cümle olmalı.
     return NextResponse.json(
-      { error: "Background removal failed" },
+      { error: "Arka plan kaldırılamadı. Fotoğrafı yeniden yüklemeyi deneyin; sorun sürerse bizimle iletişime geçin." },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/remove-background", UPLOAD_FAILED_ERROR);
   }
 }

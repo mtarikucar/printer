@@ -1,0 +1,62 @@
+-- 0055 geri alma.
+--
+-- `qc_photos.model_revision` düşer.
+--
+-- DİKKAT — BU GERİ ALMA KAYIPLIDIR: uygulamanın yazdığı damgalar KALICI olarak
+-- gider ve kolon geri geldiğinde up'ın backfill'i onları YENİDEN TÜRETMEZ
+-- (backfill yalnız kanıtlayabildiğini damgalar). Bunun dışındaki her satır
+-- DAMGASIZ geri gelir.
+--
+-- Damgasızlık artık BİR KAPIYI GEVŞETMEZ. Kural fail-closed'dur
+-- (`qcRoundPrintProof` · src/lib/config/order-model-policy.ts): damgasız bir
+-- fotoğraf, GEÇERLİ sürümün basıldığının KANITI SAYILMAZ. Siparişin birden çok
+-- sürümü varsa damgasız tur QC'den kendiliğinden geçemez; admin ancak gerekçe
+-- yazarak (denetim kaydına geçen bilinçli istisna) onaylayabilir. Yani bu geri
+-- alma, bir turu ONAYLANABİLİR hâle GETİREMEZ; yalnız daha çok turu elle
+-- gerekçelendirmeye zorlar. (Eskiden tersiydi: damgasızlık "eski değil"
+-- sayıldığı için damgaları silmek bayat bir baskının kilidini açıyordu.)
+--
+-- Yine de damgaları geri almadan ÖNCE yanına al — kolonu düşürmek onları geri
+-- getirilemez hale getirir ve her damgasız tur admin'e elle iş çıkarır:
+--   \copy (SELECT id, model_revision FROM qc_photos WHERE model_revision IS NOT NULL) TO 'qc_photos_model_revision.csv' CSV HEADER
+-- Geri yüklemek gerekirse (up uygulandıktan SONRA, damgasız satırlar için):
+--   CREATE TEMP TABLE qc_rev_backup (id uuid, model_revision integer);
+--   \copy qc_rev_backup FROM 'qc_photos_model_revision.csv' CSV HEADER
+--   UPDATE qc_photos p SET model_revision = b.model_revision
+--     FROM qc_rev_backup b WHERE b.id = p.id AND p.model_revision IS NULL;
+--
+-- Tekrar çalıştırılabilir (IF EXISTS) ve yalnız up'ın eklediği kolona dokunur;
+-- operatör/müşteri verisine dokunmaz.
+--
+-- ─── DRIZZLE KAYIT SATIRI: KENDİ SATIRINI SİL, "EN YENİSİNİ" DEĞİL ─────────
+--
+-- `drizzle-kit migrate` uygulanmış her migration'ı kendi tablosunda tutar; bu
+-- dosyadan sonra 0055'in yeniden uygulanabilmesi için KAYDININ da silinmesi
+-- gerekir. 0050-0054'ten kopyalanan tarif "en son eklenen satırı sil" diyordu
+-- (ORDER BY created_at DESC LIMIT 1) ve o tarif BURADA YANLIŞTIR: 0055 artık
+-- en yeni migration değil, ÜSTÜNDE 0056 var. O tarif 0056'nın satırını siler,
+-- 0055'in kaydı yerinde kalır ve 0055 BİR DAHA ASLA uygulanmaz — migrate
+-- "başarılı" der, kolon düşük kalır ve üreticinin her QC fotoğrafı yüklemesi
+-- 42703 ile boş gövdeli 500 döner (qc-photos rotası INSERT'te `model_revision`
+-- kolonunu adıyla yazar).
+--
+-- Bu yüzden satır KENDİ ETİKETİYLE silinir. Etiketin kimliği `created_at`tir:
+-- drizzle oraya journal'daki `when` değerini yazar
+-- (drizzle/meta/_journal.json · idx 55 · tag 0055_qc_photo_model_revision ·
+-- when 1789496039184). `hash` ile SİLME: hash dosya İÇERİĞİNİN sha256'sıdır,
+-- dosya her düzeltildiğinde değişir ve kayıttaki eski hash'le eşleşmez.
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789496039184;
+--
+-- SIRA ÖNEMLİ — TEK BAŞINA BU SİLME YETMEZ. Migrator yalnız EN YENİ kaydın
+-- `created_at`ine bakar (drizzle-orm/pg-core/dialect.js: "order by created_at
+-- desc limit 1" + `lastDbMigration.created_at < migration.folderMillis`), yani
+-- 0055'ten SONRA kaydedilmiş bir satır (0056, 0057, …) dururken 0055 yeniden
+-- uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER kendi down
+-- dosyalarıyla ve kendi satırlarıyla geri alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0056_order_partner_messages.down.sql
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789498291439;
+--   \i drizzle/0055_qc_photo_model_revision.down.sql
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789496039184;
+--   npm run db:migrate   -- ikisini de yeniden uygular (ikisi de idempotent)
+SET lock_timeout = '5s';
+ALTER TABLE "qc_photos" DROP COLUMN IF EXISTS "model_revision";

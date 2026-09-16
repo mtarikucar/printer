@@ -55,12 +55,33 @@ export const REFUNDED_PAYMENT_STATUS = "refunded";
  *
  * İade kararı (refund-end-state): iade edilen sipariş durumunu KORUR ama her
  * ileri işlem (onay, toplu onay, admin model yükleme, üretici atama, baskı
- * başlatma, kargo, Yurtiçi kargo, boyacı atama, boyama ekleme) sunucuda
+ * başlatma, kargo, Yurtiçi kargo, teslim, boyacı atama, boyama ekleme) sunucuda
  * reddedilir. Sebep: iade partnerleri koparır ve siparişi `approved` +
  * `unassigned` bırakır. Bu, atanabilir bir siparişin tam olarak görünüşüdür;
  * engellenmezse sipariş yeniden atanır ya da kargolanır ve yeni bir hakediş
- * doğar. Teslim ve ret serbesttir: teslim zaten yola çıkmış paketin kaydıdır,
- * ret siparişi kapatır; ikisi de işi ileri taşımaz.
+ * doğar.
+ *
+ * TEK İSTİSNA RET. Ret serbesttir çünkü siparişi TERMİNAL bir duruma
+ * (`rejected`) taşır ve hiçbir şey BİRİKTİRMEZ: partner hakedişi doğurmaz,
+ * müşteriye "yola çıktı/teslim edildi" demez, siparişi kimsenin tezgâhına
+ * koymaz. İade edilmiş, partneri hâlâ bağlı eski bir satırın kapanma yolu budur.
+ *
+ * TESLİM ARTIK SERBEST DEĞİL — HER İKİ YÖNÜYLE. Eski gerekçe "paket zaten yola
+ * çıkmıştı, damga yalnızca onun kaydıdır" idi ve yanlıştı: damga durumu
+ * `delivered` yapar, `delivered_at` yazar ve müşteriye teslim e-postası +
+ * bildirimi gönderir — parası geri verilmiş bir sipariş için. Damganın geri
+ * alınması da aynı kurala tabidir (iade edilmiş sipariş hiçbir yöne kımıldamaz),
+ * bu yüzden POST ve DELETE /deliver ikisi de 409 döner.
+ *
+ * TEMİZLİK (koparma) serbesttir ama BİRİKTİRMEZ. Üreticinin kabul sonrası
+ * iptali, üretici ve boyacı retleri ve admin'in boyacıdan geri alması iade
+ * edilmiş siparişte de partneri koparır — o siparişleri başka hiçbir yol
+ * toparlamaz. Orada kural şudur: sipariş KIMILDAMAZ ve kimse CEZALANDIRILMAZ —
+ * durum geri sarılmaz, güvenilirlik cezası yazılmaz (ne `applyStrike` ne de
+ * puana giren bir `manufacturer_actions` satırı; bkz. manufacturer-assignment.ts
+ * BAD_ACTIONS), kara listeye (declinedManufacturerIds / declinedPainterIds)
+ * kayıt düşülmez ve partnere "iş yeniden atanacak" denmez. Bu kuralı
+ * scripts/test-order-status-policy.ts yapısal olarak pinler.
  *
  * Kural "ödeme başarılı mı" DEĞİL, "iade edilmiş mi"dir. Bugün enum yalnız
  * succeeded|refunded olsa da elle açılan, havale, sıfır tutarlı ve atölye
@@ -78,7 +99,7 @@ export function isRefunded(o: {
  * Türkçe mesaj (HTTP 409).
  */
 export const REFUNDED_ORDER_ERROR =
-  "Bu sipariş iade edildi. Onay, model yükleme, atama, baskı, kargo ve boyama gibi ileri işlemler yapılamaz.";
+  "Bu sipariş iade edildi. Onay, model yükleme, atama, baskı, kargo, teslim ve boyama gibi ileri işlemler yapılamaz.";
 
 // Konteynerler UTC'de koşuyor; saat dilimi verilmezse damga 3 saat geride
 // yazılır. `hourCycle: "h23"` gece yarısını "24:00" değil "00:00" yazar.

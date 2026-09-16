@@ -38,6 +38,12 @@ import { autoAssignIfEligible } from "@/lib/services/order-confirm";
  * sub-status: it is cleanup, taking the job off a partner who should not be
  * working on money already returned. Handing it to another manufacturer is a
  * forward action and is refused.
+ *
+ * İade edilmiş sipariş, olağan geri almaya HİÇ girmez: yol ayrımı çağrıdan önce
+ * yapılır ve koparma (`detachFromRefundedOrder`) koşar. Kural (bağlayıcı karar,
+ * order-status-policy.ts): temizlik KOPARIR ve biter — durum geri sarılmaz,
+ * kara listeye kayıt düşülmez, QC turu artırılmaz, güvenilirlik cezası
+ * yazılmaz ve kimseye "sipariş yeniden atanacak" denmez.
  */
 const schema = z
   .object({
@@ -84,15 +90,16 @@ const schema = z
 const REFUNDED_HANDOFF_ERROR = "İade edilen sipariş başka bir üreticiye devredilemez.";
 
 /**
- * Plain revoke on a refunded order at a sub-status the ordinary revoke refuses
- * (shipped, or any status outside its whitelist).
+ * Plain revoke on a REFUNDED order — every one of them, at any manufacturer
+ * sub-status (shipped included). This is the ONLY path a refunded order takes;
+ * the ordinary, rewinding revoke is never called for one.
  *
- * Those limits exist so a revoke never strands an earning a later manufacturer
- * would then fail to accrue. A refunded order has no later manufacturer (every
- * assign path refuses it) and its earnings were already reversed by the
- * refund, so the limits protect nothing there. Refusing left a legacy refunded
- * row, attached from before refunds detached, on the manufacturer's panel for
- * good.
+ * The ordinary revoke's sub-status limits exist so a revoke never strands an
+ * earning a later manufacturer would then fail to accrue. A refunded order has
+ * no later manufacturer (every assign path refuses it) and its earnings were
+ * already reversed by the refund, so the limits protect nothing there. Refusing
+ * left a legacy refunded row, attached from before refunds detached, on the
+ * manufacturer's panel for good.
  *
  * It does what a refund does today: it takes the manufacturer off the order
  * and nothing else. The order status is kept (refund-end-state), no earning is
@@ -104,16 +111,14 @@ async function detachFromRefundedOrder(args: {
   orderId: string;
   adminEmail: string;
   reason: string;
-  blocklist: boolean;
 }): Promise<RevokeResult> {
-  const { orderId, adminEmail, reason, blocklist } = args;
+  const { orderId, adminEmail, reason } = args;
   return db.transaction(async (tx) => {
     const [order] = await tx
       .select({
         manufacturerId: orders.manufacturerId,
         manufacturerStatus: orders.manufacturerStatus,
         painterStatus: orders.painterStatus,
-        declinedManufacturerIds: orders.declinedManufacturerIds,
         orderNumber: orders.orderNumber,
         userId: orders.userId,
         orderType: orders.orderType,
@@ -136,9 +141,6 @@ async function detachFromRefundedOrder(args: {
 
     const prevManufacturerId = order.manufacturerId;
     const prevStatus = order.manufacturerStatus;
-    const declined = Array.isArray(order.declinedManufacturerIds)
-      ? (order.declinedManufacturerIds as string[])
-      : [];
     const note = `[GERİ ALMA] Admin ${adminEmail} iade edilmiş siparişte atamayı geri aldı (önceki durum: ${prevStatus}). Sebep: ${reason}`;
 
     const [updated] = await tx
@@ -147,13 +149,18 @@ async function detachFromRefundedOrder(args: {
         manufacturerId: null,
         manufacturerStatus: "unassigned",
         assignedToManufacturerAt: null,
-        ...(blocklist
-          ? {
-              declinedManufacturerIds: Array.from(
-                new Set([...declined, prevManufacturerId])
-              ),
-            }
-          : {}),
+        // Koparma tam olsun: bunlar bırakılırsa sipariş üreticisiz kalır ama
+        // üstünde o atölyenin kabul/baskı damgaları durur. Boyacı tarafındaki
+        // iade koparması (revoke-painter) da aynısını yapıyor.
+        manufacturerAcceptedAt: null,
+        manufacturerPrintedAt: null,
+        // KARA LİSTE BİLEREK YOK — üstelik çağıran isteseydi bile. Uç
+        // `blocklist`i varsayılan TRUE alır ve admin ekranı iade edilmiş
+        // siparişte kutuyu GİZLESE de o varsayılanı yine gönderir; eski hâlde
+        // bu, iade edilmiş siparişte tek doğru yolun bile atölyeyi siparişin
+        // kara listesine yazması demekti. Kayıt "bu atölyeye bir daha verme"
+        // demektir; burada verilecek bir iş yoktur, geriye yalnız atölyenin
+        // sicilindeki iz kalırdı. Bu yüzden bu yol o bayrağı hiç almaz.
         adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = ''
                         THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
         updatedAt: new Date(),
@@ -192,9 +199,16 @@ async function detachFromRefundedOrder(args: {
   });
 }
 
-export async function POST(
+/**
+ * Nereye kadar gelindi. Tek soru: GERİ ALMA YAZILDI MI? Beklenmeyen bir hatada
+ * admin'e ne olduğunu söyleyebilen tek bilgi budur.
+ */
+type RevokeProgress = { revoked: boolean };
+
+async function handleRevoke(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
+  progress: RevokeProgress
 ) {
   const a = await requireAdmin();
   if ("response" in a) return a.response;
@@ -326,30 +340,40 @@ export async function POST(
     }
   }
 
-  let result: RevokeResult = await revokeManufacturerAssignment({
-    orderId: id,
-    adminEmail,
-    reason,
-    blocklist,
-  });
+  // İADE EDİLMİŞ SİPARİŞTE KOPARMA ÖNCE GELİR.
+  //
+  // Olağan geri alma siparişi KIMILDATIR: durumu `approved`/`paid`e geri sarar,
+  // QC turunu artırır ve atölyeyi siparişin kara listesine yazar. Üçü de iade
+  // edilmiş siparişte yasaktır ve "önce çağır, reddederse düzelt" diye bir şey
+  // yoktur — yazma bir kez olur. Eski hâlde ayrım servisin CEVABINA bakıyordu
+  // (yalnız wrong_status/already_shipped dalında koparmaya düşülüyordu), oysa
+  // iade edilmiş sipariş geri alınabilir bir alt durumdaysa servis "ok" diyordu:
+  // sipariş geri sarılmış, QC turu artmış, atölye kara listeye yazılmış oluyordu.
+  // Koparma yolu ise ancak kargolanmış siparişte açılıyordu. Ayrım artık
+  // çağrıdan ÖNCE yapılır: iade edilmişse olağan servis hiç çalışmaz.
+  let result: RevokeResult =
+    !!current && isRefunded(current)
+      ? await detachFromRefundedOrder({ orderId: id, adminEmail, reason })
+      : await revokeManufacturerAssignment({
+          orderId: id,
+          adminEmail,
+          reason,
+          blocklist,
+        });
 
-  // The ordinary revoke refuses past QC approval and after shipping. On a
-  // refunded order, a plain revoke falls back to the cleanup detach instead
-  // (see detachFromRefundedOrder). Refunded orders inside the whitelist keep
-  // the ordinary path above. A hand-off never gets here: it was refused before
-  // anything moved. A refund is terminal, so the pre-read settles it.
-  if (
-    !targetManufacturerId &&
-    !!current &&
-    isRefunded(current) &&
-    (result.code === "wrong_status" || result.code === "already_shipped")
-  ) {
-    result = await detachFromRefundedOrder({
-      orderId: id,
-      adminEmail,
-      reason,
-      blocklist,
-    });
+  // Ön okuma ile yazma arasına düşen iade: servis kendi KİLİTLİ okumasında
+  // görür ve hiçbir şey yazmadan `refunded` döner (manufacturer-revoke.ts).
+  // Devir istenmişse istek tümden reddedilir — yukarıdaki kapının aynısı,
+  // çünkü iade edilmiş sipariş başka bir atölyeye verilemez ve sipariş hâlâ
+  // el değmemiştir. Düz geri almada koparmaya geçilir.
+  if (result.code === "refunded") {
+    if (targetManufacturerId) {
+      return NextResponse.json(
+        { error: REFUNDED_HANDOFF_ERROR, reason: "refunded" },
+        { status: 409 }
+      );
+    }
+    result = await detachFromRefundedOrder({ orderId: id, adminEmail, reason });
   }
 
   if (result.code !== "ok") {
@@ -384,6 +408,11 @@ export async function POST(
     };
     return NextResponse.json({ error: m.message }, { status: m.status });
   }
+
+  // Buradan sonrası "GERİ ALMA OLDU" dünyası: koparma/geri alma tek bir
+  // işlemde yazıldı ve commit edildi. Aşağıdaki herhangi bir adım patlarsa
+  // admin'e "hiçbir şey olmadı" DENEMEZ — bayrak tam da bu ayrımı taşır.
+  progress.revoked = true;
 
   const prevCompany = await db.query.manufacturers
     .findFirst({
@@ -563,7 +592,14 @@ export async function POST(
     console.error("revoke: losing-manufacturer notify failed", e)
   );
 
-  if (strike) {
+  // Güvenilirlik cezası iade edilmiş siparişte ASLA yazılmaz: ceza "alınan işi
+  // yarıda bırakmak"ın bedelidir, oysa burada işi bitiren iadedir ve atölyenin
+  // bir kusuru yoktur. `refunded` birkaç satır yukarıda hesaplanıyor ama burada
+  // hiç sorulmuyordu; ekran kutuyu gizlediği için (client.tsx
+  // `strike: !refunded && revokeStrike`) canlıda görünmüyordu, ama uca doğrudan
+  // istek atan herhangi bir istemci cezayı yazdırabiliyordu — üstelik ceza eşiğe
+  // gelmiş bir atölyeyi askıya aldırabilir. Kapı sunucuda durur.
+  if (strike && !refunded) {
     await applyStrike(result.prevManufacturerId).catch((e) =>
       console.error("revoke: applyStrike failed", e)
     );
@@ -603,4 +639,43 @@ export async function POST(
     // the chosen manufacturer, so it does not blame a race and invite a retry.
     ...(refunded ? { reason: "refunded" as const } : {}),
   });
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap.
+ *
+ * Rotanın bütün işi tek bir yerden geçirilir, çünkü buradaki okumalar ve geri
+ * alma işlemi fırlattığında Next'in varsayılan 500'üne düşülüyordu: admin
+ * ekranına SIFIR BAYT gövde, yani ne olduğuna dair tek kelime yok. (QA'da
+ * görüldü: manufacturer_actions tablosu okunamazken işlemin içindeki denetim
+ * satırı patladı; güvenli taraf doğruydu — işlem geri sarıldı, sipariş ve
+ * hakediş bit bit aynı kaldı — ama ekranda hiçbir şey yazmıyordu.)
+ *
+ * Bilebildiğimiz kadarını söyleriz ve İKİ HÂLİ ayırırız, çünkü admin'e
+ * verilecek öğüt bu ayrıma bağlı:
+ *  • Geri alma yazılmadan patladıysa yazma tek işlemdir ve geri sarılır; o
+ *    sipariş el değmemiştir, güvenle tekrar denenebilir.
+ *  • Yazıldıktan sonra patladıysa (bildirim, denetim satırı, otomatik
+ *    yerleştirme) sipariş KIMILDAMIŞTIR; "tekrar deneyin" demek olmuş bir işi
+ *    ikinci kez yaptırmaya çalışmak olurdu.
+ */
+export async function POST(
+  request: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  const progress: RevokeProgress = { revoked: false };
+  try {
+    return await handleRevoke(request, ctx, progress);
+  } catch (e) {
+    console.error("revoke: beklenmeyen hata", e);
+    return NextResponse.json(
+      {
+        error: progress.revoked
+          ? "Atama geri alındı, ancak sonraki adımlar (yeniden atama, bildirim, denetim kaydı) tamamlanamadı. Sayfayı yenileyip siparişin şu anki durumunu kontrol edin."
+          : "Beklenmeyen bir hata nedeniyle atama geri alınamadı; siparişte hiçbir şey değişmedi. Sayfayı yenileyip tekrar deneyin, sorun sürerse teknik ekibe bildirin.",
+        reason: "unexpected_error",
+      },
+      { status: 500 }
+    );
+  }
 }

@@ -1,6 +1,8 @@
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, manufacturerActions } from "@/lib/db/schema";
+import { isRefunded } from "@/lib/config/order-status-policy";
+import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 
 /**
  * Admin takes an order back from a manufacturer.
@@ -49,7 +51,12 @@ export type RevokeResult =
   | { code: "wrong_status"; status: string }
   | { code: "handed_to_painter" }
   | { code: "already_shipped" }
-  | { code: "lost_race" };
+  | { code: "lost_race" }
+  /**
+   * Sipariş iade edilmiş: bu servis HİÇBİR ŞEY yazmadan çekilir. Koparmayı
+   * çağıranın iade yolu yapar (rotadaki `detachFromRefundedOrder`).
+   */
+  | { code: "refunded" };
 
 /**
  * Money boundary: `accrueEarning` is only ever called from the ship and
@@ -80,6 +87,14 @@ export async function revokeManufacturerAssignment(args: {
       .for("update");
 
     if (!order) return { code: "not_found" as const };
+    // İADE TERMİNAL, VE BU SERVİS SİPARİŞİ KIMILDATIR: aşağıdaki tek UPDATE
+    // durumu `approved`/`paid`e geri sarar, atölyeyi kara listeye yazar ve QC
+    // turunu artırır. İade edilmiş siparişte üçü de yasaktır
+    // (order-status-policy.ts). Sınırı çağırana bırakmak yetmezdi: rotanın ön
+    // okuması ile buradaki yazma arasına düşen bir iade yine geri sarardı.
+    // Kilitli okumanın İÇİNDE sorulur, hiçbir şey yazılmadan çekilinir; işi
+    // koparma yolu (rotadaki detachFromRefundedOrder) bitirir.
+    if (isRefunded(order)) return { code: "refunded" as const };
     if (
       !order.manufacturerId ||
       !order.manufacturerStatus ||
@@ -155,7 +170,11 @@ export async function revokeManufacturerAssignment(args: {
             isNull(orders.painterStatus),
             eq(orders.painterStatus, "unassigned")
           ),
-          isNull(orders.shippedAt)
+          isNull(orders.shippedAt),
+          // Yukarıdaki iade kontrolünün SQL karşılığı. Ön okumada durmasının
+          // yarışı kapatmadığı yer burası: geri sarma yalnız iade EDİLMEMİŞ
+          // satıra uygulanır.
+          notRefundedGuard()
         )
       )
       .returning();

@@ -21,7 +21,21 @@ interface QcJob {
   photos: QcPhoto[];
 }
 
-export function PainterQcQueueClient({ jobs }: { jobs: QcJob[] }) {
+export function PainterQcQueueClient({
+  jobs,
+  photosUnreadable,
+}: {
+  jobs: QcJob[];
+  /**
+   * painter_qc_photos OKUNAMADI (sunucu doldurur: page.tsx · photoRead === null).
+   *
+   * Boş bir fotoğraf dizisi ile okunamayan bir tablo AYNI ŞEY DEĞİLDİR: ilki bir
+   * ÖLÇÜM, ikincisi yapılmamış bir okuma. Bu kuyruğun tek işi fotoğrafa bakıp
+   * karar vermek olduğundan bayrak, kartın hem METNİNİ hem de KONTROLLERİNİ
+   * değiştirir.
+   */
+  photosUnreadable: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [reason, setReason] = useState<Record<string, string>>({});
@@ -38,10 +52,26 @@ export function PainterQcQueueClient({ jobs }: { jobs: QcJob[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action === "reject" ? { reason: reason[id] } : {}),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        photoStampFailed?: boolean;
+      };
       if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        alert(e.error || "İşlem başarısız");
+        alert(data.error || "İşlem başarısız");
         return;
+      }
+      // KARAR GEÇTİ ama turun fotoğraf satırları damgalanamadı — uç bunu ayrı
+      // bir bayrakla bildiriyor. Söylenmezse hiçbir insan göremez: ekran
+      // "başarılı" diye tazelenir, fotoğraflar ise 'bekliyor' görünmeye devam
+      // eder ve bir sonraki bakan, bunun arıza mı gerçek bir durum mu olduğunu
+      // ayırt edemez. Yapılan işi yapılmamış gibi anlatmamak kadar, yarım kalan
+      // kaydı sessizce yutmamak da bu ekranın işi.
+      if (data.photoStampFailed) {
+        alert(
+          action === "approve"
+            ? "Onay UYGULANDI: boyacının kargosu açıldı. Ancak turun fotoğraf satırları damgalanamadı; fotoğraflar 'bekliyor' görünmeye devam edebilir. Karar geçerlidir, tekrar onaylamayın."
+            : "Ret UYGULANDI: boyacı yeniden boyamaya gönderildi. Ancak turun fotoğraf satırları damgalanamadı; fotoğraflar 'bekliyor' görünmeye devam edebilir. Karar geçerlidir, tekrar reddetmeyin."
+        );
       }
       router.refresh();
     } finally {
@@ -79,7 +109,15 @@ export function PainterQcQueueClient({ jobs }: { jobs: QcJob[] }) {
                 <span className="text-xs text-gray-500">Boyacı: {j.painterName}</span>
               </div>
 
-              {j.photos.length === 0 ? (
+              {/* OKUNAMAYAN TABLO, ÖLÇÜLMÜŞ BİR SIFIR DEĞİLDİR: "Fotoğraf
+                  bulunamadı" cümlesi bu hâlde kaydın yazmadığı bir iddiaydı. */}
+              {photosUnreadable ? (
+                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Bu işin QC fotoğrafları okunamadı: kart BOŞ değil, kaç fotoğraf
+                  yüklendiği bilinmiyor. Fotoğraflar silinmedi — boyacıdan yeniden
+                  yükleme istemeyin.
+                </p>
+              ) : j.photos.length === 0 ? (
                 <p className="text-sm text-amber-600 mb-3">Fotoğraf bulunamadı.</p>
               ) : (
                 <div className="flex flex-wrap gap-2 mb-4">
@@ -96,28 +134,50 @@ export function PainterQcQueueClient({ jobs }: { jobs: QcJob[] }) {
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => act(j.id, "approve")}
-                  disabled={busy !== null}
-                  className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              {/* KONTROL YA ÇALIŞIR YA DA SEBEBİYLE KAYBOLUR.
+                  Fotoğraflar okunamazken onay da ret de GÖRÜLMEMİŞ bir işe imza
+                  atmaktır: onay boyacının kargosunu açar ve hakedişine giden
+                  yolu serbest bırakır, ret ise turu artırıp boyacıyı yeniden
+                  boyamaya yollar. İkisinin de tek dayanağı fotoğraflar olduğu
+                  için bu hâlde düğme GÖSTERİLMEZ; ekranın sunduğu her kontrol,
+                  dayandığı kayıt okunabiliyorken sunulur. */}
+              {photosUnreadable ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
                 >
-                  Onayla
-                </button>
-                <input
-                  value={reason[j.id] ?? ""}
-                  onChange={(e) => setReason((s) => ({ ...s, [j.id]: e.target.value }))}
-                  placeholder="Red gerekçesi"
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm flex-1 min-w-[180px]"
-                />
-                <button
-                  onClick={() => act(j.id, "reject")}
-                  disabled={busy !== null}
-                  className="px-4 py-2 bg-red-50 text-red-700 text-sm font-medium rounded-lg hover:bg-red-100 disabled:opacity-50"
-                >
-                  Reddet
-                </button>
-              </div>
+                  <p className="font-semibold">Bu iş için onay ve ret kapatıldı</p>
+                  <p className="mt-0.5 text-amber-900/80">
+                    Karar fotoğraflara dayanır, fotoğraflar ise şu anda okunamıyor. İş
+                    kuyruktan DÜŞMEDİ ve boyacıya hiçbir şey iletilmedi; okuma düzelince
+                    aynı kartta karar verebilirsiniz. Birkaç dakika sonra sayfayı
+                    yenileyin, sürerse sunucu günlüklerine bakın.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => act(j.id, "approve")}
+                    disabled={busy !== null}
+                    className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    Onayla
+                  </button>
+                  <input
+                    value={reason[j.id] ?? ""}
+                    onChange={(e) => setReason((s) => ({ ...s, [j.id]: e.target.value }))}
+                    placeholder="Red gerekçesi"
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm flex-1 min-w-[180px]"
+                  />
+                  <button
+                    onClick={() => act(j.id, "reject")}
+                    disabled={busy !== null}
+                    className="px-4 py-2 bg-red-50 text-red-700 text-sm font-medium rounded-lg hover:bg-red-100 disabled:opacity-50"
+                  >
+                    Reddet
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -178,7 +178,19 @@ export interface OrderMoneyBreakdown {
     siblings: MoneySibling[];
   };
   shares: PartyShare[];
-  platform: { commissionKurus: number; unassignedBaseKurus: number; netKurus: number };
+  platform: {
+    commissionKurus: number;
+    unassignedBaseKurus: number;
+    /**
+     * Geri alınmış (status='reversed') hakedişlerin BRÜT tabanı. Platform
+     * gelirinin İÇİNDE DEĞİLDİR: geri alma parayı platforma bırakmaz, yalnızca
+     * otomatik ödemeyi durdurur. Ayrı alan, çünkü "partneri olmayan taban" ile
+     * aynı şey değildir: o hiç kimsenin kazanmadığı tabandır, bu ise kazanılmış
+     * ama geri alınmış olandır.
+     */
+    reversedBaseKurus: number;
+    netKurus: number;
+  };
   warnings: string[];
 }
 
@@ -287,6 +299,202 @@ export interface MoneySiblingSnapshot {
   havaleDiscountKurus: number;
 }
 
+/**
+ * Hakediş geri almanın KAYITLI sebebi. Geri alınmış hakediş satırı sebebini
+ * TAŞIMAZ (manufacturer_earnings/painter_earnings'te sebep kolonu yok ve bu faz
+ * migration açmıyor), o yüzden sebep yalnızca denetim kaydından okunabilir.
+ * Yükleyici (services/order-money.ts) admin_actions'ta arar.
+ */
+export interface MoneyReversalRecord {
+  /** Bugün denetim kaydından okunabilen tek sebep: admin kargo kaydını geri aldı. */
+  cause: "ship_revert";
+  /**
+   * Geri almanın DOKUNDUĞU pay. Kargo geri alma yalnızca kargolayan partnerin
+   * hakedişini çevirir (boyacı kargoladıysa boyacınınkini), ama denetim kaydı
+   * siparişe yazılır. Parti yazılmazsa tek bir kayıt İKİ payın birden sebebi
+   * sayılır ve dokunulmamış payın yanında yanlış cümle çıkardı.
+   */
+  party: MoneyReversalParty;
+  /** Denetim kaydının zamanı (ISO). */
+  at: string | null;
+}
+
+/** Kargo geri almanın dokunabileceği paylar. */
+export type MoneyReversalParty = "manufacturer" | "painter";
+
+/**
+ * Kargo geri alma denetim kaydının imzası. Metni DELETE /api/admin/orders/[id]/ship
+ * yazar; imza burada durur ki okuyan (yükleyici) ile yazan aynı sabiti
+ * paylaşabilsin. Eşleşme tutmazsa sonuç "sebep kayıtlı değil" olur — yani
+ * YANLIŞ bir sebep iddia edilmez, sebep yalnızca bilinmez kalır.
+ */
+export const SHIP_REVERT_AUDIT_PREFIX = "Kargo geri alındı";
+
+/** Kargo geri almanın hakedişe GERÇEKTEN ne yaptığı (DELETE /ship'in sonucu). */
+export type ShipRevertEarningOutcome = "reversed" | "already_reversed" | "none" | "failed";
+
+/**
+ * Denetim kaydının para cümleleri. Yazan (DELETE /api/admin/orders/[id]/ship)
+ * ile okuyan (services/order-money.ts) AYNI sabitten okur; cümle burada
+ * durmasaydı okuyan, yazanın metnini elle kopyalamak zorunda kalırdı.
+ *
+ * Yalnız `reversed` cümlesi "bu geri alma hakedişi çevirdi" der ve partiyi
+ * ADIYLA yazar. Ötekiler çevirmediğini söyler: `already_reversed` satırın ZATEN
+ * çevrilmiş olduğunu (sebebi bu geri alma değil, önceki bir olaydır: iade,
+ * itiraz clawback'i ya da daha eski bir geri alma), `none` hiç doğmadığını,
+ * `failed` çevrilemediğini. Sebep okunurken bunların hiçbiri kanıt sayılmaz.
+ */
+export const SHIP_REVERT_EARNING_AUDIT: {
+  reversed: Record<MoneyReversalParty, string>;
+  already_reversed: string;
+  none: string;
+  failed: string;
+} = {
+  reversed: {
+    manufacturer:
+      "Bekleyen ÜRETİCİ hakedişi geri çevrildi (yeniden kargolamada kendiliğinden doğmaz; gerekirse elle düzeltilir).",
+    painter:
+      "Bekleyen BOYACI hakedişi geri çevrildi (yeniden kargolamada kendiliğinden doğmaz; gerekirse elle düzeltilir).",
+  },
+  already_reversed:
+    "Partner hakedişi zaten geri çevrilmişti; bu geri alma para tarafında hiçbir şeyi değiştirmedi.",
+  none: "Bu siparişte partner hakedişi doğmamıştı; para tarafında değişiklik yok.",
+  failed: "Partner hakedişi geri ÇEVRİLEMEDİ (teknik hata kaydedildi); tutar elle düzeltilmeli.",
+};
+
+/**
+ * Denetim kaydına yazılacak para cümlesi. Rota bu fonksiyonu çağırır, cümleyi
+ * kendi içinde kurmaz: kayıt ancak yazıldığı yerde tek anlamlıysa okunduğu
+ * yerde de tek anlamlı olur.
+ */
+export function shipRevertEarningAuditSentence(
+  outcome: ShipRevertEarningOutcome,
+  party: MoneyReversalParty | null
+): string {
+  // `reversed` yalnız bir partinin dalında doğar; parti yoksa çevrilen bir şey
+  // de yoktur, o yüzden "hakediş doğmamıştı" cümlesi doğru olandır.
+  if (outcome === "reversed") return party ? SHIP_REVERT_EARNING_AUDIT.reversed[party] : SHIP_REVERT_EARNING_AUDIT.none;
+  return SHIP_REVERT_EARNING_AUDIT[outcome];
+}
+
+/**
+ * "Bu geri alma hakedişi geri çevirdi" diyen cümleler, partisiyle. Okuyan TAM
+ * cümleyi arar, parçasını değil: kısaltılmış bir imza, cümlenin devamı onu
+ * yalanlayan bir kayda da uyardı ("…zaten geri çevrilmişti; bu geri alma para
+ * tarafında hiçbir şeyi değiştirmedi") ve olmamış bir geri çevirme olmuş gibi
+ * okunurdu.
+ */
+export const SHIP_REVERT_EARNING_REVERSED_MARKERS: ReadonlyArray<{
+  party: MoneyReversalParty;
+  sentence: string;
+}> = [
+  { party: "manufacturer", sentence: SHIP_REVERT_EARNING_AUDIT.reversed.manufacturer },
+  { party: "painter", sentence: SHIP_REVERT_EARNING_AUDIT.reversed.painter },
+];
+
+/**
+ * Ödenmiş — iadenin geri ALAMADIĞI — hakediş. reverseEarning /
+ * reversePainterEarning `paid` satırlara dokunmaz (o para platformdan çıkmıştır);
+ * yalnızca bir ödeme partisine girmiş ama partisi HENÜZ ödenmemiş satır geri
+ * çevrilir ve partiden düşülür — o yüzden "partiye girmiş" ödenmiş değildir.
+ *
+ * Tek tanım: platform hesabı, admin kartının pay bloğu ve partner ekranı aynı
+ * soruyu aynı yerden sorar. "Geri çevrilmemiş" ile "ödenmiş" AYRI sorulardır:
+ * bekleyen bir satır ne ödenmiştir ne de platform zararıdır.
+ */
+export function isEarningPaidOut(
+  e: PartnerEarningRow | EarningMoneySnapshot | null | undefined
+): boolean {
+  return !!e && (e.status === "paid" || e.payout?.status === "paid");
+}
+
+/**
+ * Geri almanın SÖYLENEBİLİR sebebi. Sebep hiçbir zaman siparişin bugünkü
+ * hâlinden tahmin edilmez; yalnızca kayıtlı olan söylenir:
+ *   - `ship_revert*`: denetim kaydı BU PAYA dokunduğunu yazmış;
+ *   - `refund`: iade siparişin kendi kolonunda;
+ *   - `unrecorded`: kayda bakıldı, bu pay için sebep yok;
+ *   - `unreadable`: kayda bakılamadı — "kayıtlı değil" demek, bakılmamış bir şey
+ *     hakkında olumsuz bir iddia olurdu.
+ */
+export type EarningReversalCause =
+  | "ship_revert_and_refund"
+  | "ship_revert"
+  | "refund"
+  | "unrecorded"
+  | "unreadable";
+
+/**
+ * Sebebin TEK türetimi: admin para kartı da partner panelleri de bunu çağırır,
+ * cümleyi kendi başına kurmaz.
+ *
+ * Kargo geri alma kaydı yalnızca DOKUNDUĞU payın sebebidir: boyacı kargosunun
+ * geri alınması üreticinin (çoktan devirde doğmuş ve çoğu zaman ödenmiş)
+ * hakedişini açıklamaz.
+ */
+export function earningReversalCause(args: {
+  party: MoneyReversalParty;
+  reversal: MoneyReversalRecord | null | undefined;
+  refunded: boolean;
+}): EarningReversalCause {
+  const shipRevert =
+    args.reversal?.cause === "ship_revert" && args.reversal.party === args.party;
+  if (shipRevert && args.refunded) return "ship_revert_and_refund";
+  if (shipRevert) return "ship_revert";
+  if (args.refunded) return "refund";
+  // Kayda BAKILDI (null ya da başka paya ait bir kayıt okundu) → bu pay için
+  // sebep kayıtlı değil. undefined ise kayıt hiç okunamamıştır.
+  return args.reversal !== undefined ? "unrecorded" : "unreadable";
+}
+
+/**
+ * Kargo geri alma sipariş CANLIYKEN olur: partner işi yaptıysa tutar elle
+ * düzeltilir (yeniden kargolamada kendiliğinden doğmaz — DELETE /ship partnere
+ * de aynısını yazar).
+ */
+const REVERSAL_MANUAL_FIX = " Yeniden kargolandığında kendiliğinden doğmaz, elle düzeltilir.";
+
+/** Admin para kartının uyarı cümlesi; sebep tek türetimden gelir. */
+export function earningReversalAdminWarning(args: {
+  cause: EarningReversalCause;
+  /** "Üretici" / "Boyacı". */
+  who: string;
+  /** Biçimlenmiş tutar (formatTry). */
+  amountText: string;
+}): string {
+  const { who, amountText: amount } = args;
+  switch (args.cause) {
+    case "ship_revert_and_refund":
+      return `${who} hakedişi geri alındı (kayıtlı sebepler: kargo kaydının geri alınması ve iade) — ${amount} ödenmeyecek.`;
+    case "ship_revert":
+      return `${who} hakedişi geri alındı (kargo kaydı geri alındığı için) — ${amount} ödenmeyecek.${REVERSAL_MANUAL_FIX}`;
+    case "refund":
+      return `${who} hakedişi geri alındı (sipariş iade edildiği için) — ${amount} ödenmeyecek.`;
+    case "unrecorded":
+      return `${who} hakedişi geri alındı — ${amount} ödenmeyecek. Sebebi kayıtlı değil; siparişin işlem geçmişine bakın.`;
+    case "unreadable":
+      return `${who} hakedişi geri alındı — ${amount} ödenmeyecek. Sebep kaydı okunamadı; siparişin işlem geçmişine bakın.`;
+  }
+}
+
+/**
+ * Aynı sebebin PARTNERE söylenen hâli (üretici / boyacı paneli). Partner ekranı
+ * kendi cümlesini uydurmaz: "iade / itiraz" diye sabitlenmiş bir cümle, kargo
+ * kaydı geri alındığı için çevrilmiş bir hakedişte partnere olmamış bir iade
+ * anlatıyordu.
+ */
+export const EARNING_REVERSAL_PARTNER_SENTENCES: Record<EarningReversalCause, string> = {
+  ship_revert_and_refund:
+    "Bu siparişin hak edişi geri alındı (kargo kaydı geri alındı ve sipariş iade edildi); ödenmeyecek.",
+  ship_revert:
+    "Bu siparişin hak edişi geri alındı (kargo kaydı geri alındığı için); ödenmeyecek. Yeniden kargolandığında kendiliğinden doğmaz; hak ettiğiniz tutar Figurünica ekibince elle düzeltilir.",
+  refund: "Bu sipariş iade edildiği için hak edişiniz geri alındı; ödenmeyecek.",
+  unrecorded:
+    "Bu siparişin hak edişi geri alındı; ödenmeyecek. Sebebi sistemde kayıtlı değil — ayrıntı için bize yazın.",
+  unreadable:
+    "Bu siparişin hak edişi geri alındı; ödenmeyecek. Sebep kaydı şu anda okunamadı — ayrıntı için bize yazın.",
+};
+
 export interface OrderMoneySnapshot {
   orderType: string;
   amountKurus: number;
@@ -328,6 +536,16 @@ export interface OrderMoneySnapshot {
   painterName: string | null;
   painterStatus: string | null;
   shippedAt: string | null;
+  /**
+   * Hakediş geri almanın kayıtlı sebebi (yükleyici denetim kaydından doldurur):
+   *   - undefined: bakılmadı / okunamadı → sebep BİLİNMİYOR;
+   *   - null: bakıldı, kayıt YOK → sebep KAYITLI DEĞİL;
+   *   - nesne: kayıtlı sebep.
+   * Üçü de farklı cümle üretir. Hiçbiri siparişin BUGÜNKÜ hâlinden sebep tahmin
+   * etmez: geri almanın ardından sipariş yeniden kargolanınca kargo damgası geri
+   * gelir, yani "shippedAt null" bir sebep kanıtı değildir.
+   */
+  earningReversal?: MoneyReversalRecord | null;
   /** order_items (sepet alt siparişi). Diğer sipariş türlerinde boş. */
   items: OrderItemMoneySnapshot[];
   /** Aynı sepetten doğan kardeş alt siparişler (bu sipariş hariç). */
@@ -1238,7 +1456,26 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       );
     }
     if (e && e.status === "reversed") {
-      warnings.push(`${who} hakedişi geri alındı (iade / itiraz) — ${formatTry(e.netKurus)} ödenmeyecek.`);
+      // Geri alınmış satır SEBEBİNİ taşımaz. Sebep yalnızca KAYITLI olduğu
+      // yerden okunur: iade siparişin kendi kolonundadır (paymentStatus), kargo
+      // geri alma ise denetim kaydındadır (s.earningReversal) ve o kayıt hangi
+      // PAYA dokunduğunu da söyler. Siparişin BUGÜNKÜ hâlinden sebep
+      // çıkarılmaz: geri almanın ardından sipariş yeniden kargolanınca kargo
+      // damgası geri gelir; damgaya bakan bir tahmin aynı satıra önce "kargo
+      // geri alma" sonra "iade" derdi. Bilinmeyen sebep bilinmiyor diye yazılır
+      // — kart, verinin bilmediğini iddia etmez. Partner panelleri de aynı
+      // türetimi çağırır (EARNING_REVERSAL_PARTNER_SENTENCES).
+      warnings.push(
+        earningReversalAdminWarning({
+          cause: earningReversalCause({
+            party: i.share.party,
+            reversal: s.earningReversal,
+            refunded,
+          }),
+          who,
+          amountText: formatTry(e.netKurus),
+        })
+      );
     }
     if (
       e &&
@@ -1269,27 +1506,69 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
   if (succeeded) {
     const eff = internal.map(effectiveOf);
     const commissionKurus = sum(eff.map((e) => e.commission));
-    // Hiçbir partnerin kazanmadığı taban (atanmamış boyacı payı, geri alınmış
-    // hakediş…) şimdilik platformda durur.
-    const unassignedBaseKurus = s.amountKurus - sum(eff.map((e) => e.gross));
+    // Hiçbir partnerin kazanmadığı taban (ör. atanmamış boyacı payı) şimdilik
+    // platformda durur. GERİ ALINMIŞ hakedişin tabanı buraya GİRMEZ — aşağıda.
+    // Geri alınmış hakedişin tabanı platform GELİRİ DEĞİLDİR: geri alma parayı
+    // platformda bırakmaz, yalnızca otomatik ödemeyi durdurur; tutarın partnere
+    // ödenip ödenmeyeceği elle karara bağlanır. "Partneri olmayan taban"a
+    // katılırsa canlı bir siparişte platform, hiç kalmadığı parayı kâr yazmış
+    // görünürdü. Tutarların hiçbiri değişmez; yalnız hangi kovaya düştüğü düzelir.
+    const reversedBaseKurus = sum(
+      internal.map((i) => (i.share.earning?.status === "reversed" ? i.share.earning.grossKurus : 0))
+    );
+    const unassignedBaseKurus = s.amountKurus - sum(eff.map((e) => e.gross)) - reversedBaseKurus;
     platform = {
       commissionKurus: nz(commissionKurus),
       unassignedBaseKurus: nz(unassignedBaseKurus),
+      reversedBaseKurus: nz(reversedBaseKurus),
       netKurus: nz(commissionKurus + unassignedBaseKurus - s.giftCardAmountKurus - s.havaleDiscountKurus),
     };
+    if (reversedBaseKurus > 0) {
+      warnings.push(
+        `Geri alınmış hakediş tabanı ${formatTry(reversedBaseKurus)} platform gelirine yazılmadı; partnere ödenip ödenmeyeceği elle karara bağlanmalı.`
+      );
+    }
   } else {
     // İade: tahsilat ciroya sayılmaz, bekleyen hakedişler geri alındı; yalnızca
     // ÖDENMİŞ (geri alınamayan) hakediş kalır ve o, platformun zararıdır.
+    //
+    // "Geri çevrilmemiş" ÖDENMİŞ demek DEĞİLDİR: iade bekleyen satırları
+    // çevirir, çevirme başarısız olursa geriye BEKLEYEN bir satır kalır — o para
+    // hâlâ platformdadır, kimseye gitmemiştir. Onu ödenmiş sayan hesap, aynı
+    // kartın pay bloğuyla (isEarningPaidOut) çelişen bir "platform zararı"
+    // yazıyordu. Ödenmişliğin tek tanımı isEarningPaidOut'tur.
     const paidOut = sum(
-      internal.map((i) => (i.share.earning && i.share.earning.status !== "reversed" ? i.share.earning.netKurus : 0))
+      internal.map((i) => (isEarningPaidOut(i.share.earning) ? i.share.earning?.netKurus ?? 0 : 0))
+    );
+    // Geri çevrilmemiş ama ödenmemiş satır: platform ZARARI değil, açık RİSK —
+    // ödeme partisine girerse partnere ödenir. Ayrı cümleyle bildirilir.
+    const unreversedPendingKurus = sum(
+      internal.map((i) =>
+        i.share.earning && i.share.earning.status !== "reversed" && !isEarningPaidOut(i.share.earning)
+          ? i.share.earning.netKurus
+          : 0
+      )
     );
     // `-paidOut` ödenmiş hakediş yokken -0 verirdi → ekranda "-₺0,00".
-    platform = { commissionKurus: 0, unassignedBaseKurus: 0, netKurus: nz(0 - paidOut) };
+    // İadede geri alınmış taban AYRICA raporlanmaz: para müşteriye döndü, ileriye
+    // dönük bekleyen bir tutar yoktur (tahsilat da ciroya sayılmaz). Geriye yalnız
+    // ödenmiş ve geri alınamayan hakediş kalır.
+    platform = {
+      commissionKurus: 0,
+      unassignedBaseKurus: 0,
+      reversedBaseKurus: 0,
+      netKurus: nz(0 - paidOut),
+    };
     warnings.push(
       `Sipariş iade edildi: tahsil edilen ${formatTry(cashCollectedKurus(s))} ciroya sayılmaz; para PayTR / banka üzerinden elle iade edilir.`
     );
     if (paidOut > 0) {
       warnings.push(`İadeye rağmen ödenmiş partner hakedişi geri alınmadı: ${formatTry(paidOut)} platform zararı.`);
+    }
+    if (unreversedPendingKurus > 0) {
+      warnings.push(
+        `İadeye rağmen geri alınmamış bekleyen partner hakedişi var: ${formatTry(unreversedPendingKurus)}. Bu tutar henüz ödenmedi (platformdan çıkmadı) ama ödeme partisine girerse partnere ödenir — elle kontrol edin.`
+      );
     }
   }
 

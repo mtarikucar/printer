@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
  * Admin restore of an archived product. A product that has a slug was live at
@@ -15,38 +16,42 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const a = await requireAdmin();
-  if ("response" in a) return a.response;
-  const { id } = await params;
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const { id } = await params;
 
-  const existing = await db.query.products.findFirst({
-    where: eq(products.id, id),
-  });
-  if (!existing) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (existing.status !== "archived") {
-    return NextResponse.json(
-      { error: "Product is not archived" },
-      { status: 400 }
-    );
-  }
+    const existing = await db.query.products.findFirst({
+      where: eq(products.id, id),
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (existing.status !== "archived") {
+      return NextResponse.json(
+        { error: "Product is not archived" },
+        { status: 400 }
+      );
+    }
 
-  const nextStatus = existing.slug ? ("active" as const) : ("draft" as const);
-  const [updated] = await db
-    .update(products)
-    .set({
-      status: nextStatus,
-      reviewedByEmail:
-        nextStatus === "active" ? a.session.user.email : existing.reviewedByEmail,
-      reviewedAt: nextStatus === "active" ? new Date() : existing.reviewedAt,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(products.id, id), eq(products.status, "archived")))
-    .returning();
+    const nextStatus = existing.slug ? ("active" as const) : ("draft" as const);
+    const [updated] = await db
+      .update(products)
+      .set({
+        status: nextStatus,
+        reviewedByEmail:
+          nextStatus === "active" ? a.session.user.email : existing.reviewedByEmail,
+        reviewedAt: nextStatus === "active" ? new Date() : existing.reviewedAt,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(products.id, id), eq(products.status, "archived")))
+      .returning();
 
-  if (!updated) {
-    return NextResponse.json({ error: "Restore failed" }, { status: 409 });
+    if (!updated) {
+      return NextResponse.json({ error: "Restore failed" }, { status: 409 });
+    }
+    return NextResponse.json({ product: updated });
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/admin/products/[id]/unarchive", ADMIN_ACTION_FAILED_ERROR);
   }
-  return NextResponse.json({ product: updated });
 }

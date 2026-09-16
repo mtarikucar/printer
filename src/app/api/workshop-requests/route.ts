@@ -15,6 +15,7 @@ import {
   generateWorkshopReference,
 } from "@/lib/workshop/constants";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
+import { handleRouteFailure, CUSTOMER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Public lead form: a venue owner requests a Figurunica workshop at their place.
 // No auth required (guests welcome); protected by per-IP rate-limit + Turnstile.
@@ -73,7 +74,7 @@ const schema = z.object({
   turnstileToken: z.string().optional(),
 });
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   // 1) Rate limit per IP: a few submissions per hour is plenty for a real lead.
   const ip = extractClientIp(request);
   const rl = await rateLimitAsync(`workshop-request:${ip}`, 5, 60 * 60 * 1000);
@@ -200,5 +201,18 @@ export async function POST(request: NextRequest) {
       { error: "Talep gönderilemedi. Lütfen tekrar deneyin." },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Beklenmeyen hata = GÖVDESİ OLAN cevap. İş yukarıdaki `handlePOST` içinde
+ * yapılır; buradaki tek yakalama, Next'in sıfır baytlık 500'ü yerine ekranın
+ * basabileceği TÜRKÇE bir cümle döndürür (gerekçe: src/lib/api/route-error.ts).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePOST(request);
+  } catch (e) {
+    return handleRouteFailure(e, "POST /api/workshop-requests", CUSTOMER_ACTION_FAILED_ERROR);
   }
 }

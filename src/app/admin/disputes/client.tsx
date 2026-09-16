@@ -30,7 +30,15 @@ export function DisputesClient({ disputes }: { disputes: Dispute[] }) {
         }),
       });
       if (!res.ok) alert("İşlem başarısız");
-      else router.refresh();
+      else {
+        // KISMİ BAŞARI SESSİZ GEÇMEZ: kayıt kapandığı hâlde bir hak ediş geri
+        // alınamadıysa rota bunu `warning` ile söyler ve admin'in BURADA görmesi
+        // gerekir — yenilemeden sonra itiraz listeden düşer, uyarı başka hiçbir
+        // yerde yazmaz.
+        const body = (await res.json().catch(() => null)) as { warning?: string } | null;
+        if (body?.warning) alert(body.warning);
+        router.refresh();
+      }
     } finally {
       setBusy(null);
     }

@@ -336,8 +336,17 @@ export async function kickOffMarketplaceOrder(
  *
  * Not SQL'de birleştirilir (araya giren [SLA]/[N12] bayrakları kaybolmasın) ve
  * satır biçimi tek kaynaktan gelir (formatAdminNoteLine).
+ *
+ * DIŞA AÇIK, çünkü ikinci bir otomatik yerleştirme yolu daha var: atölye
+ * seansı partisi (workshop-session.ts) siparişleri tek UPDATE ile üreticinin
+ * tezgâhına yazar ve mülkiyet kuralına takılan sipariş orada da atanmamış
+ * kalır. Aynı cümleyi ikinci kez yazmak yerine aynı yardımcı çağrılır: sahibi,
+ * "elle atanacak sipariş" bildirimini hangi yoldan gelirse gelsin aynı yerde
+ * (siparişin admin notu + posta kutusu) görür.
+ *
+ * ASLA fırlatmaz: not da e-posta da kendi içinde yakalanır.
  */
-async function flagManualAssignment(args: {
+export async function flagManualAssignment(args: {
   orderId: string;
   orderNumber: string;
   reason: string;
@@ -529,6 +538,9 @@ export async function autoAssignIfEligible(
       manufacturerId: targetManufacturerId,
       // Az önce kanıtlandı, sıralayıcı da aynı siparişi okudu.
       skipPrintableCheck: true,
+      // Denetim satırı (admin'li bir çağrıda) atölyenin nasıl seçildiğini
+      // yazsın: otomatik yolda "admin elle seçti" demek yanlış olurdu.
+      selectionBasis: ranked ? "auto_ranking" : "auto_seller",
       notification: {
         subject: `Yeni sipariş atandı: ${order.orderNumber}`,
         body: `${order.orderNumber} numaralı sipariş otomatik olarak size atandı${trigger}.\n\nÜretici panelinizden 24 saat içinde kabul veya reddedin.`,
@@ -567,7 +579,22 @@ export async function autoAssignIfEligible(
     // BURADA birbirine bağlanır. Satırı 2,5 sn'lik doğrulama zamanlayıcısına
     // bırakmıyoruz: o zamanlayıcı unref'li, yani kısa ömürlü bir süreçte (betik,
     // tek işlik worker) hiç çalışmadan kaybolur ve karar hiç kaydedilmez.
-    if (ranked) await commitAssignmentEvaluation(orderId, targetManufacturerId);
+    //
+    // KENDİ try/catch'i var ve bu kasıtlıdır: bu satırdan sonrası ATAMADAN
+    // SONRAKİ defter işidir. Fonksiyonun dış yakalaması `{ assigned: false }`
+    // döndürüyor, yani buradan sızan bir telemetri hatası GERÇEKLEŞMİŞ bir
+    // atamayı çağırana "otomatik atanmadı" diye gösterirdi — admin siparişi
+    // ikinci kez atamaya çalışırdı. Kayıt yazılamazsa yalnız telemetri eksilir.
+    if (ranked) {
+      try {
+        await commitAssignmentEvaluation(orderId, targetManufacturerId);
+      } catch (err) {
+        console.error(
+          `[ATAMA] değerlendirme kaydı yazılamadı (atama yapıldı): ${orderId}`,
+          err
+        );
+      }
+    }
 
     return { assigned: true, manufacturerId: targetManufacturerId };
   } catch (err) {

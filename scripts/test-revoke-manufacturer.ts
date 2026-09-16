@@ -177,7 +177,20 @@ async function main() {
   }
 
   // ── 6. states past the money boundary are refused ───────────────
-  for (const st of ["qc_approved", "shipped"] as const) {
+  // `qc_approved` BİLEREK burada değil ve bu testin eski hâli onu "reddedilir"
+  // sanıyordu (eea4bb4 servisi değiştirdi, test güncellenmedi: temiz bir DB'de
+  // 2 satır kırmızı yanıyordu). Para sınırı QC onayı DEĞİLDİR: hakediş yalnız
+  // kargoda ve boyacıya devirde yazılır. Salt `qc_approved` bir siparişin
+  // ortada hakediş satırı yoktur, bu yüzden geri alınması kimseyi parasız
+  // bırakmaz — gerekçesi REVOCABLE_MFG_STATUSES'ın yanında duruyor
+  // (src/lib/services/manufacturer-revoke.ts). Kargolanmış ya da boyacıya
+  // gitmiş siparişi ayrı korumalar durdurur (7. ve 8. bölümler).
+  ok(
+    "qc_approved BİLEREK geri alınabilir (hakediş kargoda/boyacıya devirde yazılır)",
+    REVOCABLE_MFG_STATUSES.includes("qc_approved"),
+    REVOCABLE_MFG_STATUSES
+  );
+  for (const st of ["shipped"] as const) {
     const o = await seedOrder({ manufacturerStatus: st });
     const r = await revokeManufacturerAssignment({
       orderId: o.id,

@@ -153,7 +153,11 @@ jobs:
           # housekeeping tipped a fully successful deploy (migrated, restarted,
           # health-checked) into a red pipeline. Headroom here is cheap; a
           # deploy that is genuinely stuck still fails, just later.
-          command_timeout: 20m
+          # Image cekme tek basina ~13 dk surebiliyor (GHCR, buyuk Next image).
+          # 20 dk'lik butce 2026-09-16'da e931ab3 deploy'unu tam bu adimda dusurdu:
+          # compose'a hic ulasilamadi, migration kosmadi. Butce cekme suresinin
+          # iki kati olacak sekilde yukseltildi.
+          command_timeout: 40m
           envs: GHCR_TOKEN,GHCR_USER,IMAGE_BASE,IMAGE_TAG,NEXT_PUBLIC_APP_URL,SMTP_FROM,ADMIN_EMAIL,PAYTR_MERCHANT_ID,PAYTR_MERCHANT_KEY,PAYTR_MERCHANT_SALT,PAYTR_TEST_MODE,PAYTR_TIMEOUT_MINUTES,BANK_NAME,BANK_ACCOUNT_HOLDER,BANK_IBAN,BANK_BRANCH,NEXT_PUBLIC_GTM_ID,NEXT_PUBLIC_GA4_ID,META_PIXEL_ID,TIKTOK_PIXEL_ID,NEXT_PUBLIC_SENTRY_DSN,FAL_API_KEY,MESHY_API_KEY,ANTHROPIC_API_KEY,META_APP_SECRET,WHATSAPP_TOKEN,WHATSAPP_PHONE_NUMBER_ID,WHATSAPP_VERIFY_TOKEN
           script: |
             set -euo pipefail

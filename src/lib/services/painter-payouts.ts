@@ -1,6 +1,8 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { lockPartnerMoney } from "@/lib/services/money-partner-lock";
+import { createPartnerPayout, reversePartnerEarning, settlePartnerPayout, voidPartnerPayout, deleteEmptyPartnerPayout, type PayoutSettlementConfirmation, type PayoutVoidInput, type PartnerPayoutPaidResult } from "@/lib/services/partner-payables";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, painterEarnings, painterPayouts } from "@/lib/db/schema";
+import { orders, painterEarnings } from "@/lib/db/schema";
 import { painterBaseKurus } from "@/lib/services/earning-base";
 import { computeEarning } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
@@ -16,13 +18,7 @@ import {
   type AccrualMismatchReason,
   type AccrualOutcome,
 } from "@/lib/services/payouts";
-import { claimableEarningWhere, openEarningWhere } from "@/lib/services/earning-claimable";
-import {
-  claimEarningsIntoPayout,
-  isPayoutLockBusy,
-  payoutHoldsWhatItClaims,
-  PayoutClaimRaceError,
-} from "@/lib/services/payout-claim";
+import { openEarningWhere } from "@/lib/services/earning-claimable";
 import type { PayoutCreateResult } from "@/lib/services/payouts";
 
 // Painter earnings + payouts — mirrors src/lib/services/payouts.ts (manufacturer
@@ -151,7 +147,7 @@ type PainterAccrualTxResult =
  * satırlar için yedektir.
  *
  * A refunded order never accrues: the refund check and the insert share one
- * transaction with the order row read FOR SHARE. Why the lock, and why here as
+ * transaction with the order row read FOR UPDATE. Why the lock, and why here as
  * well as in the ship route, is explained on accrueEarning (payouts.ts).
  */
 export async function accruePainterEarning(
@@ -161,7 +157,7 @@ export async function accruePainterEarning(
 ): Promise<AccrualOutcome> {
   const result = await db.transaction(async (tx): Promise<PainterAccrualTxResult> => {
     // Bounded lock wait, for the reason given on accrueEarning.
-    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    await lockPartnerMoney(tx, "painter", painterId);
 
     const [row] = await tx
       .select({
@@ -172,7 +168,7 @@ export async function accruePainterEarning(
       })
       .from(orders)
       .where(and(eq(orders.id, orderId), notRefundedGuard()))
-      .for("share");
+      .for("update");
     if (!row) {
       const [exists] = await tx
         .select({ id: orders.id })
@@ -339,157 +335,12 @@ export async function accruePainterEarning(
 
 /** Reverse a painter's (still-pending/unpaid) earning on refund/clawback. */
 export async function reversePainterEarning(orderId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    // Sınırlı bekleme + KİLİTLİ okuma: üretici tarafının aynası. NEDEN'i
-    // reverseEarning'de (payouts.ts) uzun uzun yazılı. Özet: kilitsiz okunan
-    // `payout_id`, araya giren partilemeden sonra ESKİ sürümdür; düşüm yanlış
-    // partiye (ya da hiçbirine) gider ve parti, artık tutmadığı parayı iddia
-    // eder — ödenemez ve silinemez bir parti.
-    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-    const toReverse = await tx
-      .select({ id: painterEarnings.id, payoutId: painterEarnings.payoutId, netKurus: painterEarnings.netKurus })
-      .from(painterEarnings)
-      .where(
-        and(
-          eq(painterEarnings.orderId, orderId),
-          ne(painterEarnings.status, "reversed"),
-          ne(painterEarnings.status, "paid")
-        )
-      )
-      .for("update");
-    if (toReverse.length === 0) return;
-    // Düşüm TEK ifadede, göreli: üretici tarafının aynası (bkz. reverseEarning,
-    // payouts.ts). Oku-değiştir-yaz, aynı partideki iki eşzamanlı geri almada
-    // bir düşümü kaybediyor ve partiyi arkasındaki paradan farklı bir tutar
-    // iddia eder hâlde bırakıyordu.
-    for (const e of toReverse) {
-      if (!e.payoutId) continue;
-      await tx
-        .update(painterPayouts)
-        .set({
-          totalKurus: sql`greatest(0, ${painterPayouts.totalKurus} - ${e.netKurus})`,
-          earningCount: sql`greatest(0, ${painterPayouts.earningCount} - 1)`,
-        })
-        .where(
-          and(eq(painterPayouts.id, e.payoutId), eq(painterPayouts.status, "pending"))
-        );
-    }
-
-    // ÇEVİRME YÜKLEMİ ÜRETİCİ İKİZİYLE AYNIDIR — ve öyle olmak zorundadır.
-    // Eskiden bu UPDATE YALNIZCA satır id'sine bakıyordu
-    // (`.where(eq(painterEarnings.id, e.id))`), ikizi ise statüyü yeniden
-    // denetliyordu. Ölçülen sonuç: markPainterPayoutPaid parti satırının
-    // kilidini tutarken hakedişleri `paid` yapar; burada bekleyen UPDATE
-    // uyandığında id hâlâ eşittir ve ÖDENMİŞ bir hakedişi `reversed` +
-    // `payout_id = null` yapardı. Ödenmiş parti artık ödediğini tutmaz ve
-    // boyacı, BANKADAN ÇIKMIŞ parayla geri alınmış görünürdü. Statü yeniden
-    // ileri sürülünce satır iki kez çevrilemez, ödenmişe de dokunulamaz.
-    await tx
-      .update(painterEarnings)
-      .set({ status: "reversed", payoutId: null, updatedAt: new Date() })
-      .where(
-        and(
-          eq(painterEarnings.orderId, orderId),
-          ne(painterEarnings.status, "reversed"),
-          ne(painterEarnings.status, "paid")
-        )
-      );
-  });
+  await reversePartnerEarning("painter", orderId);
 }
 
-/**
- * Boyacının TALEP EDİLEBİLİR hakedişlerini tek bir ödemede toplar.
- *
- * İADE FİLTRESİ BURADA ZORUNLUDUR. Bu sorgu siparişe hiç bakmadan her `pending`
- * + partilenmemiş satırı süpürüyordu; boyacının kendi ekranı (/painter/earnings)
- * ise iade edilen siparişin hakedişini "talep edilebilir" tutarından çıkarıp
- * satırı "İade edildi" diye işaretliyor ve "ödeme talebi oluşturduğunuzda
- * partiye de girmez" diye yazıyordu. Admin'in /admin/payouts → Boyacılar
- * sekmesindeki "Ödeme oluştur" düğmesi tam da o satırı partiye sokuyor, sonra
- * "Ödendi işaretle" onu `paid` yapıyordu: ekranın ödenemez dediği para, ekranın
- * yanındaki düğmeyle müşteriye iade edilmiş bir siparişten ÖDENİYORDU. Kural
- * artık üretici tarafıyla tek ve aynı yerden gelir (earning-claimable.ts).
- *
- * PARTİLEME ATOMİKTİR ve üretici tarafıyla AYNI algoritmadır (payout-claim.ts):
- * sayım `for update of` ile kilitli okunur, partinin toplamı damganın
- * `returning`inden yazılır. Boyacı tarafında ölçülen hâl de aynıydı: boyacının
- * kendi talebi ile admin'in "Ödeme oluştur"u aynı anda çalıştığında iki parti
- * kuruluyor, 4 hakedişin tamamı birine kaçıyor, öteki "₺3.000,00 · 4 iş" diyen
- * ama arkasında tek satır olmayan bir hayalet parti olarak ödenebiliyordu.
- *
- * TEK PARTİLEME YOLU: /api/painter/payout-request bu fonksiyonu çağırır, kendi
- * kopyasını KURMAZ. İki ayrı kopya, kuralın (ve şimdi kilidin) ancak birinde
- * düzeltilmesi demekti.
- */
-export async function createPayoutForPainter(
-  painterId: string,
-  adminEmail: string
-): Promise<PayoutCreateResult> {
-  try {
-    const batch = await db.transaction(async (tx) => {
-      // Sınırlı bekleme: eşzamanlı partileme kilidi bırakmazsa uç askıda
-      // kalmasın, Türkçe "birazdan tekrar deneyin" cevabına düşsün.
-      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-      return claimEarningsIntoPayout({
-        lockClaimable: async () =>
-          await tx
-            .select({ id: painterEarnings.id, netKurus: painterEarnings.netKurus })
-            .from(painterEarnings)
-            // Kural siparişin ödeme durumunu okur; birleşim olmadan kurulamaz.
-            .leftJoin(orders, eq(orders.id, painterEarnings.orderId))
-            .where(
-              and(
-                eq(painterEarnings.painterId, painterId),
-                claimableEarningWhere(painterEarnings)
-              )
-            )
-            .for("update", { of: painterEarnings }),
-        openBatch: async () => {
-          const [payout] = await tx
-            .insert(painterPayouts)
-            .values({
-              painterId,
-              totalKurus: 0,
-              earningCount: 0,
-              adminEmail,
-              status: "pending",
-            })
-            .returning({ id: painterPayouts.id });
-          return payout.id;
-        },
-        // Damga id listesine EK OLARAK yüklemi de taşır: liste sayım anının
-        // fotoğrafıdır, `openEarningWhere` satırın hâlâ açık (partisiz)
-        // olduğunu damga anında yeniden ileri sürer. Gerekçesi üretici
-        // tarafında ayrıntılı yazılı (payouts.ts): yüklem olmadan "bir hakediş,
-        // tam olarak bir parti" yalnız kilide yaslanır ve kilit delinirse başka
-        // partinin satırı sessizce çalınır.
-        stamp: async (payoutId, ids) =>
-          await tx
-            .update(painterEarnings)
-            .set({ payoutId, updatedAt: new Date() })
-            .where(
-              and(inArray(painterEarnings.id, ids), openEarningWhere(painterEarnings))
-            )
-            .returning({ id: painterEarnings.id, netKurus: painterEarnings.netKurus }),
-        writeBatchTotals: async (payoutId, totalKurus, earningCount) => {
-          await tx
-            .update(painterPayouts)
-            .set({ totalKurus, earningCount })
-            .where(eq(painterPayouts.id, payoutId));
-        },
-      });
-    });
-    return batch ? { ok: true, ...batch } : { ok: false, reason: "nothing_owed" };
-  } catch (e) {
-    if (isPayoutLockBusy(e) || e instanceof PayoutClaimRaceError) {
-      console.warn(
-        `[payout] painter ${painterId}: parti kurulamadı (eşzamanlı ödeme işlemi)`,
-        e
-      );
-      return { ok: false, reason: "busy" };
-    }
-    throw e;
-  }
+/** Same gated claim algorithm and source groups as manufacturer payouts. */
+export async function createPayoutForPainter(painterId: string, adminEmail: string): Promise<PayoutCreateResult> {
+  return createPartnerPayout("painter", painterId, adminEmail);
 }
 
 /**
@@ -500,79 +351,17 @@ export async function createPayoutForPainter(
  * (hayalet parti ödenemez).
  */
 export type PainterPayoutPaidResult =
-  | { ok: true; painterId: string; totalKurus: number }
-  | { ok: false; reason: "not_found" }
-  | {
-      ok: false;
-      reason: "mismatch";
-      statedKurus: number;
-      statedCount: number;
-      heldKurus: number;
-      heldCount: number;
-    };
+  | { ok: true; painterId: string; totalKurus: number; settlementKind: "transfer" | "netting"; replayed: boolean }
+  | Exclude<PartnerPayoutPaidResult, { ok: true }>;
 
-export async function markPainterPayoutPaid(
-  payoutId: string,
-  reference: string | null
-): Promise<PainterPayoutPaidResult> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-    const [payout] = await tx
-      .select({
-        id: painterPayouts.id,
-        painterId: painterPayouts.painterId,
-        totalKurus: painterPayouts.totalKurus,
-        earningCount: painterPayouts.earningCount,
-      })
-      .from(painterPayouts)
-      .where(and(eq(painterPayouts.id, payoutId), eq(painterPayouts.status, "pending")))
-      .for("update");
-    if (!payout) return { ok: false, reason: "not_found" };
+export async function markPainterPayoutPaid(payoutId: string, reference: string | null, confirmation?: PayoutSettlementConfirmation): Promise<PainterPayoutPaidResult> {
+  const result = await settlePartnerPayout("painter", payoutId, reference, confirmation);
+  return result.ok ? { ...result, painterId: result.partnerId } : result;
+}
 
-    const [held] = await tx
-      .select({
-        heldCount: sql<number>`count(*)::int`,
-        heldKurus: sql<number>`coalesce(sum(${painterEarnings.netKurus}), 0)::int`,
-      })
-      .from(painterEarnings)
-      .where(
-        and(eq(painterEarnings.payoutId, payoutId), ne(painterEarnings.status, "reversed"))
-      );
-    const heldCount = Number(held?.heldCount ?? 0);
-    const heldKurus = Number(held?.heldKurus ?? 0);
-    if (
-      !payoutHoldsWhatItClaims({
-        statedKurus: payout.totalKurus,
-        statedCount: payout.earningCount,
-        heldKurus,
-        heldCount,
-      })
-    ) {
-      console.error(
-        `[payout] painter ${payoutId}: parti ${payout.totalKurus} kuruş / ${payout.earningCount} iş diyor ama ${heldKurus} kuruş / ${heldCount} iş tutuyor — ödendi işaretlenmedi`
-      );
-      return {
-        ok: false,
-        reason: "mismatch",
-        statedKurus: payout.totalKurus,
-        statedCount: payout.earningCount,
-        heldKurus,
-        heldCount,
-      };
-    }
-
-    await tx
-      .update(painterPayouts)
-      .set({ status: "paid", paidAt: new Date(), reference })
-      .where(eq(painterPayouts.id, payoutId));
-    await tx
-      .update(painterEarnings)
-      .set({ status: "paid", updatedAt: new Date() })
-      .where(
-        and(eq(painterEarnings.payoutId, payoutId), ne(painterEarnings.status, "reversed"))
-      );
-    return { ok: true, painterId: payout.painterId, totalKurus: payout.totalKurus };
-  });
+export async function voidPainterPayout(payoutId: string, input: PayoutVoidInput) {
+  const result = await voidPartnerPayout("painter", payoutId, input);
+  return result.ok ? { ...result, painterId: result.partnerId } : result;
 }
 
 /**
@@ -585,29 +374,7 @@ export type PainterPayoutDeleteResult =
   | { ok: false; reason: "not_found" | "already_paid" }
   | { ok: false; reason: "has_earnings"; heldCount: number };
 
-export async function deleteEmptyPainterPayout(
-  payoutId: string
-): Promise<PainterPayoutDeleteResult> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-    const [payout] = await tx
-      .select({
-        id: painterPayouts.id,
-        painterId: painterPayouts.painterId,
-        status: painterPayouts.status,
-      })
-      .from(painterPayouts)
-      .where(eq(painterPayouts.id, payoutId))
-      .for("update");
-    if (!payout) return { ok: false, reason: "not_found" };
-    if (payout.status !== "pending") return { ok: false, reason: "already_paid" };
-    const [held] = await tx
-      .select({ heldCount: sql<number>`count(*)::int` })
-      .from(painterEarnings)
-      .where(eq(painterEarnings.payoutId, payoutId));
-    const heldCount = Number(held?.heldCount ?? 0);
-    if (heldCount > 0) return { ok: false, reason: "has_earnings", heldCount };
-    await tx.delete(painterPayouts).where(eq(painterPayouts.id, payoutId));
-    return { ok: true, painterId: payout.painterId };
-  });
+export async function deleteEmptyPainterPayout(payoutId: string): Promise<PainterPayoutDeleteResult> {
+  const result = await deleteEmptyPartnerPayout("painter", payoutId);
+  return result.ok ? { ok: true, painterId: result.partnerId } : result;
 }

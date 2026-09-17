@@ -16,6 +16,7 @@ import {
 import { reverseEarning, accrueEarning } from "@/lib/services/payouts";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { autoAssignIfEligible } from "@/lib/services/order-confirm";
+import { lockPartnerMoney } from "@/lib/services/money-partner-lock";
 
 /**
  * Admin pulls a painting order all the way back from the painter to the
@@ -219,14 +220,28 @@ export async function revokeAfterPainterHandoff(args: {
   // sitting over a stranded earning that would zero-pay the next manufacturer).
   try {
     await reverseEarning(orderId);
-    await db
-      .delete(manufacturerEarnings)
-      .where(
-        and(
+    // Discover the actual earning owner: it need not match a stale order
+    // assignment. Public reversal finished its own transaction above.
+    const [reversed] = await db.select({
+      id: manufacturerEarnings.id,
+      manufacturerId: manufacturerEarnings.manufacturerId,
+    }).from(manufacturerEarnings).where(and(
+      eq(manufacturerEarnings.orderId, orderId),
+      eq(manufacturerEarnings.status, "reversed"),
+    ));
+    if (reversed) {
+      await db.transaction(async (tx) => {
+        await lockPartnerMoney(tx, "manufacturer", reversed.manufacturerId);
+        // Pin identity/owner as well as state: never delete a replacement
+        // earning created after discovery under another partner's gate.
+        await tx.delete(manufacturerEarnings).where(and(
+          eq(manufacturerEarnings.id, reversed.id),
+          eq(manufacturerEarnings.manufacturerId, reversed.manufacturerId),
           eq(manufacturerEarnings.orderId, orderId),
-          eq(manufacturerEarnings.status, "reversed")
-        )
-      );
+          eq(manufacturerEarnings.status, "reversed"),
+        ));
+      });
+    }
   } catch (e) {
     console.error("revoke-after-painter: earning reversal failed", e);
     return { code: "reverse_failed" as const };

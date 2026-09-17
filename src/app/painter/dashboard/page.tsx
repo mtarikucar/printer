@@ -1,3 +1,4 @@
+import { readPartnerPayables } from "@/lib/services/partner-payables";
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
@@ -12,8 +13,6 @@ import type { Locale } from "@/lib/i18n/types";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import {
-  claimableEarningWhere,
-  inPayoutEarningWhere,
   refundedOpenEarningWhere,
   refundedInPayoutEarningWhere,
 } from "@/lib/services/earning-claimable";
@@ -109,7 +108,7 @@ export default async function PainterDashboardPage() {
   }
 
   const pid = session.painterId;
-  const [[assigned], [accepted], [painting], [pending], recent, capacityRow] =
+  const [[assigned], [accepted], [painting], [pending], recent, capacityRow, moneySummary] =
     await Promise.all([
       // İADE: iade edilmiş sipariş kimsenin işi değildir. Bu üç kutu eskiden
       // yalnız painter_status'e bakıyordu, tezgâh kutusu ise ortak ölçüden
@@ -127,18 +126,10 @@ export default async function PainterDashboardPage() {
         .select({ c: count() })
         .from(orders)
         .where(and(eq(orders.painterId, pid), eq(orders.painterStatus, "painting"), notRefundedGuard())),
-      // "Bekleyen kazanç" = TALEP EDİLEBİLİR para, kuralı ortak yerden okur
-      // (earning-claimable.ts). İki ayrı hata vardı: tahakkuk etmiş her satırı
-      // toplamak, boyacının zaten talep ettiği (partilenmiş, transferi bekleyen)
-      // parayı ikinci kez "bekliyor" gibi gösteriyordu; iade terimi olmaması ise
-      // /painter/earnings'in "talep edilebilir" rakamından çıkardığı iade
-      // hakedişini bu panelde ödenecekmiş gibi gösteriyordu — aynı boyacı, iki
-      // ekran, iki farklı rakam. Kural siparişin ödeme durumunu okur: birleşim
-      // olmadan kurulamaz.
+      // İade edilmiş asıl hak edişler ayrı gösterilir; ödenebilir bakiye
+      // düzeltmelerle birlikte ortak partner-payables okuyucusundan gelir.
       db
         .select({
-          s: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${claimableEarningWhere(painterEarnings)}), 0)::int`,
-          inPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${inPayoutEarningWhere(painterEarnings)}), 0)::int`,
           refundedOpen: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${refundedOpenEarningWhere(painterEarnings)}), 0)::int`,
           refundedInPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${refundedInPayoutEarningWhere(painterEarnings)}), 0)::int`,
         })
@@ -167,10 +158,14 @@ export default async function PainterDashboardPage() {
       // düşülmüyordu (iade kimsenin kapasitesini tüketmez), (c) BİRİM yerine
       // KUTU sayıyordu. Partnere kendi işi hakkında yanlış bir şey söylenemez.
       loadPainterCapacity(pid),
+      readPartnerPayables("painter", pid).catch((error) => {
+        console.error("[painter dashboard] Hak ediş bakiyesi okunamadı", error);
+        return null;
+      }),
     ]);
 
-  const pendingEarnings = Number(pending?.s ?? 0);
-  const inPayoutKurus = Number(pending?.inPayout ?? 0);
+  const pendingEarnings = moneySummary?.claimableNet ?? null;
+  const inPayoutKurus = moneySummary?.pendingPayoutNet ?? null;
   // "Bekleyen kazanç"tan DIŞARIDA kalan para: sebebi rakamın yanında yazsın.
   const refundedUnpayable =
     Number(pending?.refundedOpen ?? 0) + Number(pending?.refundedInPayout ?? 0);
@@ -183,7 +178,7 @@ export default async function PainterDashboardPage() {
     { label: "Atanan işler", value: assigned?.c ?? 0 },
     { label: "Kabul edilen", value: accepted?.c ?? 0 },
     { label: "Boyanıyor", value: painting?.c ?? 0 },
-    { label: "Bekleyen kazanç", value: formatCurrency(pendingEarnings, locale) },
+    { label: "Bekleyen kazanç", value: pendingEarnings === null ? "Okunamadı" : formatCurrency(pendingEarnings, locale) },
   ];
 
   return (
@@ -215,6 +210,12 @@ export default async function PainterDashboardPage() {
           </div>
         ))}
       </div>
+
+      {moneySummary === null && (
+        <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Hak ediş ve düzeltme kayıtları okunamadığı için bakiye gösterilemiyor. Bu durum bakiyenizin sıfır olduğu anlamına gelmez. Lütfen sayfayı yenileyin.
+        </p>
+      )}
 
       {refundedUnpayable > 0 && (
         <p
@@ -274,7 +275,9 @@ export default async function PainterDashboardPage() {
             Kazançlar ve ödemeler
           </p>
           <p className="mt-1 text-sm text-gray-700">
-            {inPayoutKurus > 0
+            {inPayoutKurus === null
+              ? "Ödeme sürecindeki tutar okunamadı"
+              : inPayoutKurus > 0
               ? `Ödeme sürecinde: ${formatCurrency(inPayoutKurus, locale)}`
               : "İş bazında kazanç, ödeme talebi ve ödeme geçmişi"}
           </p>

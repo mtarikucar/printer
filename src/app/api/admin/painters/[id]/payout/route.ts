@@ -48,18 +48,27 @@ export async function POST(
       );
     }
 
+    let warning: string | undefined;
     await notifyPainter({
       painterId: id,
       type: "payout",
-      subject: "Ödemeniz hazırlanıyor",
-      body: `${fmtTRY(result.totalKurus)} tutarındaki ödemeniz oluşturuldu (${result.count} iş). Banka transferi yapıldığında ayrıca bilgilendirileceksiniz.`,
-    }).catch((e) => console.error("notifyPainter (payout create) failed", e));
+      subject: result.settlementKind === "netting" ? "Mahsup talebi oluşturuldu" : "Ödemeniz hazırlanıyor",
+      body: result.settlementKind === "netting"
+        ? "Bağlı hak ediş ve indirimleriniz için sıfır net mahsup talebi oluşturuldu. Yönetici onayı bekleniyor; banka transferi yapılmayacak."
+        : `${fmtTRY(result.totalKurus)} tutarında ödeme partisi oluşturuldu (${result.count} hak ediş, ${result.adjustmentCount} düzeltme). Banka transferi yapıldığında ayrıca bilgilendirileceksiniz.`,
+    }).catch((e) => {
+      console.error("payout creation notification failed", e);
+      warning = "Parti oluşturuldu ancak partner bildirimi gönderilemedi. Yeni parti oluşturmadan mevcut kaydı kontrol edin.";
+    });
 
     return NextResponse.json({
       success: true,
       payoutId: result.payoutId,
       totalKurus: result.totalKurus,
       count: result.count,
+      adjustmentCount: result.adjustmentCount,
+      settlementKind: result.settlementKind,
+      ...(warning ? { warning } : {}),
     });
   } catch (e) {
     return handleRouteFailure(e, "POST /api/admin/painters/[id]/payout", ADMIN_ACTION_FAILED_ERROR);

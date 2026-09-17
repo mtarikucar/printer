@@ -1,5 +1,8 @@
 export const dynamic = "force-dynamic";
 
+import { readPartnerPayables } from "@/lib/services/partner-payables";
+import { PartnerAdjustmentHistory } from "@/components/partner-adjustment-history";
+
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { desc, eq, sql } from "drizzle-orm";
@@ -12,8 +15,6 @@ import type { Locale } from "@/lib/i18n/types";
 import { PainterPayoutRequestButton } from "./payout-request-button";
 import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
 import {
-  claimableEarningWhere,
-  inPayoutEarningWhere,
   refundedOpenEarningWhere,
   refundedInPayoutEarningWhere,
 } from "@/lib/services/earning-claimable";
@@ -82,27 +83,15 @@ export default async function PainterEarningsPage() {
   const locale = (await getLocale()) as Locale;
   const pid = session.painterId;
 
-  // İADE EDİLEN SİPARİŞİN HAKEDİŞİ "TALEP EDİLEBİLİR" DEĞİLDİR.
-  //
-  // İade siparişi boyacıdan koparır ama koparma (temizlik) kuralı gereği
-  // hakediş satırına DOKUNMAZ; satır `pending` kaldığı için bu sayfa onu
-  // sıradan, talep edilebilir para gibi sayıyordu. Satır listede kalır (ekran
-  // veriyi olduğu gibi gösterir) ama talep edilebilir toplamdan ayrılır ve
-  // sebebi ekranda yazar.
-  //
-  // Kural ARTIK ORTAK (earning-claimable.ts): bu ekranın "talep edilebilir"
-  // toplamı ile ödeme talebinin partilediği satır kümesi aynı ifadeden gelir.
-  // Eskiden ayrıydılar — ekran iade hakedişini çıkarıyor, düğmenin arkasındaki
-  // sorgu onu yine de partiye sokuyordu.
-  const [[totals], earnings, payoutRows] = await Promise.all([
+  // Hak ediş + düzeltme bakiyesi partilemenin ortak okuyucusundan gelir.
+  // Aşağıdaki SQL yalnız iade edilmiş eski hak edişleri ayrıca açıklar;
+  // 200 satırlık gösterim listesi hiçbir toplamın kaynağı değildir.
+  const [[totals], earnings, payoutRows, moneySummary] = await Promise.all([
     // Toplamlar SQL'de: aşağıdaki liste son 200 satırla sınırlı, toplam değil.
     db
       .select({
-        owed: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${claimableEarningWhere(painterEarnings)}), 0)::int`,
         refundedOpen: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${refundedOpenEarningWhere(painterEarnings)}), 0)::int`,
         refundedInPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${refundedInPayoutEarningWhere(painterEarnings)}), 0)::int`,
-        inPayout: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${inPayoutEarningWhere(painterEarnings)}), 0)::int`,
-        paid: sql<number>`coalesce(sum(${painterEarnings.netKurus}) filter (where ${painterEarnings.status} = 'paid'), 0)::int`,
       })
       .from(painterEarnings)
       .leftJoin(orders, eq(orders.id, painterEarnings.orderId))
@@ -113,7 +102,7 @@ export default async function PainterEarningsPage() {
       orderBy: [desc(painterEarnings.createdAt)],
       limit: EARNING_LIST_LIMIT,
     }),
-    // YALNIZ GÖSTERİM: bu tablo yukarıdaki toplamların hiçbirini beslemez, o
+    // YALNIZ GÖSTERİM: bu geçmiş listesi bakiye okuyucusundan ayrı yüklenir, o
     // yüzden arızası sayfayı düşürmez (bkz. displayRead).
     displayRead(
       "ödeme geçmişi",
@@ -129,24 +118,32 @@ export default async function PainterEarningsPage() {
         limit: 50,
       })
     ),
+    displayRead("güncel hak ediş ve düzeltme toplamları", readPartnerPayables("painter", pid)),
   ]);
 
-  const owed = Number(totals?.owed ?? 0);
+  if (!moneySummary) return <div role="alert" className="m-6 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900">Hak ediş ve düzeltme toplamları okunamadı. Tutarlar bilinmediği için ödeme talebi kapalı; kayıtlar silinmedi. Sayfayı yeniden yükleyin.</div>;
+
+  const owed = moneySummary.claimableNet;
   const refundedOpen = Number(totals?.refundedOpen ?? 0);
   const refundedInPayout = Number(totals?.refundedInPayout ?? 0);
-  const inPayout = Number(totals?.inPayout ?? 0);
-  const paidTotal = Number(totals?.paid ?? 0);
+  const inPayout = moneySummary.pendingPayoutNet;
+  const paidTotal = moneySummary.paidTransferNet;
 
-  const badgeFor = (e: { status: string; payoutId: string | null }) =>
-    EARNING_BADGE[e.status === "pending" && e.payoutId ? "in_payout" : e.status] ??
-    EARNING_BADGE.pending;
+  const badgeFor = (e: { status: string; payoutId: string | null }) => {
+    const batch = moneySummary.payouts.find(p => p.id === e.payoutId);
+    if (batch?.settlementKind === "netting" && !batch.voidedAt) return {
+      label: batch.status === "paid" ? "Mahsupla kapandı" : "Mahsup bekliyor",
+      cls: "bg-indigo-100 text-indigo-700",
+    };
+    return EARNING_BADGE[e.status === "pending" && e.payoutId ? "in_payout" : e.status] ?? EARNING_BADGE.pending;
+  };
 
   const cards: Array<{ label: string; value: number; cls: string; hint: string }> = [
     {
       label: "Talep edilebilir",
       value: owed,
       cls: "border-amber-200 bg-amber-50 text-amber-900",
-      hint: "Tahakkuk etmiş, henüz bir ödemeye girmemiş (iade edilen siparişler hariç)",
+      hint: "Hak ediş ve düzeltmelerin birlikte ödenebilir net tutarı",
     },
     {
       label: "Ödeme sürecinde",
@@ -179,6 +176,8 @@ export default async function PainterEarningsPage() {
           </div>
         ))}
       </div>
+
+      <PartnerAdjustmentHistory summary={moneySummary} />
 
       {/* İKİ PARAGRAF DA KENDİ KOŞULUNDA DURUR, biri ötekinin İÇİNDE DEĞİL.
           "Partiye girmiş iade hakedişi" cümlesi eskiden `refundedOpen > 0`
@@ -236,7 +235,7 @@ export default async function PainterEarningsPage() {
               Profilde düzenle
             </Link>
           </div>
-          <PainterPayoutRequestButton owedKurus={owed} hasIban={!!painter.iban} />
+          <PainterPayoutRequestButton owedKurus={owed} hasClaimable={moneySummary.claimableCount > 0} hasIban={!!painter.iban} />
         </div>
       </div>
 
@@ -316,7 +315,7 @@ export default async function PainterEarningsPage() {
           </p>
           <p className="mt-1 text-amber-900/80">
             Bu bölüm BOŞ DEĞİL, BİLİNMİYOR: hiçbir ödeme kaydı silinmedi.
-            Yukarıdaki tutarlar bu tablodan hesaplanmaz; onlar doğrudur. Birkaç
+            Yukarıdaki tutarlar ayrı bir tutarlı bakiye okumasından gelir. Birkaç
             dakika sonra sayfayı yenileyin, sorun sürerse yöneticiye bildirin.
           </p>
         </div>
@@ -330,7 +329,7 @@ export default async function PainterEarningsPage() {
             <details key={p.id} className="px-4 py-3 text-sm">
               <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
                 <span className="text-gray-700">
-                  {formatDate(p.createdAt, locale)} · {p.earningCount} iş
+                  {formatDate(p.createdAt, locale)} · {p.earningCount} hak ediş · {p.adjustmentCount} düzeltme
                   {p.adminEmail === "painter-request" ? " · sizin talebiniz" : ""}
                   {p.reference ? ` · Ref: ${p.reference}` : ""}
                 </span>
@@ -341,12 +340,14 @@ export default async function PainterEarningsPage() {
                       p.status === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"
                     }`}
                   >
-                    {p.status === "paid"
+                    {p.voidedAt ? "İptal edildi" : p.settlementKind === "netting" ? (p.status === "paid" ? "Mahsup edildi" : "Mahsup bekliyor") : p.status === "paid"
                       ? `Ödendi${p.paidAt ? ` · ${formatDate(p.paidAt, locale)}` : ""}`
                       : "Transfer bekleniyor"}
                   </span>
                 </span>
               </summary>
+              {p.voidReason && <p className="mt-2 text-xs text-gray-600">İptal gerekçesi: {p.voidReason}. Eski parti tutarı ödenecek bakiye değildir.</p>}
+              <ul className="mt-2 space-y-1 text-xs text-gray-600">{moneySummary.adjustmentHistory.filter(a => a.painterPayoutId === p.id).map(a => <li key={a.id} className="flex justify-between gap-3"><span>{a.reason}</span><span>{formatCurrency(a.netKurus, locale)}</span></li>)}</ul>
               {p.earnings.length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-gray-600">
                   {p.earnings.map((e) => (

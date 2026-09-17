@@ -31,6 +31,10 @@ import {
 } from "../src/lib/services/earning-claimable";
 import {
   claimEarningsIntoPayout,
+  groupPartnerPayables,
+  verifyClaimedPayableMembers,
+  type PayableSource,
+  type PayableMember,
   isPayoutLockBusy,
   payoutHoldsWhatItClaims,
   PayoutClaimRaceError,
@@ -701,8 +705,6 @@ test("partiye girmiş iade hakedişi ayrı sorulur (eski kayıtlar görünür ka
 // partileme sorgusu. (Liste bilinen yerleri pinler; aşağıdaki ağaç taraması
 // listede olmayan yeni bir yeri de yakalar.)
 const CLAIMABLE_RULE_SITES: readonly string[] = [
-  "src/lib/services/payouts.ts",
-  "src/lib/services/painter-payouts.ts",
   // /api/painter/payout-request BURADA DEĞİL: artık kendi partilemesini
   // kurmaz, createPayoutForPainter'a devreder (aşağıda ayrıca pinli).
   "src/app/admin/payouts/page.tsx",
@@ -714,10 +716,7 @@ const CLAIMABLE_RULE_SITES: readonly string[] = [
 // Partiyi YAZAN sorgular: kural siparişin ödeme durumunu okuduğu için birleşim
 // şart, damga da sayılan id'lere vurulmalı. İKİ tane: üretici partisi ve boyacı
 // partisi. Boyacının kendi talebi ÜÇÜNCÜ bir kopya DEĞİL, ikincisini çağırır.
-const BATCHING_SITES: readonly string[] = [
-  "src/lib/services/payouts.ts",
-  "src/lib/services/painter-payouts.ts",
-];
+const BATCHING_SITES: readonly string[] = ["src/lib/services/partner-payables.ts"];
 
 // Toplamı SQL'den (satır listesinden DEĞİL) çıkarması gereken partner ekranları.
 // Admin kuyruğu bu listede yok: o, satır satır listeleyip ödenebilir/ödenmez
@@ -734,12 +733,12 @@ test("ekran ve partileme kuralı TEK yerden okur, kendi yazmaz", () => {
   for (const rel of CLAIMABLE_RULE_SITES) {
     const text = readSite(rel);
     assert.ok(
-      /from "@\/lib\/services\/earning-claimable"/.test(text),
+      /from "@\/lib\/services\/partner-payables"/.test(text),
       `${rel}: kural modülünü import etmiyor`
     );
     assert.ok(
-      text.includes("claimableEarningWhere"),
-      `${rel}: talep edilebilir kuralını claimableEarningWhere'den almıyor`
+      text.includes("readPartnerPayables(") && text.includes(".claimableNet"),
+      `${rel}: payable totals must come from readPartnerPayables`
     );
     // Kuralın elle yeniden kurulması: tam da ayrışmanın başladığı yer.
     assert.ok(
@@ -773,7 +772,7 @@ test("partileme sorguları siparişle birleşir ve damgayı sayılan satırlara 
     );
     // Toplam, damganın kendisinden yazılmalı: ortak algoritma bunu zorlar.
     assert.ok(
-      text.includes("claimEarningsIntoPayout("),
+      text.includes("verifyClaimedPayableMembers("),
       `${rel}: partileme ortak atomik algoritmadan geçmeli (payout-claim.ts)`
     );
     // Ödendi işaretleme, partinin GERÇEKTEN tuttuğu parayı doğrulamalı.
@@ -805,7 +804,7 @@ function filesInsertingPayouts(
   return out.sort();
 }
 
-test("ödeme partisini YALNIZ iki servis kurar (kopya partileme yok)", () => {
+test("ödeme partisini YALNIZ ortak servis kurar (kopya partileme yok)", () => {
   const files = walkSources(join(REPO_ROOT, "src")).map((full) => ({
     rel: relative(REPO_ROOT, full).split(sep).join("/"),
     text: readFileSync(full, "utf8"),
@@ -921,14 +920,33 @@ const BATCHING_FUNCTIONS: ReadonlyArray<{ rel: string; signature: string }> = [
   },
 ];
 
-test("geri alma, partilemenin aldığı SATIR KİLİDİNİ alır ve statüyü yeniden denetler", () => {
-  for (const { rel, signature, table } of REVERSAL_SITES) {
-    assert.deepEqual(
-      reversalDefects(functionBody(readSite(rel), signature), table),
-      [],
-      `${rel}: ${signature}...)`
-    );
+test("both reversal adapters delegate to the gated shared source/debit reversal", () => {
+  for (const { rel, signature } of REVERSAL_SITES) {
+    const body = functionBody(readSite(rel), signature);
+    assert.ok(body.includes("reversePartnerEarning("));
+    assert.ok(!body.includes("db.transaction("), "adapter must not hold outer locks");
   }
+  const shared = functionBody(readSite("src/lib/services/partner-payables.ts"), "export async function reversePartnerEarning(");
+  assert.ok(shared.indexOf("lockPartnerMoney(") < shared.indexOf('.for("update")'));
+  assert.match(shared, /eq\(t\.earning\.status, "pending"\)/);
+  assert.ok(shared.includes('sourceId, earning.id'));
+  assert.ok(shared.includes('adjustmentMembership(kind, null)'));
+  assert.ok(shared.includes('totalKurus: integerTotal(held.heldNet)'));
+  assert.ok(readSite("src/lib/services/money-partner-lock.ts").includes("lock_timeout"));
+});
+
+test("handoff recovery gates the exact reversed-row delete without nesting public money transactions", () => {
+  const source = readSite("src/lib/services/revoke-after-painter.ts");
+  const reversal = source.indexOf("await reverseEarning(orderId)");
+  const transaction = source.indexOf("await db.transaction", reversal);
+  const gate = source.indexOf("await lockPartnerMoney", transaction);
+  const deletion = source.indexOf("await tx.delete(manufacturerEarnings)", gate);
+  assert.ok(reversal >= 0 && transaction > reversal && gate > transaction && deletion > gate);
+  const body = source.slice(transaction, source.indexOf("\n      });", transaction));
+  assert.ok(!body.includes("reverseEarning(") && !body.includes("accrueEarning("));
+  assert.ok(body.includes("eq(manufacturerEarnings.id, reversed.id)"));
+  assert.ok(body.includes("eq(manufacturerEarnings.manufacturerId, reversed.manufacturerId)"));
+  assert.ok(body.includes('eq(manufacturerEarnings.status, "reversed")'));
 });
 
 test("pin ISIRIR: düzeltmeden ÖNCEKİ geri alma gövdeleri testi DÜŞÜRÜR", () => {
@@ -965,14 +983,14 @@ test("pin ISIRIR: düzeltmeden ÖNCEKİ geri alma gövdeleri testi DÜŞÜRÜR",
   assert.deepEqual(reversalDefects(duzeltilmis, "painterEarnings"), []);
 });
 
-test("damga, satırın HÂLÂ partisiz olduğunu yeniden ileri sürer", () => {
+test("both claim adapters delegate; shared stamp retains the open-source predicate", () => {
   for (const { rel, signature } of BATCHING_FUNCTIONS) {
-    assert.deepEqual(
-      stampDefects(functionBody(readSite(rel), signature)),
-      [],
-      `${rel}: ${signature}...)`
-    );
+    assert.ok(functionBody(readSite(rel), signature).includes("createPartnerPayout("));
   }
+  const shared = functionBody(readSite("src/lib/services/partner-payables.ts"), "export async function createPartnerPayout(");
+  assert.deepEqual(stampDefects(shared), []);
+  assert.ok(shared.indexOf("lockPartnerMoney(") < shared.indexOf("lockPayableOrders("));
+  assert.ok(shared.includes("verifyClaimedPayableMembers("));
 });
 
 test("pin ISIRIR: yüklemsiz damga testi DÜŞÜRÜR", () => {
@@ -1400,12 +1418,12 @@ test("boyacı reddi üreticinin baskı hakedişine DOKUNMAZ", () => {
   );
 });
 
-test("ekran toplamları SQL'den gelir, listelenen sayfadan değil", () => {
+test("screen totals use the full shared payable reader, never a truncated display list", () => {
   for (const rel of SCREEN_TOTAL_SITES) {
     const text = readSite(rel);
     assert.ok(
-      text.includes("filter (where"),
-      `${rel}: toplamlar SQL toplaması olmalı`
+      text.includes("readPartnerPayables(") && text.includes(".claimableNet"),
+      `${rel}: payable totals must delegate to the shared reader`
     );
     // Eski hata: toplam, 200 satırlık listeden reduce ile çıkarılıyordu; 200.
     // satırdan eskide kalan iade hakedişi ne toplama ne uyarıya giriyordu.
@@ -1414,6 +1432,39 @@ test("ekran toplamları SQL'den gelir, listelenen sayfadan değil", () => {
       `${rel}: toplamı satır listesinden hesaplıyor — listelenmeyen kayıt toplamdan düşer`
     );
   }
+});
+
+test("shared payable read has no page limit and owns group assessment", () => {
+  const source = readSite("src/lib/services/partner-payables.ts");
+  const body = functionBody(source, "export async function loadPartnerPayables(");
+  assert.ok(!body.includes(".limit("));
+  assert.ok(body.includes("groupPartnerPayables("));
+  assert.ok(body.includes("REFUNDED_PAYMENT_STATUS"));
+  assert.ok(body.includes("heldMembers"));
+});
+
+test("source groups cannot offset unrelated work; zero net stays claimable", () => {
+  const original: PayableSource = { sourceKind: "manufacturer_earning", id: "source", orderId: "order", netKurus: 6000, status: "pending", payoutId: null, eligible: true };
+  const offset: PayableMember = { sourceKind: "adjustment", id: "offset", orderId: "order", netKurus: -6000, status: "pending", payoutId: null, offsetSourceKind: "manufacturer_earning", sourceId: "source" };
+  const unrelated: PayableSource = { ...original, id: "other", netKurus: 2000 };
+  assert.deepEqual(groupPartnerPayables([original, unrelated], [offset]).groups.map(g => g.netKurus), [0, 2000]);
+  const reduced = groupPartnerPayables([{ ...original, netKurus: 3000 }, unrelated], [offset]);
+  assert.deepEqual(reduced.groups.map(g => g.sourceId), ["other"]);
+  assert.equal(reduced.blockedGroups[0].reason, "offset_exceeds_source");
+  assert.equal(groupPartnerPayables([], [offset]).blockedGroups[0].reason, "missing");
+  assert.equal(groupPartnerPayables([{ ...original, eligible: false }], [offset]).blockedGroups[0].reason, "source_ineligible");
+  assert.equal(groupPartnerPayables([original], [{ ...offset, orderId: "foreign-order" }]).blockedGroups[0].reason, "invalid_group");
+  // IDs alone are insufficient: a credit with the same UUID is another source.
+  const credit: PayableSource = { ...original, sourceKind: "adjustment" };
+  assert.equal(groupPartnerPayables([credit], [offset]).groups[0].netKurus, 6000);
+  assert.equal(groupPartnerPayables([credit], [offset]).blockedGroups[0].reason, "missing");
+});
+
+test("mixed stamps compare identities and individual amounts, not only the sum", () => {
+  const expected = [{ sourceKind: "manufacturer_earning", id: "x", netKurus: 6000 }, { sourceKind: "adjustment", id: "x", netKurus: -2000 }];
+  verifyClaimedPayableMembers(expected, expected);
+  assert.throws(() => verifyClaimedPayableMembers(expected, expected.map((m,i) => ({ ...m, netKurus: m.netKurus + (i ? -1 : 1) }))), PayoutClaimRaceError);
+  assert.throws(() => verifyClaimedPayableMembers(expected, [expected[0], expected[0]]), PayoutClaimRaceError);
 });
 
 /**

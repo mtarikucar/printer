@@ -8,6 +8,7 @@ import {
   orders,
   painterEarnings,
   painterPayouts,
+  partnerAdjustments,
   painters,
   payouts,
 } from "@/lib/db/schema";
@@ -16,12 +17,16 @@ import {
   SHIP_REVERT_EARNING_REVERSED_MARKERS,
   deriveOrderMoneyBreakdown,
   type EarningMoneySnapshot,
+  type AdjustmentMoneySnapshot,
   type MoneyReversalRecord,
   type MoneySiblingSnapshot,
   type OrderMoneyBreakdown,
   type OrderMoneySnapshot,
 } from "@/lib/config/order-money";
 import { loadCostLineBases } from "@/lib/services/product-cost-lines";
+import { loadPartnerPayables } from "@/lib/services/partner-payables";
+
+type MoneyReadTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Para dökümü yükleyicisi. Siparişin saklanan hâlini (order + order_items +
@@ -98,7 +103,15 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
   // dönüşür; bulunamayan sipariş gibi davranmak ekran için doğru olan.
   if (!UUID_RE.test(orderId)) return null;
 
-  const order = await db.query.orders.findFirst({
+  // Earnings, adjustment history and eligibility must describe one DB snapshot.
+  // A failed financial read propagates to the page's existing unknown-money state.
+  return db.transaction(tx => loadOrderMoneySnapshotTx(tx, orderId), {
+    isolationLevel: "repeatable read", accessMode: "read only",
+  });
+}
+
+async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promise<OrderMoneySnapshot | null> {
+  const order = await tx.query.orders.findFirst({
     where: eq(orders.id, orderId),
     columns: {
       id: true,
@@ -139,7 +152,7 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
   // refund partnerleri siparişten koparır, ama hakedişin KİME yazıldığı
   // hakediş satırının kendisindedir.
   const [items, siblings, mfrRows, painterRows] = await Promise.all([
-    db
+    tx
       .select({
         title: orderItems.productTitleSnapshot,
         quantity: orderItems.quantity,
@@ -159,7 +172,7 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
     // indirimi alt siparişlere orantılı dağıtıldı (order-draft allocate), yani
     // her alt siparişin tahsilatı kendi satırında yazılı — burada paylaştırılmaz.
     order.parentReference
-      ? db
+      ? tx
           .select({
             id: orders.id,
             orderNumber: orders.orderNumber,
@@ -173,7 +186,7 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
           .where(and(eq(orders.parentReference, order.parentReference), ne(orders.id, order.id)))
           .orderBy(asc(orders.orderNumber))
       : Promise.resolve([] as MoneySiblingSnapshot[]),
-    db
+    tx
       .select({
         partnerId: manufacturerEarnings.manufacturerId,
         partnerName: manufacturers.companyName,
@@ -186,13 +199,15 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
         payoutStatus: payouts.status,
         payoutReference: payouts.reference,
         payoutPaidAt: payouts.paidAt,
+        payoutSettlementKind: payouts.settlementKind,
+        payoutVoidedAt: payouts.voidedAt,
       })
       .from(manufacturerEarnings)
       .leftJoin(manufacturers, eq(manufacturers.id, manufacturerEarnings.manufacturerId))
       .leftJoin(payouts, eq(payouts.id, manufacturerEarnings.payoutId))
       .where(eq(manufacturerEarnings.orderId, order.id))
       .limit(1),
-    db
+    tx
       .select({
         partnerId: painterEarnings.painterId,
         partnerName: painters.companyName,
@@ -205,6 +220,8 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
         payoutStatus: painterPayouts.status,
         payoutReference: painterPayouts.reference,
         payoutPaidAt: painterPayouts.paidAt,
+        payoutSettlementKind: painterPayouts.settlementKind,
+        payoutVoidedAt: painterPayouts.voidedAt,
       })
       .from(painterEarnings)
       .leftJoin(painters, eq(painters.id, painterEarnings.painterId))
@@ -229,6 +246,8 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
                 status: r.payoutStatus ?? "pending",
                 reference: r.payoutReference ?? null,
                 paidAt: iso(r.payoutPaidAt),
+                settlementKind: r.payoutSettlementKind ?? "transfer",
+                voidedAt: iso(r.payoutVoidedAt),
               }
             : null,
         }
@@ -310,12 +329,71 @@ export async function loadOrderMoneySnapshot(orderId: string): Promise<OrderMone
     cartDraftAmountKurus: isCart ? order.draft?.amountKurus ?? null : null,
     manufacturerEarning: toEarning(mfrRows[0]),
     painterEarning: toEarning(painterRows[0]),
+    adjustments: await loadOrderAdjustments(tx, order.id),
   };
 }
 
-/**
- * Sözleşme C2: bir siparişin salt okunur para dökümü. Sipariş yoksa null.
- */
+/** Financial reads deliberately have no catch-to-empty fallback. */
+async function loadOrderAdjustments(tx: MoneyReadTx, orderId: string): Promise<AdjustmentMoneySnapshot[]> {
+  const rows = await tx.select({
+    adjustment: partnerAdjustments,
+    manufacturerName: manufacturers.companyName,
+    painterName: painters.companyName,
+  }).from(partnerAdjustments)
+    .leftJoin(manufacturers, eq(manufacturers.id, partnerAdjustments.manufacturerId))
+    .leftJoin(painters, eq(painters.id, partnerAdjustments.painterId))
+    .where(eq(partnerAdjustments.orderId, orderId))
+    .orderBy(asc(partnerAdjustments.createdAt), asc(partnerAdjustments.id));
+  const owners = new Map<string, { kind: "manufacturer" | "painter"; id: string }>();
+  for (const { adjustment: a } of rows) {
+    const kind = a.manufacturerId !== null ? "manufacturer" : "painter";
+    const id = a.manufacturerId ?? a.painterId!;
+    owners.set(`${kind}:${id}`, { kind, id });
+  }
+  const active = new Set<string>();
+  const blocked = new Map<string, string>();
+  const settlements = new Map<string, "transfer" | "netting">();
+  for (const { kind, id } of owners.values()) {
+    const view = await loadPartnerPayables(tx, kind, id);
+    const scopes = [view];
+    // Ask the shared reader for each relevant held scope as well as open groups.
+    // All calls share the transaction snapshot; no local offset eligibility rule.
+    const heldIds = new Set(rows.filter(({ adjustment: a }) => a.status === "pending"
+      && (kind === "manufacturer" ? a.manufacturerId === id : a.painterId === id))
+      .map(({ adjustment: a }) => a.manufacturerPayoutId ?? a.painterPayoutId)
+      .filter((payoutId): payoutId is string => payoutId !== null));
+    for (const batch of view.payouts) {
+      settlements.set(`${kind}:${batch.id}`, batch.settlementKind);
+      if (batch.status === "pending" && batch.voidedAt === null && heldIds.has(batch.id)) {
+        scopes.push(await loadPartnerPayables(tx, kind, id, { payoutId: batch.id }));
+      }
+    }
+    for (const scope of scopes) {
+      for (const group of scope.groups) {
+        for (const member of group.members) if (member.sourceKind === "adjustment") active.add(member.id);
+      }
+      for (const group of scope.blockedGroups) {
+        for (const member of group.members) if (member.sourceKind === "adjustment") blocked.set(member.id, group.reason);
+      }
+    }
+  }
+  return rows.map(({ adjustment: a, manufacturerName, painterName }) => {
+    const partnerKind = a.manufacturerId !== null ? "manufacturer" : "painter";
+    const payoutId = a.manufacturerPayoutId ?? a.painterPayoutId;
+    return {
+      id: a.id, partnerKind, partnerId: a.manufacturerId ?? a.painterId!,
+      partnerName: partnerKind === "manufacturer" ? manufacturerName : painterName,
+      kind: a.kind, netKurus: a.netKurus, status: a.status,
+      activePending: a.status === "pending" && active.has(a.id),
+      blockedReason: active.has(a.id) ? null : blocked.get(a.id) ?? null,
+      sourceKind: a.sourceKind, sourceId: a.sourceId, reason: a.reason,
+      createdAt: a.createdAt.toISOString(), settledAt: iso(a.settledAt), voidedAt: iso(a.voidedAt),
+      payoutId, settlementKind: payoutId ? settlements.get(`${partnerKind}:${payoutId}`) ?? null : null,
+    };
+  });
+}
+
+/** Sözleşme C2: salt okunur döküm. Sipariş yoksa null; para okunamazsa hata. */
 export async function buildOrderMoneyBreakdown(orderId: string): Promise<OrderMoneyBreakdown | null> {
   const snapshot = await loadOrderMoneySnapshot(orderId);
   return snapshot ? deriveOrderMoneyBreakdown(snapshot) : null;

@@ -1,3 +1,4 @@
+import { assessAdjustmentGroup, type AdjustmentSourceKind } from "@/lib/config/partner-adjustments";
 /**
  * ÖDEME PARTİSİ KURMANIN TEK ALGORİTMASI — "bir hakediş, tam olarak bir parti".
  *
@@ -76,6 +77,19 @@ export class PayoutClaimRaceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PayoutClaimRaceError";
+  }
+}
+
+/** Mixed earning/adjustment claims compare namespaced identities and EACH amount. */
+export function verifyClaimedPayableMembers(
+  expected: readonly { sourceKind: string; id: string; netKurus: number }[],
+  actual: readonly { sourceKind: string; id: string; netKurus: number }[],
+): void {
+  const keyed = (rows: typeof expected) => new Map(rows.map(row => [`${row.sourceKind}:${row.id}`, row.netKurus]));
+  const wanted = keyed(expected), found = keyed(actual);
+  if (wanted.size !== expected.length || found.size !== actual.length || wanted.size !== found.size
+    || [...wanted].some(([key, net]) => found.get(key) !== net)) {
+    throw new PayoutClaimRaceError("Payable membership or amount changed while claiming");
   }
 }
 
@@ -172,4 +186,66 @@ export function payoutHoldsWhatItClaims(args: {
   heldCount: number;
 }): boolean {
   return args.statedKurus === args.heldKurus && args.statedCount === args.heldCount;
+}
+
+export interface PayableMember {
+  sourceKind: AdjustmentSourceKind;
+  id: string;
+  orderId: string;
+  netKurus: number;
+  status: string;
+  payoutId: string | null;
+  sourceId?: string | null;
+  offsetSourceKind?: AdjustmentSourceKind | null;
+}
+
+export interface PayableGroup {
+  key: string;
+  sourceKind: AdjustmentSourceKind;
+  sourceId: string;
+  orderId: string;
+  members: PayableMember[];
+  netKurus: number;
+}
+
+export interface BlockedPayableGroup extends Omit<PayableGroup, "netKurus"> {
+  netKurus: number | null;
+  reason: "batched" | "settled" | "reversed" | "missing" | "source_ineligible" | "offset_exceeds_source" | "invalid_group";
+}
+
+export interface PayableSource extends PayableMember { eligible: boolean }
+
+export function groupPartnerPayables(sources: PayableSource[], offsets: PayableMember[], payoutId?: string) {
+  const groups: PayableGroup[] = [], blockedGroups: BlockedPayableGroup[] = [];
+  const sourceMap = new Map(sources.map(s => [`${s.sourceKind}:${s.id}`, s]));
+  const offsetMap = new Map<string, PayableMember[]>();
+  for (const offset of offsets) {
+    const key = `${offset.offsetSourceKind}:${offset.sourceId}`;
+    offsetMap.set(key, [...(offsetMap.get(key) ?? []), offset]);
+  }
+  for (const key of new Set([...sourceMap.keys(), ...offsetMap.keys()])) {
+    const source = sourceMap.get(key), debits = offsetMap.get(key) ?? [];
+    const members = [...(source ? [source] : []), ...debits];
+    const inScope = payoutId
+      ? members.some(m => m.payoutId === payoutId)
+      : members.some(m => m.status === "pending" && m.payoutId === null);
+    if (!inScope) continue;
+    const sourceKind = source?.sourceKind ?? debits[0].offsetSourceKind!;
+    const sourceId = source?.id ?? debits[0].sourceId!;
+    const base = { key, sourceKind, sourceId, orderId: source?.orderId ?? debits[0].orderId, members };
+    const state = !source ? "missing"
+      : source.status === "paid" || source.status === "settled" ? "settled"
+      : source.status !== "pending" ? "reversed"
+      : source.payoutId !== (payoutId ?? null) ? "batched" : "open";
+    const invalid = !!source && debits.some(d => d.orderId !== source.orderId || d.status !== "pending"
+      || d.payoutId !== (payoutId ?? null) || d.netKurus >= 0);
+    if (invalid) { blockedGroups.push({ ...base, netKurus: null, reason: "invalid_group" }); continue; }
+    const assessment = assessAdjustmentGroup({
+      sourceState: state, sourceEligible: source?.eligible ?? false,
+      sourceNetKurus: source?.netKurus ?? 0, offsetNetKurus: debits.map(d => d.netKurus),
+    });
+    if (assessment.eligible) groups.push({ ...base, netKurus: assessment.netKurus });
+    else blockedGroups.push({ ...base, netKurus: assessment.netKurus, reason: assessment.reason });
+  }
+  return { groups, blockedGroups };
 }

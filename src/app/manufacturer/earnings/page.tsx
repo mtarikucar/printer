@@ -1,5 +1,8 @@
 export const dynamic = "force-dynamic";
 
+import { readPartnerPayables } from "@/lib/services/partner-payables";
+import { PartnerAdjustmentHistory } from "@/components/partner-adjustment-history";
+
 import { redirect } from "next/navigation";
 import { eq, desc, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -12,7 +15,6 @@ import type { Locale } from "@/lib/i18n/types";
 import { PayoutRequestButton } from "@/components/manufacturer/payout-request-button";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import {
-  claimableEarningWhere,
   refundedOpenEarningWhere,
   refundedInPayoutEarningWhere,
 } from "@/lib/services/earning-claimable";
@@ -56,30 +58,14 @@ export default async function ManufacturerEarningsPage() {
   const locale = (await getLocale()) as Locale;
   const d = getDictionary(locale);
 
-  // TOPLAMLAR SQL'DE, LİSTEDEN DEĞİL.
-  //
-  // Hem "ödeme bekleyen" hem iade uyarısı, aşağıdaki 200 satırlık listeden
-  // hesaplanıyordu: 200 kaydın gerisinde kalan bir iade hakedişi NE toplama NE
-  // uyarıya giriyordu — para da, parayı açıklayan cümle de sessizce
-  // kayboluyordu. Toplamlar artık tüm satırları gören bir toplamadan gelir;
-  // liste yalnızca listedir.
-  //
-  // "Ödeme bekleyen" ayrıca bir ödeme partisine girmiş satırları da dışarıda
-  // bırakır (talep edilen para "hâlâ bekliyor" gibi ikinci kez gösterilmesin).
-  //
-  // ÜSTÜNE: İADE EDİLMİŞ SİPARİŞİN HAKEDİŞİ DE DIŞARIDA. İade siparişi
-  // partnerden koparır ama koparma (temizlik) kuralı gereği hakediş satırına
-  // DOKUNMAZ; satır `pending` kaldığı için bu ekran onu sıradan, ödenmeyi
-  // bekleyen para gibi listeliyordu. Kural ARTIK ORTAK (earning-claimable.ts):
-  // bu ekranın ödenebilir dediği küme ile "Ödeme talep et" düğmesinin
-  // partilediği küme aynı ifadeden gelir. Eskiden ayrıydılar.
-  const [[totals], earnings, payoutRows] = await Promise.all([
+  // Hak ediş + düzeltme bakiyesi partilemenin ortak okuyucusundan gelir.
+  // Aşağıdaki SQL yalnız iade edilmiş eski hak edişleri ayrıca açıklar;
+  // 200 satırlık gösterim listesi hiçbir toplamın kaynağı değildir.
+  const [[totals], earnings, payoutRows, moneySummary] = await Promise.all([
     db
       .select({
-        owed: sql<number>`coalesce(sum(${manufacturerEarnings.netKurus}) filter (where ${claimableEarningWhere(manufacturerEarnings)}), 0)::int`,
         refundedOpen: sql<number>`coalesce(sum(${manufacturerEarnings.netKurus}) filter (where ${refundedOpenEarningWhere(manufacturerEarnings)}), 0)::int`,
         refundedInPayout: sql<number>`coalesce(sum(${manufacturerEarnings.netKurus}) filter (where ${refundedInPayoutEarningWhere(manufacturerEarnings)}), 0)::int`,
-        paid: sql<number>`coalesce(sum(${manufacturerEarnings.netKurus}) filter (where ${manufacturerEarnings.status} = 'paid'), 0)::int`,
       })
       .from(manufacturerEarnings)
       .leftJoin(orders, eq(orders.id, manufacturerEarnings.orderId))
@@ -91,7 +77,7 @@ export default async function ManufacturerEarningsPage() {
       orderBy: [desc(manufacturerEarnings.createdAt)],
       limit: EARNING_LIST_LIMIT,
     }),
-    // YALNIZ GÖSTERİM: bu tablo yukarıdaki toplamların hiçbirini beslemez, o
+    // YALNIZ GÖSTERİM: bu geçmiş listesi bakiye okuyucusundan ayrı yüklenir, o
     // yüzden arızası sayfayı düşürmez (bkz. displayRead).
     displayRead(
       "ödeme geçmişi",
@@ -101,12 +87,15 @@ export default async function ManufacturerEarningsPage() {
         limit: 50,
       })
     ),
+    displayRead("güncel hak ediş ve düzeltme toplamları", readPartnerPayables("manufacturer", session.manufacturerId)),
   ]);
 
-  const owed = Number(totals?.owed ?? 0);
+  if (!moneySummary) return <div role="alert" className="m-6 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900">Hak ediş ve düzeltme toplamları okunamadı. Tutarlar bilinmediği için ödeme talebi kapalı; kayıtlar silinmedi. Sayfayı yeniden yükleyin.</div>;
+
+  const owed = moneySummary.claimableNet;
   const refundedOpenKurus = Number(totals?.refundedOpen ?? 0);
   const refundedInPayoutKurus = Number(totals?.refundedInPayout ?? 0);
-  const paidTotal = Number(totals?.paid ?? 0);
+  const paidTotal = moneySummary.paidTransferNet;
 
   const refundedOrder = (e: (typeof earnings)[number]) =>
     isRefunded({ paymentStatus: e.order?.paymentStatus ?? null });
@@ -115,6 +104,11 @@ export default async function ManufacturerEarningsPage() {
     pending: d["manufacturer.earnings.status.pending"],
     paid: d["manufacturer.earnings.status.paid"],
     reversed: d["manufacturer.earnings.status.reversed"],
+  };
+  const earningLabel = (e: { status: string; payoutId: string | null }) => {
+    const batch = moneySummary.payouts.find(p => p.id === e.payoutId);
+    if (batch?.settlementKind === "netting" && !batch.voidedAt) return batch.status === "paid" ? "Mahsupla kapandı" : "Mahsup bekliyor";
+    return statusLabel[e.status] ?? e.status;
   };
   const statusColor: Record<string, string> = {
     pending: "bg-amber-100 text-amber-700",
@@ -139,8 +133,7 @@ export default async function ManufacturerEarningsPage() {
           {/* Neyin dışarıda kaldığı rakamın yanında yazar: tutar düşük
               göründüğünde üretici sebebini burada görür. */}
           <p className="mt-1 text-xs text-amber-800/80">
-            Tahakkuk etmiş, henüz bir ödemeye girmemiş (iade edilen siparişler
-            hariç)
+            Hak ediş ve düzeltmelerin birlikte ödenebilir net tutarı
           </p>
         </div>
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
@@ -152,6 +145,8 @@ export default async function ManufacturerEarningsPage() {
           </p>
         </div>
       </div>
+
+      <PartnerAdjustmentHistory summary={moneySummary} />
 
       {/* Türkçe sabit metin: bu uyarı i18n sözlüğünde karşılığı olmayan yeni bir
           cümle ve panel dili yalnız Türkçe. */}
@@ -189,7 +184,7 @@ export default async function ManufacturerEarningsPage() {
       )}
 
       <div className="mb-8">
-        <PayoutRequestButton owedKurus={owed} />
+        <PayoutRequestButton owedKurus={owed} hasClaimable={moneySummary.claimableCount > 0} />
       </div>
 
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -235,7 +230,7 @@ export default async function ManufacturerEarningsPage() {
                   <td className="py-2.5 px-4 text-right font-semibold text-gray-900">{formatCurrency(e.netKurus, locale)}</td>
                   <td className="py-2.5 px-4 text-right">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[e.status]}`}>
-                      {statusLabel[e.status]}
+                      {earningLabel(e)}
                     </span>
                   </td>
                 </tr>
@@ -262,7 +257,7 @@ export default async function ManufacturerEarningsPage() {
               </p>
               <p className="mt-1 text-amber-900/80">
                 Bu bölüm BOŞ DEĞİL, BİLİNMİYOR: hiçbir ödeme kaydı silinmedi.
-                Yukarıdaki tutarlar bu tablodan hesaplanmaz; onlar doğrudur.
+                Yukarıdaki tutarlar ayrı bir tutarlı bakiye okumasından gelir.
                 Birkaç dakika sonra sayfayı yenileyin, sorun sürerse yöneticiye
                 bildirin.
               </p>
@@ -272,12 +267,13 @@ export default async function ManufacturerEarningsPage() {
               {payoutRows.map((p) => (
                 <div key={p.id} className="flex items-center justify-between px-4 py-3 text-sm">
                   <span className="text-gray-700">
-                    {formatDate(p.createdAt.toISOString(), locale)} · {p.earningCount} sipariş
+                    {formatDate(p.createdAt.toISOString(), locale)} · {p.earningCount} hak ediş · {p.adjustmentCount} düzeltme
+                    {p.voidReason && <span className="mt-1 block text-xs">İptal: {p.voidReason}. Eski parti tutarı ödenecek bakiye değildir.</span>}
                   </span>
                   <span className="flex items-center gap-3">
                     <span className="font-semibold text-gray-900">{formatCurrency(p.totalKurus, locale)}</span>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.status === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                      {p.status === "paid" ? statusLabel.paid : statusLabel.pending}
+                      {p.voidedAt ? "İptal edildi" : p.settlementKind === "netting" ? (p.status === "paid" ? "Mahsup edildi" : "Mahsup bekliyor") : p.status === "paid" ? statusLabel.paid : statusLabel.pending}
                     </span>
                   </span>
                 </div>

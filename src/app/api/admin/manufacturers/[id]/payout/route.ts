@@ -44,18 +44,27 @@ export async function POST(
       return NextResponse.json({ error: "Ödenecek bekleyen hak ediş yok." }, { status: 400 });
     }
 
+    let warning: string | undefined;
     await notifyManufacturer({
       manufacturerId: id,
       type: "system_announcement",
-      subject: "Ödeme talebiniz oluşturuldu",
-      body: `${fmtTRY(result.totalKurus)} tutarında ödeme talebiniz oluşturuldu (${result.count} sipariş). Ödeme banka transferiyle yapıldığında ayrıca bilgilendirileceksiniz.`,
-    }).catch((e) => console.error("notifyManufacturer (payout create) failed", e));
+      subject: result.settlementKind === "netting" ? "Mahsup talebi oluşturuldu" : "Ödeme talebiniz oluşturuldu",
+      body: result.settlementKind === "netting"
+        ? "Bağlı hak ediş ve indirimleriniz için sıfır net mahsup talebi oluşturuldu. Yönetici onayı bekleniyor; banka transferi yapılmayacak."
+        : `${fmtTRY(result.totalKurus)} tutarında ödeme partisi oluşturuldu (${result.count} hak ediş, ${result.adjustmentCount} düzeltme). Banka transferi yapıldığında ayrıca bilgilendirileceksiniz.`,
+    }).catch((e) => {
+      console.error("payout creation notification failed", e);
+      warning = "Parti oluşturuldu ancak partner bildirimi gönderilemedi. Yeni parti oluşturmadan mevcut kaydı kontrol edin.";
+    });
 
     return NextResponse.json({
       success: true,
       payoutId: result.payoutId,
       totalKurus: result.totalKurus,
       count: result.count,
+      adjustmentCount: result.adjustmentCount,
+      settlementKind: result.settlementKind,
+      ...(warning ? { warning } : {}),
     });
   } catch (e) {
     return handleRouteFailure(e, "POST /api/admin/manufacturers/[id]/payout", ADMIN_ACTION_FAILED_ERROR);

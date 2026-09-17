@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDate } from "@/lib/i18n/format";
@@ -36,6 +36,8 @@ export interface EarningLine {
  * ödenmeyecek para. İkisi ayrı taşınır çünkü tek toplamda birleştirmek, ekranın
  * partnere "ödenmez" dediği tutarı admin'e "ödenecek" diye göstermekti.
  */
+export interface AdjustmentLine { id: string; orderId: string; netKurus: number; kind: string; reason: string; status: string }
+
 export interface OwedPartner {
   partnerId: string;
   name: string;
@@ -46,9 +48,21 @@ export interface OwedPartner {
   bank: BankInfo;
   earnings: EarningLine[];
   refundedEarnings: EarningLine[];
+  adjustments: AdjustmentLine[];
+  blockedRecords: Array<{ orderId: string; reason: string }>;
 }
 
 export interface PayoutRow {
+  adjustmentCount: number;
+  adjustments: AdjustmentLine[];
+  settlementKind: "transfer" | "netting";
+  expectedFingerprint: string | null;
+  heldNet: number;
+  heldEarningCount: number;
+  heldAdjustmentCount: number;
+  blockedReason: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
   id: string;
   partnerId: string;
   name: string;
@@ -170,6 +184,11 @@ function BankBlock({ bank, reviewHref }: { bank: BankInfo; reviewHref: string })
   );
 }
 
+function AdjustmentDetails({ rows }: { rows: AdjustmentLine[] }) {
+  if (!rows.length) return null;
+  return <details className="mt-2 text-xs text-gray-600"><summary className="cursor-pointer text-blue-700">Düzeltmeleri göster ({rows.length})</summary><ul className="mt-2 space-y-2">{rows.map(r => <li key={r.id} className="rounded-md bg-gray-50 p-2"><div className="flex justify-between gap-2"><Link href={`/admin/orders/${r.orderId}`} className="underline">{r.kind === "reprint" ? "Yeniden üretim" : r.kind === "unpaid_offset" ? "Kesinti" : "Ek hak ediş"}</Link><strong>{fmt(r.netKurus)}</strong></div><p>{r.reason}</p></li>)}</ul></details>;
+}
+
 function EarningsDetails({ earnings, label }: { earnings: EarningLine[]; label: string }) {
   if (earnings.length === 0) return null;
   return (
@@ -262,13 +281,17 @@ export function PayoutsClient({
   const router = useRouter();
   const [tab, setTab] = useState<PartnerKind>(initialTab);
   const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
+  const voidAttempt = useRef<{ intent: string; key: string } | null>(null);
   const d = data[tab];
   const cfg = PARTNER[tab];
-  const pendingPayouts = d.payouts.filter((p) => p.status !== "paid");
-  const paidPayouts = d.payouts.filter((p) => p.status === "paid");
+  const pendingPayouts = d.payouts.filter((p) => p.status === "pending" && !p.voidedAt);
+  const paidPayouts = d.payouts.filter((p) => p.status === "paid" && !p.voidedAt);
   const waitingCount = (k: PartnerKind) =>
-    data[k].owed.length + data[k].payouts.filter((p) => p.status !== "paid").length;
+    data[k].owed.length + data[k].payouts.filter((p) => p.status === "pending" && !p.voidedAt).length;
+
+  const voidedPayouts = d.payouts.filter(p => !!p.voidedAt);
 
   const switchTab = (next: PartnerKind) => {
     setTab(next);
@@ -290,7 +313,7 @@ export function PayoutsClient({
 
   // Adım 1 — para GÖNDERMEZ; bekleyen hakedişleri tek bir bekleyen ödemede toplar.
   const createPayout = async (o: OwedPartner) => {
-    const warn = bankWarnings(o.bank).map((w) => `- ${w.text}`);
+    const warn = o.owedKurus > 0 ? bankWarnings(o.bank).map((w) => `- ${w.text}`) : [];
     // Onay kutusunda yazan rakam ile oluşan parti artık aynı; aradaki farkın
     // nereye gittiği de burada yazar, sessizce düşmez.
     if (o.refundedCount > 0) {
@@ -299,10 +322,11 @@ export function PayoutsClient({
       );
     }
     const msg =
-      `${o.name} için ${fmt(o.owedKurus)} tutarında ödeme (${o.count} sipariş) oluşturulsun mu?` +
+      `${o.name} için güncel kayıtlardan ${fmt(o.owedKurus)} tutarında ödeme oluşturulsun mu?` +
       (warn.length ? `\n\nDikkat:\n${warn.join("\n")}` : "") +
-      `\n\nBu adım parayı göndermez. Transferi yaptıktan sonra "Ödendi işaretle"ye basın.`;
+      (o.owedKurus === 0 ? `\n\nBu kayıtlar sıfır net tutarla mahsup kuyruğuna alınır; banka transferi yapılmaz.` : `\n\nBu adım parayı göndermez. Sıfır net gruplar ayrı mahsup talebine bırakılır. Güncel kayıtlar partilenir; tutarı kontrol edip transferi yaptıktan sonra "Ödendi işaretle"ye basın.`);
     if (!confirm(msg)) return;
+    setNotice(null);
     setBusy(`create-${o.partnerId}`);
     try {
       const res = await fetch(cfg.createUrl(o.partnerId), { method: "POST" });
@@ -311,7 +335,11 @@ export function PayoutsClient({
         alert(j.error || "Ödeme oluşturulamadı");
         return;
       }
+      const result = await res.json().catch(() => null);
+      setNotice(result?.warning || (result ? `${result.settlementKind === "netting" ? "Mahsup" : "Ödeme"} partisi oluşturuldu: ${fmt(result.totalKurus)} · ${result.count} hak ediş, ${result.adjustmentCount} düzeltme.` : "Parti oluşturuldu; güncel listeyi kontrol edin."));
       router.refresh();
+    } catch {
+      setNotice("İşlemin sonucu alınamadı. Yeniden denemeden önce sayfayı yenileyip oluşan partiyi kontrol edin.");
     } finally {
       setBusy(null);
     }
@@ -319,41 +347,29 @@ export function PayoutsClient({
 
   // Adım 2 — banka transferi yapıldıktan sonra.
   const markPaid = async (p: PayoutRow) => {
-    // Eski kurala göre kurulmuş partilerde iade edilmiş hakediş bulunabilir;
-    // "Ödendi" onu `paid` yapar ve para gerçekten ödenmiş sayılır.
-    const refunded = refundedInPayout(p);
-    if (
-      refunded &&
-      !confirm(
-        `${p.name} — bu ödemedeki ${refunded.count} siparişin parası müşteriye iade edilmiş (${fmt(refunded.kurus)}). Bu tutar ödenmemeli. Yine de ödendi işaretlensin mi?`
-      )
-    ) {
-      return;
-    }
-    if (
-      p.bank.ibanReviewPending &&
-      !confirm(
-        `${p.name} için IBAN değişikliği onay bekliyor. Transferi kayıtlı (onaylı) IBAN'a yaptığınızdan emin misiniz?`
-      )
-    ) {
-      return;
-    }
-    const reference = prompt(`${p.name} — ${fmt(p.totalKurus)}\nBanka referansı (opsiyonel):`);
-    // İptal = işaretleme yok (eskiden iptal de "ödendi" yazıyordu).
+    if (!p.expectedFingerprint || p.blockedReason) return;
+    const netting = p.settlementKind === "netting";
+    if (netting && !confirm(`${p.name}: hak ediş ve düzeltmeler birbirini karşılıyor. Banka transferi yapmadan mahsup olarak kapatılsın mı?`)) return;
+    if (!netting && p.bank.ibanReviewPending && !confirm(`${p.name} için IBAN değişikliği onay bekliyor. Transferi onaylı IBAN'a yaptığınızı doğrulayın.`)) return;
+    const reference = netting ? "" : prompt(`${p.name} — ${fmt(p.totalKurus)} transferini yaptıysanız banka referansını yazın (opsiyonel):`);
     if (reference === null) return;
+    setNotice(null);
     setBusy(`paid-${p.id}`);
     try {
       const res = await fetch(`/api/admin/payouts/${p.id}/mark-paid`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reference, kind: tab }),
+        body: JSON.stringify({ reference, kind: tab, expectedFingerprint: p.expectedFingerprint, settlementKind: p.settlementKind }),
       });
+      const result = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        alert(j.error || "İşaretlenemedi");
+        alert(result.error || "İşaretlenemedi");
         return;
       }
+      setNotice(result.warning || result.message || "İşlem kaydedildi.");
       router.refresh();
+    } catch {
+      setNotice("İşlemin sonucu alınamadı. Tekrar banka transferi yapmayın; sayfayı yenileyip partinin durumunu kontrol edin.");
     } finally {
       setBusy(null);
     }
@@ -365,10 +381,7 @@ export function PayoutsClient({
    * çünkü onlar `paid` olmaz — uç de tam bu kümeyi karşılaştırır, böylece
    * ekranın uyardığı hâl ile ucun reddettiği hâl AYNIDIR.
    */
-  const heldBy = (p: PayoutRow) => {
-    const rows = p.earnings.filter((e) => e.status !== "reversed");
-    return { count: rows.length, kurus: rows.reduce((a, e) => a + e.netKurus, 0) };
-  };
+  const heldBy = (p: PayoutRow) => ({ count: p.heldEarningCount + p.heldAdjustmentCount, kurus: p.heldNet });
 
   /**
    * Parti iddia ettiği parayı tutuyor mu?
@@ -381,42 +394,36 @@ export function PayoutsClient({
    * uyuşmazlık kadar açık yazılmalı.
    */
   const payoutMismatch = (p: PayoutRow) => {
+    if (!p.expectedFingerprint) return null;
     const held = heldBy(p);
-    return held.kurus !== p.totalKurus || held.count !== p.earningCount ? held : null;
+    return held.kurus !== p.totalKurus || p.heldEarningCount !== p.earningCount || p.heldAdjustmentCount !== p.adjustmentCount ? held : null;
   };
   /** Parti hiç hak ediş tutmuyor: ödenemez, ama kuyruktan silinebilir. */
-  const holdsNothing = (p: PayoutRow) => heldBy(p).count === 0;
+  const holdsNothing = (p: PayoutRow) => !!p.expectedFingerprint && heldBy(p).count === 0;
 
   const mismatchText = (p: PayoutRow, held: { count: number; kurus: number }) =>
     held.count === 0
-      ? `Bu parti ${p.earningCount} sipariş · ${fmt(p.totalKurus)} diyor ama ARKASINDA TEK BİR HAK EDİŞ YOK. Eşzamanlı bir ödeme oluşturma sırasında satırlar başka bir partiye girmiş olabilir: TRANSFER YAPMAYIN. Ödendi işaretlenemez; partnerin güncel hak edişlerine bakıp boş partiyi silin.`
+      ? `Bu parti ${p.earningCount} sipariş · ${fmt(p.totalKurus)} diyor ama ARKASINDA TEK BİR HAK EDİŞ YOK. Eşzamanlı bir ödeme oluşturma sırasında satırlar başka bir partiye girmiş olabilir: TRANSFER YAPMAYIN. Ödendi işaretlenemez; partnerin güncel hak edişlerine bakıp partiyi gerekçeyle iptal edin.`
       : `Bu parti ${p.earningCount} sipariş · ${fmt(p.totalKurus)} diyor ama arkasında ${held.count} sipariş · ${fmt(held.kurus)} var. Tutarsız parti ödendi işaretlenemez; siparişleri aşağıdan kontrol edin.`;
 
-  // Yalnız BOŞ ve bekleyen partiyi siler; uç de aynı kuralı uygular.
-  const deleteEmptyPayout = async (p: PayoutRow) => {
-    if (
-      !confirm(
-        `${p.name} — bu parti hiçbir hak ediş tutmuyor (üzerinde ${p.earningCount} sipariş · ${fmt(p.totalKurus)} yazıyor). Parti kuyruktan silinsin mi?\n\nHak edişler etkilenmez: ödenmemiş olanlar yeniden partilenebilir. Silinen parti geri alınamaz.`
-      )
-    ) {
-      return;
-    }
-    setBusy(`delete-${p.id}`);
+  const voidPayout = async (p: PayoutRow) => {
+    if (!p.expectedFingerprint) return;
+    const reason = prompt(`${p.name} — ${fmt(p.totalKurus)} tutarlı bekleyen parti iptal edilecek. Banka transferi yaptıysanız iptal etmeyin. Ödenmemiş kayıtlar yeniden seçilebilir olacak; geçmiş korunacak.
+
+En az 10 karakter gerekçe yazın:`);
+    if (reason === null) return;
+    if (reason.trim().length < 10) { alert("Gerekçe en az 10 karakter olmalıdır."); return; }
+    const payload = { kind: tab, reason: reason.trim(), expectedFingerprint: p.expectedFingerprint };
+    const intent = JSON.stringify({ id: p.id, payload });
+    if (voidAttempt.current?.intent !== intent) voidAttempt.current = { intent, key: crypto.randomUUID() };
+    setBusy(`void-${p.id}`);
     try {
-      const res = await fetch(`/api/admin/payouts/${p.id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: tab }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        alert(j.error || "Parti silinemedi");
-        return;
-      }
-      router.refresh();
-    } finally {
-      setBusy(null);
-    }
+      const res = await fetch(`/api/admin/payouts/${p.id}/void`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, idempotencyKey: voidAttempt.current.key }) });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Parti iptal edilemedi."); return; }
+      voidAttempt.current = null; setNotice(data.message || "Parti iptal edildi; geçmişi korundu."); router.refresh();
+    } catch { alert("Sonuç alınamadı. Kayıtları yenileyin; aynı iptali tekrar denerseniz işlem anahtarı korunur."); }
+    finally { setBusy(null); }
   };
 
   return (
@@ -424,7 +431,7 @@ export function PayoutsClient({
       <h1 className="mb-1 text-2xl font-bold text-gray-900">Ödemeler (Payout)</h1>
       <p className="mb-6 text-sm text-gray-500">
         İki adım: önce ödeme oluşturun (bekleyen hak edişler tek ödemede toplanır), banka
-        transferini yaptıktan sonra &quot;Ödendi işaretle&quot;.
+        transferini yaptıktan sonra &quot;Ödendi işaretle&quot;. Sıfır net tutarlı kayıtlar banka transferi olmadan mahsup edilir.
       </p>
 
       <div className="mb-6 flex gap-2 border-b border-gray-200">
@@ -450,6 +457,7 @@ export function PayoutsClient({
         })}
       </div>
 
+      {notice && <p role="status" className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{notice}</p>}
       <SectionTitle>1 · Ödeme bekleyen hak edişler</SectionTitle>
       {d.owed.length === 0 ? (
         <Empty>Bekleyen hak ediş yok.</Empty>
@@ -460,7 +468,7 @@ export function PayoutsClient({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900">{o.name}</p>
-                  <p className="text-xs text-gray-500">{o.count} sipariş</p>
+                  <p className="text-xs text-gray-500">{o.count} kayıt grubu</p>
                   <BankBlock bank={o.bank} reviewHref={cfg.reviewHref} />
                 </div>
                 <div className="flex items-center gap-4">
@@ -472,7 +480,7 @@ export function PayoutsClient({
                       disabled={busy === `create-${o.partnerId}`}
                       className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-gray-400"
                     >
-                      {busy === `create-${o.partnerId}` ? "…" : "Ödeme oluştur"}
+                      {busy === `create-${o.partnerId}` ? "…" : o.owedKurus === 0 ? "Mahsup oluştur" : "Ödeme oluştur"}
                     </button>
                   ) : (
                     // Ödenebilir satır yok (kuyrukta yalnız iade hakedişi var).
@@ -491,6 +499,8 @@ export function PayoutsClient({
                   edilebilir saymıyor.
                 </p>
               )}
+              {o.blockedRecords.map((row, i) => <p key={i} role="alert" className="mt-2 text-xs text-amber-800">{row.reason} <Link href={`/admin/orders/${row.orderId}`} className="underline">Kaynak siparişi aç</Link></p>)}
+              <AdjustmentDetails rows={o.adjustments} />
               <EarningsDetails earnings={o.earnings} label="Siparişleri göster" />
               <EarningsDetails
                 earnings={o.refundedEarnings}
@@ -501,9 +511,9 @@ export function PayoutsClient({
         </div>
       )}
 
-      <SectionTitle>2 · Transfer bekleyen ödemeler</SectionTitle>
+      <SectionTitle>2 · Ödeme veya mahsup bekleyen partiler</SectionTitle>
       {pendingPayouts.length === 0 ? (
-        <Empty>Transfer bekleyen ödeme yok.</Empty>
+        <Empty>Bekleyen ödeme veya mahsup yok.</Empty>
       ) : (
         <div className="mb-8 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
           {pendingPayouts.map((p) => {
@@ -518,9 +528,10 @@ export function PayoutsClient({
                       <RequesterChip p={p} partnerLabel={cfg.request} />
                     </p>
                     <p className="text-xs text-gray-500">
-                      {day(p.createdAt)} · {p.earningCount} sipariş
+                      {day(p.createdAt)} · {p.earningCount} hak ediş · {p.adjustmentCount} düzeltme
                     </p>
-                    <BankBlock bank={p.bank} reviewHref={cfg.reviewHref} />
+                    {p.settlementKind === "transfer" && <BankBlock bank={p.bank} reviewHref={cfg.reviewHref} />}
+                    {p.blockedReason && <p role="alert" className="mt-2 text-xs text-red-700">{p.blockedReason}</p>}
                     {mismatch !== null && (
                       <p
                         role="alert"
@@ -534,7 +545,7 @@ export function PayoutsClient({
                       // (iade). Ödenecek bir şey yok; kuyruğu tıkamasın.
                       <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
                         Bu parti boş: içindeki hak edişlerin tamamı geri alınmış. Ödenecek tutar
-                        yok, partiyi kuyruktan silebilirsiniz.
+                        yok, partiyi gerekçeyle iptal edebilirsiniz.
                       </p>
                     )}
                     {refunded !== null && (
@@ -550,31 +561,11 @@ export function PayoutsClient({
                     {/* Ekran, ucun REDDEDECEĞİ denetimi sunmaz: tuttuğu parayı
                         söylemeyen ya da hiç hak ediş tutmayan parti için tek
                         anlamlı iş, partiyi kuyruktan kaldırmaktır. */}
-                    {mismatch === null && !holdsNothing(p) ? (
-                      <button
-                        type="button"
-                        onClick={() => markPaid(p)}
-                        disabled={busy === `paid-${p.id}`}
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-400"
-                      >
-                        {busy === `paid-${p.id}` ? "…" : "Ödendi işaretle"}
-                      </button>
-                    ) : holdsNothing(p) ? (
-                      <button
-                        type="button"
-                        onClick={() => deleteEmptyPayout(p)}
-                        disabled={busy === `delete-${p.id}`}
-                        className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:text-gray-400"
-                      >
-                        {busy === `delete-${p.id}` ? "…" : "Boş partiyi sil"}
-                      </button>
-                    ) : (
-                      <span className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-500">
-                        Ödendi işaretlenemez
-                      </span>
-                    )}
+                    {mismatch === null && !holdsNothing(p) && !p.blockedReason && p.expectedFingerprint && <button type="button" onClick={() => markPaid(p)} disabled={busy !== null} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:bg-gray-400">{busy === `paid-${p.id}` ? "…" : p.settlementKind === "netting" ? "Mahsup et" : "Ödendi işaretle"}</button>}
+                    <button type="button" onClick={() => voidPayout(p)} disabled={busy !== null || !p.expectedFingerprint} className="rounded-lg border border-red-300 px-3 py-1.5 text-xs text-red-700 disabled:opacity-40">{busy === `void-${p.id}` ? "…" : "Partiyi iptal et"}</button>
                   </div>
                 </div>
+                <AdjustmentDetails rows={p.adjustments} />
                 <EarningsDetails earnings={p.earnings} label="Siparişleri göster" />
               </div>
             );
@@ -596,18 +587,19 @@ export function PayoutsClient({
                     <RequesterChip p={p} partnerLabel={cfg.request} />
                   </p>
                   <p className="text-xs text-gray-500">
-                    {day(p.createdAt)} · {p.earningCount} sipariş
-                    {p.paidAt ? ` · ödendi ${day(p.paidAt)}` : ""}
+                    {day(p.createdAt)} · {p.earningCount} hak ediş · {p.adjustmentCount} düzeltme
+                    {p.paidAt ? ` · ${p.settlementKind === "netting" ? "mahsup" : "ödendi"} ${day(p.paidAt)}` : ""}
                     {p.reference ? ` · Ref: ${p.reference}` : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="font-semibold text-gray-900">{fmt(p.totalKurus)}</span>
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                    Ödendi
+                    {p.settlementKind === "netting" ? "Mahsup edildi" : "Ödendi"}
                   </span>
                 </div>
               </div>
+              {p.blockedReason && <p role="alert" className="mt-2 text-xs text-amber-800">{p.blockedReason}</p>}
               {/* Geçmişte de susmaz: düzeltmeden ÖNCE ödenmiş bir hayalet parti
                   ("ödendi" yazan ama arkasında hak ediş olmayan) yalnız burada
                   görünür ve muhasebe ile partnerin ekranı ancak böyle
@@ -621,11 +613,13 @@ export function PayoutsClient({
                   tutarı banka kaydından doğrulayın.
                 </p>
               )}
-              <EarningsDetails earnings={p.earnings} label="Siparişleri göster" />
+              <AdjustmentDetails rows={p.adjustments} />
+                <EarningsDetails earnings={p.earnings} label="Siparişleri göster" />
             </div>
           ))}
         </div>
       )}
+      {voidedPayouts.length > 0 && <><SectionTitle>İptal edilen partiler</SectionTitle><div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">{voidedPayouts.map(p => <div key={p.id} className="p-4 text-sm"><p className="font-medium">{p.name} · {fmt(p.totalKurus)} <RequesterChip p={p} partnerLabel={cfg.request} /></p><p className="mt-1 text-xs text-gray-500">{p.voidedAt && day(p.voidedAt)} · İptal edildi; gösterilen tutar eski partinin kaydıdır, ödenecek tutar değildir.</p><p className="mt-1 text-xs">{p.voidReason}</p></div>)}</div></>}
     </div>
   );
 }

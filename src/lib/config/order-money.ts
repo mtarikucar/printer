@@ -48,6 +48,7 @@ import { PLATFORM_COMMISSION_RATE_BPS, UPSELL_PRICES_KURUS, calculateUpsellAmoun
 import { allocateBases, isCostLineKind } from "@/lib/config/cost-lines";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { computeEarning } from "@/lib/services/finance";
+import type { AdjustmentKind, AdjustmentSourceKind, AdjustmentStatus, PartnerKind, SettlementKind } from "./partner-adjustments";
 import {
   manufacturerBaseKurus,
   orderMoneySplit,
@@ -100,7 +101,32 @@ export interface PartnerEarningRow {
   netKurus: number;
   rateBps: number;
   status: string;
-  payout: null | { id: string; status: string; reference: string | null; paidAt: string | null };
+  payout: null | {
+    id: string; status: string; reference: string | null; paidAt: string | null;
+    settlementKind?: SettlementKind;
+    voidedAt?: string | null;
+  };
+}
+
+/** Eligibility is supplied by the shared payable reader, never recalculated here. */
+export interface AdjustmentMoneySnapshot {
+  id: string;
+  partnerKind: PartnerKind;
+  partnerId: string;
+  partnerName: string | null;
+  kind: AdjustmentKind;
+  netKurus: number;
+  status: AdjustmentStatus;
+  activePending: boolean;
+  blockedReason?: string | null;
+  sourceKind: AdjustmentSourceKind | null;
+  sourceId: string | null;
+  reason: string;
+  createdAt: string;
+  settledAt: string | null;
+  voidedAt: string | null;
+  payoutId: string | null;
+  settlementKind: SettlementKind | null;
 }
 
 export interface PartyShare {
@@ -178,6 +204,8 @@ export interface OrderMoneyBreakdown {
     siblings: MoneySibling[];
   };
   shares: PartyShare[];
+  /** Separate audit rows; original earning amounts above remain unchanged. */
+  adjustments?: AdjustmentMoneySnapshot[];
   platform: {
     commissionKurus: number;
     unassignedBaseKurus: number;
@@ -190,6 +218,11 @@ export interface OrderMoneyBreakdown {
      */
     reversedBaseKurus: number;
     netKurus: number;
+    /** Signed partner compensation deducted from platform net in this state. */
+    adjustmentNetKurus?: number;
+    settledAdjustmentNetKurus?: number;
+    /** Valid pending liability, including pending batches; never labelled cash paid. */
+    pendingAdjustmentNetKurus?: number;
   };
   warnings: string[];
 }
@@ -554,6 +587,8 @@ export interface OrderMoneySnapshot {
   cartDraftAmountKurus: number | null;
   manufacturerEarning: EarningMoneySnapshot | null;
   painterEarning: EarningMoneySnapshot | null;
+  /** Legacy fixtures may omit this. Live loader failures must throw, never use []. */
+  adjustments?: AdjustmentMoneySnapshot[];
 }
 
 // ─── Sipariş türü ───────────────────────────────────────────────────────────
@@ -1292,6 +1327,10 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
   const kind = classifyMoneyOrder(s);
   const succeeded = countsAsRevenue(s.paymentStatus);
   const refunded = isRefunded(s);
+  const adjustments = s.adjustments ?? [];
+  const settledAdjustmentNetKurus = sum(adjustments.filter(a => a.status === "settled").map(a => a.netKurus));
+  const pendingAdjustmentNetKurus = sum(adjustments.filter(a => a.status === "pending" && a.activePending).map(a => a.netKurus));
+  const adjustmentNetKurus = settledAdjustmentNetKurus + (succeeded ? pendingAdjustmentNetKurus : 0);
 
   // Üretici boyamayı KENDİSİ yaptı mı? Kargoladıktan sonra bu bir olgudur: ship
   // kapısı boyamalı siparişi yalnızca "kendim boyarım" üreticisine, boyacıya
@@ -1526,7 +1565,7 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       commissionKurus: nz(commissionKurus),
       unassignedBaseKurus: nz(unassignedBaseKurus),
       reversedBaseKurus: nz(reversedBaseKurus),
-      netKurus: nz(commissionKurus + unassignedBaseKurus - s.giftCardAmountKurus - s.havaleDiscountKurus),
+      netKurus: nz(commissionKurus + unassignedBaseKurus - s.giftCardAmountKurus - s.havaleDiscountKurus - adjustmentNetKurus),
     };
     if (reversedBaseKurus > 0) {
       warnings.push(
@@ -1542,9 +1581,13 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
     // hâlâ platformdadır, kimseye gitmemiştir. Onu ödenmiş sayan hesap, aynı
     // kartın pay bloğuyla (isEarningPaidOut) çelişen bir "platform zararı"
     // yazıyordu. Ödenmişliğin tek tanımı isEarningPaidOut'tur.
-    const paidOut = sum(
+    const originalPaidOut = sum(
       internal.map((i) => (isEarningPaidOut(i.share.earning) ? i.share.earning?.netKurus ?? 0 : 0))
     );
+    // Settled offsets reduce the actual transfer, including a zero-netting
+    // batch whose original earning still has status='paid'. Pending reprint
+    // obligations remain a separate risk, not money already sent.
+    const paidOut = originalPaidOut + settledAdjustmentNetKurus;
     // Geri çevrilmemiş ama ödenmemiş satır: platform ZARARI değil, açık RİSK —
     // ödeme partisine girerse partnere ödenir. Ayrı cümleyle bildirilir.
     const unreversedPendingKurus = sum(
@@ -1575,6 +1618,15 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
         `İadeye rağmen geri alınmamış bekleyen partner hakedişi var: ${formatTry(unreversedPendingKurus)}. Bu tutar henüz ödenmedi (platformdan çıkmadı) ama ödeme partisine girerse partnere ödenir — elle kontrol edin.`
       );
     }
+    if (pendingAdjustmentNetKurus > 0) {
+      warnings.push(`İade sonrası platformun bekleyen ek partner borcu: ${formatTry(pendingAdjustmentNetKurus)}. Bu tutar henüz ödenmedi; nakit zarara dahil değildir.`);
+    }
+  }
+  platform.adjustmentNetKurus = nz(adjustmentNetKurus);
+  platform.settledAdjustmentNetKurus = nz(settledAdjustmentNetKurus);
+  platform.pendingAdjustmentNetKurus = nz(pendingAdjustmentNetKurus);
+  if (adjustments.some(a => a.status === "pending" && !a.activePending)) {
+    warnings.push("Ödenebilirlik kontrolünden geçmeyen bekleyen düzeltmeler var; platform netine dahil edilmedi. Düzeltme geçmişini kontrol edin.");
   }
 
   // ── Sepet: alt siparişlerin toplamı ödeme taslağını tutmalı. Tutmuyorsa fark
@@ -1619,6 +1671,7 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       })),
     },
     shares: internal.map((i) => i.share),
+    adjustments,
     platform,
     warnings,
   };

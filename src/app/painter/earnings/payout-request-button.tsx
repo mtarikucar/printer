@@ -11,19 +11,24 @@ import { useRouter } from "next/navigation";
 export function PainterPayoutRequestButton({
   owedKurus,
   hasIban,
+  hasClaimable = owedKurus > 0,
 }: {
   owedKurus: number;
   hasIban: boolean;
+  hasClaimable?: boolean;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (owedKurus <= 0) return null;
+  if (done) {
+    return <p className="text-sm font-medium text-emerald-600">{done}</p>;
+  }
+  if (!hasClaimable) return null;
 
   // IBAN'sız bir talep admin kuyruğunda ödenemez hâlde bekler; önce IBAN.
-  if (!hasIban) {
+  if (!hasIban && owedKurus > 0) {
     return (
       <p className="text-sm text-amber-800">
         Ödeme talep etmek için önce{" "}
@@ -41,7 +46,8 @@ export function PainterPayoutRequestButton({
     try {
       const r = await fetch("/api/painter/payout-request", { method: "POST" });
       if (r.ok) {
-        setDone(true);
+        const outcome = await r.json().catch(() => null);
+        setDone(outcome?.message || "Talebiniz yönetici kuyruğuna alındı.");
         router.refresh();
         return;
       }
@@ -62,9 +68,7 @@ export function PainterPayoutRequestButton({
     }
   };
 
-  if (done) {
-    return <p className="text-sm font-medium text-emerald-600">Ödeme talebiniz alındı.</p>;
-  }
+
   return (
     <div>
       <button
@@ -73,7 +77,7 @@ export function PainterPayoutRequestButton({
         disabled={loading}
         className="rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
       >
-        {loading ? "…" : "Ödeme talep et"}
+        {loading ? "…" : owedKurus === 0 ? "Mahsup talep et" : "Ödeme talep et"}
       </button>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </div>

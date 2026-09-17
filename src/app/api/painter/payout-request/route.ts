@@ -63,6 +63,11 @@ export async function POST() {
       payoutId: result.payoutId,
       totalKurus: result.totalKurus,
       count: result.count,
+      adjustmentCount: result.adjustmentCount,
+      settlementKind: result.settlementKind,
+      message: result.settlementKind === "netting"
+        ? "Mahsup talebiniz yönetici onayına gönderildi; banka transferi talep edilmedi."
+        : "Ödeme talebiniz yönetici onayına gönderildi; henüz banka transferi yapılmadı.",
     });
   } catch (e) {
     return handleRouteFailure(e, "POST /api/painter/payout-request", PARTNER_ACTION_FAILED_ERROR);

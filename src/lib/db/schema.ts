@@ -16,6 +16,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { Attribution } from "../analytics/types";
+import type {
+  AdjustmentKind,
+  AdjustmentSourceKind,
+  AdjustmentStatus,
+  SettlementKind,
+} from "../config/partner-adjustments";
 
 export const giftCardThemeEnum = pgEnum("gift_card_theme", [
   "ramazan",
@@ -1048,7 +1054,29 @@ export const payouts = pgTable("payouts", {
   adminEmail: text("admin_email").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   paidAt: timestamp("paid_at"),
-});
+  adjustmentCount: integer("adjustment_count").notNull().default(0),
+  settlementKind: text("settlement_kind").$type<SettlementKind>().notNull().default("transfer"),
+  paidBy: text("paid_by"),
+  voidedAt: timestamp("voided_at"),
+  voidedBy: text("voided_by"),
+  voidReason: text("void_reason"),
+  voidSnapshot: jsonb("void_snapshot").$type<Record<string, unknown>>(),
+  voidOperationKey: uuid("void_operation_key").unique(),
+  voidRequestHash: text("void_request_hash"),
+}, (t) => [
+  check("payouts_adjustment_count_check", sql`${t.adjustmentCount} >= 0`),
+  check("payouts_settlement_kind_check", sql`${t.settlementKind} IN ('transfer', 'netting')`),
+  check("payouts_netting_check", sql`${t.settlementKind} <> 'netting' OR (${t.totalKurus} = 0 AND ${t.reference} IS NULL)`),
+  check("payouts_void_audit_check", sql`
+    (${t.voidedAt} IS NULL AND ${t.voidedBy} IS NULL AND ${t.voidReason} IS NULL
+      AND ${t.voidSnapshot} IS NULL AND ${t.voidOperationKey} IS NULL AND ${t.voidRequestHash} IS NULL)
+    OR
+    (${t.status} = 'pending' AND ${t.voidedAt} IS NOT NULL AND ${t.voidedBy} IS NOT NULL
+      AND length(btrim(${t.voidedBy})) > 0 AND ${t.voidReason} IS NOT NULL AND length(btrim(${t.voidReason})) > 0
+      AND ${t.voidSnapshot} IS NOT NULL AND jsonb_typeof(${t.voidSnapshot}) = 'object'
+      AND ${t.voidOperationKey} IS NOT NULL AND ${t.voidRequestHash} IS NOT NULL AND length(btrim(${t.voidRequestHash})) > 0)
+  `),
+]);
 
 // Customer invoice (KDV-inclusive). invoiceNumber is 1:1 with the order.
 export const invoices = pgTable("invoices", {
@@ -1776,7 +1804,100 @@ export const painterPayouts = pgTable("painter_payouts", {
   adminEmail: text("admin_email").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   paidAt: timestamp("paid_at"),
-});
+  adjustmentCount: integer("adjustment_count").notNull().default(0),
+  settlementKind: text("settlement_kind").$type<SettlementKind>().notNull().default("transfer"),
+  paidBy: text("paid_by"),
+  voidedAt: timestamp("voided_at"),
+  voidedBy: text("voided_by"),
+  voidReason: text("void_reason"),
+  voidSnapshot: jsonb("void_snapshot").$type<Record<string, unknown>>(),
+  voidOperationKey: uuid("void_operation_key").unique(),
+  voidRequestHash: text("void_request_hash"),
+}, (t) => [
+  check("painter_payouts_adjustment_count_check", sql`${t.adjustmentCount} >= 0`),
+  check("painter_payouts_settlement_kind_check", sql`${t.settlementKind} IN ('transfer', 'netting')`),
+  check("painter_payouts_netting_check", sql`${t.settlementKind} <> 'netting' OR (${t.totalKurus} = 0 AND ${t.reference} IS NULL)`),
+  check("painter_payouts_void_audit_check", sql`
+    (${t.voidedAt} IS NULL AND ${t.voidedBy} IS NULL AND ${t.voidReason} IS NULL
+      AND ${t.voidSnapshot} IS NULL AND ${t.voidOperationKey} IS NULL AND ${t.voidRequestHash} IS NULL)
+    OR
+    (${t.status} = 'pending' AND ${t.voidedAt} IS NOT NULL AND ${t.voidedBy} IS NOT NULL
+      AND length(btrim(${t.voidedBy})) > 0 AND ${t.voidReason} IS NOT NULL AND length(btrim(${t.voidReason})) > 0
+      AND ${t.voidSnapshot} IS NOT NULL AND jsonb_typeof(${t.voidSnapshot}) = 'object'
+      AND ${t.voidOperationKey} IS NOT NULL AND ${t.voidRequestHash} IS NOT NULL AND length(btrim(${t.voidRequestHash})) > 0)
+  `),
+]);
+
+// Manual net compensation is independent of automatic Phase4 reconciliation.
+// Source IDs are logical references: handoff recovery may delete an old earning.
+// The immutable source snapshot retains that evidence; services must fail closed
+// when the live source is missing, reversed, paid, or belongs to another payee.
+export const partnerAdjustments = pgTable("partner_adjustments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "restrict" }),
+  manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id, { onDelete: "restrict" }),
+  painterId: uuid("painter_id").references(() => painters.id, { onDelete: "restrict" }),
+  kind: text("kind").$type<AdjustmentKind>().notNull(),
+  netKurus: integer("net_kurus").notNull(),
+  sourceKind: text("source_kind").$type<AdjustmentSourceKind>(),
+  sourceId: uuid("source_id"),
+  sourceSnapshot: jsonb("source_snapshot").$type<Record<string, unknown>>(),
+  idempotencyKey: uuid("idempotency_key").notNull().unique(),
+  requestHash: text("request_hash").notNull(),
+  adminEmail: text("admin_email").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").$type<AdjustmentStatus>().notNull().default("pending"),
+  manufacturerPayoutId: uuid("manufacturer_payout_id").references(() => payouts.id, { onDelete: "restrict" }),
+  painterPayoutId: uuid("painter_payout_id").references(() => painterPayouts.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  settledAt: timestamp("settled_at"),
+  voidedAt: timestamp("voided_at"),
+  voidedBy: text("voided_by"),
+  voidReason: text("void_reason"),
+  voidOperationKey: uuid("void_operation_key").unique(),
+  voidRequestHash: text("void_request_hash"),
+}, (t) => [
+  index("partner_adjustments_manufacturer_state_idx").on(t.manufacturerId, t.status, t.manufacturerPayoutId),
+  index("partner_adjustments_painter_state_idx").on(t.painterId, t.status, t.painterPayoutId),
+  index("partner_adjustments_order_created_idx").on(t.orderId, t.createdAt),
+  index("partner_adjustments_source_idx").on(t.sourceKind, t.sourceId),
+  check("partner_adjustments_partner_check", sql`num_nonnulls(${t.manufacturerId}, ${t.painterId}) = 1`),
+  check("partner_adjustments_kind_net_check", sql`
+    (${t.kind} IN ('topup', 'reprint') AND ${t.netKurus} > 0)
+    OR (${t.kind} = 'unpaid_offset' AND ${t.netKurus} BETWEEN -2147483647 AND -1)
+  `),
+  check("partner_adjustments_source_check", sql`
+    (${t.kind} IN ('topup', 'reprint') AND ${t.sourceKind} IS NULL AND ${t.sourceId} IS NULL AND ${t.sourceSnapshot} IS NULL)
+    OR (${t.kind} = 'unpaid_offset' AND ${t.sourceKind} IS NOT NULL
+      AND ${t.sourceKind} IN ('manufacturer_earning', 'painter_earning', 'adjustment')
+      AND ${t.sourceId} IS NOT NULL AND ${t.sourceId} <> ${t.id}
+      AND ${t.sourceSnapshot} IS NOT NULL AND jsonb_typeof(${t.sourceSnapshot}) = 'object'
+      AND (${t.sourceKind} <> 'manufacturer_earning' OR ${t.manufacturerId} IS NOT NULL)
+      AND (${t.sourceKind} <> 'painter_earning' OR ${t.painterId} IS NOT NULL))
+  `),
+  check("partner_adjustments_actor_check", sql`length(btrim(${t.adminEmail})) > 0 AND length(btrim(${t.reason})) > 0 AND length(btrim(${t.requestHash})) > 0`),
+  check("partner_adjustments_status_check", sql`${t.status} IN ('pending', 'settled', 'voided')`),
+  check("partner_adjustments_payout_check", sql`
+    (${t.manufacturerPayoutId} IS NULL OR ${t.manufacturerId} IS NOT NULL)
+    AND (${t.painterPayoutId} IS NULL OR ${t.painterId} IS NOT NULL)
+  `),
+  check("partner_adjustments_settled_check", sql`
+    (${t.status} = 'settled' AND ${t.settledAt} IS NOT NULL
+      AND num_nonnulls(${t.manufacturerPayoutId}, ${t.painterPayoutId}) = 1)
+    OR (${t.status} <> 'settled' AND ${t.settledAt} IS NULL)
+  `),
+  check("partner_adjustments_void_check", sql`
+    (${t.status} = 'voided' AND ${t.voidedAt} IS NOT NULL AND ${t.voidedBy} IS NOT NULL
+      AND length(btrim(${t.voidedBy})) > 0 AND ${t.voidReason} IS NOT NULL AND length(btrim(${t.voidReason})) > 0
+      AND ${t.voidOperationKey} IS NOT NULL AND ${t.voidRequestHash} IS NOT NULL AND length(btrim(${t.voidRequestHash})) > 0
+      AND ${t.manufacturerPayoutId} IS NULL AND ${t.painterPayoutId} IS NULL)
+    OR (${t.status} <> 'voided' AND ${t.voidedAt} IS NULL AND ${t.voidedBy} IS NULL AND ${t.voidReason} IS NULL
+      AND ${t.voidOperationKey} IS NULL AND ${t.voidRequestHash} IS NULL)
+  `),
+]);
+
+export type PartnerAdjustment = typeof partnerAdjustments.$inferSelect;
+export type NewPartnerAdjustment = typeof partnerAdjustments.$inferInsert;
 
 // Per-order painter action audit trail (mirrors manufacturerActions).
 export const painterActions = pgTable("painter_actions", {

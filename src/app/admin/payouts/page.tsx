@@ -10,6 +10,7 @@ import {
   painterPayouts,
   painters,
   payouts,
+  partnerAdjustments,
 } from "@/lib/db/schema";
 import {
   PayoutsClient,
@@ -18,7 +19,9 @@ import {
   type OwedPartner,
   type PayoutRow,
   type PayoutTabData,
+  type AdjustmentLine,
 } from "./client";
+import { readPartnerPayables, type PartnerPayables } from "@/lib/services/partner-payables";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import {
   claimableEarningWhere,
@@ -131,6 +134,8 @@ function groupOwed(
         bank: bankOf(r),
         earnings: [],
         refundedEarnings: [],
+        adjustments: [],
+        blockedRecords: [],
       };
       byPartner.set(r.partnerId, g);
     }
@@ -257,7 +262,7 @@ export default async function AdminPayoutsPage({
           with: { order: { columns: { orderNumber: true, paymentStatus: true } } },
         },
       },
-      orderBy: [asc(payouts.status), desc(payouts.createdAt)],
+      orderBy: [desc(sql`(${payouts.voidedAt} is null and ${payouts.status} = 'pending')`), desc(payouts.createdAt)],
       limit: 100,
       })
     ),
@@ -299,7 +304,7 @@ export default async function AdminPayoutsPage({
           with: { order: { columns: { orderNumber: true, paymentStatus: true } } },
         },
       },
-      orderBy: [asc(painterPayouts.status), desc(painterPayouts.createdAt)],
+      orderBy: [desc(sql`(${painterPayouts.voidedAt} is null and ${painterPayouts.status} = 'pending')`), desc(painterPayouts.createdAt)],
       limit: 100,
       })
     ),
@@ -333,6 +338,10 @@ export default async function AdminPayoutsPage({
       id: string;
       totalKurus: number;
       earningCount: number;
+      adjustmentCount: number;
+      settlementKind: "transfer" | "netting";
+      voidedAt: Date | null;
+      voidReason: string | null;
       status: string;
       reference: string | null;
       adminEmail: string;
@@ -346,6 +355,12 @@ export default async function AdminPayoutsPage({
     partner: (BankColumns & { companyName: string }) | null | undefined
   ): PayoutRow => ({
     id: p.id,
+    adjustmentCount: p.adjustmentCount,
+    settlementKind: p.settlementKind,
+    voidedAt: p.voidedAt?.toISOString() ?? null,
+    voidReason: p.voidReason,
+    expectedFingerprint: null, heldNet: 0, heldEarningCount: 0, heldAdjustmentCount: 0,
+    adjustments: [], blockedReason: "Hak ediş ve düzeltme kayıtları okunamadı; ödeme işlemi kapalı.",
     partnerId,
     name: partner?.companyName ?? "—",
     totalKurus: p.totalKurus,
@@ -373,9 +388,75 @@ export default async function AdminPayoutsPage({
     },
   };
 
+  const adjustmentLine = (a: PartnerPayables["adjustmentHistory"][number]): AdjustmentLine => ({
+    id: a.id, orderId: a.orderId, netKurus: a.netKurus, kind: a.kind, reason: a.reason, status: a.status,
+  });
+  const pendingAdjustments = await displayRead("ek hak ediş sahipleri", db.select({
+    manufacturerId: partnerAdjustments.manufacturerId, painterId: partnerAdjustments.painterId,
+  }).from(partnerAdjustments).where(eq(partnerAdjustments.status, "pending")));
+  if (pendingAdjustments === null) {
+    unreadableAreas.push("Ek hak edişler okunamadı; ödeme oluşturma kuyrukları kapalı tutuldu.");
+    data.manufacturer.owed = []; data.painter.owed = [];
+  }
+  for (const kind of ["manufacturer", "painter"] as const) {
+    if (pendingAdjustments !== null) {
+      const existing = new Map(data[kind].owed.map(o => [o.partnerId, o]));
+      const ids = new Set([...existing.keys(), ...pendingAdjustments.map(a => kind === "manufacturer" ? a.manufacturerId : a.painterId).filter((id): id is string => !!id)]);
+      const updated = await Promise.all([...ids].map(async partnerId => {
+        try {
+          const summary = await readPartnerPayables(kind, partnerId);
+          let entry = existing.get(partnerId);
+          if (!entry) {
+            const partner = kind === "manufacturer"
+              ? await db.query.manufacturers.findFirst({ where: eq(manufacturers.id, partnerId), columns: { companyName: true, ...BANK_COLUMNS } })
+              : await db.query.painters.findFirst({ where: eq(painters.id, partnerId), columns: { companyName: true, ...BANK_COLUMNS } });
+            if (!partner) throw new Error("Partner missing");
+            entry = { partnerId, name: partner.companyName, bank: bankOf(partner), owedKurus: 0, count: 0,
+              refundedKurus: 0, refundedCount: 0, earnings: [], refundedEarnings: [], adjustments: [], blockedRecords: [] };
+          }
+          const eligibleOrders = new Set(summary.groups.filter(g => g.sourceKind !== "adjustment").map(g => g.orderId));
+          const adjustmentIds = new Set(summary.groups.flatMap(g => g.members.filter(m => m.sourceKind === "adjustment").map(m => m.id)));
+          return { ...entry, owedKurus: summary.claimableNet, count: summary.claimableCount,
+            earnings: entry.earnings.filter(e => eligibleOrders.has(e.orderId)),
+            adjustments: summary.adjustmentHistory.filter(a => adjustmentIds.has(a.id)).map(adjustmentLine),
+            blockedRecords: summary.blockedGroups.map(g => ({ orderId: g.orderId, reason:
+              g.reason === "offset_exceeds_source" ? "Kesinti kaynağın güncel tutarını aşıyor; düzeltmeyi iptal edip yeniden düzenleyin."
+              : g.reason === "missing" || g.reason === "reversed" ? "Düzeltmenin kaynağı yok veya geri alınmış; başka siparişten kesinti yapılamaz."
+              : g.reason === "source_ineligible" ? "Kaynak hak ediş ödenebilir değil; iade ve hak ediş kayıtlarını inceleyin."
+              : "Kaynak ve düzeltmeler birlikte ödemeye alınamıyor; kayıtları inceleyin." })),
+          };
+        } catch (error) {
+          console.error("admin payout balance", kind, partnerId, error);
+          unreadableAreas.push(`${kind === "manufacturer" ? "Üretici" : "Boyacı"} ${existing.get(partnerId)?.name ?? partnerId}: güncel bakiye okunamadı; ödeme oluşturma kapalı.`);
+          return null;
+        }
+      }));
+      data[kind].owed = updated.filter((o): o is OwedPartner => o !== null).sort((a, b) => b.owedKurus - a.owedKurus);
+    }
+    data[kind].payouts = await Promise.all(data[kind].payouts.map(async p => {
+      try {
+        const summary = await readPartnerPayables(kind, p.partnerId, { payoutId: p.id });
+        return { ...p, expectedFingerprint: summary.fingerprint, heldNet: summary.heldNet,
+          heldEarningCount: summary.heldEarningCount, heldAdjustmentCount: summary.heldAdjustmentCount,
+          adjustments: summary.adjustmentHistory.filter(a => (kind === "manufacturer" ? a.manufacturerPayoutId : a.painterPayoutId) === p.id).map(adjustmentLine),
+          blockedReason: !p.voidedAt && p.status === "pending" && summary.blockedGroups.length
+            ? "Bu partide ödenebilirliği doğrulanamayan kaynak veya düzeltme var. Transfer yapmayın; partiyi iptal edip kayıtları inceleyin." : null,
+        };
+      } catch (error) {
+        console.error("admin payout held sources", p.id, error);
+        return p;
+      }
+    }));
+  }
+
   return (
     <>
       <PayoutReadNotice areas={unreadableAreas} />
+      {(mPayoutRows.length === 100 || pPayoutRows.length === 100) && (
+        <p role="status" className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Her partner türü için en fazla 100 ödeme partisi gösteriliyor; bekleyen partiler önceliklidir. Daha eski kayıtlar bu listede görünmeyebilir.
+        </p>
+      )}
       <PayoutsClient initialTab={tab === "painter" ? "painter" : "manufacturer"} data={data} />
     </>
   );

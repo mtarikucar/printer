@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LocaleProvider } from "../src/lib/i18n/locale-context";
+import { MoneyBreakdownCard } from "../src/components/admin/money-breakdown-card";
 import {
   EARNING_REVERSAL_PARTNER_SENTENCES,
   MONEY_LINE_KIND_LABELS_TR,
@@ -18,6 +22,7 @@ import {
   formatTry,
   shipRevertEarningAuditSentence,
   type EarningMoneySnapshot,
+  type AdjustmentMoneySnapshot,
   type EarningReversalCause,
   type MoneyLine,
   type MoneyReversalParty,
@@ -2307,6 +2312,105 @@ test("döküm JSON'a birebir serileşir (sunucu → istemci): fiyat satırları 
     // deepStrictEqual sayıları Object.is ile karşılaştırır: -0 JSON'da 0 olur ve burada yakalanır.
     assert.deepEqual(JSON.parse(JSON.stringify(b)), b);
   }
+});
+
+const adjustment = (over: Partial<AdjustmentMoneySnapshot> = {}): AdjustmentMoneySnapshot => ({
+  id: "a1", partnerKind: "manufacturer", partnerId: "m1", partnerName: "Atölye A",
+  kind: "reprint", netKurus: 2000, status: "pending", activePending: true,
+  sourceKind: null, sourceId: null, reason: "Platform funded reprint", createdAt: SHIPPED_AT,
+  settledAt: null, voidedAt: null, payoutId: null, settlementKind: null,
+  ...over,
+});
+
+test("manual credits and source-approved offsets change platform net without rewriting earnings", () => {
+  const original = earning(249900);
+  const s = snap({ manufacturerEarning: original });
+  const before = deriveOrderMoneyBreakdown(s);
+  const entries = [adjustment(), adjustment({ id: "offset", kind: "unpaid_offset", netKurus: -500, sourceKind: "manufacturer_earning", sourceId: "earning1" })];
+  const after = deriveOrderMoneyBreakdown({ ...s, adjustments: entries });
+  assert.equal(after.platform.netKurus, before.platform.netKurus - 1500);
+  assert.equal(after.platform.adjustmentNetKurus, 1500);
+  assert.deepEqual(after.shares, before.shares);
+  assert.deepEqual(after.adjustments, entries);
+  assert.deepEqual(original, earning(249900));
+});
+
+test("batched valid credits count, voided and missing-source pending offsets do not", () => {
+  const s = snap();
+  const before = deriveOrderMoneyBreakdown(s);
+  const after = deriveOrderMoneyBreakdown({ ...s, adjustments: [
+    adjustment({ payoutId: "pending-batch" }),
+    adjustment({ id: "void", status: "voided", netKurus: 9000, activePending: false }),
+    adjustment({ id: "missing", kind: "unpaid_offset", netKurus: -8000, sourceKind: "manufacturer_earning", sourceId: "missing", activePending: false }),
+  ] });
+  assert.equal(after.platform.netKurus, before.platform.netKurus - 2000);
+  assert.equal(after.adjustments?.length, 3, "ineligible rows stay visible as history");
+});
+
+test("settled adjustments count even when their source is no longer eligible", () => {
+  const s = snap();
+  const before = deriveOrderMoneyBreakdown(s);
+  const after = deriveOrderMoneyBreakdown({ ...s, adjustments: [
+    adjustment({ status: "settled", activePending: false, payoutId: "paid-batch", settledAt: SHIPPED_AT }),
+  ] });
+  assert.equal(after.platform.netKurus, before.platform.netKurus - 2000);
+});
+
+test("refund separates actual settled adjustments from pending independent compensation risk", () => {
+  const original = earning(249900, { status: "paid", payout: PAID_PAYOUT });
+  const b = deriveOrderMoneyBreakdown(snap({ ...DETACHED, manufacturerEarning: original, adjustments: [
+    adjustment({ id: "paid-credit", status: "settled", activePending: false, netKurus: 2000, payoutId: "paid-credit-batch", settledAt: SHIPPED_AT }),
+    adjustment({ id: "paid-offset", status: "settled", activePending: false, kind: "unpaid_offset", netKurus: -1000, sourceKind: "manufacturer_earning", sourceId: "earning1", payoutId: "po1", settledAt: SHIPPED_AT }),
+    adjustment({ id: "owed-credit", netKurus: 3000 }),
+    adjustment({ id: "owed-offset", kind: "unpaid_offset", netKurus: -500, sourceKind: "adjustment", sourceId: "owed-credit" }),
+    adjustment({ id: "blocked-offset", kind: "unpaid_offset", netKurus: -6000, activePending: false, sourceKind: "manufacturer_earning", sourceId: "refunded" }),
+  ] }));
+  assert.equal(b.platform.netKurus, -original.netKurus - 1000);
+  assert.equal(b.platform.adjustmentNetKurus, 1000);
+  assert.equal(b.platform.pendingAdjustmentNetKurus, 2500);
+  assert.ok(hasWarning(b, "henüz ödenmedi"));
+});
+
+test("zero netting on a refunded order reports zero cash loss, not the original earning as paid cash", () => {
+  const original = earning(10000, { status: "paid", payout: { ...PAID_PAYOUT, reference: null, settlementKind: "netting" } });
+  const b = deriveOrderMoneyBreakdown(snap({ ...DETACHED, manufacturerEarning: original, adjustments: [
+    adjustment({ kind: "unpaid_offset", netKurus: -6000, status: "settled", activePending: false,
+      sourceKind: "manufacturer_earning", sourceId: "earning1", payoutId: "po1", settledAt: SHIPPED_AT, settlementKind: "netting" }),
+  ] }));
+  assert.ok(Object.is(b.platform.netKurus, 0));
+  assert.ok(!hasWarning(b, "platform zararı"));
+  assert.equal(b.shares[0].earning?.netKurus, 6000);
+});
+
+test("legacy omitted adjustments have the same money as an explicit empty history", () => {
+  assert.deepEqual(deriveOrderMoneyBreakdown(snap()), deriveOrderMoneyBreakdown(snap({ adjustments: [] })));
+});
+
+const renderMoney = (money: OrderMoneyBreakdown | null) => {
+  const props = { locale: "tr" as const, children: createElement(MoneyBreakdownCard, { money, loc: "tr" }) };
+  return renderToStaticMarkup(createElement(LocaleProvider, props));
+};
+
+test("money card renders separate compensation history and pending refund liability", () => {
+  const b = deriveOrderMoneyBreakdown(snap({ ...DETACHED, adjustments: [adjustment()] }));
+  const html = renderMoney(b);
+  assert.ok(html.includes("Ek partner düzeltmeleri"));
+  assert.ok(html.includes("Platform funded reprint"));
+  assert.ok(html.includes("Bekleyen ek partner borcu (henüz ödenmedi)"));
+});
+
+test("netting and unavailable money cannot be displayed as a bank payment or a zero balance", () => {
+  const original = earning(10000, { status: "paid", payout: { ...PAID_PAYOUT, reference: null, settlementKind: "netting" } });
+  const b = deriveOrderMoneyBreakdown(snap({ ...DETACHED, manufacturerEarning: original, adjustments: [
+    adjustment({ kind: "unpaid_offset", netKurus: -6000, status: "settled", activePending: false,
+      sourceKind: "manufacturer_earning", sourceId: "earning1", payoutId: "po1", settledAt: SHIPPED_AT, settlementKind: "netting" }),
+  ] }));
+  const html = renderMoney(b);
+  assert.ok(html.includes("Mahsupla kapandı"));
+  assert.ok(!html.includes("bu hakediş zaten ödenmişti"));
+  const missing = renderMoney(null);
+  assert.ok(missing.includes("Para dökümü hesaplanamadı"));
+  assert.ok(!missing.includes("Platform net"));
 });
 
 test("formatTry Türkçe biçim, eksi başta", () => {

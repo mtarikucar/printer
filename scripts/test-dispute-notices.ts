@@ -195,10 +195,13 @@ async function main() {
   });
   await test("production SQL changes only its phase and fences every delivery write without filtering closed disputes", async () => {
     // Real Drizzle SQL, fake pg/queue/provider only: no socket or runtime rows.
-    const { drizzle } = await import("drizzle-orm/node-postgres");
     const require = createRequire(import.meta.url), saved = new Map<string, NodeJS.Module | undefined>();
     const queries: Array<{ text: string; values: unknown[] }> = [];
-    const smtp: string[] = [];
+    const smtp: Array<{ to: string; subject: string }> = [];
+    const SMTP = require("nodemailer/lib/smtp-transport") as {
+      prototype: { send(mail: { data: { to: string; subject: string } }, callback: (error: Error | null, info: { accepted: string[]; rejected: string[] }) => void): void };
+    };
+    const originalSend = SMTP.prototype.send;
     const client = { query: async (config: { text: string }, values: unknown[]) => {
       const text = config.text; queries.push({ text, values });
       const phase = text.includes('"opening_email_state"') ? "opening" : "decision";
@@ -225,17 +228,26 @@ async function main() {
       require.cache[filename] = { id: filename, filename, loaded: true, exports } as NodeJS.Module;
     };
     try {
-      stub("../src/lib/db", { db: drizzle(client as unknown as import("pg").Pool) });
-      stub("../src/lib/queue/queues", { getEmailQueue: () => ({}) });
-      stub("../src/lib/services/email", { sendEmail: async (params: { to: string; disputeNotice: { kind: string } }) => {
-        smtp.push(`${params.disputeNotice.kind}:${params.to}`);
-      } });
+      // Node 20 cannot discover named dynamic imports from hand-written cache
+      // entries for TS modules. Load the real db/queue/email exports through
+      // tsx, mocking only their CJS drivers so the SQL proof stays socket-free.
+      stub("pg", { Pool: class { query = client.query; } });
+      stub("bullmq", { Queue: class { constructor(name: string) { assert.equal(name, "email"); } } });
+      stub("ioredis", class {});
+      SMTP.prototype.send = (mail, callback) => {
+        smtp.push({ to: mail.data.to, subject: mail.data.subject });
+        callback(null, { accepted: [mail.data.to], rejected: [] });
+      };
       await deliverDisputeNotices(id, "opening"); await deliverDisputeNotices(id, "decision");
       await recoverDisputeNotices();
-      assert.deepEqual(smtp, ["opening:admin@example.test", "decision:customer@example.test"]);
+      assert.deepEqual(smtp, [
+        { to: "admin@example.test", subject: renderDisputeEmail(payload("opening").messages[0]).subject },
+        { to: "customer@example.test", subject: renderDisputeEmail(payload("decision").messages[0]).subject },
+      ]);
       assert.equal(queries.filter((query) => query.text.startsWith("update")).length, 8);
       assert.equal(queries.filter((query) => query.text.startsWith("select")).length, 2);
     } finally {
+      SMTP.prototype.send = originalSend;
       for (const [filename, prior] of saved) {
         if (prior) require.cache[filename] = prior; else delete require.cache[filename];
       }

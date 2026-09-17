@@ -3,22 +3,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { cancelWorkshopSession } from "@/lib/services/workshop-cancel";
 import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
-/**
- * Seansı iptal eder ve ödemiş katılımcıların parasını iade eder.
- *
- * Mantık `workshop-cancel.ts`tedir (aynı gerekçeyle `refundOrder` da rotadan
- * çıkarıldı): iade TEK para yolundan geçer ve testten geçirilebilir.
- *
- * `delivered`/`completed` seans REDDEDİLİR (409): parti mekana ulaşmış ve
- * hakediş tahakkuk etmiştir; o satırı `cancelled` yapmak hiçbir parayı geri
- * getirmez, yalnızca olan biteni yalanlar. Buton da gizlidir; kapı burada da
- * durur ki doğrudan bir POST arayüzle ayrışmasın.
- *
- * İDEMPOTENT — zaten `cancelled` bir seansta da çalışır ve yalnızca iadesi
- * geçen sefer patlayanları yeniden dener. Yanıttaki `failed` ve
- * `alreadyShipped` admin ekranında UYARI olarak gösterilir: sessizce yutulan
- * bir iade, geri ödenmemiş müşteri parası demektir.
- */
+/** Cancel each participant atomically; retries include all outstanding obligations. */
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

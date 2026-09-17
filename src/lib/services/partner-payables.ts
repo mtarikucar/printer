@@ -101,7 +101,7 @@ export async function loadPartnerPayables(tx: MoneyTx, kind: PartnerKind, id: st
   const earnings = await tx.select({
     id: t.earning.id, orderId: t.earning.orderId, netKurus: t.earning.netKurus,
     status: t.earning.status, payoutId: t.earning.payoutId,
-    paymentStatus: orders.paymentStatus, foundOrder: orders.id,
+    paymentStatus: orders.paymentStatus, orderStatus: orders.status, foundOrder: orders.id,
   }).from(t.earning).leftJoin(orders, eq(orders.id, t.earning.orderId)).where(eq(t.earningOwner, id));
   const adjustments = await tx.select().from(partnerAdjustments).where(eq(t.adjustmentOwner, id)).orderBy(partnerAdjustments.createdAt, partnerAdjustments.id);
   const batches = await tx.select({
@@ -116,7 +116,11 @@ export async function loadPartnerPayables(tx: MoneyTx, kind: PartnerKind, id: st
     sourceId: a.sourceId, offsetSourceKind: a.sourceKind,
   });
   const sources: PayableSource[] = earnings.map(e => ({
-    ...e, sourceKind: t.sourceKind, eligible: e.foundOrder !== null && e.paymentStatus !== REFUNDED_PAYMENT_STATUS,
+    ...e, sourceKind: t.sourceKind,
+    eligible: e.foundOrder !== null && e.paymentStatus !== REFUNDED_PAYMENT_STATUS && e.orderStatus !== "rejected",
+    // Keep the existing refund reason; cancellation does not prove a cash return.
+    ineligibleReason: e.paymentStatus !== REFUNDED_PAYMENT_STATUS && e.orderStatus === "rejected"
+      ? "order_cancelled" as const : undefined,
   }));
   // Independent positive compensation survives a customer refund by design.
   sources.push(...adjustments.filter(a => a.kind !== "unpaid_offset" && a.status !== "voided")
@@ -316,32 +320,63 @@ export async function voidPartnerPayout(kind: PartnerKind, payoutId: string, inp
   }
 }
 
+export interface ReversePartnerEarningResult {
+  outcome: "reversed" | "paid_retained" | "already_reversed" | "absent";
+  earningId?: string;
+  /** Original recorded net, not cash transferred (a paid batch can be netting). */
+  netKurus?: number;
+  affectedPayoutIds: string[];
+}
+
+/**
+ * Caller holds the expected partner's gate and the order row lock. No gate or
+ * nested transaction here: reversal must commit/roll back with refund evidence.
+ * Owner mismatch invalidates discovery, including for already closed earnings.
+ */
+export async function reversePartnerEarningTx(tx: MoneyTx, input: {
+  kind: PartnerKind; orderId: string; expectedPartnerId: string;
+}): Promise<ReversePartnerEarningResult> {
+  const { kind, orderId, expectedPartnerId } = input;
+  const t = partnerMoneyTables(kind);
+  const [earning] = await tx.select({
+    id: t.earning.id, partnerId: t.earningOwner, status: t.earning.status,
+    netKurus: t.earning.netKurus, payoutId: t.earning.payoutId,
+  }).from(t.earning).where(eq(t.earning.orderId, orderId)).for("update");
+  if (!earning) return { outcome: "absent", affectedPayoutIds: [] };
+  if (earning.partnerId.toLowerCase() !== expectedPartnerId.toLowerCase()) {
+    throw new PayoutClaimRaceError("Earning owner changed; rediscover partner gates before reversal");
+  }
+  const original = { earningId: earning.id, netKurus: earning.netKurus };
+  if (earning.status === "paid") return { outcome: "paid_retained", ...original, affectedPayoutIds: [] };
+  if (earning.status === "reversed") return { outcome: "already_reversed", ...original, affectedPayoutIds: [] };
+  // Associated debits lose membership with their source. They remain as
+  // historical pending adjustments and the shared reader blocks the group.
+  const offsets = await tx.select().from(partnerAdjustments).where(and(
+    eq(t.adjustmentOwner, expectedPartnerId), eq(partnerAdjustments.sourceKind, t.sourceKind),
+    eq(partnerAdjustments.sourceId, earning.id), eq(partnerAdjustments.status, "pending"),
+  ));
+  const affectedBatches = [...new Set([earning.payoutId, ...offsets.map(a => kind === "manufacturer" ? a.manufacturerPayoutId : a.painterPayoutId)].filter((p): p is string => !!p))].sort();
+  for (const payoutId of affectedBatches) {
+    const [batch] = await tx.select({ status: t.payout.status, voidedAt: t.payout.voidedAt }).from(t.payout).where(and(eq(t.payout.id, payoutId), eq(t.payoutOwner, expectedPartnerId))).for("update");
+    if (!batch || batch.status !== "pending" || batch.voidedAt) throw new PayoutClaimRaceError("Cannot reverse members of a closed payout");
+  }
+  await tx.update(t.earning).set({ status: "reversed", payoutId: null, updatedAt: new Date() }).where(and(eq(t.earning.id, earning.id), eq(t.earningOwner, expectedPartnerId), eq(t.earning.status, "pending")));
+  if (offsets.length) await tx.update(partnerAdjustments).set(adjustmentMembership(kind, null)).where(inArray(partnerAdjustments.id, offsets.map(a => a.id)));
+  for (const payoutId of affectedBatches) {
+    const held = await loadPartnerPayables(tx, kind, expectedPartnerId, { payoutId });
+    await tx.update(t.payout).set({ totalKurus: integerTotal(held.heldNet), earningCount: held.heldEarningCount, adjustmentCount: held.heldAdjustmentCount }).where(eq(t.payout.id, payoutId));
+  }
+  return { outcome: "reversed", ...original, affectedPayoutIds: affectedBatches };
+}
+
 export async function reversePartnerEarning(kind: PartnerKind, orderId: string): Promise<void> {
   const t = partnerMoneyTables(kind);
-  const [owner] = await db.select({ id: t.earning.id, partnerId: t.earningOwner }).from(t.earning).where(eq(t.earning.orderId, orderId));
+  const [owner] = await db.select({ partnerId: t.earningOwner }).from(t.earning).where(eq(t.earning.orderId, orderId));
   if (!owner) return;
   await db.transaction(async tx => {
     await lockPartnerMoney(tx, kind, owner.partnerId);
     await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, orderId)).for("update");
-    const [earning] = await tx.select().from(t.earning).where(and(eq(t.earning.id, owner.id), eq(t.earningOwner, owner.partnerId), eq(t.earning.status, "pending"))).for("update");
-    if (!earning) return;
-    // Associated debits lose membership with their source. They remain as
-    // historical pending adjustments and the shared reader blocks the group.
-    const offsets = await tx.select().from(partnerAdjustments).where(and(
-      eq(t.adjustmentOwner, owner.partnerId), eq(partnerAdjustments.sourceKind, t.sourceKind),
-      eq(partnerAdjustments.sourceId, earning.id), eq(partnerAdjustments.status, "pending"),
-    ));
-    const affectedBatches = [...new Set([earning.payoutId, ...offsets.map(a => kind === "manufacturer" ? a.manufacturerPayoutId : a.painterPayoutId)].filter((p): p is string => !!p))].sort();
-    for (const payoutId of affectedBatches) {
-      const [batch] = await tx.select({ status: t.payout.status, voidedAt: t.payout.voidedAt }).from(t.payout).where(and(eq(t.payout.id, payoutId), eq(t.payoutOwner, owner.partnerId))).for("update");
-      if (!batch || batch.status !== "pending" || batch.voidedAt) throw new PayoutClaimRaceError("Cannot reverse members of a closed payout");
-    }
-    await tx.update(t.earning).set({ status: "reversed", payoutId: null, updatedAt: new Date() }).where(and(eq(t.earning.id, earning.id), eq(t.earningOwner, owner.partnerId), eq(t.earning.status, "pending")));
-    if (offsets.length) await tx.update(partnerAdjustments).set(adjustmentMembership(kind, null)).where(inArray(partnerAdjustments.id, offsets.map(a => a.id)));
-    for (const payoutId of affectedBatches) {
-      const held = await loadPartnerPayables(tx, kind, owner.partnerId, { payoutId });
-      await tx.update(t.payout).set({ totalKurus: integerTotal(held.heldNet), earningCount: held.heldEarningCount, adjustmentCount: held.heldAdjustmentCount }).where(eq(t.payout.id, payoutId));
-    }
+    await reversePartnerEarningTx(tx, { kind, orderId, expectedPartnerId: owner.partnerId });
   });
 }
 

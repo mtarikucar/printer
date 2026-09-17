@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, ne, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
@@ -305,7 +305,8 @@ export async function POST(
           eq(orders.painterId, prevPainterId),
           inArray(orders.painterStatus, [...PAINTER_REVOCABLE_STATUSES]),
           isNull(orders.shippedAt),
-          notRefundedGuard()
+          notRefundedGuard(),
+          ne(orders.status, "rejected")
         )
       )
       .returning();

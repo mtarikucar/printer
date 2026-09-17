@@ -27,11 +27,26 @@ import {
   getModelApprovalSlaQueue,
   getWorkshopCloseQueue,
   getPainterAcceptSlaQueue,
+  getEmailQueue,
 } from "../src/lib/queue/queues";
 
 console.log("Starting BullMQ workers...");
 
 const emailWorker = startEmailWorker();
+// Refund intent remains on its DB record through Redis loss, retained jobs and
+// worker crashes. Use the existing email worker for the bounded recovery sweep.
+getEmailQueue().upsertJobScheduler(
+  "refund-record-email-recovery",
+  { every: 60_000 },
+  { name: "refund_record_email_recover", data: { type: "refund_record_email_recover" },
+    opts: { attempts: 1, removeOnComplete: true, removeOnFail: 20 } }
+).catch((error) => console.error("Refund email recovery registration failed", error));
+getEmailQueue().upsertJobScheduler(
+  "refund-record-analytics-recovery",
+  { every: 60_000 },
+  { name: "refund_record_analytics_recover", data: { type: "refund_record_analytics_recover" },
+    opts: { attempts: 1, removeOnComplete: true, removeOnFail: 20 } }
+).catch((error) => console.error("Refund analytics recovery registration failed", error));
 const previewWorker = startPreviewGenerationWorker();
 const cleanupWorker = startPreviewCleanupWorker();
 const paymentDeadlineWorker = startPaymentDeadlineWorker();

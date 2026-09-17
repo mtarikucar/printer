@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, ne, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
@@ -259,6 +259,7 @@ export async function POST(
             gt(orders.paintingPriceKurus, 0),
             // Re-checked here so a refund landing after the read above still wins.
             notRefundedGuard(),
+            ne(orders.status, "rejected"),
             sql`(${orders.painterStatus} IS NULL OR ${orders.painterStatus} = 'unassigned')`
           )
         )

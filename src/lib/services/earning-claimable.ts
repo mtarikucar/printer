@@ -49,6 +49,15 @@ export const OPEN_EARNING_STATUS = "pending";
  * isRefunded'ı ile aynı soruyu sorar.
  */
 export const orderNotRefundedSql: SQL = sql`${orders.paymentStatus} is distinct from ${REFUNDED_PAYMENT_STATUS}`;
+/** Cancellation stops original earnings without claiming that cash was returned. */
+export const orderNotCancelledSql: SQL = sql`${orders.status} is distinct from ${"rejected"}`;
+export const orderCancelledSql: SQL = sql`${orders.status} is not distinct from ${"rejected"}`;
+
+/** Shared order eligibility for original accrual and claim projections. */
+export function originalEarningOrderOpen(): SQL {
+  return sql`(${orderNotRefundedSql} and ${orderNotCancelledSql})`;
+}
+
 export const orderRefundedSql: SQL = sql`${orders.paymentStatus} is not distinct from ${REFUNDED_PAYMENT_STATUS}`;
 
 /**
@@ -93,7 +102,7 @@ export function inPayoutEarningWhere(t: EarningRuleColumns): SQL {
  * kaymasın.
  */
 export function claimableEarningWhere(t: EarningRuleColumns): SQL {
-  return sql`(${openEarningWhere(t)} and ${orderNotRefundedSql})`;
+  return sql`(${openEarningWhere(t)} and ${originalEarningOrderOpen()})`;
 }
 
 /**
@@ -114,4 +123,13 @@ export function refundedOpenEarningWhere(t: EarningRuleColumns): SQL {
  */
 export function refundedInPayoutEarningWhere(t: EarningRuleColumns): SQL {
   return sql`(${inPayoutEarningWhere(t)} and ${orderRefundedSql})`;
+}
+
+/** Cancelled, still-unrefunded originals are a separate liability warning. */
+export function cancelledOpenEarningWhere(t: EarningRuleColumns): SQL {
+  return sql`(${openEarningWhere(t)} and ${orderNotRefundedSql} and ${orderCancelledSql})`;
+}
+
+export function cancelledInPayoutEarningWhere(t: EarningRuleColumns): SQL {
+  return sql`(${inPayoutEarningWhere(t)} and ${orderNotRefundedSql} and ${orderCancelledSql})`;
 }

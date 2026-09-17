@@ -117,18 +117,19 @@ const VOIDED_ALERT = "bg-red-50 text-red-700 ring-1 ring-red-200";
  * here escaped the reversal (it accrued after the refund, say) and would be
  * paid out, so it is flagged instead of muted.
  */
-function voidedShareState(e: PartnerEarningRow | null): {
+function voidedShareState(e: PartnerEarningRow | null, cause: PartyShare["voided"] = "refunded"): {
   badge: string;
   accrual: string;
   tone: string;
   note: string;
 } {
+  const closed = cause === "cancelled" ? "İptal edildi" : "İade edildi";
   if (!e) {
     return {
       badge: "Hakediş yok",
-      accrual: "İade nedeniyle tahakkuk olmayacak",
+      accrual: cause === "cancelled" ? "İptal nedeniyle tahakkuk olmayacak" : "İade nedeniyle tahakkuk olmayacak",
       tone: VOIDED_MUTED,
-      note: "İade edildi — hakediş oluşmaz.",
+      note: `${closed} — hakediş oluşmaz.`,
     };
   }
   if (e.status === "reversed") {
@@ -136,7 +137,7 @@ function voidedShareState(e: PartnerEarningRow | null): {
       badge: "Geri alındı",
       accrual: "Geri alındı",
       tone: VOIDED_MUTED,
-      note: "İade edildi — hakediş oluşmaz; tahakkuk etmiş satır geri alındı.",
+      note: `${closed} — hakediş oluşmaz; tahakkuk etmiş satır geri alındı.`,
     };
   }
   if (e.payout?.settlementKind === "netting") {
@@ -159,7 +160,7 @@ function voidedShareState(e: PartnerEarningRow | null): {
     badge: "Geri alınmadı",
     accrual: "Tahakkuk etti, geri alınmadı",
     tone: VOIDED_ALERT,
-    note: "İade edildi ama bu hakediş geri alınmadı; ödeme partisine girerse partnere ödenir. Elle kontrol edilmeli.",
+    note: `${closed} ama bu hakediş geri alınmadı; ödenebilir değildir. Elle kontrol edilmeli.`,
   };
 }
 
@@ -241,7 +242,7 @@ function PartyShareBlock({ share: s, loc }: { share: PartyShare; loc: Locale }) 
   // already treat the order as closed. Only the real earning row, if any, is
   // left to show.
   if (s.voided) {
-    const v = voidedShareState(e);
+    const v = voidedShareState(e, s.voided);
     return (
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -389,6 +390,7 @@ export function MoneyBreakdownCard({
       )
     : allShares;
   const refunded = isRefunded(collection);
+  const cancelled = collection.cancelled === true;
   const paymentMethodLabel =
     collection.paymentMethod === "card"
       ? d["admin.payment.method.card"]
@@ -573,6 +575,24 @@ export function MoneyBreakdownCard({
               valueClass={refunded ? "text-red-700" : undefined}
             />
           )}
+          {(collection.cashReturnedKurus ?? 0) > 0 && (
+            <MoneyRow label="Kayıtlı nakit iadesi" value={fc(collection.cashReturnedKurus!)} valueClass="text-red-700" />
+          )}
+          {(collection.giftReturnedKurus ?? 0) > 0 && (
+            <MoneyRow label="Hediye kartına geri yüklenen" value={fc(collection.giftReturnedKurus!)} />
+          )}
+          {collection.cashRemainingKurus !== undefined && (
+            <MoneyRow label="İadeler sonrası kalan nakit" value={collection.cashRemainingKurus === null ? "Bilinmiyor" : fc(collection.cashRemainingKurus)} />
+          )}
+          {cancelled && (
+            <MoneyRow label="İade bekleyen nakit yükümlülüğü" value={collection.cashRefundDueKurus == null ? "Bilinmiyor" : fc(collection.cashRefundDueKurus)} valueClass="text-amber-700" />
+          )}
+          {collection.legacyRefundUnknown && (
+            <MoneyRow label="İade kanıtı" value="Eski iadenin gerçekleşen tutarı bilinmiyor" valueClass="text-amber-700" />
+          )}
+          {collection.cancellationCashUnknown && (
+            <MoneyRow label="İptal kaydı" value="Nakit iade yükümlülüğü ödeme kayıtlarıyla uzlaştırılmalı" valueClass="text-amber-700" />
+          )}
           <MoneyRow label="Ödeme yöntemi" value={paymentMethodLabel} />
           <MoneyRow
             label="Ödeme durumu"
@@ -686,8 +706,8 @@ export function MoneyBreakdownCard({
           )}
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
             <p className="text-sm font-semibold text-gray-900">Platform</p>
-            {refunded ? (
-              // Refunded: nothing counts as revenue and pending earnings were
+            {refunded || cancelled ? (
+              // Closed: nothing counts as revenue and pending earnings were
               // reversed, so the platform is left with only the paid-out,
               // unrecoverable partner earnings (as a loss).
               <>
@@ -696,7 +716,7 @@ export function MoneyBreakdownCard({
                     <MoneyRow label="Gerçekleşen düzeltmelerin net etkisi" value={fc(-(platform.settledAdjustmentNetKurus ?? 0))} />
                   )}
                   <MoneyRow
-                    label="Platform net (iade)"
+                    label={collection.cancellationCashUnknown || collection.legacyRefundUnknown ? "Geri alınmayan partner net etkisi" : cancelled && !refunded ? "Platform net (iptal yükümlülüğü ayrıldı)" : "Platform net (iade)"}
                     value={fc(platform.netKurus)}
                     strong
                     valueClass={platform.netKurus < 0 ? "text-red-700" : undefined}
@@ -706,8 +726,8 @@ export function MoneyBreakdownCard({
                   )}
                 </dl>
                 <p className="mt-1 text-[11px] text-gray-500">
-                  İadede tahsilat ciroya sayılmaz. Kapatılmış hakedişler ve gerçekleşen düzeltmelerin neti nakit zararı belirler;
-                  bekleyen ek borç bu zarara dahil değildir. Mahsup, banka transferi değildir.
+                  İade veya iptalde müşteri yükümlülüğü gelir sayılmaz. Kapatılmış hakedişler ve gerçekleşen düzeltmelerin neti ayrı gösterilir;
+                  bekleyen ek borç henüz ödenmemiştir. Mahsup, banka transferi değildir.
                 </p>
               </>
             ) : (
@@ -748,6 +768,9 @@ export function MoneyBreakdownCard({
                 {(platform.adjustmentNetKurus ?? 0) !== 0 && (
                   <MoneyRow label="Ek partner düzeltmelerinin net etkisi" value={fc(-(platform.adjustmentNetKurus ?? 0))} />
                 )}
+                {(collection.cashReturnedKurus ?? 0) > 0 && (
+                  <MoneyRow label="Kayıtlı nakit iadeleri" value={fc(-(collection.cashReturnedKurus ?? 0))} valueClass="text-red-700" />
+                )}
                 <MoneyRow
                   label="Platform net"
                   value={fc(platform.netKurus)}
@@ -771,7 +794,7 @@ export function MoneyBreakdownCard({
             {shares.map((s) => {
               // Refunded: "Henüz tahakkuk etmedi" would promise an accrual the
               // refund has ruled out; an existing row reports its own state.
-              const voided = s.voided ? voidedShareState(s.earning) : null;
+              const voided = s.voided ? voidedShareState(s.earning, s.voided) : null;
               return (
               <li key={s.party} className="flex flex-wrap items-start justify-between gap-2 text-sm">
                 <div className="min-w-0">

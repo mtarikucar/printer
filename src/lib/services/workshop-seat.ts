@@ -11,12 +11,60 @@
  *
  * `reserveSeat` bilerek burada DEĞİL: o, katılımın kendi `db.transaction`'ı
  * içinde (`tx` ile) çalışmak zorunda — taslak ve katılımcı insert'leriyle aynı
- * commit'e bağlı. Bu dosyadaki iki fonksiyon ise tam tersine, çağıranın işlemi
- * COMMIT ettikten SONRA `db` üzerinden çalışır (gerekçe aşağıda).
+ * commit'e bağlı. Ücretli iptalde cancelParticipantSeatTx para işlemini paylaşır;
+ * taslak sonlandırmanın public yardımcıları commit SONRASINDA çalışır.
  */
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { workshopParticipants, workshopSessions } from "@/lib/db/schema";
+import { orders, workshopParticipants, workshopSessions } from "@/lib/db/schema";
+import { RefundPolicyError } from "@/lib/config/order-refund";
+import { WORKSHOP_CANCEL_SHIPPED_STATUSES } from "@/lib/config/workshop";
+
+type SeatTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Paid cancellation only: called after the refund coordinator's money locks.
+ * Never opens a transaction. A linkage mismatch aborts the entire cancellation.
+ */
+export async function cancelParticipantSeatTx(
+  tx: SeatTx,
+  participantId: string,
+  cancelReason: string,
+  opts: { sessionId: string; orderId: string; releaseSeat: boolean }
+): Promise<{ changed: boolean; seatReleased: boolean }> {
+  // The coordinator already holds this order lock. Validate here too because
+  // an existing cancellation can enter this hook through its replay branch.
+  const [order] = await tx.select({ status: orders.status, shippedAt: orders.shippedAt,
+    deliveredAt: orders.deliveredAt }).from(orders)
+    .where(eq(orders.id, opts.orderId)).for("update");
+  if (!order) throw new RefundPolicyError("not_found", "Sipariş bulunamadı.", 404);
+  if (order.shippedAt || order.deliveredAt
+    || (WORKSHOP_CANCEL_SHIPPED_STATUSES as readonly string[]).includes(order.status)) {
+    throw new RefundPolicyError("invalid_evidence", "Sevk edilmiş sipariş atölye iptaliyle kapatılamaz.", 400);
+  }
+  const [participant] = await tx.select().from(workshopParticipants)
+    .where(eq(workshopParticipants.id, participantId)).for("update");
+  if (!participant || participant.sessionId !== opts.sessionId || participant.orderId !== opts.orderId) {
+    throw new Error("Workshop cancellation participant/order linkage changed");
+  }
+  if (participant.status === "cancelled") return { changed: false, seatReleased: false };
+  if (opts.releaseSeat) {
+    // closeSession takes session -> order. We already own the order through
+    // the money coordinator, so never wait for its session lock in reverse.
+    // 55P03 aborts the entire money transaction and is returned as 409 busy.
+    const [session] = await tx.select({ id: workshopSessions.id }).from(workshopSessions)
+      .where(eq(workshopSessions.id, opts.sessionId)).for("update", { noWait: true });
+    if (!session) throw new RefundPolicyError("not_found", "Seans bulunamadı.", 404);
+  }
+  await tx.update(workshopParticipants)
+    .set({ status: "cancelled", cancelReason, updatedAt: new Date() })
+    .where(eq(workshopParticipants.id, participantId));
+  // Check the live session status in the write, not the caller's earlier read.
+  const released = opts.releaseSeat ? await tx.update(workshopSessions)
+    .set(decrementBookedCount())
+    .where(and(eq(workshopSessions.id, opts.sessionId), eq(workshopSessions.status, "open")))
+    .returning({ id: workshopSessions.id }) : [];
+  return { changed: true, seatReleased: released.length > 0 };
+}
 
 /**
  * Sayacı bir azaltan TEK ifade. Hem tek başına `releaseSeat` hem de

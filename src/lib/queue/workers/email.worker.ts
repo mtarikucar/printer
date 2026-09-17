@@ -6,8 +6,26 @@ import { sendEmail } from "../../services/email";
 import { db } from "../../db";
 import { manufacturerNotifications, orders } from "../../db/schema";
 import { ensureJourneyToken } from "../../services/order-journey";
+import { deliverRefundRecordNotices, recoverRefundRecordNotices } from "../../services/refund-record-notices";
+import { deliverRefundRecordAnalytics, recoverRefundRecordAnalytics } from "../../services/refund-record-analytics";
 
 async function processJob(job: Job<EmailJobData>) {
+  if (job.data.type === "refund_record_analytics") {
+    await deliverRefundRecordAnalytics(job.data.refundId);
+    return;
+  }
+  if (job.data.type === "refund_record_analytics_recover") {
+    await recoverRefundRecordAnalytics();
+    return;
+  }
+  if (job.data.type === "refund_record_email") {
+    await deliverRefundRecordNotices(job.data.refundId);
+    return;
+  }
+  if (job.data.type === "refund_record_email_recover") {
+    await recoverRefundRecordNotices();
+    return;
+  }
   const {
     type, to, orderNumber, customerName, trackingNumber, locale,
     adminEmail, manufacturerEmail, companyName, cancelReason,
@@ -80,11 +98,11 @@ export function startEmailWorker() {
   });
 
   worker.on("completed", (job) => {
-    console.log(`Email sent: ${job.data.type} to ${job.data.to}`);
+    console.log(`Email job completed: ${job.data.type}${"to" in job.data ? ` to ${job.data.to}` : ""}`);
   });
 
   worker.on("failed", (job, error) => {
-    console.error(`Email failed: ${job?.data.type} to ${job?.data.to}:`, error.message);
+    console.error(`Email job failed: ${job?.data.type}:`, error.message);
   });
 
   return worker;

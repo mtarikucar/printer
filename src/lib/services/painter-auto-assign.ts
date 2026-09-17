@@ -1,4 +1,4 @@
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   orders,
@@ -155,6 +155,7 @@ function painterHandoffConditions(orderId: string) {
     eq(orders.needsPainting, true),
     gt(orders.paintingPriceKurus, 0),
     notRefundedGuard(),
+    ne(orders.status, "rejected"),
     sql`(${orders.painterStatus} IS NULL OR ${orders.painterStatus} = 'unassigned')`,
   ];
 }

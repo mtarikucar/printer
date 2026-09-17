@@ -1,7 +1,8 @@
 import { nanoid } from "nanoid";
-import { and, eq, count, isNull, isNotNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { giftCards, giftCardRedemptions } from "@/lib/db/schema";
+import { giftCards } from "@/lib/db/schema";
+import { countLiveGiftCardUses } from "./gift-card-usage";
 
 export function generateGiftCardCode(): string {
   const part1 = nanoid(4).toUpperCase();
@@ -61,22 +62,8 @@ export async function validateGiftCard(code: string) {
 
   // Check redemption limit
   if (card.maxRedemptions !== null) {
-    const [result] = await db
-      .select({ value: count() })
-      .from(giftCardRedemptions)
-      // One checkout = one redemption use. Count only LIVE (non-refunded) rows,
-      // and only the ONE draft-anchored primary row per checkout: a multi-seller
-      // cart fans a single redemption into N per-sub-order rows for refund
-      // proration, but the split extras carry draftId=null — counting them would
-      // burn N of a card's maxRedemptions on one checkout and lock residual balance.
-      .where(
-        and(
-          eq(giftCardRedemptions.giftCardId, card.id),
-          isNull(giftCardRedemptions.refundedAt),
-          isNotNull(giftCardRedemptions.draftId)
-        )
-      );
-    if (result.value >= card.maxRedemptions) {
+    const uses = await countLiveGiftCardUses(db, card.id);
+    if (uses >= card.maxRedemptions) {
       return { valid: false, error: "limit_reached" as const };
     }
   }

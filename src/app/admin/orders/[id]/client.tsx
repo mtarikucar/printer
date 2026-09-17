@@ -1,5 +1,6 @@
 "use client";
 
+import { OrderRefundCard } from "@/components/admin/order-refund-card";
 import { OrderMoneySplitEditor } from "@/components/admin/order-money-split-editor";
 import { OrderPartnerAdjustments } from "@/components/admin/order-partner-adjustments";
 import { MoneyBreakdownCard } from "@/components/admin/money-breakdown-card";
@@ -2146,8 +2147,6 @@ export function OrderDetailClient({ data, locale }: Props) {
     "customer_admin"
   );
   // Refund card: collapsed by default; opens to the warning + reason field.
-  const [refundOpen, setRefundOpen] = useState(false);
-  const [refundReason, setRefundReason] = useState("");
 
   // ─── Faz 2: her aşamada model yükleme ────────────────────
   // Yükleyici doğrudan açılmaz: aşama uyarısı okunur, kutu bilerek açılır ve
@@ -2289,10 +2288,30 @@ export function OrderDetailClient({ data, locale }: Props) {
         reportFailure(data.error || `${action} ${d["admin.orderDetail.actionFailed"]}`);
         return;
       }
+      const data = await res.json().catch(() => ({}));
+      if (action === "reject") {
+        const remaining = typeof data.cashRefundRequiredKurus === "number"
+          ? formatCurrency(data.cashRefundRequiredKurus, loc) : "uzlaştırılması gereken tutar";
+        alert(`Sipariş iptal edildi. Bu işlem nakit iade yapmaz. Kalan nakit iade yükümlülüğü: ${remaining}.${data.warning ? ` ${data.warning}` : ""}`);
+      } else if (data.warning) alert(data.warning);
       router.refresh();
     } finally {
       setLoading(null);
     }
+  };
+
+  const handleReject = async () => {
+    if (loading) return;
+    setLoading("reject-preview");
+    try {
+      const response = await fetch(`/api/admin/orders/${order.id}/refund`, { cache: "no-store" });
+      const snapshot = await response.json();
+      if (!response.ok) { reportFailure(snapshot.error || "İade yükümlülükleri okunamadı."); return; }
+      if (!window.confirm("Sipariş iptal edilecek ve üretim duracak. Bu işlem parayı müşteriye geri göndermez; nakit iadesini tamamladıktan sonra İadeler kartına kaydedin. Devam edilsin mi?")) return;
+      await performAction("reject", { reason: notes || d["admin.orderDetail.rejectDefault"],
+        operationKey: crypto.randomUUID(), expectedFingerprint: snapshot.expectedFingerprint });
+    } catch { reportFailure("İptal sonucu doğrulanamadı. Siparişin son durumunu kontrol edin."); }
+    finally { setLoading(null); }
   };
 
   /**
@@ -3146,7 +3165,6 @@ export function OrderDetailClient({ data, locale }: Props) {
   // Refund is possible at every stage the money is still with us. It used to sit
   // in the reject/force-review row and vanished once an order was printing, in
   // QC, painting, awaiting the customer, shipped or delivered.
-  const canRefund = order.paymentStatus === "succeeded";
   // Cash that actually came in: amount − gift card − havale discount, through the
   // pure helper the money breakdown uses too (C3). The dashboard and analytics
   // compute the same figure in SQL with its twin, CASH_COLLECTED_KURUS
@@ -3165,12 +3183,6 @@ export function OrderDetailClient({ data, locale }: Props) {
     (s) => s.party === "manufacturer" && s.includesPainting
   );
   const paidOutShares = moneyShares.filter((s) => isPaidOut(s.earning));
-  const batchedShares = moneyShares.filter(
-    (s) =>
-      !!s.earning &&
-      s.earning.status === "pending" &&
-      s.earning.payout?.status === "pending"
-  );
   // The admin action that refunded it (adminActions arrive newest first). The
   // refund row wins; a reject only counts when there is none, because rejecting
   // a paid order refunds it too, while a reject AFTER a refund is not the refund.
@@ -3713,18 +3725,6 @@ export function OrderDetailClient({ data, locale }: Props) {
     }
   };
 
-  // ─── Refund ──────────────────────────────────────────────
-  // There is no PayTR refund integration: the button only marks the order
-  // refunded, detaches the partners, reverses UNPAID earnings and restores the
-  // gift card. Both the card and the confirm dialog say so, and name every
-  // partner earning that is already paid out and will therefore stay paid.
-  const refundMoneyInstruction =
-    order.paymentMethod === "bank_transfer"
-      ? `Tahsil edilen ${formatCurrency(collectedKurus, loc)} müşteriye bankadan elle havale edilmeli.`
-      : order.paymentMethod === "gift_card_full"
-        ? "Nakit tahsilat yok; ödemenin tamamı hediye kartıyla yapıldı."
-        : `Tahsil edilen ${formatCurrency(collectedKurus, loc)} PayTR panelinden elle iade edilmeli.`;
-
   const describeEarning = (s: PartyShare): string => {
     const e = s.earning;
     if (!e) return "";
@@ -3732,33 +3732,6 @@ export function OrderDetailClient({ data, locale }: Props) {
     const ref = e.payout?.reference ? `, ref ${e.payout.reference}` : "";
     const when = e.payout?.paidAt ? `, ${formatDateTime(e.payout.paidAt, loc)}` : "";
     return `• ${who}: asıl hak ediş neti ${formatCurrency(e.netKurus, loc)}${e.payout?.settlementKind === "netting" ? ", mahsup — banka transferi değil" : ", düzeltmeler ayrıca kayıtlı"}${ref}${when}`;
-  };
-
-  const handleRefund = async () => {
-    const text = [
-      `${order.orderNumber} iade edildi olarak işaretlenecek.`,
-      "",
-      "PARA OTOMATİK İADE EDİLMEZ.",
-      refundMoneyInstruction,
-      ...(order.giftCardAmountKurus > 0
-        ? [`Hediye kartından karşılanan ${formatCurrency(order.giftCardAmountKurus, loc)} karta otomatik geri yüklenir.`]
-        : []),
-      "",
-      ...(paidOutShares.length > 0
-        ? ["Ödeme veya mahsupla kapatılmış, GERİ ALINMAYACAK hakedişler:", ...paidOutShares.map(describeEarning), ""]
-        : []),
-      ...(batchedShares.length > 0
-        ? ["Bekleyen ödeme partisinden düşülecek hakedişler:", ...batchedShares.map(describeEarning), ""]
-        : []),
-      ...(money
-        ? []
-        : ["Partner hakediş durumu yüklenemedi; iadeden önce Ödemeler sayfasını kontrol edin.", ""]),
-      "Üretici ve boyacı siparişten ayrılır, ödenmemiş hakedişler geri alınır. Sipariş durumu korunur ama ileri işlemler kapanır.",
-      "",
-      "Devam edilsin mi?",
-    ].join("\n");
-    if (!window.confirm(text)) return;
-    await performAction("refund", { reason: refundReason.trim() || "Admin iadesi" });
   };
 
   // ─── Timeline ────────────────────────────────────────────
@@ -3861,7 +3834,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                 {paymentStatusLabel(d, order.paymentStatus)}
               </h2>
               <p className="mt-0.5 text-sm text-red-800">
-                Bu siparişin ödemesi iade edildi. Durumu ({statusLabel(order.status)}) kayıt için
+                Bu sipariş ödeme kaydında iade edilmiş olarak işaretli. Gerçekleşen tutar ve işlem kanıtını İadeler kartından inceleyin. Durumu ({statusLabel(order.status)}) kayıt için
                 korunur; onay, model yükleme, üretici atama, baskı, kargo, boyacı atama, boyama
                 ekleme ve TESLİM damgası kapalıdır — iade edilmiş sipariş hiçbir yöne kımıldamaz.
                 Paket müşteriye ulaştıysa bunu denetim notuna yazın. Yalnız siparişi reddetme
@@ -3887,8 +3860,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                 </div>
               )}
               <p className="mt-2 text-xs text-red-700">
-                Bu panel parayı geri göndermez: kartla ödemede PayTR panelinden, havalede bankadan
-                elle iade edildiğini doğrulayın.
+                Bu panel banka veya PayTR transferi yapmaz. Eski iade işareti tek başına para transferinin kanıtı değildir.
               </p>
             </div>
           </div>
@@ -4327,7 +4299,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                   </button>
                 )}
                 {canReject && (
-                  <button onClick={() => { if (confirm(d["admin.orderDetail.rejectConfirm"])) performAction("reject", { reason: notes || d["admin.orderDetail.rejectDefault"] }); }} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
+                  <button onClick={handleReject} disabled={!!loading} className="text-sm text-red-500 hover:text-red-700 font-medium hover:underline transition-colors disabled:text-gray-400">
                     {loading === "reject" ? d["admin.orderDetail.rejecting"] : d["admin.orderDetail.reject"]}
                   </button>
                 )}
@@ -6081,108 +6053,7 @@ export function OrderDetailClient({ data, locale }: Props) {
           </div>
         )}
 
-        {/* ─── İade ───────────────────────────────────────────
-            One line until opened: a destructive action should be reachable at
-            every stage, not loud on every order. */}
-        {canRefund && (
-          <div
-            className={`rounded-2xl border bg-white ${
-              refundOpen ? "border-red-200 p-5" : "border-gray-200 px-5 py-3"
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-700">İade</h3>
-                <span className="text-xs text-gray-500">
-                  Tahsil edilen {formatCurrency(collectedKurus, loc)}
-                </span>
-              </div>
-              {!refundOpen && (
-                <button
-                  type="button"
-                  onClick={() => setRefundOpen(true)}
-                  className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
-                >
-                  İade et
-                </button>
-              )}
-            </div>
-            {refundOpen && (
-              <div className="mt-3 space-y-3">
-                <div className="space-y-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
-                  <p>
-                    <strong>Bu işlem parayı geri göndermez.</strong> {refundMoneyInstruction}
-                  </p>
-                  <p>
-                    Üretici ve boyacı siparişten ayrılır, ödenmemiş hakedişleri geri alınır
-                    {order.giftCardAmountKurus > 0 ? ", hediye kartı bakiyesi karta geri yüklenir" : ""}.
-                    Müşteriye iade bildirimi gider. Sipariş durumu korunur, ileri işlemler kapanır.
-                  </p>
-                </div>
-                {paidOutShares.length > 0 && (
-                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    <p className="font-semibold">Ödeme veya mahsupla kapatılmış, geri ALINMAYACAK:</p>
-                    <ul className="mt-1 space-y-0.5">
-                      {paidOutShares.map((s) => (
-                        <li key={s.party}>{describeEarning(s)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {batchedShares.length > 0 && (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                    <p className="font-semibold">Bekleyen ödeme partisinden düşülecek:</p>
-                    <ul className="mt-1 space-y-0.5">
-                      {batchedShares.map((s) => (
-                        <li key={s.party}>{describeEarning(s)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {!money && (
-                  <p className="text-xs text-amber-700">
-                    Partner hakediş durumu yüklenemedi; iadeden önce{" "}
-                    <Link href="/admin/payouts" className="underline">Ödemeler</Link> sayfasını kontrol edin.
-                  </p>
-                )}
-                <div>
-                  <label htmlFor="refund-reason" className="mb-1 block text-xs font-medium text-gray-600">
-                    İade sebebi
-                  </label>
-                  <input
-                    id="refund-reason"
-                    type="text"
-                    value={refundReason}
-                    onChange={(e) => setRefundReason(e.target.value)}
-                    maxLength={500}
-                    placeholder="örn. müşteri vazgeçti, ürün hasarlı geldi"
-                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={handleRefund}
-                    disabled={!!loading}
-                    className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:bg-gray-300 disabled:text-gray-500"
-                  >
-                    {loading === "refund" ? "İade ediliyor…" : "İadeyi onayla"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRefundOpen(false);
-                      setRefundReason("");
-                    }}
-                    className="rounded-xl bg-white px-4 py-2 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
-                  >
-                    Vazgeç
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        <OrderRefundCard orderId={order.id} />
       </div>
 
       {/* ═══ Tab bar ═════════════════════════════════════════════ */}

@@ -1,3 +1,5 @@
+import { PgDialect } from "drizzle-orm/pg-core";
+import { originalEarningOrderOpen } from "../src/lib/services/earning-claimable";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
@@ -722,13 +724,7 @@ for (const rel of FORWARD_WRITES) {
 // iade yüzünden reddediyordu: yanlış damga bir daha geri alınamıyordu. Kural
 // artık yönden bağımsız (iade edilmiş sipariş hiçbir yöne kımıldamaz) ve bu
 // blok iki YÖNTEMİ de aynı şekilde pinler.
-const REFUSAL_IDS = [
-  "notRefundedGuard",
-  "isOrderRefunded",
-  "isPartnerOrderRefunded",
-  "isRefunded",
-  "REFUNDED_ORDER_ERROR",
-];
+
 
 /** Dosyadaki tek bir dışa açık HTTP yöntemi (POST/DELETE ayrı pinlensin diye). */
 function exportedMethod(sf: ts.SourceFile, name: string): ts.FunctionDeclaration {
@@ -801,28 +797,13 @@ function nodeIdentifiers(root: ts.Node): Set<string> {
   );
 }
 
+// Cancellation delegates to the same locked financial coordinator as refunds.
+// The route must not carry a second, reason-only payment flip.
 {
   const rel = "src/app/api/admin/orders/[id]/reject/route.ts";
-  const src = read(rel);
-  const chains = updateChains(parse(src)).filter((c) => !!c.where);
-  ok(`${rel}: has a guarded status write to scan`, chains.length > 0, chains.length);
-  ok(
-    `${rel}: no UPDATE where carries the refund guard`,
-    !chains.some((c) => whereCarries(c.where!, isGuardCall))
-  );
-  const ids = codeIdentifiers(src);
-  const used = REFUSAL_IDS.filter((id) => ids.has(id));
-  ok(`${rel}: never refuses a refunded order`, used.length === 0, used);
-}
-
-// İade çevirmesi yarışa kapalı: hem iade servisi hem ret rotası `refunded`
-// yazarken ödeme durumuna koşullu ve RETURNING'li günceller. Biri koşulsuz
-// yazarsa hakedişler iki kez geri alınır, gelir iki kez düşer.
-for (const rel of [
-  "src/lib/services/order-refund.ts",
-  "src/app/api/admin/orders/[id]/reject/route.ts",
-]) {
-  ok(`${rel}: refund flip guarded on payment status, with RETURNING`, refundFlipGuarded(read(rel)));
+  const sf = parse(read(rel));
+  ok(`${rel}: delegates cancellation with no own order writes`, callsTo(sf, "cancelPaidOrder").length === 1 && updateChains(sf).length === 0);
+  ok(`${rel}: never turns cancellation into an external cash refund`, callsTo(sf, "refundOrder").length === 0 && !sf.getText().includes('"order_refunded"'));
 }
 
 // ─── Ortak denetleyiciler: her yazma, her okuma, her tahakkuk ───────────────
@@ -960,6 +941,12 @@ function isTransactionCallback(fn: ts.Node): boolean {
  * koşan reverseEarning() yeni satırı görür. INSERT `db` ile yazılırsa başka bir
  * bağlantıda, kilidin dışında koşar; o yüzden reddedilir.
  */
+const originalGuardQuery = new PgDialect().sqlToQuery(originalEarningOrderOpen());
+const originalGuardProven = originalGuardQuery.sql.includes('"orders"."payment_status" is distinct from')
+  && originalGuardQuery.sql.includes('"orders"."status" is distinct from')
+  && originalGuardQuery.params.includes(REFUNDED_PAYMENT_STATUS) && originalGuardQuery.params.includes("rejected");
+ok("combined original earning gate proves both refund and cancellation exclusion", originalGuardProven);
+
 function accrualsGuarded(src: string): boolean {
   const inserts = earningInserts(parse(src));
   return (
@@ -981,7 +968,7 @@ function accrualsGuarded(src: string): boolean {
         const strength = lock?.call.arguments[0];
         return (
           !!where &&
-          whereCarries(where.call, isGuardCall) &&
+          whereCarries(where.call, n => isGuardCall(n) || (originalGuardProven && isCallTo(n, "originalEarningOrderOpen"))) &&
           !!strength &&
           ts.isStringLiteralLike(strength) &&
           ROW_LOCKS.has(strength.text)
@@ -1084,14 +1071,13 @@ function sourceFiles(dirRel: string): string[] {
 const REFUND_READS = new Set(["isRefunded", "isOrderRefunded", "isPartnerOrderRefunded"]);
 const REFUSAL_ONLY_IDS = ["notRefundedGuard", "REFUNDED_ORDER_ERROR"];
 
-const isCallTo = (n: ts.Node, name: string) =>
-  ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name;
+function isCallTo(n: ts.Node, name: string): boolean { return ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name; }
 
 const isRefundReadCall = (n: ts.Node) =>
   ts.isCallExpression(n) && ts.isIdentifier(n.expression) && REFUND_READS.has(n.expression.text);
 
 /** Every call to `name` (a plain identifier callee), in source order. */
-function callsTo(sf: ts.SourceFile, name: string): ts.CallExpression[] {
+function callsTo(sf: ts.Node, name: string): ts.CallExpression[] {
   const out: ts.CallExpression[] = [];
   forEachNode(sf, (n) => {
     if (isCallTo(n, name)) out.push(n as ts.CallExpression);
@@ -1259,10 +1245,6 @@ const whereRefersTo = (w: ts.CallExpression, col: string) =>
         n.name.text === col
     )
   );
-
-/** A string literal equal to `text` under `n`. */
-const hasLiteral = (n: ts.Node, text: string) =>
-  anyNode(n, (m) => ts.isStringLiteralLike(m) && m.text === text);
 
 /** `text` inside a string or `sql` template chunk under `n`. */
 const mentionsText = (n: ts.Node, text: string) =>
@@ -1919,65 +1901,21 @@ const DECLINE_SERVICE = "src/lib/services/manufacturer-decline.ts";
   );
 }
 
-// Ret: önceden iade edilmiş, partneri hâlâ bağlı sipariş de koparılır. İadenin
-// yan etkileri (hakediş geri alma, hediye kartı, gelir kaydı, müşteri e-postası)
-// yalnız çevirmeyi kendisi yapan istekte, bir kez koşar.
-const REJECT = "src/app/api/admin/orders/[id]/reject/route.ts";
+// Recorded refunds and cancellation: evidence, replay, locks and financial
+// effects share a transaction. Behavioral rollback/race proof lives in the
+// isolated order-refund and cancellation DB suites.
 {
-  const sf = parse(read(REJECT));
-  const isBareRefundedNow = (c: ts.Expression) => {
-    const u = unwrapAs(c);
-    return ts.isIdentifier(u) && u.text === "refundedNow";
-  };
-  const detaches = updateChains(sf).filter(
-    (c) =>
-      !!c.set &&
-      setWrites(c.set, "manufacturerId") &&
-      setWrites(c.set, "painterId") &&
-      !setWrites(c.set, "paymentStatus") &&
-      !!c.where &&
-      !c.where.arguments.some((a) => anyNode(a, isPaymentStatusRef))
-  );
-  // The gate may skip the detach only when the flip already did it
-  // (`!refundedNow`) or nothing is attached; it may not look at the payment
-  // state, which is exactly what left an already-refunded order attached.
-  const isNotRefundedNow = (n: ts.Node) =>
-    ts.isPrefixUnaryExpression(n) &&
-    n.operator === ts.SyntaxKind.ExclamationToken &&
-    ts.isIdentifier(n.operand) &&
-    n.operand.text === "refundedNow";
-  const gateRunsOnRefunded = (cond: ts.Expression) =>
-    !isBareRefundedNow(cond) &&
-    !hasLiteral(cond, "succeeded") &&
-    !anyNode(cond, (n) => ts.isPropertyAccessExpression(n) && n.name.text === "paymentStatus") &&
-    !anyNode(cond, (n) => n.kind === ts.SyntaxKind.FalseKeyword) &&
-    (!anyNode(cond, (n) => ts.isIdentifier(n) && n.text === "refundedNow") || anyNode(cond, isNotRefundedNow));
-  ok(
-    `${REJECT}: partners are detached whatever the payment state (an already-refunded order too)`,
-    detaches.some((c) => thenConditions(c.set!).every(gateRunsOnRefunded)),
-    detaches.length
-  );
-  const SIDE_EFFECTS = ["reverseEarning", "reversePainterEarning", "refundGiftCardForOrder", "recordRefund"];
-  const effects: ts.Node[] = SIDE_EFFECTS.flatMap((name) => callsTo(sf, name));
-  forEachNode(sf, (n) => {
-    if (
-      ts.isPropertyAssignment(n) &&
-      ts.isIdentifier(n.name) &&
-      n.name.text === "type" &&
-      ts.isStringLiteralLike(n.initializer) &&
-      n.initializer.text === "order_refunded"
-    ) {
-      effects.push(n);
-    }
-  });
-  ok(
-    `${REJECT}: every refund side effect is still there`,
-    SIDE_EFFECTS.every((name) => callsTo(sf, name).length > 0) && effects.some(ts.isPropertyAssignment)
-  );
-  ok(
-    `${REJECT}: refund side effects run only under if (refundedNow)`,
-    effects.every((n) => thenConditions(n).some(isBareRefundedNow))
-  );
+  const core = parse(read("src/lib/services/order-refund-record.ts"));
+  const close = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "closeOrder");
+  const coordinator = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "coordinated");
+  const recorded = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "recordOrderRefundTx");
+  const cancel = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "cancelPaidOrder");
+  ok("refund coordinator holds partner and order locks in one transaction", !!coordinator && callsTo(coordinator, "lockPartnerMoney").length > 0 && coordinator.getText().includes('.for("update")') && coordinator.getText().includes("db.transaction"));
+  ok("full refund/cancellation detaches both partners on transaction handle", !!close && close.getText().includes("tx.update(orders)") && close.getText().includes("manufacturerId:null") && close.getText().includes("painterId:null"));
+  ok("refund record checks replay before snapshot and side effects", !!recorded && recorded.getText().indexOf("await replay(") < recorded.getText().indexOf("requireCurrent(") && callsTo(recorded, "reverseOriginals").length > 0 && callsTo(recorded, "restoreGift").length > 0 && callsTo(recorded, "closeOrder").length > 0);
+  ok("cancel uses coordinator and keeps its own terminal status rule", !!cancel && callsTo(cancel, "coordinated").length === 1 && cancel.getText().includes("REJECTABLE_STATUSES.includes") && callsTo(cancel, "closeOrder").length > 0);
+  ok("financial core has no public nested money service or direct notification", ["refundGiftCardForOrder", "reverseEarning", "reversePainterEarning", "notifyCustomer"].every(name => callsTo(core,name).length === 0));
+  ok("legacy reason-only refund service removed", callsTo(parse(read("src/lib/services/order-refund.ts")),"refundOrder").length === 0 && !read("src/lib/services/order-refund.ts").includes("db.update"));
 }
 
 // Boyacıya devir, yazmada da "henüz boyacı yok" şartını arar: ön okuma ile
@@ -2140,8 +2078,6 @@ for (const [name, src, want] of ADMIN_STATUS_SELF_TESTS) {
  * o "yerini tutan şey"in gerçekten orada olduğu doğrulanır.
  */
 const ADMIN_STATUS_WRITE_EXEMPTIONS: Record<string, string> = {
-  "src/app/api/admin/orders/[id]/reject/route.ts":
-    "Ret siparişi KAPATIR, hiçbir yöne taşımaz: iade edilmiş sipariş de reddedilebilmeli. Bu dosyanın üst bölümü rotanın iadeyi hiç reddetmediğini ayrıca pinliyor.",
   "src/app/api/admin/orders/[id]/ship-kargo/route.ts":
     "Yalnız TELAFİ yazmaları korumasız: SOAP çağrısı patlayınca rotanın KENDİ yazdığı 'shipped' damgasını geri alır. Koruma oraya konsaydı, araya giren bir iade siparişi hiç var olmayan bir kargoyla 'shipped' bırakırdı. Gerçek kargolama yazması FORWARD_WRITES'ta ve korumalı.",
   "src/app/api/admin/workshops/sessions/[id]/ship/route.ts":

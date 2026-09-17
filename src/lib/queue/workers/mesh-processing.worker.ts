@@ -85,7 +85,7 @@ async function processOrder(job: Job<MeshProcessingJobData>) {
         failureReason: `unknown_size: ${order.figurineSize ?? "(boş)"}`,
         updatedAt: new Date(),
       })
-      .where(eq(orders.id, orderId));
+      .where(and(eq(orders.id, orderId), eq(orders.status, "processing_mesh")));
     return;
   }
   const material = order.material === "filament" ? "filament" : "resin";

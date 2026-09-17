@@ -95,7 +95,7 @@ async function main() {
       await refuse(() => applyDraftAction(id, resend, "admin@example.invalid", async () => { throw new Error("injected email failure"); }), /kuyruğuna alınamadı/);
       check("failed email rolls audit back", (await admin.query(`SELECT count(*)::int AS n FROM ${schema}.admin_draft_actions WHERE draft_id=$1`, [id])).rows[0].n, 0);
       let queued = 0;
-      const sent = await applyDraftAction(id, resend, "admin@example.invalid", async (mail) => { queued++; assert.match(mail.customBody ?? "", /\/pay\/FIG-TEST/); });
+      const sent = await applyDraftAction(id, resend, "admin@example.invalid", async (mail) => { queued++; assert.ok("customBody" in mail); assert.match(mail.customBody ?? "", /\/pay\/FIG-TEST/); });
       check("email retry queued once", queued, 1);
       assert.match(sent.message, /teslim henüz doğrulanmadı/); checks++;
       const deadline = new Date(Date.now() + 86400_000).toISOString();

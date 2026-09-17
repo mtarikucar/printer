@@ -1,5 +1,5 @@
 import { sql, type AnyColumn, type SQL } from "drizzle-orm";
-import { orders } from "@/lib/db/schema";
+import { orders, orderRefundRecords, orderRefundAllocations } from "@/lib/db/schema";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
 import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
 
@@ -25,17 +25,36 @@ import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
 export const CASH_COLLECTED_KURUS = sql<number>`GREATEST(0, ${orders.amountKurus} - ${orders.giftCardAmountKurus} - ${orders.havaleDiscountKurus})`;
 
 /**
- * Which orders count as revenue (C3): payment succeeded, i.e. not refunded.
- * SQL twin of countsAsRevenue() in src/lib/config/order-money.ts.
+ * Revenue excludes refunded and cancelled orders; unreturned cancellation cash
+ * remains a customer liability. Partial returns reduce NET_REVENUE_CASH_KURUS.
+ * Matches revenueKurus() in src/lib/config/order-money.ts.
  * paidAt is NOT NULL on every order row, so it only decides which day an order
  * counts on. The old dashboard filtered on `paidAt IS NOT NULL`, which matched
  * every order, refunds included.
  */
-export const COUNTS_AS_REVENUE = sql`${orders.paymentStatus} = 'succeeded'`;
+export const COUNTS_AS_REVENUE = sql`(${orders.paymentStatus} = 'succeeded'
+  AND ${orders.status} <> 'rejected'
+  AND NOT EXISTS (SELECT 1 FROM ${orderRefundAllocations}
+    WHERE ${orderRefundAllocations.orderId} = ${orders.id} AND ${orderRefundAllocations.kind} = 'cancellation'))`;
+
+// Keep the correlated query in its own SQL fragment. Drizzle's single-table
+// SELECT projection strips qualification from columns in the outer fragment.
+const ACTUAL_RETURNED_CASH_KURUS = sql<number>`COALESCE((
+  SELECT SUM(${orderRefundAllocations.cashKurus})
+  FROM ${orderRefundAllocations}
+  INNER JOIN ${orderRefundRecords} ON ${orderRefundRecords.id} = ${orderRefundAllocations.refundId}
+    AND ${orderRefundRecords.kind} = ${orderRefundAllocations.kind}
+  WHERE ${orderRefundAllocations.orderId} = ${orders.id}
+    AND ${orderRefundRecords.kind} IN ('refund', 'cancellation')
+), 0)`;
+
+/** Current net cash revenue; original collection above remains immutable. */
+export const NET_REVENUE_CASH_KURUS = sql<number>`CASE WHEN ${COUNTS_AS_REVENUE} THEN
+  ${CASH_COLLECTED_KURUS} - ${ACTUAL_RETURNED_CASH_KURUS} ELSE 0 END`;
 
 /** The same definition in words, shown under every revenue figure. */
 export const REVENUE_DEFINITION_TR =
-  "Tahsil edilen: sipariş tutarı − hediye kartı − havale indirimi. İade edilen siparişler sayılmaz.";
+  "Net nakit ciro: ilk nakit tahsilatı − kayıtlı nakit iadeleri. Hediye kartı dönüşü nakit değildir. İade edilmiş ve iptal edilmiş siparişler ciroya sayılmaz; iptalde elde kalan nakit iade yükümlülüğüdür. İadeler ilk satışın döneminden düşülür.";
 
 /**
  * Refund-end-state: a refunded order keeps its status, but every forward

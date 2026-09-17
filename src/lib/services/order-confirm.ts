@@ -10,6 +10,7 @@ import {
   AUTO_ASSIGN_SKIP_FOR_FAILURE,
   assignManufacturerToOrder,
   isOrderRefunded,
+  notRefundedGuard,
   orderHasPrintableContent,
 } from "@/lib/services/manufacturer-assign";
 import {
@@ -313,10 +314,12 @@ export async function kickOffMarketplaceOrder(
     await autoAssignIfEligible(order.id, { reason: "ödeme alındı" });
   } else {
     // Shape 3.
-    await db
+    const [advanced] = await db
       .update(orders)
       .set({ status: "awaiting_model", updatedAt: new Date() })
-      .where(eq(orders.id, order.id));
+      .where(and(eq(orders.id, order.id), eq(orders.status, "paid"), notRefundedGuard()))
+      .returning({ id: orders.id });
+    if (!advanced) return;
     await emitOrderChanged({
       orderId: order.id,
       orderNumber: order.orderNumber,

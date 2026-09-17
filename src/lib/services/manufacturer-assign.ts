@@ -615,6 +615,9 @@ export async function assignManufacturerToOrder(
     // `not_assignable`: callers map reasons through fixed tables, and a new
     // member would reach them as an unknown key.
     notRefundedGuard(),
+    // Cancellation can retain succeeded payment while the cash return is due.
+    // Even a caller bypassing the normal stage guard cannot restart that order.
+    ne(orders.status, "rejected"),
   ];
   if (statusGuard) conditions.push(statusGuard);
   // Kuralın SQL ikizi, YAZININ İÇİNDE. Yukarıdaki okuma ile bu UPDATE arasında

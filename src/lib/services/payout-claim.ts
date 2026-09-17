@@ -210,10 +210,13 @@ export interface PayableGroup {
 
 export interface BlockedPayableGroup extends Omit<PayableGroup, "netKurus"> {
   netKurus: number | null;
-  reason: "batched" | "settled" | "reversed" | "missing" | "source_ineligible" | "offset_exceeds_source" | "invalid_group";
+  reason: "batched" | "settled" | "reversed" | "missing" | "source_ineligible" | "order_cancelled" | "offset_exceeds_source" | "invalid_group";
 }
 
-export interface PayableSource extends PayableMember { eligible: boolean }
+export interface PayableSource extends PayableMember {
+  eligible: boolean;
+  ineligibleReason?: "order_cancelled";
+}
 
 export function groupPartnerPayables(sources: PayableSource[], offsets: PayableMember[], payoutId?: string) {
   const groups: PayableGroup[] = [], blockedGroups: BlockedPayableGroup[] = [];
@@ -245,7 +248,7 @@ export function groupPartnerPayables(sources: PayableSource[], offsets: PayableM
       sourceNetKurus: source?.netKurus ?? 0, offsetNetKurus: debits.map(d => d.netKurus),
     });
     if (assessment.eligible) groups.push({ ...base, netKurus: assessment.netKurus });
-    else blockedGroups.push({ ...base, netKurus: assessment.netKurus, reason: assessment.reason });
+    else blockedGroups.push({ ...base, netKurus: assessment.netKurus, reason: assessment.reason === "source_ineligible" ? source?.ineligibleReason ?? assessment.reason : assessment.reason });
   }
   return { groups, blockedGroups };
 }

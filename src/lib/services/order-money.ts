@@ -1,10 +1,12 @@
-import { and, asc, desc, eq, like, ne } from "drizzle-orm";
+import { and, asc, desc, eq, like, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   adminActions,
   manufacturerEarnings,
   manufacturers,
   orderItems,
+  orderRefundRecords,
+  orderRefundAllocations,
   orders,
   painterEarnings,
   painterPayouts,
@@ -116,6 +118,7 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
     columns: {
       id: true,
       orderType: true,
+      status: true,
       amountKurus: true,
       productionBaseKurus: true,
       paintingPriceKurus: true,
@@ -284,6 +287,7 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
 
   return {
     orderType: order.orderType,
+    status: order.status,
     amountKurus: order.amountKurus,
     productionBaseKurus: order.productionBaseKurus,
     paintingPriceKurus: order.paintingPriceKurus,
@@ -330,6 +334,26 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
     manufacturerEarning: toEarning(mfrRows[0]),
     painterEarning: toEarning(painterRows[0]),
     adjustments: await loadOrderAdjustments(tx, order.id),
+    // Read amounts from each order allocation, not the payment-scope header.
+    // Same repeatable-read transaction as original tenders, earnings and adjustments.
+    // A failed read propagates; missing refund data must never look like zero returns.
+    refunds: await tx.select({
+      kind: orderRefundRecords.kind,
+      cashKurus: orderRefundAllocations.cashKurus,
+      giftKurus: orderRefundAllocations.giftKurus,
+      // JSON null is an explicit unknown; absent old metadata is not.
+      // Preserve the coordinator's recorded result without re-reading lineage.
+      cancellationCashUnknown: sql<boolean>`(${orderRefundRecords.kind} = 'cancellation' AND COALESCE(
+        ${orderRefundRecords.resultSnapshot}->'cashRefundRequiredKurus' = 'null'::jsonb
+        OR ${orderRefundRecords.sourceSnapshot}->'payment'->'cashBasisKurus' = 'null'::jsonb,
+        false
+      ))`,
+    }).from(orderRefundAllocations)
+      .innerJoin(orderRefundRecords, and(
+        eq(orderRefundRecords.id, orderRefundAllocations.refundId),
+        eq(orderRefundRecords.kind, orderRefundAllocations.kind),
+      ))
+      .where(eq(orderRefundAllocations.orderId, order.id)),
   };
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
@@ -481,9 +481,9 @@ export async function POST(
     // aşamada okunan (bayat) durumu geri yazmak, aynı istekte QC sıfırlamasının
     // yazacağı `printing`i ezerdi.
     //
-    // Refund guard in the write too: a refund that landed while the files were
-    // being promoted must not see its order advance. The revision stays attached
-    // (files on a refunded order are inert) and is still audited below.
+    // Cancellation can leave payment succeeded. Check the current status too,
+    // and only advance if the order still awaits its model. The saved revision
+    // remains attached and audited even when the transition loses.
     const advances = order.status === "awaiting_model";
     const newStatus = advances ? "approved" : order.status;
     const [advanced] = await db
@@ -492,7 +492,12 @@ export async function POST(
         ...(advances ? { status: "approved" as const } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(orders.id, orderId), notRefundedGuard()))
+      .where(and(
+        eq(orders.id, orderId),
+        notRefundedGuard(),
+        ne(orders.status, "rejected"),
+        advances ? eq(orders.status, "awaiting_model") : undefined,
+      ))
       .returning({ id: orders.id });
 
     const stl = inputs.filter((f) => f.kind === "stl").length;
@@ -513,7 +518,9 @@ export async function POST(
     });
 
     if (!advanced) {
-      return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
+      return NextResponse.json({
+        error: "Model dosyaları kaydedildi ancak sipariş durumu değiştiği için sonraki işlemler uygulanmadı. Sayfayı yenileyin.",
+      }, { status: 409 });
     }
 
     // Yan etkiler (QC sıfırlama, müşteri onay turu, partner duyurusu, kargo

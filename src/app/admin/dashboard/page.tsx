@@ -7,7 +7,7 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { DashboardClient } from "./dashboard-client";
 import {
   AWAITING_MANUFACTURER,
-  CASH_COLLECTED_KURUS,
+  NET_REVENUE_CASH_KURUS,
   COUNTS_AS_REVENUE,
   ISTANBUL_TODAY_START,
   NOT_REFUNDED,
@@ -103,14 +103,14 @@ async function getMetrics() {
     // collected on orders whose payment succeeded, refunds excluded).
     db
       .select({
-        total: sql<number>`COALESCE(SUM(${CASH_COLLECTED_KURUS}), 0)`,
+        total: sql<number>`COALESCE(SUM(${NET_REVENUE_CASH_KURUS}), 0)`,
       })
       .from(orders)
       .where(COUNTS_AS_REVENUE),
 
     db
       .select({
-        total: sql<number>`COALESCE(SUM(${CASH_COLLECTED_KURUS}), 0)`,
+        total: sql<number>`COALESCE(SUM(${NET_REVENUE_CASH_KURUS}), 0)`,
       })
       .from(orders)
       .where(sql`${COUNTS_AS_REVENUE} AND ${orders.paidAt} >= ${ISTANBUL_TODAY_START}`),
@@ -202,7 +202,7 @@ async function getMetrics() {
 // analytics' cannot drift apart by an off-by-one.
 async function getRevenueTrend(): Promise<{ date: string; amount: number }[]> {
   const rows = await db.execute(
-    sql`SELECT ${istanbulDay(orders.paidAt)} AS day, SUM(${CASH_COLLECTED_KURUS}) AS total
+    sql`SELECT ${istanbulDay(orders.paidAt)} AS day, SUM(${NET_REVENUE_CASH_KURUS}) AS total
         FROM ${orders}
         WHERE ${COUNTS_AS_REVENUE}
           AND ${orders.paidAt} >= ${istanbulLastDaysStart(30)}

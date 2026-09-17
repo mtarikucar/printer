@@ -1,5 +1,6 @@
 import { assertEditedDraftConsent } from "@/lib/services/draft-commercial-consent";
 import { allocateCartMoney } from "@/lib/config/cart-money-allocation";
+import { GiftCreditReturnError, lockGiftRedemptionsTx, restoreGiftCreditTx } from "./gift-credit-return";
 import { eq, and, isNull, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -9,8 +10,8 @@ import {
   orderItems,
   orderPhotos,
   products,
-  giftCards,
   giftCardRedemptions,
+  giftCreditReturns,
   workshopParticipants,
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
@@ -102,6 +103,18 @@ export async function promoteDraftToOrder(
         }
       }
       throw new Error(`DRAFT_NOT_PROMOTABLE:${draft.status}`);
+    }
+
+    // A returned reservation cannot fund promotion. The draft lock serializes
+    // this check with expiry and every transaction-taking draft gift return.
+    if (draft.giftCardAmountKurus > 0) {
+      const reservations = await tx.select({ id: giftCardRedemptions.id, refundedAt: giftCardRedemptions.refundedAt })
+        .from(giftCardRedemptions).where(eq(giftCardRedemptions.draftId, draft.id));
+      const returns = reservations.length ? await tx.select({ id: giftCreditReturns.id }).from(giftCreditReturns)
+        .where(inArray(giftCreditReturns.redemptionId, reservations.map(r => r.id))).limit(1) : [];
+      if (reservations.some(r => r.refundedAt) || returns.length) {
+        throw new GiftCreditReturnError("gift_history_unknown", "Hediye kartı rezervasyonu iade edilmiş; bu taslak ödemeye dönüştürülemez.");
+      }
     }
 
     // Still under the draft row lock: an admin edit cannot clear consent
@@ -657,9 +670,8 @@ export async function expireDraft(
       return null;
     }
 
-    // Atomic claim: refund only redemptions that haven't been refunded yet.
-    // The `refundedAt IS NULL` guard makes this idempotent — a retried job
-    // that finds rows already refunded just gets zero claimed rows back.
+    // Return the reserved residual and its evidence in this transaction.
+    // Completed markers and the unique expiry claim prevent duplicate credit.
     await refundGiftCardForDraft(tx, draftId);
 
     await tx
@@ -822,97 +834,27 @@ export async function failDraft(
   await cancelHavaleJobs(draftId);
 }
 
-/**
- * Refund any active (refundedAt IS NULL) gift-card redemption rows tied to
- * `draftId`. Implementation note: we do the credit-restore in a single UPDATE
- * against `giftCardRedemptions` keyed on `refundedAt IS NULL`. Any concurrent
- * worker retry that re-enters this code path finds zero rows in that state
- * and is a no-op — so even without the partial unique index (defense in
- * depth) we cannot double-refund.
- */
 type GiftTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-// Restore credit for each just-claimed redemption row. Locks per gift card to
-// prevent a concurrent redemption from stomping the balance. Shared by the
-// draft-expiry and order-refund paths.
-async function restoreClaimedRedemptions(
-  tx: GiftTx,
-  claimed: { giftCardId: string; amountKurus: number }[]
-): Promise<void> {
-  for (const r of claimed) {
-    const [card] = await tx
-      .select()
-      .from(giftCards)
-      .where(eq(giftCards.id, r.giftCardId))
-      .for("update");
-    if (!card) continue;
-
-    const newBalance = card.balanceKurus + r.amountKurus;
-    let newStatus: typeof card.status;
-    if (card.status === "expired") {
-      newStatus = "expired";
-    } else if (newBalance === 0) {
-      newStatus = "fully_used";
-    } else if (newBalance >= card.amountKurus) {
-      newStatus = "active";
-    } else {
-      newStatus = "partially_used";
+/** Caller holds the unpromoted draft row lock; release only its reservations. */
+async function refundGiftCardForDraft(tx: GiftTx, draftId: string): Promise<void> {
+  const candidates = await tx.select({ id: giftCardRedemptions.id }).from(giftCardRedemptions).where(and(
+    eq(giftCardRedemptions.draftId, draftId), isNull(giftCardRedemptions.orderId), isNull(giftCardRedemptions.refundedAt),
+  ));
+  if (!candidates.length) return;
+  const { redemptions } = await lockGiftRedemptionsTx(tx, candidates.map(r => r.id));
+  const history = await tx.select().from(giftCreditReturns).where(inArray(giftCreditReturns.redemptionId, redemptions.map(r => r.id)));
+  const allocations = redemptions.filter(r => !r.refundedAt).map(r => {
+    const returns = history.filter(h => h.redemptionId === r.id);
+    const restored = returns.reduce((sum, h) => sum + h.amountKurus, 0);
+    if (returns.some(h => h.balanceEffect !== "restore") || !Number.isSafeInteger(restored) || restored < 0 || restored >= r.amountKurus) {
+      throw new GiftCreditReturnError("gift_history_unknown", "Taslak hediye kartı iade geçmişi tutarsız.");
     }
-    await tx
-      .update(giftCards)
-      .set({
-        balanceKurus: newBalance,
-        status: newStatus,
-        updatedAt: new Date(),
-      })
-      .where(eq(giftCards.id, card.id));
-  }
-}
-
-async function refundGiftCardForDraft(
-  tx: GiftTx,
-  draftId: string
-): Promise<void> {
-  const claimed = await tx
-    .update(giftCardRedemptions)
-    .set({ refundedAt: new Date() })
-    .where(
-      and(
-        eq(giftCardRedemptions.draftId, draftId),
-        isNull(giftCardRedemptions.refundedAt)
-      )
-    )
-    .returning({
-      giftCardId: giftCardRedemptions.giftCardId,
-      amountKurus: giftCardRedemptions.amountKurus,
-    });
-  await restoreClaimedRedemptions(tx, claimed);
-}
-
-/**
- * Refund any active (refundedAt IS NULL) gift-card redemption tied to an ORDER.
- * After a draft is promoted its redemption row carries `orderId`, so the admin
- * refund flow claws the spent credit back onto the card here. Idempotent via the
- * `refundedAt IS NULL` guard — a second refund of the same order is a no-op.
- */
-export async function refundGiftCardForOrder(orderId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    const claimed = await tx
-      .update(giftCardRedemptions)
-      .set({ refundedAt: new Date() })
-      .where(
-        and(
-          eq(giftCardRedemptions.orderId, orderId),
-          isNull(giftCardRedemptions.refundedAt)
-        )
-      )
-      .returning({
-        giftCardId: giftCardRedemptions.giftCardId,
-        amountKurus: giftCardRedemptions.amountKurus,
-      });
-    await restoreClaimedRedemptions(tx, claimed);
+    return { redemptionId: r.id, amountKurus: r.amountKurus - restored };
   });
+  if (allocations.length) await restoreGiftCreditTx(tx, { scope: { kind: "draft", id: draftId }, parent: { expiredDraftId: draftId }, allocations });
 }
+
 
 export async function findDraftByReference(reference: string) {
   return db.query.orderDrafts.findFirst({

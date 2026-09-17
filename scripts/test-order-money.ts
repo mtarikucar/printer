@@ -1708,7 +1708,7 @@ test("iade (QA f/m): iki pay da 'refunded' ile kapanır, tahakkuk eksik değil, 
     ]
   );
   assert.ok(Object.is(b.platform.netKurus, 0), "platform neti -0 değil, +0");
-  assert.ok(hasWarning(b, "iade edildi"));
+  assert.ok(hasWarning(b, "gerçekleşen tutarı bilinmiyor"));
   assert.ok(!hasWarning(b, "platform zararı"));
 });
 
@@ -1744,7 +1744,7 @@ test("iade: ciro 0 (tahsilat korunur), ödenmiş hakediş platform zararı olara
   assert.equal(m.partnerName, "Atölye A", "hakediş kime yazıldıysa o görünür");
   assert.equal(m.voided, "refunded");
   assert.equal(m.earning?.status, "paid", "ödenmiş satır kendi durumunu korur");
-  assert.ok(hasWarning(b, "iade edildi"));
+  assert.ok(hasWarning(b, "gerçekleşen tutarı bilinmiyor"));
   assert.ok(hasWarning(b, "platform zararı"));
 });
 
@@ -2411,6 +2411,122 @@ test("netting and unavailable money cannot be displayed as a bank payment or a z
   const missing = renderMoney(null);
   assert.ok(missing.includes("Para dökümü hesaplanamadı"));
   assert.ok(!missing.includes("Platform net"));
+});
+
+test("partial cash returns reduce revenue and platform net without changing sale, tender or original earnings", () => {
+  const source = snap({ amountKurus: 10000, productionBaseKurus: 10000, paintingPriceKurus: 0,
+    giftCardAmountKurus: 2000, havaleDiscountKurus: 500, manufacturerEarning: earning(10000) });
+  const before = deriveOrderMoneyBreakdown(source);
+  const after = deriveOrderMoneyBreakdown({ ...source, refunds: [
+    { kind: "refund", cashKurus: 3000, giftKurus: 0 },
+    { kind: "refund", cashKurus: 1000, giftKurus: 500 },
+  ] });
+  assert.equal(after.collection.cashCollectedKurus, 7500);
+  assert.equal(after.collection.cashReturnedKurus, 4000);
+  assert.equal(after.collection.giftReturnedKurus, 500);
+  assert.equal(after.collection.cashRemainingKurus, 3500);
+  assert.equal(after.collection.revenueKurus, 3500);
+  assert.equal(after.platform.netKurus, before.platform.netKurus - 4000);
+  assert.deepEqual(after.shares, before.shares);
+  assert.deepEqual(after.lines, before.lines);
+});
+
+test("gift return is restored tender and never a second cash or invoice discount", () => {
+  const source = snap({ giftCardAmountKurus: 2000 });
+  const before = deriveOrderMoneyBreakdown(source);
+  const after = deriveOrderMoneyBreakdown({ ...source, refunds: [{ kind: "refund", cashKurus: 0, giftKurus: 1200 }] });
+  assert.equal(after.collection.giftReturnedKurus, 1200);
+  assert.equal(after.collection.giftCardKurus, 2000);
+  assert.equal(after.collection.revenueKurus, before.collection.revenueKurus);
+  assert.equal(after.platform.netKurus, before.platform.netKurus);
+});
+
+test("cancelled succeeded cash is refund-due liability, never earned platform profit", () => {
+  const b = deriveOrderMoneyBreakdown(snap({ status: "rejected", manufacturerId: null,
+    refunds: [{ kind: "cancellation", cashKurus: 0, giftKurus: 0 }, { kind: "refund", cashKurus: 10000, giftKurus: 0 }],
+    adjustments: [adjustment({ netKurus: 3000 })] }));
+  assert.equal(b.collection.cashRemainingKurus, 339900);
+  assert.equal(b.collection.cashRefundDueKurus, 339900);
+  assert.equal(b.collection.revenueKurus, 0);
+  assert.equal(b.platform.netKurus, 0);
+  assert.equal(b.platform.pendingAdjustmentNetKurus, 3000);
+  assert.ok(b.shares.every(s => s.voided === "cancelled" && !s.accrualMissing));
+  const html = renderMoney(b);
+  assert.ok(html.includes("İade bekleyen nakit yükümlülüğü"));
+  assert.ok(!html.includes("İade edildi — hakediş oluşmaz"));
+});
+
+test("actual full return retains paid compensation and independent pending reprint risk", () => {
+  const b = deriveOrderMoneyBreakdown(snap({ ...DETACHED,
+    manufacturerEarning: earning(10000, { status: "paid", payout: PAID_PAYOUT }),
+    refunds: [{ kind: "refund", cashKurus: 349900, giftKurus: 0 }],
+    adjustments: [adjustment({ netKurus: 3000 })],
+  }));
+  assert.equal(b.collection.cashRemainingKurus, 0);
+  assert.equal(b.collection.legacyRefundUnknown, false);
+  assert.equal(b.platform.netKurus, -6000);
+  assert.equal(b.platform.pendingAdjustmentNetKurus, 3000);
+});
+
+test("cancelled paid netting has zero retained cash cost and still owes the customer's cash", () => {
+  const b = deriveOrderMoneyBreakdown(snap({ status: "rejected",
+    manufacturerEarning: earning(10000, { status: "paid", payout: { ...PAID_PAYOUT, settlementKind: "netting", reference: null } }),
+    adjustments: [adjustment({ netKurus: -6000, kind: "unpaid_offset", status: "settled", activePending: false,
+      sourceKind: "manufacturer_earning", sourceId: "earning1", settlementKind: "netting" })],
+  }));
+  assert.equal(b.platform.netKurus, 0);
+  assert.equal(b.collection.cashRefundDueKurus, 349900);
+  assert.equal(b.collection.revenueKurus, 0);
+});
+
+test("legacy evidence never fabricates a current cash return or a known remaining balance", () => {
+  const b = deriveOrderMoneyBreakdown(snap({ ...DETACHED, refunds: [{ kind: "legacy_evidence", cashKurus: 349900, giftKurus: 0 }] }));
+  assert.equal(b.collection.cashReturnedKurus, 0);
+  assert.equal(b.collection.cashRemainingKurus, null);
+  assert.equal(b.collection.legacyRefundUnknown, true);
+  const html = renderMoney(b);
+  assert.ok(html.includes("Eski iadenin gerçekleşen tutarı bilinmiyor"));
+});
+
+test("return facts reject invalid amounts instead of publishing a plausible zero balance", () => {
+  assert.throws(() => deriveOrderMoneyBreakdown(snap({ refunds: [{ kind: "refund", cashKurus: 350000, giftKurus: 0 }] })), /return/i);
+  assert.throws(() => deriveOrderMoneyBreakdown(snap({ refunds: [{ kind: "refund", cashKurus: -1, giftKurus: 0 }] })), /return/i);
+});
+
+test("cancelled unknown payment basis stays unknown without losing actual returns or retained partner effects", () => {
+  const b = deriveOrderMoneyBreakdown(snap({ status: "rejected", amountKurus: 6000,
+    productionBaseKurus: 6000, paintingPriceKurus: 0,
+    manufacturerEarning: earning(10000, { status: "paid", payout: PAID_PAYOUT }),
+    refunds: [{ kind: "cancellation", cashKurus: 0, giftKurus: 0, cancellationCashUnknown: true },
+      { kind: "refund", cashKurus: 1000, giftKurus: 0 }],
+    adjustments: [adjustment({ netKurus: 3000 })],
+  }));
+  assert.equal(b.collection.cashRefundDueKurus, null);
+  assert.equal(b.collection.cashRemainingKurus, null);
+  assert.equal(b.collection.cashCollectedKurus, 6000);
+  assert.equal(b.collection.cashReturnedKurus, 1000);
+  assert.equal(b.collection.revenueKurus, 0);
+  assert.equal(b.collection.legacyRefundUnknown, false);
+  assert.equal(b.platform.netKurus, -6000);
+  assert.equal(b.platform.pendingAdjustmentNetKurus, 3000);
+  const html = renderMoney(b);
+  assert.match(html, /İade bekleyen nakit yükümlülüğü<\/dt><dd[^>]*>Bilinmiyor<\/dd>/);
+  assert.match(html, /İadeler sonrası kalan nakit<\/dt><dd[^>]*>Bilinmiyor<\/dd>/);
+  assert.ok(!html.includes("Eski iadenin gerçekleşen tutarı bilinmiyor"));
+  assert.ok(!html.includes("Platform net (iptal yükümlülüğü ayrıldı)"));
+});
+
+test("unknown cancellation flag does not change other record kinds or legacy omitted metadata", () => {
+  for (const kind of ["refund", "legacy_evidence"] as const) {
+    const b = deriveOrderMoneyBreakdown(snap({ refunds: [{ kind, cashKurus: 0, giftKurus: 0, cancellationCashUnknown: true }] }));
+    assert.equal(b.collection.cashRemainingKurus, 349900);
+    assert.equal(b.collection.cashRefundDueKurus, 0);
+  }
+  for (const cancellationCashUnknown of [undefined, false]) {
+    const b = deriveOrderMoneyBreakdown(snap({ status: "rejected",
+      refunds: [{ kind: "cancellation", cashKurus: 0, giftKurus: 0, cancellationCashUnknown }] }));
+    assert.equal(b.collection.cashRefundDueKurus, 349900);
+  }
 });
 
 test("formatTry Türkçe biçim, eksi başta", () => {

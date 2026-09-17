@@ -3,17 +3,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { cancelWorkshopParticipant } from "@/lib/services/workshop-cancel";
 import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
-/**
- * Tek bir katılımcıyı partiden çıkarır (kullanım: modelin yetişmeyeceği
- * anlaşıldı) ve parasını iade eder.
- *
- * `shipped`/`delivered` siparişte 409 döner — figür yolda, otomatik iade
- * ürünü bedava vermek olurdu; admin normal iade ekranını kullanır.
- *
- * Koltuk yalnızca seans hâlâ `open` iken havuza döner: kapanmış bir seansta
- * `bookedCount`u düşürmek, partinin donmuş komisyon oranıyla gerçek sipariş
- * sayısını çelişkiye düşürür (bkz. workshop-cancel.ts / seatReturnsToPool).
- */
+/** Paid cancellation and the participant seat commit together; cash remains due. */
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string; pid: string }> }
@@ -31,15 +21,11 @@ export async function POST(
 
     if (!res.ok) {
       const status =
-        res.reason === "not_found" ? 404 : res.reason === "already_shipped" ? 409 : 500;
+        res.reason === "not_found" ? 404 : res.reason === "already_shipped" || res.reason === "busy" ? 409 : 500;
       return NextResponse.json({ error: res.reason }, { status });
     }
 
-    return NextResponse.json({
-      ok: true,
-      refunded: res.refunded,
-      seatReleased: res.seatReleased,
-    });
+    return NextResponse.json(res);
   } catch (e) {
     return handleRouteFailure(e, "POST /api/admin/workshops/sessions/[id]/participants/[pid]/cancel", ADMIN_ACTION_FAILED_ERROR);
   }

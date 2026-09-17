@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { orders, orderDrafts, analyticsEvents, products } from "@/lib/db/schema";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
 import {
-  CASH_COLLECTED_KURUS,
+  NET_REVENUE_CASH_KURUS,
   COUNTS_AS_REVENUE,
   ISTANBUL_TODAY,
   REVENUE_DEFINITION_TR,
@@ -44,7 +44,7 @@ const FUNNEL_STEPS: { name: string; label: string }[] = [
 // (amount − gift card − havale discount) on orders whose payment succeeded, so
 // refunded orders drop out. Both pages read these fragments; neither spells
 // the formula out itself.
-const NET = CASH_COLLECTED_KURUS;
+const NET = NET_REVENUE_CASH_KURUS;
 
 export default async function AdminAnalyticsPage({
   searchParams,

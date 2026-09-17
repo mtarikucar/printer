@@ -3,8 +3,9 @@ import type { Locale } from "@/lib/i18n/types";
 import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
+import type { RefundRecordEmailMessage } from "./refund-record-notices";
 
-const transporter = nodemailer.createTransport({
+const smtpOptions = {
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
   secure: process.env.SMTP_PORT === "465",
@@ -14,7 +15,11 @@ const transporter = nodemailer.createTransport({
   auth: process.env.SMTP_USER
     ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
     : undefined,
-});
+};
+const transporter = nodemailer.createTransport(smtpOptions);
+// Bound SMTP inactivity below the refund record's renewable five-minute lease.
+const refundTransporter = nodemailer.createTransport({ ...smtpOptions,
+  connectionTimeout: 30_000, greetingTimeout: 30_000, socketTimeout: 60_000 });
 
 const FROM_EMAIL = process.env.SMTP_FROM || "Figurunica <siparis@figurunica.com>";
 
@@ -26,12 +31,72 @@ function escHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Render only snapshotted refund evidence; never infer an amount or bank ETA. */
+export function renderRefundRecordEmail(message: Pick<RefundRecordEmailMessage,
+  "orderNumber" | "customerName" | "locale" | "notice" | "audience">): { subject: string; html: string } {
+  const en = (message.locale ?? defaultLocale) === "en";
+  const amount = (kurus: number) => new Intl.NumberFormat(en ? "en-GB" : "tr-TR", {
+    style: "currency", currency: "TRY",
+  }).format(kurus / 100);
+  const { notice } = message;
+  const lines: string[] = [];
+  const audience = message.audience ?? "customer";
+  if (audience !== "customer") {
+    const heading = en ? "Order fulfillment stopped" : "Sipariş işlemleri durduruldu";
+    const work = audience === "manufacturer" ? (en ? "production" : "üretim") : (en ? "painting" : "boyama");
+    const reason = notice.kind === "actual_refund"
+      ? (en ? "A full return has been recorded for this order." : "Bu siparişin tam iadesi kaydedildi.")
+      : (en ? "This order has been cancelled." : "Bu sipariş iptal edildi.");
+    const instruction = en ? `Stop ${work} for this order and do not start a new shipment.`
+      : `Bu sipariş için ${work} işlemlerini durdurun ve yeni sevkiyat başlatmayın.`;
+    return { subject: `${heading} — ${message.orderNumber}`,
+      html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1>${escHtml(heading)}</h1><p>${escHtml(message.customerName)}</p>
+        <p>${en ? "Order" : "Sipariş"}: ${escHtml(message.orderNumber)}</p>
+        <p>${escHtml(reason)}</p><p>${escHtml(instruction)}</p></div>` };
+  }
+  let heading: string;
+  if (notice.kind === "actual_refund") {
+    heading = en ? "Refund recorded" : "Gerçekleşen iade kaydedildi";
+    if (notice.cashKurus > 0) lines.push(en
+      ? `Completed cash refund recorded: ${amount(notice.cashKurus)}.`
+      : `Gerçekleşen nakit iadesi kaydedildi: ${amount(notice.cashKurus)}.`);
+  } else {
+    heading = en ? "Order cancelled" : "Sipariş iptal edildi";
+    if (notice.kind === "no_collection") lines.push(en
+      ? "There is no recorded collection for this order. No refund was recorded."
+      : "Bu sipariş için kayıtlı tahsilat bulunmuyor. İade kaydedilmedi.");
+    else if (notice.cashRefundRequiredKurus === null) lines.push(en
+      ? "The cash refund obligation requires reconciliation. No completed cash refund was recorded with this cancellation."
+      : "Nakit iade yükümlülüğü mutabakat gerektiriyor. Bu iptal işleminde gerçekleşmiş nakit iadesi kaydedilmedi.");
+    else if (notice.cashRefundRequiredKurus > 0) lines.push(en
+      ? `Cash refund pending: ${amount(notice.cashRefundRequiredKurus)}. No completed cash refund was recorded with this cancellation.`
+      : `Bekleyen nakit iadesi: ${amount(notice.cashRefundRequiredKurus)}. Bu iptal işleminde gerçekleşmiş nakit iadesi kaydedilmedi.`);
+    else lines.push(en ? "No remaining cash refund obligation is recorded."
+      : "Kayıtlı kalan nakit iade yükümlülüğü bulunmuyor.");
+  }
+  if (notice.kind !== "no_collection" && notice.giftKurus > 0) lines.push(en
+    ? `Gift credit restored to the original gift card: ${amount(notice.giftKurus)}.`
+    : `Kullanılan hediye kartına geri yüklenen bakiye: ${amount(notice.giftKurus)}.`);
+  if (notice.kind === "cancellation" && notice.giftReturnBlockedReason) lines.push(en
+    ? `Unresolved gift credit return: ${notice.giftReturnBlockedReason}`
+    : `Çözümlenmemiş hediye bakiyesi iadesi: ${notice.giftReturnBlockedReason}`);
+  return {
+    subject: `${heading} — ${message.orderNumber}`,
+    html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h1>${escHtml(heading)}</h1><p>${escHtml(message.customerName)}</p>
+      <p>${en ? "Order" : "Sipariş"}: ${escHtml(message.orderNumber)}</p>
+      ${lines.map((line) => `<p>${escHtml(line)}</p>`).join("\n")}</div>`,
+  };
+}
+
 interface SendEmailParams {
   type:
     | "order_confirmation"
     | "generation_failed"
     | "order_shipped"
     | "order_refunded"
+    | "refund_record_notice"
     | "revision_request"
     | "gift_card_received"
     | "order_approved"
@@ -59,6 +124,8 @@ interface SendEmailParams {
   to: string;
   orderNumber: string;
   customerName: string;
+  refundNotice?: RefundRecordEmailMessage["notice"];
+  audience?: RefundRecordEmailMessage["audience"];
   /** Finish tier — decides whether the paint-kit list is included. */
   finish?: string;
   trackingNumber?: string;
@@ -223,6 +290,11 @@ function getTemplates(locale: Locale) {
         </div>
       `,
     }),
+
+    refund_record_notice: (p) => {
+      if (!p.refundNotice) throw new Error("Refund record email intent missing");
+      return renderRefundRecordEmail({ ...p, notice: p.refundNotice });
+    },
 
     order_refunded: (p) => ({
       subject: d["email.refunded.subject"].replace("{orderNumber}", p.orderNumber),
@@ -663,12 +735,15 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   const templates = getTemplates(locale);
   const template = templates[params.type](params);
 
-  await transporter.sendMail({
+  const result = await (params.type === "refund_record_notice" ? refundTransporter : transporter).sendMail({
     from: FROM_EMAIL,
     to: resolveRecipient(params),
     subject: template.subject,
     html: template.html,
   });
+  if (params.type === "refund_record_notice" && (!result.accepted.length || result.rejected.length)) {
+    throw new Error("Refund record email recipient was not accepted by SMTP");
+  }
 }
 
 /**

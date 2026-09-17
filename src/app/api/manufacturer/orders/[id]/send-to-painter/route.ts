@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, eq, ne, gt, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, manufacturers, painters, manufacturerActions } from "@/lib/db/schema";
@@ -259,6 +259,7 @@ export async function POST(
           eq(orders.needsPainting, true),
           gt(orders.paintingPriceKurus, 0),
           notRefundedGuard(),
+            ne(orders.status, "rejected"),
           // No painter yet: the condition admin assign-painter writes with. The
           // painter check above reads before this write, so without it a
           // concurrent admin hand-off was overwritten by a second painter, and

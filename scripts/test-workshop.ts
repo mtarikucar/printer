@@ -323,12 +323,9 @@ test("toplu teslim bekleme listesi yalnızca delivered+rejected'i hariç tutar (
 });
 
 // ─── Partiye ait olmanın tanımı: İADE EDİLMİŞ sipariş partide DEĞİLDİR ─────
-// Bu, canlıda para kaybettiren gerçek bir açıktı: `refundOrder`
-// `payment_status`ü `refunded` yapıyor ama `orders.status`e HİÇ DOKUNMUYOR
-// (`rejected` yazan tek yer admin'in sipariş red rotası ve iade yolları oradan
-// geçmiyor). Yalnızca `status <> 'rejected'` bakan yüklemler iade edilmiş
-// siparişi partide TUTUYORDU: merdiven şişiyor, üretici geri yapıştırılıyor,
-// sevkte gerçek hakediş tahakkuk ediyor ve seans asla `shipped`e ulaşamıyordu.
+// Gerçek iade (payment_status=refunded) ve iptal (status=rejected) ayrı
+// kapanış nedenleridir. İptal edilmiş ama nakit iadesi henüz yapılmamış
+// succeeded sipariş de partiye, atamaya ve sevk kuyruğuna giremez.
 //
 // Aşağıdakiler tanımın İKİ ayağını da pinler. Biri `orderInBatch`ten ödeme
 // kontrolünü çıkarırsa (ya da diziyi boşaltırsa) burası patlar. SQL tarafının
@@ -369,7 +366,7 @@ test("taslaksız koltuk tutması raporlama penceresi makul", () => {
 // Seans/katılımcı iptalinin ÜÇ ayrı davranışı saf bir karar fonksiyonunda
 // toplanır: rota da servis de aynı yerden okur, testi DB'siz çalışır.
 
-test("ödemeye hiç gelmemiş katılımcıda iade edilecek para yoktur", () => {
+test("siparişsiz katılımcı taslak sonlandırma yoluna gider", () => {
   // `orderId` yalnızca sipariş terfisinde yazılır — "bu kişi gerçekten ödedi
   // mi" sorusunun tek işareti budur.
   assert.equal(
@@ -397,7 +394,7 @@ test("sevk edilmiş/teslim edilmiş sipariş OTOMATİK iade edilmez", () => {
   assert.deepEqual([...WORKSHOP_CANCEL_SHIPPED_STATUSES].sort(), ["delivered", "shipped"]);
 });
 
-test("ödenmiş ama yola çıkmamış sipariş iade edilir", () => {
+test("ödenmiş ama yola çıkmamış sipariş para koordinatörüne gider", () => {
   for (const st of ["paid", "approved", "printing", "awaiting_model", "qc_pending", null]) {
     assert.equal(
       participantCancelDisposition({ orderId: "o1", orderStatus: st }),

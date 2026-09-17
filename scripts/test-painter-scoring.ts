@@ -879,7 +879,16 @@ check("başarı gövdesindeki UYARI üç panelde de gösteriliyor", () => {
     admin.includes("const [actionWarning, setActionWarning]"),
     "admin panelinde uyarı için ayrı bir hâl yok (kırmızı hata kutusu işlemi başarısız gösterirdi)"
   );
-  const assign = sliceBetween(admin, "const handleAssignPainter = async () => {", "// ─── Refund");
+  const tree = ts.createSourceFile("client.tsx", admin, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let assignBody: ts.Node | undefined;
+  const findAssign = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "handleAssignPainter"
+      && node.initializer && ts.isArrowFunction(node.initializer)) assignBody = node.initializer.body;
+    ts.forEachChild(node, findAssign);
+  };
+  findAssign(tree);
+  assert.ok(assignBody, "boyacı atama işlevi bulunamadı");
+  const assign = assignBody.getText(tree);
   assert.ok(
     assign.includes("setActionWarning(responseWarning(data))"),
     "atama, başarı gövdesindeki uyarıyı yere düşürüyor"

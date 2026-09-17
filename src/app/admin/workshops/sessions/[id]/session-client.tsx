@@ -70,25 +70,9 @@ interface BatchCorrectionResult {
   customersNotified: boolean;
 }
 
-/**
- * Seans iptal ucunun raporu. `alreadyShipped` ve `failed` boş DEĞİLSE bu
- * ekranda uyarı olarak durur: sessizce yutulan bir iade, geri ödenmemiş
- * müşteri parası demektir.
- */
-interface CancelReport {
-  refunded: string[];
-  alreadyRefunded: string[];
-  alreadyShipped: string[];
-  failed: string[];
-  /**
-   * PayTR'de ELLE yapılacak iadelerin iş listesi (isim + sipariş no + tutar).
-   * Bu kod tabanında PayTR iade API'si yok: `refundOrder` defteri yazıp
-   * müşteriye "iadeniz işleme alındı" der, parayı gerçekten gönderen adım
-   * admin'in panelde yaptığı işlemdir. Yirmi kişilik bir seansta bu yükümlülük
-   * ekrandan KOPYALANABİLİR biçimde çıkmalı, yoksa kimse listeyi tutamaz.
-   */
-  refundedOrders: Array<{ fullName: string; orderNumber: string; amountKurus: number }>;
-}
+type CancelReport = import("@/lib/services/workshop-cancel").WorkshopSessionCancelReport;
+const remainingAmount = (amount: number | null) => amount === null ? "Uzlaştırma gerekli" : formatKurus(amount);
+
 
 /**
  * Seans detayında toplu devir için seçilebilecek üretici.
@@ -135,10 +119,11 @@ const SESSION_CANCEL_ERRORS: Record<string, string> = {
 /** Katılımcı iptal ucunun makine okunur hata kodları → admin'e Türkçe karşılık. */
 const PARTICIPANT_CANCEL_ERRORS: Record<string, string> = {
   not_found: "Katılımcı bulunamadı.",
+  busy: "Seans veya ödeme kaydı başka bir işlemde güncelleniyor. İptal uygulanmadı; tekrar deneyin.",
   already_shipped:
     "Bu katılımcının figürü sevk edilmiş; otomatik iade edilmez. Normal iade ekranından tek tek halledin.",
-  refund_failed:
-    "İade işlenemedi — katılımcı İPTAL EDİLMEDİ. Tekrar deneyin ya da normal iade ekranını kullanın.",
+  cancellation_failed:
+    "İptal tamamlanamadı veya sonuç okunamadı. Güncel durumu görmek için tekrar deneyin.",
   expire_failed:
     "Ödeme taslağı sonlandırılamadı — katılımcı İPTAL EDİLMEDİ (ödemesi hâlâ tamamlanabilirdi). Tekrar deneyin.",
 };
@@ -572,14 +557,8 @@ export function SessionClient({
     if (
       !confirm(
         isCancelled
-          ? "Bu seans zaten iptal. Yalnızca iadesi başarısız kalan katılımcılar yeniden denenecek. Devam edilsin mi?"
-          : "Seans iptal edilsin mi?\n\n" +
-              "• Ödemiş katılımcılara \"iadeniz işleme alındı\" e-postası GİDER.\n" +
-              "• Parayı PayTR panelinden GERİ GÖNDERMEK SİZE DÜŞER — bu ekran " +
-              "iade emrini PayTR'ye iletmez.\n" +
-              "• İşlem sonunda iade edilecek kişilerin listesi (sipariş no + " +
-              "tutar) burada gösterilir; kopyalayıp PayTR'de tek tek işleyin.\n\n" +
-              "Bu işlem geri alınamaz. Devam edilsin mi?"
+          ? "Bu seans zaten iptal. Başarısız iptaller yeniden denenecek ve kalan iade yükümlülükleri gösterilecek. Devam edilsin mi?"
+          : "Seans iptal edilsin mi? Siparişlerin üretimi durdurulur. Kanıtlanabilen hediye bakiyesi geri yüklenir; nakit iadelerini ödeme kanalında ayrıca gerçekleştirip siparişin iade ekranında kaydetmeniz gerekir."
       )
     )
       return;
@@ -600,15 +579,13 @@ export function SessionClient({
       }
       setCopied(false);
       setCancelReport({
-        refunded: Array.isArray(payload.refunded) ? payload.refunded : [],
-        alreadyRefunded: Array.isArray(payload.alreadyRefunded)
-          ? payload.alreadyRefunded
-          : [],
+        cancelled: Array.isArray(payload.cancelled) ? payload.cancelled : [],
+        alreadyCancelled: Array.isArray(payload.alreadyCancelled) ? payload.alreadyCancelled : [],
+        refundRequiredOrders: Array.isArray(payload.refundRequiredOrders) ? payload.refundRequiredOrders : [],
+        actualGiftReturnedKurus: payload.actualGiftReturnedKurus ?? 0,
+        warning: payload.warning,
         alreadyShipped: Array.isArray(payload.alreadyShipped) ? payload.alreadyShipped : [],
         failed: Array.isArray(payload.failed) ? payload.failed : [],
-        refundedOrders: Array.isArray(payload.refundedOrders)
-          ? payload.refundedOrders
-          : [],
       });
       router.refresh();
     } catch {
@@ -618,27 +595,20 @@ export function SessionClient({
     }
   };
 
-  /**
-   * PayTR'de elle işlenecek iadelerin toplamı — admin'in üstlendiği
-   * yükümlülüğün büyüklüğü ekranda bir sayı olarak durmalı.
-   */
-  const refundObligationKurus = (cancelReport?.refundedOrders ?? []).reduce(
-    (sum, r) => sum + r.amountKurus,
-    0
+  const refundObligationKurus = (cancelReport?.refundRequiredOrders ?? []).reduce(
+    (sum, r) => sum + (r.cashRemainingKurus ?? 0), 0
   );
+  const hasUnknownObligation = cancelReport?.refundRequiredOrders.some(r =>
+    r.cashRemainingKurus === null || r.giftRemainingKurus === null || r.legacyUnverified);
 
-  /**
-   * İade iş listesini panoya kopyalar. Yükümlülük ekrandan ÇIKMALI: sayfa
-   * yenilendiğinde bu rapor kaybolur (client state) ve geriye yalnızca
-   * "iadeniz işleme alındı" e-postasını almış N kişi kalır.
-   */
   const copyRefundWorklist = async () => {
-    const rows = cancelReport?.refundedOrders ?? [];
+    const rows = cancelReport?.refundRequiredOrders ?? [];
     if (rows.length === 0) return;
     const text = [
-      `Atölye seansı iptali — PayTR'de elle iade edilecekler (${session.venueName}, ${formatDateTime(session.startsAt)})`,
-      ...rows.map((r) => `${r.orderNumber}\t${r.fullName}\t${formatKurus(r.amountKurus)}`),
-      `TOPLAM\t${rows.length} iade\t${formatKurus(refundObligationKurus)}`,
+      `Atölye iptali — kalan iade yükümlülükleri (${session.venueName}, ${formatDateTime(session.startsAt)})`,
+      "Sipariş\tKatılımcı\tKalan nakit\tKalan hediye\tUzlaştırma",
+      ...rows.map(r => `${r.orderNumber}\t${r.fullName}\t${remainingAmount(r.cashRemainingKurus)}\t${remainingAmount(r.giftRemainingKurus)}\t${r.legacyUnverified ? "Gerekli" : "—"}`),
+      `BİLİNEN NAKİT TOPLAMI\t${formatKurus(refundObligationKurus)}${hasUnknownObligation ? " (uzlaştırılacak tutarlar hariç)" : ""}`,
     ].join("\n");
     try {
       await navigator.clipboard.writeText(text);
@@ -653,7 +623,7 @@ export function SessionClient({
   const submitCancelParticipant = async (p: ParticipantRow) => {
     if (
       !confirm(
-        `${p.fullName} partiden çıkarılsın mı? Ödemesi varsa iade edilir. Bu işlem geri alınamaz.`
+        `${p.fullName} partiden çıkarılsın mı? Kanıtlanabilen hediye bakiyesi geri yüklenir; nakit iadesi ayrıca gerçekleştirilip kaydedilmelidir.`
       )
     )
       return;
@@ -673,6 +643,15 @@ export function SessionClient({
         );
         return;
       }
+      setCopied(false);
+      setCancelReport({
+        cancelled: payload.alreadyCancelled ? [] : [p.fullName],
+        alreadyCancelled: payload.alreadyCancelled ? [p.fullName] : [],
+        refundRequiredOrders: payload.refundRequiredOrders ?? [],
+        actualGiftReturnedKurus: payload.actualGiftReturnedKurus ?? 0,
+        warning: payload.warning,
+        alreadyShipped: [], failed: [],
+      });
       router.refresh();
     } catch {
       setParticipantError("Ağ hatası — bağlantınızı kontrol edip tekrar deneyin.");
@@ -1118,21 +1097,12 @@ export function SessionClient({
         <div className="mt-6 rounded-2xl border border-red-200 bg-white p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Seans iptali</h3>
           <p className="text-xs text-gray-500 mb-2">
-            Ödemiş katılımcıların siparişi iade işaretlenir, ödemeye hiç
-            gelmemişler iptal edilir ve seans &quot;İptal edildi&quot; olur.
-            Figürü zaten sevk edilmiş katılımcılar otomatik iade EDİLMEZ —
-            aşağıda isimle raporlanır, onları normal iade ekranından tek tek
-            halledin.
+            İptal, siparişleri üretime kapatır. Sevk edilmiş katılımcılar ayrıca raporlanır.
+            Kanıtlanabilen hediye bakiyesi geri yüklenir; nakit iadesi bekleyen tutarlar aşağıda gösterilir.
           </p>
-          {/* Bu uyarı süs değil: kod tabanında PayTR iade API'si YOK. */}
           <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            <strong>Para PayTR&apos;den otomatik geri gitmez.</strong> Bu işlem
-            siparişleri iade olarak kaydeder ve katılımcılara &quot;iadeniz
-            işleme alındı&quot; e-postası gönderir; parayı geri gönderme adımı
-            PayTR panelinde SİZİN yapacağınız işlemdir. Bir seansın toplu
-            iptali, kişi başı {formatKurus(session.pricePerSeatKurus)} olmak
-            üzere aynı anda birden çok iade yükümlülüğü doğurur — aşağıdaki
-            listeyi kopyalayıp PayTR&apos;de tek tek işleyin.
+            <strong>Nakit otomatik geri gönderilmez.</strong> İadeyi ödeme kanalında gerçekleştirdikten
+            sonra siparişin iade ekranında işlem kanıtıyla kaydedin. Yeniden denemede kalan yükümlülükler gösterilir.
           </p>
           {cancelError && <p className="text-xs text-red-600 mb-2">{cancelError}</p>}
           <button
@@ -1144,91 +1114,40 @@ export function SessionClient({
             {busy
               ? "İşleniyor…"
               : isCancelled
-                ? "Başarısız iadeleri tekrar dene"
-                : "Seansı iptal et ve iade et"}
+                ? "İptalleri tekrar dene ve kalan iadeleri göster"
+                : "Seansı iptal et"}
           </button>
 
           {cancelReport && (
             <div className="mt-3 space-y-2 text-xs">
-              {cancelReport.refunded.length > 0 && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
-                  <p className="font-medium">
-                    {cancelReport.refunded.length} katılımcının iadesi işleme alındı
-                    {refundObligationKurus > 0
-                      ? ` — PayTR'de iade edilecek toplam ${formatKurus(refundObligationKurus)}:`
-                      : ":"}
-                  </p>
-                  {/* İş listesi: PayTR'de aranacak şey İSİM değil sipariş
-                      numarasıdır, o yüzden satır satır ve kopyalanabilir. */}
-                  {cancelReport.refundedOrders.length > 0 ? (
-                    <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
-                      {cancelReport.refundedOrders.map((r) => (
-                        <li key={r.orderNumber}>
-                          {r.orderNumber} · {r.fullName} · {formatKurus(r.amountKurus)}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-0.5">{cancelReport.refunded.join(", ")}</p>
-                  )}
-                  {cancelReport.refundedOrders.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={copyRefundWorklist}
-                      className="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
-                    >
-                      {copied ? "Kopyalandı ✓" : "İade listesini kopyala"}
-                    </button>
-                  )}
-                </div>
+              {cancelReport.warning && <p className="text-amber-800">{cancelReport.warning}</p>}
+              <p>{cancelReport.cancelled.length} katılım iptal edildi; {cancelReport.alreadyCancelled.length} katılım zaten iptal edilmişti.</p>
+              {cancelReport.actualGiftReturnedKurus > 0 && (
+                <p>Bu işlemde hediye kartlarına geri yüklenen: {formatKurus(cancelReport.actualGiftReturnedKurus)}</p>
               )}
-              {cancelReport.alreadyRefunded.length > 0 && (
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700">
-                  <p className="font-medium">
-                    {cancelReport.alreadyRefunded.length} katılımcının parası zaten
-                    DAHA ÖNCE iade edilmişti:
-                  </p>
-                  <p className="mt-0.5">{cancelReport.alreadyRefunded.join(", ")}</p>
-                  <p className="mt-0.5 text-gray-500">
-                    Bu çağrıda yeni bir para hareketi olmadı; yalnızca katılımları
-                    kapatıldı.
-                  </p>
+              {cancelReport.refundRequiredOrders.length > 0 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                  <p className="font-medium">Kalan nakit iadesi: {formatKurus(refundObligationKurus)}{hasUnknownObligation ? " + uzlaştırılacak tutarlar" : ""}</p>
+                  <ul className="mt-1 space-y-1">
+                    {cancelReport.refundRequiredOrders.map(r => (
+                      <li key={r.orderId}>
+                        <a className="underline" href={`/admin/orders/${r.orderId}`}>{r.orderNumber}</a> · {r.fullName}
+                        {" · Nakit: "}{remainingAmount(r.cashRemainingKurus)}{" · Hediye: "}{remainingAmount(r.giftRemainingKurus)}
+                        {r.legacyUnverified && " · Eski ödeme kayıtları uzlaştırılmalı"}
+                      </li>
+                    ))}
+                  </ul>
+                  <button type="button" onClick={copyRefundWorklist} className="mt-2 underline">
+                    {copied ? "Kopyalandı ✓" : "Kalan iade listesini kopyala"}
+                  </button>
                 </div>
               )}
               {cancelReport.alreadyShipped.length > 0 && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-                  <p className="font-medium">
-                    Figürü sevk edilmiş {cancelReport.alreadyShipped.length} katılımcı
-                    iade EDİLMEDİ:
-                  </p>
-                  <p className="mt-0.5">{cancelReport.alreadyShipped.join(", ")}</p>
-                  <p className="mt-0.5 text-amber-700/80">
-                    Figür yola çıktığı için otomatik iade edilmez. Gerekiyorsa
-                    siparişin kendi iade ekranından tek tek işleyin.
-                  </p>
-                </div>
+                <p className="text-amber-800">Sevk edildiği için iptal edilmedi: {cancelReport.alreadyShipped.join(", ")}. Sipariş ekranından ayrıca değerlendirin.</p>
               )}
               {cancelReport.failed.length > 0 && (
-                <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-red-800">
-                  <p className="font-medium">
-                    {cancelReport.failed.length} katılımcının çıkışı BAŞARISIZ — parası
-                    hâlâ bizde (ya da ödemesi hâlâ tamamlanabilir):
-                  </p>
-                  <p className="mt-0.5">{cancelReport.failed.join(", ")}</p>
-                  <p className="mt-0.5 text-red-700/80">
-                    Bu kişiler iptal edilmedi. &quot;Başarısız iadeleri tekrar
-                    dene&quot; ile yalnızca onlar yeniden denenir.
-                  </p>
-                </div>
+                <p className="text-red-800">İptali tamamlanamayan veya sonucu okunamayan katılımlar: {cancelReport.failed.join(", ")}. Güncel durumu görmek için tekrar deneyin.</p>
               )}
-              {cancelReport.refunded.length === 0 &&
-                cancelReport.alreadyRefunded.length === 0 &&
-                cancelReport.alreadyShipped.length === 0 &&
-                cancelReport.failed.length === 0 && (
-                  <p className="text-gray-500">
-                    İade edilecek ödenmiş sipariş yoktu; seans iptal edildi.
-                  </p>
-                )}
             </div>
           )}
         </div>

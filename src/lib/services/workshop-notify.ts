@@ -327,39 +327,45 @@ export async function notifyWorkshopParticipantsReady(orderIds: string[]): Promi
   );
 }
 
-/**
- * Seans iptal edildiğinde katılımcıya giden bilgilendirme.
- *
- * YALNIZCA iadesi başarıyla işlenen ve parası hiç alınmamış katılımcılara
- * gönderilir — sevk edilmiş figürü olan ya da iadesi patlayan kişiye
- * gönderilmez, onların durumu farklıdır ve admin'in eliyle çözülür
- * (bkz. workshop-cancel.ts).
- *
- * "İadeniz hesabınıza geçti" DEMEZ: PayTR iadesinin karta yansıması 3–7 iş
- * günü sürer, o cümle gönderildiği an yanlış olurdu. Söylediğimiz tek şey
- * iadenin İŞLEME ALINDIĞIdır.
- *
- * Mekan/kişi adlarına Türkçe hâl eki EKLENMEZ (ünlü uyumu kırılır); ad
- * geçen yerler ek almayan bir kalıba ya da tabloya alınmıştır.
- */
+/** Cancellation copy states only recorded money facts; never predicts bank arrival. */
+export type WorkshopCancellationMoney =
+  | { paymentState: "no_recorded_collection" }
+  | { paymentState: "unverified" }
+  | { paymentState: "cancelled_cash_pending"; cashRemainingKurus: number | null; actualGiftReturnedKurus: number }
+  | { paymentState: "actual_return"; actualCashReturnedKurus: number; actualGiftReturnedKurus: number };
+
+export function workshopCancellationMoneyHtml(input: WorkshopCancellationMoney): string {
+  if (input.paymentState === "no_recorded_collection") {
+    return "<p>Bu katılım için kayıtlı bir tahsilat bulunmuyor.</p>";
+  }
+  if (input.paymentState === "unverified") {
+    return "<p>Ödeme kayıtlarınız kontrol ediliyor. Yapılmış veya geç ulaşan bir ödeme varsa iade yükümlülüğü ayrıca uzlaştırılacaktır.</p>";
+  }
+  const gift = input.actualGiftReturnedKurus > 0
+    ? `<p>Hediye kartınıza ${formatKurus(input.actualGiftReturnedKurus)} geri yüklendi.</p>` : "";
+  if (input.paymentState === "actual_return") {
+    return (input.actualCashReturnedKurus > 0
+      ? `<p>${formatKurus(input.actualCashReturnedKurus)} tutarındaki nakit iadesinin gerçekleştiği kaydedildi.</p>` : "") + gift;
+  }
+  return (input.cashRemainingKurus === null
+    ? "<p>Nakit iade yükümlülüğü ödeme kayıtlarıyla uzlaştırılmayı bekliyor.</p>"
+    : input.cashRemainingKurus > 0
+      ? `<p>${formatKurus(input.cashRemainingKurus)} nakit iadesi bekliyor. İptal işlemi paranın geri gönderildiği anlamına gelmez.</p>`
+      : "<p>Kayıtlı kalan nakit iade yükümlülüğü bulunmuyor.</p>") + gift;
+}
+
 export async function sendWorkshopSessionCancelledEmail(input: {
   sessionId: string;
   fullName: string;
   email: string;
-  /** Parası iade edilenle hiç tahsilat yapılmayan farklı cümle görür. */
-  refunded: boolean;
-}): Promise<void> {
+} & WorkshopCancellationMoney): Promise<void> {
   const session = await db.query.workshopSessions.findFirst({
     where: eq(workshopSessions.id, input.sessionId),
     with: { venue: true },
   });
   if (!session || !session.venue) return;
 
-  const moneyLine = input.refunded
-    ? `<p><strong>Ödemenizin iadesi işleme alındı.</strong> Tutarın kartınıza
-         yansıması, bankanızın işlem süresine bağlı olarak genellikle 3–7 iş
-         günü sürer.</p>`
-    : `<p><strong>Sizden herhangi bir tahsilat yapılmadı.</strong></p>`;
+  const moneyLine = workshopCancellationMoneyHtml(input);
 
   const html = wrap(`
     <h1 style="color:#1a1a1a;font-size:20px;">Atölye seansı iptal edildi</h1>

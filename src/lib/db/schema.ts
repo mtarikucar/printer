@@ -13,6 +13,8 @@ import {
   primaryKey,
   bigint,
   check,
+  foreignKey,
+  unique,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { Attribution } from "../analytics/types";
@@ -3473,3 +3475,135 @@ export const coverageOverrides = pgTable(
     byManufacturer: index("coverage_overrides_manufacturer_idx").on(t.manufacturerId),
   })
 );
+
+// Phase6c: recorded refund evidence. A header owns one immutable external
+// transfer and its order allocations. Delivery progress is not payment proof.
+export type RefundRecordKind = "refund" | "cancellation" | "legacy_evidence";
+export type RefundMethod = "card" | "bank_transfer" | "gift_credit" | "none";
+export type RefundEmailState = "pending" | "delivering" | "delivered" | "not_required";
+export type RefundAnalyticsState = "pending" | "recorded" | "not_required";
+export type GiftReturnBalanceEffect = "restore" | "none";
+
+export const orderRefundRecords = pgTable("order_refund_records", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  operationKey: uuid("operation_key").notNull().unique(),
+  requestHash: text("request_hash").notNull(),
+  kind: text("kind").$type<RefundRecordKind>().notNull(),
+  paymentScopeKey: text("payment_scope_key").notNull(),
+  draftId: uuid("draft_id").references(() => orderDrafts.id, { onDelete: "restrict" }),
+  standaloneOrderId: uuid("standalone_order_id").references(() => orders.id, { onDelete: "restrict" }),
+  cashAmountKurus: integer("cash_amount_kurus").notNull(),
+  giftAmountKurus: integer("gift_amount_kurus").notNull(),
+  method: text("method").$type<RefundMethod>().notNull(),
+  externalReference: text("external_reference"),
+  externalReferenceKey: text("external_reference_key"),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+  adminEmail: text("admin_email").notNull(),
+  reason: text("reason").notNull(),
+  sourceSnapshot: jsonb("source_snapshot").$type<Record<string, unknown>>().notNull(),
+  resultSnapshot: jsonb("result_snapshot").$type<Record<string, unknown>>().notNull(),
+  emailPayload: jsonb("email_payload").$type<Record<string, unknown>>().notNull().default({}),
+  emailProgress: jsonb("email_progress").$type<Record<string, unknown>>().notNull().default({}),
+  emailState: text("email_state").$type<RefundEmailState>().notNull().default("not_required"),
+  emailNextAttemptAt: timestamp("email_next_attempt_at", { withTimezone: true }),
+  emailLeaseUntil: timestamp("email_lease_until", { withTimezone: true }),
+  emailLastError: text("email_last_error"),
+  analyticsState: text("analytics_state").$type<RefundAnalyticsState>().notNull().default("not_required"),
+  analyticsProgress: jsonb("analytics_progress").$type<Record<string, unknown>>().notNull().default({}),
+  analyticsRecordedAt: timestamp("analytics_recorded_at", { withTimezone: true }),
+  analyticsLastError: text("analytics_last_error"),
+}, (t) => [
+  unique("order_refund_records_id_kind_unique").on(t.id, t.kind),
+  uniqueIndex("order_refund_records_transfer_unique").on(t.paymentScopeKey, t.method, t.externalReferenceKey).where(sql`${t.cashAmountKurus} > 0`),
+  index("order_refund_records_scope_created_idx").on(t.paymentScopeKey, t.recordedAt, t.id),
+  index("order_refund_records_email_due_idx").on(t.emailState, t.emailNextAttemptAt, t.id),
+  index("order_refund_records_analytics_state_idx").on(t.analyticsState, t.recordedAt, t.id),
+  check("order_refund_records_kind_check", sql`${t.kind} IN ('refund', 'cancellation', 'legacy_evidence')`),
+  check("order_refund_records_scope_check", sql`num_nonnulls(${t.draftId}, ${t.standaloneOrderId}) = 1 AND (
+    (${t.draftId} IS NOT NULL AND ${t.paymentScopeKey} = 'draft:' || ${t.draftId}::text)
+    OR (${t.standaloneOrderId} IS NOT NULL AND ${t.paymentScopeKey} = 'order:' || ${t.standaloneOrderId}::text)
+  )`),
+  check("order_refund_records_amount_check", sql`${t.cashAmountKurus} >= 0 AND ${t.giftAmountKurus} >= 0 AND (
+    (${t.kind} = 'cancellation' AND ${t.cashAmountKurus} = 0)
+    OR (${t.kind} IN ('refund', 'legacy_evidence') AND (${t.cashAmountKurus} > 0 OR ${t.giftAmountKurus} > 0))
+  )`),
+  check("order_refund_records_method_check", sql`
+    (${t.cashAmountKurus} > 0 AND ${t.method} IN ('card', 'bank_transfer'))
+    OR (${t.cashAmountKurus} = 0 AND ${t.giftAmountKurus} > 0 AND ${t.method} = 'gift_credit')
+    OR (${t.cashAmountKurus} = 0 AND ${t.giftAmountKurus} = 0 AND ${t.method} = 'none')
+  `),
+  check("order_refund_records_reference_check", sql`
+    (${t.cashAmountKurus} > 0 AND ${t.externalReference} IS NOT NULL AND length(btrim(${t.externalReference})) > 0
+      AND ${t.externalReferenceKey} IS NOT NULL AND length(btrim(${t.externalReferenceKey})) > 0)
+    OR (${t.cashAmountKurus} = 0 AND ${t.externalReference} IS NULL AND ${t.externalReferenceKey} IS NULL)
+  `),
+  check("order_refund_records_actor_check", sql`length(btrim(${t.adminEmail})) > 0 AND length(btrim(${t.reason})) >= 10 AND length(btrim(${t.requestHash})) > 0`),
+  check("order_refund_records_json_check", sql`jsonb_typeof(${t.sourceSnapshot}) = 'object' AND jsonb_typeof(${t.resultSnapshot}) = 'object'
+    AND jsonb_typeof(${t.emailPayload}) = 'object' AND jsonb_typeof(${t.emailProgress}) = 'object' AND jsonb_typeof(${t.analyticsProgress}) = 'object'`),
+  check("order_refund_records_email_state_check", sql`${t.emailState} IN ('pending', 'delivering', 'delivered', 'not_required')`),
+  check("order_refund_records_analytics_state_check", sql`${t.analyticsState} IN ('pending', 'recorded', 'not_required')`),
+  check("order_refund_records_legacy_delivery_check", sql`${t.kind} <> 'legacy_evidence' OR (
+    ${t.emailState} = 'not_required' AND ${t.emailPayload} = '{}'::jsonb AND ${t.emailProgress} = '{}'::jsonb
+    AND ${t.emailNextAttemptAt} IS NULL AND ${t.emailLeaseUntil} IS NULL AND ${t.emailLastError} IS NULL
+    AND ${t.analyticsState} = 'not_required' AND ${t.analyticsProgress} = '{}'::jsonb
+    AND ${t.analyticsRecordedAt} IS NULL AND ${t.analyticsLastError} IS NULL
+  )`),
+]);
+
+export const orderRefundAllocations = pgTable("order_refund_allocations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  refundId: uuid("refund_id").notNull(),
+  kind: text("kind").$type<RefundRecordKind>().notNull(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "restrict" }),
+  cashKurus: integer("cash_kurus").notNull(),
+  giftKurus: integer("gift_kurus").notNull(),
+  basisSnapshot: jsonb("basis_snapshot").$type<Record<string, unknown>>().notNull(),
+  analyticsGrossKurus: integer("analytics_gross_kurus").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  foreignKey({ name: "order_refund_allocations_record_kind_fk", columns: [t.refundId, t.kind], foreignColumns: [orderRefundRecords.id, orderRefundRecords.kind] }).onDelete("restrict"),
+  uniqueIndex("order_refund_allocations_refund_order_unique").on(t.refundId, t.orderId),
+  uniqueIndex("order_refund_allocations_cancellation_order_unique").on(t.orderId).where(sql`${t.kind} = 'cancellation'`),
+  index("order_refund_allocations_order_created_idx").on(t.orderId, t.createdAt, t.id),
+  check("order_refund_allocations_amount_check", sql`${t.cashKurus} >= 0 AND ${t.giftKurus} >= 0 AND ${t.analyticsGrossKurus} >= 0 AND (
+    (${t.kind} = 'cancellation' AND ${t.cashKurus} = 0)
+    OR (${t.kind} IN ('refund', 'legacy_evidence') AND (${t.cashKurus} > 0 OR ${t.giftKurus} > 0))
+  )`),
+  check("order_refund_allocations_snapshot_check", sql`jsonb_typeof(${t.basisSnapshot}) = 'object'`),
+]);
+
+// Cumulative allocation sums and kind/card/redemption lineage are checked by
+// the locked service transaction, not by cross-row CHECK constraints.
+export const giftCreditReturns = pgTable("gift_credit_returns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  refundAllocationId: uuid("refund_allocation_id").references(() => orderRefundAllocations.id, { onDelete: "restrict" }),
+  expiredDraftId: uuid("expired_draft_id").references(() => orderDrafts.id, { onDelete: "restrict" }),
+  redemptionId: uuid("redemption_id").notNull().references(() => giftCardRedemptions.id, { onDelete: "restrict" }),
+  giftCardId: uuid("gift_card_id").notNull().references(() => giftCards.id, { onDelete: "restrict" }),
+  amountKurus: integer("amount_kurus").notNull(),
+  balanceEffect: text("balance_effect").$type<GiftReturnBalanceEffect>().notNull(),
+  balanceBeforeKurus: integer("balance_before_kurus"),
+  balanceAfterKurus: integer("balance_after_kurus"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("gift_credit_returns_refund_redemption_unique").on(t.refundAllocationId, t.redemptionId).where(sql`${t.refundAllocationId} IS NOT NULL`),
+  uniqueIndex("gift_credit_returns_draft_redemption_unique").on(t.expiredDraftId, t.redemptionId).where(sql`${t.expiredDraftId} IS NOT NULL`),
+  check("gift_credit_returns_parent_check", sql`num_nonnulls(${t.refundAllocationId}, ${t.expiredDraftId}) = 1 AND (${t.expiredDraftId} IS NULL OR ${t.balanceEffect} = 'restore')`),
+  index("gift_credit_returns_redemption_idx").on(t.redemptionId),
+  check("gift_credit_returns_amount_check", sql`${t.amountKurus} > 0`),
+  check("gift_credit_returns_balance_check", sql`
+    (${t.balanceEffect} = 'restore' AND ${t.balanceBeforeKurus} IS NOT NULL AND ${t.balanceAfterKurus} IS NOT NULL
+      AND ${t.balanceBeforeKurus} >= 0 AND ${t.balanceAfterKurus} >= 0
+      AND ${t.balanceAfterKurus}::bigint = ${t.balanceBeforeKurus}::bigint + ${t.amountKurus}::bigint)
+    OR (${t.balanceEffect} = 'none' AND ${t.balanceBeforeKurus} IS NULL AND ${t.balanceAfterKurus} IS NULL)
+  `),
+]);
+
+export type OrderRefundRecord = typeof orderRefundRecords.$inferSelect;
+export type NewOrderRefundRecord = typeof orderRefundRecords.$inferInsert;
+export type OrderRefundAllocation = typeof orderRefundAllocations.$inferSelect;
+export type NewOrderRefundAllocation = typeof orderRefundAllocations.$inferInsert;
+export type GiftCreditReturn = typeof giftCreditReturns.$inferSelect;
+export type NewGiftCreditReturn = typeof giftCreditReturns.$inferInsert;

@@ -37,6 +37,7 @@ import {
 } from "@/lib/services/idempotency";
 import { resolveOrCreateGuestUser } from "@/lib/services/guest-user";
 import { validateGiftCard } from "@/lib/services/gift-card";
+import { countLiveGiftCardUses } from "@/lib/services/gift-card-usage";
 import {
   buildDraftReference,
   promoteDraftToOrder,
@@ -68,7 +69,7 @@ import {
   attributionColumns,
 } from "@/lib/analytics/attribution-server";
 import { recordEvent } from "@/lib/analytics/server";
-import { eq, and, or, isNull, isNotNull, count, inArray } from "drizzle-orm";
+import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { sizeDisplay } from "@/lib/config/sizes";
@@ -677,19 +678,7 @@ async function handleCreateOrder(
           throw new Error("INSUFFICIENT_BALANCE");
         }
         if (card.maxRedemptions !== null) {
-          const [{ value: redemptionCount }] = await tx
-            .select({ value: count() })
-            .from(giftCardRedemptions)
-            // One checkout = one redemption use: live rows only, and only the
-            // draft-anchored primary row (multi-seller cart split extras carry
-            // draftId=null — see gift-card.ts validateGiftCard).
-            .where(
-              and(
-                eq(giftCardRedemptions.giftCardId, card.id),
-                isNull(giftCardRedemptions.refundedAt),
-                isNotNull(giftCardRedemptions.draftId)
-              )
-            );
+          const redemptionCount = await countLiveGiftCardUses(tx, card.id);
           if (redemptionCount >= card.maxRedemptions) {
             throw new Error("LIMIT_REACHED");
           }

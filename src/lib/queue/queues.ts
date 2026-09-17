@@ -85,7 +85,13 @@ export interface WaAgentJobData {
   pendingMediaIds?: string[];
 }
 
-export interface EmailJobData {
+export type EmailJobData = StandardEmailJobData
+  | { type: "refund_record_email"; refundId: string }
+  | { type: "refund_record_email_recover" }
+  | { type: "refund_record_analytics"; refundId: string }
+  | { type: "refund_record_analytics_recover" };
+
+export interface StandardEmailJobData {
   type:
     | "order_confirmation"
     | "generation_failed"

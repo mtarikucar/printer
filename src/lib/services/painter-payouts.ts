@@ -6,7 +6,6 @@ import { orders, painterEarnings } from "@/lib/db/schema";
 import { painterBaseKurus } from "@/lib/services/earning-base";
 import { computeEarning } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
-import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 // KARAR kuralı üretici tarafıyla ORTAKTIR ve burada ikinci kez yazılmaz: aynı
 // soruyu (duran satır korunur mu, düzeltilir mi, reddedilir mi) iki ayrı yerde
@@ -18,7 +17,7 @@ import {
   type AccrualMismatchReason,
   type AccrualOutcome,
 } from "@/lib/services/payouts";
-import { openEarningWhere } from "@/lib/services/earning-claimable";
+import { openEarningWhere, originalEarningOrderOpen } from "@/lib/services/earning-claimable";
 import type { PayoutCreateResult } from "@/lib/services/payouts";
 
 // Painter earnings + payouts — mirrors src/lib/services/payouts.ts (manufacturer
@@ -103,7 +102,7 @@ async function writePainterMismatchNote(args: {
 
 /** accruePainterEarning'in işleminden çıkan sonuç + izin gerektirdiği rakamlar. */
 type PainterAccrualTxResult =
-  | { outcome: "accrued" | "already_accrued" | "skipped_refunded" | "order_not_found" }
+  | { outcome: "accrued" | "already_accrued" | "skipped_refunded" | "skipped_cancelled" | "order_not_found" }
   | { outcome: "corrected"; fromGrossKurus: number; toGrossKurus: number }
   | {
       outcome: "mismatch_refused";
@@ -146,7 +145,7 @@ type PainterAccrualTxResult =
  * olur. Kolon her boyama siparişinde doludur; sabit yalnız dondurma öncesi
  * satırlar için yedektir.
  *
- * A refunded order never accrues: the refund check and the insert share one
+ * A refunded or cancelled order never accrues: the refund check and the insert share one
  * transaction with the order row read FOR UPDATE. Why the lock, and why here as
  * well as in the ship route, is explained on accrueEarning (payouts.ts).
  */
@@ -167,14 +166,14 @@ export async function accruePainterEarning(
         paintingPriceKurus: orders.paintingPriceKurus,
       })
       .from(orders)
-      .where(and(eq(orders.id, orderId), notRefundedGuard()))
+      .where(and(eq(orders.id, orderId), originalEarningOrderOpen()))
       .for("update");
     if (!row) {
       const [exists] = await tx
-        .select({ id: orders.id })
+        .select({ id: orders.id, paymentStatus: orders.paymentStatus })
         .from(orders)
         .where(eq(orders.id, orderId));
-      return { outcome: exists ? "skipped_refunded" : "order_not_found" };
+      return { outcome: !exists ? "order_not_found" : exists.paymentStatus === "refunded" ? "skipped_refunded" : "skipped_cancelled" };
     }
     const rateBps = row.rate ?? PLATFORM_COMMISSION_RATE_BPS;
 
@@ -313,6 +312,8 @@ export async function accruePainterEarning(
     console.warn(
       `[accrual] order ${orderId}: skipped: refunded — no painter earning for ${painterId}`
     );
+  } else if (result.outcome === "skipped_cancelled") {
+    console.warn(`[accrual] order ${orderId}: skipped: cancelled — no painter earning for ${painterId}`);
   } else if (result.outcome === "order_not_found") {
     console.error(`[accrual] order ${orderId}: not found — no painter earning accrued`);
   } else if (result.outcome === "corrected") {

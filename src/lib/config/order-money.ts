@@ -129,6 +129,15 @@ export interface AdjustmentMoneySnapshot {
   settlementKind: SettlementKind | null;
 }
 
+/** Per-order allocation joined to its immutable refund/cancellation record. */
+export interface RefundMoneySnapshot {
+  kind: "refund" | "cancellation" | "legacy_evidence";
+  cashKurus: number;
+  giftKurus: number;
+  /** Explicit null cash basis/due in the persisted cancellation snapshot. */
+  cancellationCashUnknown?: boolean;
+}
+
 export interface PartyShare {
   party: "manufacturer" | "painter";
   partnerName: string | null;
@@ -146,7 +155,7 @@ export interface PartyShare {
    * (accrualMissing false). Hakediş satırı varsa kendi durumunu korur: geri
    * alındıysa `reversed`, iadeden önce ödendiyse `paid`.
    */
-  voided: null | "refunded";
+  voided: null | "refunded" | "cancelled";
   /**
    * Yalnızca üretici payında ve YALNIZCA iki koşul birlikteyken true: üretici
    * boyamayı kendi atölyesinde yapıyor (split.paintsItself) VE siparişin
@@ -195,10 +204,18 @@ export interface OrderMoneyBreakdown {
     cashCollectedKurus: number;
     /**
      * Ciroya sayılan nakit (C3): yalnızca paymentStatus='succeeded' iken
-     * cashCollectedKurus'a eşit, aksi hâlde 0. Panel ve analitik aynı kuralı
+     * ilk nakitten kayıtlı nakit iadeleri düşülür; iptalde 0. Panel ve analitik aynı kuralı
      * SQL'de uygular (services/admin-order-sql.ts).
      */
     revenueKurus: number;
+    /** Recorded actual returns only; legacy evidence does not establish a baseline. */
+    cashReturnedKurus?: number;
+    giftReturnedKurus?: number;
+    cashRemainingKurus?: number | null;
+    cashRefundDueKurus?: number | null;
+    legacyRefundUnknown?: boolean;
+    cancellationCashUnknown?: boolean;
+    cancelled?: boolean;
     paymentMethod: string | null;
     paymentStatus: string;
     siblings: MoneySibling[];
@@ -268,15 +285,47 @@ export function countsAsRevenue(paymentStatus: string | null | undefined): boole
 
 /**
  * Sözleşme C3 — panel, analitik ve para dökümü AYNI sayıyı göstersin diye tek
- * tanım: tahsil edilen nakit, yalnızca paymentStatus='succeeded' için.
+ * tanım: açık başarılı siparişin ilk nakdi eksi kayıtlı nakit iadeleri.
  */
 export function revenueKurus(o: {
   amountKurus: number;
   giftCardAmountKurus: number;
   havaleDiscountKurus: number;
   paymentStatus: string | null | undefined;
+  status?: string;
+  refunds?: readonly RefundMoneySnapshot[];
 }): number {
-  return countsAsRevenue(o.paymentStatus) ? cashCollectedKurus(o) : 0;
+  const facts = actualReturnFacts(o);
+  return countsAsRevenue(o.paymentStatus) && !facts.cancelled
+    ? cashCollectedKurus(o) - facts.cashReturnedKurus : 0;
+}
+
+/** No guessed full return from paymentStatus; old refund evidence remains unknown. */
+export function actualReturnFacts(o: {
+  amountKurus: number; giftCardAmountKurus: number; havaleDiscountKurus: number;
+  paymentStatus: string | null | undefined; status?: string;
+  refunds?: readonly RefundMoneySnapshot[];
+}) {
+  const actual = (o.refunds ?? []).filter(r => r.kind !== "legacy_evidence");
+  let cashReturnedKurus = 0, giftReturnedKurus = 0;
+  for (const row of actual) {
+    if (!Number.isSafeInteger(row.cashKurus) || row.cashKurus < 0
+      || !Number.isSafeInteger(row.giftKurus) || row.giftKurus < 0) throw new RangeError("Invalid return amount");
+    cashReturnedKurus += row.cashKurus;
+    giftReturnedKurus += row.giftKurus;
+  }
+  const originalCash = cashCollectedKurus(o);
+  if (!Number.isSafeInteger(cashReturnedKurus) || !Number.isSafeInteger(giftReturnedKurus)
+    || cashReturnedKurus > originalCash || giftReturnedKurus > o.giftCardAmountKurus) throw new RangeError("Return exceeds original tender");
+  const legacyRefundUnknown = o.paymentStatus === "refunded"
+    && (actual.length === 0 || cashReturnedKurus !== originalCash || giftReturnedKurus !== o.giftCardAmountKurus);
+  const cancelled = o.status === "rejected" || actual.some(r => r.kind === "cancellation");
+  const cancellationCashUnknown = actual.some(r => r.kind === "cancellation" && r.cancellationCashUnknown === true);
+  const cashRemainingKurus = legacyRefundUnknown || cancellationCashUnknown ? null : originalCash - cashReturnedKurus;
+  return {
+    cashReturnedKurus, giftReturnedKurus, cashRemainingKurus, legacyRefundUnknown, cancellationCashUnknown, cancelled,
+    cashRefundDueKurus: cancelled ? cashRemainingKurus : 0,
+  };
 }
 
 // ─── Girdi: siparişin saklanan hâli (yükleyici DB'den doldurur) ──────────────
@@ -529,6 +578,9 @@ export const EARNING_REVERSAL_PARTNER_SENTENCES: Record<EarningReversalCause, st
 };
 
 export interface OrderMoneySnapshot {
+  /** Optional for old pure fixtures; the live loader always supplies this. */
+  status?: string;
+  refunds?: RefundMoneySnapshot[];
   orderType: string;
   amountKurus: number;
   productionBaseKurus: number | null;
@@ -1325,7 +1377,9 @@ function effectiveOf(s: InternalShare): { gross: number; commission: number; net
 export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBreakdown {
   const warnings: string[] = [];
   const kind = classifyMoneyOrder(s);
-  const succeeded = countsAsRevenue(s.paymentStatus);
+  const returnFacts = actualReturnFacts(s);
+  const cancelled = returnFacts.cancelled;
+  const succeeded = countsAsRevenue(s.paymentStatus) && !cancelled;
   const refunded = isRefunded(s);
   const adjustments = s.adjustments ?? [];
   const settledAdjustmentNetKurus = sum(adjustments.filter(a => a.status === "settled").map(a => a.netKurus));
@@ -1419,7 +1473,7 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
 
   // İade edilmiş siparişte iki pay da kapanır: beklenen rakamlar ödenecek bir
   // şey değildir ve tahakkuk beklenmez. Hakediş satırı kendi durumunu korur.
-  const voided: PartyShare["voided"] = refunded ? "refunded" : null;
+  const voided: PartyShare["voided"] = refunded ? "refunded" : cancelled ? "cancelled" : null;
 
   const mfrExpected = computeEarning(split.manufacturerBaseKurus, rateBps);
   const mfrEventHappened =
@@ -1499,7 +1553,9 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
         `Tahakkuk eksik: ${who}${name} için tahakkuk olayı gerçekleşti (${i.share.accrualEvent.toLocaleLowerCase("tr")}) ama hakediş satırı yok.`
       );
     }
-    if (e && e.status === "reversed") {
+    if (e && e.status === "reversed" && cancelled && !refunded) {
+      warnings.push(`${who}${name} hakedişi geri alınmış; sipariş iptal edildi. İptal, nakit iadesi yapıldığını göstermez.`);
+    } else if (e && e.status === "reversed") {
       // Geri alınmış satır SEBEBİNİ taşımaz. Sebep yalnızca KAYITLI olduğu
       // yerden okunur: iade siparişin kendi kolonundadır (paymentStatus), kargo
       // geri alma ise denetim kaydındadır (s.earningReversal) ve o kayıt hangi
@@ -1565,7 +1621,7 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       commissionKurus: nz(commissionKurus),
       unassignedBaseKurus: nz(unassignedBaseKurus),
       reversedBaseKurus: nz(reversedBaseKurus),
-      netKurus: nz(commissionKurus + unassignedBaseKurus - s.giftCardAmountKurus - s.havaleDiscountKurus - adjustmentNetKurus),
+      netKurus: nz(commissionKurus + unassignedBaseKurus - s.giftCardAmountKurus - s.havaleDiscountKurus - adjustmentNetKurus - returnFacts.cashReturnedKurus),
     };
     if (reversedBaseKurus > 0) {
       warnings.push(
@@ -1607,19 +1663,23 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       reversedBaseKurus: 0,
       netKurus: nz(0 - paidOut),
     };
-    warnings.push(
-      `Sipariş iade edildi: tahsil edilen ${formatTry(cashCollectedKurus(s))} ciroya sayılmaz; para PayTR / banka üzerinden elle iade edilir.`
-    );
+    if (cancelled && !refunded) {
+      warnings.push(`Sipariş iptal edildi; elde kalan nakit gelir değildir. İade bekleyen nakit yükümlülüğü: ${returnFacts.cashRefundDueKurus === null ? "bilinmiyor" : formatTry(returnFacts.cashRefundDueKurus)}.`);
+    } else if (returnFacts.legacyRefundUnknown) {
+      warnings.push("Eski iadenin gerçekleşen tutarı bilinmiyor; ödeme durumu tek başına nakit iadesi kanıtı değildir.");
+    } else {
+      warnings.push(`Kayıtlı nakit iadesi ${formatTry(returnFacts.cashReturnedKurus)}, hediye kartına dönüş ${formatTry(returnFacts.giftReturnedKurus)}; ilk satış ve tahsilat kayıtları değişmedi.`);
+    }
     if (paidOut > 0) {
-      warnings.push(`İadeye rağmen ödenmiş partner hakedişi geri alınmadı: ${formatTry(paidOut)} platform zararı.`);
+      warnings.push(`${cancelled && !refunded ? "İptale" : "İadeye"} rağmen ödenmiş partner hakedişi geri alınmadı: ${formatTry(paidOut)} platform zararı.`);
     }
     if (unreversedPendingKurus > 0) {
       warnings.push(
-        `İadeye rağmen geri alınmamış bekleyen partner hakedişi var: ${formatTry(unreversedPendingKurus)}. Bu tutar henüz ödenmedi (platformdan çıkmadı) ama ödeme partisine girerse partnere ödenir — elle kontrol edin.`
+        `${cancelled && !refunded ? "İptale" : "İadeye"} rağmen geri alınmamış bekleyen partner hakedişi var: ${formatTry(unreversedPendingKurus)}. Bu tutar henüz ödenmedi (platformdan çıkmadı) ama ödeme partisine girerse partnere ödenir — elle kontrol edin.`
       );
     }
     if (pendingAdjustmentNetKurus > 0) {
-      warnings.push(`İade sonrası platformun bekleyen ek partner borcu: ${formatTry(pendingAdjustmentNetKurus)}. Bu tutar henüz ödenmedi; nakit zarara dahil değildir.`);
+      warnings.push(`${cancelled && !refunded ? "İptal" : "İade"} sonrası platformun bekleyen ek partner borcu: ${formatTry(pendingAdjustmentNetKurus)}. Bu tutar henüz ödenmedi; nakit zarara dahil değildir.`);
     }
   }
   platform.adjustmentNetKurus = nz(adjustmentNetKurus);
@@ -1655,6 +1715,7 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       havaleDiscountKurus: s.havaleDiscountKurus,
       cashCollectedKurus: cashCollectedKurus(s),
       revenueKurus: revenueKurus(s),
+      ...returnFacts,
       paymentMethod: s.paymentMethod,
       paymentStatus: s.paymentStatus,
       // Her kardeş KENDİ kolonlarından: sepetin hediye çeki / havale indirimi

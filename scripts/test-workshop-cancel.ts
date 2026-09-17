@@ -1,24 +1,9 @@
-/**
- * Atölye iptal/iade akışının DB'li doğrulaması (Görev 12b).
- *
- * NEDEN AYRI BİR BETİK: `scripts/test-workshop.ts` `npm run test:unit` içinde
- * koşuyor ve CI'da Postgres YOK (bkz. .github/workflows/ci.yml — DATABASE_URL
- * yalnızca env ayrıştırmayı memnun etmek için var, ayakta bir sunucu değil).
- * Para yolunu gerçekten çalıştıran testler bu yüzden burada yaşar; saf karar
- * fonksiyonlarının (`participantCancelDisposition`, `seatReturnsToPool`) ve
- * sözleşme merdiveninin testleri test-workshop.ts'te, yani test:unit'te.
- *
- * GEVŞEK ŞEMA: dev veritabanına HİÇBİR migration uygulanmaz. Betik kendi
- * SCRATCH ŞEMASINI açar, `drizzle-kit generate` ile schema.ts'ten ürettiği
- * güncel DDL'i oraya basar, testleri orada koşar ve şemayı düşürür. Bu yüzden
- * dev verisine dokunmaz ve schema.ts değiştiğinde kendiliğinden güncellenir.
- *
- *   DATABASE_URL=... npx tsx scripts/test-workshop-cancel.ts
- *
- * Veritabanına ulaşılamıyorsa test ATLANIR (çıkış 0) — DB'siz bir ortamda
- * yanlışlıkla kırmızı yakmasın.
+/** Workshop cancellation, draft, batch placement/shipping and recovery regressions.
+ * QA_MONEY_PG_URL on 127.0.0.1:55433 only; disposable schema up/down.
+ * External queues, SMTP, analytics and realtime are faked, not sent.
  */
-import "dotenv/config";
+import { randomUUID } from "node:crypto";
+import { installCancellationTestIO } from "./test-cancellation-refund-db";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -26,8 +11,9 @@ import os from "node:os";
 import path from "node:path";
 import pg from "pg";
 
-const BASE_URL = process.env.DATABASE_URL;
-const SCHEMA = `ws_cancel_test_${Date.now()}`;
+const BASE_URL = process.env.QA_MONEY_PG_URL;
+let testPool: pg.Pool | undefined;
+const SCHEMA = `ws_cancel_test_${randomUUID().replaceAll("-", "")}`;
 
 let pass = 0;
 let fail = 0;
@@ -39,11 +25,6 @@ function ok(name: string, cond: boolean, extra?: unknown) {
     fail++;
     console.log(`  FAIL  ${name}`, extra ?? "");
   }
-}
-
-function skip(reason: string): never {
-  console.log(`SKIP: ${reason}`);
-  process.exit(0);
 }
 
 /** schema.ts'ten GÜNCEL tam DDL'i üretir (dev DB'ye dokunmaz — tamamen çevrimdışı). */
@@ -64,14 +45,12 @@ function generateDdl(): string {
 }
 
 async function main() {
-  if (!BASE_URL) skip("DATABASE_URL tanımlı değil");
-
+  if (!BASE_URL) throw new Error("QA_MONEY_PG_URL required");
+  const target = new URL(BASE_URL);
+  if (target.hostname !== "127.0.0.1" || target.port !== "55433") throw new Error("Refusing non-QA database");
+  const io = installCancellationTestIO();
   const admin = new pg.Client({ connectionString: BASE_URL });
-  try {
-    await admin.connect();
-  } catch (e) {
-    skip(`veritabanına bağlanılamadı: ${(e as Error).message}`);
-  }
+  await admin.connect();
 
   const scratchUrl = new URL(BASE_URL);
   scratchUrl.searchParams.set("options", `-c search_path=${SCHEMA}`);
@@ -90,50 +69,22 @@ async function main() {
     // Uygulama kodu ancak env HAZIR olduktan SONRA import edilebilir: `db`
     // havuzu da nodemailer taşıyıcısı da modül yüklenirken kurulur.
     process.env.DATABASE_URL = scratchUrl.toString();
-    // Dev kuyruklarını kirletmeme (ve gerçek e-posta göndermeme) sigortası:
-    // BullMQ işleri 15 numaralı Redis veritabanına, SMTP hiçbir yere gider.
-    process.env.REDIS_URL = (process.env.REDIS_URL ?? "redis://127.0.0.1:6379").replace(
-      /\/\d+$/,
-      ""
-    ) + "/15";
-    process.env.SMTP_HOST = "127.0.0.1";
-    process.env.SMTP_PORT = "1";
 
     await run();
   } finally {
+    await testPool?.end();
+    io.restore();
     await admin.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`).catch(() => {});
     await admin.end().catch(() => {});
-    await cleanupTestRedis();
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 }
 
-/**
- * Testin 15 numaralı Redis veritabanına bıraktığı e-posta kuyruğu anahtarlarını
- * siler. FLUSHDB DEĞİL: yalnızca bu betiğin dokunduğu `bull:email:*` desenini
- * temizler, başkasının verisini süpürmez.
- */
-async function cleanupTestRedis() {
-  try {
-    const { default: IORedis } = await import("ioredis");
-    const r = new IORedis(process.env.REDIS_URL!, {
-      maxRetriesPerRequest: 1,
-      enableReadyCheck: false,
-      lazyConnect: true,
-    });
-    await r.connect();
-    const keys = await r.keys("bull:email:*");
-    if (keys.length > 0) await r.del(...keys);
-    await r.quit();
-  } catch {
-    // Redis yoksa temizlenecek bir şey de yok.
-  }
-}
-
 async function run() {
   const { db } = await import("../src/lib/db");
+  testPool = (db as unknown as { $client: pg.Pool }).$client;
   const schema = await import("../src/lib/db/schema");
   const { users, manufacturers, manufacturerNotifications, orders, orderDrafts, workshopVenues, workshopSessions, workshopParticipants, manufacturerEarnings, adminActions } =
     schema;
@@ -149,7 +100,17 @@ async function run() {
     closeSession,
     countBatchOrders,
   } = await import("../src/lib/services/workshop-session");
-  const { refundOrder } = await import("../src/lib/services/order-refund");
+  const { recordOrderRefund, readOrderRefundView } = await import("../src/lib/services/order-refund-record");
+  async function actualFullRefund(input: { orderId: string; reason: string; adminEmail: string }) {
+    const view = await readOrderRefundView(input.orderId);
+    const row = view.siblings.find(row => row.orderId === input.orderId)!;
+    assert.notEqual(row.remainingCashKurus, null);
+    assert.notEqual(row.remainingGiftKurus, null);
+    return recordOrderRefund({ operationKey: randomUUID(), expectedFingerprint: view.expectedFingerprint,
+      mode: "actual", allocations: [{ orderId: input.orderId, cashKurus: row.remainingCashKurus!, giftKurus: row.remainingGiftKurus! }],
+      reason: input.reason, cashEvidence: { method: "card", externalReference: randomUUID(),
+        occurredAt: new Date().toISOString(), paytrRefundCompleted: true } }, { adminEmail: input.adminEmail });
+  }
   const { promoteDraftToOrder, expireDraft } = await import(
     "../src/lib/services/order-draft"
   );
@@ -362,10 +323,10 @@ async function run() {
   const r1 = await cancelWorkshopSession({ sessionId: s1.id, adminEmail: ADMIN });
   assert.ok(r1.ok);
   ok(
-    "2 ödenmiş katılımcı iade edildi",
-    r1.report.refunded.length === 2 &&
-      r1.report.refunded.includes("Ayse Yilmaz") &&
-      r1.report.refunded.includes("Burak Demir"),
+    "4 katılım iptal edildi; 2 ödenmiş siparişin nakit iadesi bekliyor",
+    r1.report.cancelled.length === 4 && r1.report.refundRequiredOrders.length === 2 &&
+      r1.report.cancelled.includes("Ayse Yilmaz") &&
+      r1.report.cancelled.includes("Burak Demir"),
     r1.report
   );
   ok(
@@ -375,8 +336,8 @@ async function run() {
   );
   ok("başarısız çıkış yok", r1.report.failed.length === 0, r1.report);
   ok(
-    "ilk çağrıda 'zaten iade edilmiş' kimse yok",
-    r1.report.alreadyRefunded.length === 0,
+    "ilk çağrıda zaten iptal edilmiş kimse yok",
+    r1.report.alreadyCancelled.length === 0,
     r1.report
   );
   ok(
@@ -411,9 +372,11 @@ async function run() {
       (await participantStatus(paidB.participant.id)) === "cancelled"
   );
   ok(
-    "iade edilen siparişler `refunded`",
-    (await orderPayment(paidA.orderId!)) === "refunded" &&
-      (await orderPayment(paidB.orderId!)) === "refunded"
+    "iptal edilen siparişlerin nakit tahsilatı succeeded kalır",
+    (await orderPayment(paidA.orderId!)) === "succeeded" &&
+      (await orderPayment(paidB.orderId!)) === "succeeded" &&
+      (await orderRow(paidA.orderId!))?.status === "rejected" &&
+      (await orderRow(paidB.orderId!))?.status === "rejected"
   );
   ok("seans `cancelled`", (await sessionRow(s1.id))?.status === "cancelled");
 
@@ -471,14 +434,16 @@ async function run() {
   const refundActionsBefore = await db
     .select()
     .from(adminActions)
-    .where(eq(adminActions.action, "refund"));
+    .where(eq(adminActions.action, "reject"));
 
   const r2 = await cancelWorkshopSession({ sessionId: s1.id, adminEmail: ADMIN });
   assert.ok(r2.ok);
   ok(
-    "`already_refunded` BAŞARI sayılır ama YENİ iade olarak raporlanmaz",
-    r2.report.refunded.length === 0 &&
-      r2.report.alreadyRefunded.length === 2 &&
+    "tekrar iptal para hareketi yaratmaz; kalan nakit yükümlülüklerini yine raporlar",
+    r2.report.cancelled.length === 0 &&
+      r2.report.alreadyCancelled.length === 4 &&
+      r2.report.refundRequiredOrders.length === 2 &&
+      r2.report.refundRequiredOrders.every(row => row.cashRemainingKurus === 135000) &&
       r2.report.failed.length === 0,
     r2.report
   );
@@ -512,9 +477,9 @@ async function run() {
   const refundActionsAfter = await db
     .select()
     .from(adminActions)
-    .where(eq(adminActions.action, "refund"));
+    .where(eq(adminActions.action, "reject"));
   ok(
-    "ikinci çağrı yeni bir `refund` admin aksiyonu YAZMADI",
+    "ikinci çağrı yeni bir `reject` admin aksiyonu YAZMADI",
     refundActionsAfter.length === refundActionsBefore.length,
     { before: refundActionsBefore.length, after: refundActionsAfter.length }
   );
@@ -532,7 +497,7 @@ async function run() {
   ok("koltuk havuza döndü (bookedCount 2 → 1)", (await sessionRow(s3.id))?.bookedCount === 1, {
     bookedCount: (await sessionRow(s3.id))?.bookedCount,
   });
-  ok("sipariş iade edildi", (await orderPayment(openP.orderId!)) === "refunded");
+  ok("sipariş iptal edildi; nakit iadesi bekliyor", (await orderPayment(openP.orderId!)) === "succeeded" && (await orderRow(openP.orderId!))?.status === "rejected");
   ok(
     "katılımcı `cancelled`",
     (await participantStatus(openP.participant.id)) === "cancelled"
@@ -563,7 +528,7 @@ async function run() {
   ok("koltuk havuza DÖNMEDİ (bookedCount 3)", (await sessionRow(s4.id))?.bookedCount === 3, {
     bookedCount: (await sessionRow(s4.id))?.bookedCount,
   });
-  ok("sipariş yine de iade edildi", (await orderPayment(closedP.orderId!)) === "refunded");
+  ok("closed seansta sipariş iptal edildi; nakit bekliyor", (await orderPayment(closedP.orderId!)) === "succeeded" && (await orderRow(closedP.orderId!))?.status === "rejected");
   ok(
     "katılımcı `cancelled`",
     (await participantStatus(closedP.participant.id)) === "cancelled"
@@ -706,7 +671,7 @@ async function run() {
 
   // ── 8) İADE EDİLMİŞ SİPARİŞ PARTİDEN DÜŞER ───────────────────────────────
   //
-  // Kapatılan açık: `refundOrder` `payment_status`ü `refunded` yapıyor ama
+  // Kapatılan açık: eski gerekçe-temelli iade yolu `payment_status`ü `refunded` yapıyor ama
   // `orders.status`e HİÇ dokunmuyor. Parti yüklemleri yalnızca
   // `status <> 'rejected'` baktığı sürece iade edilmiş sipariş partide KALIYOR
   // ve dört ayrı yerde para/işleyiş bozuluyordu:
@@ -738,7 +703,7 @@ async function run() {
   });
 
   // Kapanıştan ÖNCE iade: sipariş `refunded`, `orders.status` DEĞİŞMEZ.
-  const refundRes = await refundOrder({
+  const refundRes = await actualFullRefund({
     orderId: w3.orderId!,
     reason: "Test — kapanış öncesi iade",
     adminEmail: ADMIN,
@@ -899,7 +864,7 @@ async function run() {
     close9
   );
 
-  await refundOrder({
+  await actualFullRefund({
     orderId: v2.orderId!,
     reason: "Test — kapanış sonrası iade",
     adminEmail: ADMIN,

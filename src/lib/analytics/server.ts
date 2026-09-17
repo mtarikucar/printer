@@ -66,12 +66,8 @@ function timeoutFetch(url: string, init: RequestInit, ms = 2500): Promise<Respon
   return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
 }
 
-/**
- * Record an event: persist it, then forward to the configured vendor server APIs
- * per the event's `server` routing matrix. Resolves once persistence is done;
- * vendor forwarding is awaited but never allowed to throw.
- */
-export async function recordEvent(input: ServerEventInput): Promise<void> {
+/** Persist an event idempotently. Failures reach the caller. */
+async function persistEvent(input: ServerEventInput): Promise<void> {
   const denorm = input.attribution
     ? denormalizeAttribution(input.attribution)
     : {
@@ -84,8 +80,7 @@ export async function recordEvent(input: ServerEventInput): Promise<void> {
         visitorId: null,
       };
 
-  try {
-    await db
+  await db
       .insert(analyticsEvents)
       .values({
         eventId: input.eventId,
@@ -110,6 +105,12 @@ export async function recordEvent(input: ServerEventInput): Promise<void> {
       // Idempotent: a retried webhook or a client+server pair with the same id
       // collapses to a single stored row.
       .onConflictDoNothing({ target: analyticsEvents.eventId });
+}
+
+/** Legacy best-effort dispatcher; refund record delivery uses the strict paths below. */
+export async function recordEvent(input: ServerEventInput): Promise<void> {
+  try {
+    await persistEvent(input);
   } catch (err) {
     if (ANALYTICS_DEBUG) console.warn("[analytics.server] persist failed", err);
   }
@@ -148,7 +149,9 @@ function major(valueKurus?: number | null): number | undefined {
 }
 
 /* ── GA4 Measurement Protocol ──────────────────────────────────────────── */
-async function forwardGA4(eventName: string, input: ServerEventInput): Promise<void> {
+async function forwardGA4(eventName: string, input: ServerEventInput, adapter: RefundGA4Adapter = {
+  measurementId: GA4_ID, apiSecret: GA4_API_SECRET, request: timeoutFetch,
+}): Promise<Response> {
   const clientId = input.visitorId || input.sessionId || input.eventId;
   const value = major(input.valueKurus);
   const params: Record<string, unknown> = {
@@ -161,10 +164,11 @@ async function forwardGA4(eventName: string, input: ServerEventInput): Promise<v
   if (input.productId) {
     params.items = [{ item_id: input.productId, quantity: 1, price: value }];
   }
+  if (eventName === "refund") params.event_id = input.eventId;
   const url = `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(
-    GA4_ID
-  )}&api_secret=${encodeURIComponent(GA4_API_SECRET)}`;
-  await timeoutFetch(url, {
+    adapter.measurementId
+  )}&api_secret=${encodeURIComponent(adapter.apiSecret)}`;
+  return adapter.request(url, {
     method: "POST",
     body: JSON.stringify({
       client_id: clientId,
@@ -322,6 +326,53 @@ export async function recordRefund(args: {
     sessionId: args.attribution?.sessionId ?? null,
     consent: readStoredConsent(args.attribution),
   });
+}
+
+export interface RefundAnalyticsEventInput {
+  /** Immutable allocation-scoped identity; never refund:<orderNumber>. */
+  eventId: string;
+  orderNumber: string;
+  valueKurus: number;
+  userId?: string | null;
+  productId?: string | null;
+  attribution?: Attribution | null;
+}
+
+function refundAnalyticsInput(args: RefundAnalyticsEventInput): ServerEventInput {
+  return { name: "refund", eventId: args.eventId, source: "server", reference: args.orderNumber,
+    valueKurus: args.valueKurus, userId: args.userId ?? null, productId: args.productId ?? null,
+    attribution: args.attribution ?? null, visitorId: args.attribution?.visitorId ?? null,
+    sessionId: args.attribution?.sessionId ?? null,
+    consent: { analytics: args.attribution?.consent?.analytics === true,
+      marketing: args.attribution?.consent?.marketing === true } };
+}
+
+/** Strict refund-only persistence. Unlike the legacy best-effort dispatcher,
+ * rejection reaches the record's durable retry coordinator. Conflict is success. */
+export async function persistRefundAnalyticsEvent(args: RefundAnalyticsEventInput,
+  persist: (input: ServerEventInput) => Promise<void> = persistEvent): Promise<void> {
+  await persist(refundAnalyticsInput(args));
+}
+
+export interface RefundGA4Adapter {
+  measurementId: string;
+  apiSecret: string;
+  request(url: string, init: RequestInit): Promise<Response>;
+}
+
+/** HTTP acceptance is not a guarantee of GA4 processing or exactly-once.
+ * Consent denial is explicit; unavailable configuration/destination is retryable. */
+export async function deliverRefundAnalyticsGA4(args: RefundAnalyticsEventInput,
+  adapter: RefundGA4Adapter = { measurementId: GA4_ID, apiSecret: GA4_API_SECRET, request: timeoutFetch },
+): Promise<"accepted" | "not_required"> {
+  const input = refundAnalyticsInput(args);
+  if (input.consent?.analytics !== true) return "not_required";
+  if (!adapter.measurementId.trim() || !adapter.apiSecret.trim()) {
+    throw new Error("Refund analytics GA4 configuration unavailable");
+  }
+  const response = await forwardGA4("refund", input, adapter);
+  if (!response.ok) throw new Error(`Refund analytics GA4 HTTP ${response.status}`);
+  return "accepted";
 }
 
 /** Consent snapshot persisted on the attribution object at checkout time. */

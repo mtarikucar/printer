@@ -14,8 +14,7 @@ import { PLATFORM_COMMISSION_RATE_BPS, KDV_RATE_BPS } from "@/lib/config/prices"
 import { eInvoiceProvider } from "@/lib/services/e-invoice";
 import { manufacturerBaseKurus } from "@/lib/services/earning-base";
 import { invoiceBasisKurus } from "@/lib/config/invoice";
-import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
-import { openEarningWhere } from "@/lib/services/earning-claimable";
+import { openEarningWhere, originalEarningOrderOpen } from "@/lib/services/earning-claimable";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 
 /**
@@ -43,6 +42,7 @@ export type AccrualOutcome =
    */
   | "mismatch_refused"
   | "skipped_refunded"
+  | "skipped_cancelled"
   | "order_not_found";
 
 /**
@@ -197,7 +197,7 @@ async function writeMismatchNote(args: {
 
 /** accrueEarning'in işleminden çıkan sonuç + izin gerektirdiği rakamlar. */
 type AccrualTxResult =
-  | { outcome: "accrued" | "already_accrued" | "skipped_refunded" | "order_not_found" }
+  | { outcome: "accrued" | "already_accrued" | "skipped_refunded" | "skipped_cancelled" | "order_not_found" }
   | { outcome: "corrected"; fromGrossKurus: number; toGrossKurus: number }
   | {
       outcome: "mismatch_refused";
@@ -255,7 +255,7 @@ type AccrualTxResult =
  * (payoutHoldsWhatItClaims) — bir para deliğini kapatırken partnerin bütün
  * ödemesini kilitlemiş olurduk. Ödenmiş satır zaten geri alınamaz.
  *
- * A refunded order never accrues. The routes refuse forward actions on one, but
+ * A refunded or cancelled order never accrues. The routes refuse forward actions on one, but
  * this is the backstop for whatever reaches it anyway: a refunded row that kept
  * its partner, a caller that forgot the guard, a re-accrual after a lost race.
  * The check and the insert share one transaction, and the order row is read
@@ -291,14 +291,14 @@ export async function accrueEarning(
         manufacturerStatus: orders.manufacturerStatus,
       })
       .from(orders)
-      .where(and(eq(orders.id, orderId), notRefundedGuard()))
+      .where(and(eq(orders.id, orderId), originalEarningOrderOpen()))
       .for("update");
     if (!row) {
       const [exists] = await tx
-        .select({ id: orders.id })
+        .select({ id: orders.id, paymentStatus: orders.paymentStatus })
         .from(orders)
         .where(eq(orders.id, orderId));
-      return { outcome: exists ? "skipped_refunded" : "order_not_found" };
+      return { outcome: !exists ? "order_not_found" : exists.paymentStatus === "refunded" ? "skipped_refunded" : "skipped_cancelled" };
     }
     const rateBps = row.rate ?? PLATFORM_COMMISSION_RATE_BPS;
 
@@ -450,6 +450,8 @@ export async function accrueEarning(
     console.warn(
       `[accrual] order ${orderId}: skipped: refunded — no manufacturer earning for ${manufacturerId}`
     );
+  } else if (result.outcome === "skipped_cancelled") {
+    console.warn(`[accrual] order ${orderId}: skipped: cancelled — no manufacturer earning for ${manufacturerId}`);
   } else if (result.outcome === "order_not_found") {
     console.error(`[accrual] order ${orderId}: not found — no manufacturer earning accrued`);
   } else if (result.outcome === "corrected") {

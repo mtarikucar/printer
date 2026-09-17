@@ -28,6 +28,9 @@ import {
   openEarningWhere,
   refundedOpenEarningWhere,
   refundedInPayoutEarningWhere,
+  cancelledOpenEarningWhere,
+  cancelledInPayoutEarningWhere,
+  originalEarningOrderOpen,
 } from "../src/lib/services/earning-claimable";
 import {
   claimEarningsIntoPayout,
@@ -661,26 +664,37 @@ test("grep guard: izin satır METNİNE bağlı, dosyaya değil; eskiyen izin tes
 const dialect = new PgDialect();
 const compile = (q: SQL) => dialect.sqlToQuery(q);
 
-test("talep edilebilir hakediş: bekleyen + partilenmemiş + iade EDİLMEMİŞ", () => {
+test("talep edilebilir hakediş: bekleyen + partilenmemiş + iade ve iptal EDİLMEMİŞ", () => {
   const q = compile(claimableEarningWhere(manufacturerEarnings));
   assert.match(q.sql, /"manufacturer_earnings"\."status" = \$\d/);
   assert.match(q.sql, /"manufacturer_earnings"\."payout_id" is null/);
   assert.match(q.sql, /"orders"\."payment_status" is distinct from \$\d/);
   // "is not distinct from" olsaydı kural TERSİNE dönerdi: yalnız iade edilenler.
   assert.ok(!/is not distinct from/.test(q.sql), q.sql);
-  assert.deepEqual(q.params, [OPEN_EARNING_STATUS, REFUNDED_PAYMENT_STATUS]);
+  assert.deepEqual(q.params, [OPEN_EARNING_STATUS, REFUNDED_PAYMENT_STATUS, "rejected"]);
+  assert.match(q.sql, /"orders"\."status" is distinct from \$\d/);
+  assert.ok(!/\bor\b/i.test(q.sql), "both payment and cancellation guards must hold");
 });
 
-test("iade edilen açık hakediş, talep edilebilirin TAM tümleyenidir", () => {
+test("iade ve iptal ayrı engellerdir; iptal uyarısı gerçekleşmiş nakit iadesi iddia etmez", () => {
   const claim = compile(claimableEarningWhere(painterEarnings));
   const refunded = compile(refundedOpenEarningWhere(painterEarnings));
-  // Aynı "açık satır" tanımı; yalnız iade terimi ters. Biri gevşerse (ör. biri
-  // partilenmiş satırları da sayarsa) tutar iki toplamda birden görünürdü.
-  assert.equal(
-    claim.sql.replace(" is distinct from ", " <IADE> "),
-    refunded.sql.replace(" is not distinct from ", " <IADE> ")
-  );
-  assert.deepEqual(claim.params, refunded.params);
+  const cancelled = compile(cancelledOpenEarningWhere(painterEarnings));
+  const orderOpen = compile(originalEarningOrderOpen());
+  assert.deepEqual(orderOpen.params, [REFUNDED_PAYMENT_STATUS, "rejected"]);
+  assert.match(orderOpen.sql, /"orders"\."payment_status" is distinct from \$1 and "orders"\."status" is distinct from \$2/);
+  for (const q of [claim, refunded, cancelled]) {
+    assert.match(q.sql, /"painter_earnings"\."status" = \$1/);
+    assert.match(q.sql, /"painter_earnings"\."payout_id" is null/);
+  }
+  assert.deepEqual(refunded.params, [OPEN_EARNING_STATUS, REFUNDED_PAYMENT_STATUS]);
+  assert.match(refunded.sql, /"orders"\."payment_status" is not distinct from/);
+  assert.ok(!refunded.sql.includes('"orders"."status"'), "refund reason wins even on a rejected order");
+  assert.deepEqual(cancelled.params, [OPEN_EARNING_STATUS, REFUNDED_PAYMENT_STATUS, "rejected"]);
+  assert.match(cancelled.sql, /"orders"\."payment_status" is distinct from \$2 and "orders"\."status" is not distinct from \$3/);
+  const batched = compile(cancelledInPayoutEarningWhere(painterEarnings));
+  assert.match(batched.sql, /"payout_id" is not null/);
+  assert.deepEqual(batched.params, cancelled.params);
 });
 
 test("kural iki tabloda da AYNI (üretici ve boyacı tarafı ayrışamaz)", () => {
@@ -926,12 +940,19 @@ test("both reversal adapters delegate to the gated shared source/debit reversal"
     assert.ok(body.includes("reversePartnerEarning("));
     assert.ok(!body.includes("db.transaction("), "adapter must not hold outer locks");
   }
-  const shared = functionBody(readSite("src/lib/services/partner-payables.ts"), "export async function reversePartnerEarning(");
+  const source = readSite("src/lib/services/partner-payables.ts");
+  const shared = functionBody(source, "export async function reversePartnerEarning(");
+  assert.ok(shared.includes("lockPartnerMoney(") && shared.includes('.for("update")'));
   assert.ok(shared.indexOf("lockPartnerMoney(") < shared.indexOf('.for("update")'));
-  assert.match(shared, /eq\(t\.earning\.status, "pending"\)/);
-  assert.ok(shared.includes('sourceId, earning.id'));
-  assert.ok(shared.includes('adjustmentMembership(kind, null)'));
-  assert.ok(shared.includes('totalKurus: integerTotal(held.heldNet)'));
+  assert.ok(shared.indexOf('.for("update")') < shared.indexOf("reversePartnerEarningTx("));
+  const primitive = functionBody(source, "export async function reversePartnerEarningTx(");
+  assert.ok(!primitive.includes("db.transaction(") && !primitive.includes("lockPartnerMoney("), "caller transaction owns all partner gates");
+  assert.ok(primitive.includes("earning.partnerId.toLowerCase() !== expectedPartnerId.toLowerCase()"));
+  assert.ok(primitive.indexOf("earning.partnerId.toLowerCase()") < primitive.indexOf('outcome: "paid_retained"'));
+  assert.match(primitive, /eq\(t\.earning\.status, "pending"\)/);
+  assert.ok(primitive.includes('sourceId, earning.id'));
+  assert.ok(primitive.includes('adjustmentMembership(kind, null)'));
+  assert.ok(primitive.includes('totalKurus: integerTotal(held.heldNet)'));
   assert.ok(readSite("src/lib/services/money-partner-lock.ts").includes("lock_timeout"));
 });
 
@@ -1458,6 +1479,26 @@ test("source groups cannot offset unrelated work; zero net stays claimable", () 
   const credit: PayableSource = { ...original, sourceKind: "adjustment" };
   assert.equal(groupPartnerPayables([credit], [offset]).groups[0].netKurus, 6000);
   assert.equal(groupPartnerPayables([credit], [offset]).blockedGroups[0].reason, "missing");
+});
+
+test("cancelled originals have a distinct blocked reason while independent credits stay payable", () => {
+  for (const sourceKind of ["manufacturer_earning", "painter_earning"] as const) {
+    const original: PayableSource = { sourceKind, id: "original", orderId: "order", netKurus: 6000,
+      status: "pending", payoutId: null, eligible: false, ineligibleReason: "order_cancelled" };
+    const credit: PayableSource = { ...original, sourceKind: "adjustment", id: "credit", netKurus: 2000, eligible: true, ineligibleReason: undefined };
+    const offset: PayableMember = { sourceKind: "adjustment", id: "offset", orderId: "order", netKurus: -1000,
+      status: "pending", payoutId: null, offsetSourceKind: sourceKind, sourceId: original.id };
+    const cancelled = groupPartnerPayables([original, credit], [offset]);
+    assert.deepEqual(cancelled.groups.map(g => [g.sourceId, g.netKurus]), [["credit", 2000]]);
+    assert.equal(cancelled.blockedGroups[0].reason, "order_cancelled");
+    assert.deepEqual(cancelled.blockedGroups[0].members.map(m => m.id), ["original", "offset"]);
+    const refunded = groupPartnerPayables([{ ...original, ineligibleReason: undefined }, credit], [offset]);
+    assert.equal(refunded.blockedGroups[0].reason, "source_ineligible");
+    const batch = groupPartnerPayables([{ ...original, payoutId: "batch" }], [{ ...offset, payoutId: "batch" }], "batch");
+    assert.equal(batch.groups.length, 0);
+    assert.equal(batch.blockedGroups[0].reason, "order_cancelled");
+    assert.equal(groupPartnerPayables([{ ...original, status: "reversed" }], [offset]).blockedGroups[0].reason, "reversed");
+  }
 });
 
 test("mixed stamps compare identities and individual amounts, not only the sum", () => {

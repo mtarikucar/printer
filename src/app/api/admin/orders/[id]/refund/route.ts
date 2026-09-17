@@ -1,38 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { refundOrder } from "@/lib/services/order-refund";
-import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
+import { readOrderRefundView, recordOrderRefund } from "@/lib/services/order-refund-record";
+import { normalizeRecordRefundInput, RefundPolicyError } from "@/lib/config/order-refund";
+import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR, ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
 
-// Faz 7: mark an order refunded. Flips paymentStatus, reverses any manufacturer
-// earning, records the admin action, and notifies the customer (in-app + email).
-//
-// Bütün mantık `refundOrder` servisindedir: atölye seansı/katılımcısı iptal
-// edildiğinde de AYNI para yolu çalışır. Rota yalnızca yetki + gövde ayrıştırma
-// + HTTP eşlemesi yapar.
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type Context = { params: Promise<{ id: string }> };
+export async function GET(_request: NextRequest, { params }: Context) {
   try {
     const a = await requireAdmin();
     if ("response" in a) return a.response;
-
     const { id } = await params;
-    const body = await request.json().catch(() => ({}));
-    const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : null;
+    if (!UUID.test(id)) return NextResponse.json({ error: "Sipariş bulunamadı." }, { status: 404 });
+    return NextResponse.json(await readOrderRefundView(id), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    if (error instanceof RefundPolicyError) return NextResponse.json({ error: `İade kayıtları okunamadı: ${error.message}`, code: error.code }, { status: error.status });
+    return handleRouteFailure(error, "GET /api/admin/orders/[id]/refund", ADMIN_READ_FAILED_ERROR);
+  }
+}
 
-    const r = await refundOrder({ orderId: id, reason, adminEmail: a.session.user.email });
-    if (!r.ok) {
-      // The admin page alerts `error` as-is, so it is Turkish copy, not a key.
-      // `already_refunded` also covers losing a race: the service's guarded
-      // UPDATE matched no row because a reject or another refund got there
-      // first, and none of the refund side effects ran a second time.
-      return r.reason === "already_refunded"
-        ? NextResponse.json({ error: "Sipariş zaten iade edilmiş." }, { status: 409 })
-        : NextResponse.json({ error: "Sipariş bulunamadı." }, { status: 404 });
-    }
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return handleRouteFailure(e, "POST /api/admin/orders/[id]/refund", ADMIN_ACTION_FAILED_ERROR);
+/** Records an already completed external cash return; never initiates a transfer. */
+export async function POST(request: NextRequest, { params }: Context) {
+  try {
+    const a = await requireAdmin();
+    if ("response" in a) return a.response;
+    const { id } = await params;
+    if (!UUID.test(id)) return NextResponse.json({ error: "Sipariş bulunamadı." }, { status: 404 });
+    const input = normalizeRecordRefundInput(await request.json().catch(() => null));
+    if (!input.allocations.some(row => row.orderId === id.toLowerCase())) return NextResponse.json({ error: "Açık sipariş, iade dağılımında yer almalıdır." }, { status: 400 });
+    const result = await recordOrderRefund(input, { adminEmail: a.session.user.email });
+    return NextResponse.json(result, { status: result.ok ? 200 : result.status });
+  } catch (error) {
+    if (error instanceof RefundPolicyError) return NextResponse.json({ error: `İade kaydedilemedi: ${error.message}`, code: error.code }, { status: error.status });
+    return handleRouteFailure(error, "POST /api/admin/orders/[id]/refund", ADMIN_ACTION_FAILED_ERROR);
   }
 }

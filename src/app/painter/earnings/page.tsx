@@ -2,12 +2,16 @@ export const dynamic = "force-dynamic";
 
 import { readPartnerPayables } from "@/lib/services/partner-payables";
 import { PartnerAdjustmentHistory } from "@/components/partner-adjustment-history";
+import { PartnerPayoutHistory } from "@/components/partner-payout-history";
+import { PayoutHistoryNavigation } from "@/components/payout-history-navigation";
+import { readPayoutPage } from "@/lib/services/payout-list";
+import { parsePayoutListQuery, type PayoutListQuery } from "@/lib/config/payout-list";
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, painters, painterEarnings, painterPayouts } from "@/lib/db/schema";
+import { orders, painters, painterEarnings } from "@/lib/db/schema";
 import { getPainterSession } from "@/lib/services/painter-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { formatCurrency, formatDate } from "@/lib/i18n/format";
@@ -63,7 +67,7 @@ async function displayRead<T>(label: string, query: PromiseLike<T>): Promise<T |
   }
 }
 
-export default async function PainterEarningsPage() {
+export default async function PainterEarningsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await getPainterSession();
   if (!session) redirect("/painter/login");
 
@@ -77,16 +81,30 @@ export default async function PainterEarningsPage() {
       ibanReviewStatus: true,
     },
   });
-  // Aktif olmayan boyacı, hesap durumunu anlatan panele düşer (işler sayfası gibi).
-  if (!painter || painter.status !== "active") redirect("/painter/dashboard");
+  if (!painter) redirect("/painter/login");
 
+  const historyScope = { audience: "partner" as const, kind: "painter" as const, partnerId: session.painterId };
+  const rawHistory = await searchParams;
+  let historyQuery: PayoutListQuery;
+  try {
+    if (rawHistory.partnerId !== undefined || rawHistory.kind !== undefined) throw new Error("Partner bilgisi oturumdan belirlenir; liste bağlantısı geçersiz.");
+    const params = new URLSearchParams();
+    for (const key of ["status", "limit", "cursor"]) {
+      const value = rawHistory[key];
+      if (Array.isArray(value)) value.forEach(item => params.append(key, item));
+      else if (value !== undefined) params.set(key, value);
+    }
+    historyQuery = parsePayoutListQuery(params, historyScope);
+  } catch {
+    return <div role="alert" className="m-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Ödeme geçmişi filtresi veya sayfa bağlantısı geçersiz. <a href="/painter/earnings" className="underline">Listeyi yeniden açın</a>.</div>;
+  }
   const locale = (await getLocale()) as Locale;
   const pid = session.painterId;
 
   // Hak ediş + düzeltme bakiyesi partilemenin ortak okuyucusundan gelir.
   // Aşağıdaki SQL yalnız iade edilmiş eski hak edişleri ayrıca açıklar;
   // 200 satırlık gösterim listesi hiçbir toplamın kaynağı değildir.
-  const [[totals], earnings, payoutRows, moneySummary] = await Promise.all([
+  const [[totals], earnings, payoutPage, moneySummary] = await Promise.all([
     // Toplamlar SQL'de: aşağıdaki liste son 200 satırla sınırlı, toplam değil.
     db
       .select({
@@ -104,20 +122,7 @@ export default async function PainterEarningsPage() {
     }),
     // YALNIZ GÖSTERİM: bu geçmiş listesi bakiye okuyucusundan ayrı yüklenir, o
     // yüzden arızası sayfayı düşürmez (bkz. displayRead).
-    displayRead(
-      "ödeme geçmişi",
-      db.query.painterPayouts.findMany({
-        where: eq(painterPayouts.painterId, pid),
-        with: {
-          earnings: {
-            columns: { id: true, netKurus: true, status: true },
-            with: { order: { columns: { orderNumber: true } } },
-          },
-        },
-        orderBy: [desc(painterPayouts.createdAt)],
-        limit: 50,
-      })
-    ),
+    displayRead("ödeme geçmişi", readPayoutPage(historyScope, historyQuery)),
     displayRead("güncel hak ediş ve düzeltme toplamları", readPartnerPayables("painter", pid)),
   ]);
 
@@ -235,7 +240,7 @@ export default async function PainterEarningsPage() {
               Profilde düzenle
             </Link>
           </div>
-          <PainterPayoutRequestButton owedKurus={owed} hasClaimable={moneySummary.claimableCount > 0} hasIban={!!painter.iban} />
+          {painter.status === "active" ? <PainterPayoutRequestButton owedKurus={owed} hasClaimable={moneySummary.claimableCount > 0} hasIban={!!painter.iban} /> : <p className="text-sm text-amber-800">Hesabınız aktif olmadığı için yeni ödeme talebi kapalıdır; geçmiş kayıtlarınızı görebilirsiniz.</p>}
         </div>
       </div>
 
@@ -302,66 +307,11 @@ export default async function PainterEarningsPage() {
         </div>
       )}
 
-      <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">
-        Ödeme geçmişi
-      </h2>
-      {payoutRows === null ? (
-        <div
-          role="alert"
-          className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
-        >
-          <p className="font-semibold">
-            Ödeme geçmişi şu anda okunamıyor (geçici sistem arızası)
-          </p>
-          <p className="mt-1 text-amber-900/80">
-            Bu bölüm BOŞ DEĞİL, BİLİNMİYOR: hiçbir ödeme kaydı silinmedi.
-            Yukarıdaki tutarlar ayrı bir tutarlı bakiye okumasından gelir. Birkaç
-            dakika sonra sayfayı yenileyin, sorun sürerse yöneticiye bildirin.
-          </p>
-        </div>
-      ) : payoutRows.length === 0 ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-500">
-          Henüz ödeme yok.
-        </div>
-      ) : (
-        <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
-          {payoutRows.map((p) => (
-            <details key={p.id} className="px-4 py-3 text-sm">
-              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
-                <span className="text-gray-700">
-                  {formatDate(p.createdAt, locale)} · {p.earningCount} hak ediş · {p.adjustmentCount} düzeltme
-                  {p.adminEmail === "painter-request" ? " · sizin talebiniz" : ""}
-                  {p.reference ? ` · Ref: ${p.reference}` : ""}
-                </span>
-                <span className="flex items-center gap-3">
-                  <span className="font-semibold text-gray-900">{formatCurrency(p.totalKurus, locale)}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      p.status === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"
-                    }`}
-                  >
-                    {p.voidedAt ? "İptal edildi" : p.settlementKind === "netting" ? (p.status === "paid" ? "Mahsup edildi" : "Mahsup bekliyor") : p.status === "paid"
-                      ? `Ödendi${p.paidAt ? ` · ${formatDate(p.paidAt, locale)}` : ""}`
-                      : "Transfer bekleniyor"}
-                  </span>
-                </span>
-              </summary>
-              {p.voidReason && <p className="mt-2 text-xs text-gray-600">İptal gerekçesi: {p.voidReason}. Eski parti tutarı ödenecek bakiye değildir.</p>}
-              <ul className="mt-2 space-y-1 text-xs text-gray-600">{moneySummary.adjustmentHistory.filter(a => a.painterPayoutId === p.id).map(a => <li key={a.id} className="flex justify-between gap-3"><span>{a.reason}</span><span>{formatCurrency(a.netKurus, locale)}</span></li>)}</ul>
-              {p.earnings.length > 0 && (
-                <ul className="mt-2 space-y-1 text-xs text-gray-600">
-                  {p.earnings.map((e) => (
-                    <li key={e.id} className="flex justify-between gap-3">
-                      <span className="font-mono">{e.order?.orderNumber ?? "—"}</span>
-                      <span>{formatCurrency(e.netKurus, locale)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </details>
-          ))}
-        </div>
-      )}
+      <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Ödeme geçmişi</h2>
+      <PayoutHistoryNavigation key={historyScope.kind} status={historyQuery.status} limit={historyQuery.limit} cursor={historyQuery.cursor}
+        nextCursor={payoutPage?.nextCursor ?? null} rowCount={payoutPage?.rows.length ?? 0} unavailable={payoutPage === null}
+        exportHref={`/api/painter/payouts/export?status=${historyQuery.status}`} />
+      <PartnerPayoutHistory rows={payoutPage?.rows ?? []} unavailable={payoutPage === null} />
     </div>
   );
 }

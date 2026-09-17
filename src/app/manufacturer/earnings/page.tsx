@@ -2,15 +2,19 @@ export const dynamic = "force-dynamic";
 
 import { readPartnerPayables } from "@/lib/services/partner-payables";
 import { PartnerAdjustmentHistory } from "@/components/partner-adjustment-history";
+import { PartnerPayoutHistory } from "@/components/partner-payout-history";
+import { PayoutHistoryNavigation } from "@/components/payout-history-navigation";
+import { readPayoutPage } from "@/lib/services/payout-list";
+import { parsePayoutListQuery, type PayoutListQuery } from "@/lib/config/payout-list";
 
 import { redirect } from "next/navigation";
 import { eq, desc, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { manufacturers, manufacturerEarnings, payouts, orders } from "@/lib/db/schema";
+import { manufacturers, manufacturerEarnings, orders } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
-import { formatCurrency, formatDate } from "@/lib/i18n/format";
+import { formatCurrency } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { PayoutRequestButton } from "@/components/manufacturer/payout-request-button";
 import { isRefunded } from "@/lib/config/order-status-policy";
@@ -44,24 +48,39 @@ async function displayRead<T>(label: string, query: PromiseLike<T>): Promise<T |
   }
 }
 
-export default async function ManufacturerEarningsPage() {
+export default async function ManufacturerEarningsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await getManufacturerSession();
   if (!session) redirect("/manufacturer/login");
 
   const manufacturer = await db.query.manufacturers.findFirst({
     where: eq(manufacturers.id, session.manufacturerId),
   });
-  if (!manufacturer || manufacturer.status !== "active") {
+  if (!manufacturer) {
     redirect("/manufacturer/login");
   }
 
+  const historyScope = { audience: "partner" as const, kind: "manufacturer" as const, partnerId: session.manufacturerId };
+  const rawHistory = await searchParams;
+  let historyQuery: PayoutListQuery;
+  try {
+    if (rawHistory.partnerId !== undefined || rawHistory.kind !== undefined) throw new Error("Partner bilgisi oturumdan belirlenir; liste bağlantısı geçersiz.");
+    const params = new URLSearchParams();
+    for (const key of ["status", "limit", "cursor"]) {
+      const value = rawHistory[key];
+      if (Array.isArray(value)) value.forEach(item => params.append(key, item));
+      else if (value !== undefined) params.set(key, value);
+    }
+    historyQuery = parsePayoutListQuery(params, historyScope);
+  } catch {
+    return <div role="alert" className="m-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Ödeme geçmişi filtresi veya sayfa bağlantısı geçersiz. <a href="/manufacturer/earnings" className="underline">Listeyi yeniden açın</a>.</div>;
+  }
   const locale = (await getLocale()) as Locale;
   const d = getDictionary(locale);
 
   // Hak ediş + düzeltme bakiyesi partilemenin ortak okuyucusundan gelir.
   // Aşağıdaki SQL yalnız iade edilmiş eski hak edişleri ayrıca açıklar;
   // 200 satırlık gösterim listesi hiçbir toplamın kaynağı değildir.
-  const [[totals], earnings, payoutRows, moneySummary] = await Promise.all([
+  const [[totals], earnings, payoutPage, moneySummary] = await Promise.all([
     db
       .select({
         refundedOpen: sql<number>`coalesce(sum(${manufacturerEarnings.netKurus}) filter (where ${refundedOpenEarningWhere(manufacturerEarnings)}), 0)::int`,
@@ -79,14 +98,7 @@ export default async function ManufacturerEarningsPage() {
     }),
     // YALNIZ GÖSTERİM: bu geçmiş listesi bakiye okuyucusundan ayrı yüklenir, o
     // yüzden arızası sayfayı düşürmez (bkz. displayRead).
-    displayRead(
-      "ödeme geçmişi",
-      db.query.payouts.findMany({
-        where: eq(payouts.manufacturerId, session.manufacturerId),
-        orderBy: [desc(payouts.createdAt)],
-        limit: 50,
-      })
-    ),
+    displayRead("ödeme geçmişi", readPayoutPage(historyScope, historyQuery)),
     displayRead("güncel hak ediş ve düzeltme toplamları", readPartnerPayables("manufacturer", session.manufacturerId)),
   ]);
 
@@ -184,7 +196,7 @@ export default async function ManufacturerEarningsPage() {
       )}
 
       <div className="mb-8">
-        <PayoutRequestButton owedKurus={owed} hasClaimable={moneySummary.claimableCount > 0} />
+        {manufacturer.status === "active" ? <PayoutRequestButton owedKurus={owed} hasClaimable={moneySummary.claimableCount > 0} /> : <p className="text-sm text-amber-800">Hesabınız aktif olmadığı için yeni ödeme talebi kapalıdır; geçmiş kayıtlarınızı görebilirsiniz.</p>}
       </div>
 
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -240,48 +252,11 @@ export default async function ManufacturerEarningsPage() {
         </div>
       )}
 
-      {/* Başlık YA tabloyla YA arıza uyarısıyla birlikte görünür; hiç ödeme
-          yokken (null DEĞİL, boş liste) eskisi gibi hiç basılmaz. */}
-      {(payoutRows === null || payoutRows.length > 0) && (
-        <>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            {d["manufacturer.earnings.payouts"]}
-          </h2>
-          {payoutRows === null ? (
-            <div
-              role="alert"
-              className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
-            >
-              <p className="font-semibold">
-                Ödeme geçmişi şu anda okunamıyor (geçici sistem arızası)
-              </p>
-              <p className="mt-1 text-amber-900/80">
-                Bu bölüm BOŞ DEĞİL, BİLİNMİYOR: hiçbir ödeme kaydı silinmedi.
-                Yukarıdaki tutarlar ayrı bir tutarlı bakiye okumasından gelir.
-                Birkaç dakika sonra sayfayı yenileyin, sorun sürerse yöneticiye
-                bildirin.
-              </p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-              {payoutRows.map((p) => (
-                <div key={p.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                  <span className="text-gray-700">
-                    {formatDate(p.createdAt.toISOString(), locale)} · {p.earningCount} hak ediş · {p.adjustmentCount} düzeltme
-                    {p.voidReason && <span className="mt-1 block text-xs">İptal: {p.voidReason}. Eski parti tutarı ödenecek bakiye değildir.</span>}
-                  </span>
-                  <span className="flex items-center gap-3">
-                    <span className="font-semibold text-gray-900">{formatCurrency(p.totalKurus, locale)}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.status === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                      {p.voidedAt ? "İptal edildi" : p.settlementKind === "netting" ? (p.status === "paid" ? "Mahsup edildi" : "Mahsup bekliyor") : p.status === "paid" ? statusLabel.paid : statusLabel.pending}
-                    </span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+      <h2 className="mt-8 mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Ödeme geçmişi</h2>
+      <PayoutHistoryNavigation key={historyScope.kind} status={historyQuery.status} limit={historyQuery.limit} cursor={historyQuery.cursor}
+        nextCursor={payoutPage?.nextCursor ?? null} rowCount={payoutPage?.rows.length ?? 0} unavailable={payoutPage === null}
+        exportHref={`/api/manufacturer/payouts/export?status=${historyQuery.status}`} />
+      <PartnerPayoutHistory rows={payoutPage?.rows ?? []} unavailable={payoutPage === null} />
     </div>
   );
 }

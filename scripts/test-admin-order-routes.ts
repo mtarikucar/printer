@@ -524,6 +524,7 @@ const TRANSITIVE_READERS = new Set([
   // "db" geçmez.
   "latestModelFiles",
   "getProductSpec",
+  "readPayoutPage",
 ]);
 
 /**
@@ -710,6 +711,8 @@ function coreReadRelations(sf: ts.SourceFile, rel: string): string[] {
 // Denetleyicinin KENDİSİ önce kanıtlanır: korumasızı yakalamayan bir çivi,
 // çivi değildir.
 const GUARD_SELF_TESTS: Array<[string, string, number]> = [
+  ["çıplak ödeme okuyucusu yakalanır", "async function f(){ await readPayoutPage(scope, query); }", 1],
+  ["korumalı ödeme okuyucusu geçer", "async function f(){ await readPayoutPage(scope, query).catch(() => null); }", 0],
   ["çıplak okuma yakalanır", "async function f(){ const r = await db.select().from(t); }", 1],
   ["kendi .catch'i olan okuma geçer", "async function f(){ const r = await db.select().from(t).catch(() => null); }", 0],
   ["displayRead ile sarılan okuma geçer", "async function f(){ const r = await displayRead('x', id, db.select().from(t)); }", 0],

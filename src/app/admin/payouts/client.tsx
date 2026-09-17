@@ -4,6 +4,7 @@ import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDate } from "@/lib/i18n/format";
+import { PayoutHistoryNavigation, type PayoutHistoryNavigationProps } from "@/components/payout-history-navigation";
 
 export type PartnerKind = "manufacturer" | "painter";
 
@@ -79,6 +80,7 @@ export interface PayoutRow {
 }
 
 export interface PayoutTabData {
+  history?: PayoutHistoryNavigationProps;
   owed: OwedPartner[];
   payouts: PayoutRow[];
 }
@@ -279,7 +281,7 @@ export function PayoutsClient({
   data: Record<PartnerKind, PayoutTabData>;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<PartnerKind>(initialTab);
+  const tab = initialTab;
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -288,19 +290,18 @@ export function PayoutsClient({
   const cfg = PARTNER[tab];
   const pendingPayouts = d.payouts.filter((p) => p.status === "pending" && !p.voidedAt);
   const paidPayouts = d.payouts.filter((p) => p.status === "paid" && !p.voidedAt);
-  const waitingCount = (k: PartnerKind) =>
-    data[k].owed.length + data[k].payouts.filter((p) => p.status === "pending" && !p.voidedAt).length;
+
 
   const voidedPayouts = d.payouts.filter(p => !!p.voidedAt);
 
   const switchTab = (next: PartnerKind) => {
-    setTab(next);
-    // Sekme URL'de dursun: yenileme ya da paylaşılan bağlantı aynı sekmeye açılsın.
-    window.history.replaceState(
-      null,
-      "",
-      next === "painter" ? "/admin/payouts?tab=painter" : "/admin/payouts"
-    );
+    router.push(`/admin/payouts?tab=${next}&status=pending`, { scroll: false });
+  };
+  const refreshHistory = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("cursor");
+    router.replace(`${url.pathname}${url.search}`, { scroll: false });
+    router.refresh();
   };
 
   // Bir ödeme partisinin içindeki iade edilmiş (ödenmemesi gereken) para.
@@ -337,7 +338,7 @@ export function PayoutsClient({
       }
       const result = await res.json().catch(() => null);
       setNotice(result?.warning || (result ? `${result.settlementKind === "netting" ? "Mahsup" : "Ödeme"} partisi oluşturuldu: ${fmt(result.totalKurus)} · ${result.count} hak ediş, ${result.adjustmentCount} düzeltme.` : "Parti oluşturuldu; güncel listeyi kontrol edin."));
-      router.refresh();
+      refreshHistory();
     } catch {
       setNotice("İşlemin sonucu alınamadı. Yeniden denemeden önce sayfayı yenileyip oluşan partiyi kontrol edin.");
     } finally {
@@ -367,7 +368,7 @@ export function PayoutsClient({
         return;
       }
       setNotice(result.warning || result.message || "İşlem kaydedildi.");
-      router.refresh();
+      refreshHistory();
     } catch {
       setNotice("İşlemin sonucu alınamadı. Tekrar banka transferi yapmayın; sayfayı yenileyip partinin durumunu kontrol edin.");
     } finally {
@@ -421,7 +422,7 @@ En az 10 karakter gerekçe yazın:`);
       const res = await fetch(`/api/admin/payouts/${p.id}/void`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, idempotencyKey: voidAttempt.current.key }) });
       const data = await res.json();
       if (!res.ok) { alert(data.error || "Parti iptal edilemedi."); return; }
-      voidAttempt.current = null; setNotice(data.message || "Parti iptal edildi; geçmişi korundu."); router.refresh();
+      voidAttempt.current = null; setNotice(data.message || "Parti iptal edildi; geçmişi korundu."); refreshHistory();
     } catch { alert("Sonuç alınamadı. Kayıtları yenileyin; aynı iptali tekrar denerseniz işlem anahtarı korunur."); }
     finally { setBusy(null); }
   };
@@ -436,7 +437,6 @@ En az 10 karakter gerekçe yazın:`);
 
       <div className="mb-6 flex gap-2 border-b border-gray-200">
         {(Object.keys(PARTNER) as PartnerKind[]).map((k) => {
-          const n = waitingCount(k);
           return (
             <button
               key={k}
@@ -449,9 +449,7 @@ En az 10 karakter gerekçe yazın:`);
               }`}
             >
               {PARTNER[k].tab}
-              {n > 0 && (
-                <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{n}</span>
-              )}
+
             </button>
           );
         })}
@@ -511,9 +509,10 @@ En az 10 karakter gerekçe yazın:`);
         </div>
       )}
 
+      {d.history && <PayoutHistoryNavigation key={`${tab}:${d.history.status}:${d.history.partnerFilter?.value ?? ""}`} {...d.history} />}
       <SectionTitle>2 · Ödeme veya mahsup bekleyen partiler</SectionTitle>
       {pendingPayouts.length === 0 ? (
-        <Empty>Bekleyen ödeme veya mahsup yok.</Empty>
+        <Empty>{d.history?.unavailable ? "Ödeme geçmişi okunamadı; kayıt sayısı bilinmiyor." : "Bu sayfada bekleyen ödeme veya mahsup yok."}</Empty>
       ) : (
         <div className="mb-8 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
           {pendingPayouts.map((p) => {
@@ -575,7 +574,7 @@ En az 10 karakter gerekçe yazın:`);
 
       <SectionTitle>Ödeme geçmişi</SectionTitle>
       {paidPayouts.length === 0 ? (
-        <Empty>Henüz ödeme yok.</Empty>
+        <Empty>{d.history?.unavailable ? "Ödeme geçmişi okunamadı; kayıt sayısı bilinmiyor." : "Bu sayfada tamamlanmış ödeme yok."}</Empty>
       ) : (
         <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
           {paidPayouts.map((p) => (

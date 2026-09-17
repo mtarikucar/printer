@@ -1,9 +1,10 @@
 /** Actual refund evidence. No provider calls, nested money transactions or legacy refund writers. */
 import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
 import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  adminActions, analyticsEvents, customerNotifications, giftCards, giftCardRedemptions, giftCreditReturns,
+  adminActions, analyticsEvents, customerNotifications, disputes, users, giftCards, giftCardRedemptions, giftCreditReturns,
   manufacturerEarnings, manufacturerNotifications, manufacturers, orderDrafts,
   orderRefundAllocations, orderRefundRecords, orders, painterEarnings, painterNotifications, painters,
 } from "@/lib/db/schema";
@@ -16,6 +17,9 @@ import type {
   RefundActor, RefundFailure, RefundKind, RefundNotificationState,
   RefundOriginalReversal, RefundResult,
 } from "@/lib/config/order-refund";
+import { DisputePolicyError, normalizeResolveDisputeInput } from "@/lib/config/dispute-resolution";
+import type { DisputeDecisionFailure, DisputeDecisionResult, ResolveDisputeInput } from "@/lib/config/dispute-resolution";
+import type { DisputeEmailPayload } from "./dispute-notices";
 import { REJECTABLE_STATUSES, formatAdminNoteLine } from "@/lib/config/order-status-policy";
 import { lockPartnerMoney } from "./money-partner-lock";
 import type { MoneyTx, PartnerKind } from "./money-partner-lock";
@@ -107,7 +111,7 @@ function discoveryIdentity(d: Discovery) {
 }
 
 /** All partner gates precede the payment gate, draft, orders, cards and redemptions. */
-async function coordinated<T>(orderId: string, run: (tx: MoneyTx,context: LockedRefundContext)=>Promise<T>): Promise<T> {
+async function withLockedPaymentScope<T>(orderId: string, run: (tx: MoneyTx,discovery: Discovery,draft: typeof orderDrafts.$inferSelect | null)=>Promise<T>): Promise<T> {
   for (let attempt=0;attempt<3;attempt++) {
     const discovered=await discover(db,orderId);
     try {
@@ -122,8 +126,7 @@ async function coordinated<T>(orderId: string, run: (tx: MoneyTx,context: Locked
         await tx.select({id:orders.id}).from(orders).where(discovered.scope.kind === "draft" ? eq(orders.draftId,discovered.scope.id) : eq(orders.id,discovered.scope.id)).orderBy(asc(orders.id)).for("update");
         const current=await discover(tx,orderId);
         if (discoveryIdentity(current)!==discoveryIdentity(discovered)) throw new Rediscover();
-        const context=await loadContext(tx,current,draft);
-        return run(tx,context);
+        return run(tx,current,draft);
       });
     } catch (error) {
       // A unique operation key can race across different payment gates. Roll back,
@@ -133,6 +136,11 @@ async function coordinated<T>(orderId: string, run: (tx: MoneyTx,context: Locked
     }
   }
   throw new Rediscover();
+}
+
+/** Existing 6c callers still receive their complete, branded financial context. */
+async function coordinated<T>(orderId: string, run: (tx: MoneyTx,context: LockedRefundContext)=>Promise<T>): Promise<T> {
+  return withLockedPaymentScope(orderId,async(tx,discovery,draft)=>run(tx,await loadContext(tx,discovery,draft)));
 }
 
 async function loadContext(tx: MoneyTx, discovery: Discovery, draft: typeof orderDrafts.$inferSelect | null): Promise<LockedRefundContext> {
@@ -287,9 +295,15 @@ async function closeOrder(tx: MoneyTx,s: Sibling,reason: string,cancel: boolean)
 
 /** Only the coordinator can supply the branded, transaction-bound context. */
 export async function recordOrderRefundTx(tx: MoneyTx,context: LockedRefundContext,input: RecordRefundInput,actor: RefundActor): Promise<RefundResult> {
+  return recordOrderRefundLocked(tx,context,input,actor);
+}
+
+type DisputeOrigin = { kind: "dispute_decision"; disputeId: string; decisionOperationKey: string };
+/** Notice ownership can only be supplied by the private dispute composition. */
+async function recordOrderRefundLocked(tx: MoneyTx,context: LockedRefundContext,input: RecordRefundInput,actor: RefundActor,origin?: DisputeOrigin): Promise<RefundResult> {
   if (context[lockedContext]!==tx) throw new TypeError("A locked refund context from this transaction is required");
   const adminEmail=actorEmail(actor), scope=context.discovery.scope;
-  const requestHash=hash({version:1,action:"refund",scope:scope.key,mode:input.mode,allocations:input.allocations,cashEvidence:input.cashEvidence??null,reason:input.reason,adminEmail});
+  const requestHash=hash({version:1,action:"refund",scope:scope.key,mode:input.mode,allocations:input.allocations,cashEvidence:input.cashEvidence??null,reason:input.reason,adminEmail,...(origin?{disputeOrigin:origin}:{})});
   const prior=await replay(tx,input.operationKey,requestHash,scope);
   if (prior) return {...prior.resultSnapshot as unknown as RefundResult,replayed:true,notificationState:notificationState(prior.emailState)};
   requireCurrent(context,input.expectedFingerprint);
@@ -325,7 +339,7 @@ export async function recordOrderRefundTx(tx: MoneyTx,context: LockedRefundConte
   }
   const refundId=randomUUID(),now=new Date();
   const analytics=evidenceOnly ? {payload:{version:1 as const,orders:[] as AnalyticsOrder[]},gross:new Map<string,number>()} : await prepareAnalytics(tx,events.map(e=>({s:e.s,allocationId:e.id,returnedKurus:sumRefundKurus([e.allocation.cashKurus,e.allocation.giftKurus])})));
-  const notices=evidenceOnly ? emptyNotices() : await prepareNotices(tx,input.operationKey,"refund",events.map(e=>({s:e.s,cashKurus:e.allocation.cashKurus,giftKurus:e.allocation.giftKurus,cashDue:e.remainingCashKurus,stopped:e.fullyReturned})),input.reason);
+  const notices=evidenceOnly ? emptyNotices() : await prepareNotices(tx,input.operationKey,"refund",events.map(e=>({s:e.s,cashKurus:e.allocation.cashKurus,giftKurus:e.allocation.giftKurus,cashDue:e.remainingCashKurus,stopped:e.fullyReturned})),input.reason,!!origin);
   const resultOrders: RefundResult["orders"]=[];
   for (const e of events) {
     const originalReversal=e.fullyReturned && !evidenceOnly ? await reverseOriginals(tx,context,e.s) : [];
@@ -338,7 +352,7 @@ export async function recordOrderRefundTx(tx: MoneyTx,context: LockedRefundConte
     method:input.cashEvidence?.method??"gift_credit",cashAmountKurus:cashKurus,giftAmountKurus:giftKurus,
     externalReference:input.cashEvidence?.externalReference??null,externalReferenceKey:input.cashEvidence?.externalReference??null,
     occurredAt:input.cashEvidence?new Date(input.cashEvidence.occurredAt):now,confirmedAt:now,adminEmail,reason:input.reason,
-    sourceSnapshot:{...sourceSnapshot(context),analytics:analytics.payload},analyticsState:analytics.gross.size?"pending":"not_required",resultSnapshot:{...result},emailPayload:result.notificationState==="not_required"?{}:notices.payload,emailProgress:{},emailState:result.notificationState,
+    sourceSnapshot:{...sourceSnapshot(context),analytics:analytics.payload,...(origin?{customerNoticeOwner:origin}:{})},analyticsState:analytics.gross.size?"pending":"not_required",resultSnapshot:{...result},emailPayload:result.notificationState==="not_required"?{}:notices.payload,emailProgress:{},emailState:result.notificationState,
     emailNextAttemptAt:result.notificationState==="pending"?now:null});
   for (const e of events) {
     await tx.insert(orderRefundAllocations).values({id:e.id,refundId,kind,orderId:e.s.order.id,cashKurus:e.allocation.cashKurus,giftKurus:e.allocation.giftKurus,
@@ -361,6 +375,99 @@ export async function recordOrderRefund(input: RecordRefundInput,actor: RefundAc
     await kickNotices(result.refundId,result.notificationState);
     return result;
   } catch (error) { return failure(error); }
+}
+
+/** Read-only fingerprint; delivery progress and financial previews are separate. */
+export function disputeDecisionFingerprint(dispute: typeof disputes.$inferSelect): string {
+  return hash({version:1,id:dispute.id,orderId:dispute.orderId,userId:dispute.userId,
+    category:dispute.category,description:dispute.description,status:dispute.status,
+    resolution:dispute.resolution,adminEmail:dispute.adminEmail,resolvedAt:dispute.resolvedAt,
+    decisionOperationKey:dispute.decisionOperationKey,refundRecordId:dispute.refundRecordId});
+}
+
+/** A domain command, never an arbitrary transaction callback or context factory. */
+export async function recordDisputeDecisionWithRefund(input: ResolveDisputeInput,actor: RefundActor): Promise<DisputeDecisionResult | DisputeDecisionFailure> {
+  try {
+    const command=normalizeResolveDisputeInput(input),adminEmail=actorEmail(actor);
+    const [anchor]=await db.select({orderId:disputes.orderId}).from(disputes).where(eq(disputes.id,command.disputeId));
+    if (!anchor) fail("not_found","Anlaşmazlık bulunamadı.",404);
+    const intent=command.refund ? {allocations:command.refund.allocations,cashEvidence:command.refund.cashEvidence??null,reason:command.refund.reason} : null;
+    const requestHash=hash({version:1,disputeId:command.disputeId,orderId:anchor.orderId,action:command.action,resolution:command.resolution,refund:intent,adminEmail});
+    const committed=await withLockedPaymentScope(anchor.orderId,async(tx,discovery,draft)=>{
+      const [dispute]=await tx.select().from(disputes).where(eq(disputes.id,command.disputeId)).for("update");
+      if (!dispute) fail("not_found","Anlaşmazlık bulunamadı.",404);
+      if (dispute.orderId!==anchor.orderId) fail("stale","Anlaşmazlığın sipariş bağlantısı değişti. Kaydı yeniden açın.");
+      const order=discovery.siblings.find(o=>o.id===dispute.orderId)!;
+      if (dispute.userId!==order.userId) fail("lineage_unknown","Anlaşmazlığı açan müşteri ile sipariş sahibi uyuşmuyor.");
+      // Global key ownership is checked before stale/closed checks. A unique-key
+      // race rolls back through the scope runner, then observes committed ownership.
+      const [keyOwner]=await tx.select().from(disputes).where(eq(disputes.decisionOperationKey,command.operationKey));
+      if (keyOwner) {
+        if (keyOwner.id!==dispute.id || keyOwner.decisionRequestHash!==requestHash) fail("operation_conflict","Bu işlem anahtarı farklı bir anlaşmazlık kararı için kullanılmış.");
+        const snapshot=keyOwner.decisionSnapshot as {version?:number;result?:DisputeDecisionResult} | null;
+        if (snapshot?.version!==1 || !snapshot.result || snapshot.result.operationKey!==command.operationKey || snapshot.result.disputeId!==dispute.id) {
+          fail("lineage_unknown","Kararın kayıtlı işlem makbuzu doğrulanamıyor.");
+        }
+        let refund=snapshot.result.refund;
+        if (refund) {
+          const [header]=await tx.select().from(orderRefundRecords).where(eq(orderRefundRecords.id,dispute.refundRecordId!));
+          const allocations=header ? await tx.select().from(orderRefundAllocations).where(eq(orderRefundAllocations.refundId,header.id)) : [];
+          if (!header || header.id!==refund.refundId || header.kind!=="refund" || header.operationKey!==command.operationKey
+            || header.paymentScopeKey!==discovery.scope.key || allocations.length!==1 || allocations[0].orderId!==order.id || allocations[0].kind!=="refund"
+            || allocations[0].cashKurus!==refund.cashKurus || allocations[0].giftKurus!==refund.giftKurus) {
+            fail("lineage_unknown","Kararın bağlı iade kaydı doğrulanamıyor.");
+          }
+          refund={...refund,replayed:true,notificationState:notificationState(header.emailState)};
+        } else if (dispute.refundRecordId) fail("lineage_unknown","Kararın bağlı iade kaydı doğrulanamıyor.");
+        return {userId:dispute.userId,result:{...snapshot.result,refund,replayed:true,decisionNotificationState:notificationState(dispute.decisionEmailState)}};
+      }
+      if (dispute.status!=="open") throw new DisputePolicyError("already_closed","Bu anlaşmazlık için karar daha önce kaydedilmiş.",409);
+      if (command.expectedDecisionFingerprint!==disputeDecisionFingerprint(dispute)) fail("stale","Anlaşmazlık kaydı değişti. Güncel kaydı yeniden açın.");
+      // Snapshot the verified complainant, not a checkout email or a submitted recipient.
+      const [customer]=await tx.select({email:users.email,name:users.fullName}).from(users).where(eq(users.id,dispute.userId));
+      if (!customer || !z.email().safeParse(customer.email).success) fail("unavailable","Müşteri bildirim adresi doğrulanamıyor.",503);
+      let refund: RefundResult | null=null;
+      if (command.refund) {
+        if (command.refund.allocations.length!==1 || command.refund.allocations[0].orderId!==dispute.orderId) {
+          fail("invalid_evidence","Kararla birlikte yalnız bu anlaşmazlığın siparişine iade kaydedilebilir.",400);
+        }
+        const [prior]=await tx.select({id:orderRefundRecords.id}).from(orderRefundRecords).where(eq(orderRefundRecords.operationKey,command.operationKey));
+        if (prior) fail("operation_conflict","Bu işlem anahtarı daha önce ayrı bir iade veya iptal için kullanılmış.");
+        const context=await loadContext(tx,discovery,draft);
+        const actual=normalizeRecordRefundInput({...command.refund,operationKey:command.operationKey,mode:"actual"});
+        refund=await recordOrderRefundLocked(tx,context,actual,{adminEmail},{kind:"dispute_decision",disputeId:dispute.id,decisionOperationKey:command.operationKey});
+      }
+      const now=new Date(),status=command.action==="resolve"?"resolved" as const:"rejected" as const;
+      const result: DisputeDecisionResult={ok:true,disputeId:dispute.id,orderId:order.id,operationKey:command.operationKey,status,
+        resolution:command.resolution,resolvedAt:now.toISOString(),replayed:false,refund,decisionNotificationState:"pending"};
+      const noticeKey=`${command.operationKey}.decision.${dispute.id}.${dispute.userId}`;
+      const payload: DisputeEmailPayload={version:1,messages:[{key:noticeKey,to:customer.email,kind:"decision",disputeId:dispute.id,
+        orderNumber:order.orderNumber,customerName:customer.name,category:dispute.category,resolution:command.resolution,decision:status,
+        ...(refund?{cashKurus:refund.cashKurus,giftKurus:refund.giftKurus}:{})}]};
+      const [updated]=await tx.update(disputes).set({status,resolution:command.resolution,adminEmail,resolvedAt:now,
+        decisionOperationKey:command.operationKey,decisionRequestHash:requestHash,refundRecordId:refund?.refundId??null,
+        decisionSnapshot:{version:1,result},decisionEmailPayload:payload,decisionEmailProgress:{},decisionEmailState:"pending",
+        decisionEmailNextAttemptAt:now,decisionEmailLeaseUntil:null,
+      }).where(and(eq(disputes.id,dispute.id),eq(disputes.status,"open"))).returning({id:disputes.id});
+      if (!updated) throw new DisputePolicyError("already_closed","Bu anlaşmazlık için karar daha önce kaydedilmiş.",409);
+      const money=refund ? `${refund.cashKurus} kuruş nakit iadesi ve ${refund.giftKurus} kuruş hediye kartı dönüşü kaydedildi.` : "Bu kararla yeni iade kaydı oluşturulmadı.";
+      await tx.insert(customerNotifications).values({id:stableId(noticeKey),userId:dispute.userId,orderId:order.id,type:"dispute_update",
+        title:status==="resolved"?"Anlaşmazlığınız sonuçlandırıldı":"Anlaşmazlığınız incelendi — işlem yok",
+        body:`${order.orderNumber}: ${command.resolution} ${money}`});
+      await tx.insert(adminActions).values({orderId:order.id,action:"edit",adminEmail,
+        notes:`Anlaşmazlık kararı: ${status}; anlaşmazlık: ${dispute.id}; işlem: ${command.operationKey}; iade kaydı: ${refund?.refundId??"yok"}\n${command.resolution}`});
+      return {userId:dispute.userId,result};
+    });
+    // Post-commit failures cannot turn a durable decision into a failed command.
+    // Dynamic worker imports also keep existing standalone 6c callers independent.
+    try { const {kickDisputeNotices}=await import("./dispute-notices");void kickDisputeNotices(committed.result.disputeId,"decision").catch(()=>{}); } catch { /* durable intent */ }
+    try { const {emitCustomerNotification}=await import("@/lib/realtime/emit");void emitCustomerNotification(committed.userId).catch(()=>{}); } catch { /* best effort */ }
+    if (committed.result.refund) await kickNotices(committed.result.refund.refundId,committed.result.refund.notificationState);
+    return committed.result;
+  } catch (error) {
+    if (error instanceof DisputePolicyError) return {ok:false,status:error.status,code:error.code,error:error.message};
+    return failure(error);
+  }
 }
 
 function normalizeCancellation(input: CancelPaidOrderInput): CancelPaidOrderInput {
@@ -435,7 +542,7 @@ type NoticeRows = {
 function emptyNotices(): NoticeRows { return {payload:{version:1,messages:[]},customer:[],manufacturer:[],painter:[]}; }
 async function prepareNotices(tx: MoneyTx,operationKey: string,kind: "refund" | "cancellation",events: Array<{
   s: Sibling; cashKurus: number; giftKurus: number; cashDue: number | null; stopped: boolean; giftReturnBlockedReason?: string;
-}>,reason: string): Promise<NoticeRows> {
+}>,reason: string,customerNoticeOwnedByDecision=false): Promise<NoticeRows> {
   const notices=emptyNotices();
   for (const event of events) {
     const {s,cashKurus,giftKurus,cashDue}=event,order=s.order;
@@ -447,8 +554,10 @@ async function prepareNotices(tx: MoneyTx,operationKey: string,kind: "refund" | 
       ? `${order.orderNumber}: ${cashKurus} kuruş nakit iadesi ve ${giftKurus} kuruş hediye kartı dönüşü kaydedildi.`
       : `${order.orderNumber}: sipariş iptal edildi. Hediye kartına dönen: ${giftKurus} kuruş. ${cashDue===null?"Nakit iade tutarı uzlaştırılmalı.":`Bekleyen nakit iade: ${cashDue} kuruş.`}${event.giftReturnBlockedReason?` ${event.giftReturnBlockedReason}`:""}`;
     const customerKey=`${operationKey}.customer.${order.id}.${order.userId}`;
-    notices.payload.messages.push({key:customerKey,audience:"customer",to:order.email,orderNumber:order.orderNumber,customerName:order.customerName,locale:order.locale==="en"?"en":"tr",notice});
-    notices.customer.push({id:stableId(customerKey),userId:order.userId,orderId:order.id,type:kind==="refund"?"refund_recorded":"order_cancelled",title,body});
+    if (!customerNoticeOwnedByDecision) {
+      notices.payload.messages.push({key:customerKey,audience:"customer",to:order.email,orderNumber:order.orderNumber,customerName:order.customerName,locale:order.locale==="en"?"en":"tr",notice});
+      notices.customer.push({id:stableId(customerKey),userId:order.userId,orderId:order.id,type:kind==="refund"?"refund_recorded":"order_cancelled",title,body});
+    }
     if (!event.stopped) continue;
     // IDs/emails are read from the pre-detach snapshot, inside the same tx.
     for (const partnerKind of ["manufacturer","painter"] as const) {

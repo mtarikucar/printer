@@ -1132,8 +1132,10 @@ export const manufacturerDocuments = pgTable("manufacturer_documents", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-// Customer-opened dispute on an order; admin resolves (optionally clawing back
-// the manufacturer's earning + refunding).
+export type DisputeEmailState = "pending" | "delivering" | "delivered" | "not_required";
+
+// A new decision preserves its receipt and optional actual refund association.
+// Legacy rows stay keyless; opening and decision delivery are independent.
 export const disputes = pgTable("disputes", {
   id: uuid("id").primaryKey().defaultRandom(),
   orderId: uuid("order_id")
@@ -1149,7 +1151,50 @@ export const disputes = pgTable("disputes", {
   adminEmail: text("admin_email"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
-});
+  decisionOperationKey: uuid("decision_operation_key"),
+  decisionRequestHash: text("decision_request_hash"),
+  refundRecordId: uuid("refund_record_id").references(() => orderRefundRecords.id, { onDelete: "restrict" }),
+  decisionSnapshot: jsonb("decision_snapshot").$type<Record<string, unknown>>(),
+  decisionEmailPayload: jsonb("decision_email_payload").$type<Record<string, unknown>>().notNull().default({}),
+  decisionEmailProgress: jsonb("decision_email_progress").$type<Record<string, unknown>>().notNull().default({}),
+  decisionEmailState: text("decision_email_state").$type<DisputeEmailState>().notNull().default("not_required"),
+  decisionEmailNextAttemptAt: timestamp("decision_email_next_attempt_at", { withTimezone: true }),
+  decisionEmailLeaseUntil: timestamp("decision_email_lease_until", { withTimezone: true }),
+  openingEmailPayload: jsonb("opening_email_payload").$type<Record<string, unknown>>().notNull().default({}),
+  openingEmailProgress: jsonb("opening_email_progress").$type<Record<string, unknown>>().notNull().default({}),
+  openingEmailState: text("opening_email_state").$type<DisputeEmailState>().notNull().default("not_required"),
+  openingEmailNextAttemptAt: timestamp("opening_email_next_attempt_at", { withTimezone: true }),
+  openingEmailLeaseUntil: timestamp("opening_email_lease_until", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("disputes_decision_operation_key_unique").on(t.decisionOperationKey).where(sql`${t.decisionOperationKey} IS NOT NULL`),
+  uniqueIndex("disputes_refund_record_id_unique").on(t.refundRecordId).where(sql`${t.refundRecordId} IS NOT NULL`),
+  index("disputes_decision_email_due_idx").on(t.decisionEmailState, t.decisionEmailNextAttemptAt, t.id),
+  index("disputes_opening_email_due_idx").on(t.openingEmailState, t.openingEmailNextAttemptAt, t.id),
+  index("disputes_status_resolved_idx").on(t.status, t.resolvedAt, t.id),
+  check("disputes_decision_metadata_check", sql`
+    (${t.decisionOperationKey} IS NULL AND ${t.decisionRequestHash} IS NULL AND ${t.decisionSnapshot} IS NULL
+      AND ${t.refundRecordId} IS NULL AND ${t.decisionEmailPayload} = '{}'::jsonb
+      AND ${t.decisionEmailProgress} = '{}'::jsonb AND ${t.decisionEmailState} = 'not_required'
+      AND ${t.decisionEmailNextAttemptAt} IS NULL AND ${t.decisionEmailLeaseUntil} IS NULL)
+    OR (${t.decisionOperationKey} IS NOT NULL AND ${t.decisionRequestHash} IS NOT NULL AND length(btrim(${t.decisionRequestHash})) > 0
+      AND ${t.decisionSnapshot} IS NOT NULL AND jsonb_typeof(${t.decisionSnapshot}) = 'object'
+      AND ${t.status} IN ('resolved', 'rejected') AND ${t.resolution} IS NOT NULL AND length(btrim(${t.resolution})) > 0
+      AND ${t.adminEmail} IS NOT NULL AND length(btrim(${t.adminEmail})) > 0 AND ${t.resolvedAt} IS NOT NULL
+      AND (${t.refundRecordId} IS NULL OR ${t.status} = 'resolved'))
+  `),
+  check("disputes_delivery_json_check", sql`jsonb_typeof(${t.decisionEmailPayload}) = 'object' AND jsonb_typeof(${t.decisionEmailProgress}) = 'object'
+    AND jsonb_typeof(${t.openingEmailPayload}) = 'object' AND jsonb_typeof(${t.openingEmailProgress}) = 'object'`),
+  check("disputes_decision_email_check", sql`
+    (${t.decisionEmailPayload} = '{}'::jsonb AND ${t.decisionEmailState} = 'not_required' AND ${t.decisionEmailProgress} = '{}'::jsonb
+      AND ${t.decisionEmailNextAttemptAt} IS NULL AND ${t.decisionEmailLeaseUntil} IS NULL)
+    OR (${t.decisionEmailPayload} <> '{}'::jsonb AND ${t.decisionEmailState} IN ('pending', 'delivering', 'delivered'))
+  `),
+  check("disputes_opening_email_check", sql`
+    (${t.openingEmailPayload} = '{}'::jsonb AND ${t.openingEmailState} = 'not_required' AND ${t.openingEmailProgress} = '{}'::jsonb
+      AND ${t.openingEmailNextAttemptAt} IS NULL AND ${t.openingEmailLeaseUntil} IS NULL)
+    OR (${t.openingEmailPayload} <> '{}'::jsonb AND ${t.openingEmailState} IN ('pending', 'delivering', 'delivered'))
+  `),
+]);
 
 // ─── Atölye Talebi (Workshop Request) ───────────────────────────────────────
 // A venue owner / organization requests a Figurunica workshop event AT THEIR

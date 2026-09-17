@@ -55,6 +55,9 @@
 -- yeniden uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN
 -- YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri
 -- alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0062_dispute_decisions.down.sql
+--   -- 0062'nin down'ı KENDİ kaydını (created_at = 1789654507721) siler.
+--   -- Açılış/karar/bildirim metaverisi varsa veri silmeden durur.
 --   \i drizzle/0061_order_refunds.down.sql
 --   -- 0061'in down'ı KENDİ kaydını (created_at = 1789651551663) siler.
 --   -- İade veya kart dönüşü geçmişi varsa veri silmeden durur.

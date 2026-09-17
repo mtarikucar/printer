@@ -89,7 +89,9 @@ export type EmailJobData = StandardEmailJobData
   | { type: "refund_record_email"; refundId: string }
   | { type: "refund_record_email_recover" }
   | { type: "refund_record_analytics"; refundId: string }
-  | { type: "refund_record_analytics_recover" };
+  | { type: "refund_record_analytics_recover" }
+  | { type: "dispute_email"; disputeId: string; phase: "opening" | "decision" }
+  | { type: "dispute_email_recover" };
 
 export interface StandardEmailJobData {
   type:

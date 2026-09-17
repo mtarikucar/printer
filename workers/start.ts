@@ -47,6 +47,14 @@ getEmailQueue().upsertJobScheduler(
   { name: "refund_record_analytics_recover", data: { type: "refund_record_analytics_recover" },
     opts: { attempts: 1, removeOnComplete: true, removeOnFail: 20 } }
 ).catch((error) => console.error("Refund analytics recovery registration failed", error));
+// Opening-admin and decision-customer intents have independent DB leases; both
+// remain recoverable on the existing email queue after Redis loss/restarts.
+getEmailQueue().upsertJobScheduler(
+  "dispute-email-recovery",
+  { every: 60_000 },
+  { name: "dispute_email_recover", data: { type: "dispute_email_recover" },
+    opts: { attempts: 1, removeOnComplete: true, removeOnFail: 20 } }
+).catch((error) => console.error("Dispute email recovery registration failed", error));
 const previewWorker = startPreviewGenerationWorker();
 const cleanupWorker = startPreviewCleanupWorker();
 const paymentDeadlineWorker = startPaymentDeadlineWorker();

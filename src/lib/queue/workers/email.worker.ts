@@ -8,8 +8,17 @@ import { manufacturerNotifications, orders } from "../../db/schema";
 import { ensureJourneyToken } from "../../services/order-journey";
 import { deliverRefundRecordNotices, recoverRefundRecordNotices } from "../../services/refund-record-notices";
 import { deliverRefundRecordAnalytics, recoverRefundRecordAnalytics } from "../../services/refund-record-analytics";
+import { deliverDisputeNotices, recoverDisputeNotices } from "../../services/dispute-notices";
 
 async function processJob(job: Job<EmailJobData>) {
+  if (job.data.type === "dispute_email") {
+    await deliverDisputeNotices(job.data.disputeId, job.data.phase);
+    return;
+  }
+  if (job.data.type === "dispute_email_recover") {
+    await recoverDisputeNotices();
+    return;
+  }
   if (job.data.type === "refund_record_analytics") {
     await deliverRefundRecordAnalytics(job.data.refundId);
     return;

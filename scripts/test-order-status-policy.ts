@@ -1907,10 +1907,16 @@ const DECLINE_SERVICE = "src/lib/services/manufacturer-decline.ts";
 {
   const core = parse(read("src/lib/services/order-refund-record.ts"));
   const close = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "closeOrder");
-  const coordinator = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "coordinated");
-  const recorded = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "recordOrderRefundTx");
+  const coordinator = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "withLockedPaymentScope");
+  const contextWrapper = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "coordinated");
+  const publicRecord = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "recordOrderRefundTx");
+  const recorded = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "recordOrderRefundLocked");
+  const decision = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "recordDisputeDecisionWithRefund");
   const cancel = core.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "cancelPaidOrder");
   ok("refund coordinator holds partner and order locks in one transaction", !!coordinator && callsTo(coordinator, "lockPartnerMoney").length > 0 && coordinator.getText().includes('.for("update")') && coordinator.getText().includes("db.transaction"));
+  ok("standalone refunds still obtain financial context inside the locked payment scope", !!contextWrapper && callsTo(contextWrapper,"withLockedPaymentScope").length === 1 && callsTo(contextWrapper,"loadContext").length === 1);
+  ok("public refund writer delegates to the same private evidence and money writer", !!publicRecord && callsTo(publicRecord,"recordOrderRefundLocked").length === 1);
+  ok("dispute decisions share the locked scope and private refund writer", !!decision && callsTo(decision,"withLockedPaymentScope").length === 1 && callsTo(decision,"recordOrderRefundLocked").length === 1 && callsTo(decision,"recordOrderRefund").length === 0);
   ok("full refund/cancellation detaches both partners on transaction handle", !!close && close.getText().includes("tx.update(orders)") && close.getText().includes("manufacturerId:null") && close.getText().includes("painterId:null"));
   ok("refund record checks replay before snapshot and side effects", !!recorded && recorded.getText().indexOf("await replay(") < recorded.getText().indexOf("requireCurrent(") && callsTo(recorded, "reverseOriginals").length > 0 && callsTo(recorded, "restoreGift").length > 0 && callsTo(recorded, "closeOrder").length > 0);
   ok("cancel uses coordinator and keeps its own terminal status rule", !!cancel && callsTo(cancel, "coordinated").length === 1 && cancel.getText().includes("REJECTABLE_STATUSES.includes") && callsTo(cancel, "closeOrder").length > 0);

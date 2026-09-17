@@ -4,6 +4,7 @@ import { defaultLocale } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
 import type { RefundRecordEmailMessage } from "./refund-record-notices";
+import type { DisputeEmailMessage } from "./dispute-notices";
 
 const smtpOptions = {
   host: process.env.SMTP_HOST,
@@ -90,6 +91,30 @@ export function renderRefundRecordEmail(message: Pick<RefundRecordEmailMessage,
   };
 }
 
+/** Dispute decisions describe adjudication, not order cancellation or a promised transfer. */
+export function renderDisputeEmail(message: DisputeEmailMessage): { subject: string; html: string } {
+  const categories: Record<string, string> = { not_as_described: "Ürün açıklamadan farklı", damaged: "Hasarlı geldi",
+    not_received: "Teslim alınmadı", other: "Diğer" };
+  const amount = (value: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(value / 100);
+  const lines = [`Sipariş: ${message.orderNumber}`, `Müşteri: ${message.customerName}`,
+    `Kategori: ${categories[message.category] ?? message.category}`];
+  let heading: string;
+  if (message.kind === "opening") {
+    heading = "Yeni müşteri şikayeti";
+    lines.push(message.description);
+  } else {
+    heading = message.decision === "resolved" ? "Şikayetiniz çözümlendi" : "Şikayetiniz reddedildi";
+    lines.push(message.resolution);
+    const cash = message.cashKurus ?? 0, gift = message.giftKurus ?? 0;
+    if (!cash && !gift) lines.push("Bu kararla yeni iade kaydı oluşturulmadı.");
+    if (cash > 0) lines.push(`Bu kararla kaydedilen gerçekleşmiş nakit iadesi: ${amount(cash)}.`);
+    if (gift > 0) lines.push(`Kullanılan hediye kartına geri yüklenen bakiye: ${amount(gift)}.`);
+  }
+  return { subject: `${heading} — ${message.orderNumber}`,
+    html: `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h1>${escHtml(heading)}</h1>${lines.map((line) => `<p style="white-space: pre-wrap;">${escHtml(line)}</p>`).join("\n")}</div>` };
+}
+
 interface SendEmailParams {
   type:
     | "order_confirmation"
@@ -97,6 +122,7 @@ interface SendEmailParams {
     | "order_shipped"
     | "order_refunded"
     | "refund_record_notice"
+    | "dispute_notice"
     | "revision_request"
     | "gift_card_received"
     | "order_approved"
@@ -125,6 +151,7 @@ interface SendEmailParams {
   orderNumber: string;
   customerName: string;
   refundNotice?: RefundRecordEmailMessage["notice"];
+  disputeNotice?: DisputeEmailMessage;
   audience?: RefundRecordEmailMessage["audience"];
   /** Finish tier — decides whether the paint-kit list is included. */
   finish?: string;
@@ -290,6 +317,11 @@ function getTemplates(locale: Locale) {
         </div>
       `,
     }),
+
+    dispute_notice: (p) => {
+      if (!p.disputeNotice) throw new Error("Dispute email intent missing");
+      return renderDisputeEmail(p.disputeNotice);
+    },
 
     refund_record_notice: (p) => {
       if (!p.refundNotice) throw new Error("Refund record email intent missing");
@@ -735,14 +767,15 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
   const templates = getTemplates(locale);
   const template = templates[params.type](params);
 
-  const result = await (params.type === "refund_record_notice" ? refundTransporter : transporter).sendMail({
+  const durableNotice = params.type === "refund_record_notice" || params.type === "dispute_notice";
+  const result = await (durableNotice ? refundTransporter : transporter).sendMail({
     from: FROM_EMAIL,
     to: resolveRecipient(params),
     subject: template.subject,
     html: template.html,
   });
-  if (params.type === "refund_record_notice" && (!result.accepted.length || result.rejected.length)) {
-    throw new Error("Refund record email recipient was not accepted by SMTP");
+  if (durableNotice && (!result.accepted.length || result.rejected.length)) {
+    throw new Error(`${params.type === "dispute_notice" ? "Dispute" : "Refund record"} email recipient was not accepted by SMTP`);
   }
 }
 

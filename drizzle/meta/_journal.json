@@ -407,6 +407,13 @@
       "when": 1789556775560,
       "tag": "0057_painter_assignment_evaluations",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1789582571939,
+      "tag": "0058_coverage_overrides",
+      "breakpoints": true
     }
   ]
 }

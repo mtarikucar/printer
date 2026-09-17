@@ -7,7 +7,24 @@ import {
   orderItems,
   orders,
 } from "@/lib/db/schema";
-import { autoAssignPlacementPlan } from "@/lib/config/flags";
+import {
+  autoAssignPlacementPlan,
+  placementGateRefusal,
+  type AutoAssignSkip,
+} from "@/lib/config/flags";
+// Kapının hangi ölçüyü UYGULAYACAĞINI belirleyen küme. Sıralayıcı da aynı
+// fonksiyondan okur (`signalsForProfile`), yani ekran ile uç aynı anahtara
+// bağlıdır — Faz 5'in ölçülen kusuru tam olarak ikisinin ayrı olmasıydı.
+import { signalsForProfile, type Phase5SignalSet } from "@/lib/config/scoring";
+import {
+  LARGE_FORMAT_MIN_MM,
+  capabilityMatch,
+  orderRequirements,
+} from "@/lib/services/capability";
+import {
+  MANUFACTURER_CAPACITY_FULL_ERROR,
+  manufacturerCapacityGate,
+} from "@/lib/services/manufacturer-capacity";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
@@ -131,6 +148,14 @@ export type AssignFailure =
   | "manufacturer_unavailable"
   | "no_printable_content"
   | "not_assignable"
+  // Atölyenin tezgâhı AĞIRLIKLI ölçüyle dolu (capacity-unit karari = C). Ayrı
+  // bir üye, çünkü bu GEÇİCİ bir durumdur: aynı istek yarın çalışır, oysa
+  // `not_assignable` "bu sipariş artık bu aşamada değil" demektir ve admin'i
+  // bambaşka bir yere bakmaya gönderir.
+  | "capacity_full"
+  // İş büyük format ister, atölye bunu beyan etmemiş. Kalıcı bir uyumsuzluk:
+  // tekrar denemek asla işe yaramaz, atölyenin yeteneği değişmeli.
+  | "large_format_required"
   // Satıcının kendi katalog ürünü, hedef atölye o satıcı DEĞİL. Ayrı bir üye,
   // çünkü admin'e söylenecek şey "atanamaz" değil "bu işi yalnız sahibi
   // basabilir"dir ve bu cevap bir yarış kaybı gibi tekrar denenmemelidir.
@@ -150,10 +175,114 @@ export const ASSIGN_FAILURE_MESSAGES: Record<AssignFailure, string> = {
     "Bu siparişte üreticiye gönderilecek basılabilir içerik yok (model dosyası ya da katalog ürünü). Yazılı kalemler tek başına yetmez: önce 3D modeli yükleyin.",
   not_assignable:
     "Sipariş atanamaz: bulunamadı, onaylı değil, zaten atanmış ya da iade edilmiş.",
+  // Cümle BURADA YAZILMAZ, kapasite modülünden okunur: aynı kuralın iki sesi
+  // olursa operatör "bu aynı kural mı?" diye tahmin etmek zorunda kalır.
+  capacity_full: MANUFACTURER_CAPACITY_FULL_ERROR,
+  // GERÇEK sebebi adıyla söyler: hangi ölçü, hangi eksik beyan. "Atanamaz"
+  // demek, admin'i siparişin durumunda olmayan bir sorunu aramaya gönderirdi.
+  large_format_required:
+    `Seçilen atölye büyük format baskı yapabildiğini beyan etmemiş: bu siparişin figür boyu ${LARGE_FORMAT_MIN_MM} mm ve üzeri. ` +
+    `Bu iş yalnız "large_format" yeteneğini beyan eden bir atölyeye atanabilir.`,
   // Çağıranın elinde satıcının ADI varsa (AssignResult bunu geri veriyor) daha
   // iyi bir cümle kurabilir; bu, adı çözülemediğinde de doğru kalan hâlidir.
   seller_owned:
     "Bu sipariş bir satıcının kendi kataloğundan çıktı: yalnız o atölyeye atanabilir, başka bir atölyeye verilemez.",
+};
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * BÜYÜK FORMAT: SERT FİLTRE (Faz 5)
+ *
+ * Sahibin kararı: 120 mm'yi (LARGE_FORMAT_MIN_MM) aşan bir iş, YALNIZ büyük
+ * format basabildiğini BEYAN EDEN atölyeye gidebilir. Yetenek bugün tanımlı
+ * (`services/capability.ts`) ve hiçbir yerde KONTROL EDİLMİYOR: `orderRequirements`
+ * "large_format" istiyor, sıralayıcı yalnız MALZEMEYİ sert filtre olarak
+ * uyguluyor, atama kapısı ise hiçbirine bakmıyordu.
+ *
+ * Kural BURADA YENİDEN YAZILMAZ: hangi işin büyük format istediğini
+ * `orderRequirements`, beyanın yeterli olup olmadığını `capabilityMatch`
+ * söyler. İkisi de saf ve test edilmiş (scripts/test-capability.ts); burada
+ * yalnız İKİSİ BİRLEŞTİRİLİR.
+ *
+ * ── "DEĞERLENDİRİLMEMİŞ ATÖLYE" İSTİSNASI ve NEDEN ZORUNLU ───────────────────
+ * Bugün `large_format` etiketini HİÇBİR yüzey yazamıyor: kayıt formu yalnız
+ * malzeme soruyor, admin düzenleyicisi ve partnerin kendi profili de yalnız
+ * `material_*` etiketlerine dokunuyor (ikisi de diğer "yönlendirme
+ * etiketlerini" bilerek KORUYOR ama YAZAMIYOR). Satılan tek ürün ise 150 mm,
+ * yani eşiğin üstünde.
+ *
+ * Yani istisnasız bir sert filtre, BUGÜN her siparişi her atölyeye kapatırdı:
+ * platformda tek bir iş bile atanamaz olurdu (ölçüldü: canlı veritabanındaki üç
+ * atölyenin üçü de hiçbir etiket beyan etmemiş). Bu, kuralı uygulamak değil
+ * platformu durdurmaktır.
+ *
+ * Bu yüzden filtre, atölyenin BASKI HACMİ HAKKINDA BİR ŞEY BEYAN ETMİŞ olup
+ * olmadığına bakar. `material_*` etiketleri hacim hakkında hiçbir şey söylemez —
+ * kayıt formunun ürettiği tek şey odur. Bir atölyenin YÖNLENDİRME etiketi
+ * (material_* dışında herhangi bir etiket) varsa, o atölye değerlendirilmiştir
+ * ve `large_format` yoksa iş oraya GİTMEZ. Hiç yönlendirme etiketi yoksa atölye
+ * henüz değerlendirilmemiştir ve bugünkü davranış korunur.
+ *
+ * Bu, `manufacturerSupportsMaterial`in yıllardır uyguladığı "beyan yoksa eski
+ * atölye kapsam dışı kalmaz" kararının aynısıdır — yeni bir kural değil, aynı
+ * kararın hacim eksenine uygulanması.
+ *
+ * İSTİSNANIN KAPANMASI bu düzelticinin mülkiyetinde DEĞİL: admin düzenleyicisi
+ * `large_format` kutusunu yazabildiği gün (bkz. crossOwnerRequest) istisna
+ * kendiliğinden daralır ve filtre tam anlamıyla sert olur.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Bu iş, bu atölyenin beyan etmediği bir büyük format işi mi? (saf; DB yok) */
+export function largeFormatPlacementBlocked(
+  figurineSize: string | null | undefined,
+  capabilities: string[] | null | undefined
+): boolean {
+  const needsLargeFormat = orderRequirements({
+    figurineSize: figurineSize ?? undefined,
+  }).includes("large_format");
+  if (!needsLargeFormat) return false;
+  if (capabilityMatch(capabilities, ["large_format"])) return false;
+  // Değerlendirilmemiş atölye (yalnız malzeme etiketi ya da hiç etiket yok):
+  // bugünkü davranış korunur — bkz. yukarıdaki gerekçe.
+  const routingTags = (capabilities ?? []).filter(
+    (t) => typeof t === "string" && !t.startsWith("material_")
+  );
+  return routingTags.length > 0;
+}
+
+/**
+ * Bu YERLEŞTİRMEDE yürürlükte olan sinyaller — sıralayıcının okuduğu KÜMENİN
+ * AYNISI (`signalsForProfile("live")`).
+ *
+ * Kapı env'i KENDİ okumaz: "canlı davranışa yeni bir kural sızdı mı?" sorusunun
+ * cevabı tek bir yerde aranmalı (config/scoring.ts). Gölge şeridi kendi
+ * kümesini ("shadow") alır ve bugün her iki sinyali de AÇIK görür, yani
+ * /admin/assignment-sweep bayraklar açılsa NE OLACAĞINI göstermeye devam eder.
+ */
+export function placementSignals(): Phase5SignalSet {
+  return signalsForProfile("live");
+}
+
+/**
+ * Her yerleştirme reddinin OTOMATİK ATAMA karşılığı — TEK tablo.
+ *
+ * `Record<AssignFailure, AutoAssignSkip>`: yeni bir ret sebebi eklendiğinde
+ * karşılığını yazmak DERLEME zorunluluğudur. Tablo yokken otomatik atama her
+ * reddi tek bir `not_eligible`e çöküyordu; sipariş ATANMAMIŞ kalırken admin'e
+ * "işlem gerekmiyor", koparılan atölyeye "iş başkasına gitti" deniyordu.
+ *
+ * `seller_owned` OTOMATİK yolda ulaşılamaz (satıcının ürünü sıralamaya hiç
+ * girmez, kendi atölyesine gider), ama tablo TOTAL olmak zorunda: ulaşılamaz
+ * sayılan bir dalın sessizce yanlış cevap vermesi, tam olarak bu fazda
+ * düzeltilen kusurdur. Karşılığı `no_candidate`tir — iş atanmamış bekler ve
+ * admin'in karar vermesi gerekir.
+ */
+export const AUTO_ASSIGN_SKIP_FOR_FAILURE: Record<AssignFailure, AutoAssignSkip> = {
+  manufacturer_unavailable: "not_eligible",
+  no_printable_content: "not_eligible",
+  not_assignable: "not_eligible",
+  capacity_full: "capacity_full",
+  large_format_required: "large_format_required",
+  seller_owned: "no_candidate",
 };
 
 /**
@@ -252,15 +381,24 @@ export function sellerPlacementGuard(manufacturerId: string): SQL {
  */
 export const SELLER_OVERRIDE_REASON_MIN_LENGTH = 10;
 
-/** Siparişin sahibi (ve adı) — reddi ADIYLA söyleyebilmek için. */
-async function loadSellerOwnership(orderId: string): Promise<{
+/**
+ * Yerleştirme kararının siparişten okuduğu her şey — TEK sorguda.
+ *
+ * Satıcı (ve adı) reddi ADIYLA söyleyebilmek için; `figurineSize` ise büyük
+ * format sert filtresi için. İkinci bir okuma açmak yerine aynı satırdan
+ * alınır: iki okuma arasında sipariş değişirse kapı iki farklı gerçeğe göre
+ * karar verirdi.
+ */
+async function loadPlacementFacts(orderId: string): Promise<{
   sellerManufacturerId: string | null;
   sellerName: string | null;
+  figurineSize: string | null;
 }> {
   const [row] = await db
     .select({
       sellerManufacturerId: orders.sellerManufacturerId,
       sellerName: manufacturers.companyName,
+      figurineSize: orders.figurineSize,
     })
     .from(orders)
     .leftJoin(manufacturers, eq(manufacturers.id, orders.sellerManufacturerId))
@@ -271,6 +409,7 @@ async function loadSellerOwnership(orderId: string): Promise<{
   return {
     sellerManufacturerId: row?.sellerManufacturerId ?? null,
     sellerName: row?.sellerName ?? null,
+    figurineSize: row?.figurineSize ?? null,
   };
 }
 
@@ -359,7 +498,11 @@ export async function assignManufacturerToOrder(
   // MÜLKİYET, her şeyden ÖNCE. Hedef atölyenin var olup olmadığından da önce:
   // satıcının ürününü rakibe vermek, kapalı bir atölyeye vermekten daha ağır
   // bir hatadır ve cevabın "üretici aktif değil" olması sebebi gizlerdi.
-  const ownership = await loadSellerOwnership(orderId);
+  // DEĞİŞKEN ADI `ownership` KALMALI: scripts/test-auto-assign.ts satıcı
+  // bildiriminin ve reddin doğru alandan beslendiğini KAYNAK ÜZERİNDEN pinliyor
+  // (`ownership.sellerManufacturerId!` / `ownership.sellerName`). Adı
+  // değiştirmek o tuzak telini sessizce koparır — nitekim bir kez kopardı.
+  const ownership = await loadPlacementFacts(orderId);
   const sellerBreach = sellerOwnedPlacementBlocked(
     ownership.sellerManufacturerId,
     manufacturerId
@@ -401,12 +544,57 @@ export async function assignManufacturerToOrder(
       eq(manufacturers.id, manufacturerId),
       eq(manufacturers.status, "active")
     ),
-    columns: { id: true, companyName: true },
+    columns: { id: true, companyName: true, capabilities: true },
   });
   if (!manufacturer) return { ok: false, reason: "manufacturer_unavailable" };
 
   if (!args.skipPrintableCheck && !(await orderHasPrintableContent(orderId))) {
     return { ok: false, reason: "no_printable_content" };
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * FAZ 5 KAPILARI — İKİSİ DE SIRALAYICI İKİZİYLE AYNI ANAHTARDA.
+   *
+   * Bugün her iki sinyal de KAPALI (config/scoring.ts · liveSignalSet), yani bu
+   * blok hiçbir yerleştirmeyi reddetmez: canlı davranış Faz 5 ÖNCESİYLE
+   * birebir aynıdır. Bayraklar ikizleriyle BİRLİKTE açılınca ekran ve uç aynı
+   * ölçüye aynı anda geçer. Sıralamadan sonra tezgâh dolabileceği için yazma
+   * yolu kapasiteyi yeniden okur; bu arada oluşan ret kendi sebebiyle bildirilir.
+   *
+   * Kararı burada YENİDEN YAZMIYORUZ: saf kural flags.ts'te durur, çünkü aynı
+   * cevabı DB'siz birim testi de vermek zorunda.
+   * ────────────────────────────────────────────────────────────────────────── */
+  const signals = placementSignals();
+  // Kural (saf, DB'siz) her hâlde HESAPLANIR: gölge kaydı ve aşağıdaki günlük
+  // satırı, bayrak kapalıyken bile "açık olsaydı ne olurdu" sorusunu
+  // cevaplayabilmeli.
+  const largeFormatBlocked = largeFormatPlacementBlocked(
+    ownership.figurineSize,
+    manufacturer.capabilities
+  );
+  // KAPASİTE ÖLÇÜSÜ YALNIZ SİNYAL AÇIKKEN OKUNUR. Uygulanmayacak bir ölçü için
+  // her yerleştirmede üç sorgu açmak, ölçmenin bedelini canlıya yüklerdi —
+  // üstelik gereksiz: gölge ölçümü sıralama şeridinde TEK toplu yüklemeyle
+  // zaten alınıyor (manufacturer-assignment-shadow.ts · capacities).
+  // Ölçü ORTAKTIR (services/manufacturer-capacity.ts): burada kendi sayımımız
+  // YOK — iade edilmiş iş sayılmaz ve ölçü ağırlıklı birimdir.
+  const capacity = signals.weightedLoad
+    ? await manufacturerCapacityGate(manufacturerId)
+    : null;
+  const refusal = placementGateRefusal({
+    signals,
+    largeFormatBlocked,
+    // `null` = ölçülmedi (sinyal kapalı). Ölçülmemiş değer ret sebebi olamaz.
+    hasRoom: capacity ? capacity.ok : null,
+  });
+  if (refusal) return { ok: false, reason: refusal };
+  if (largeFormatBlocked) {
+    // GÖLGE: kural bugün UYGULANMIYOR ama sessiz de kalmıyor. Bayrak açıldığı
+    // gün hangi işlerin duvara toslayacağı, o günden önce günlükte görünsün.
+    console.info(
+      `[GÖLGE] ${orderId}: büyük format sinyali AÇIK olsaydı bu yerleştirme ` +
+        `reddedilirdi (atölye ${manufacturerId} 'large_format' beyan etmemiş)`
+    );
   }
 
   const statusGuard =

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { manufacturerAssignmentEvaluations, orders } from "@/lib/db/schema";
+import { manufacturerAssignmentEvaluations, manufacturers, orders } from "@/lib/db/schema";
 import {
+  rankManufacturersDetailed,
   rankManufacturersForOrder,
-  rankManufacturersForProfiles,
   type CandidateScore,
   type RankOptions,
 } from "@/lib/services/manufacturer-assignment";
@@ -16,6 +16,22 @@ import {
   weightsVersion,
   type ScoringProfile,
 } from "@/lib/config/manufacturer-scoring";
+import {
+  PHASE5_DISTANCE_MODEL,
+  PHASE5_WEIGHTS_VERSION,
+  activeSignals,
+  explainShadowDivergence,
+  isPhase5ShadowEnabled,
+  signalsForProfile,
+  type CoverageResolver,
+  type ShadowComparison,
+} from "@/lib/config/scoring";
+import { loadManufacturerCapacities } from "@/lib/services/manufacturer-capacity";
+// Büyük format kuralının TEK sahibi. Sıralayıcı bunu import EDEMEZ (o modül
+// manufacturer-capacity'yi, o da sıralayıcıyı import ediyor: döngü), bu yüzden
+// fişi bu katman takıyor — kapasite ve kapsama fişleriyle aynı sebeple.
+import { largeFormatPlacementBlocked } from "@/lib/services/manufacturer-assign";
+import { coveragePlanResolver, loadCoveragePlan } from "@/lib/services/coverage-plan";
 
 /**
  * Mesafe gölgesi (Phase 1). v3 = v1 ağırlıkları + sürekli mesafe.
@@ -30,6 +46,77 @@ const SHADOW_DISTANCE_PROFILE: ScoringProfile = "v3";
 export interface RankWithShadowOptions extends RankOptions {
   /** Admin tanı görünümü (?weights=v1|v2|v3): kanaryayı ve kaydı atlar. */
   forceProfile?: ScoringProfile;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * FAZ 5 GÖLGE BAĞLAMI: ağırlıklı kapasite (K2) + hesaplanan etki alanı (K1)
+ *
+ * İkisi de BU KATMANDA bağlanır, sıralayıcının içinde değil. Sebep yapısal:
+ * `manufacturer-capacity.ts` ve `coverage-plan.ts` ikisi de sıralayıcıdan
+ * import ediyor (`ACTIVE_MFG_STATUSES`, `DISTANCE_NEAR_UNITS`), yani
+ * sıralayıcının onları import etmesi döngü kurardı. Sıralayıcı bu yüzden
+ * ikisini de YUVA olarak taşır; fişi buraya takıyoruz.
+ *
+ * ÖNBELLEK, çünkü plan sipariş başına değil TARAMA başına hesaplanmalı (K1'in
+ * notu): her atamada 81 il × malzeme hesabı + atölye/müdahale okuması yapmak,
+ * bir TELEMETRİ satırı için canlı atama yoluna ölçülebilir bir gecikme eklerdi.
+ * 60 sn'lik önbellek yalnız GÖLGE içindir. Kapasite veya kapsama sinyali
+ * canlıya açılırsa ortak sıralama bağlamı her çağrıda yeniden yüklenir;
+ * gölgenin açık olup olmaması bu tazelik kuralını değiştirmez.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+interface Phase5Context {
+  capacities?: ReadonlyMap<string, { loadUnits: number }>;
+  coverageOf?: CoverageResolver;
+}
+
+const PHASE5_CTX_TTL_MS = 60 * 1000;
+let phase5CtxAt = 0;
+let phase5Ctx: Phase5Context = {};
+
+/** Kapasite önce yüklenir; kapsama planı aynı aktif atölye ölçüsünü kullanır. */
+async function loadPhase5Context(): Promise<Phase5Context> {
+  const active = await db
+    .select({ id: manufacturers.id })
+    .from(manufacturers)
+    .where(eq(manufacturers.status, "active"));
+  const capacities = await loadManufacturerCapacities(active.map((m) => m.id));
+  const plan = await loadCoveragePlan(capacities);
+  return { capacities, coverageOf: coveragePlanResolver(plan) };
+}
+
+/**
+ * Canlı sinyaller gölge önbelleğini kullanamaz. Canlı okuma hatası da eski
+ * telemetriye ya da boş bağlama düşmemeli; çağıran bu denemeyi başarısız görür.
+ * Taze okuma, sıralama ile atama yazımı arasındaki yarışları engellemez.
+ */
+async function rankingPhase5Context(withShadow: boolean): Promise<Phase5Context> {
+  const liveSignals = signalsForProfile("live");
+  if (liveSignals.weightedLoad || liveSignals.computedCoverage) {
+    return loadPhase5Context();
+  }
+  return withShadow ? phase5Context() : {};
+}
+
+/**
+ * Gölge bağlamını verir. ASLA FIRLATMAZ.
+ *
+ * Bir telemetri girdisi, gerçek bir atamayı düşüremez: plan ya da kapasite
+ * okunamazsa boş bağlam döner ve gölge o turda ağırlıklı yükü "ölçülemedi",
+ * kapsamayı da "typed" olarak damgalar — yani ekran, sinyalin konuşmadığını
+ * SÖYLER, sessizce "fark yok" demez.
+ */
+async function phase5Context(): Promise<Phase5Context> {
+  const now = Date.now();
+  if (now - phase5CtxAt < PHASE5_CTX_TTL_MS) return phase5Ctx;
+  try {
+    phase5Ctx = await loadPhase5Context();
+  } catch (err) {
+    console.warn("[Faz 5 gölge] bağlam yüklenemedi; gölge eksik sinyalle çalışır:", err);
+    phase5Ctx = {};
+  }
+  phase5CtxAt = now;
+  return phase5Ctx;
 }
 
 /**
@@ -97,10 +184,20 @@ export async function rankForOrderWithShadow(
   // ortak çağrı patlarsa canlı sıralama yalnız başına bir kez daha çalıştırılır.
   // Böylece bozuk bir meydan okuyan (kaçak env ağırlığı, bozuk çapa, şema
   // kayması) atamayı hâlâ düşüremez.
-  let ranked: Map<ScoringProfile, CandidateScore[]>;
+  // FAZ 5 gölgesi de AYNI yüklemeden çıkar: ek sıralama, ek veri okuması
+  // değildir (yalnız kendi sinyalleri için gereken geçmiş sorgusu eklenir).
+  const withPhase5 = isPhase5ShadowEnabled();
+
+  const ctx = await rankingPhase5Context(withPhase5);
+
+  let ranked: Awaited<ReturnType<typeof rankManufacturersDetailed>>;
   try {
-    ranked = await rankManufacturersForProfiles(orderId, profiles, {
+    ranked = await rankManufacturersDetailed(orderId, profiles, {
       excludeManufacturerIds,
+      phase5Shadow: withPhase5,
+      capacities: ctx.capacities,
+      coverageOf: ctx.coverageOf,
+      largeFormatBlocked: largeFormatPlacementBlocked,
     });
   } catch (err) {
     console.warn(
@@ -112,11 +209,12 @@ export async function rankForOrderWithShadow(
     });
   }
 
-  const authoritative = ranked.get(authoritativeProfile) ?? [];
-  const weightsShadow = ranked.get(shadowProfile) ?? [];
+  const authoritative = ranked.byProfile.get(authoritativeProfile) ?? [];
+  const weightsShadow = ranked.byProfile.get(shadowProfile) ?? [];
   const distanceShadow = withDistanceShadow
-    ? ranked.get(SHADOW_DISTANCE_PROFILE) ?? []
+    ? ranked.byProfile.get(SHADOW_DISTANCE_PROFILE) ?? []
     : [];
+  const phase5Shadow = ranked.phase5 ?? [];
 
   const rows: EvaluationRowDraft[] = [
     // Ağırlık karşılaştırması (v2.2 satırı): karar veren profil ile öbür profil.
@@ -146,10 +244,77 @@ export async function rankForOrderWithShadow(
       })
     );
   }
+  if (withPhase5 && phase5Shadow.length > 0) {
+    // FAZ 5 karşılaştırması (v4.0 satırı): kararı veren sıralamanın karşısında
+    // YENİ SİNYALLİ sıralama. Yeni bir `ScoringProfile` AÇILMADI — bu gölge bir
+    // profil değil, aynı profilin sinyalli hâli; damgası `weights_version`
+    // sütununda durur.
+    //
+    // `livePlacement: "profile"` BİLİNÇLİ (mesafe satırındaki gibi sabit "v1"
+    // değil): okuyucu (scoring-evaluations/evaluation-view.ts) bu damgayı
+    // tanımıyor ve tanımadığı satırlarda canlı tarafı `authoritative`in kendi
+    // sütunundan okuyor. Profil yerleşimi tam olarak o okumayla uyuşur, yani
+    // kanarya açıldığı gün bile ekran işi kimin kazandığını doğru söyler.
+    rows.push(
+      draftRow({
+        rowWeightsVersion: PHASE5_WEIGHTS_VERSION,
+        authoritative: authoritativeProfile,
+        livePlacement: "profile",
+        live: { profile: authoritativeProfile, list: authoritative },
+        shadow: {
+          profile: authoritativeProfile,
+          list: phase5Shadow,
+          // Damga profilden TÜRETİLEMEZ: iki taraf da aynı profil adını
+          // taşıyor, ayrımı yapan şey sinyaller. Açıkça yazılır.
+          versionOverride: PHASE5_WEIGHTS_VERSION,
+          distanceModelOverride: PHASE5_DISTANCE_MODEL,
+        },
+        signals: activeSignals(ranked.phase5Signals),
+      })
+    );
+  }
 
   stashPending(orderId, rankedAt, rows, excludeManufacturerIds);
 
   return authoritative;
+}
+
+/**
+ * FAZ 5 GÖLGESİNİN SALT-OKUNUR hâli: canlı sıralama + sinyalli sıralama + ikisi
+ * arasındaki farkın Türkçe açıklaması. HİÇBİR kayıt yazmaz.
+ *
+ * /admin/assignment-sweep bunu çağırır: tarama salt okunur bir işlemdir ve
+ * `manufacturer_assignment_evaluations` tablosuna satır yazmamalıdır (Faz 1'in
+ * kuralı — kayıt yalnızca bir sipariş ATANDIĞINDA düşer). Bu yüzden burada
+ * `stashPending` YOKTUR ve olmayacaktır.
+ *
+ * Karşılaştırmayı `explainShadowDivergence` üretir — gölge kaydının da,
+ * ekranın da aynı saf fonksiyonu çağırması bilinçli: ikinci bir karşılaştırma
+ * yazılsaydı ekranda görülen fark ile kayda düşen fark sessizce ayrışabilirdi.
+ */
+export async function rankForOrderShadowPreview(
+  orderId: string
+): Promise<{ live: CandidateScore[]; shadow: CandidateScore[] | null; comparison: ShadowComparison | null }> {
+  const liveProfile: ScoringProfile = shouldUseV2(orderId, getCanaryPercent())
+    ? "v2"
+    : "v1";
+  const withPhase5 = isPhase5ShadowEnabled();
+  const ctx = await rankingPhase5Context(withPhase5);
+  const ranked = await rankManufacturersDetailed(orderId, [liveProfile], {
+    phase5Shadow: withPhase5,
+    capacities: ctx.capacities,
+    coverageOf: ctx.coverageOf,
+    largeFormatBlocked: largeFormatPlacementBlocked,
+  });
+  const live = ranked.byProfile.get(liveProfile) ?? [];
+  const shadow = ranked.phase5;
+  return {
+    live,
+    shadow,
+    comparison: shadow
+      ? explainShadowDivergence(live, shadow, ranked.phase5Signals)
+      : null,
+  };
 }
 
 /**
@@ -217,6 +382,17 @@ export function discardAssignmentEvaluation(orderId: string): void {
 interface EvaluationSideInput {
   profile: ScoringProfile;
   list: CandidateScore[];
+  /**
+   * Ağırlık damgası profilden TÜRETİLEMİYORSA açıkça verilir.
+   *
+   * Faz 5 gölgesinde iki taraf da aynı `ScoringProfile`ı taşıyor (yeni bir
+   * profil açılmadı); ayrımı yapan şey yürürlükteki sinyaller. Damga o yüzden
+   * dışarıdan gelir, yoksa iki taraf da "v1.2" yazar ve satır kendi kendini
+   * açıklayamaz hâle gelirdi.
+   */
+  versionOverride?: string;
+  /** Aynı sebeple: mesafe modeli profilden türetilemediğinde açıkça verilir. */
+  distanceModelOverride?: string;
 }
 
 interface EvaluationSideSnapshot {
@@ -228,6 +404,8 @@ interface EvaluationSideSnapshot {
     companyName: string;
     totalScore: number;
     scores: CandidateScore["scores"];
+    /** Faz 5 açıklaması (ceza kalemleri, ağırlıklı yük, kapsama kaynağı). */
+    shadow?: CandidateScore["shadow"];
   }>;
 }
 
@@ -237,6 +415,14 @@ interface EvaluationRowDraft {
   authoritative: ScoringProfile;
   v1: EvaluationSideSnapshot;
   v2: EvaluationSideSnapshot;
+  /**
+   * Bu satırı üreten Faz 5 sinyalleri (varsa).
+   *
+   * Satırın anlamı sinyal kümesine bağlı: aynı "v4.0" damgası, iki hafta sonra
+   * bir sinyal kapatıldığında BAŞKA bir formülü anlatır. Küme yazılmazsa
+   * karşılaştırma geriye dönük olarak okunamaz hâle gelirdi.
+   */
+  signals?: string[];
 }
 
 interface PendingEvaluation {
@@ -403,6 +589,8 @@ function draftRow(args: {
    *  "v1"      → her zaman v1_* (mesafe gölgesi satırı)
    */
   livePlacement: "profile" | "v1";
+  /** Faz 5 satırını üreten sinyaller; öbür karşılaştırmalarda yoktur. */
+  signals?: string[];
 }): EvaluationRowDraft {
   // Persist top-3 score snapshots only — anything below rank 3 is
   // useless noise once we're looking at decision quality.
@@ -415,12 +603,18 @@ function draftRow(args: {
         companyName: c.companyName,
         totalScore: c.totalScore,
         scores: c.scores,
+        // Faz 5 açıklaması (ceza kalemleri, ağırlıklı yük, kapsama kaynağı).
+        // Sinyaller kapalıyken alan hiç YOKTUR, yani eski satırların şekli
+        // değişmez.
+        ...(c.shadow ? { shadow: c.shadow } : {}),
       }));
 
   const sideOf = (input: EvaluationSideInput): EvaluationSideSnapshot => ({
     winnerId: input.list.find((c) => c.eligible)?.manufacturerId ?? null,
-    weightsVersion: weightsVersion(input.profile),
-    distanceModel: getDistanceModel(input.profile),
+    // Damga profilden TÜRETİLEMİYORSA açık değer kazanır: Faz 5 gölgesinde iki
+    // taraf da aynı profili taşır, ayrımı sinyaller yapar.
+    weightsVersion: input.versionOverride ?? weightsVersion(input.profile),
+    distanceModel: input.distanceModelOverride ?? getDistanceModel(input.profile),
     candidates: summarize(input.list),
   });
 
@@ -436,6 +630,7 @@ function draftRow(args: {
     authoritative: args.authoritative,
     v1: v1Side,
     v2: v2Side,
+    signals: args.signals,
   };
 }
 
@@ -447,9 +642,17 @@ function sideJson(
   side: EvaluationSideSnapshot,
   decisionId: string,
   assignedManufacturerId: string,
-  excludedManufacturerIds: readonly string[]
+  excludedManufacturerIds: readonly string[],
+  signals?: readonly string[]
 ) {
   return {
+    /**
+     * Bu satırı üreten Faz 5 sinyalleri (varsa).
+     *
+     * Damga olmadan satır geriye dönük okunamaz: aynı "v4.0" etiketi, iki hafta
+     * sonra bir sinyal kapatıldığında BAŞKA bir formülü anlatır.
+     */
+    ...(signals && signals.length > 0 ? { signals: [...signals] } : {}),
     /**
      * Bu satırı doğuran YERLEŞTİRME KARARININ kimliği (D-C1).
      *
@@ -533,13 +736,15 @@ async function writeEvaluationRows(
         row.v1,
         decisionId,
         assignedManufacturerId,
-        pending.excludedManufacturerIds
+        pending.excludedManufacturerIds,
+        row.signals
       ),
       v2Scores: sideJson(
         row.v2,
         decisionId,
         assignedManufacturerId,
-        pending.excludedManufacturerIds
+        pending.excludedManufacturerIds,
+        row.signals
       ),
       authoritative: row.authoritative,
     });

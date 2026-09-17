@@ -12,6 +12,12 @@
  *
  * NOTE: no `import "server-only"` here — BullMQ workers reach this module.
  */
+// YALNIZ TİP: derlemede silinir, yani bu modülü import eden BullMQ worker'ı ve
+// admin istemci bileşeni için çalışma anında hiçbir şey değişmez. Sinyal
+// kümesinin TANIMI `config/scoring.ts`te durur ve orada kalmalı — yerleştirme
+// kapısı ile sıralayıcı AYNI kümeyi okumak zorunda (bkz. placementGateRefusal).
+import type { Phase5SignalSet } from "@/lib/config/scoring";
+
 export const FLAG_KEYS = [
   "auto_model_enabled",
   "meshy_enabled",
@@ -213,13 +219,43 @@ export function autoAssignFlagFor(kind: AutoAssignOrderKind): FlagKey | null {
   }
 }
 
-/** Otomatik atamanın yapılmama sebebi (P1-C1 sözleşmesindeki kapalı küme). */
-export type AutoAssignSkip =
+/**
+ * SATIR KAPISININ verebileceği sebepler: yalnız siparişin KENDİ satırından
+ * okunabilen hâller (tür, anahtar, iade, durum). Atama taraması bu kümeyi
+ * çevirir, çünkü tarama hiçbir yerleştirme DENEMEZ — sipariş satırına bakar.
+ */
+export type AutoAssignRowSkip =
   | "flag_off"
   | "not_eligible"
   | "no_candidate"
   | "refunded"
   | "workshop";
+
+/**
+ * Otomatik atamanın yapılmama sebebi (P1-C1 sözleşmesindeki kapalı küme).
+ *
+ * FAZ 5'TE GENİŞLEDİ ve genişlemesi ZORUNLUYDU. Yerleştirme kapısı artık iki
+ * yeni sebeple reddedebiliyor (`capacity_full`, `large_format_required`) ve
+ * ikisinin de bu kümede karşılığı YOKTU. Ölçülen sonuç: ikisi de
+ * `not_eligible`e çöküyordu, yani sipariş `manufacturer_id` NULL ile
+ * ATANMAMIŞ beklerken
+ *   - admin'e "sipariş artık atanabilir durumda değil" (yani işlem gerekmiyor),
+ *   - koparılan atölyeye "iş başka bir atölyeye yönlendirildi"
+ * deniyordu. Üçü de yanlıştı: iş kayboluyor, kimse doğru bilgilendirilmiyordu.
+ *
+ * KÜME KAPALI KALMALI: `Record<AutoAssignSkip, ...>` yazan her sözlük, yeni bir
+ * sebebin karşılığı unutulduğunda DERLEME hatası verir — admin'in e-postasına
+ * düşen bir "undefined" değil. Aşağıdaki üç tablo (sebep, sonraki adım, atama
+ * bekleniyor mu) bilerek bu tipe bağlıdır.
+ */
+export type AutoAssignSkip =
+  | AutoAssignRowSkip
+  // Atölyenin tezgâhı dolu. GEÇİCİDİR: aynı sipariş yarın yerleşebilir, bu
+  // yüzden "artık atanamaz" diyen `not_eligible` ile aynı cümleyi kuramaz.
+  | "capacity_full"
+  // İş büyük format ister, atölye bu yeteneği beyan etmemiş. KALICIDIR: tekrar
+  // denemek işe yaramaz; admin ya başka atölye seçmeli ya beyanı düzeltmeli.
+  | "large_format_required";
 
 /**
  * Sipariş atanabilir bir durumda mı? `paid` + pazaryeri, platform kataloğu
@@ -253,7 +289,7 @@ function isUnassigned(
 export function autoAssignRowGate(
   o: AutoAssignOrderShape,
   flagEnabled: boolean
-): AutoAssignSkip | null {
+): AutoAssignRowSkip | null {
   const kind = classifyAutoAssignOrder(o);
   if (autoAssignFlagFor(kind) === null) return "workshop";
   if (!flagEnabled) return "flag_off";
@@ -275,7 +311,7 @@ export function autoAssignRowGate(
 export function autoAssignSkipReason(
   o: AutoAssignOrderShape,
   ctx: { flagEnabled: boolean; hasPrintableContent: boolean }
-): AutoAssignSkip | null {
+): AutoAssignRowSkip | null {
   const gate = autoAssignRowGate(o, ctx.flagEnabled);
   if (gate) return gate;
   return ctx.hasPrintableContent ? null : "not_eligible";
@@ -320,6 +356,163 @@ export function autoAssignPlacementPlan(o: {
   }
   return { kind: "rank", excluded };
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * FAZ 5 YERLEŞTİRME KAPILARI — HANGİ ÖLÇÜ UYGULANIYOR (ranker-rollout = B)
+ *
+ * Faz 5 yerleştirme kapısına İKİ YENİ KURAL koydu (büyük format sert filtresi ve
+ * ağırlıklı kapasite), ama SIRALAYICIDAKİ İKİZLERİ bayrakla KAPALI bırakıldı:
+ *   - sıralayıcı: `required = signals.largeFormat ? orderRequirements(...) : []`
+ *   - sıralayıcı: `loadValue = signals.weightedLoad ? m.loadUnits : currentLoad`
+ *
+ * Bu asimetri tek başına ölçülen kusurların neredeyse hepsini üretiyordu: ekran
+ * ham iş sayısına göre bir atölye ÖNERİYOR, uç ağırlıklı birime göre REDDEDİYOR;
+ * ekran büyük format beyanı olmayan atölyeyi öneriyor, uç onu KALICI olarak
+ * reddediyordu. Hiçbir ekran bu reddi önceden söyleyemiyordu.
+ *
+ * ÇÖZÜM, beş ekranı yeni ölçüye taşımak DEĞİL: iki kapıyı da İKİZLERİYLE AYNI
+ * anahtara bağlamak. Bayrak kapalıyken (bugünkü hâl) yerleştirme Faz 5
+ * ÖNCESİYLE BİT-BİT AYNIDIR, yani "ekran ile uç birbirini yalanlar" durumu
+ * ihtimal olmaktan çıkar — ekran kovalayarak değil, YAPISI GEREĞİ. Bayraklar
+ * ikizleriyle BİRLİKTE açılır; o gün ekran ve uç aynı ölçüye aynı anda geçer.
+ *
+ * SAF ve BURADA, çünkü kararı üç ayrı çalışma ortamı vermek zorunda: atama
+ * kapısı (Next rotaları), BullMQ worker'ı ve veritabanısız birim testi.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Yerleştirmenin Faz 5 kapılarından biri tarafından reddedilme sebebi.
+ * `AssignFailure` üyeleriyle AYNI dizeler — kapı bunları doğrudan döndürür.
+ */
+export type PlacementGateRefusal = "large_format_required" | "capacity_full";
+
+/**
+ * İKİ KAPININ TEK KARARI. Bayrak kapalıysa kapı YOKTUR.
+ *
+ * `hasRoom === null` "ölçülmedi" demektir (kapasite sinyali kapalıyken kapı o
+ * sorguyu hiç açmaz): ölçülmemiş bir değer ASLA ret sebebi olamaz.
+ *
+ * SIRA KURALIN KENDİSİDİR — kalıcı uyumsuzluk, geçici doluluktan ÖNCE söylenir:
+ * "kapasitesi dolu" cevabı admin'i yarın tekrar denemeye (ve aynı duvara
+ * toslamaya) gönderirdi, oysa yetenek eksikse o iş oraya hiçbir zaman gitmez.
+ */
+export function placementGateRefusal(input: {
+  signals: Phase5SignalSet;
+  /** `largeFormatPlacementBlocked()` sonucu (saf kural, services/manufacturer-assign). */
+  largeFormatBlocked: boolean;
+  /** Ağırlıklı kapasite kapısının cevabı; `null` = sinyal kapalı, ölçülmedi. */
+  hasRoom: boolean | null;
+}): PlacementGateRefusal | null {
+  if (input.signals.largeFormat && input.largeFormatBlocked) {
+    return "large_format_required";
+  }
+  if (input.signals.weightedLoad && input.hasRoom === false) {
+    return "capacity_full";
+  }
+  return null;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * ATLAMA SEBEBİNİN ÜÇ MUHATABI: sebep, sonraki adım, atama bekleniyor mu
+ *
+ * NEDEN BU DOSYADA: aynı cümleyi İKİ modül kuruyor — otomatik atamanın kendisi
+ * (services/order-confirm.ts, admin notu + e-posta) ve SLA süpürmesi
+ * (queue/workers/manufacturer-accept-sla.worker.ts, toplu e-posta + üretici
+ * bildirimi). Süpürme order-confirm'i import ediyor, yani ters yönde bir import
+ * DÖNGÜ kurardı; tablolar worker'da kalsaydı order-confirm kendi kopyasını
+ * yazmak zorunda kalırdı ve iki kopya ilk düzeltmede ayrışırdı.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Sebebin admin'e söylenen hâli. Cümle DEĞİL, cümlenin içine giren bir ibare:
+ * çağıranlar bunu "Otomatik atama yapılamadı: <ibare>." gibi kurar.
+ */
+export const AUTO_ASSIGN_SKIP_REASON_TR: Record<AutoAssignSkip, string> = {
+  flag_off: "bu sipariş türünün otomatik atama anahtarı kapalı",
+  not_eligible:
+    "sipariş artık atanabilir durumda değil (bu sırada başkası almış, durumu değişmiş ya da basılacak içeriği yok)",
+  no_candidate: "uygun üretici kalmadı",
+  refunded: "sipariş iade edilmiş",
+  workshop: "atölye seansı siparişi otomatik atanmaz",
+  // Faz 5 — GERÇEĞİ söyleyen iki cümle. Eskiden ikisi de `not_eligible`e
+  // çöküyordu ve admin'e "sipariş artık atanabilir durumda değil" deniyordu:
+  // sipariş ATANABİLİR durumdaydı, yalnız seçilen atölye alamıyordu.
+  capacity_full:
+    "sıralamanın seçtiği atölyenin tezgâhı dolu; sipariş yerleştirilemedi ve atanmamış bekliyor",
+  large_format_required:
+    "sıralamanın seçtiği atölye büyük format baskı yapabildiğini beyan etmemiş; sipariş atanmamış bekliyor",
+};
+
+/**
+ * Admin'e "BUNDAN SONRA NE OLACAK" cümlesi — SEBEBE göre.
+ *
+ * Sebep ne olursa olsun "elle üretici atayın" yazmak, atama BEKLENMEYEN
+ * siparişlerde (iade, bu sırada başkasına atanmış) admin'i yapılmaması gereken
+ * bir işe çağırır ve gerçekten atama bekleyen kayıtları aynı cümlenin
+ * gürültüsünde eşitlerdi.
+ */
+export const AUTO_ASSIGN_SKIP_NEXT_STEP_TR: Record<AutoAssignSkip, string> = {
+  flag_off:
+    "Sipariş üretici bekliyor: /admin/orders üzerinden elle atayabilirsiniz (türün otomatik atama anahtarı açılırsa sıradaki atölyeye kendiliğinden de yerleşir).",
+  not_eligible:
+    "Siparişin durumu değişmiş olabilir: önce sipariş sayfasını açıp güncel hâline bakın, gerekiyorsa elle atayın.",
+  no_candidate:
+    "Sipariş üretici bekliyor: /admin/orders üzerinden elle atayın ya da /admin/manufacturers üzerinden kapasite ve etki alanı ayarlarını gözden geçirin.",
+  refunded:
+    "Sipariş iade edilmiş: üretici atanmayacak, bu sipariş için işlem gerekmiyor.",
+  workshop:
+    "Atölye seansı siparişi otomatik atanmaz: üreticiyi seans ekranından onaylayın.",
+  capacity_full:
+    "Sipariş üretici bekliyor: /admin/orders üzerinden tezgâhı müsait başka bir atölyeye elle atayın ya da /admin/manufacturers üzerinden atölyenin kapasite sınırını gözden geçirin.",
+  large_format_required:
+    "Sipariş üretici bekliyor: büyük format baskı yapabilen bir atölyeye elle atayın ya da /admin/manufacturers üzerinden atölyenin yetenek beyanını düzeltin.",
+};
+
+/**
+ * Bu siparişte gerçekten bir ATAMA bekleniyor mu?
+ *
+ * Toplu e-postanın konusu ve giriş cümlesi buna bakar: "atama için yönetici
+ * kararı bekliyor" diyen bir başlık, atanmayacak siparişler için gelen
+ * kutusunda YANLIŞ bir iş listesi kurardı — satırın kendisi doğruyu söylerken.
+ *
+ * Record (fonksiyon içi `if` zinciri DEĞİL): yeni bir sebep eklendiğinde cevabı
+ * unutmak DERLEME hatasıdır. Eski `if` hâli yeni üyeleri sessizce `true`ya
+ * düşürüyordu — bu iki yeni sebepte doğru cevap zaten `true`, ama bir sonraki
+ * sebepte sessiz varsayılan yanlış tarafa düşebilirdi.
+ */
+export const AUTO_ASSIGN_ASSIGNMENT_EXPECTED: Record<AutoAssignSkip, boolean> = {
+  flag_off: true,
+  // Çoğunlukla "bu sırada başkası aldı": iş bir atölyededir, admin'den bir
+  // atama beklenmez.
+  not_eligible: false,
+  no_candidate: true,
+  refunded: false,
+  workshop: true,
+  // Faz 5: SİPARİŞ ATANMAMIŞ KALDI. Admin gerçekten bir atama yapmalı — bu
+  // satırın `false` olması, işin kaybolduğu ve kimsenin beklemediği hâlin ta
+  // kendisiydi.
+  capacity_full: true,
+  large_format_required: true,
+};
+
+/**
+ * Otomatik atama bu sebepte KENDİ admin notunu ve e-postasını yazar mı?
+ *
+ * SLA süpürmesi bunu bilmek zorunda: kendi toplu e-postasında "bu sipariş için
+ * ayrıca bir e-posta daha aldınız" diyebilmesi gerekiyor, yoksa admin ikinci
+ * postayı ayrı bir olay sanar.
+ */
+export const AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN: Record<AutoAssignSkip, boolean> = {
+  flag_off: false,
+  not_eligible: false,
+  no_candidate: true,
+  refunded: false,
+  workshop: false,
+  // Sipariş atanmamış kaldı ve sebebi geçici/kalıcı bir YERLEŞTİRME engeli:
+  // admin'in bunu duyması gerekir.
+  capacity_full: true,
+  large_format_required: true,
+};
 
 // ─── Otomatik BOYACI ataması: kapı ve ret üst sınırı (Faz 4) ────────────────
 //
@@ -543,5 +736,92 @@ export interface PainterParcelShape {
  */
 export function painterParcelOnTheWay(o: PainterParcelShape): boolean {
   if (o.receivedByPainterAt) return true;
+  return (o.painterHandoffTrackingNumber ?? "").trim().length > 0;
+}
+
+// ─── Üretici kabul SLA'sı: yanıtsız atama, üst sınır ve yola çıkmışlık (Faz 5) ─
+//
+// Boyacı bölümünün yanında ve aynı sebeple SAF durur: kural süpürmede, admin
+// ekranında ve testte AYNI cümleyi söylemek zorunda; hiçbiri diğerinin çalışma
+// ortamını paylaşmıyor.
+
+/**
+ * Bir ret (ya da 24 saatlik sessizlik) sonrası sipariş EN FAZLA kaç RET
+ * biriktirince artık hiç denenmez ve admin kuyruğuna düşer.
+ *
+ * DEĞER BUGÜNKÜ DAVRANIŞTIR, yeni bir karar değil: ret yolunun kendi özel
+ * sabiti (services/manufacturer-decline.ts · MAX_DECLINES_BEFORE_ADMIN = 3)
+ * yıllardır bu sayıyı uyguluyor. Buraya taşınmasının sebebi, SLA süpürmesinin
+ * de aynı sayaca yazması: cevapsız bırakılan iş de bu sayıya girer (sahibin
+ * kararı — ceza yazılmaz ama deneme sayılır, yoksa cevap vermeyen atölyeler
+ * siparişi sonsuza kadar dolaştırırdı).
+ *
+ * İKİ KOPYA ŞU AN VAR ve bu bilinçli bir geçiş hâlidir: ret yolu başka bir
+ * fixer'ın dosyası olduğu için import'u bu fazda değiştirilemedi.
+ * `scripts/test-manufacturer-sla.ts` iki sayının EŞİT kaldığını her koşuda
+ * doğrular — biri değişirse test düşer, yani kopya sessizce ayrışamaz.
+ *
+ * NOT: boyacı ikizi (PAINTER_MAX_REPLACEMENTS = 3 yeniden yerleştirme, yani
+ * DÖRDÜNCÜ rette tükenir) bir fazla dener; ayrım bilinçlidir ve iki tarafın
+ * sınırını kendi sözleşmeleri belirler.
+ */
+export const MANUFACTURER_MAX_DECLINES = 3;
+
+/**
+ * Sipariş en fazla kaç kez YENİDEN yerleştirilir. TÜRETİLMİŞTİR: ilk
+ * yerleştirme bir "yeniden seçim" değildir, o yüzden üst sınırın bir eksiğidir.
+ * İki sayı birbirinden bağımsız yazılsaydı, birini değiştiren diğerini sessizce
+ * yalanlardı (boyacı tarafında ölçülen kusur tam buydu).
+ */
+export const MANUFACTURER_MAX_REPLACEMENTS = MANUFACTURER_MAX_DECLINES - 1;
+
+/** Ret/cevapsızlık sayısı üst sınıra ulaştı mı (artık admin kuyruğu)? */
+export function manufacturerDeclinesExhausted(declinedCount: number): boolean {
+  return declinedCount >= MANUFACTURER_MAX_DECLINES;
+}
+
+/**
+ * 24 saat yanıtsız kalan atamanın `manufacturer_actions` günlüğündeki adı.
+ *
+ * SIRALAYICININ PUAN KÜMELERİNİN DIŞINDADIR ve öyle kalmalıdır: ne GOOD_ACTIONS
+ * ne BAD_ACTIONS (services/manufacturer-assignment.ts) bu dizeyi tanır, yani
+ * satır güvenilirlik puanını DEĞİŞTİRMEZ. Sahibin kararı yanıtsızlığa ceza
+ * yasaklıyor (sla-no-answer = C) ve bu satır yalnız "ne olduğunu" açıklayan bir
+ * denetim kaydıdır.
+ *
+ * Boyacı ikizinden (PAINTER_SLA_TIMEOUT_ACTION) ayrılan nokta budur: orada
+ * sinyal sıralayıcının olumsuz kümesinde SAYILIYOR. Burada saymak, partner
+ * gelirini canlıda kaydıran bir sıralama değişikliği olurdu; bu fazın kuralı
+ * (ranker-rollout = B) yeni sinyalin önce GÖLGEDE koşmasını şart koşuyor. Yani
+ * bu dizeyi BAD_ACTIONS'a eklemek tek başına yapılacak bir iş değildir: gölge
+ * şeridinden geçmesi gerekir.
+ */
+export const MANUFACTURER_SLA_TIMEOUT_ACTION = "sla_timeout";
+
+/** İşin fiziksel olarak yola çıkıp çıkmadığını söyleyen sipariş alanları. */
+export interface ManufacturerJobShape {
+  /** Müşteriye sevk damgası. */
+  shippedAt: Date | null;
+  /** Müşteri kargosunun takip numarası. */
+  trackingNumber: string | null;
+  /** Baskının boyacıya devredildiği an. */
+  sentToPainterAt: Date | null;
+  /** Boyacıya giden kolinin takip numarası. */
+  painterHandoffTrackingNumber: string | null;
+}
+
+/**
+ * İş üreticinin elinden ÇIKTI mı (kargoya verildi ya da boyacıya devredildi)?
+ *
+ * Yanıtsız bir atamanın taşınmasını engelleyen ölçü. Boyacı tarafındaki
+ * `painterParcelOnTheWay` ile aynı gerekçe: ortada FİZİKSEL bir parça varsa işi
+ * başka bir atölyeye yazmak o parçayı öksüz bırakır — kararı admin verir.
+ *
+ * Kargo FİRMASI bilerek kanıt sayılmaz (panelde paket çıkmadan da seçilebilir);
+ * takip numarası ve damgalar ancak iş gerçekten hareket ettiğinde doğar.
+ */
+export function manufacturerJobInTransit(o: ManufacturerJobShape): boolean {
+  if (o.shippedAt || o.sentToPainterAt) return true;
+  if ((o.trackingNumber ?? "").trim().length > 0) return true;
   return (o.painterHandoffTrackingNumber ?? "").trim().length > 0;
 }

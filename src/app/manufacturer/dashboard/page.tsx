@@ -1,5 +1,7 @@
 export const dynamic = "force-dynamic";
 
+import { signalsForProfile } from "@/lib/config/scoring";
+
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { eq, and, count, desc, sql } from "drizzle-orm";
@@ -10,10 +12,15 @@ import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { formatDate } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
+import {
+  emptyManufacturerCapacity,
+  loadManufacturerCapacity,
+} from "@/lib/services/manufacturer-capacity";
 import { AcceptingOrdersToggle } from "@/components/manufacturer/accepting-orders-toggle";
 
 export default async function ManufacturerDashboardPage() {
   const session = await getManufacturerSession();
+  const weightedLoadLive = signalsForProfile("live").weightedLoad;
   if (!session) redirect("/manufacturer/login");
 
   const manufacturer = await db.query.manufacturers.findFirst({
@@ -46,7 +53,7 @@ export default async function ManufacturerDashboardPage() {
   }
 
   const mfgId = session.manufacturerId;
-  const [[total], [assigned], [printing], [shipped], recent] =
+  const [[total], [assigned], [printing], [shipped], recent, capacityRead] =
     await Promise.all([
       db.select({ c: count() }).from(orders).where(eq(orders.manufacturerId, mfgId)),
       db
@@ -79,7 +86,23 @@ export default async function ManufacturerDashboardPage() {
           assignedToManufacturerAt: true,
         },
       }),
+      // Ağırlıklı ölçüm gölgede de gösterilir; yalnız canlı sinyal atamayı engeller.
+      // Okunamayan yük diğer sayaçları ve sipariş listesini etkilemez.
+      loadManufacturerCapacity(mfgId).catch((e) => {
+        console.error("üretici paneli: tezgâh yükü okunamadı", e);
+        return "unreadable" as const;
+      }),
     ]);
+
+  // Üretici satırı yukarıda okundu, yani `null` pratikte imkânsız; yine de
+  // eksik satır "bilinmiyor" diye okunmasın diye boş tezgâha düşüyoruz.
+  // "unreadable" bundan AYRI bir hâldir: bilinmeyen yükü 0 göstermek, dolu bir
+  // tezgâhı boş göstermek olurdu.
+  const capacity =
+    capacityRead === "unreadable"
+      ? null
+      : capacityRead ??
+        emptyManufacturerCapacity(mfgId, manufacturer.maxConcurrentOrders);
 
   const stats = [
     { label: d["manufacturer.dashboard.totalOrders"], value: total?.c ?? 0 },
@@ -106,11 +129,45 @@ export default async function ManufacturerDashboardPage() {
       <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
         <div>
           <p className="text-xs uppercase tracking-wide text-gray-500">
-            Devam eden / Maks kapasite
+            Ağırlıklı yük ({weightedLoadLive ? "canlı" : "gölge"}) / Maks kapasite
           </p>
-          <p className="mt-1 text-2xl font-bold text-gray-900">
-            {(assigned?.c ?? 0) + (printing?.c ?? 0)} / {manufacturer.maxConcurrentOrders}
-          </p>
+          {capacity ? (
+            <>
+              <p className="mt-1 text-2xl font-bold text-gray-900">
+                {capacity.loadUnits} / {capacity.maxConcurrentOrders}{" "}
+                <span className="text-base font-medium text-gray-500">birim</span>
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                {capacity.activeJobs} aktif iş · bir iş 1 birim sayılır, her 20 adet
+                için 1 birim daha eklenir (60 adetlik tek iş = 4 birim). İade edilen
+                siparişler bu yükü doldurmaz.
+              </p>
+              {/* Ağırlıklı eşik yalnız canlıyken kapıdır; iş kabulü ayrı bir koşuldur. */}
+              <p
+                className={`mt-1 text-xs font-medium ${
+                  !manufacturer.acceptingOrders
+                    ? "text-gray-600"
+                    : !weightedLoadLive || capacity.hasRoom
+                      ? "text-emerald-700"
+                      : "text-amber-700"
+                }`}
+              >
+                {!manufacturer.acceptingOrders
+                  ? "Yeni iş kabulünü kapattınız: kapasiteniz uygun olsa da iş düşmez."
+                  : !weightedLoadLive
+                    ? "Ağırlıklı yük (gölge): bu ölçüm atamayı engellemez. Yeni sipariş düşebilir."
+                    : capacity.hasRoom
+                      ? "Yeni sipariş düşebilir."
+                      : "Kapasiteniz dolu: yük limitin altına inene kadar yeni iş düşmez."}
+              </p>
+            </>
+          ) : (
+            <p role="alert" className="mt-1 max-w-md text-sm text-amber-800">
+              Tezgâh yükünüz şu anda okunamıyor (geçici sistem arızası). Bu, yükünüz
+              yok DEMEK DEĞİL — birkaç dakika sonra sayfayı yenileyin. Beyan ettiğiniz
+              maksimum kapasite: {manufacturer.maxConcurrentOrders} birim.
+            </p>
+          )}
         </div>
         <AcceptingOrdersToggle initial={manufacturer.acceptingOrders} />
       </div>

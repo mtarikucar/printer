@@ -131,6 +131,42 @@ export function deriveSessionDates(startsAt: Date): {
 }
 
 /**
+ * ORTAK KAPASİTE ÖLÇÜSÜNÜN HAZIR CEVABI — sunucuda hesaplanır, buraya PROP olarak iner.
+ *
+ * NEDEN HAZIR GELİYOR: bu modül `@/lib/db`yi import EDEMEZ (admin'in "Seans aç"
+ * formu `assessSessionRisk`i TARAYICIDA çağırıyor; `manufacturer-capacity.ts`
+ * `pg`yi istemci paketine sürüklerdi — `scripts/test-manufacturer-capacity.ts`
+ * bunu ayrıca denetliyor). Bu yüzden kapının cevabı BURADA HESAPLANMAZ:
+ * `manufacturerHasRoom` ve `manufacturerLoadLabel` sunucu sayfasında çağrılır,
+ * sonuçları buraya geçilir.
+ *
+ * Eşiğin burada yeniden yazılmamasının sebebi tek cümle: ekran, ucun
+ * uygulamadığı bir ölçüyle kimseyi kapatamaz. Kapı ölçüsünü değiştirdiği gün
+ * ikinci bir karşılaştırma sessizce eski kuralı anlatmaya devam ederdi.
+ */
+export interface SessionRiskCapacity {
+  /** Ağırlıklı yük eşiği; yalnız canlı sinyal açıkken atama kapısıdır. */
+  hasRoom: boolean;
+  /** Kapının ölçüsüyle yazılmış TEK etiket (`manufacturerLoadLabel`): "6/5 birim · 2 iş". */
+  loadLabel: string;
+  /**
+   * Atölye DOLUYKEN bu ekranın eylemine ne oluyor. Cümle bunu söylemek
+   * ZORUNDA, çünkü iki ekranın gerçeği farklı:
+   *
+   *  - "queued"  → "Seans aç" formu. Partiyi basacak atölye seans AÇILIRKEN
+   *    seçilir ve üretici o TARİHİ taahhüt eder; `closeSession` partiyi
+   *    kapanışta yine ona yazar (kapı orada danışılır, engellemez — gerekçesi
+   *    workshop-session.ts'te). Yani uyarı vardır, engel yoktur.
+   *  - "shadow" → canlı ağırlıklı yük kapalı; ölçüm hiçbir atamayı engellemez.
+   *  - "blocked" → yalnız canlı ağırlıklı yük AÇIKKEN TOPLU DEVİR. Admin'in şu
+   *    an bir atölye SEÇTİĞİ yoldur ve `assignBatchManufacturer` ortak kapasite
+   *    kapısından geçip dolu atölyeyi REDDEDER; ekran da aynı şeyi söylemeli,
+   *    yoksa admin 409'a kadar yürür.
+   */
+  whenFull: "queued" | "blocked" | "shadow";
+}
+
+/**
  * Seçilen üreticinin bu tarihe yetişip yetişemeyeceğine dair uyarı.
  *
  * ENGELLEMEZ — admin bilerek riskli bir seans açabilir (üreticiyle telefonda
@@ -148,15 +184,42 @@ export function assessSessionRisk(args: {
   daysUntilSession: number;
   /** Üreticinin son işlerindeki ortalama atama→baskı süresi (gün). */
   avgPrintDays: number;
+  /**
+   * Ağırlıklı yük birimi (`ManufacturerCapacity.loadUnits`) — ham
+   * iş sayısı DEĞİL. 300 adetlik tek bir parti "1 iş"tir ama tezgâhın tamamını
+   * doldurabilir (capacity-unit = C).
+   */
   currentLoad: number;
   maxConcurrentOrders: number;
+  /**
+   * Ortak ölçünün hazır cevabı. Admin ekranlarının İKİSİ DE geçer.
+   *
+   * Verilmediğinde fonksiyon doluluğu yukarıdaki iki sayıdan okur; o yedek
+   * yalnız DB'siz birim testi (`scripts/test-workshop.ts`) içindir ve kapının
+   * cümlesini KURMAZ — hangi eylemin engellendiğini bilmez.
+   */
+  capacity?: SessionRiskCapacity;
 }): { level: "ok" | "warn" | "danger"; message: string } {
-  const { daysUntilSession, avgPrintDays, currentLoad, maxConcurrentOrders } = args;
+  const { daysUntilSession, avgPrintDays, currentLoad, maxConcurrentOrders, capacity } =
+    args;
 
-  if (currentLoad >= maxConcurrentOrders) {
+  // Eşik sunucudan gelir; eyleme etkisi canlı sinyale göre ayrıca belirtilir.
+  const full = capacity ? !capacity.hasRoom : currentLoad >= maxConcurrentOrders;
+  const shadowNote = full && capacity?.whenFull === "shadow"
+    ? ` Ağırlıklı yük (gölge) eşikte veya üzerinde (${capacity.loadLabel}); bu ölçüm atamayı engellemez.`
+    : "";
+  if (full && capacity?.whenFull !== "shadow") {
+    const load = capacity?.loadLabel ?? `${currentLoad}/${maxConcurrentOrders} birim`;
     return {
       level: "danger",
-      message: `Bu üreticinin kapasitesi dolu (${currentLoad}/${maxConcurrentOrders}). Parti sıraya girer.`,
+      message:
+        capacity?.whenFull === "blocked"
+          ? `Bu atölyenin tezgâhı dolu (${load}). Parti bu atölyeye DEVREDİLEMEZ: toplu devir ` +
+            `ucu aynı kapasite kapısından geçiyor ve reddediyor. Yük limitin altına inene ` +
+            `kadar başka bir atölye seçin.`
+          : `Bu atölyenin tezgâhı dolu (${load}). Seans yine de açılabilir: parti bir TARİHE ` +
+            `taahhüttür ve kapanışta yine bu atölyeye düşer, sıraya girer. Yükü buna göre ` +
+            `değerlendirin.`,
     };
   }
 
@@ -166,16 +229,16 @@ export function assessSessionRisk(args: {
   if (usableDays < avgPrintDays) {
     return {
       level: "danger",
-      message: `Seansa ${daysUntilSession} gün var; bu üreticinin ortalama baskı süresi ${avgPrintDays} gün. Yetişmeyebilir.`,
+      message: `Seansa ${daysUntilSession} gün var; bu üreticinin ortalama baskı süresi ${avgPrintDays} gün. Yetişmeyebilir.${shadowNote}`,
     };
   }
   if (usableDays < avgPrintDays * 1.5) {
     return {
       level: "warn",
-      message: `Seansa ${daysUntilSession} gün var; ortalama baskı süresi ${avgPrintDays} gün. Pay dar.`,
+      message: `Seansa ${daysUntilSession} gün var; ortalama baskı süresi ${avgPrintDays} gün. Pay dar.${shadowNote}`,
     };
   }
-  return { level: "ok", message: "Süre yeterli görünüyor." };
+  return { level: shadowNote ? "warn" : "ok", message: `Süre yeterli görünüyor.${shadowNote}` };
 }
 
 export const WORKSHOP_SESSION_STATUSES = [

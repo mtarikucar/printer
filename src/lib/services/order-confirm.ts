@@ -7,6 +7,7 @@ import { issueGuestClaimToken } from "@/lib/services/password-reset";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { notifyManufacturer } from "@/lib/services/manufacturer-notifications";
 import {
+  AUTO_ASSIGN_SKIP_FOR_FAILURE,
   assignManufacturerToOrder,
   isOrderRefunded,
   orderHasPrintableContent,
@@ -20,6 +21,8 @@ import { EXCLUDED_THIS_ATTEMPT_REASON } from "@/lib/services/manufacturer-assign
 import { getModelGenerationQueue } from "@/lib/queue/queues";
 import { isFlagEnabled } from "@/lib/services/flags";
 import {
+  AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN,
+  AUTO_ASSIGN_SKIP_REASON_TR,
   autoAssignFlagFor,
   autoAssignPlacementPlan,
   autoAssignRowGate,
@@ -344,16 +347,19 @@ export async function kickOffMarketplaceOrder(
  * "elle atanacak sipariş" bildirimini hangi yoldan gelirse gelsin aynı yerde
  * (siparişin admin notu + posta kutusu) görür.
  *
- * ASLA fırlatmaz: not da e-posta da kendi içinde yakalanır.
+ * ASLA fırlatmaz: not da e-posta da kendi içinde yakalanır. Dönüş değeri
+ * e-postanın kuyruğa alındığını söyler; tekrarlayan işler hatayı yeniden dener.
  */
 export async function flagManualAssignment(args: {
   orderId: string;
   orderNumber: string;
   reason: string;
-}): Promise<void> {
+  /** Tekrarlanan denemede kalıcı not varsa yeniden ekleme. */
+  noteAlreadyWritten?: boolean;
+}): Promise<boolean> {
   const note = formatAdminNoteLine(`[ATAMA] Otomatik atama yapılamadı: ${args.reason}. Sipariş atanmamış bekliyor; /admin/orders üzerinden elle üretici atayın.`);
   try {
-    await db
+    if (!args.noteAlreadyWritten) await db
       .update(orders)
       .set({
         adminNotes: sql`CASE WHEN ${orders.adminNotes} IS NULL OR ${orders.adminNotes} = '' THEN ${note} ELSE ${orders.adminNotes} || E'\n' || ${note} END`,
@@ -379,8 +385,10 @@ export async function flagManualAssignment(args: {
         `ya da üretici kapasitesi/etki alanı ayarlarını gözden geçirin.`,
       locale: "tr",
     });
+    return true;
   } catch (err) {
     console.error(`[ATAMA] admin e-postası kuyruğa alınamadı: ${args.orderNumber}`, err);
+    return false;
   }
 }
 
@@ -569,10 +577,27 @@ export async function autoAssignIfEligible(
         });
         return { assigned: false, skipped: "no_candidate" };
       }
-      console.info(
-        `[ATAMA] ${order.orderNumber} atanamadı (${result.reason}); sipariş bu sırada başka bir işlemle değişmiş olabilir`
-      );
-      return { assigned: false, skipped: "not_eligible" };
+      // SEBEP KORUNUR. Eskiden buradaki her ret tek bir `not_eligible`e
+      // çöküyordu ve ÜÇ muhataba birden yanlış söyleniyordu: admin'e "sipariş
+      // artık atanabilir durumda değil" (oysa sipariş atanabilir durumda,
+      // yalnız seçilen atölye alamıyor), toplu e-postanın konusunda "atama
+      // beklenmiyor" ve koparılan atölyeye "iş başka bir atölyeye yönlendirildi"
+      // (oysa iş hiçbir yere gitmedi). Karşılık artık TOTAL bir tablodan okunur.
+      const skipped = AUTO_ASSIGN_SKIP_FOR_FAILURE[result.reason];
+      if (AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN[skipped]) {
+        // Sipariş ATANMAMIŞ kaldı ve kendiliğinden yerleşmeyecek: not + e-posta
+        // bir insanı çağırır. Sessiz `console.info` bu hâlde işi kaybediyordu.
+        await flagManualAssignment({
+          orderId,
+          orderNumber: order.orderNumber,
+          reason: AUTO_ASSIGN_SKIP_REASON_TR[skipped],
+        });
+      } else {
+        console.info(
+          `[ATAMA] ${order.orderNumber} atanamadı (${result.reason}); sipariş bu sırada başka bir işlemle değişmiş olabilir`
+        );
+      }
+      return { assigned: false, skipped };
     }
 
     // Korumalı UPDATE geçti: kararı yaratan sıralama ile kararın kendisi ancak

@@ -48,7 +48,17 @@ interface ManufacturerOption {
   companyName: string;
   city: string | null;
   maxConcurrentOrders: number;
+  /** Ağırlıklı yük birimi; yalnız canlı sinyal açıkken kapıdır (ortak ölçüdeki `loadUnits`). */
   currentLoad: number;
+  /**
+   * Ağırlıklı eşiğin boolean cevabı — sunucuda `manufacturerHasRoom`dan gelir.
+   * İstemci bunu HESAPLAMAZ: ortak kapasite modülü (manufacturer-capacity.ts)
+   * `pg`yi bu pakete sürüklerdi, üstelik ikinci bir eşik ekranın ucu
+   * yalanlaması demek.
+   */
+  hasRoom: boolean;
+  /** Ortak yük etiketi: "6/5 birim · 2 iş". */
+  loadLabel: string;
   acceptingOrders: boolean;
   avgPrintDays: number;
 }
@@ -95,10 +105,12 @@ export function VenueClient({
   venue,
   sessions,
   manufacturers,
+  weightedLoadLive,
 }: {
   venue: VenueData;
   sessions: SessionRow[];
   manufacturers: ManufacturerOption[];
+  weightedLoadLive: boolean;
 }) {
   const router = useRouter();
   const statusMeta =
@@ -132,8 +144,16 @@ export function VenueClient({
       avgPrintDays: mfg.avgPrintDays,
       currentLoad: mfg.currentLoad,
       maxConcurrentOrders: mfg.maxConcurrentOrders,
+      capacity: {
+        hasRoom: mfg.hasRoom,
+        loadLabel: mfg.loadLabel,
+        // Bu ekranın eylemi SEANS AÇMAK: parti bir tarihe taahhüttür ve
+        // kapanışta yine bu atölyeye düşer (kapanış kapıyı danışır, engellemez
+        // — gerekçesi workshop-session.ts'te). Uyarı vardır, engel yoktur.
+        whenFull: weightedLoadLive ? "queued" : "shadow",
+      },
     });
-  }, [manufacturerId, startsAt, manufacturers]);
+  }, [manufacturerId, startsAt, manufacturers, weightedLoadLive]);
 
   const submitSession = async () => {
     setFormError(null);
@@ -358,11 +378,13 @@ export function VenueClient({
                 onChange={(e) => setManufacturerId(e.target.value)}
               >
                 <option value="">— Seçilmedi —</option>
+                {/* Gölge yük seçimi etkilemez; canlı dolulukta da seans açılabilir. */}
                 {manufacturers.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.companyName}
-                    {m.city ? ` — ${m.city}` : ""} ({m.currentLoad}/{m.maxConcurrentOrders}, ort.{" "}
-                    {m.avgPrintDays} gün){!m.acceptingOrders ? " — sipariş almıyor" : ""}
+                    {m.city ? ` — ${m.city}` : ""} ({m.loadLabel}, ort.{" "}
+                    {m.avgPrintDays} gün){weightedLoadLive && !m.hasRoom ? " — TEZGÂH DOLU" : ""}
+                    {!m.acceptingOrders ? " — sipariş almıyor" : ""}
                   </option>
                 ))}
               </Select>

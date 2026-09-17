@@ -26,19 +26,131 @@ export interface BulkProductGroup {
   byManufacturer: Array<{ name: string; units: number }>;
 }
 
+/**
+ * Bir ürün grubu için SIRALAMANIN önerdiği atölye.
+ *
+ * Sunucuda, canlı atamanın kendi sıralayıcısıyla üretilir (page.tsx). Burada
+ * yalnız GÖSTERİLİR ve kutuyu ön seçer: karar yine admin'indir, öneri kimseye
+ * iş yazmaz.
+ */
+export interface BulkSuggestion {
+  /** Önerinin hangi siparişe bakılarak çıktığı — mesafe skoru o adrestendir. */
+  basedOnOrderNumber: string;
+  manufacturerId: string | null;
+  companyName: string | null;
+  city: string | null;
+  totalScore: number | null;
+  currentLoad: number | null;
+  maxConcurrentOrders: number | null;
+  reasons: string[];
+  /** Aday sıralamadan değil MÜLKİYETTEN geldi (satıcının kendi ürünü). */
+  sellerOwned: boolean;
+  runnerUpName: string | null;
+  runnerUpScore: number | null;
+  /** Aday yoksa Türkçe gerekçe (sıralayıcının kendi cümlesi). */
+  blockMessage: string | null;
+}
+
+/**
+ * Önerinin GEREKÇESİ — skorun kendisi bir cevap değildir.
+ *
+ * Admin'in "neden bu atölye" sorusunu ekranda yanıtlar: skor, yük, mesafe ve
+ * ikinci aday bir arada durur. Aday YOKSA sebebi yazar; boş bir öneri,
+ * "sıralama çalışmadı" ile "hiçbir atölye uygun değil"i aynı şeye indirgerdi.
+ */
+function SuggestionNote({
+  suggestion,
+  picked,
+}: {
+  suggestion: BulkSuggestion | undefined;
+  picked: string;
+}) {
+  // Öneri hesaplanmamış grup (liste sınırının dışında): ekran bugünkü gibi
+  // davranır, uydurma bir cümle yazılmaz.
+  if (!suggestion) return null;
+
+  if (!suggestion.manufacturerId) {
+    return (
+      <p className="w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+        <strong>Sıralama önerisi yok.</strong>{" "}
+        {suggestion.blockMessage ?? "Uygun aday bulunamadı."} Aşağıdaki listeden
+        elle seçebilirsiniz.
+      </p>
+    );
+  }
+
+  const overridden = picked !== "" && picked !== suggestion.manufacturerId;
+  return (
+    <div className="w-full rounded-lg border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs text-blue-900">
+      <p>
+        <strong>Sıralama önerisi: {suggestion.companyName}</strong>
+        {suggestion.city ? ` · ${suggestion.city}` : ""}
+        {suggestion.totalScore !== null ? ` · skor ${suggestion.totalScore}` : ""}
+        {suggestion.currentLoad !== null && suggestion.maxConcurrentOrders !== null
+          ? ` · yük ${suggestion.currentLoad}/${suggestion.maxConcurrentOrders}`
+          : ""}
+      </p>
+      {suggestion.sellerOwned && (
+        <p className="mt-0.5">
+          Bu ürün bir satıcının kendi kataloğundan çıktı: yalnız o atölyeye
+          atanabilir — aday sıralamayla değil mülkiyet kuralıyla belirlendi.
+        </p>
+      )}
+      {suggestion.reasons.length > 0 && (
+        <p className="mt-0.5 text-blue-900/80">{suggestion.reasons.join(" · ")}</p>
+      )}
+      {suggestion.runnerUpName && (
+        <p className="mt-0.5 text-blue-900/70">
+          2. sırada: {suggestion.runnerUpName}
+          {suggestion.runnerUpScore !== null
+            ? ` (skor ${suggestion.runnerUpScore})`
+            : ""}
+        </p>
+      )}
+      <p className="mt-0.5 text-blue-900/70">
+        {suggestion.basedOnOrderNumber} numaralı siparişin adresine göre
+        hesaplandı. Öneri yalnız seçimi hazırlar; atamayı siz onaylarsınız.
+        {overridden ? " Şu an listeden başka bir atölye seçili." : ""}
+      </p>
+    </div>
+  );
+}
+
 interface Props {
+  weightedLoadLive: boolean;
   groups: BulkProductGroup[];
   manufacturers: Array<{
     id: string;
     companyName: string;
     acceptingOrders: boolean;
+    /**
+     * Atama ucunun ölçüsüyle yazılmış yük etiketi ("6/5 birim · 2 iş"),
+     * sunucuda `manufacturerLoadLabel` ile hazırlanır. Okunamadıysa null —
+     * istemci bunu HESAPLAMAZ: ortak kapasite modülü (manufacturer-capacity.ts)
+     * `pg`yi bu pakete sürüklerdi.
+     */
+    loadLabel: string | null;
+    /** Ağırlıklı eşiğin boolean cevabı; yük okunamadıysa null ("dolu değil" DEĞİL). */
+    hasRoom: boolean | null;
   }>;
+  /** Ürün kimliği → sıralamanın önerisi. Eksik grup = öneri hesaplanmadı. */
+  suggestions?: Record<string, BulkSuggestion>;
 }
 
-export function BulkOrdersClient({ groups, manufacturers }: Props) {
+export function BulkOrdersClient({ groups, manufacturers, weightedLoadLive, suggestions = {} }: Props) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [picked, setPicked] = useState<Record<string, string>>({});
+  // KUTU ÖN SEÇİLİ AÇILIR: sahibin kararı, admin boş bir listeye bakıp "hangi
+  // atölye?" diye düşünmesin. Yalnız ilk render'da kurulur (lazy initializer),
+  // sonrasında admin'in seçimi kazanır — sayfa yenilenmeden öneri geri gelip
+  // seçimi ezemez.
+  const [picked, setPicked] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      Object.entries(suggestions)
+        .filter(([, s]) => !!s.manufacturerId)
+        .map(([productId, s]) => [productId, s.manufacturerId as string])
+    )
+  );
   const [busy, setBusy] = useState<string | null>(null);
   // `reasons`: one line per distinct skip reason the assign API sent back.
   const [message, setMessage] = useState<{ text: string; reasons: string[] } | null>(
@@ -181,6 +293,10 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
 
               {assignableOrders.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
+                  <SuggestionNote
+                    suggestion={suggestions[g.productId]}
+                    picked={picked[g.productId] ?? ""}
+                  />
                   <select
                     value={picked[g.productId] ?? ""}
                     onChange={(e) =>
@@ -189,9 +305,12 @@ export function BulkOrdersClient({ groups, manufacturers }: Props) {
                     className="rounded border border-gray-300 px-2 py-1.5 text-sm"
                   >
                     <option value="">Üretici seç…</option>
+                    {/* Seçenekler açık kalır; canlı kapasiteye son kararı atama ucu verir. */}
                     {manufacturers.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.companyName}
+                        {m.loadLabel ? ` · ${m.loadLabel}` : ""}
+                        {weightedLoadLive && m.hasRoom === false ? " · TEZGÂH DOLU" : ""}
                         {m.acceptingOrders ? "" : " (sipariş almıyor)"}
                       </option>
                     ))}

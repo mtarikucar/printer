@@ -170,6 +170,7 @@ let scoringEvaluationsCleanupQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let analyticsCleanupQueue: Queue | null = null;
 let assignmentSlaQueue: Queue | null = null;
+let manufacturerAcceptSlaQueue: Queue | null = null;
 let painterAcceptSlaQueue: Queue | null = null;
 let modelApprovalSlaQueue: Queue | null = null;
 let workshopCloseQueue: Queue | null = null;
@@ -346,6 +347,32 @@ export function getAssignmentSlaQueue(): Queue {
     });
   }
   return assignmentSlaQueue;
+}
+
+/**
+ * Saatlik süpürme: atanan ÜRETİCİNİN 24 saatlik kabul/ret süresini aşan işler.
+ *
+ * `assignment-sla`nın yerini alır: o süpürme yalnız bayrak koyuyordu, bu
+ * süpürme OTOMATİK atanmış işi sıradaki atölyeye devreder (ceza yok, yeniden
+ * yerleştirme sınırına sayılır) ve kalanını bayraklar. İkisi aynı anda
+ * zamanlanmaz — aynı sipariş için admin'e iki ayrı e-posta giderdi
+ * (bkz. workers/start.ts).
+ */
+export function getManufacturerAcceptSlaQueue(): Queue {
+  if (!manufacturerAcceptSlaQueue) {
+    manufacturerAcceptSlaQueue = new Queue("manufacturer-accept-sla", {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        // Tek deneme: süpürme idempotent (koparma korumalı UPDATE ile yazılır)
+        // ve bir saat sonra zaten tekrar koşuyor; yeniden denemek aynı
+        // siparişleri ikinci kez taramaktan başka bir şey yapmaz.
+        attempts: 1,
+        removeOnComplete: { count: 20 },
+        removeOnFail: { count: 50 },
+      },
+    });
+  }
+  return manufacturerAcceptSlaQueue;
 }
 
 /**

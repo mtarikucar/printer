@@ -1,5 +1,7 @@
 export const dynamic = "force-dynamic";
 
+import { signalsForProfile } from "@/lib/config/scoring";
+
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -10,7 +12,27 @@ import {
 } from "@/lib/db/schema";
 import { getPublicUrl } from "@/lib/services/storage";
 import { AWAITING_MANUFACTURER, NOT_REFUNDED } from "@/lib/services/admin-order-sql";
-import { BulkOrdersClient, type BulkProductGroup } from "./bulk-orders-client";
+// Ağırlıklı yük ortak ölçümden gelir; yalnız canlı sinyal açıkken atamayı engeller.
+import {
+  loadManufacturerCapacities,
+  manufacturerLoadLabel,
+} from "@/lib/services/manufacturer-capacity";
+// Sıralı aday ÖNERİSİ, atama taramasının kendi yükleyicisinden gelir. Burada
+// ikinci bir sıralama kurulmaz: aynı ekranda gördüğünüz aday ile canlı atamanın
+// seçeceği aday ayrışırsa, öneri güvenilmez olur. Aynı modül aynı zamanda
+// mülkiyet kuralını (satıcının kendi ürünü) ve "neden aday yok" cümlesini de
+// taşıyor — üçünü burada yeniden yazmak Faz 4'te beş tura mal olan hatanın ta
+// kendisi olurdu.
+import {
+  evaluateSweepOrder,
+  loadAutoAssignSwitches,
+  loadSweepOrderById,
+} from "@/app/admin/assignment-sweep/sweep-data";
+import {
+  BulkOrdersClient,
+  type BulkProductGroup,
+  type BulkSuggestion,
+} from "./bulk-orders-client";
 
 // Toplu üretim kuyruğu — bulk orders aggregated BY PRODUCT rather than by
 // order, because that is the unit production actually cares about: "340
@@ -73,6 +95,7 @@ function QueueReadNotice({ areas }: { areas: string[] }) {
 }
 
 export default async function AdminBulkOrdersPage() {
+  const weightedLoadLive = signalsForProfile("live").weightedLoad;
   // One row per (product, order) so we can aggregate units per product and
   // still know which orders are unassigned. Covers both order shapes: cart
   // sub-orders carry products on order_items, single-product orders on the
@@ -276,7 +299,88 @@ export default async function AdminBulkOrdersPage() {
       return null;
     });
   const manufacturerListUnreadable = activeManufacturerRead === null;
-  const activeManufacturers = activeManufacturerRead ?? [];
+  const activeManufacturerRows = activeManufacturerRead ?? [];
+
+  // Ağırlıklı ölçüm ayrı ve korumalı okunur. Okunamayan yük sıfır sayılmaz;
+  // canlı/gölge ayrımı sunucudan ayrıca geçirilir.
+  const capacityRead = activeManufacturerRows.length
+    ? await loadManufacturerCapacities(
+        activeManufacturerRows.map((m) => m.id)
+      ).catch((e) => {
+        console.error("toplu üretim: üretici tezgâh yükü okunamadı", e);
+        return null;
+      })
+    : null;
+  const capacitiesUnreadable =
+    activeManufacturerRows.length > 0 && capacityRead === null;
+  const activeManufacturers = activeManufacturerRows.map((m) => {
+    const cap = capacityRead?.get(m.id) ?? null;
+    return {
+      id: m.id,
+      companyName: m.companyName,
+      acceptingOrders: m.acceptingOrders,
+      loadLabel: cap ? `Ağırlıklı yük (${weightedLoadLive ? "canlı" : "gölge"}): ${manufacturerLoadLabel(cap)}` : null,
+      hasRoom: cap?.hasRoom ?? null,
+    };
+  });
+
+  // ─── Sıralı aday önerisi (Faz 5) ─────────────────────────────────────────
+  //
+  // Eskiden bu ekranda yalnız alfabetik bir açılır liste vardı: "hangi atölye"
+  // sorusunu admin tamamen kendi başına cevaplıyordu. Öneri artık CANLI
+  // ATAMANIN kullandığı sıralamadan gelir ve kutu ÖN SEÇİLİ açılır — ama
+  // atamayı yine admin başlatır. Bu ekran otomatik atama değildir ve öneri
+  // kimseye iş yazmaz.
+  //
+  // Öneri ÜRÜN GRUBU başına, o grubun EN ESKİ atanabilir siparişine bakılarak
+  // üretilir: mesafe skoru siparişin teslimat adresinden geliyor ve bir grubun
+  // siparişleri aynı adrese gitmiyor. Hangi siparişe bakıldığı ekranda yazar,
+  // yoksa skorun neye göre çıktığı okunamaz.
+  //
+  // MALİYET SINIRLI: her öneri bir sıralama demek (atölye başına birkaç sorgu).
+  // Yalnız ilk N grup için hesaplanır; gerisi bugünkü davranışla (düz liste)
+  // kalır — öneri olmayan grupta kutu boş açılır, hiçbir şey bozulmaz.
+  const RANKED_SUGGESTION_LIMIT = 8;
+  const suggestionTargets = productGroups
+    .filter((g) => g.orders.some((o) => o.assignable))
+    .slice(0, RANKED_SUGGESTION_LIMIT);
+  const suggestions: Record<string, BulkSuggestion> = {};
+  let suggestionsUnreadable = false;
+  if (suggestionTargets.length > 0) {
+    try {
+      const switches = await loadAutoAssignSwitches();
+      // SIRAYLA: her sıralama atölye başına sorgu açıyor; sekizini aynı anda
+      // çalıştırmak bu ekranı veritabanı için ani bir yüke çevirirdi.
+      for (const g of suggestionTargets) {
+        // Grubun siparişleri en eskiden yeniye sıralı (yukarıda), yani bu en
+        // uzun bekleyen atanabilir sipariştir.
+        const rep = g.orders.find((o) => o.assignable);
+        if (!rep) continue;
+        const pending = await loadSweepOrderById(rep.orderId, switches);
+        if (!pending) continue;
+        const row = await evaluateSweepOrder(pending);
+        suggestions[g.productId] = {
+          basedOnOrderNumber: rep.orderNumber,
+          manufacturerId: row.candidate?.manufacturerId ?? null,
+          companyName: row.candidate?.companyName ?? null,
+          city: row.candidate?.city ?? null,
+          totalScore: row.candidate?.totalScore ?? null,
+          currentLoad: row.candidate?.currentLoad ?? null,
+          maxConcurrentOrders: row.candidate?.maxConcurrentOrders ?? null,
+          reasons: row.candidate?.reasons ?? [],
+          sellerOwned: row.candidate?.sellerOwned ?? false,
+          runnerUpName: row.runnerUp?.companyName ?? null,
+          runnerUpScore: row.runnerUp?.totalScore ?? null,
+          // Aday yoksa SEBEBİ gösterilir: boş bir öneri, "sıralama çalışmadı"
+          // ile "hiçbir atölye uygun değil"i aynı şeye indirgerdi.
+          blockMessage: row.block?.message ?? null,
+        };
+      }
+    } catch (e) {
+      console.error("toplu üretim: aday önerisi hesaplanamadı", e);
+      suggestionsUnreadable = true;
+    }
+  }
 
   // Header figures, one scan over the bulk orders.
   //  - awaiting: AWAITING_MANUFACTURER ∧ isBulk, exactly the set the
@@ -311,8 +415,14 @@ export default async function AdminBulkOrdersPage() {
     manufacturerNamesUnreadable && "Atanmış üretici adları",
     manufacturerListUnreadable &&
       "Aktif üretici listesi (atama kutusu boş kaldı; bu yüzden şu an atama yapılamıyor)",
+    capacitiesUnreadable &&
+      (weightedLoadLive
+        ? "Üreticilerin ağırlıklı yükü (canlı): yük gösterilemiyor; dolu atölyede atama ucu siparişleri atlar"
+        : "Üreticilerin ağırlıklı yükü (gölge): yük gösterilemiyor; bu ölçüm atamayı engellemez"),
     headerUnreadable &&
       "Başlıktaki sayılar (\"üretici bekliyor\" ve \"henüz atanamaz\" sayıları gösterilemiyor)",
+    suggestionsUnreadable &&
+      "Sıralı üretici önerisi (kutular ön seçili gelmiyor; atama yapabilirsiniz, yalnız öneri yok)",
   ].filter((x): x is string => typeof x === "string");
 
   return (
@@ -344,8 +454,10 @@ export default async function AdminBulkOrdersPage() {
       </p>
 
       <BulkOrdersClient
+        weightedLoadLive={weightedLoadLive}
         groups={productGroups}
         manufacturers={activeManufacturers}
+        suggestions={suggestions}
       />
     </div>
   );

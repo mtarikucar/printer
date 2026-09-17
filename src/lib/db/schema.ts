@@ -3271,3 +3271,61 @@ export const orderPartnerMessages = pgTable(
     ),
   })
 );
+
+/**
+ * ETKİ ALANI MÜDAHALELERİ — hesaplanan kapsama planına yöneticinin elle koyduğu
+ * iki kaldıraç (Faz 5, coverage-model = B kararı).
+ *
+ * Kapsama artık TIKLANMIYOR, HESAPLANIYOR (`services/coverage-plan.ts`): 81 ilin
+ * her biri, her malzemede, yarıçap içindeki en yakın uygun atölyeye düşer.
+ * Yöneticinin elinde kalan iki söz bu tabloda durur:
+ *   kind = 'pin'     → bu il, bu malzemede HER ZAMAN `manufacturer_id`in.
+ *   kind = 'exclude' → bu il, bu malzemede HİÇBİR ZAMAN kapsanmaz.
+ *
+ * NEDEN `manufacturers.coverage_provinces` DEĞİL: o kolon bir ATÖLYENİN beyanı;
+ * burada kaydedilen ise bir İLİN sahibi. Aynı veriyi atölye satırında tutmak,
+ * "bu il neden onda?" sorusunu 81 satırı tarayarak cevaplamak demekti ve
+ * dışlamanın (sahibi OLMAYAN il) orada karşılığı yok. Eski kolon yerinde kalır:
+ * plan, hesabı onunla KARŞILAŞTIRIP farkı gösterir.
+ *
+ * HÜCRE BAŞINA TEK SATIR (`coverage_overrides_il_material_idx`): bir il bir
+ * malzemede ya pinlidir ya dışlanmıştır. `kind` tek sütun olduğu için "hem pinli
+ * hem dışlanmış" durumu YAPISAL olarak imkânsızdır — iki ayrı boolean sütun
+ * olsaydı yalnız uygulama katmanı engelleyebilirdi.
+ *
+ * `material` bir pg enum DEĞİL, `text`: değer kümesi `figurine_material`
+ * enum'undan OKUNUR (services/coverage-plan.ts · COVERAGE_MATERIALS), ama
+ * kolonun kendisi metin kalır ki müdahale tablosu bir enum'a bağlanmasın ve geri
+ * alma çifti tabloyu temiz düşürebilsin (Faz 2 kuralı: kaldırılabilmesi gereken
+ * bir şey için pg enum'a değer eklenmez).
+ *
+ * `manufacturer_id` ON DELETE cascade: silinmiş bir atölyeye pin, var olmayan
+ * bir sorumludur; satırın yaşaması yöneticiye o ilin kapsandığını söylerdi.
+ * Dışlama satırlarında NULL'dur (dışlamanın sahibi yoktur).
+ *
+ * `created_by` denetim içindir: `admin_actions` kullanılamaz, o tablo NOT NULL
+ * `order_id` istiyor ve etki alanı kararı bir siparişe ait değildir.
+ */
+export const coverageOverrides = pgTable(
+  "coverage_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    il: text("il").notNull(),
+    material: text("material").notNull(),
+    kind: text("kind").notNull(), // 'pin' | 'exclude'
+    manufacturerId: uuid("manufacturer_id").references(() => manufacturers.id, {
+      onDelete: "cascade",
+    }),
+    note: text("note"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    oneOverridePerCell: uniqueIndex("coverage_overrides_il_material_idx").on(
+      t.il,
+      t.material
+    ),
+    byManufacturer: index("coverage_overrides_manufacturer_idx").on(t.manufacturerId),
+  })
+);

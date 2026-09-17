@@ -33,7 +33,13 @@ export type PartnerKind = "manufacturer" | "painter";
 export interface PublicPartner {
   kind: PartnerKind;
   il: string | null;
-  /** Etkin etki alanı: kapsama ∪ {konum ili}, Türkçe sıralı. */
+  /**
+   * Bu partnerin hizmet verdiği iller, Türkçe sıralı.
+   *
+   * Üreticide HESAPLANAN plandan gelir (`plannedCoverage`); boyacıda hâlâ
+   * "kapsama ∪ {konum ili}". Yani üreticinin konum ili burada garanti DEĞİL:
+   * yönetici o ili dışladıysa atölye haritada durur ama il kapsanmış sayılmaz.
+   */
   coverage: string[];
   /** Yalnız üreticide ve yalnız BEYAN EDİLMİŞ malzemeler. */
   materials: string[];
@@ -48,7 +54,7 @@ export interface NetworkMapData {
     painters: number;
     /** Atölyesi olan il sayısı. */
     homeProvinces: number;
-    /** En az bir partnerin hizmet verdiği il sayısı. */
+    /** En az bir partnerin GERÇEKTEN hizmet verdiği (covered) il sayısı. */
     coveredProvinces: number;
   };
 }
@@ -60,6 +66,21 @@ export interface PartnerRow {
   il: string | null | undefined;
   coverageProvinces?: string[] | null;
   capabilities?: string[] | null;
+  /**
+   * HESAPLANAN etki alanı (`services/coverage-plan.ts`).
+   *
+   * VERİLDİYSE elle yazılmış liste hiç okunmaz ve konum ili de OTOMATİK
+   * EKLENMEZ: planda dışlanan bir il, o ilde atölye olsa bile kapsanmış
+   * görünemez — yöneticinin "burayı karşılamıyoruz" kararı public yüzeyde de
+   * geçerli olmalı. Konum ilini burada geri eklemek, dışlama kaldıracını tam da
+   * müşterinin baktığı yerde sessizce iptal ederdi.
+   *
+   * BOŞ DİZİ ile YOKLUK farklıdır: boş dizi "plan bu atölyeye hiç il vermedi"
+   * demektir ve elle yazılan listeye DÜŞMEZ; `undefined` ise "bu satır planın
+   * dışında" (boyacılar plana girmez, çünkü plan hangi ilin hangi atölyede
+   * BASILDIĞININ hesabıdır).
+   */
+  plannedCoverage?: readonly string[] | null;
 }
 
 const ALL_MATERIALS = ["resin", "filament"] as const;
@@ -121,7 +142,10 @@ export function buildNetworkMap(rows: PartnerRow[]): NetworkMapData {
 
   for (const row of rows) {
     const il = isKnownProvince(row.il) ? row.il : null;
-    const coverage = effectiveCoverage(row.coverageProvinces, il);
+    // Plan verilmişse TEK hesap odur; verilmemişse (boyacı) eski etkin liste.
+    const coverage = Array.isArray(row.plannedCoverage)
+      ? normalizeCoverage([...row.plannedCoverage])
+      : effectiveCoverage(row.coverageProvinces, il);
     // Nereye koyacağımız belli değilse haritaya hiç girmesin.
     if (!il && coverage.length === 0) continue;
 
@@ -138,6 +162,14 @@ export function buildNetworkMap(rows: PartnerRow[]): NetworkMapData {
   }
 
   const homeProvinces = Object.values(provinces).filter((p) => p.located.length > 0).length;
+  // "Hizmet verilen il" = GERÇEKTEN KAPSANAN il. Eskiden indeksin anahtar sayısı
+  // (konumu VEYA kapsaması olan iller) sayılıyordu; bu, kapsama elle yazıldığı
+  // sürece zararsızdı çünkü atölyenin kendi ili listeye otomatik giriyordu.
+  // Kapsama hesaplanmaya başlayınca zararsız olmaktan çıktı: DIŞLANMIŞ ama
+  // içinde atölye bulunan bir il, haritada gri boyanırken (dolgu `covered`
+  // sayısına bakar) sayaçta "hizmet veriliyor" diye görünürdü. Sayı ile renk
+  // aynı şeyi söylemek zorunda.
+  const coveredProvinces = Object.values(provinces).filter((p) => p.covered.length > 0).length;
 
   return {
     partners,
@@ -146,7 +178,7 @@ export function buildNetworkMap(rows: PartnerRow[]): NetworkMapData {
       manufacturers: partners.filter((p) => p.kind === "manufacturer").length,
       painters: partners.filter((p) => p.kind === "painter").length,
       homeProvinces,
-      coveredProvinces: Object.keys(provinces).length,
+      coveredProvinces,
     },
   };
 }

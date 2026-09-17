@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
+import { PHASE5_SIGNAL_LABELS_TR, type ShadowComparison } from "@/lib/config/scoring";
 import {
   SWEEP_APPLY_BATCH,
   SWEEP_KIND_LABEL_TR,
@@ -74,6 +75,7 @@ export function AssignmentSweepClient({
       block: null,
       ineligible: [],
       profile: "v1" as const,
+      shadow: null,
     }));
 
   const assignable = view.filter((r) => r.candidate !== null);
@@ -708,7 +710,88 @@ function CandidateCell({ row, scanned }: { row: SweepRow; scanned: boolean }) {
           2. sıra: {row.runnerUp.companyName} ({row.runnerUp.totalScore})
         </p>
       )}
+      <ShadowCompare shadow={row.shadow} />
     </div>
+  );
+}
+
+/**
+ * FAZ 5 GÖLGESİ — yeni sinyallerle yapılan sıralamanın canlıyla FARKI.
+ *
+ * Sahibin kararı (ranker-rollout = B): yeni sinyaller bir-iki hafta yalnız
+ * ÖLÇÜLÜR. Bu blok o ölçümün tek okunabilir yüzüdür ve bilinçli olarak
+ * KAPALI gelir (`details`): tarama ekranının işi hâlâ birikeni eritmek, gölge
+ * karşılaştırması ise bakılmak istendiğinde açılan bir rapor.
+ *
+ * "Fark yok" ile "gölge hiç çalışmadı" AYRI tutulur: ikisini tek görünüşe
+ * katlamak, hiç yapılmamış bir karşılaştırmayı "sinyaller bir şey değiştirmedi"
+ * diye okuturdu — yani ölçüm yapılmadığı hâlde ölçüm yapıldığı sanılırdı.
+ */
+function ShadowCompare({ shadow }: { shadow: ShadowComparison | null }) {
+  if (!shadow) {
+    return (
+      <p className="text-[10px] text-gray-400">
+        Gölge sıralama çalışmadı (kapalı ya da hesaplanamadı).
+      </p>
+    );
+  }
+  // Konuşacak bir şeyi olan satırlar: skoru oynayan ya da uygunluğu değişen.
+  const moved = shadow.deltas.filter(
+    (d) => d.reasons.length > 0 || (d.delta !== null && d.delta !== 0)
+  );
+  return (
+    <details className="mt-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5">
+      <summary className="cursor-pointer text-[11px] font-semibold text-violet-900">
+        {shadow.shadowWinnerId === null
+          ? "⚖ Gölge sıralamada uygun aday yok"
+          : shadow.differs
+            ? "⚖ Gölge sıralama BAŞKA üretici seçiyor"
+            : "⚖ Gölge sıralama (fark yok)"}
+      </summary>
+      <p className="mt-1 text-[11px] text-violet-900">{shadow.summaryTr}</p>
+      {shadow.signals.length > 0 && (
+        <p className="mt-1 text-[10px] text-violet-700">
+          Denenen sinyaller:{" "}
+          {shadow.signals
+            .map((k) => PHASE5_SIGNAL_LABELS_TR[k] ?? k)
+            .join(", ")}
+        </p>
+      )}
+      {moved.length > 0 && (
+        <ul className="mt-1.5 space-y-1">
+          {moved.slice(0, 5).map((d) => (
+            <li key={d.manufacturerId} className="text-[10px] text-violet-900">
+              <span className="font-medium">{d.companyName}</span>{" "}
+              <span className="font-mono">
+                {d.liveScore ?? "—"} → {d.shadowScore ?? "—"}
+              </span>
+              {d.delta !== null && d.delta !== 0 && (
+                <span
+                  className={
+                    d.delta > 0 ? "ml-1 text-emerald-700" : "ml-1 text-red-700"
+                  }
+                >
+                  ({d.delta > 0 ? "+" : ""}
+                  {d.delta})
+                </span>
+              )}
+              {d.liveEligible !== d.shadowEligible && (
+                <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800">
+                  {d.shadowEligible ? "gölgede uygun" : "gölgede eleniyor"}
+                </span>
+              )}
+              {d.reasons.length > 0 && (
+                <span className="text-violet-700"> — {d.reasons.join(", ")}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1.5 text-[10px] text-violet-600">
+        Bu karşılaştırma hiçbir atamayı değiştirmez; yalnızca kaydedilir ve
+        karşılaştırılır. Sinyallerin canlıya alınması ayrı bir karardır.
+      </p>
+    </details>
   );
 }
 

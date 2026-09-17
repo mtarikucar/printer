@@ -8,6 +8,7 @@ import {
   WORKSHOP_SESSION_STATUS_LABELS,
   WORKSHOP_PARTICIPANT_STATUS_LABELS,
   WORKSHOP_CANCEL_SHIPPED_STATUSES,
+  assessSessionRisk,
   sessionCancellable,
 } from "@/lib/config/workshop";
 
@@ -89,11 +90,39 @@ interface CancelReport {
   refundedOrders: Array<{ fullName: string; orderNumber: string; amountKurus: number }>;
 }
 
-/** Seans detayında toplu devir için seçilebilecek üretici. */
+/**
+ * Seans detayında toplu devir için seçilebilecek üretici.
+ *
+ * Sıralama alanları (rank/skor/yük) sunucuda, CANLI atamanın sıralayıcısıyla
+ * hesaplanır; burada yalnız gösterilir ve kutuyu ön seçer. Sıralamaya hiç
+ * girmemiş bir atölyede bu alanlar `null`'dur — "0" DEĞİL: bilinmeyen bir yükü
+ * sıfır göstermek, kapasitesi dolu bir atölyeyi boş gibi okuturdu.
+ */
 interface ManufacturerOption {
   id: string;
   companyName: string;
   acceptingOrders: boolean;
+  city: string | null;
+  /** Sıralamadaki sırası (1 = en uygun); sıralamaya girmediyse null. */
+  rank: number | null;
+  totalScore: number | null;
+  eligible: boolean;
+  ineligibleReason: string | null;
+  /** Ağırlıklı yük birimi; yalnız canlı sinyal açıkken kapıdır (ortak ölçüdeki `loadUnits`). */
+  currentLoad: number | null;
+  maxConcurrentOrders: number | null;
+  /**
+   * Ağırlıklı eşiğin boolean cevabı (`manufacturerHasRoom`), sunucudan HAZIR gelir —
+   * istemci ortak kapasite modülünü (manufacturer-capacity.ts) import edemez,
+   * `pg`yi paketine sürüklerdi. Yük okunamadıysa null: "bilinmiyor", yani
+   * "dolu değil" DEĞİL.
+   */
+  hasRoom: boolean | null;
+  /** Ortak yük etiketi: "6/5 birim · 2 iş"; okunamadıysa null. */
+  loadLabel: string | null;
+  /** Son işlerdeki ortalama atama→baskı süresi (gün); okunamadıysa null. */
+  avgPrintDays: number | null;
+  reasons: string[];
 }
 
 /** Seans iptal ucunun makine okunur hata kodları → admin'e Türkçe karşılık. */
@@ -197,6 +226,8 @@ export function SessionClient({
   netTotalKurus,
   daysUntilSession,
   manufacturerOptions,
+  weightedLoadLive,
+  suggestionBasedOnOrderNumber,
 }: {
   session: SessionData;
   participants: ParticipantRow[];
@@ -211,6 +242,13 @@ export function SessionClient({
    * gerçekten gerektiğinde yüklenir, istemci ayrıca durum yorumlamaz.
    */
   manufacturerOptions: ManufacturerOption[];
+  weightedLoadLive: boolean;
+  /**
+   * Sıralamanın hangi parti siparişine bakarak hesaplandığı. Mesafe skoru o
+   * siparişin teslimat adresinden geliyor; yazmazsak skorun neye göre çıktığı
+   * okunamaz. Parti boşsa (ya da siparişler okunamadıysa) null.
+   */
+  suggestionBasedOnOrderNumber: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -257,7 +295,52 @@ export function SessionClient({
   const [correctResult, setCorrectResult] = useState<BatchCorrectionResult | null>(null);
 
   // ─── Üretici devri (üreticisiz kapanmış parti) ──────────────────────────
-  const [assignManufacturerId, setAssignManufacturerId] = useState("");
+  //
+  // KUTU ÖN SEÇİLİ AÇILIR: sıralamanın en uygun bulduğu atölye hazır gelir,
+  // admin boş bir listeye bakıp "hangi atölye?" diye düşünmesin. Yalnız ilk
+  // render'da kurulur (lazy initializer), sonrasında admin'in seçimi kazanır.
+  //
+  // ÖN SEÇİM BİR ATAMA DEĞİLDİR: atölye seansı hiçbir zaman otomatik atanmaz
+  // (sahibin kararı — parti bir TARİHE taahhütlü). Partiyi devreden şey aşağıdaki
+  // düğme ve onun onay kutusudur.
+  //
+  // Yalnız canlı ağırlıklı kapasite doluysa ön seçimden çıkarılır.
+  // Gölge ve okunamayan yük, canlı sıralamanın önerisini değiştirmez.
+  const [assignManufacturerId, setAssignManufacturerId] = useState(
+    () => manufacturerOptions.find((m) => m.eligible && (!weightedLoadLive || m.hasRoom !== false))?.id ?? ""
+  );
+
+  const selectedManufacturer =
+    manufacturerOptions.find((m) => m.id === assignManufacturerId) ?? null;
+  /**
+   * Seçilen atölye bu tarihe yetişir mi?
+   *
+   * Kural SAF ve DB'siz (config/workshop.ts · assessSessionRisk) ve mekân
+   * ekranındakiyle AYNI fonksiyondur — ikinci bir risk ölçüsü yazılmaz.
+   * Girdilerden biri bilinmiyorsa (atölye sıralamaya girmemiş ya da baskı
+   * geçmişi okunamamış) uyarı GÖSTERİLMEZ: eksik veriyle "yetişir" demek,
+   * partiyi zamanında teslim edilecek sanmak olurdu.
+   */
+  const assignRisk =
+    selectedManufacturer &&
+    selectedManufacturer.avgPrintDays !== null &&
+    selectedManufacturer.currentLoad !== null &&
+    selectedManufacturer.maxConcurrentOrders !== null &&
+    selectedManufacturer.hasRoom !== null &&
+    selectedManufacturer.loadLabel !== null
+      ? assessSessionRisk({
+          daysUntilSession,
+          avgPrintDays: selectedManufacturer.avgPrintDays,
+          currentLoad: selectedManufacturer.currentLoad,
+          maxConcurrentOrders: selectedManufacturer.maxConcurrentOrders,
+          capacity: {
+            hasRoom: selectedManufacturer.hasRoom,
+            loadLabel: selectedManufacturer.loadLabel,
+            // Toplu devir yalnız canlı ağırlıklı kapasite açıkken engellenir.
+            whenFull: weightedLoadLive ? "blocked" : "shadow",
+          },
+        })
+      : null;
 
   const statusBadge =
     SESSION_STATUS_BADGE[session.status] ?? "bg-gray-100 text-gray-700";
@@ -738,6 +821,43 @@ export function SessionClient({
             panelinde belirir ve donmuş oranla bildirim gider. Oran DEĞİŞMEZ.
           </p>
           {assignError && <p className="text-xs text-red-600 mb-2">{assignError}</p>}
+
+          {/* Sıralı öneri: KARAR değil, hazırlık. Partiyi devreden şey aşağıdaki
+              düğmedir — atölye seansı hiçbir zaman otomatik atanmaz. */}
+          <div className="mb-3 rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-xs text-amber-900">
+            <p className="font-semibold">Sıralama önerisi — onay sizde</p>
+            <ol className="mt-1 space-y-0.5">
+              {manufacturerOptions
+                .filter((m) => m.eligible)
+                .slice(0, 3)
+                .map((m) => (
+                  <li key={m.id}>
+                    {m.rank}. {m.companyName}
+                    {m.city ? ` · ${m.city}` : ""}
+                    {m.totalScore !== null ? ` · skor ${m.totalScore}` : ""}
+                    {/* Yük, devir ucunun uyguladığı ÖLÇÜYLE yazılır; burada
+                        sıralayıcının ham iş sayısı duruyordu. */}
+                    {m.loadLabel ? ` · ${m.loadLabel}` : ""}
+                    {weightedLoadLive && m.hasRoom === false ? " · TEZGÂH DOLU" : ""}
+                    {m.id === assignManufacturerId ? " — seçili" : ""}
+                  </li>
+                ))}
+              {manufacturerOptions.filter((m) => m.eligible).length === 0 && (
+                <li>
+                  Sıralama uygun aday bulamadı; liste alfabetik duruyor. Seçimi
+                  kendiniz yapın.
+                </li>
+              )}
+            </ol>
+            <p className="mt-1 text-amber-900/80">
+              {suggestionBasedOnOrderNumber
+                ? `${suggestionBasedOnOrderNumber} numaralı parti siparişinin teslimat adresine göre hesaplandı. `
+                : "Partide sipariş okunamadığı için mesafe hesaplanamadı. "}
+              Atölye seansı hiçbir zaman otomatik atanmaz: parti bir tarihe
+              taahhütlü olduğu için son sözü siz verirsiniz.
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <FormField label="Üretici">
               <Select
@@ -747,8 +867,16 @@ export function SessionClient({
                 <option value="">— Seçilmedi —</option>
                 {manufacturerOptions.map((m) => (
                   <option key={m.id} value={m.id}>
+                    {m.rank !== null ? `${m.rank}. ` : ""}
                     {m.companyName}
+                    {m.totalScore !== null ? ` · skor ${m.totalScore}` : ""}
+                    {m.loadLabel ? ` · ${m.loadLabel}` : ""}
+                    {/* Uç yalnız canlı sinyal açıkken kapasiteden reddeder. */}
+                    {weightedLoadLive && m.hasRoom === false ? " — TEZGÂH DOLU, devir reddedilir" : ""}
                     {!m.acceptingOrders ? " — sipariş almıyor" : ""}
+                    {!m.eligible && m.ineligibleReason
+                      ? ` — sıralamada uygun değil: ${m.ineligibleReason}`
+                      : ""}
                   </option>
                 ))}
               </Select>
@@ -762,6 +890,23 @@ export function SessionClient({
               {busy ? "Atanıyor…" : "Partiyi bu üreticiye ver"}
             </button>
           </div>
+
+          {/* Yetişme uyarısı ENGELLEMEZ: admin bilerek riskli bir devir
+              yapabilir (atölyeyle telefonda anlaşmış olabilir). Girdisi
+              eksikse hiç gösterilmez — bkz. assignRisk. */}
+          {assignRisk && (
+            <p
+              className={`mt-2 text-xs ${
+                assignRisk.level === "danger"
+                  ? "font-semibold text-red-700"
+                  : assignRisk.level === "warn"
+                    ? "text-amber-800"
+                    : "text-emerald-700"
+              }`}
+            >
+              {selectedManufacturer?.companyName}: {assignRisk.message}
+            </p>
+          )}
         </div>
       )}
 

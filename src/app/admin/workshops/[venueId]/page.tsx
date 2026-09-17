@@ -1,16 +1,19 @@
 export const dynamic = "force-dynamic";
 
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { signalsForProfile } from "@/lib/config/scoring";
+
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { manufacturers, orders, workshopSessions, workshopVenues } from "@/lib/db/schema";
+import { manufacturers, workshopSessions, workshopVenues } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { sessionJoinUrl } from "@/lib/services/workshop-session";
+import { averagePrintDaysFor } from "@/lib/services/manufacturer-assignment";
 import {
-  ACTIVE_MFG_STATUSES,
-  averagePrintDaysFor,
-  orderStillOnManufacturerBench,
-} from "@/lib/services/manufacturer-assignment";
+  emptyManufacturerCapacity,
+  loadManufacturerCapacities,
+  manufacturerLoadLabel,
+} from "@/lib/services/manufacturer-capacity";
 import { VenueClient } from "./venue-client";
 
 export default async function AdminWorkshopVenuePage({
@@ -19,6 +22,7 @@ export default async function AdminWorkshopVenuePage({
   params: Promise<{ venueId: string }>;
 }) {
   const { venueId } = await params;
+  const weightedLoadLive = signalsForProfile("live").weightedLoad;
 
   const venue = await db.query.workshopVenues.findFirst({
     where: eq(workshopVenues.id, venueId),
@@ -51,11 +55,10 @@ export default async function AdminWorkshopVenuePage({
     (sessionMfgRead ?? []).map((m) => [m.id, m.companyName])
   );
 
-  // Üretici seçimi + risk uyarısı için: aktif üreticiler, her birinin güncel
-  // yükü (candidate scoring ile AYNI "bench" tanımı, bkz.
-  // orderStillOnManufacturerBench) ve son işlerindeki ortalama atama→baskı
-  // süresi. Sayı büyük değil (üretici listesi admin ölçeğinde), N sorgu kabul
-  // edilebilir.
+  // Üretici seçimi + risk uyarısı için: aktif üreticiler, her birinin ORTAK
+  // ÖLÇÜDEKİ yükü (services/manufacturer-capacity.ts) ve son işlerindeki
+  // ortalama atama→baskı süresi. Sayı büyük değil (üretici listesi admin
+  // ölçeğinde), N sorgu kabul edilebilir.
   // Üç okuma da TEK seçim listesini besler, bu yüzden TEK korumanın içinde:
   // biri düşerse liste bilinmiyor demektir. Okunamadığında sayfa yine açılır ve
   // uyarı, boş listenin "uygun üretici yok" DEMEDİĞİNİ söyler.
@@ -73,32 +76,32 @@ export default async function AdminWorkshopVenuePage({
         },
       });
 
-      const loadRows = await db
-        .select({
-          manufacturerId: orders.manufacturerId,
-          load: sql<number>`count(*)::int`,
-        })
-        .from(orders)
-        .where(
-          and(
-            inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
-            orderStillOnManufacturerBench(),
-            sql`${orders.manufacturerId} IS NOT NULL`
-          )
-        )
-        .groupBy(orders.manufacturerId);
-      const loadMap = new Map(loadRows.map((r) => [r.manufacturerId, r.load]));
+      // İade ve adetleri hesaba katan ortak ağırlıklı ölçüm. Yalnız canlı
+      // sinyal açıkken atama kapısıdır; gölgede de bilgi olarak gösterilir.
+      const capacities = await loadManufacturerCapacities(
+        activeMfgs.map((m) => m.id)
+      );
 
       return await Promise.all(
-        activeMfgs.map(async (m) => ({
-          id: m.id,
-          companyName: m.companyName,
-          city: (m.address as TurkishAddress | null)?.il ?? null,
-          maxConcurrentOrders: m.maxConcurrentOrders,
-          currentLoad: loadMap.get(m.id) ?? 0,
-          acceptingOrders: m.acceptingOrders,
-          avgPrintDays: await averagePrintDaysFor(m.id),
-        }))
+        activeMfgs.map(async (m) => {
+          // Eksik anahtar "bilinmiyor" değil "boş tezgâh" demektir.
+          const cap =
+            capacities.get(m.id) ??
+            emptyManufacturerCapacity(m.id, m.maxConcurrentOrders);
+          return {
+            id: m.id,
+            companyName: m.companyName,
+            city: (m.address as TurkishAddress | null)?.il ?? null,
+            maxConcurrentOrders: cap.maxConcurrentOrders,
+            // Ağırlıklı birim; canlı sinyal kapalıyken yalnız gölge ölçümüdür.
+            currentLoad: cap.loadUnits,
+            // Ağırlıklı eşiğin boolean cevabı ve tek etiketi; ekran kendi eşiğini kurmaz.
+            hasRoom: cap.hasRoom,
+            loadLabel: `Ağırlıklı yük (${weightedLoadLive ? "canlı" : "gölge"}): ${manufacturerLoadLabel(cap)}`,
+            acceptingOrders: m.acceptingOrders,
+            avgPrintDays: await averagePrintDaysFor(m.id),
+          };
+        })
       );
     } catch (e) {
       console.error("venue: atanabilir üretici listesi okunamadı", e);
@@ -133,6 +136,7 @@ export default async function AdminWorkshopVenuePage({
         </div>
       )}
     <VenueClient
+      weightedLoadLive={weightedLoadLive}
       venue={{
         id: venue.id,
         name: venue.name,

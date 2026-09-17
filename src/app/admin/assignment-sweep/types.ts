@@ -1,4 +1,9 @@
 import type { AutoAssignOrderKind } from "@/lib/config/flags";
+// YALNIZ TİP (`import type`, derlemede silinir): bu modülü istemci bileşeni de
+// okuyor. `@/lib/config/scoring` zaten saf bir modül, ama tip olarak almak
+// sözleşmeyi tek kaynakta tutar — ekranın gösterdiği karşılaştırma ile gölge
+// kaydına düşen karşılaştırma aynı şeklin iki kopyası olamaz.
+import type { ShadowComparison } from "@/lib/config/scoring";
 
 /**
  * /admin/assignment-sweep — ekran, API ve istemci arasındaki veri sözleşmesi.
@@ -127,6 +132,15 @@ export interface SweepRow extends SweepOrderBase {
   /** Aday çıkmadıysa elenen üreticiler ve eleme gerekçeleri (ilk birkaçı). */
   ineligible: { companyName: string; reason: string }[];
   profile: SweepProfile;
+  /**
+   * FAZ 5 GÖLGESİ: yeni sinyallerle yapılan sıralamanın canlıyla farkı.
+   *
+   * SALT GÖSTERİMDİR — bu alan hiçbir atamayı belirlemez ve uygulama ucu onu
+   * hiç okumaz (ranker-rollout = B: sinyaller bir-iki hafta yalnız ölçülür).
+   * `null` = gölge kapalı ya da hesaplanamadı; ekran o zaman bir şey iddia
+   * etmez, "gölge çalışmadı" der.
+   */
+  shadow: ShadowComparison | null;
 }
 
 export interface SweepDryRunResponse {

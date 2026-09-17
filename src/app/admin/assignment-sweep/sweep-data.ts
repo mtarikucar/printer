@@ -11,7 +11,7 @@ import {
   type AutoAssignOrderKind,
   type AutoAssignOrderShape,
   type AutoAssignPlacementPlan,
-  type AutoAssignSkip,
+  type AutoAssignRowSkip,
   type FlagKey,
 } from "@/lib/config/flags";
 import { getAllFlags } from "@/lib/services/flags";
@@ -20,7 +20,8 @@ import {
   shouldUseV2,
 } from "@/lib/config/manufacturer-scoring";
 import type { CandidateScore } from "@/lib/services/manufacturer-assignment";
-import { rankForOrderPreview } from "@/lib/services/manufacturer-assignment-shadow";
+import { rankForOrderShadowPreview } from "@/lib/services/manufacturer-assignment-shadow";
+import type { ShadowComparison } from "@/lib/config/scoring";
 import {
   ASSIGN_FAILURE_MESSAGES,
   orderHasPrintableContent,
@@ -40,9 +41,10 @@ import type {
  * biri için "bugün atansa kime giderdi" sorusunu cevaplar.
  *
  * Skor matematiği burada YOKTUR. Tarama, canlı atamanın sıralayıcısını
- * (`rankForOrderPreview` → `rankManufacturersForOrder`) çağırır; ikinci bir
- * kopya olsaydı ekranda gördüğünüz aday ile gerçekte atanan üretici sessizce
- * ayrışabilirdi.
+ * (`rankForOrderShadowPreview` → `rankManufacturersDetailed`) çağırır; ikinci
+ * bir kopya olsaydı ekranda gördüğünüz aday ile gerçekte atanan üretici
+ * sessizce ayrışabilirdi. Aynı çağrı Faz 5 GÖLGESİNİ de üretir (tek veri
+ * yüklemesi) — o yalnız gösterilir, hiçbir atamayı belirlemez.
  *
  * Hem sayfa (`page.tsx`) hem HTTP ucu (`/api/admin/assignment-sweep`) bu
  * modülü kullanır, böylece listelenen küme ile uygulanan küme aynı tanımdan
@@ -137,7 +139,7 @@ export const SELLER_MISMATCH_TR =
  * cevabını çeviriyoruz, yani tarama ile otomatik atama aynı siparişe asla
  * farklı cevap veremez.
  */
-export const GATE_BLOCK_TR: Record<AutoAssignSkip, string> = {
+export const GATE_BLOCK_TR: Record<AutoAssignRowSkip, string> = {
   workshop:
     "Atölye seansı siparişi: otomatik atama yok. Üreticiyi seans ekranından onaylayın.",
   // Tarama satır kapısını anahtarsız çağırır (aşağıya bakın): kapalı anahtar
@@ -162,7 +164,7 @@ export function noCandidateMessage(candidates: readonly CandidateScore[]): strin
 /**
  * Bu sipariş için canary'nin yetkili kıldığı profilin ADI.
  *
- * Sıralamanın kendisi `rankForOrderPreview` içinde aynı kapıdan geçer
+ * Sıralamanın kendisi `rankForOrderShadowPreview` içinde aynı kapıdan geçer
  * (shouldUseV2 + yüzde); buradaki kopya yalnızca ekranda "hangi ağırlıklar"
  * yazabilmek içindir, karar vermez.
  *
@@ -376,6 +378,9 @@ export async function evaluateSweepOrder(
     block,
     ineligible: [],
     profile,
+    // Gölge yalnız gerçekten sıralanan satırlarda dolar; engellenmiş bir satır
+    // için "fark yok" demek, hiç yapılmamış bir karşılaştırmayı sonuç saymaktı.
+    shadow: null,
     ...extra,
   });
 
@@ -403,8 +408,15 @@ export async function evaluateSweepOrder(
   }
 
   let candidates: CandidateScore[];
+  // FAZ 5: canlı sıralama ile gölge sıralama AYNI çağrıdan çıkar (tek veri
+  // yüklemesi). Ayrı iki çağrı, tarama başına ikinci bir tam yükleme demekti.
+  // `comparison` SALT GÖSTERİMDİR: aşağıdaki hiçbir karar onu okumaz ve
+  // uygulama ucu onu hiç görmez.
+  let shadow: ShadowComparison | null = null;
   try {
-    candidates = await rankForOrderPreview(base.orderId);
+    const previewed = await rankForOrderShadowPreview(base.orderId);
+    candidates = previewed.live;
+    shadow = previewed.comparison;
   } catch (err) {
     // Tek siparişin sıralaması patlarsa tarama devam etmeli: 40 siparişlik bir
     // tarama, bir bozuk satır yüzünden komple boş dönmemeli.
@@ -446,6 +458,9 @@ export async function evaluateSweepOrder(
       // İkinci aday YOKTUR: alternatif göstermek, verilmesi yasak bir seçenek
       // varmış gibi okunurdu.
       runnerUp: null,
+      // Gölge yine gösterilir: sıralama kararı vermiyor olsa bile admin, yeni
+      // sinyallerin bu atölye hakkında ne dediğini (kapasite, QC, ceza) görmeli.
+      shadow,
     });
   }
 
@@ -465,6 +480,7 @@ export async function evaluateSweepOrder(
   return row(null, {
     candidate: toSweepCandidate(eligible[0]),
     runnerUp: eligible[1] ? toSweepCandidate(eligible[1]) : null,
+    shadow,
   });
 }
 

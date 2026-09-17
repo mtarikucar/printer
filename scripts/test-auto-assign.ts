@@ -25,7 +25,11 @@ import { join } from "node:path";
 import ts from "typescript";
 import {
   AI_SPEND_FLAG_KEYS,
+  AUTO_ASSIGN_ASSIGNMENT_EXPECTED,
   AUTO_ASSIGN_FLAG_KEYS,
+  AUTO_ASSIGN_SKIP_NEXT_STEP_TR,
+  AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN,
+  AUTO_ASSIGN_SKIP_REASON_TR,
   FLAG_DEFAULTS,
   FLAG_KEYS,
   FLAG_LABELS_TR,
@@ -36,9 +40,18 @@ import {
   classifyAutoAssignOrder,
   flagForcedOffByKillSwitch,
   isFlagKey,
+  placementGateRefusal,
   type AutoAssignOrderKind,
   type AutoAssignOrderShape,
+  type AutoAssignSkip,
 } from "../src/lib/config/flags";
+import {
+  NO_SIGNALS,
+  PHASE5_SIGNAL_ENV,
+  liveSignalSet,
+  shadowSignalSet,
+  type Phase5SignalSet,
+} from "../src/lib/config/scoring";
 import { REFUNDED_PAYMENT_STATUS } from "../src/lib/config/order-status-policy";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -1132,6 +1145,10 @@ const RANKERS = [
   "rankForOrderWithShadow",
   "rankManufacturersForOrder",
   "rankManufacturersForProfiles",
+  // Faz 5: sıralayıcının "tam" hâli (canlı profiller + gölge). Listeye
+  // eklenmeseydi, yalnız bunu çağırarak kurulan yeni bir yerleştirme yolu
+  // taslak disiplininin DIŞINDA kalırdı.
+  "rankManufacturersDetailed",
 ];
 /** Beklemedeki değerlendirme taslağını KAPATAN iki çağrı. */
 const SETTLERS = ["commitAssignmentEvaluation", "discardAssignmentEvaluation"];
@@ -1635,6 +1652,398 @@ console.log("atölye partisi: elenen siparişin sebebi");
     "ikinci bir kopya yok: otomatik atamanın yardımcısı dışa açık ve tek yerde",
     /export async function flagManualAssignment\(/.test(confirmSrc) &&
       (confirmSrc.match(/async function flagManualAssignment\(/g) ?? []).length === 1
+  );
+}
+
+// ─── Faz 5 gölgesi: SALT OKUNUR olduğu yapısal olarak sabit ───────────────
+// Gölge sıralaması hiçbir işi yerleştirmez (ranker-rollout = B). İki yol bunu
+// bozabilirdi: (1) tarama önizlemesinin değerlendirme satırı yazması, (2) gölge
+// listesinin canlı aday listesi olarak döndürülmesi. İkisi de burada çivili.
+console.log("faz 5 gölgesi: salt okunur");
+{
+  const shadowSrc = read(SHADOW_REL);
+  const sweepDataRel = "src/app/admin/assignment-sweep/sweep-data.ts";
+  const sweepDataSrc = read(sweepDataRel);
+
+  ok(
+    "gölge önizlemesi beklemedeki taslağı HİÇ kurmaz",
+    !/export async function rankForOrderShadowPreview\([\s\S]*?\n}/
+      .exec(shadowSrc)![0]
+      .includes("stashPending")
+  );
+  ok(
+    "tarama gölgeyi salt-okunur önizlemeden alır (kayıt yazan sarmalayıcıdan değil)",
+    sweepDataSrc.includes("rankForOrderShadowPreview(") &&
+      !sweepDataSrc.includes("rankForOrderWithShadow(")
+  );
+  ok(
+    "taramanın ADAYI canlı sıralamadan gelir, gölgeden DEĞİL",
+    /candidates = previewed\.live;/.test(sweepDataSrc) &&
+      !/candidates = previewed\.shadow/.test(sweepDataSrc)
+  );
+  // Uygulama ucu (gerçek atamayı yapan yol) gölgeyi HİÇ okumamalı: okusaydı
+  // ölçülmek için konmuş bir sinyal, sessizce işi yerleştiren şeye dönüşürdü.
+  ok(
+    "uygulama ucu gölge karşılaştırmasını hiç okumaz",
+    !/\.shadow\b/.test(read(SWEEP_REL)) && !/previewed\./.test(read(SWEEP_REL))
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * FAZ 5 YERLEŞTİRME KAPILARI: BAYRAKSIZ YENİ KURAL YOK, SEBEP ÇÖKMEZ
+ *
+ * Faz 5, yerleştirme kapısına iki YENİ canlı kural koymuştu (büyük format sert
+ * filtresi + ağırlıklı kapasite) ama sıralayıcıdaki ikizleri bayrakla kapalı
+ * bırakılmıştı. Bu asimetri iki somut arızayı birden üretiyordu:
+ *   - ekran ham iş sayısına göre atölye ÖNERİYOR, uç ağırlıklı birime göre
+ *     REDDEDİYOR (ve tersi);
+ *   - iki yeni ret sebebinin `AutoAssignSkip` karşılığı olmadığı için ikisi de
+ *     `not_eligible`e çöküyor, sipariş ATANMAMIŞ kalırken admin'e "işlem
+ *     gerekmiyor", koparılan atölyeye "iş başkasına gitti" deniyordu.
+ *
+ * Buradaki denetimler ikisinin de GERİ GELMESİNİ engeller.
+ * ────────────────────────────────────────────────────────────────────────── */
+console.log("faz 5 yerleştirme kapıları: bayrak ve kapalı küme");
+{
+  // ── 0. VARSAYILAN ORTAMDA CANLI KÜME BOŞ, GÖLGE KÜME DOLU ────────────────
+  // Bu fazın bağlayıcı kararı (ranker-rollout = B) tek cümlede: yeni sinyaller
+  // ÖLÇÜLÜR ama kimsenin işini/gelirini oynatmaz. Anahtarlar env'den okunuyor,
+  // bu yüzden ortam KASITLI olarak temizlenip geri konuyor — yoksa test,
+  // makinede o an ne ayarlıysa onu doğrulardı.
+  {
+    const saved = new Map<string, string | undefined>();
+    for (const key of Object.values(PHASE5_SIGNAL_ENV)) {
+      saved.set(key.live, process.env[key.live]);
+      saved.set(key.shadow, process.env[key.shadow]);
+      delete process.env[key.live];
+      delete process.env[key.shadow];
+    }
+    try {
+      const live = liveSignalSet();
+      const shadow = shadowSignalSet();
+      ok(
+        "varsayılanda CANLI yerleştirme ölçüsü kapalı (büyük format)",
+        live.largeFormat === false,
+        live
+      );
+      ok(
+        "varsayılanda CANLI yerleştirme ölçüsü kapalı (ağırlıklı kapasite)",
+        live.weightedLoad === false,
+        live
+      );
+      // Kapalı olmak YETMEZ: gölge ölçmeye devam etmeli, yoksa sahibin
+      // "bayrağı açsam ne olur" sorusunun cevabı hiç birikmez.
+      ok(
+        "varsayılanda GÖLGE iki ölçüyü de ölçmeye devam eder",
+        shadow.largeFormat === true && shadow.weightedLoad === true,
+        shadow
+      );
+      // Ve en kötü senaryo bile canlıda REDDEDİLMEZ: bu, "Faz 5 canlı
+      // yönlendirmeyi değiştirmedi" cümlesinin çalıştırılabilir hâlidir.
+      ok(
+        "varsayılan canlı kümede en kötü senaryo bile reddedilmez",
+        placementGateRefusal({
+          signals: live,
+          largeFormatBlocked: true,
+          hasRoom: false,
+        }) === null
+      );
+    } finally {
+      for (const [name, value] of saved) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }
+
+  // Bütün sinyaller açık: bayraklar ikizleriyle birlikte açıldığı GÜNÜN hâli.
+  const ALL_ON: Phase5SignalSet = {
+    paintInHouse: true,
+    qcRejections: true,
+    strikes: true,
+    onTime: true,
+    weightedLoad: true,
+    largeFormat: true,
+    computedCoverage: true,
+  };
+
+  // ── 1. BAYRAK KAPALIYKEN KAPI YOKTUR ──────────────────────────────────────
+  // Bugünkü canlı hâl. Tek bir kombinasyon bile ret dönerse, Faz 5 canlı
+  // yönlendirmeyi sessizce değiştirmiş olur (ranker-rollout = B ihlali).
+  for (const largeFormatBlocked of [true, false]) {
+    for (const hasRoom of [true, false, null]) {
+      ok(
+        `bayraklar kapalıyken yerleştirme reddi yok (büyük format engeli=${largeFormatBlocked}, yer=${hasRoom})`,
+        placementGateRefusal({ signals: NO_SIGNALS, largeFormatBlocked, hasRoom }) === null,
+        placementGateRefusal({ signals: NO_SIGNALS, largeFormatBlocked, hasRoom })
+      );
+    }
+  }
+
+  // ── 2. HER KAPI YALNIZ KENDİ İKİZİNİN ANAHTARINI OKUR ─────────────────────
+  // Tek bir anahtara bağlanmış olsalardı, ölçülmek için açılan bir sinyal
+  // ötekini de canlıya sokardı.
+  ok(
+    "kapasite kapısı büyük format anahtarıyla açılmaz",
+    placementGateRefusal({
+      signals: { ...NO_SIGNALS, largeFormat: true },
+      largeFormatBlocked: false,
+      hasRoom: false,
+    }) === null
+  );
+  ok(
+    "büyük format kapısı kapasite anahtarıyla açılmaz",
+    placementGateRefusal({
+      signals: { ...NO_SIGNALS, weightedLoad: true },
+      largeFormatBlocked: true,
+      hasRoom: true,
+    }) === null
+  );
+
+  // ── 3. AÇIKKEN GERÇEKTEN REDDEDER, SIRASI DA KURALIN PARÇASI ──────────────
+  ok(
+    "büyük format sinyali açıkken beyan etmeyen atölye reddedilir",
+    placementGateRefusal({ signals: ALL_ON, largeFormatBlocked: true, hasRoom: true }) ===
+      "large_format_required"
+  );
+  ok(
+    "kapasite sinyali açıkken dolu tezgâh reddedilir",
+    placementGateRefusal({ signals: ALL_ON, largeFormatBlocked: false, hasRoom: false }) ===
+      "capacity_full"
+  );
+  ok(
+    "kalıcı uyumsuzluk, geçici dolulukTAN ÖNCE söylenir",
+    placementGateRefusal({ signals: ALL_ON, largeFormatBlocked: true, hasRoom: false }) ===
+      "large_format_required"
+  );
+  // Ölçülmemiş bir değer ret sebebi olamaz: sinyal kapalıyken kapı kapasite
+  // sorgusunu hiç açmaz ve `null` döner.
+  ok(
+    "ölçülmemiş kapasite (null) reddetmez",
+    placementGateRefusal({ signals: ALL_ON, largeFormatBlocked: false, hasRoom: null }) === null
+  );
+}
+
+// ─── Kapıya BAYRAKSIZ yeni bir ret eklenemez (yapısal) ─────────────────────
+console.log("yerleştirme kapısı: bayraksız yeni kural taraması");
+{
+  /**
+   * Faz 5 ÖNCESİNDEN gelen, bayrak istemeyen retler. Bunlar bir ölçü değil,
+   * siparişin/atölyenin var olup olmadığı sorusudur (mülkiyet, kapalı hesap,
+   * basılacak içerik yok, yarış kaybı) — hiçbiri partner gelirini kaydıran bir
+   * SIRALAMA kuralı değildir.
+   */
+  const PRE_PHASE5_REASONS = new Set([
+    "manufacturer_unavailable",
+    "no_printable_content",
+    "not_assignable",
+    "seller_owned",
+  ]);
+
+  const literalReasons = new Set<string>();
+  let computedReasons = 0;
+  forEachNode(assignSf, (n) => {
+    if (!ts.isReturnStatement(n) || !n.expression) return;
+    if (!ts.isObjectLiteralExpression(n.expression)) return;
+    if (enclosingFunction(n) !== "assignManufacturerToOrder") return;
+    for (const prop of n.expression.properties) {
+      if (!ts.isPropertyAssignment(prop) || prop.name.getText() !== "reason") continue;
+      if (ts.isStringLiteral(prop.initializer)) literalReasons.add(prop.initializer.text);
+      else computedReasons++;
+    }
+  });
+
+  // YENİ BİR KAPI, YENİ BİR SEBEBİ doğrudan uca yazarak eklenirse burada düşer:
+  // ölçüye dayanan her ret saf karardan (placementGateRefusal) geçmek zorunda,
+  // çünkü bayrağı okuyan tek yer orasıdır.
+  const unflagged = [...literalReasons].filter((r) => !PRE_PHASE5_REASONS.has(r));
+  ok(
+    "kapıya bayraksız yeni bir ret sebebi eklenmemiş",
+    unflagged.length === 0,
+    unflagged
+  );
+  ok(
+    "Faz 5 retleri tek bir SAF karardan gelir",
+    assignSrc.includes("placementGateRefusal(") && computedReasons >= 1,
+    computedReasons
+  );
+  // Kapasite SORGUSU da bayrağa bağlı: uygulanmayacak bir ölçü için her
+  // yerleştirmede üç sorgu açmak, ölçmenin bedelini canlıya yüklerdi.
+  ok(
+    "kapasite ölçüsü yalnız sinyal açıkken okunur",
+    /signals\.weightedLoad\s*\n?\s*\?\s*await manufacturerCapacityGate\(/.test(assignSrc)
+  );
+  // Kapı sinyalleri KENDİ okumaz: sıralayıcıyla aynı kaynaktan alır, yoksa
+  // ekran ile uç yine ayrı anahtarlara bağlanabilirdi.
+  ok(
+    "kapı sinyal kümesini sıralayıcıyla AYNI kaynaktan alır",
+    /signalsForProfile\("live"\)/.test(assignSrc) && !/process\.env\.MFG_SIGNAL/.test(assignSrc)
+  );
+}
+
+// ─── Kapalı küme: her ret sebebinin bir AutoAssignSkip karşılığı var ───────
+console.log("ret sebebi → otomatik atama karşılığı (kapalı küme)");
+{
+  const unionBody = assignSrc.slice(
+    assignSrc.indexOf("export type AssignFailure"),
+    assignSrc.indexOf("export const ASSIGN_FAILURE_MESSAGES")
+  );
+  const failureMembers = [...unionBody.matchAll(/\|\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  ok("AssignFailure üyeleri okunabildi", failureMembers.length >= 6, failureMembers);
+
+  const mapStart = assignSrc.indexOf("export const AUTO_ASSIGN_SKIP_FOR_FAILURE");
+  const mapBody = assignSrc.slice(mapStart, assignSrc.indexOf("};", mapStart));
+  const mapped = new Map(
+    [...mapBody.matchAll(/^\s{2}([a-z_]+):\s*"([a-z_]+)",/gm)].map((m) => [m[1], m[2]])
+  );
+  // Yeni bir ret sebebi, karşılığı yazılmadan eklenemez: eklenirse o sebep
+  // yine tek bir "not_eligible"e çöker ve iş sessizce kaybolurdu.
+  ok(
+    "her AssignFailure üyesinin otomatik atama karşılığı var",
+    failureMembers.every((f) => mapped.has(f)),
+    failureMembers.filter((f) => !mapped.has(f))
+  );
+  // Karşılıklar KAPALI kümeden olmalı: tabloların anahtar kümesi = AutoAssignSkip
+  // (derleyici `Record<AutoAssignSkip, …>` ile bunu zaten zorluyor).
+  const skipMembers = new Set(Object.keys(AUTO_ASSIGN_SKIP_REASON_TR));
+  ok(
+    "karşılıklar kapalı kümenin üyesi",
+    [...mapped.values()].every((v) => skipMembers.has(v)),
+    [...mapped.values()].filter((v) => !skipMembers.has(v))
+  );
+  // Faz 5'in iki sebebi KENDİ üyesine gider: `not_eligible`e eşlenirlerse
+  // düzeltilen kusur aynen geri gelir.
+  ok(
+    "kapasite reddi kendi sebebini korur",
+    mapped.get("capacity_full") === "capacity_full"
+  );
+  ok(
+    "büyük format reddi kendi sebebini korur",
+    mapped.get("large_format_required") === "large_format_required"
+  );
+}
+
+// ─── Her sebebin ÜÇ muhatabı için de doğru cümlesi var ─────────────────────
+console.log("atlama sebebi: üç muhatap");
+{
+  const skips = Object.keys(AUTO_ASSIGN_SKIP_REASON_TR) as AutoAssignSkip[];
+  for (const skip of skips) {
+    ok(
+      `${skip}: admin'e söylenen sebep yazılı`,
+      (AUTO_ASSIGN_SKIP_REASON_TR[skip] ?? "").trim().length > 0
+    );
+    ok(
+      `${skip}: "bundan sonra ne olacak" cümlesi yazılı`,
+      (AUTO_ASSIGN_SKIP_NEXT_STEP_TR[skip] ?? "").trim().length > 0
+    );
+    ok(
+      `${skip}: atama bekleniyor mu cevabı var`,
+      typeof AUTO_ASSIGN_ASSIGNMENT_EXPECTED[skip] === "boolean"
+    );
+    ok(
+      `${skip}: ikinci e-posta cevabı var`,
+      typeof AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN[skip] === "boolean"
+    );
+  }
+  // ATANMAMIŞ KALAN İŞTE ADMİN GERÇEKTEN BİR ŞEY YAPMALI. Bu iki satırın
+  // `false` olması, işin kaybolduğu ve kimsenin beklemediği hâlin ta kendisiydi.
+  ok(
+    "yerleştirme reddinde admin'den ATAMA beklenir",
+    AUTO_ASSIGN_ASSIGNMENT_EXPECTED.capacity_full === true &&
+      AUTO_ASSIGN_ASSIGNMENT_EXPECTED.large_format_required === true
+  );
+  ok(
+    "yerleştirme reddi admin'e ayrıca bildirilir",
+    AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN.capacity_full === true &&
+      AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN.large_format_required === true
+  );
+  // Cümleler YANLIŞ olmamalı: yeni sebepler "bu sırada başkası almış" demez —
+  // iş hiçbir yere gitmedi, atanmamış bekliyor.
+  ok(
+    "yeni sebepler 'başkası almış' demez",
+    !/başkası almış/.test(
+      AUTO_ASSIGN_SKIP_REASON_TR.capacity_full +
+        AUTO_ASSIGN_SKIP_REASON_TR.large_format_required
+    )
+  );
+}
+
+// ─── Otomatik atama sebebi ÇÖKERTMEZ, worker da doğruyu söyler ─────────────
+console.log("otomatik atama ve süpürme: sebep korunuyor");
+{
+  const failBlock = confirmSrc.slice(
+    confirmSrc.indexOf("if (!result.ok) {"),
+    confirmSrc.indexOf("// Korumalı UPDATE geçti")
+  );
+  ok("yerleştirme reddi dalı okunabildi", failBlock.length > 200, failBlock.length);
+  // ESKİ KUSUR: bu daldaki HER ret `skipped: "not_eligible"` dönüyordu.
+  ok(
+    "yerleştirme reddi tek bir sebebe çökmez",
+    !/skipped: "not_eligible"/.test(failBlock),
+    failBlock.match(/skipped: "[a-z_]+"/g)
+  );
+  ok(
+    "karşılık TOTAL tablodan okunur",
+    failBlock.includes("AUTO_ASSIGN_SKIP_FOR_FAILURE[result.reason]")
+  );
+  ok(
+    "atanmamış kalan sipariş admin'e bildirilir (sessiz console.info değil)",
+    failBlock.includes("flagManualAssignment(") &&
+      failBlock.includes("AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN[")
+  );
+
+  const workerSrc = read("src/lib/queue/workers/manufacturer-accept-sla.worker.ts");
+  ok(
+    "süpürme sebep tablolarının İKİNCİ kopyasını tutmaz",
+    !/const SKIP_REASONS_TR: Record/.test(workerSrc) &&
+      !/const ADMIN_NEXT_STEP_TR: Record/.test(workerSrc)
+  );
+  ok(
+    "süpürme ortak tabloları okur",
+    workerSrc.includes("AUTO_ASSIGN_SKIP_REASON_TR[") &&
+      workerSrc.includes("AUTO_ASSIGN_SKIP_NEXT_STEP_TR[") &&
+      workerSrc.includes("AUTO_ASSIGN_ASSIGNMENT_EXPECTED[")
+  );
+  ok(
+    "ikinci e-posta uyarısı elle yazılmış sebep listesinden gelmez",
+    !/skipCode === "no_candidate"/.test(workerSrc) &&
+      workerSrc.includes("AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN[skipCode]")
+  );
+  // KOPARILAN ATÖLYEYE YALAN SÖYLENMEZ: "sizden işlem beklenmiyor, iş başka
+  // bir atölyeye atanmış / durumu değişmiş" cümlesine yalnız gerçekten öyle
+  // olan iki sebep girebilir. Faz 5'in sebepleri o dala düşerse atölyeye,
+  // hiçbir yere gitmemiş bir iş için "gitti" denmiş olur.
+  const notice = workerSrc.slice(
+    workerSrc.indexOf("function manufacturerSlaNotice"),
+    workerSrc.indexOf("/** Yalnız BAYRAKLANAN")
+  );
+  const noticeBranches = [...notice.matchAll(/skip === "([a-z_]+)"/g)].map((m) => m[1]);
+  ok(
+    "koparılan atölyeye yalnız DOĞRU sebeplerde 'iş sizden çıkmadı' denir",
+    noticeBranches.length > 0 &&
+      noticeBranches.every((b) => b === "refunded" || b === "not_eligible"),
+    noticeBranches
+  );
+}
+
+// ─── Kapılar bayrakla kapalıyken bile GÖLGEDE ölçülüyor ───────────────────
+// Sahibin görebilmesi gereken şey: bayraklar açılsa NE OLURDU. Gölge şeridi
+// iki ölçüyü de sıralayıcıya takmazsa /admin/assignment-sweep geleceği
+// gösteremez ve bayrak körlemesine açılır.
+console.log("faz 5 kapıları: gölgede ölçülüyor mu");
+{
+  const shadowLane = read(SHADOW_REL);
+  ok(
+    "gölge şeridi büyük format kuralını sıralayıcıya takar",
+    /largeFormatBlocked: largeFormatPlacementBlocked/.test(shadowLane)
+  );
+  ok(
+    "gölge şeridi ağırlıklı kapasiteyi sıralayıcıya takar",
+    /capacities: ctx\.capacities/.test(shadowLane)
+  );
+  ok(
+    "kapı, bayrak kapalıyken de büyük format kuralını HESAPLAR (gölge günlüğü)",
+    assignSrc.includes("[GÖLGE]") && /const largeFormatBlocked = largeFormatPlacementBlocked\(/.test(assignSrc)
   );
 }
 

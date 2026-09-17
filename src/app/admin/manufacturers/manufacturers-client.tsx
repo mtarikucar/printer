@@ -30,7 +30,21 @@ interface Manufacturer {
   taxIdType: "vkn" | "tckn" | null;
   requiresManualTaxReview: boolean;
   status: string;
+  /**
+   * GÖSTERİM: tezgâhtaki ayrı kutu sayısı. KAPI DEĞİLDİR — bir toplu iş tek
+   * "iş"tir ama tezgâhın tamamını doldurabilir.
+   */
   activeOrders: number;
+  /**
+   * Ağırlıklı yük: sipariş başına 1, her 20 adet için 1 daha.
+   * Yalnız weightedLoadLive açıkken atama kapısıdır.
+   */
+  loadUnits: number;
+  weightedLoadLive: boolean;
+  /** Ağırlıklı eşiğin boolean cevabı: bu atölyeye bir iş daha yazılabilir mi. */
+  hasRoom: boolean;
+  /** Kapının ölçüsüyle yazılmış tek yük etiketi: "6/5 birim · 1 iş". */
+  loadLabel: string;
   createdAt: string;
   rejectionReason: string | null;
   printerPhotoUploadedAt: string | null;
@@ -251,7 +265,7 @@ export function ManufacturersClient({
                   {d["admin.manufacturers.colTaxId"]}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                  {d["admin.manufacturers.activeOrders"]}
+                  Ağırlıklı yük
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
                   {d["admin.manufacturers.registeredAt"]}
@@ -364,7 +378,13 @@ function MfrRow({
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700 text-center">
-                    {m.activeOrders}
+                    {/* Ölçüm her profilde görünür; dolu rozeti yalnız canlı kapıyı anlatır. */}
+                    <span className="whitespace-nowrap">{m.loadLabel}</span>
+                    {m.weightedLoadLive && !m.hasRoom && (
+                      <span className="ml-1.5 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 align-middle">
+                        Dolu
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
                     {formatDate(m.createdAt, loc)}
@@ -849,8 +869,12 @@ function RankerInputsEditor({
                 className="w-28 rounded border border-gray-300 px-2 py-1 text-sm"
               />
               <p className="mt-1 text-xs text-gray-400">
-                Aktif iş sayısı bu sayıya ulaşınca atölyeye yeni sipariş düşmez.
-                Şu an {m.activeOrders} aktif iş var.
+                {m.weightedLoadLive
+                  ? "Ağırlıklı yük bu limite ulaşınca yeni atama engellenir."
+                  : "Ağırlıklı yük (gölge): bu ölçüm atamayı engellemez."}{" "}
+                Ağırlık: sipariş başına 1 birim, toplu ve atölye partilerinde her
+                20 adet için 1 birim daha. Şu an {m.loadLabel}
+                {m.weightedLoadLive && !m.hasRoom ? " — tezgâh dolu, yeni atama engellenir" : ""}.
               </p>
             </div>
 

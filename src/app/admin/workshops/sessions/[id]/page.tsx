@@ -1,5 +1,7 @@
 export const dynamic = "force-dynamic";
 
+import { signalsForProfile } from "@/lib/config/scoring";
+
 import { asc, eq, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
@@ -12,6 +14,18 @@ import {
 import { orderInBatch } from "@/lib/config/workshop";
 import { orderHasOwnModel } from "@/lib/config/order-model-presence";
 import { computeEarning } from "@/lib/services/finance";
+// Aday SIRALAMASI canlı atamanın kendi sıralayıcısından gelir; bu ekran ikinci
+// bir sıralama kurmaz. `rankForOrderPreview` SALT-OKUNURDUR: değerlendirme
+// satırı yalnız GERÇEKLEŞEN bir atamada yazılır (Faz 1 kuralı), her seans
+// görüntülemesinde değil.
+import { rankForOrderPreview } from "@/lib/services/manufacturer-assignment-shadow";
+import { averagePrintDaysFor } from "@/lib/services/manufacturer-assignment";
+// Ağırlıklı ölçüm sunucudan gelir; canlı kapı olup olmadığı ayrıca geçirilir.
+import {
+  loadManufacturerCapacities,
+  manufacturerLoadLabel,
+  type ManufacturerCapacity,
+} from "@/lib/services/manufacturer-capacity";
 import { SessionClient } from "./session-client";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,6 +36,7 @@ export default async function AdminWorkshopSessionPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const weightedLoadLive = signalsForProfile("live").weightedLoad;
 
   const session = await db.query.workshopSessions.findFirst({
     where: eq(workshopSessions.id, id),
@@ -148,18 +163,103 @@ export default async function AdminWorkshopSessionPage({
     : [];
   // Liste OKUNAMADIYSA boş görünür — "uygun üretici yok" DEĞİL. Uyarı bunu söyler.
   const manufacturerOptionsUnreadable = manufacturerOptionRead === null;
-  const manufacturerOptions = needsManufacturerPick
-    ? (manufacturerOptionRead ?? []).map((m) => ({
+
+  // ─── Sıralı aday önerisi (Faz 5) ────────────────────────────────────────
+  //
+  // SEANSIN ÜRETİCİSİ ASLA OTOMATİK ATANMAZ (sahibin kararı): seans bir TARİHE
+  // taahhütlüdür ve partiyi basacak atölyeyi bir insan onaylar. Değişen tek
+  // şey, admin'in artık alfabetik bir listeye değil SIRALI bir öneriye bakması
+  // ve kutunun ön seçili açılması. Onay düğmesi yerinde duruyor.
+  //
+  // Sıralama partinin KENDİ siparişlerinden birine bakılarak yapılır: mesafe
+  // skorunun girdisi siparişin teslimat adresidir ve partinin siparişleri aynı
+  // mekâna gider, yani temsilci sipariş parti için de doğru cevabı verir.
+  // Hangi siparişe bakıldığı ekranda yazar.
+  const representativeOrder = batch.length > 0 ? orderOf(batch[0]) : null;
+  const rankedRead =
+    needsManufacturerPick && representativeOrder
+      ? await rankForOrderPreview(representativeOrder.id).catch((e) => {
+          console.error("workshop session: aday sıralaması yapılamadı", e);
+          return null;
+        })
+      : [];
+  // Sıralama okunamadıysa liste ALFABETİK kalır ve uyarı bunu söyler: sırasız
+  // bir liste, "bu atölyeler uygun değil" diye okunmamalı.
+  const rankingUnreadable = rankedRead === null;
+  const rankedById = new Map(
+    (rankedRead ?? []).map((c, i) => [c.manufacturerId, { candidate: c, rank: i + 1 }])
+  );
+
+  const optionRows = needsManufacturerPick ? (manufacturerOptionRead ?? []) : [];
+
+  // Tezgâh yükü ORTAK ÖLÇÜDEN, AYRI ve KORUMALI okunur: düşerse liste yine
+  // çizilir, yalnız yük "bilinmiyor" olur. Bilinmeyen yükü 0 göstermek, dolu
+  // bir atölyeyi boş gibi seçtirmek demekti.
+  let capacityUnreadable = false;
+  let capacities = new Map<string, ManufacturerCapacity>();
+  if (optionRows.length > 0) {
+    try {
+      capacities = await loadManufacturerCapacities(optionRows.map((m) => m.id));
+    } catch (e) {
+      console.error("workshop session: üretici tezgâh yükü okunamadı", e);
+      capacityUnreadable = true;
+    }
+  }
+  // Ortalama baskı süresi: seans risk uyarısının (assessSessionRisk) girdisi.
+  // Mekân ekranındaki kurulumun aynısı — ikinci bir risk ölçüsü yazılmaz.
+  // Okunamayan atölye için `null` kalır ve ekran o satırda risk cümlesi
+  // GÖSTERMEZ; uydurma bir sayıyla yanlış bir "yetişir" demekten iyidir.
+  const avgPrintDaysById = new Map<string, number>();
+  await Promise.all(
+    optionRows.map(async (m) => {
+      try {
+        avgPrintDaysById.set(m.id, await averagePrintDaysFor(m.id));
+      } catch (e) {
+        console.error("workshop session: ortalama baskı süresi okunamadı", e);
+      }
+    })
+  );
+
+  const manufacturerOptions = optionRows
+    .map((m) => {
+      const ranked = rankedById.get(m.id);
+      const cap = capacities.get(m.id) ?? null;
+      return {
         id: m.id,
         companyName: m.companyName,
         acceptingOrders: m.acceptingOrders,
-      }))
-    : [];
+        city: ranked?.candidate.city ?? null,
+        rank: ranked?.rank ?? null,
+        totalScore: ranked?.candidate.totalScore ?? null,
+        eligible: ranked?.candidate.eligible ?? false,
+        ineligibleReason: ranked?.candidate.ineligibleReason ?? null,
+        // Ağırlıklı yük sıralamadan bağımsızdır; okunamayan ölçüm null kalır.
+        currentLoad: cap?.loadUnits ?? null,
+        maxConcurrentOrders: cap?.maxConcurrentOrders ?? null,
+        // Ağırlıklı eşiğin boolean cevabı ve tek etiketi — ekran kendi eşiğini kurmaz.
+        hasRoom: cap?.hasRoom ?? null,
+        loadLabel: cap ? `Ağırlıklı yük (${weightedLoadLive ? "canlı" : "gölge"}): ${manufacturerLoadLabel(cap)}` : null,
+        avgPrintDays: avgPrintDaysById.get(m.id) ?? null,
+        reasons: ranked?.candidate.reasons ?? [],
+      };
+    })
+    .sort((a, b) => {
+      // Sıralamanın UYGUN bulduğu adaylar önce, skoru yüksek olan üstte.
+      // Sıralamaya girmeyenler (hesabı aktif ama aday listesinde yok) arkada,
+      // alfabetik durur — listede kalırlar, çünkü admin'in son sözü var.
+      if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+      if (a.rank !== null && b.rank !== null) return a.rank - b.rank;
+      if (a.rank !== null) return -1;
+      if (b.rank !== null) return 1;
+      return a.companyName.localeCompare(b.companyName, "tr");
+    });
 
   return (
     <>
       {(assignedNameUnreadable ||
         manufacturerOptionsUnreadable ||
+        rankingUnreadable ||
+        capacityUnreadable ||
         batchOrdersUnreadable) && (
         <div
           role="alert"
@@ -173,6 +273,12 @@ export default async function AdminWorkshopSessionPage({
               assignedNameUnreadable && "seansa atanmış üreticinin adı",
               manufacturerOptionsUnreadable &&
                 "atanabilir üretici listesi — liste boş görünüyor, bu “uygun üretici yok” demek DEĞİL",
+              rankingUnreadable &&
+                "üretici SIRALAMASI — liste alfabetik duruyor ve öneri gösterilemiyor; sıra “uygunluk” anlamına GELMEZ, atamayı kendiniz değerlendirin",
+              capacityUnreadable &&
+                (weightedLoadLive
+                  ? "üreticilerin ağırlıklı yükü (canlı) — yük gösterilemiyor; dolu atölyede devir ucu reddeder"
+                  : "üreticilerin ağırlıklı yükü (gölge) — yük gösterilemiyor; bu ölçüm devri engellemez"),
               batchOrdersUnreadable &&
                 "katılımcıların SİPARİŞLERİ: parti sayacı (hazır/eksik model), sipariş durumları ve üreticinin net payı bu yüzden 0 görünüyor — bunlar ÖLÇÜM DEĞİL, okunamayan kayıtlardır; partiyi bu ekrana bakarak kapatmayın",
             ]
@@ -184,6 +290,7 @@ export default async function AdminWorkshopSessionPage({
         </div>
       )}
     <SessionClient
+      weightedLoadLive={weightedLoadLive}
       session={{
         id: session.id,
         venueName: session.venue.name,
@@ -233,6 +340,7 @@ export default async function AdminWorkshopSessionPage({
       netTotalKurus={netTotalDisplayKurus}
       daysUntilSession={daysUntilSession}
       manufacturerOptions={manufacturerOptions}
+      suggestionBasedOnOrderNumber={representativeOrder?.orderNumber ?? null}
     />
     </>
   );

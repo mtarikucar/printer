@@ -22,9 +22,16 @@ import {
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import { flagManualAssignment } from "@/lib/services/order-confirm";
 import {
+  placementSignals,
   sellerOwnedPlacementBlocked,
   sellerPlacementGuard,
 } from "@/lib/services/manufacturer-assign";
+// KAPASİTE: platformdaki TEK ölçü. Parti yolları kendi sayımlarını kurmaz —
+// ekranın gösterdiği "dolu" ile burada verilen karar aynı fonksiyondan doğar.
+import {
+  manufacturerCapacityGate,
+  manufacturerLoadLabel,
+} from "@/lib/services/manufacturer-capacity";
 import {
   notifyAdminSessionWithoutManufacturer,
   notifyManufacturerOrdersAdopted,
@@ -555,6 +562,44 @@ export async function closeSession(
   // donduruldu. O hâlde muhatap ADMİN'dir (yukarıdaki bildirim); üreticiye
   // gidecek doğru metin workshop-manufacturer-notify.ts'e eklenecek ayrı bir
   // daldır — burada uydurulmuş bir cümle, sessiz kalmaktan daha kötüdür.
+  // KAPASİTE KAPISI — PARTİ İÇİN DANIŞILIR, ENGEL DEĞİLDİR. Bu ayrım bilinçli.
+  //
+  // Tek siparişte kapı REDDEDER (manufacturer-assign.ts). Burada reddetmek
+  // ödenmiş bir partiyi seans tarihinden günler önce üreticisiz bırakırdı:
+  // partiyi basacak atölye seans AÇILIRKEN seçilir ve üretici o tarihi TAAHHÜT
+  // eder; "Seans aç" ekranı da dolu atölyede "parti sıraya girer" diye zaten
+  // uyarır (config/workshop.ts · assessSessionRisk · whenFull: "queued").
+  // Kapanış o taahhüdün yerine getirildiği andır ve yerine kimse konulamaz —
+  // reddedilen parti, seans günü figürsüz kalan müşteri demektir.
+  //
+  // Admin'in yeni atölye seçtiği yolda kapasite ancak canlı ağırlıklı yük
+  // sinyali açıldığında reddetme sebebidir. Gölge ölçümü atamayı değiştirmez.
+  //
+  // Sessiz de kalmaz: ölçü parti YAZILDIKTAN sonra okunur, yani "bu atölye
+  // şimdi beyan ettiği sınırın neresinde" sorusunun gerçek cevabıdır ve
+  // operatör onu ölçüyle birlikte görür. Okuma HATASI kapanışı düşürmez:
+  // kapanış paranın donduğu adımdır, bir kapasite okuması onu geri alamaz.
+  if (outcome.manufacturerId && placedCount > 0) {
+    try {
+      const gate = await manufacturerCapacityGate(outcome.manufacturerId);
+      if (!gate.ok) {
+        console.error(
+          `[workshop] seans ${sessionId}: ${placedCount} siparişlik parti TAAHHÜT gereği ` +
+            `${outcome.manufacturerId} atölyesine yazıldı, ama tezgâh ortak ölçüyle DOLU` +
+            (gate.capacity ? ` (${manufacturerLoadLabel(gate.capacity)})` : "") +
+            ` — ağırlıklı yük sınırına ulaşıldı; canlı kapasite kuralı ` +
+            (placementSignals().weightedLoad ? "açık" : "kapalı (gölge ölçümü)")
+        );
+      }
+    } catch (e) {
+      console.error(
+        `[workshop] seans ${sessionId}: kapasite kapısı okunamadı — parti yazıldı, ` +
+          `atölyenin yükü raporlanamadı`,
+        e
+      );
+    }
+  }
+
   if (placedCount > 0) {
     await notifyManufacturerSessionClosed(sessionId, {
       orderCount: placedCount,
@@ -668,6 +713,15 @@ export async function assignBatchManufacturer(input: {
         "Yalnızca kapanmış ama henüz sevk edilmemiş bir partiye üretici " +
         `atanabilir (bu seans: ${session.status}).`,
     };
+  }
+
+  // Tek sipariş atamasıyla aynı canlı anahtar. Gölge ölçümü bir partiyi
+  // reddedemez; seansın kendi uygunluk kontrolleri her zaman yürürlüktedir.
+  if (placementSignals().weightedLoad) {
+    const capacity = await manufacturerCapacityGate(manufacturerId);
+    if (!capacity.ok) {
+      return { ok: false, error: capacity.error };
+    }
   }
 
   /** İşlem içi sonuç: ya sahiplenilemedi ya da parti devredildi. */
@@ -955,6 +1009,7 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
     .select({
       orderId: orders.id,
       orderNumber: orders.orderNumber,
+      adminNotes: orders.adminNotes,
       sellerManufacturerId: orders.sellerManufacturerId,
       sessionId: workshopSessions.id,
       sessionStatus: workshopSessions.status,
@@ -1027,6 +1082,40 @@ export async function adoptOrphanBatchOrders(): Promise<OrphanAdoption[]> {
           `sahiplenilemedi: ${orderNumbers}`
       );
       continue;
+    }
+
+    // Gölge modunda geç ödeyen katılımcılar eskisi gibi partiye katılır.
+    // Canlı kapı açıldığında ret veya okuma hatası yalnız günlüğe bırakılamaz:
+    // sipariş notu ve yönetici bildirimiyle görünür, sonraki tur yeniden denenir.
+    if (placementSignals().weightedLoad) {
+      let capacityReason: string | null = null;
+      try {
+        const gate = await manufacturerCapacityGate(batchManufacturerId);
+        if (!gate.ok) capacityReason = gate.error;
+      } catch (e) {
+        console.error(`[workshop] seans ${sessionId}: kapasite okunamadı`, e);
+        capacityReason = "Partinin üreticisinin kapasitesi okunamadı";
+      }
+      if (capacityReason) {
+        for (const row of rows) {
+          // Notun yazılması e-postanın kuyruğa alındığını kanıtlamaz.
+          if (row.adminNotes?.includes("[ATÖLYE-KAPASİTE-BİLDİRİLDİ]")) continue;
+          const queued = await flagManualAssignment({
+            orderId: row.orderId,
+            orderNumber: row.orderNumber,
+            reason: `[ATÖLYE-KAPASİTE] ${capacityReason}; geç ödeme seans partisine alınamadı. Kapasite uygunsa sonraki süpürmede tekrar denenecek`,
+            noteAlreadyWritten: row.adminNotes?.includes("[ATÖLYE-KAPASİTE]"),
+          });
+          if (queued) {
+            await db.update(orders).set({
+              adminNotes: sql`coalesce(${orders.adminNotes}, '') || E'\n[ATÖLYE-KAPASİTE-BİLDİRİLDİ] Yönetici e-postası kuyruğa alındı.'`,
+            }).where(eq(orders.id, row.orderId)).catch((e) => {
+              console.error(`[workshop] bildirim damgası yazılamadı: ${row.orderNumber}`, e);
+            });
+          }
+        }
+        continue;
+      }
     }
 
     // Mülkiyet kuralı (E-C1): geç ödeyen sipariş partiye ALINIR, ama satıcısı

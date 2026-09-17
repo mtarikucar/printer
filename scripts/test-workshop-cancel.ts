@@ -330,6 +330,7 @@ async function run() {
       where: eq(orders.id, id),
       columns: {
         status: true,
+        adminNotes: true,
         paymentStatus: true,
         manufacturerId: true,
         manufacturerStatus: true,
@@ -1038,6 +1039,50 @@ async function run() {
     !assignSealed.ok,
     assignSealed
   );
+
+  // Phase 5: gölge ölçümü canlı toplu atamayı değiştiremez. Gerçek servisleri
+  // dolu bir tezgâhta iki bayrak değeriyle çalıştır; sorgu biçimini test etme.
+  const savedWeightedFlag = process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE;
+  try {
+    await db.update(manufacturers).set({ maxConcurrentOrders: 1 }).where(eq(manufacturers.id, mfg.id));
+    const pending = await seedSession("closed", 1, { withoutManufacturer: true });
+    await db.update(workshopSessions).set({ commissionRateBps: 4000 }).where(eq(workshopSessions.id, pending.id));
+    await seedParticipant(pending.id, "Golge Toplu Atama", { orderStatus: "approved", preClose: true });
+    process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE = "1";
+    const blocked = await assignBatchManufacturer({ sessionId: pending.id, manufacturerId: mfg.id });
+    ok("canlı ağırlıklı kural açık: dolu üreticiye toplu atama reddedilir", !blocked.ok, blocked);
+    process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE = "0";
+    const allowed = await assignBatchManufacturer({ sessionId: pending.id, manufacturerId: mfg.id });
+    ok("gölge modu: dolu ağırlıklı ölçüm toplu atamayı engellemez", allowed.ok, allowed);
+
+    const lateSession = await seedSession("in_production", 3);
+    await db.update(workshopSessions).set({ commissionRateBps: 4000 }).where(eq(workshopSessions.id, lateSession.id));
+    await seedParticipant(lateSession.id, "Partinin Mevcut Isi", { orderStatus: "approved" });
+    const late = await seedParticipant(lateSession.id, "Gec Odeme", { orderStatus: "approved", preClose: true });
+    process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE = "1";
+    const { getEmailQueue } = await import("../src/lib/queue/queues");
+    const emailQueue = getEmailQueue();
+    const originalAdd = emailQueue.add;
+    emailQueue.add = async () => { throw new Error("test: email queue unavailable"); };
+    try { await adoptOrphanBatchOrders(); }
+    finally { emailQueue.add = originalAdd; }
+    const held = await orderRow(late.orderId!);
+    ok("canlı kural açık: geç ödeme atanmamış kalır", held?.manufacturerId === null);
+    ok("kapasite reddi yönetici notunda görünür", held?.adminNotes?.includes("[ATAMA]") === true, held?.adminNotes);
+    await adoptOrphanBatchOrders();
+    const notified = await orderRow(late.orderId!);
+    ok("başarısız e-posta sonraki süpürmede yeniden kuyruğa alınır", notified?.adminNotes?.includes("[ATÖLYE-KAPASİTE-BİLDİRİLDİ]") === true, notified?.adminNotes);
+    await adoptOrphanBatchOrders();
+    ok("bildirilmiş ret sonraki süpürmede yeniden yazılmaz", (await orderRow(late.orderId!))?.adminNotes === notified?.adminNotes);
+    process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE = "0";
+    await adoptOrphanBatchOrders();
+    const adopted = await orderRow(late.orderId!);
+    ok("gölge modu: geç ödeme dolu ağırlıklı tezgâha katılır", adopted?.manufacturerId === mfg.id, adopted);
+    ok("geç ödeme partinin donmuş oranını korur", adopted?.commissionRateBps === 4000);
+  } finally {
+    if (savedWeightedFlag === undefined) delete process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE;
+    else process.env.MFG_SIGNAL_WEIGHTED_LOAD_LIVE = savedWeightedFlag;
+  }
 }
 
 main().catch((e) => {

@@ -17,11 +17,13 @@ import { startWaAgentWorker } from "../src/lib/queue/workers/wa-agent.worker";
 import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-approval-sla.worker";
 import { startWorkshopCloseWorker } from "../src/lib/queue/workers/workshop-close.worker";
 import { startPainterAcceptSlaWorker } from "../src/lib/queue/workers/painter-accept-sla.worker";
+import { startManufacturerAcceptSlaWorker } from "../src/lib/queue/workers/manufacturer-accept-sla.worker";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
   getAnalyticsCleanupQueue,
   getAssignmentSlaQueue,
+  getManufacturerAcceptSlaQueue,
   getModelApprovalSlaQueue,
   getWorkshopCloseQueue,
   getPainterAcceptSlaQueue,
@@ -60,6 +62,12 @@ const workshopCloseWorker = startWorkshopCloseWorker();
 // config/flags.ts · PAINTER_MAX_DECLINES), elle atanmışsa yalnız bayraklanır.
 // Üretici ikizi (assignment-sla) hiçbir işi taşımaz.
 const painterAcceptSlaWorker = startPainterAcceptSlaWorker();
+// Üreticiye atanan iş 24 saat yanıtsız kalırsa: OTOMATİK atanmışsa sıradaki
+// atölyeye devredilir (ceza yok, yeniden yerleştirme sınırına sayılır —
+// config/flags.ts · MANUFACTURER_MAX_DECLINES), elle atanmışsa / satıcının kendi
+// ürünüyse / iş yola çıkmışsa yalnız bayraklanır. Boyacı ikizinin (
+// painter-accept-sla) üretici tarafındaki karşılığı.
+const manufacturerAcceptSlaWorker = startManufacturerAcceptSlaWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -83,12 +91,39 @@ getAnalyticsCleanupQueue().upsertJobScheduler(
   { name: "analytics-cleanup" }
 );
 
-// The assignment email promises a 24h accept/decline; flag the ones that blow
-// through it so an admin can reassign instead of noticing by accident.
-getAssignmentSlaQueue().upsertJobScheduler(
-  "assignment-sla-hourly",
+// ESKİ BAYRAK-ONLY SÜPÜRMESİ EMEKLİ EDİLDİ (Faz 5).
+//
+// `assignment-sla` aynı kümeyi (24 saattir yanıtlanmamış atamalar) tarayıp
+// yalnız [SLA] notu yazıyor ve admin'e e-posta atıyordu. Yerini alan
+// `manufacturer-accept-sla` aynı kümeyi tarıyor, OTOMATİK atanmış işi devrediyor
+// ve devredemediğini yine bayraklıyor — yani eski süpürmenin yaptığı her şeyi
+// kapsıyor. İKİSİ BİRDEN ZAMANLANSAYDI admin tek bir olay için iki ayrı e-posta
+// ve iki ayrı not alırdı; üstelik eski süpürme, yeni süpürme işi devretmeden
+// önce "24 saattir yanıt bekliyor" diye haber verip hemen bayatlayabilirdi.
+//
+// Zamanlayıcı Redis'te KALICIDIR: `upsertJobScheduler` çağrısını silmek, daha
+// önce yazılmış zamanlayıcıyı durdurmaz — bu yüzden açıkça kaldırılıyor. Worker
+// yine de ayakta tutuluyor (yukarıda): kuyrukta bekleyen ya da elle eklenmiş bir
+// iş varsa sahipsiz kalmasın.
+getAssignmentSlaQueue()
+  .removeJobScheduler("assignment-sla-hourly")
+  .then((removed) => {
+    if (removed) {
+      console.info(
+        "assignment-sla-hourly zamanlayıcısı kaldırıldı (yerini manufacturer-accept-sla aldı)"
+      );
+    }
+  })
+  .catch((e) =>
+    console.error("assignment-sla-hourly zamanlayıcısı kaldırılamadı", e)
+  );
+
+// Üreticinin 24 saatlik kabul süresini saatlik ölç: süresi dolan OTOMATİK
+// atamayı sıradaki atölyeye devret, kalanını admin için bayrakla.
+getManufacturerAcceptSlaQueue().upsertJobScheduler(
+  "manufacturer-accept-sla-hourly",
   { every: 3600000 },
-  { name: "assignment-sla" }
+  { name: "manufacturer-accept-sla" }
 );
 
 // 48h auto-approve (only a clean `pass`), 72h customer reminder, 7d admin
@@ -123,7 +158,8 @@ console.log("  - dekont-ocr (concurrency: 2)");
 console.log("  - scoring-evaluations-cleanup (repeatable: every 24h)");
 console.log("  - notification (concurrency: 5)");
 console.log("  - analytics-cleanup (repeatable: every 24h)");
-console.log("  - assignment-sla (repeatable: every 1h)");
+console.log("  - assignment-sla (emekli: zamanlayıcı yok, yerini manufacturer-accept-sla aldı)");
+console.log("  - manufacturer-accept-sla (repeatable: every 1h)");
 console.log("  - model-generation (concurrency: 4, meshy)");
 console.log("  - mesh-processing (concurrency: 1, python)");
 console.log("  - wa-outbound (concurrency: 4, 40/min)");
@@ -153,6 +189,7 @@ async function shutdown() {
     modelApprovalSlaWorker.close(),
     workshopCloseWorker.close(),
     painterAcceptSlaWorker.close(),
+    manufacturerAcceptSlaWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   manufacturers,
@@ -18,10 +18,32 @@ import { effectiveCoverage } from "@/lib/config/network-map";
 import {
   getAssignmentWeights,
   getDistanceModel,
+  type DistanceModel,
   type ScoringProfile,
   type ScoringWeights,
 } from "@/lib/config/manufacturer-scoring";
-import { manufacturerSupportsMaterial } from "@/lib/services/capability";
+import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
+import {
+  manufacturerSupportsMaterial,
+  orderRequirements,
+} from "@/lib/services/capability";
+// Faz 5 sinyalleri. Sıralayıcı env OKUMAZ: yalnız `signalsForProfile()`in
+// verdiği kümeye bakar, yani "canlı skora yeni bir sinyal sızdı mı?" sorusunun
+// cevabı tek bir yerde aranır (config/scoring.ts, dosya başlığı).
+import {
+  NO_SIGNALS,
+  PHASE5_DISTANCE_MODEL,
+  anySignalOn,
+  applyReliabilityPenalties,
+  activeSignals,
+  paintInHouseBonus,
+  phase5Weights,
+  signalsForProfile,
+  type CoverageResolver,
+  type CoverageSource,
+  type Phase5SignalSet,
+  type ShadowSignalDetail,
+} from "@/lib/config/scoring";
 
 // Every manufacturerStatus where the order is still on the manufacturer's bench
 // (i.e. counts against their capacity) — everything except 'unassigned' and the
@@ -52,6 +74,22 @@ export function orderStillOnManufacturerBench() {
     isNull(orders.painterStatus),
     eq(orders.painterStatus, "unassigned")
   )!;
+}
+
+/**
+ * "Bu sipariş şu anda bir atölyenin TEZGÂHINDA" — tek SQL cümlesi.
+ *
+ * Üç okuma bu aynı cümleyi ayrı ayrı yazıyordu (canlı yük sayımı, parti
+ * toplaması ve şimdi ağırlıklı yük). Üç kopya, tezgâh tanımının bir gün
+ * birinde değişip ötekilerde kalmasına açık davetiyeydi: yük "dolu" derken
+ * parti sayacı "boş" diyebilirdi. Tanım tek yerde durur.
+ */
+function manufacturerBenchFilter() {
+  return and(
+    inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
+    orderStillOnManufacturerBench(),
+    sql`${orders.manufacturerId} IS NOT NULL`
+  );
 }
 
 // Human labels for the material a manufacturer can't print (ineligibleReason).
@@ -92,6 +130,14 @@ export interface CandidateScore {
   reasons: string[];
   eligible: boolean;
   ineligibleReason?: string;
+  /**
+   * Faz 5 GÖLGE açıklaması — yalnız en az bir yeni sinyal yürürlükteyken dolar.
+   *
+   * İsteğe bağlı olması yapısal bir güvencedir: sinyaller kapalıyken (canlı
+   * yolun varsayılanı) aday nesnesi bugünküyle ALAN ALAN aynıdır, yani "canlı
+   * skor değişmedi" iddiası derin eşitlikle sınanabilir.
+   */
+  shadow?: ShadowSignalDetail;
 }
 
 /**
@@ -362,11 +408,7 @@ async function sameProductUnitsByManufacturer(
   const out = new Map<string, number>();
   if (productIds.length === 0) return out;
 
-  const onBench = and(
-    inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
-    orderStillOnManufacturerBench(),
-    sql`${orders.manufacturerId} IS NOT NULL`
-  );
+  const onBench = manufacturerBenchFilter();
 
   const scalar = await db
     .select({
@@ -564,6 +606,55 @@ async function reliabilityScoreFor(manufacturerId: string): Promise<number> {
   return Math.round((good / total) * 100);
 }
 
+/** Geçmiş okunamadığında yazılan nötr QC sayacı: ne ödül ne ceza. */
+const NEUTRAL_QC = { jobs: 0, rejectedJobs: 0 } as const;
+
+/**
+ * Bir atölyenin son işlerinden QC REDDİ sayacı (Faz 5 · qcRejections sinyali).
+ *
+ * ÖLÇÜ `qcRejectionCount`, `qcRound` DEĞİL: ikisi de "1'den büyük" olabilir ama
+ * `qcRound` başka sebeplerle de artıyor — atama geri alındığında
+ * (manufacturer-revoke.ts) ve müşteriye yeni bir model sürümü yüklendiğinde
+ * (order-model.ts). O turları atölyeye ceza olarak yazmak, hiç hata yapmamış
+ * bir atölyeyi admin'in kendi işlemleri yüzünden cezalandırmak olurdu.
+ * `qcRejectionCount` yalnız QC reddinde artan ömür boyu sayaçtır.
+ *
+ * PENCERE, OTD ile AYNI (son `OTD_LOOKBACK` kargolanmış iş): iki geçmiş sinyali
+ * "hangi işler sayılır" konusunda asla ayrışamasın.
+ *
+ * İADE EDİLMİŞ SİPARİŞ SAYILMAZ: iade kimseyi cezalandırmaz (fazın bağlayıcı
+ * kuralı). Boyacı tarafındaki geçmiş okumasının (painter-assignment.ts
+ * `historyFor`) aynı filtresi.
+ *
+ * HATA POLİTİKASI: bu sinyal yalnız skoru GÖLGELER, kapıyı değil — okunamazsa
+ * nötre düşer ve loglanır. Sıralama tek bir yavaş sorgu yüzünden durmaz.
+ */
+async function qcRejectionHistoryFor(
+  manufacturerId: string
+): Promise<{ jobs: number; rejectedJobs: number }> {
+  try {
+    const rows = await db
+      .select({ rejections: orders.qcRejectionCount })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.manufacturerId, manufacturerId),
+          isNotNull(orders.shippedAt),
+          ne(orders.paymentStatus, REFUNDED_PAYMENT_STATUS)
+        )
+      )
+      .orderBy(desc(orders.shippedAt))
+      .limit(OTD_LOOKBACK);
+    let rejectedJobs = 0;
+    for (const r of rows) if ((r.rejections ?? 0) > 0) rejectedJobs++;
+    return { jobs: rows.length, rejectedJobs };
+  } catch (e) {
+    console.error("QC geçmişi okunamadı (nötr puanla devam)", manufacturerId, e);
+    return { ...NEUTRAL_QC };
+  }
+}
+
+
 /**
  * Bu DENEMEYE özgü dışlanan atölyenin uygunsuzluk gerekçesi.
  *
@@ -590,6 +681,360 @@ export interface RankOptions {
    * insan kararı olarak— açıklar.
    */
   excludeManufacturerIds?: readonly string[];
+  /**
+   * Faz 5 GÖLGE geçişi de çalışsın mı (yalnız `rankManufacturersDetailed`
+   * okur). Gölge hiçbir işi yerleştirmez; sonucu kaydedilir ve ekranda canlının
+   * yanına konur.
+   */
+  phase5Shadow?: boolean;
+  /**
+   * K1'in HESAPLANAN kapsama planı — takılırsa gölge, elle yazılmış listenin
+   * yerine bunu kullanır (coverage-model = B). Verilmezse gölge bugünkü listeyi
+   * okur ve kaydına "typed" damgalar, yani hesaplanan lane'in henüz bağlanmadığını
+   * SÖYLER. Buraya ikinci bir kapsama hesabı YAZILMAZ; tek sahibi K1'in modülü.
+   */
+  coverageOf?: CoverageResolver;
+  /**
+   * ADET AĞIRLIKLI yük — DIŞARIDAN verilir, burada HESAPLANMAZ.
+   *
+   * Ölçünün tek sahibi `services/manufacturer-capacity.ts`
+   * (`loadManufacturerCapacities`). Buraya ikinci bir yükleyici yazmak, Faz
+   * 4'te boyacı tarafında ölçülen kusurun aynısını doğururdu: ekran bir ölçüyle
+   * kapatırken uç başka bir ölçüyle kabul eder.
+   *
+   * IMPORT EDİLEMEZ, ENJEKTE EDİLİR: o modül `ACTIVE_MFG_STATUSES`i BURADAN
+   * alıyor, yani buradan onu import etmek döngü kurardı. Şekil yapısaldır
+   * (`{ loadUnits }`), böylece tip düzeyinde bile bağ kurulmaz.
+   *
+   * Verilmezse ağırlıklı yük "ölçülemedi" sayılır ve sıralayıcı ham iş sayısına
+   * düşer (bkz. ShadowSignalDetail · loadUnitsMeasured).
+   */
+  capacities?: ReadonlyMap<string, { loadUnits: number }>;
+  /**
+   * "Bu iş, bu atölyenin beyan etmediği bir BÜYÜK FORMAT işi mi?"
+   *
+   * Kural burada YAZILMAZ: tek sahibi `services/manufacturer-assign.ts` ·
+   * `largeFormatPlacementBlocked` ve o kural, etiket yazamayan bugünkü
+   * yüzeyler yüzünden "değerlendirilmemiş atölye" istisnasını da taşıyor.
+   * Buraya çıplak bir `capabilityMatch` yazmak o istisnayı düşürür ve hiç
+   * etiket beyan etmemiş (bugün: hepsi) atölyelerin tamamını eler — yani
+   * gölge, karşılaştırılacak veri yerine gürültü üretirdi.
+   *
+   * IMPORT EDİLEMEZ, ENJEKTE EDİLİR: o modül `manufacturer-capacity.ts`i, o da
+   * BURAYI import ediyor — import zinciri döngü kurardı.
+   *
+   * Verilmezse sinyal KONUŞMAZ (bugünkü davranış: sıralayıcı büyük formata hiç
+   * bakmıyordu). Sessizce elemek yerine susmak doğrudur: takılmamış bir fiş,
+   * aday havuzunu daraltmak için gerekçe değildir.
+   */
+  largeFormatBlocked?: (
+    figurineSize: string | null,
+    capabilities: string[] | null
+  ) => boolean;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * SAF SKORLAYICI
+ *
+ * Boyacı ikizindeki (`painter-assignment.ts` · `scorePainters`) düzenin
+ * aynısı: saf yarı `@/lib/db`ye DOKUNMAZ, yükleyici yarısı veriyi toplayıp saf
+ * yarıyı çağırır.
+ *
+ * NEDEN AYRILDI: Faz 5'in bağlayıcı sözü "yeni sinyaller canlı skoru
+ * değiştirmesin". Bu, ancak SAYISAL olarak sınanabilir bir iddiadır — aynı
+ * girdiyi hem sinyaller kapalı hem açık geçirip çıktının bit-bit aynı kaldığını
+ * görmek gerekir. Skor matematiği veritabanı yükleyicisinin içinde kaldığı
+ * sürece o test yazılamazdı (scripts/test-scoring-v2.ts artık yazıyor).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Skorlayıcının beklediği ham atölye satırı — DB tiplerine bağlı DEĞİL. */
+export interface ManufacturerScoringRow {
+  manufacturerId: string;
+  companyName: string;
+  /** `address.il`; yoksa null. */
+  il: string | null;
+  /** `address.ilce`; yoksa null. */
+  ilce: string | null;
+  phone: string | null;
+  email: string;
+  iban: string | null;
+  capabilities: string[] | null;
+  coverageProvinces: string[] | null;
+  requiresManualTaxReview: boolean;
+  acceptingOrders: boolean;
+  /** Boyamayı kendi atölyesinde yapıyor mu (Faz 5 · paintInHouse). */
+  paintsInHouse: boolean;
+  /** `manufacturers.strikeCount` (Faz 5 · strikes). */
+  strikeCount: number;
+  maxConcurrentOrders: number;
+  /** HAM iş sayısı — bugünkü CANLI kapı ve yük skoru. */
+  currentLoad: number;
+  /** ADET ağırlıklı yük birimi — yalnız weightedLoad sinyali açıkken konuşur. */
+  loadUnits: number;
+  /** Ağırlıklı yük gerçekten ölçülebildi mi (kapasite haritası geldi mi). */
+  loadUnitsMeasured: boolean;
+  /** Eylem geçmişinden gelen güvenilirlik (0-100), cezalar UYGULANMADAN önce. */
+  reliability: number;
+  /** Zamanında teslim (0-100). */
+  onTimeDelivery: number;
+  /** QC penceresinde sayılan iş sayısı. */
+  qcJobs: number;
+  /** Bunlardan kaçı en az bir kez QC'den geri döndü. */
+  qcRejectedJobs: number;
+  /** Tezgâhındaki, bu siparişin ürün(ler)ine ait adet. */
+  sameProductUnits: number;
+}
+
+/** Skorlayıcının gördüğü sipariş bağlamı — DB tiplerine bağlı DEĞİL. */
+export interface ManufacturerScoringOrder {
+  /** Teslimat ili. */
+  city: string | null | undefined;
+  material: string;
+  /** Siparişte boyama kalemi var mı (Faz 5 · paintInHouse). */
+  needsPainting: boolean;
+  /** Faz 5 · largeFormat sinyalinin girdileri. */
+  style: string | null;
+  figurineSize: string | null;
+  declinedManufacturerIds?: readonly string[];
+  excludeManufacturerIds?: readonly string[];
+}
+
+export interface ManufacturerScoringInput {
+  order: ManufacturerScoringOrder;
+  manufacturers: readonly ManufacturerScoringRow[];
+  weights: ScoringWeights;
+  distanceModel: DistanceModel;
+  /**
+   * Bu geçişte YÜRÜRLÜKTEKİ Faz 5 sinyalleri. Verilmezse HİÇBİRİ — yani
+   * bugünkü canlı davranış. Varsayılanın "boş küme" olması bir tercih değil,
+   * fazın kararıdır: çağıran unutursa canlı skor oynamaz.
+   */
+  signals?: Phase5SignalSet;
+  /** K1'in hesaplanan kapsama planı; yoksa elle yazılmış liste kullanılır. */
+  coverageOf?: CoverageResolver;
+  /** Büyük format kuralı (K2'nin saf fonksiyonu); yoksa sinyal konuşmaz. */
+  largeFormatBlocked?: (
+    figurineSize: string | null,
+    capabilities: string[] | null
+  ) => boolean;
+}
+
+/**
+ * SAF, KARARLI ve açıklanabilir sıralama: aynı girdi → aynı çıktı, IO yok.
+ *
+ * Uygunsuzluk SIRASI kuralın kendisidir, çünkü admin'in gördüğü gerekçe bu
+ * sıradan çıkar: bu denemeye özgü dışlama → kalıcı ret → malzeme → büyük format
+ * → "sipariş almıyor" → kapasite.
+ */
+export function scoreManufacturers(
+  input: ManufacturerScoringInput
+): CandidateScore[] {
+  const { weights, distanceModel } = input;
+  const signals = input.signals ?? NO_SIGNALS;
+  const signalNames = activeSignals(signals);
+  const explain = anySignalOn(signals);
+  const declinedIds = new Set(input.order.declinedManufacturerIds ?? []);
+  const excludedIds = new Set(
+    (input.order.excludeManufacturerIds ?? []).filter((id) => !!id)
+  );
+  const orderCity = input.order.city;
+  const orderMaterial = input.order.material;
+
+  // Sipariş NE İSTİYOR: kural burada yeniden yazılmaz, `orderRequirements`
+  // çağrılır (services/capability.ts). O fonksiyon büyük formatı MİLİMETREYLE
+  // belirler, kademe ADIYLA değil — katalog yeniden adlandırıldığında sessizce
+  // bozulmayan tek ölçü budur.
+  const required = signals.largeFormat
+    ? orderRequirements({
+        style: input.order.style ?? undefined,
+        figurineSize: input.order.figurineSize ?? undefined,
+      })
+    : [];
+  const largeFormatRequired = required.includes("large_format");
+
+  const candidates = input.manufacturers.map((m): CandidateScore => {
+    const city = m.il;
+    const district = m.ilce;
+    const currentLoad = m.currentLoad;
+    const max = m.maxConcurrentOrders;
+
+    // YÜK ÖLÇÜSÜ: sinyal açıkken ağırlıklı birim, kapalıyken bugünkü ham sayı.
+    // Ölçü hem SKORU hem KAPIYI birlikte belirler — ikisini ayırmak, ekranın
+    // ucun uygulamadığı bir sınırla atölye kapatması demekti (Faz 4'te ölçülen
+    // kusur, painter-capacity.ts · KARAR 2).
+    const loadValue = signals.weightedLoad ? m.loadUnits : currentLoad;
+
+    // Ağırlığı 0 olan sinyal, profilin çıktısında da nötr kalır: v1'in
+    // değerlendirme anlık görüntüsü ortak yükleme yüzünden değişmesin.
+    const onTimeDelivery = weights.onTimeDelivery > 0 ? m.onTimeDelivery : 70;
+    const sameProductUnits = weights.batchAffinity > 0 ? m.sameProductUnits : 0;
+
+    // Etki alanı: HESAPLANAN plan takılıysa o, değilse admin'in verdiği iller +
+    // atölyenin kendi ili. İkinci bir kapsama hesabı buraya YAZILMAZ.
+    const coverageSource: CoverageSource =
+      signals.computedCoverage && input.coverageOf ? "computed" : "typed";
+    const coverage =
+      coverageSource === "computed" && input.coverageOf
+        ? [
+            ...input.coverageOf({
+              manufacturerId: m.manufacturerId,
+              il: city,
+              coverageProvinces: m.coverageProvinces,
+            }),
+          ]
+        : effectiveCoverage(m.coverageProvinces, city);
+
+    const continuous =
+      distanceModel === "continuous"
+        ? distanceScoreContinuous(orderCity, city, coverage)
+        : null;
+    const distance: {
+      score: number;
+      kind: DistanceKind | ContinuousDistanceKind;
+    } = continuous ?? distanceScore(orderCity, city, coverage);
+
+    // Güvenilirlik: QC reddi ve ceza puanı bu kalemin İÇİNDEN düşer (sahibin
+    // cümlesi "güvenilirlik düşsün"). Sinyaller kapalıyken taban aynen geçer.
+    const penalties = applyReliabilityPenalties(
+      m.reliability,
+      { jobs: m.qcJobs, rejectedJobs: m.qcRejectedJobs, strikeCount: m.strikeCount },
+      signals
+    );
+
+    const scores = {
+      distance: distance.score,
+      load: loadScore(loadValue, max),
+      reliability: penalties.score,
+      onTimeDelivery,
+      compliance:
+        (m.requiresManualTaxReview ? 60 : 100) +
+        (m.iban ? 0 : -10) +
+        (m.acceptingOrders ? 0 : -20),
+      batchAffinity: batchAffinityScore(sameProductUnits),
+    };
+    scores.compliance = Math.max(0, Math.min(100, scores.compliance));
+
+    // Kendi boyayan atölyenin artısı BONUSTUR, ağırlık değil: kapalıyken tam
+    // olarak 0'dır ve formülün şekline hiç dokunmaz (config/scoring.ts).
+    const bonus = paintInHouseBonus(signals, {
+      orderNeedsPainting: input.order.needsPainting,
+      paintsInHouse: m.paintsInHouse,
+    });
+    const totalScore = weightedTotal(scores, weights) + bonus;
+
+    // Beyanın yeterli olup olmadığına K2'nin kuralı karar verir; fiş takılı
+    // değilse sinyal susar (aday elenmez), çünkü eksik bir fiş bir gerekçe
+    // değildir.
+    const largeFormatOk = !(
+      largeFormatRequired &&
+      (input.largeFormatBlocked?.(input.order.figurineSize, m.capabilities) ?? false)
+    );
+
+    let eligible = true;
+    let ineligibleReason: string | undefined;
+    // SIRA KURALIN KENDİSİDİR: en üstte bu denemeye özgü dışlama durur.
+    // Kalıcı "reddetti" etiketinden önce gelir, çünkü iş az önce bu atölyeden
+    // GERİ ALINDIYSA admin'in gördüğü gerekçe o olmalıdır — daha eski bir
+    // reddin üstünü örtmez, yalnızca bugünkü sebebi öne alır.
+    //
+    // Material hard-filter: an order routes only to manufacturers that declare
+    // they print its material. Legacy manufacturers with no declared material
+    // tags are treated as able to print any material (manufacturerSupportsMaterial).
+    if (excludedIds.has(m.manufacturerId)) {
+      eligible = false;
+      ineligibleReason = EXCLUDED_THIS_ATTEMPT_REASON;
+    } else if (declinedIds.has(m.manufacturerId)) {
+      eligible = false;
+      ineligibleReason = "Bu siparişi daha önce reddetti / iptal etti";
+    } else if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
+      eligible = false;
+      ineligibleReason = `Malzeme uyumsuz (${MATERIAL_LABEL_TR[orderMaterial] ?? orderMaterial})`;
+      // Büyük format MALZEMEDEN SONRA sorulur: ikisi de "bu atölye bunu basabilir
+      // mi" kapısıdır ve malzeme uyuşmazlığı daha temel bir cevaptır.
+    } else if (!largeFormatOk) {
+      eligible = false;
+      ineligibleReason = "Büyük format yeteneği beyan edilmemiş";
+    } else if (!m.acceptingOrders) {
+      eligible = false;
+      ineligibleReason = "Sipariş almıyor";
+    } else if (loadValue >= max) {
+      eligible = false;
+      ineligibleReason = "Kapasite dolu";
+    }
+    // IBAN is required for payout but isn't a hard eligibility gate — pre-existing
+    // manufacturers may not have filled it in yet, and blocking them entirely freezes
+    // assignment. Surface the missing-IBAN warning via a reason chip instead and let
+    // the admin decide. (Compliance score already penalizes missing IBAN.)
+
+    const reasons: string[] = [];
+    if (distance.kind === "same_il") reasons.push("Aynı şehir");
+    else if (distance.kind === "coverage" || distance.kind === "coverage_pin")
+      reasons.push("Etki alanı");
+    else if (distance.kind === "same_region") reasons.push("Aynı bölge");
+    // Sürekli modelde "aynı bölge" diye bir kademe yok; mesafeyi km olarak
+    // yazmak admin'e kademeden daha çok şey söyler.
+    else if (continuous?.kind === "near" && continuous.units !== null)
+      reasons.push(`Yakın (~${Math.round(continuous.units * MAP_UNIT_KM)} km)`);
+    if (scores.load >= 80) reasons.push("Düşük yük");
+    else if (scores.load <= 30 && eligible) reasons.push("Yüksek yük");
+    if (scores.reliability >= 85) reasons.push("Güvenilir");
+    if (weights.onTimeDelivery > 0 && scores.onTimeDelivery >= 85)
+      reasons.push("Hızlı teslimat");
+    if (sameProductUnits > 0)
+      reasons.push(`Aynı ürünü üretiyor (${sameProductUnits} adet)`);
+    if (m.requiresManualTaxReview) reasons.push("Vergi incelemede");
+    if (!m.iban) reasons.push("⚠ IBAN eksik");
+    // Faz 5 gerekçeleri: hepsi ölçülen bir farktan doğar, tahminden değil.
+    // Sinyal kapalıyken karşılık gelen değer 0'dır, yani rozet de çıkmaz.
+    if (bonus > 0) reasons.push("Kendi boyuyor");
+    if (penalties.qcPenalty > 0) reasons.push(`QC reddi −${penalties.qcPenalty}`);
+    if (penalties.strikePenalty > 0)
+      reasons.push(`Ceza puanı −${penalties.strikePenalty}`);
+    if (signals.weightedLoad) reasons.push(`Ağırlıklı yük ${m.loadUnits}/${max} birim`);
+
+    return {
+      manufacturerId: m.manufacturerId,
+      companyName: m.companyName,
+      city,
+      district,
+      phone: m.phone,
+      email: m.email,
+      iban: m.iban,
+      currentLoad,
+      maxConcurrentOrders: max,
+      acceptingOrders: m.acceptingOrders,
+      scores,
+      sameProductUnits,
+      totalScore: Math.round(totalScore),
+      reasons,
+      eligible,
+      ineligibleReason,
+      // Açıklama alanı YALNIZ sinyaller açıkken eklenir: kapalıyken aday nesnesi
+      // bugünküyle alan alan aynı kalsın (testin derin eşitlik iddiası budur).
+      ...(explain
+        ? {
+            shadow: {
+              signals: signalNames,
+              loadUnits: m.loadUnits,
+              loadUnitsMeasured: m.loadUnitsMeasured,
+              bonus,
+              qcPenalty: penalties.qcPenalty,
+              strikePenalty: penalties.strikePenalty,
+              coverageSource,
+              largeFormatRequired,
+              largeFormatOk,
+            } satisfies ShadowSignalDetail,
+          }
+        : {}),
+    };
+  });
+
+  // Sort eligible first (by score desc), ineligible at bottom.
+  candidates.sort((a, b) => {
+    if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+    return b.totalScore - a.totalScore;
+  });
+  return candidates;
 }
 
 /**
@@ -638,13 +1083,57 @@ export async function rankManufacturersForProfiles(
   profiles: readonly ScoringProfile[],
   opts?: RankOptions
 ): Promise<Map<ScoringProfile, CandidateScore[]>> {
+  return (await rankManufacturersDetailed(orderId, profiles, opts)).byProfile;
+}
+
+/** `rankManufacturersDetailed`in çıktısı: canlı profiller + Faz 5 gölgesi. */
+export interface RankedProfiles {
+  /** İstenen her profilin kendi sıralaması (bugünkü davranış). */
+  byProfile: Map<ScoringProfile, CandidateScore[]>;
+  /**
+   * Faz 5 gölge sıralaması; istenmediyse null.
+   *
+   * HİÇBİR İŞİ YERLEŞTİRMEZ. Çağıran bunu yalnız kaydeder ve ekranda canlının
+   * yanına koyar (ranker-rollout = B).
+   */
+  phase5: CandidateScore[] | null;
+  /** Gölgede yürürlükte olan sinyaller — kayda ve ekrana damgalanır. */
+  phase5Signals: Phase5SignalSet;
+}
+
+/**
+ * Sıralamanın TAM hâli: istenen profiller + (istenirse) Faz 5 gölgesi, hepsi
+ * TEK bir veri yüklemesinden.
+ *
+ * `rankManufacturersForProfiles` bunun ince bir sarmalayıcısıdır; bugünkü
+ * çağıranların hiçbiri değişmez.
+ */
+export async function rankManufacturersDetailed(
+  orderId: string,
+  profiles: readonly ScoringProfile[],
+  opts?: RankOptions
+): Promise<RankedProfiles> {
   const wanted = [...new Set(profiles)];
-  const out = new Map<ScoringProfile, CandidateScore[]>();
-  if (wanted.length === 0) return out;
-  const allEmpty = () => {
-    for (const p of wanted) out.set(p, []);
-    return out;
+  const byProfile = new Map<ScoringProfile, CandidateScore[]>();
+
+  // CANLI sinyaller: varsayılanda BOŞ küme, yani bugünkü skor. Bir sinyalin
+  // canlıya geçmesi ancak kendi *_LIVE anahtarının açıkça açılmasıyla olur
+  // (config/scoring.ts) — ve o, partner gelirini oynatan bilinçli bir karardır.
+  const liveSignals = signalsForProfile("live");
+  // GÖLGE sinyalleri yalnız gölge geçişi istendiğinde okunur; canlı sıralamaya
+  // hiçbir koşulda verilmez.
+  const shadowSignals = opts?.phase5Shadow ? signalsForProfile("shadow") : NO_SIGNALS;
+  const empty = (): RankedProfiles => {
+    for (const p of wanted) byProfile.set(p, []);
+    return {
+      byProfile,
+      phase5: opts?.phase5Shadow ? [] : null,
+      phase5Signals: shadowSignals,
+    };
   };
+  if (wanted.length === 0) {
+    return { byProfile, phase5: null, phase5Signals: shadowSignals };
+  }
 
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
@@ -653,9 +1142,13 @@ export async function rankManufacturersForProfiles(
       material: true,
       declinedManufacturerIds: true,
       productId: true,
+      // Faz 5 sinyallerinin sipariş tarafındaki girdileri.
+      needsPainting: true,
+      style: true,
+      figurineSize: true,
     },
   });
-  if (!order) return allEmpty();
+  if (!order) return empty();
 
   // Manufacturers who already declined or cancelled-after-accept for THIS order
   // must not be re-offered it — otherwise the admin candidate list (and any
@@ -679,8 +1172,15 @@ export async function rankManufacturersForProfiles(
   // Bir sinyal, onu KULLANAN en az bir profil varsa yüklenir. Kullanmayan
   // profilin sonucunda değeri yine nötr yazılır (aşağıda), böylece ortak
   // yükleme tek bir profilin çıktısını bile değiştirmez.
-  const needsOtd = wanted.some((p) => weightsOf(p).onTimeDelivery > 0);
+  const needsOtd =
+    wanted.some((p) => weightsOf(p).onTimeDelivery > 0) ||
+    liveSignals.onTime ||
+    shadowSignals.onTime;
   const needsBatch = wanted.some((p) => weightsOf(p).batchAffinity > 0);
+  // Faz 5 yüklemeleri de aynı kurala tabi: sinyali KULLANAN bir taraf yoksa
+  // sorgu hiç açılmaz. Kapalı bir sinyal sorguya mal olmamalı.
+  const needsWeightedLoad = liveSignals.weightedLoad || shadowSignals.weightedLoad;
+  const needsQc = liveSignals.qcRejections || shadowSignals.qcRejections;
 
   const shipping = order.shippingAddress as TurkishAddress | null;
   const orderCity = shipping?.il;
@@ -690,7 +1190,7 @@ export async function rankManufacturersForProfiles(
     where: inArray(manufacturers.status, ["active"]),
   });
 
-  if (mfgs.length === 0) return allEmpty();
+  if (mfgs.length === 0) return empty();
 
   // Bulk-compute current load for all active manufacturers.
   const loads = await db
@@ -699,18 +1199,17 @@ export async function rankManufacturersForProfiles(
       load: sql<number>`count(*)::int`,
     })
     .from(orders)
-    .where(
-      and(
-        inArray(orders.manufacturerStatus, [...ACTIVE_MFG_STATUSES]),
-        orderStillOnManufacturerBench(),
-        sql`${orders.manufacturerId} IS NOT NULL`
-      )
-    )
+    .where(manufacturerBenchFilter())
     .groupBy(orders.manufacturerId);
   const loadMap = new Map<string, number>();
   for (const l of loads) {
     if (l.manufacturerId) loadMap.set(l.manufacturerId, l.load);
   }
+
+  // ADET ağırlıklı yük (capacity-unit = C) — TEK ÖLÇÜDEN, enjekte edilerek.
+  // Canlı ham sayımın YANINDA durur, onun yerine geçmez: hangisinin kapı
+  // olduğunu sinyal belirler (bkz. RankOptions · capacities).
+  const capacities = needsWeightedLoad ? opts?.capacities : undefined;
 
   // Batching signal. Skipped entirely when no requested profile weights it,
   // mirroring the OTD skip below — a disabled signal must not cost queries.
@@ -720,146 +1219,116 @@ export async function rankManufacturersForProfiles(
       )
     : new Map<string, number>();
 
-  // Atölye başına geçmiş sinyalleri: TÜM profiller için bir kez.
+  // Atölye başına geçmiş sinyalleri: TÜM profiller VE gölge için bir kez.
   const history = new Map<
     string,
-    { reliability: number; onTimeDelivery: number }
+    {
+      reliability: number;
+      onTimeDelivery: number;
+      qcJobs: number;
+      qcRejectedJobs: number;
+    }
   >();
   await Promise.all(
     mfgs.map(async (m) => {
-      const [reliability, onTimeDelivery] = await Promise.all([
+      const [reliability, onTimeDelivery, qc] = await Promise.all([
         reliabilityScoreFor(m.id),
         // Hiçbir profil OTD'ye ağırlık vermiyorsa sorguyu hiç açma.
         needsOtd ? onTimeDeliveryScoreFor(m.id) : Promise.resolve(70),
+        // QC geçmişi de aynı kurala tabi: sinyali kullanan taraf yoksa sorgu yok.
+        needsQc ? qcRejectionHistoryFor(m.id) : Promise.resolve({ ...NEUTRAL_QC }),
       ]);
-      history.set(m.id, { reliability, onTimeDelivery });
+      history.set(m.id, {
+        reliability,
+        onTimeDelivery,
+        qcJobs: qc.jobs,
+        qcRejectedJobs: qc.rejectedJobs,
+      });
     })
   );
 
+  // Atölye satırları TEK KEZ kurulur; her profil ve gölge AYNI satırları
+  // puanlar. Skor matematiği artık burada DEĞİL (saf `scoreManufacturers`):
+  // "yeni sinyaller canlı skoru değiştirmedi" iddiası ancak saf bir fonksiyon
+  // üzerinde, aynı girdiyle iki kez koşularak sayısal olarak sınanabilir.
+  const rows: ManufacturerScoringRow[] = mfgs.map((m) => {
+    const addr = m.address as TurkishAddress | null;
+    const h = history.get(m.id);
+    return {
+      manufacturerId: m.id,
+      companyName: m.companyName,
+      il: addr?.il ?? null,
+      ilce: addr?.ilce ?? null,
+      phone: m.phone,
+      email: m.email,
+      iban: m.iban,
+      capabilities: m.capabilities,
+      coverageProvinces: m.coverageProvinces,
+      requiresManualTaxReview: m.requiresManualTaxReview,
+      acceptingOrders: m.acceptingOrders,
+      paintsInHouse: m.paintsInHouse,
+      strikeCount: m.strikeCount,
+      maxConcurrentOrders: m.maxConcurrentOrders,
+      currentLoad: loadMap.get(m.id) ?? 0,
+      // Ölçülemediyse ham sayıya düşülür: "0 birim" demek, dolu bir atölyeyi
+      // boş göstermek olurdu.
+      loadUnits: capacities?.get(m.id)?.loadUnits ?? loadMap.get(m.id) ?? 0,
+      loadUnitsMeasured: capacities?.has(m.id) ?? false,
+      reliability: h?.reliability ?? 70,
+      onTimeDelivery: h?.onTimeDelivery ?? 70,
+      qcJobs: h?.qcJobs ?? 0,
+      qcRejectedJobs: h?.qcRejectedJobs ?? 0,
+      sameProductUnits: batchUnits.get(m.id) ?? 0,
+    };
+  });
+
+  const scoringOrder: ManufacturerScoringOrder = {
+    city: orderCity,
+    material: orderMaterial,
+    needsPainting: order.needsPainting,
+    style: order.style,
+    figurineSize: order.figurineSize,
+    declinedManufacturerIds: [...declinedIds],
+    excludeManufacturerIds: [...excludedIds],
+  };
+
   for (const profile of wanted) {
-    const weights = weightsOf(profile);
-    // Mesafe modeli profile bağlıdır. Canlı profiller (v1/v2) kademeli skoru
-    // kullanmaya devam eder — bu fazda canlı atamanın KİMİ seçtiği değişmemeli;
-    // yalnız v3 gölgesi sürekli mesafeyle puanlar.
-    const distanceModel = getDistanceModel(profile);
-
-    const candidates = mfgs.map((m): CandidateScore => {
-      const addr = m.address as TurkishAddress | null;
-      const city = addr?.il ?? null;
-      const district = addr?.ilce ?? null;
-      const currentLoad = loadMap.get(m.id) ?? 0;
-      const max = m.maxConcurrentOrders;
-
-      const signals = history.get(m.id) ?? { reliability: 70, onTimeDelivery: 70 };
-      // Ağırlığı 0 olan sinyal, profilin çıktısında da nötr kalır: v1'in
-      // değerlendirme anlık görüntüsü ortak yükleme yüzünden değişmesin.
-      const onTimeDelivery =
-        weights.onTimeDelivery > 0 ? signals.onTimeDelivery : 70;
-      const sameProductUnits =
-        weights.batchAffinity > 0 ? batchUnits.get(m.id) ?? 0 : 0;
-      // Etkin kapsama = admin'in verdiği iller + atölyenin kendi ili. Public
-      // harita ile atama aynı fonksiyondan beslenir, ikisi ayrışamaz.
-      const coverage = effectiveCoverage(m.coverageProvinces, city);
-      const continuous =
-        distanceModel === "continuous"
-          ? distanceScoreContinuous(orderCity, city, coverage)
-          : null;
-      const distance: {
-        score: number;
-        kind: DistanceKind | ContinuousDistanceKind;
-      } = continuous ?? distanceScore(orderCity, city, coverage);
-      const scores = {
-        distance: distance.score,
-        load: loadScore(currentLoad, max),
-        reliability: signals.reliability,
-        onTimeDelivery,
-        compliance:
-          (m.requiresManualTaxReview ? 60 : 100) +
-          (m.iban ? 0 : -10) +
-          (m.acceptingOrders ? 0 : -20),
-        batchAffinity: batchAffinityScore(sameProductUnits),
-      };
-      scores.compliance = Math.max(0, Math.min(100, scores.compliance));
-
-      const totalScore = weightedTotal(scores, weights);
-
-      let eligible = true;
-      let ineligibleReason: string | undefined;
-      // SIRA KURALIN KENDİSİDİR: en üstte bu denemeye özgü dışlama durur.
-      // Kalıcı "reddetti" etiketinden önce gelir, çünkü iş az önce bu atölyeden
-      // GERİ ALINDIYSA admin'in gördüğü gerekçe o olmalıdır — daha eski bir
-      // reddin üstünü örtmez, yalnızca bugünkü sebebi öne alır.
-      //
-      // Material hard-filter: an order routes only to manufacturers that declare
-      // they print its material. Legacy manufacturers with no declared material
-      // tags are treated as able to print any material (manufacturerSupportsMaterial).
-      if (excludedIds.has(m.id)) {
-        eligible = false;
-        ineligibleReason = EXCLUDED_THIS_ATTEMPT_REASON;
-      } else if (declinedIds.has(m.id)) {
-        eligible = false;
-        ineligibleReason = "Bu siparişi daha önce reddetti / iptal etti";
-      } else if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
-        eligible = false;
-        ineligibleReason = `Malzeme uyumsuz (${MATERIAL_LABEL_TR[orderMaterial] ?? orderMaterial})`;
-      } else if (!m.acceptingOrders) {
-        eligible = false;
-        ineligibleReason = "Sipariş almıyor";
-      } else if (currentLoad >= max) {
-        eligible = false;
-        ineligibleReason = "Kapasite dolu";
-      }
-      // IBAN is required for payout but isn't a hard eligibility gate — pre-existing
-      // manufacturers may not have filled it in yet, and blocking them entirely freezes
-      // assignment. Surface the missing-IBAN warning via a reason chip instead and let
-      // the admin decide. (Compliance score already penalizes missing IBAN.)
-
-      const reasons: string[] = [];
-      if (distance.kind === "same_il") reasons.push("Aynı şehir");
-      else if (distance.kind === "coverage" || distance.kind === "coverage_pin")
-        reasons.push("Etki alanı");
-      else if (distance.kind === "same_region") reasons.push("Aynı bölge");
-      // Sürekli modelde "aynı bölge" diye bir kademe yok; mesafeyi km olarak
-      // yazmak admin'e kademeden daha çok şey söyler.
-      else if (continuous?.kind === "near" && continuous.units !== null)
-        reasons.push(`Yakın (~${Math.round(continuous.units * MAP_UNIT_KM)} km)`);
-      if (scores.load >= 80) reasons.push("Düşük yük");
-      else if (scores.load <= 30 && eligible) reasons.push("Yüksek yük");
-      if (scores.reliability >= 85) reasons.push("Güvenilir");
-      if (weights.onTimeDelivery > 0 && scores.onTimeDelivery >= 85)
-        reasons.push("Hızlı teslimat");
-      if (sameProductUnits > 0)
-        reasons.push(`Aynı ürünü üretiyor (${sameProductUnits} adet)`);
-      if (m.requiresManualTaxReview) reasons.push("Vergi incelemede");
-      if (!m.iban) reasons.push("⚠ IBAN eksik");
-
-      return {
-        manufacturerId: m.id,
-        companyName: m.companyName,
-        city,
-        district,
-        phone: m.phone,
-        email: m.email,
-        iban: m.iban,
-        currentLoad,
-        maxConcurrentOrders: max,
-        acceptingOrders: m.acceptingOrders,
-        scores,
-        sameProductUnits,
-        totalScore: Math.round(totalScore),
-        reasons,
-        eligible,
-        ineligibleReason,
-      };
-    });
-
-    // Sort eligible first (by score desc), ineligible at bottom.
-    candidates.sort((a, b) => {
-      if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
-      return b.totalScore - a.totalScore;
-    });
-    out.set(profile, candidates);
+    byProfile.set(
+      profile,
+      scoreManufacturers({
+        order: scoringOrder,
+        manufacturers: rows,
+        weights: weightsOf(profile),
+        // Mesafe modeli profile bağlıdır. Canlı profiller (v1/v2) kademeli
+        // skoru kullanmaya devam eder; yalnız v3 gölgesi sürekli mesafeyle
+        // puanlar.
+        distanceModel: getDistanceModel(profile),
+        // CANLI sinyaller — varsayılanda BOŞ küme, yani bugünkü skor.
+        signals: liveSignals,
+        coverageOf: opts?.coverageOf,
+        largeFormatBlocked: opts?.largeFormatBlocked,
+      })
+    );
   }
 
-  return out;
+  // FAZ 5 GÖLGESİ: aynı satırlar, yeni sinyaller, HİÇBİR yerleştirme.
+  //
+  // Ağırlık TABANI kararı veren profilin ağırlıklarıdır (`wanted[0]` —
+  // sarmalayıcı otoriteyi hep başa koyar). `phase5Weights` yalnız `onTime`
+  // sinyali açıkken yeni ağırlık kümesine geçer, kapalıyken canlının
+  // ağırlıklarını aynen kullanır: böylece gölgede çıkan fark TEK bir sebebe
+  // atfedilebilir kalır (iki değişkenli bir deneyin sonucu atfedilemez).
+  const phase5 = opts?.phase5Shadow
+    ? scoreManufacturers({
+        order: scoringOrder,
+        manufacturers: rows,
+        weights: phase5Weights(shadowSignals, weightsOf(wanted[0])),
+        distanceModel: PHASE5_DISTANCE_MODEL,
+        signals: shadowSignals,
+        coverageOf: opts?.coverageOf,
+        largeFormatBlocked: opts?.largeFormatBlocked,
+      })
+    : null;
+
+  return { byProfile, phase5, phase5Signals: shadowSignals };
 }

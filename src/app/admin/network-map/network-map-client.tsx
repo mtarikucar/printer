@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { PROVINCES } from "@/lib/data/turkey-address";
 import {
   PROVINCES_BY_REGION,
@@ -19,6 +20,13 @@ import { TurkeyMapSvg } from "@/components/turkey-map/turkey-map-svg";
  * Haritaya tıklamak SİPARİŞ YÖNLENDİRMESİNİ değiştirir (kapsanan il mesafe
  * skorunda 85 alır), bu yüzden sonucun her zaman ekranda yazılı olması gerekir
  * — admin burada pazarlama rozeti değil operasyonel karar veriyor.
+ *
+ * BU EKRANIN KAPSAMI FAZ 5'TE DARALDI. Elle yazılan liste artık YALNIZ canlı
+ * atama sıralamasını besliyor; anasayfadaki public harita hesaplanan planı
+ * (`/admin/coverage`) okuyor. İki ekran aynı konuda konuştuğu için hangisinin
+ * hangi yüzeyi beslediği ekran metninde AÇIKÇA yazılı: aksi hâlde yönetici aynı
+ * panelde iki farklı etki alanı hikâyesi okur ve hangisinin geçerli olduğunu
+ * çıkaramaz (ölçülen kusur buydu).
  */
 
 const STATUS_BADGE: Record<string, string> = {
@@ -217,10 +225,18 @@ export function NetworkMapClient({
     <div className="p-4 sm:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Üretim ağı haritası</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Her üreticinin sorumlu olduğu illeri harita üzerinden belirle. Seçilen iller
-          anasayfadaki public haritada görünür ve o illerden gelen siparişlerde bu atölye
-          atama sıralamasında öne çıkar.
+        <p className="mt-1 max-w-3xl text-sm text-gray-500">
+          Her üreticinin sorumlu olduğu illeri harita üzerinden belirle. Bu liste{" "}
+          <strong>canlı atama sıralamasını</strong> besler: seçilen illerden gelen
+          siparişlerde bu atölye öne çıkar (mesafe skoru 85).{" "}
+          <strong>Anasayfadaki public haritayı artık bu liste beslemiyor</strong> — orası{" "}
+          <Link
+            href="/admin/coverage"
+            className="font-medium text-cyan-700 underline underline-offset-2"
+          >
+            hesaplanan etki alanı
+          </Link>{" "}
+          planını okur; pin ve dışlama oradan verilir.
         </p>
       </div>
 
@@ -434,6 +450,7 @@ export function NetworkMapClient({
                     </p>
                     <p className="mt-1 text-xs text-gray-500">
                       Bu iller için atama sıralamasında öne çıkar (mesafe skoru 85).
+                      Public harita bu listeyi okumaz; orası hesaplanan planı gösterir.
                     </p>
                     {draft.length > WIDE_COVERAGE_WARNING && (
                       <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800">

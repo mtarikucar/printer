@@ -193,6 +193,16 @@ export function AdminSidebar({
           badge: 0,
         },
         {
+          // Faz 5'in ANA ekranı: hesaplanan plan, pin ve dışlama buradan
+          // verilir. Menüde yoktu, yani yalnız URL yazarak açılabiliyordu.
+          // Üstündeki elle-seçim haritasının hemen ardında duruyor: ikisi aynı
+          // konunun iki yüzü ve hangisinin neyi beslediği ekranlarda yazılı.
+          href: "/admin/coverage",
+          label: "Etki alanı planı",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z" />,
+          badge: 0,
+        },
+        {
           href: "/admin/categories",
           label: "Kategoriler",
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />,

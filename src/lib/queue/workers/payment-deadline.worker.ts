@@ -1,5 +1,5 @@
 import { Worker, Job } from "bullmq";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getRedisConnection } from "../connection";
 import { getEmailQueue, type PaymentDeadlineJobData } from "../queues";
 import { db } from "../../db";
@@ -12,7 +12,32 @@ function localeOf(value: string | null | undefined): Locale {
   return value === "en" ? "en" : "tr";
 }
 
-async function processJob(job: Job<PaymentDeadlineJobData>) {
+/**
+ * Serialize deadline extension with the final expiry decision. A plain reread
+ * still races: extension could commit immediately before expireDraft's lock.
+ * Do NOT lock the draft row in this outer transaction: expireDraft locks it on
+ * another connection. Admin extension takes this same advisory lock first.
+ */
+export async function expireDraftAtCurrentDeadline(
+  draftId: string,
+  expire: (id: string) => Promise<void> = expireDraft,
+  expectedDeadline?: string,
+): Promise<"processed" | "extended" | "closed" | "superseded"> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`draft-deadline:${draftId}`}, 0))`);
+    const draft = await tx.query.orderDrafts.findFirst({ where: eq(orderDrafts.id, draftId) });
+    if (!draft || !["pending", "awaiting_review"].includes(draft.status) || draft.promotedOrderId) return "closed";
+    // An extension job may have been queued before its DB transaction failed.
+    // Only the precise committed deadline can authorize that job to expire.
+    if (expectedDeadline && draft.bankTransferDeadline?.toISOString() !== expectedDeadline) return "superseded";
+    if (draft.bankTransferDeadline && draft.bankTransferDeadline.getTime() > Date.now()) return "extended";
+    await expire(draftId);
+    return "processed";
+  });
+}
+
+async function processJob(job: Job<PaymentDeadlineJobData & { expectedDeadline?: string }>) {
   const { draftId, reference, type } = job.data;
 
   const draft = await db.query.orderDrafts.findFirst({
@@ -84,8 +109,8 @@ async function processJob(job: Job<PaymentDeadlineJobData>) {
   // force-expire route calls expireDraft directly too, and a seat released in
   // only one of the two callers would leak on the other.
   if (type === "havale_expire" || type === "card_expire") {
-    await expireDraft(draftId);
-    job.log(`Draft ${reference} expired and refunded`);
+    const result = await expireDraftAtCurrentDeadline(draftId, expireDraft, job.data.expectedDeadline);
+    job.log(`Draft ${reference}: expiry ${result}`);
   }
 }
 

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   orders,
@@ -151,6 +151,9 @@ function painterHandoffConditions(orderId: string) {
   return [
     eq(orders.id, orderId),
     eq(orders.manufacturerStatus, "qc_approved"),
+    // Sıralama sırasında kaldırılmış boyama için yeni bir iş yazılmaz.
+    eq(orders.needsPainting, true),
+    gt(orders.paintingPriceKurus, 0),
     notRefundedGuard(),
     sql`(${orders.painterStatus} IS NULL OR ${orders.painterStatus} = 'unassigned')`,
   ];
@@ -930,21 +933,28 @@ export async function assignPainterAutomatically(
     // kendi devri girdi. Sebebi siparişin GÜNCEL hâlinden okuruz; uydurmayız.
     const now = await db.query.orders.findFirst({
       where: eq(orders.id, orderId),
-      columns: { paymentStatus: true, painterId: true },
+      columns: { paymentStatus: true, painterId: true, needsPainting: true, paintingPriceKurus: true },
     });
     const lost: PainterAssignOutcomeReason =
       now?.paymentStatus === "refunded"
         ? "refunded"
-        : now?.painterId
-          ? "already_assigned"
-          : "no_candidate";
-    await announceUnplacedPainter({
-      orderId,
-      orderNumber,
-      reason: lost,
-      painterDetached,
-      enabled: notifyAdmin,
-    });
+        : !now || !now.needsPainting || now.paintingPriceKurus <= 0
+          ? "not_needed"
+          : now.painterId
+            ? "already_assigned"
+            : "no_candidate";
+    // Kaybedilen yazma yeni bir karar değildir; para veya karar kaydı yok.
+    // Ama hâlâ boyacı bekleyen iş admin'e görünmeli. İade, kaldırılan boyama
+    // ve başka bir boyacıya atanmış iş için yeni bildirim gerekmez.
+    if (lost === "no_candidate") {
+      await announceUnplacedPainter({
+        orderId,
+        orderNumber,
+        reason: lost,
+        painterDetached,
+        enabled: notifyAdmin,
+      });
+    }
     return unplacedResult(lost);
   } catch (err) {
     // Çağıran kendi işini commit etmiştir; burada fırlatmak ona yalan söylerdi.

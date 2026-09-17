@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { DraftManagement, type DraftManagementProps } from "./management";
 import { formatPhoneDisplay } from "@/lib/phone";
 
 interface DraftView {
   id: string;
+  commercialFingerprint: string;
   reference: string;
   status: string;
   paymentMethod: string;
@@ -45,17 +47,17 @@ function formatKurus(kurus: number): string {
   })}`;
 }
 
-export function DraftReviewClient({ draft }: { draft: DraftView }) {
+export function DraftReviewClient({ draft, management }: { draft: DraftView; management: DraftManagementProps }) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [managementMessage, setManagementMessage] = useState<string | null>(null);
 
   const isHavale = draft.paymentMethod === "bank_transfer";
   const isCard = draft.paymentMethod === "card";
   const canMarkPaid =
     isHavale && (draft.status === "pending" || draft.status === "awaiting_review");
-  const canExpire = draft.status === "pending" || draft.status === "awaiting_review";
   const canVerifyPaytr =
     isCard &&
     !!draft.paytrMerchantOid &&
@@ -99,14 +101,14 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
   };
 
   const markPaid = async () => {
-    if (!confirm("Bu havale ödemesini onaylıyor musunuz? Sipariş hemen üretime alınacak.")) return;
+    if (!confirm(`${formatKurus(draft.finalAmountKurus)} havale tahsilatını doğruladınız mı? Onaydan sonra sipariş üretime alınacak.`)) return;
     setError(null);
     setLoading("mark-paid");
     try {
       const res = await fetch(`/api/admin/orders/${draft.id}/mark-havale-paid`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes }),
+        body: JSON.stringify({ notes, commercialFingerprint: draft.commercialFingerprint }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -114,25 +116,6 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
         return;
       }
       router.push(`/admin/orders/${data.orderId}`);
-    } catch {
-      setError("Bir hata oluştu");
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const expire = async () => {
-    if (!confirm("Bu taslağı süresi dolmuş olarak işaretliyor musunuz? Hediye kartı varsa iade edilir.")) return;
-    setError(null);
-    setLoading("expire");
-    try {
-      const res = await fetch(`/api/admin/drafts/${draft.id}/expire`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "İşlem başarısız");
-        return;
-      }
-      router.push("/admin/drafts");
     } catch {
       setError("Bir hata oluştu");
     } finally {
@@ -343,7 +326,10 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
         </section>
       )}
 
-      {(canMarkPaid || canExpire) && (
+      {managementMessage && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{managementMessage}</p>}
+      <DraftManagement key={management.updatedAt} {...management} onSuccess={setManagementMessage} />
+
+      {canMarkPaid && (
         <section className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-4">
             İşlem
@@ -368,15 +354,7 @@ export function DraftReviewClient({ draft }: { draft: DraftView }) {
                 {loading === "mark-paid" ? "Onaylanıyor..." : "Havaleyi onayla → sipariş oluştur"}
               </button>
             )}
-            {canExpire && (
-              <button
-                onClick={expire}
-                disabled={loading !== null}
-                className="px-5 py-2 bg-red-100 text-red-700 rounded-xl text-sm font-semibold hover:bg-red-200 disabled:bg-gray-100"
-              >
-                {loading === "expire" ? "İşleniyor..." : "Süresi dolmuş işaretle"}
-              </button>
-            )}
+
           </div>
         </section>
       )}

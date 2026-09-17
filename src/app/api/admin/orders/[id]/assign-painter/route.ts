@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
@@ -93,7 +93,7 @@ export async function POST(
     if (isRefunded(order)) {
       return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
     }
-    if (!order.needsPainting) {
+    if (!order.needsPainting || order.paintingPriceKurus <= 0) {
       return NextResponse.json(
         { error: "Bu sipariş için boyama seçilmemiş." },
         { status: 400 }
@@ -254,6 +254,9 @@ export async function POST(
           and(
             eq(orders.id, id),
             eq(orders.manufacturerStatus, "qc_approved"),
+            // Bölüşüm ön okumadan sonra değişebilir: kaldırılan boyama devredilmez.
+            eq(orders.needsPainting, true),
+            gt(orders.paintingPriceKurus, 0),
             // Re-checked here so a refund landing after the read above still wins.
             notRefundedGuard(),
             sql`(${orders.painterStatus} IS NULL OR ${orders.painterStatus} = 'unassigned')`

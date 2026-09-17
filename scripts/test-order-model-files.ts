@@ -276,11 +276,19 @@ check("ZIP: 4 GiB'ı aşan tek dosya ya da toplam reddedilir, altı geçer", () 
 });
 
 // ─── Route nöbetçileri ──────────────────────────────────────────────────────
-check("atölye siparişine boyama eklenemez: route (kontrol + atomik WHERE) ve ekran", () => {
+check("boyama ekleme ortak kilitli bölüşüm servisine devreder; ekran aynı kapıyı kullanır", () => {
   const route = read("src/app/api/admin/orders/[id]/add-painting/route.ts");
-  assert.match(route, /if \(order\.workshopSessionId\)/);
-  assert.match(route, /isNull\(orders\.workshopSessionId\)/);
-  assert.match(read("src/app/admin/orders/[id]/page.tsx"), /order\.workshopSessionId\s*\?\s*"Atölye/);
+  assert.match(route, /await editOrderMoneySplit\(/);
+  assert.doesNotMatch(route, /\.update\(orders\)|\.insert\(adminActions\)/);
+  assert.match(route, /expectedProductionKurus:\s*productionBefore/);
+  assert.match(route, /expectedPaintingKurus:\s*order\.paintingPriceKurus/);
+  assert.match(route, /reason:\s*parsed\.data\.reason/);
+  const page = read("src/app/admin/orders/[id]/page.tsx");
+  assert.match(page, /moneySplitEditBlock\(/);
+  assert.doesNotMatch(page, /ne\(manufacturerEarnings\.status, "reversed"\)/);
+  const client = read("src/app/admin/orders/[id]/client.tsx");
+  assert.match(client, /reason:\s*addPaintingReason/);
+  assert.match(client, /addPaintingReason\.trim\(\)\.length < 10/);
 });
 
 check("boyama bildirimi 'kendim boyarım' üreticisini ayırt eder ve rakamı tek yerden türetir", () => {

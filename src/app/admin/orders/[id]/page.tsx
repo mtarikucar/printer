@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
-import { and, eq, desc, inArray, asc, ne } from "drizzle-orm";
+import { eq, desc, inArray, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, orderPhotos, previews, orderModelRevisions, orderModelFiles, orderModelApprovals, manufacturerAssignmentEvaluations, painterAssignmentEvaluations, manufacturerEarnings, generationAttempts, meshReports, adminActions, adminMessages, manufacturers, manufacturerActions, qcPhotos, qcReviews, painters, painterActions, painterEarnings, painterQcPhotos, painterQcReviews } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
@@ -40,6 +40,7 @@ import { partnerHoldingOrder } from "@/lib/services/on-behalf";
 import { modelApprovalUrl } from "@/lib/services/model-approval";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { buildOrderMoneyBreakdown } from "@/lib/services/order-money";
+import { moneySplitEditBlock } from "@/lib/config/order-money-edit";
 import {
   gateMode,
   requiresOverride,
@@ -396,51 +397,36 @@ export default async function AdminOrderDetailPage({
     filesByRevision.set(f.revision, list);
   }
 
-  // ─── Can the admin still ADD a painting line to this order? ───────────────
-  // Mirrors /api/admin/orders/[id]/add-painting exactly (the route is the
-  // authority; this only decides what the card shows and why). The painting
-  // share is carved out of the production share, so it is only possible before
-  // the manufacturer's earning has accrued. A refunded order is closed for new
-  // work, so it is refused first.
-  // Bu okuma GÖSTERİM DEĞİL, bir KAPININ girdisi: hakediş tahakkuk etmişse
-  // boyama payı artık üretim payından ayrılamaz. Okunamadığında kapı AÇIK
-  // varsayılamaz ("kayıt yok" ile "okuyamadım" aynı şey değildir), bu yüzden
-  // arıza ayrı bir bayrağa düşer ve aşağıda GEREKÇE olarak yazılır: kapı kapalı
-  // tarafta kalır, sebebini de ekran söyler.
-  const manufacturerEarningRead = order.needsPainting
-    ? { accrued: false }
+  // Boyama ekleme de bölüşüm düzenlemesidir: geri çevrilmiş kayıtlar dâhil
+  // iki partnerin geçmiş hakedişi aynı kapıyla korunur. Okuma arızası kapatır.
+  const addPaintingEarningRead = order.needsPainting
+    ? { manufacturerEarningExists: false, painterEarningExists: false }
     : await displayRead(
-        "üretici hakediş kaydı",
+        "bölüşüm hakediş kayıtları",
         order.id,
-        db.query.manufacturerEarnings
-          .findFirst({
-            where: and(
-              eq(manufacturerEarnings.orderId, order.id),
-              ne(manufacturerEarnings.status, "reversed")
-            ),
-            columns: { id: true },
-          })
-          .then((row) => ({ accrued: !!row }))
+        Promise.all([
+          db.query.manufacturerEarnings.findFirst({
+            where: eq(manufacturerEarnings.orderId, order.id), columns: { id: true },
+          }),
+          db.query.painterEarnings.findFirst({
+            where: eq(painterEarnings.orderId, order.id), columns: { id: true },
+          }),
+        ]).then(([manufacturer, painter]) => ({
+          manufacturerEarningExists: !!manufacturer,
+          painterEarningExists: !!painter,
+        }))
       );
-  const manufacturerEarningUnreadable = manufacturerEarningRead === null;
-  const manufacturerEarningAccrued = manufacturerEarningRead?.accrued ?? false;
+  const addPaintingEarningUnreadable = addPaintingEarningRead === null;
   const addPaintingBlockedReason: string | null = order.needsPainting
     ? null
-    : isRefunded(order)
-      ? "Sipariş iade edildi; iade edilen siparişe boyama eklenemez."
-    : order.workshopSessionId
-      ? "Atölye siparişine boyama eklenemez: atölye partisi mekâna toplu teslim edilir, boyacı hattına girmez."
-      : order.painterId
-      ? "Sipariş zaten bir boyacıda."
-      : order.shippedAt || ["shipped", "delivered", "rejected"].includes(order.status)
-        ? "Sipariş kargolanmış ya da kapanmış; boyama eklenemez."
-        : manufacturerEarningUnreadable
-          ? "Üreticinin hakediş kaydı şu anda okunamadı (geçici sistem arızası); boyama payının üretim payından ayrılıp ayrılamayacağı bilinmiyor. Kapı güvenlik gereği KAPALI tutuldu; birkaç dakika sonra sayfayı yenileyin."
-        : manufacturerEarningAccrued
-          ? "Üreticinin hakedişi tahakkuk etmiş; boyama payı artık üretim payından ayrılamaz."
+    : addPaintingEarningRead === null
+      ? "Hak ediş kayıtları şu anda okunamadı; boyama ekleme kapalı tutuldu. Lütfen tekrar deneyin."
+      : moneySplitEditBlock({ ...order, ...addPaintingEarningRead })
+        ?? (order.paintingPriceKurus > 0
+          ? "Bu siparişte zaten boyama kalemi var."
           : (order.productionBaseKurus ?? order.amountKurus) <= 1
             ? "Üretim payı boyama ayırmaya yetmiyor."
-            : null;
+            : null);
 
   // ─── Journey QR ──────────────────────────────────────────────────────────
   // Resolved here so the order page can show the code itself rather than a
@@ -1089,8 +1075,8 @@ export default async function AdminOrderDetailPage({
     !evaluationRowsUnreadable &&
       assignmentDecisionsUnreadable &&
       "Değerlendirmedeki atölye adları",
-    manufacturerEarningUnreadable &&
-      "Üreticinin hakediş kaydı (boyama kalemi ekleme kapalı tutuldu)",
+    addPaintingEarningUnreadable &&
+      "Bölüşüm hakediş kayıtları (boyama kalemi ekleme kapalı tutuldu)",
     painterQcUnreadable && "Boyacı QC fotoğrafları",
     painterQcDecisionsUnreadable && "Boyacı QC karar geçmişi",
     painterEarningUnreadable && "Boyacının hakediş kaydı",

@@ -697,9 +697,14 @@ const FORWARD_WRITES = [
 ];
 for (const rel of FORWARD_WRITES) {
   const src = read(rel);
+  const splitAdapterProtected = rel.endsWith("/add-painting/route.ts")
+    && anyNode(parse(src), (n) => ts.isCallExpression(n)
+      && ts.isIdentifier(n.expression) && n.expression.text === "editOrderMoneySplit")
+    && updateChains(parse(src)).length === 0
+    && guardInUpdateWhere(read("src/lib/services/order-money-edit.ts"));
   ok(
     `${rel}: refund guard in its own UPDATE's where, or delegated to the guarded choke point`,
-    forwardWriteProtected(src, chokePointGuarded)
+    splitAdapterProtected || forwardWriteProtected(src, chokePointGuarded)
   );
   ok(`${rel}: no 'succeeded' requirement`, !hasSucceededRequirement(src));
 }

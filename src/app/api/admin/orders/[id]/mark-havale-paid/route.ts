@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
 import { orderDrafts, adminActions } from "@/lib/db/schema";
+import { DraftConsentRequiredError, DraftPaymentEvidenceChangedError } from "@/lib/services/draft-commercial-consent";
+import { z } from "zod";
 import { promoteDraftToOrder } from "@/lib/services/order-draft";
 import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
@@ -20,7 +22,12 @@ export async function POST(
     const session = { user: { email: a.session.user.email } };
 
     const { id } = await params;
-    const body = await request.json().catch(() => ({}));
+    const parsed = z.object({
+      notes: z.string().optional(),
+      commercialFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    }).safeParse(await request.json().catch(() => ({})));
+    if (!parsed.success) return NextResponse.json({ error: "Ödeme onay bilgileri geçersiz. Sayfayı yenileyip tekrar deneyin." }, { status: 400 });
+    const body = parsed.data;
 
     const draft = await db.query.orderDrafts.findFirst({
       where: eq(orderDrafts.id, id),
@@ -51,7 +58,14 @@ export async function POST(
       );
     }
 
-    const promoted = await promoteDraftToOrder(draft.id);
+    let promoted: Awaited<ReturnType<typeof promoteDraftToOrder>>;
+    try {
+      promoted = await promoteDraftToOrder(draft.id, { manualPaymentEvidence: { fingerprint: body.commercialFingerprint } });
+    } catch (error) {
+      if (error instanceof DraftPaymentEvidenceChangedError) return NextResponse.json({ error: error.message, code: "payment_evidence_changed" }, { status: 409 });
+      if (error instanceof DraftConsentRequiredError) return NextResponse.json({ error: error.message, code: "commercial_consent_required" }, { status: 409 });
+      throw error;
+    }
 
     await db.insert(adminActions).values({
       orderId: promoted.orderId,

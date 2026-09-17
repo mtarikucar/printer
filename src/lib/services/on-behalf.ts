@@ -722,6 +722,8 @@ async function runManufacturerStep(
             eq(orders.manufacturerId, manufacturerId),
             // QC kapısı: yalnız QC onayından geçmiş iş kargolanır.
             eq(orders.manufacturerStatus, "qc_approved"),
+            // Boyama okuma ile sevk arasında eklendiyse admin güncel işi görmeli.
+            eq(orders.needsPainting, order.needsPainting),
             isNull(orders.workshopSessionId),
             notRefundedGuard(),
             // Boyama payı olan sipariş ancak "kendim boyarım" üreticisinde ve
@@ -737,7 +739,7 @@ async function runManufacturerStep(
       if (!updated) {
         return fail(
           "wrong_state",
-          "Sipariş kargolanabilir durumda değil (önce QC onayı gerekir; boyamalı sipariş boyacıdan çıkar).",
+          "Siparişin QC veya boyama durumu sevke uygun değil ya da bu sırada değişti. Sayfayı yenileyin.",
           400
         );
       }

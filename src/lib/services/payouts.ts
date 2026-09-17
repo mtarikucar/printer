@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   earningStatusEnum,
   manufacturerEarnings,
+  manufacturers,
   payouts,
   invoices,
   orders,
@@ -10,6 +11,8 @@ import {
 import { computeEarning, computeKdv } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS, KDV_RATE_BPS } from "@/lib/config/prices";
 import { eInvoiceProvider } from "@/lib/services/e-invoice";
+import { manufacturerBaseKurus } from "@/lib/services/earning-base";
+import { invoiceBasisKurus } from "@/lib/config/invoice";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import { claimableEarningWhere, openEarningWhere } from "@/lib/services/earning-claimable";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
@@ -286,6 +289,9 @@ export async function accrueEarning(
         amountKurus: orders.amountKurus,
         productionBaseKurus: orders.productionBaseKurus,
         paintingPriceKurus: orders.paintingPriceKurus,
+        painterId: orders.painterId,
+        manufacturerId: orders.manufacturerId,
+        manufacturerStatus: orders.manufacturerStatus,
       })
       .from(orders)
       .where(and(eq(orders.id, orderId), notRefundedGuard()))
@@ -318,7 +324,22 @@ export async function accrueEarning(
       }
     }
 
-    const e = computeEarning(grossKurus, rateBps);
+    // The caller may have read the split before an admin edit acquired the
+    // order lock. Only the values read UNDER this lock may create a liability.
+    const [manufacturer] = await tx.select({ paintsInHouse: manufacturers.paintsInHouse })
+      .from(manufacturers).where(eq(manufacturers.id, manufacturerId));
+    // A successful shipment with no painter is fulfillment evidence: the
+    // manufacturer ship gate allowed painting only in-house. Later profile
+    // changes cannot take compensation away from work already completed.
+    const shippedInHouse = row.manufacturerId === manufacturerId
+      && row.manufacturerStatus === "shipped" && row.painterId === null;
+    const currentGrossKurus = manufacturerBaseKurus({
+      ...row, paintsInHouse: shippedInHouse || (manufacturer?.paintsInHouse ?? false),
+    });
+    if (grossKurus !== currentGrossKurus) {
+      console.info(`[earning] ${orderId}: stale caller base ${grossKurus}; using locked base ${currentGrossKurus}`);
+    }
+    const e = computeEarning(currentGrossKurus, rateBps);
 
     // Reddin izini TEK yerden bırakır: karar hangi dalda alınırsa alınsın iz
     // aynı işlemde ve aynı biçimde yazılır — "iz yazmayı unutan dal" diye bir
@@ -814,6 +835,7 @@ export async function getOrCreateInvoice(order: {
   id: string;
   orderNumber: string;
   amountKurus: number;
+  havaleDiscountKurus: number;
   customerName: string;
   email: string;
 }) {
@@ -822,8 +844,34 @@ export async function getOrCreateInvoice(order: {
   });
   if (existing) return existing;
 
-  const k = computeKdv(order.amountKurus, KDV_RATE_BPS);
+  // Gift cards pay for the sale; only the havale discount reduces its price.
+  // Existing invoices above remain unchanged, including already-issued totals.
+  const k = computeKdv(invoiceBasisKurus(order), KDV_RATE_BPS);
   const invoiceNumber = `FAT-${order.orderNumber}`;
+
+  // Claim the unique order invoice BEFORE issuing. Concurrent requests that
+  // lose the insert return the stored row without invoking the provider.
+  // A crash/provider failure leaves an honest pending record. Retrying actual
+  // external issuance needs provider idempotency/reconciliation, not an
+  // automatic retry of every existing pending invoice.
+  const [row] = await db
+    .insert(invoices)
+    .values({
+      orderId: order.id,
+      invoiceNumber,
+      subtotalKurus: k.subtotalKurus,
+      kdvKurus: k.kdvKurus,
+      totalKurus: k.totalKurus,
+      kdvRateBps: k.kdvRateBps,
+      status: "pending",
+      providerRef: null,
+    })
+    .onConflictDoNothing({ target: invoices.orderId })
+    .returning();
+  if (!row) {
+    return db.query.invoices.findFirst({ where: eq(invoices.orderId, order.id) });
+  }
+
   let providerRef: string | null = null;
   try {
     const issued = await eInvoiceProvider.issue({
@@ -846,22 +894,14 @@ export async function getOrCreateInvoice(order: {
     console.warn(
       `[invoice] ${invoiceNumber} recorded as pending — no real provider reference`
     );
+    return row;
   }
 
-  const [row] = await db
-    .insert(invoices)
-    .values({
-      orderId: order.id,
-      invoiceNumber,
-      subtotalKurus: k.subtotalKurus,
-      kdvKurus: k.kdvKurus,
-      totalKurus: k.totalKurus,
-      kdvRateBps: k.kdvRateBps,
-      status: reallyIssued ? "issued" : "pending",
-      providerRef: reallyIssued ? providerRef : null,
-    })
-    .onConflictDoNothing({ target: invoices.orderId })
+  const [issuedRow] = await db
+    .update(invoices)
+    .set({ status: "issued", providerRef })
+    .where(eq(invoices.id, row.id))
     .returning();
 
-  return row ?? db.query.invoices.findFirst({ where: eq(invoices.orderId, order.id) });
+  return issuedRow ?? row;
 }

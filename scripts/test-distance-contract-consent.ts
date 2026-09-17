@@ -86,9 +86,27 @@ check("WhatsApp /pay akışı da ön bilgilendirme damgası alır", () => {
   // an ödeme sayfasıdır. Damga orada alınmazsa WhatsApp siparişlerinin TAMAMI
   // belgesiz kalır.
   const route = read("src/app/api/pay/[reference]/consent/route.ts");
-  assert.match(route, /preliminaryInfoAcceptedAt: new Date\(\)/);
+  // The route delegates to the same locked write used by the DB regression
+  // suite. An import alone is not evidence that this payment flow records it.
+  assert.match(route, /await recordDraftCommercialConsent\(\{ reference, fingerprint: parsed\.data\.fingerprint,/);
+  const service = read("src/lib/services/draft-commercial-consent.ts");
+  const writer = service.slice(service.indexOf("export async function recordDraftCommercialConsent("));
+  assert.match(writer, /await db\.transaction\(async \(tx\) =>/);
+  const lock = writer.indexOf('.for("update")');
+  const snapshot = writer.indexOf("draftCommercialFingerprint(draft) !== args.fingerprint");
+  const update = writer.indexOf("await tx.update(orderDrafts).set({");
+  assert.ok(lock >= 0 && snapshot > lock && update > snapshot, "güncel taslak kilit altında doğrulanmadan onay yazılıyor");
+  assert.match(writer, /const now = new Date\(\)/);
+  const stamps = writer.slice(update, writer.indexOf("}).where(", update));
+  assert.match(stamps, /contentConsentAt: draft\.contentConsentAt \?\? now/);
+  assert.match(stamps, /preliminaryInfoAcceptedAt: draft\.preliminaryInfoAcceptedAt \?\? now/, "ön bilgilendirme damgası aynı yazmada yok");
+  assert.match(stamps, /preliminaryInfoVersion:.*PRELIMINARY_INFO_VERSION/);
+  assert.match(stamps, /distanceContractVersion:.*DISTANCE_CONTRACT_VERSION/);
   const gate = read("src/app/pay/[reference]/pay-consent-gate.tsx");
   assert.match(gate, /DistanceContractConsent/, "onay kutusu /pay sayfasında yok");
+  assert.match(gate, /const ok = contentOk && contractOk && recorded/);
+  assert.match(gate, /const response = await fetch\(/);
+  assert.match(gate, /if \(!response\.ok \|\| data\.ok !== true\) \{[^}]*return;\s*\}\s*setRecorded\(true\)/, "ödeme onay kaydı başarılı olmadan açılıyor");
 });
 
 check("hazır ürüne kişiye özel metni GÖSTERİLMEZ", () => {

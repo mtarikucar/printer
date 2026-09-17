@@ -655,6 +655,19 @@ test("sepet + sonradan 'Boyama ekle': fiyat satırlarının boyama payı sayıl�
   assert.deepEqual(b.warnings, []);
 });
 
+test("sepet: tahsil edilmiş ek hizmet payı güncel fiyatla yeniden yazılmaz", () => {
+  const b = deriveOrderMoneyBreakdown(snap({
+    orderType: "marketplace", parentReference: "SEP-1", items: cartItems,
+    amountKurus: 460475, productionBaseKurus: 350475, paintingPriceKurus: 110000,
+    upsells: ["digital_files"], upsellAmountKurus: 2475,
+  }));
+  const service = b.lines.find(l => l.label.includes("Ek hizmetler (sepet payı)"));
+  assert.equal(service?.amountKurus, 2475);
+  assert.equal(Boolean(service?.recomputed), false);
+  assert.equal(b.lines.reduce((n,l) => n + l.amountKurus, 0), 460475);
+  assert.deepEqual(b.warnings, []);
+});
+
 test("sepet: alt siparişler taslak tutarını tutmuyorsa uyarı (sepetteki ek hizmet kaybı)", () => {
   const b = deriveOrderMoneyBreakdown(
     snap({

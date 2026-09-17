@@ -106,8 +106,11 @@ export async function POST(
       // mesajla), sonra aşağıdaki koşullu UPDATE'te (yarışa karşı) durur.
       const current = await db.query.orders.findFirst({
         where: and(eq(orders.id, id), eq(orders.manufacturerId, session.manufacturerId)),
-        columns: { workshopSessionId: true, paymentStatus: true },
+        columns: { workshopSessionId: true, paymentStatus: true, needsPainting: true },
       });
+      if (!current) {
+        return NextResponse.json({ error: "Sipariş bulunamadı." }, { status: 404 });
+      }
       // A refunded order never ships, workshop or not: the customer has their
       // money back, so no "shipped" mail and no fresh earning. This is the
       // readable refusal; the race-proof half is notRefundedGuard() below.
@@ -170,6 +173,8 @@ export async function POST(
             eq(orders.manufacturerId, session.manufacturerId),
             // Ship gate: only orders that passed admin QC approval may ship.
             eq(orders.manufacturerStatus, "qc_approved"),
+            // Boyama okuma ile sevk arasında eklendiyse yeni iş görülmeden sevk edilmez.
+            eq(orders.needsPainting, current.needsPainting),
             // Workshop batches ship from the admin panel, never one by one. The
             // readable refusal is above; this is the race-proof half.
             isNull(orders.workshopSessionId),
@@ -195,7 +200,7 @@ export async function POST(
           return NextResponse.json({ error: REFUNDED_ORDER_ERROR }, { status: 409 });
         }
         return NextResponse.json(
-          { error: "Order not found or not approved for shipping (QC required)" },
+          { error: "Sipariş bu sırada değişmiş veya sevk koşullarını sağlamıyor (QC onayı ve boyama durumu). Sayfayı yenileyin." },
           { status: 400 }
         );
       }

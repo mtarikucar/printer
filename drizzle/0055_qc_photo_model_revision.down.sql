@@ -34,8 +34,8 @@
 -- dosyadan sonra 0055'in yeniden uygulanabilmesi için KAYDININ da silinmesi
 -- gerekir. 0050-0054'ten kopyalanan tarif "en son eklenen satırı sil" diyordu
 -- (ORDER BY created_at DESC LIMIT 1) ve o tarif BURADA YANLIŞTIR: 0055 artık
--- en yeni migration değil, ÜSTÜNDE 0056, 0057 ve 0058 var. O tarif en yeninin
--- (bugün 0058'in) satırını siler, 0055'in kaydı yerinde kalır ve 0055 BİR DAHA
+-- en yeni migration değil, ÜSTÜNDE 0056, 0057, 0058 ve 0059 var. O tarif en yeninin
+-- (bugün 0059'un) satırını siler, 0055'in kaydı yerinde kalır ve 0055 BİR DAHA
 -- ASLA uygulanmaz — migrate "başarılı" der, kolon düşük kalır ve üreticinin
 -- her QC fotoğrafı yüklemesi
 -- 42703 ile boş gövdeli 500 döner (qc-photos rotası INSERT'te `model_revision`
@@ -51,10 +51,13 @@
 -- SIRA ÖNEMLİ — TEK BAŞINA BU SİLME YETMEZ. Migrator yalnız EN YENİ kaydın
 -- `created_at`ine bakar (drizzle-orm/pg-core/dialect.js: "order by created_at
 -- desc limit 1" + `lastDbMigration.created_at < migration.folderMillis`), yani
--- 0055'ten SONRA kaydedilmiş bir satır (0056, 0057, 0058, …) dururken 0055
+-- 0055'ten SONRA kaydedilmiş bir satır (0056, 0057, 0058, 0059, …) dururken 0055
 -- yeniden uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN
 -- YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri
 -- alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0059_admin_draft_actions.down.sql
+--   -- 0059'un down'ı KENDİ kaydını (created_at = 1789640739303) siler.
+--   -- Denetim geçmişi varsa veri silmeden durur; önce geçmiş korunmalıdır.
 --   \i drizzle/0058_coverage_overrides.down.sql
 --   -- 0058'in down'ı KENDİ kaydını (created_at = 1789582571939) kendi içinde
 --   -- siler; onun için burada ayrıca DELETE yazmayın.
@@ -65,6 +68,6 @@
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789498291439;
 --   \i drizzle/0055_qc_photo_model_revision.down.sql
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789496039184;
---   npm run db:migrate   -- dördünü de yeniden uygular (dördü de idempotent)
+--   npm run db:migrate   -- beşini de yeniden uygular (hepsi idempotent)
 SET lock_timeout = '5s';
 ALTER TABLE "qc_photos" DROP COLUMN IF EXISTS "model_revision";

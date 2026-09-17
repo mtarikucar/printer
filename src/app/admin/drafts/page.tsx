@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orderDrafts } from "@/lib/db/schema";
 import { APP_TIME_ZONE } from "@/lib/config/timezone";
@@ -63,6 +63,7 @@ export default async function AdminDraftsPage({
     { key: "confirmed", label: "Onaylanmış" },
     { key: "expired", label: "Süresi dolan" },
     { key: "failed", label: "Başarısız" },
+    { key: "cancelled", label: "İptal edilen" },
     { key: "all", label: "Tümü" },
   ];
 
@@ -71,7 +72,7 @@ export default async function AdminDraftsPage({
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Ödeme Taslakları</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Henüz ödemesi tamamlanmamış sipariş niyetleri. Havale dekontlarının manuel kontrolü için kullanın.
+          Ödenmemiş taslakları inceleyin; uygun taslaklarda kalemleri düzenleyin, ödeme bağlantısını paylaşın, süreyi uzatın veya iptal edin.
         </p>
       </div>
 

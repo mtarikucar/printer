@@ -12,6 +12,7 @@ import {
   index,
   primaryKey,
   bigint,
+  check,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { Attribution } from "../analytics/types";
@@ -572,6 +573,28 @@ export const orderDrafts = pgTable("order_drafts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Durable history for unpaid-draft administration. Never cascade-delete audit
+// evidence when a draft is removed; the draft must remain while history exists.
+export const adminDraftActions = pgTable(
+  "admin_draft_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    draftId: uuid("draft_id")
+      .notNull()
+      .references(() => orderDrafts.id, { onDelete: "restrict" }),
+    action: text("action").notNull(),
+    adminEmail: text("admin_email").notNull(),
+    reason: text("reason").notNull(),
+    before: jsonb("before").$type<Record<string, unknown>>().notNull(),
+    after: jsonb("after").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    byDraftCreated: index("admin_draft_actions_draft_created_idx").on(t.draftId, t.createdAt),
+    validAction: check("admin_draft_actions_action_check", sql`${t.action} IN ('edit', 'extend', 'cancel', 'resend')`),
+  })
+);
 
 export const orders = pgTable("orders", {
   id: uuid("id").primaryKey().defaultRandom(),

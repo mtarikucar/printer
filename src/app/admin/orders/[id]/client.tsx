@@ -1,5 +1,6 @@
 "use client";
 
+import { OrderMoneySplitEditor } from "@/components/admin/order-money-split-editor";
 import { Component, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -2831,6 +2832,7 @@ export function OrderDetailClient({ data, locale }: Props) {
   const [painterTracking, setPainterTracking] = useState("");
   // Boyama kalemi olmadan satılmış siparişe boyacı payı ekleme.
   const [paintingAmount, setPaintingAmount] = useState("");
+  const [addPaintingReason, setAddPaintingReason] = useState("");
   const [addPaintingError, setAddPaintingError] = useState<string | null>(null);
   const [showAddPainting, setShowAddPainting] = useState(false);
   const [journeyCopied, setJourneyCopied] = useState(false);
@@ -4338,6 +4340,10 @@ export function OrderDetailClient({ data, locale }: Props) {
 
   const handleAddPainting = async () => {
     if (!paintingPreview?.ok || !painting) return;
+    if (addPaintingReason.trim().length < 10) {
+      setAddPaintingError("Değişiklik gerekçesi en az 10 karakter olmalıdır.");
+      return;
+    }
     // Para taşıyan, üreticiye bildirim giden bir işlem: tek tıkla değil, bölüşümü
     // görüp onaylayarak.
     const ok = window.confirm(
@@ -4352,11 +4358,12 @@ export function OrderDetailClient({ data, locale }: Props) {
     if (!ok) return;
     setLoading("add-painting");
     setAddPaintingError(null);
+    setActionWarning(null);
     try {
       const res = await fetch(`/api/admin/orders/${order.id}/add-painting`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: paintingAmount }),
+        body: JSON.stringify({ amount: paintingAmount, reason: addPaintingReason }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -4367,6 +4374,8 @@ export function OrderDetailClient({ data, locale }: Props) {
         return;
       }
       setPaintingAmount("");
+      setAddPaintingReason("");
+      setActionWarning(responseWarning(body));
       router.refresh();
     } finally {
       setLoading(null);
@@ -5649,12 +5658,24 @@ export function OrderDetailClient({ data, locale }: Props) {
                   Müşteriden ek ücret alınmaz; boyacı payı üretim payından ayrılır. Üreticiye bildirim
                   gider ve siparişin yüzeyi &quot;El boyaması&quot; olur.
                 </p>
+                <label htmlFor="add-painting-reason" className="block text-xs font-medium text-gray-600">
+                  Değişiklik gerekçesi
+                </label>
+                <textarea
+                  id="add-painting-reason"
+                  value={addPaintingReason}
+                  onChange={(e) => setAddPaintingReason(e.target.value)}
+                  minLength={10}
+                  maxLength={1000}
+                  placeholder="En az 10 karakter"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
                 {addPaintingError && <p className="text-xs text-red-600">{addPaintingError}</p>}
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
                     <button
                       onClick={handleAddPainting}
-                      disabled={!paintingPreview?.ok || loading === "add-painting"}
+                      disabled={!paintingPreview?.ok || addPaintingReason.trim().length < 10 || loading === "add-painting"}
                       className="w-full rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-700 disabled:opacity-50"
                     >
                       {loading === "add-painting" ? "Ekleniyor…" : "Boyama kalemi ekle"}
@@ -5665,6 +5686,7 @@ export function OrderDetailClient({ data, locale }: Props) {
                     onClick={() => {
                       setShowAddPainting(false);
                       setPaintingAmount("");
+                      setAddPaintingReason("");
                       setAddPaintingError(null);
                     }}
                     className="text-xs text-gray-500 underline hover:text-gray-700"
@@ -6993,6 +7015,7 @@ export function OrderDetailClient({ data, locale }: Props) {
 
             {/* ─── Para dökümü ─────────────────────────── */}
             <MoneyBreakdownCard money={money} loc={loc} />
+            <OrderMoneySplitEditor orderId={order.id} />
           </div>
 
           {/* Right column (1/3) */}

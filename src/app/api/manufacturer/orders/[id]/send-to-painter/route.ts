@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { orders, manufacturers, painters, manufacturerActions } from "@/lib/db/schema";
@@ -130,7 +130,7 @@ export async function POST(
       );
     }
 
-    if (!order.needsPainting) {
+    if (!order.needsPainting || order.paintingPriceKurus <= 0) {
       return NextResponse.json({ error: "Bu sipariş için boyama seçilmemiş" }, { status: 400 });
     }
     if (order.manufacturerStatus !== "qc_approved") {
@@ -255,6 +255,9 @@ export async function POST(
           eq(orders.id, id),
           eq(orders.manufacturerId, session.manufacturerId),
           eq(orders.manufacturerStatus, "qc_approved"),
+          // Bölüşüm ön okumadan sonra değişebilir: kaldırılan boyama devredilmez.
+          eq(orders.needsPainting, true),
+          gt(orders.paintingPriceKurus, 0),
           notRefundedGuard(),
           // No painter yet: the condition admin assign-painter writes with. The
           // painter check above reads before this write, so without it a
@@ -274,7 +277,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            "Sipariş bu sırada değişti: bir boyacıya atanmış ya da QC durumu değişmiş olabilir. Sayfayı yenileyin.",
+            "Sipariş bu sırada değişti: boyama payı kaldırılmış, bir boyacıya atanmış ya da QC durumu değişmiş olabilir. Sayfayı yenileyin.",
         },
         { status: 409 }
       );

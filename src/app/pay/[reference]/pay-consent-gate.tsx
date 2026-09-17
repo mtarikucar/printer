@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ContentConsent } from "@/components/content-consent";
 import { DistanceContractConsent } from "@/components/distance-contract-consent";
 
@@ -15,35 +16,56 @@ import { DistanceContractConsent } from "@/components/distance-contract-consent"
  * anı bu sayfadır.
  *
  * İki kutu işaretlendiği anda onay, draft'a damgalanır (POST .../consent) ve
- * terfide siparişe taşınır. Damgalama best-effort: asıl engel bu UI kapısı
- * olduğu için, ağ hatası müşteriyi sayfada kilitlemez.
+ * terfide siparişe taşınır. Sunucu bu sayfanın ticari bilgilerinin güncel
+ * olduğunu doğrulayıp iki damgayı yazmadan ödeme bölümü açılmaz.
  */
 export function PayConsentGate({
   reference,
+  fingerprint,
   productName,
   priceKurus,
   children,
 }: {
   reference: string;
+  fingerprint: string;
   /** Ürünün temel nitelikleri — MSY m.6/2-a özet bloğunun (a) bendi. */
   productName: string;
   /** Vergiler dâhil toplam — (d) bendi. */
   priceKurus: number;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   const [contentOk, setContentOk] = useState(false);
   const [contractOk, setContractOk] = useState(false);
   const [recorded, setRecorded] = useState(false);
-  const ok = contentOk && contractOk;
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const ok = contentOk && contractOk && recorded;
 
-  const record = (both: boolean, contract: boolean) => {
-    if (both && contract && !recorded) {
-      setRecorded(true);
-      fetch(`/api/pay/${encodeURIComponent(reference)}/consent`, {
+  const record = async (both: boolean, contract: boolean) => {
+    if (!both || !contract || recorded || inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true); setError(null); setStale(false);
+    try {
+      const response = await fetch(`/api/pay/${encodeURIComponent(reference)}/consent`, {
         method: "POST",
-      }).catch(() => {
-        // Yut: denetim damgası best-effort; ödeme kapısı zaten işaretlemeye bağlı.
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fingerprint }),
       });
+      const data = await response.json();
+      if (!response.ok || data.ok !== true) {
+        setStale(response.status === 409);
+        setError(data.error || "Onay kaydedilemedi. Lütfen tekrar deneyin.");
+        return;
+      }
+      setRecorded(true);
+    } catch {
+      setError("Onay kaydedilemedi. Bağlantınızı kontrol edip tekrar deneyin; ödeme henüz açılmadı.");
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
     }
   };
 
@@ -66,11 +88,18 @@ export function PayConsentGate({
         }}
         className="rounded-xl border border-bg-subtle bg-bg-elevated p-4 space-y-3 text-left"
       />
+      {busy && <p role="status" className="text-sm text-text-secondary">Onayınız kaydediliyor…</p>}
+      {error && <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-900">
+        <p>{error}</p>
+        <button type="button" className="mt-2 font-semibold underline" disabled={busy} onClick={() => stale ? router.refresh() : void record(contentOk, contractOk)}>
+          {stale ? "Güncel bilgileri yükle" : "Onayı yeniden kaydet"}
+        </button>
+      </div>}
       <div
         className={ok ? "space-y-6" : "space-y-6 opacity-40 pointer-events-none select-none"}
         aria-disabled={!ok}
       >
-        {children}
+        {ok ? children : <p className="text-sm text-text-secondary">Ödeme bilgileri, onayınız kaydedildikten sonra açılır.</p>}
       </div>
     </>
   );

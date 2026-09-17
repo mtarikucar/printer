@@ -13,6 +13,7 @@ import {
 import { WhatsAppIcon } from "@/components/whatsapp/whatsapp-button";
 import { PayCardButton } from "./pay-card-button";
 import { PayConsentGate } from "./pay-consent-gate";
+import { draftCommercialFingerprint } from "@/lib/services/draft-commercial-consent";
 
 export const dynamic = "force-dynamic";
 
@@ -168,6 +169,8 @@ export default async function PayPage({
         )}
 
         <PayConsentGate
+          key={draftCommercialFingerprint(draft)}
+          fingerprint={draftCommercialFingerprint(draft)}
           reference={draft.reference}
           productName={draft.productTitleSnapshot || "Kişiye özel figürin"}
           priceKurus={finalAmountKurus}

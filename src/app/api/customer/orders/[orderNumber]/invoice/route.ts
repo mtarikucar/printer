@@ -21,6 +21,7 @@ async function handleGET(
       id: true,
       orderNumber: true,
       amountKurus: true,
+      havaleDiscountKurus: true,
       customerName: true,
       email: true,
       status: true,

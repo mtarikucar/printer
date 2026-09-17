@@ -1334,7 +1334,12 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
   let upsellDriftKurus = 0;
   let todayUpsellKurus = 0;
   if (kind === "cart") {
-    lines = reconcileKinds(s.items.flatMap(cartItemLines), split);
+    const cartServices = s.upsellAmountKurus > 0 ? [line({
+      label: "Ek hizmetler (sepet payı)", kind: "addon", amountKurus: s.upsellAmountKurus,
+    }, {
+      note: `${(s.upsells ?? []).map(key => UPSELL_LABELS_TR[key] ?? key).join(", ")}. Sepette bir kez tahsil edilen ek hizmetlerin bu alt siparişe ayrılan payı.`,
+    })] : [];
+    lines = reconcileKinds([...s.items.flatMap(cartItemLines), ...cartServices], split);
   } else if (kind === "manual") {
     lines = reconcileKinds(manualLines(s), split);
   } else {

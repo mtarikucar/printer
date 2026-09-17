@@ -1,6 +1,7 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, painterEarnings, painterPayouts } from "@/lib/db/schema";
+import { painterBaseKurus } from "@/lib/services/earning-base";
 import { computeEarning } from "@/lib/services/finance";
 import { PLATFORM_COMMISSION_RATE_BPS } from "@/lib/config/prices";
 import { notRefundedGuard } from "@/lib/services/manufacturer-assign";
@@ -166,6 +167,8 @@ export async function accruePainterEarning(
       .select({
         rate: orders.commissionRateBps,
         amountKurus: orders.amountKurus,
+        productionBaseKurus: orders.productionBaseKurus,
+        paintingPriceKurus: orders.paintingPriceKurus,
       })
       .from(orders)
       .where(and(eq(orders.id, orderId), notRefundedGuard()))
@@ -188,7 +191,12 @@ export async function accruePainterEarning(
       );
     }
 
-    const e = computeEarning(grossKurus, rateBps);
+    // Read the current split under the same order lock as the accrual.
+    const currentGrossKurus = painterBaseKurus(row);
+    if (grossKurus !== currentGrossKurus) {
+      console.info(`[painter-earning] ${orderId}: stale caller base ${grossKurus}; using locked base ${currentGrossKurus}`);
+    }
+    const e = computeEarning(currentGrossKurus, rateBps);
 
     // Reddin izini TEK yerden bırakır: karar hangi dalda alınırsa alınsın iz
     // aynı işlemde ve aynı biçimde yazılır. Not yazılamazsa işlem geri alınır —

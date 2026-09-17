@@ -1,3 +1,5 @@
+import { assertEditedDraftConsent } from "@/lib/services/draft-commercial-consent";
+import { allocateCartMoney } from "@/lib/config/cart-money-allocation";
 import { eq, and, isNull, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -65,7 +67,8 @@ export function buildDraftReference(): string {
  * Throws if the draft is missing or already confirmed.
  */
 export async function promoteDraftToOrder(
-  draftId: string
+  draftId: string,
+  options?: { manualPaymentEvidence?: { fingerprint?: string } }
 ): Promise<{ orderId: string; orderNumber: string; locale: Locale }> {
   const result = await db.transaction(async (tx) => {
     const [draft] = await tx
@@ -100,6 +103,10 @@ export async function promoteDraftToOrder(
       }
       throw new Error(`DRAFT_NOT_PROMOTABLE:${draft.status}`);
     }
+
+    // Still under the draft row lock: an admin edit cannot clear consent
+    // between this check and promotion. Confirmed replays returned above.
+    await assertEditedDraftConsent(tx, draft, options?.manualPaymentEvidence);
 
     const isMarketplace = draft.orderType === "marketplace";
 
@@ -189,33 +196,20 @@ export async function promoteDraftToOrder(
         productTitleSnapshot: string | null;
         amountKurus: number;
       }> = [];
-      // Prorate the draft-level gift-card + havale discounts across the
-      // per-seller sub-orders by each group's amount share, so the order rows
-      // (and refund/analytics math derived from them) reflect what the customer
-      // actually paid instead of the full undiscounted total. The last group
-      // absorbs the rounding remainder so the parts sum EXACTLY to the draft.
+      // Draft totals already include checkout upsells. Allocate that frozen fee
+      // exactly once across children, along with discount and gift tender.
       const groupList = Array.from(groups.values());
-      const groupAmounts = groupList.map((g) =>
-        g.reduce((a, it) => a + it.lineTotalKurus, 0)
-      );
-      const cartTotalAmount = groupAmounts.reduce((a, b) => a + b, 0) || 1;
-      // Largest-remainder allocation: each group gets floor(total*share), then
-      // the leftover units (< group count) are handed out one each to the first
-      // groups. Guarantees non-negative parts that sum EXACTLY to `total` (no
-      // negative remainder even with many tiny equal groups).
-      const allocate = (total: number): number[] => {
-        const shares = groupAmounts.map((a) =>
-          Math.floor((total * a) / cartTotalAmount)
-        );
-        let rem = total - shares.reduce((a, b) => a + b, 0);
-        for (let i = 0; i < shares.length && rem > 0; i++) {
-          shares[i] += 1;
-          rem -= 1;
-        }
-        return shares;
-      };
-      const gcShares = allocate(draft.giftCardAmountKurus ?? 0);
-      const havaleShares = allocate(draft.havaleDiscountKurus ?? 0);
+      const itemAmounts = groupList.map((group) => group.reduce((sum, item) => sum + item.lineTotalKurus, 0));
+      const cartMoney = allocateCartMoney({
+        itemAmounts,
+        upsellAmount: draft.upsellAmountKurus,
+        amount: draft.amountKurus,
+        havaleDiscount: draft.havaleDiscountKurus,
+        giftCardAmount: draft.giftCardAmountKurus,
+      });
+      const groupAmounts = cartMoney.amounts;
+      const gcShares = cartMoney.gifts;
+      const havaleShares = cartMoney.discounts;
       let idx = 0;
       for (let gi = 0; gi < groupList.length; gi++) {
         const groupItems = groupList[gi];
@@ -231,7 +225,7 @@ export async function promoteDraftToOrder(
         // yani alt siparişte de partner payları tutarı geçemez.
         const groupProductionBase = groupItems.reduce(
           (sum, it) => sum + (it.productionBaseKurus ?? it.lineTotalKurus),
-          0
+          cartMoney.upsells[gi]
         );
         const groupPainting = Math.max(0, groupAmount - groupProductionBase);
         const groupGiftCard = gcShares[gi];
@@ -258,6 +252,8 @@ export async function promoteDraftToOrder(
             paymentMethod: draft.paymentMethod,
             paymentStatus: "succeeded",
             amountKurus: groupAmount,
+            upsells: draft.upsells,
+            upsellAmountKurus: cartMoney.upsells[gi],
             productionBaseKurus: groupProductionBase,
             paintingPriceKurus: groupPainting,
             needsPainting: groupPainting > 0,

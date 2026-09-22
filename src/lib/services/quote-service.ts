@@ -175,7 +175,7 @@ async function mutateQuote<T>(
 }
 
 /** drizzle 0.45 pg hatasını sarar: gerçek kod `.cause` üzerindedir. */
-function pgErrorCode(err: unknown): string | undefined {
+export function pgErrorCode(err: unknown): string | undefined {
   const direct = (err as { code?: unknown } | null)?.code;
   if (typeof direct === "string") return direct;
   const cause = (err as { cause?: { code?: unknown } } | null)?.cause?.code;

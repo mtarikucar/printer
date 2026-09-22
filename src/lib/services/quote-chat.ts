@@ -19,7 +19,7 @@ import { topics } from "@/lib/realtime/events";
 import { saveChatAttachment, type SerializedMessage } from "@/lib/services/order-chat";
 import { containsContactInfo, isUnread } from "@/lib/services/order-messages";
 import { notifyQuoteMessage } from "@/lib/services/quote-notify";
-import { QuoteServiceError } from "@/lib/services/quote-service";
+import { pgErrorCode, QuoteServiceError } from "@/lib/services/quote-service";
 import { getPublicUrl } from "@/lib/services/storage";
 
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -38,15 +38,11 @@ const CHAT_UNAVAILABLE =
  * sayfayı 500'e düşürmek yerine sohbet KAPALI davranır (aynı kural
  * `order-partner-chat.ts`'te de var).
  *
- * Drizzle 0.45 pg hatasını SARAR: yakalanan hatanın `.code`'u undefined'dır,
+ * Hata kodu `pgErrorCode` ile okunur: drizzle 0.45 pg hatasını sarar ve
  * gerçek kod `.cause` üzerindedir (bkz. drizzle-error-wrapping notu).
  */
 function isChatTableMissing(err: unknown): boolean {
-  const code = (e: unknown) =>
-    typeof e === "object" && e !== null && "code" in e
-      ? String((e as { code?: unknown }).code)
-      : null;
-  return code(err) === "42P01" || code((err as { cause?: unknown })?.cause) === "42P01";
+  return pgErrorCode(err) === "42P01";
 }
 
 /** `isUnread` iki katılımcı bilir: "admin" ve "karşı taraf" (burada müşteri). */

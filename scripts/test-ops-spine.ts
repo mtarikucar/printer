@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 import {
   AI_SPEND_FLAG_KEYS,
   AUTO_ASSIGN_FLAG_KEYS,
+  FEATURE_FLAG_KEYS,
   FLAG_KEYS,
   FLAG_DEFAULTS,
+  FLAG_LABELS_TR,
   flagForcedOffByKillSwitch,
   isFlagKey,
 } from "../src/lib/config/flags";
@@ -31,7 +33,7 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("eleven flags, closed set", () => {
+test("twelve flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
     "auto_assign_cart_platform",
     "auto_assign_custom",
@@ -43,6 +45,8 @@ test("eleven flags, closed set", () => {
     "auto_assign_whatsapp_ai",
     "auto_model_enabled",
     "fal_enabled",
+    // Faz 1'in anlık teklif motoru: üçüncü kümenin (FEATURE) ilk anahtarı.
+    "instant_quote_enabled",
     "meshy_enabled",
     "wa_agent_enabled",
     "wa_bot_enabled",
@@ -66,16 +70,24 @@ test("everything that spends NEW money defaults off", () => {
       assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);
     }
   }
-  // No key may dodge the rule by belonging to neither group.
+  // No key may dodge the rule by belonging to no group at all — or to two.
   for (const key of FLAG_KEYS) {
-    const spend = (AI_SPEND_FLAG_KEYS as readonly string[]).includes(key);
-    const routing = (AUTO_ASSIGN_FLAG_KEYS as readonly string[]).includes(key);
-    assert.ok(spend !== routing, `${key} must sit in exactly one group`);
+    const groups = [AI_SPEND_FLAG_KEYS, AUTO_ASSIGN_FLAG_KEYS, FEATURE_FLAG_KEYS].filter(
+      (group) => (group as readonly string[]).includes(key)
+    ).length;
+    assert.equal(groups, 1, `${key} must sit in exactly one group`);
   }
   // Routing switches spend nothing new — they do by themselves what the admin
   // does by hand today — so they legitimately ship ON.
   for (const key of AUTO_ASSIGN_FLAG_KEYS) {
     assert.equal(FLAG_DEFAULTS[key], true, `${key} ships enabled`);
+  }
+});
+test("a new customer surface ships behind a closed flag", () => {
+  assert.deepEqual([...FEATURE_FLAG_KEYS], ["instant_quote_enabled"]);
+  for (const key of FEATURE_FLAG_KEYS) {
+    assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);
+    assert.ok(FLAG_LABELS_TR[key], `${key} needs a Turkish admin label`);
   }
 });
 test("AI_KILL_ALL stops the spending, not the manufacturer routing", () => {
@@ -90,6 +102,13 @@ test("AI_KILL_ALL stops the spending, not the manufacturer routing", () => {
         flagForcedOffByKillSwitch(key),
         false,
         `${key} must keep routing orders — it spends no money`
+      );
+    }
+    for (const key of FEATURE_FLAG_KEYS) {
+      assert.equal(
+        flagForcedOffByKillSwitch(key),
+        false,
+        `${key} is a product surface — the kill switch must not close the shop`
       );
     }
     delete process.env.AI_KILL_ALL;

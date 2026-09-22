@@ -30,6 +30,7 @@ import {
   AUTO_ASSIGN_SKIP_NEXT_STEP_TR,
   AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN,
   AUTO_ASSIGN_SKIP_REASON_TR,
+  FEATURE_FLAG_KEYS,
   FLAG_DEFAULTS,
   FLAG_KEYS,
   FLAG_LABELS_TR,
@@ -127,18 +128,15 @@ console.log("kill switch kapsamı");
     else process.env.AI_KILL_ALL = previous;
   }
 }
+// Üçüncü küme (FEATURE) anlık teklif motoruyla geldi: ne harcar ne yönlendirir.
+const flagGroupCount = (k: string) =>
+  [AI_SPEND_FLAG_KEYS, AUTO_ASSIGN_FLAG_KEYS, FEATURE_FLAG_KEYS].filter((group) =>
+    (group as readonly string[]).includes(k)
+  ).length;
 ok(
-  "her anahtar tam olarak bir kümede (harcama / yönlendirme)",
-  FLAG_KEYS.every(
-    (k) =>
-      (AI_SPEND_FLAG_KEYS as readonly string[]).includes(k) !==
-      (AUTO_ASSIGN_FLAG_KEYS as readonly string[]).includes(k)
-  ),
-  FLAG_KEYS.filter(
-    (k) =>
-      (AI_SPEND_FLAG_KEYS as readonly string[]).includes(k) ===
-      (AUTO_ASSIGN_FLAG_KEYS as readonly string[]).includes(k)
-  )
+  "her anahtar tam olarak bir kümede (harcama / yönlendirme / ürün yüzeyi)",
+  FLAG_KEYS.every((k) => flagGroupCount(k) === 1),
+  FLAG_KEYS.filter((k) => flagGroupCount(k) !== 1)
 );
 
 const flagsServiceSrc = read("src/lib/services/flags.ts");

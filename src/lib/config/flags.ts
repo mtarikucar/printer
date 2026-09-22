@@ -38,6 +38,10 @@ export const FLAG_KEYS = [
   // ve boyama kalemi olan her sipariş aynı kapıdan geçer. Türe göre bölmek,
   // hiçbir zaman kullanılmayacak beş ayrı düğme demek olurdu.
   "auto_assign_painter",
+  // Anlık teklif motoru (Xometry paritesi). Ne para harcar ne sipariş
+  // yönlendirir: yalnız yeni müşteri yüzeylerini (yükle → fiyat → öde) açar.
+  // Kapalıyken bu yüzeyler yalnız admin oturumuna görünür (iç test).
+  "instant_quote_enabled",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -63,6 +67,9 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   auto_assign_manual: true,
   auto_assign_cart_platform: true,
   auto_assign_painter: true,
+  // Yeni bir satış yüzeyi KAPALI doğar: kodu yayına almak ile müşteriye açmak
+  // aynı olay olmamalı.
+  instant_quote_enabled: false,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -77,6 +84,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   auto_assign_manual: "Otomatik atama — elle yazılan siparişler",
   auto_assign_cart_platform: "Otomatik atama — platform kataloğu / sepet siparişleri",
   auto_assign_painter: "Otomatik boyacı ataması (üretici QC onayında)",
+  instant_quote_enabled: "Anlık teklif motoru",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -111,6 +119,16 @@ export const AUTO_ASSIGN_FLAG_KEYS = [
   // durdurmamalı. Acil durumda boyacı atamasının durması, üretici QC'sinden
   // geçmiş işlerin kimsenin tezgâhına düşmeden beklemesi demek olurdu.
   "auto_assign_painter",
+] as const satisfies readonly FlagKey[];
+
+/**
+ * Üçüncü küme: ÜRÜN YÜZEYİ anahtarları. Ne dışarıya para harcar (AI_SPEND) ne
+ * de sipariş yönlendirir (AUTO_ASSIGN); "bu özellik müşteriye açık mı" sorusunu
+ * cevaplar. Ayrı küme, çünkü kill switch bir para musluğudur: acil durumda
+ * çalışan bir satış yüzeyini kapatmak kaybı azaltmaz, satışı durdurur.
+ */
+export const FEATURE_FLAG_KEYS = [
+  "instant_quote_enabled",
 ] as const satisfies readonly FlagKey[];
 
 export function isAiSpendFlag(key: FlagKey): boolean {

@@ -15,8 +15,13 @@
 import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { join } from "node:path";
+import { QUOTE_UNITS } from "@/lib/config/quote-types";
+import type { PartGeometry, QuoteSourceFormat, QuoteUnits, Vec3 } from "@/lib/config/quote-types";
 
 const DEFAULT_TIMEOUT_MS = 600_000; // 10 min hard ceiling, then SIGKILL
+/** Quote analysis is a customer waiting on a price, not a background render. */
+const ANALYZE_TIMEOUT_MS = 300_000;
 const VENV_PYTHON = "/opt/venv/bin/python3";
 
 export class MeshProcessError extends Error {
@@ -136,6 +141,163 @@ export async function runProcessMesh(args: {
     throw new MeshProcessError("Mesh report has unexpected shape", "bad_report");
   }
   return report;
+}
+
+// ─── Anlık teklif: parça analizi ────────────────────────────────────────────
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseVec3(value: unknown): Vec3 | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const x = finiteNumber(raw.x);
+  const y = finiteNumber(raw.y);
+  const z = finiteNumber(raw.z);
+  return x === null || y === null || z === null ? null : { x, y, z };
+}
+
+/**
+ * Validate the Python report against the PartGeometry contract.
+ *
+ * Every key is checked, because a silently missing one becomes `undefined` in
+ * the jsonb column and then NaN in the price — a wrong price is worse than a
+ * failed analysis.
+ */
+function parseGeometry(raw: unknown): PartGeometry {
+  const geometry = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const invalid: string[] = [];
+
+  const required = (key: string): number => {
+    const value = finiteNumber(geometry[key]);
+    if (value === null) invalid.push(key);
+    return value ?? 0;
+  };
+  const nullable = (key: string): number | null => {
+    if (!(key in geometry)) {
+      invalid.push(key);
+      return null;
+    }
+    const value = geometry[key];
+    if (value === null) return null;
+    const parsed = finiteNumber(value);
+    if (parsed === null) invalid.push(key);
+    return parsed;
+  };
+  const flag = (key: string): boolean => {
+    if (typeof geometry[key] !== "boolean") invalid.push(key);
+    return geometry[key] === true;
+  };
+
+  const extents = parseVec3(geometry.extents);
+  if (extents === null) invalid.push("extents");
+
+  let sourceUnits: QuoteUnits | null = null;
+  if (!("sourceUnits" in geometry)) {
+    invalid.push("sourceUnits");
+  } else if (geometry.sourceUnits !== null) {
+    const value = geometry.sourceUnits;
+    if (typeof value === "string" && (QUOTE_UNITS as readonly string[]).includes(value)) {
+      sourceUnits = value as QuoteUnits;
+    } else {
+      invalid.push("sourceUnits");
+    }
+  }
+
+  const parsed: PartGeometry = {
+    volume: nullable("volume"),
+    area: required("area"),
+    extents: extents ?? { x: 0, y: 0, z: 0 },
+    bodyCount: required("bodyCount"),
+    isWatertight: flag("isWatertight"),
+    isVolume: flag("isVolume"),
+    volumeEstimated: flag("volumeEstimated"),
+    faceCount: required("faceCount"),
+    wallP1: nullable("wallP1"),
+    wallP5: nullable("wallP5"),
+    overhangArea: required("overhangArea"),
+    sourceUnits,
+    objectCount: required("objectCount"),
+  };
+
+  if (invalid.length > 0) {
+    throw new MeshProcessError(
+      `Part analysis report has invalid fields: ${invalid.join(", ")}`,
+      "bad_report"
+    );
+  }
+  return parsed;
+}
+
+/** Enrich a nonzero exit with the failure code the script left in report.json. */
+async function describeFailure(error: unknown, reportPath: string): Promise<unknown> {
+  if (!(error instanceof MeshProcessError) || error.code !== "exit_nonzero") return error;
+  try {
+    const report = JSON.parse(await readFile(reportPath, "utf8")) as {
+      ok?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
+    if (report?.ok === false && typeof report.error === "string" && report.error) {
+      const detail = typeof report.message === "string" ? `: ${report.message}` : "";
+      return new MeshProcessError(
+        `Part analysis failed (${report.error})${detail}`,
+        "exit_nonzero",
+        error.stderr
+      );
+    }
+  } catch {
+    /* no report, or not JSON — the original exit error is the best we have */
+  }
+  return error;
+}
+
+/**
+ * Run scripts/analyze_quote_part.py and return the validated geometry.
+ *
+ * The script also writes `thumb.png`, `preview.glb` and `canonical.stl` into
+ * `outDir`; the caller decides what to store. Geometry is in FILE UNITS at
+ * scale 1 — millimetres are `scaledGeometry()`'s job, never this one's.
+ */
+export async function runAnalyzeQuotePart(args: {
+  inputPath: string;
+  format: QuoteSourceFormat;
+  outDir: string;
+  timeoutMs?: number;
+  onLog?: (line: string) => void;
+}): Promise<{ geometry: PartGeometry }> {
+  const python = await resolvePython();
+  const reportPath = join(args.outDir, "report.json");
+  // Absolute: the worker process does not always start in /app.
+  const script = join(process.cwd(), "scripts", "analyze_quote_part.py");
+
+  try {
+    await runScript(
+      python,
+      [script, args.inputPath, args.format, args.outDir],
+      args.timeoutMs ?? ANALYZE_TIMEOUT_MS,
+      args.onLog
+    );
+  } catch (err) {
+    throw await describeFailure(err, reportPath);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(reportPath, "utf8"));
+  } catch (err) {
+    throw new MeshProcessError(
+      "Part analysis report is missing or unreadable",
+      "bad_report",
+      String(err)
+    );
+  }
+  const report = parsed as { ok?: unknown; geometry?: unknown };
+  if (report?.ok !== true) {
+    throw new MeshProcessError("Part analysis report is not a success report", "bad_report");
+  }
+  return { geometry: parseGeometry(report.geometry) };
 }
 
 /**

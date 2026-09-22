@@ -1,0 +1,411 @@
+#!/usr/bin/env python3
+"""Measure ONE uploaded part for the instant quote engine.
+
+Usage:
+    analyze_quote_part.py <input> <stl|obj|3mf> <outdir>
+                          [--thumb-size 512] [--max-faces-walls 2500000]
+
+Writes into <outdir>:
+    report.json    {"ok": true, "geometry": <PartGeometry>, "timings": {…}}
+    thumb.png      3/4 isometric still (default 512²)
+    preview.glb    ≤200k faces, Y-up, for <model-viewer>
+    canonical.stl  binary STL of the ORIGINAL geometry, in file units
+
+Exit 0 on success. On failure exit 2 and, whenever it is still possible, write
+report.json as {"ok": false, "error": "<code>", "message": "…"}.
+
+`geometry` is the `PartGeometry` interface from src/lib/config/quote-types.ts,
+key for key, in camelCase. Three rules this file exists to enforce:
+
+  1. MEASURE THE FULL-RESOLUTION MESH AT SCALE 1, IN FILE UNITS. Decimation is
+     for the preview only, repair only ever touches a COPY, and unit/scale are
+     applied afterwards in TypeScript (`quote-units.ts`). Changing the unit or
+     the scale must never re-run this script.
+  2. NEVER merge or drop shells. `process_mesh.merge_components` exists for
+     figurines; an engineering part with two bodies is quoted as two bodies, so
+     `bodyCount` counts them and every one of them is measured.
+  3. 3MF UNITS ARE REPORTED, NOT APPLIED. trimesh 5.1 only sets `scene.units`;
+     it does not convert the geometry (measured against the cube1in.3mf
+     fixture: a 1 inch cube still loads as a 1-unit cube). So the `unit`
+     attribute is read out of the package XML and returned as `sourceUnits`
+     while the mesh stays exactly as the file wrote it.
+"""
+import argparse
+import json
+import os
+import re
+import resource
+import sys
+import time
+import zipfile
+
+import numpy as np
+import trimesh
+
+# Same dir on sys.path when run as `python3 scripts/analyze_quote_part.py`.
+from process_mesh import (  # type: ignore
+    load_mesh,
+    repair_with_pymeshlab,
+    estimate_wall_percentiles,
+)
+from render_turntable import render_frame, simplify, write_png  # type: ignore
+
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover - older images ship without Pillow
+    Image = None
+
+try:
+    import pymeshlab
+except ImportError:  # pragma: no cover - deployment guard
+    pymeshlab = None
+
+# A runaway mesh must die inside the worker, not take the box down with it.
+ADDRESS_SPACE_LIMIT_BYTES = 3 * 1024**3
+# <model-viewer> gets a light mesh; the price and the printer use the original.
+PREVIEW_TARGET_FACES = 200_000
+# cos(135°): steeper than 45° from the build plate, i.e. it needs support.
+OVERHANG_NORMAL_Z = -0.707
+# Faces whose highest vertex sits this deep in the bottom slab rest ON the
+# plate; they are down-facing but they are not overhangs.
+FLOOR_BAND_RATIO = 0.01
+THUMB_ELEVATION_DEG = 30.0  # POSITIVE: the top tilts toward the camera.
+THUMB_AZIMUTH_DEG = 45.0
+# 3MF: `<mesh>` is only ever a child of `<object>`, so counting the opening
+# tags counts the objects that carry geometry.
+MESH_TOKEN = b"<mesh"
+MODEL_ENTRY_RE = re.compile(r"3D/.*\.model$", re.IGNORECASE)
+MODEL_UNIT_RE = re.compile(rb"<model\b[^>]*?\bunit\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+# QuoteUnits only knows mm/cm/in; micron, foot and meter get no suggestion
+# rather than a wrong one (the customer picks the unit in that case).
+UNIT_MAP = {"millimeter": "mm", "centimeter": "cm", "inch": "in"}
+XML_HEAD_BYTES = 64 * 1024
+XML_CHUNK_BYTES = 4 * 1024 * 1024
+XML_SCAN_LIMIT_BYTES = 256 * 1024 * 1024
+
+
+class AnalysisError(Exception):
+    """Failure with a machine-readable code for report.json."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def limit_address_space() -> None:
+    """Best effort RLIMIT_AS. A hard limit below ours is left alone."""
+    try:
+        _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        target = ADDRESS_SPACE_LIMIT_BYTES
+        if hard != resource.RLIM_INFINITY:
+            target = min(target, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+    except Exception as exc:  # noqa: BLE001 - never fail the job over this
+        print(f"Warning: RLIMIT_AS not applied: {exc}", file=sys.stderr)
+
+
+def read_3mf_model_meta(input_path: str) -> tuple[str | None, int]:
+    """(sourceUnits, objectCount) from the first `3D/*.model` entry.
+
+    Deliberately NO XML parser: the package comes from an anonymous visitor and
+    an entity-expansion bomb would be expanded before any element callback ran.
+    Reading is chunked and capped, so a deflate bomb cannot blow the memory
+    limit either.
+    """
+    try:
+        with zipfile.ZipFile(input_path) as archive:
+            names = sorted(n for n in archive.namelist() if MODEL_ENTRY_RE.match(n))
+            if not names:
+                return None, 0
+            with archive.open(names[0]) as handle:
+                head = handle.read(XML_HEAD_BYTES)
+                matched = MODEL_UNIT_RE.search(head)
+                unit = None
+                if matched:
+                    unit = UNIT_MAP.get(matched.group(1).decode("utf-8", "replace").strip().lower())
+                count = head.count(MESH_TOKEN)
+                overlap = head[-(len(MESH_TOKEN) - 1) :]
+                read = len(head)
+                while read < XML_SCAN_LIMIT_BYTES:
+                    chunk = handle.read(XML_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    read += len(chunk)
+                    window = overlap + chunk
+                    count += window.count(MESH_TOKEN)
+                    overlap = window[-(len(MESH_TOKEN) - 1) :]
+        return unit, count
+    except Exception as exc:  # noqa: BLE001 - metadata is a hint, not the price
+        print(f"Warning: 3MF metadata unreadable: {exc}", file=sys.stderr)
+        return None, 0
+
+
+def load_part(input_path: str, source_format: str) -> trimesh.Trimesh:
+    """Full-resolution mesh, scale 1, Z-up, in the file's own units."""
+    try:
+        mesh = load_mesh(input_path)
+    except Exception as exc:  # noqa: BLE001
+        raise AnalysisError("load_failed", f"Mesh could not be loaded: {exc}") from exc
+    if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
+        raise AnalysisError("empty_mesh", "File contains no triangles")
+    if source_format == "obj":
+        # OBJ is written Y-up by most modellers; STL and 3MF are Z-up. Every
+        # later step (overhangs, the thumbnail, the printer) assumes Z-up.
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    return mesh
+
+
+def count_bodies(mesh: trimesh.Trimesh, capped: bool) -> int:
+    """Disconnected shells. Nothing is merged and nothing is dropped."""
+    if capped:
+        # Same count as split(), without building a submesh per component.
+        components = trimesh.graph.connected_components(
+            mesh.face_adjacency, nodes=np.arange(len(mesh.faces)), min_len=1
+        )
+        return int(len(components))
+    return int(len(mesh.split(only_watertight=False)))
+
+
+def overhang_area(mesh: trimesh.Trimesh, extent_z: float) -> float:
+    """Down-facing area that needs support; the footprint on the plate is not it."""
+    normals = mesh.face_normals
+    down = normals[:, 2] < OVERHANG_NORMAL_Z
+    if not bool(down.any()):
+        return 0.0
+    min_z = float(mesh.bounds[0][2])
+    band = min_z + FLOOR_BAND_RATIO * float(extent_z)
+    highest_vertex_z = mesh.triangles[:, :, 2].max(axis=1)
+    on_floor = highest_vertex_z <= band
+    return float(mesh.area_faces[down & ~on_floor].sum())
+
+
+def required_number(value: float, label: str) -> float:
+    number = float(value)
+    if not np.isfinite(number):
+        raise AnalysisError("bad_geometry", f"{label} is not a finite number")
+    return number
+
+
+def optional_number(value: float | None) -> float | None:
+    if value is None:
+        return None
+    number = float(value)
+    return number if np.isfinite(number) else None
+
+
+def measure(
+    mesh: trimesh.Trimesh,
+    source_units: str | None,
+    object_count: int,
+    max_faces_walls: int,
+) -> dict:
+    """The PartGeometry payload, measured on the untouched full-resolution mesh."""
+    face_count = len(mesh.faces)
+    capped = face_count > max_faces_walls
+    extents = np.asarray(mesh.extents, dtype=float)
+    watertight = bool(mesh.is_watertight)
+
+    repaired: trimesh.Trimesh | None = None
+    volume: float | None
+    volume_estimated = False
+    if watertight:
+        volume = required_number(abs(mesh.volume), "volume")
+    else:
+        # The repair NEVER touches the mesh we measure, export or print.
+        repaired = repair_with_pymeshlab(mesh.copy(), [])
+        if repaired.is_volume:
+            volume = optional_number(abs(repaired.volume))
+            volume_estimated = volume is not None
+        else:
+            volume = None
+
+    wall_p1: float | None = None
+    wall_p5: float | None = None
+    if not capped:
+        wall_p1, wall_p5 = estimate_wall_percentiles(repaired if repaired is not None else mesh)
+
+    return {
+        "volume": volume,
+        "area": required_number(mesh.area, "area"),
+        "extents": {
+            "x": required_number(extents[0], "extents.x"),
+            "y": required_number(extents[1], "extents.y"),
+            "z": required_number(extents[2], "extents.z"),
+        },
+        "bodyCount": count_bodies(mesh, capped),
+        "isWatertight": watertight,
+        "isVolume": bool(mesh.is_volume),
+        "volumeEstimated": volume_estimated,
+        "faceCount": int(face_count),
+        "wallP1": optional_number(wall_p1),
+        "wallP5": optional_number(wall_p5),
+        "overhangArea": required_number(overhang_area(mesh, extents[2]), "overhangArea"),
+        "sourceUnits": source_units,
+        "objectCount": int(object_count),
+    }
+
+
+def write_canonical_stl(mesh: trimesh.Trimesh, path: str) -> None:
+    """Binary STL of the ORIGINAL geometry: unrepaired, undecimated, file units.
+
+    This is the file the manufacturer prints, so it must not inherit any of the
+    cosmetic simplifications the preview gets.
+    """
+    try:
+        mesh.export(path, file_type="stl")
+    except Exception as exc:  # noqa: BLE001
+        raise AnalysisError("canonical_failed", f"canonical.stl could not be written: {exc}") from exc
+
+
+def write_thumbnail(mesh: trimesh.Trimesh, path: str, size: int) -> None:
+    # .copy(): simplify() hands the mesh straight back under 12k faces, and the
+    # centring/scaling below would otherwise move the mesh we measure.
+    view = simplify(mesh.copy())
+    view.apply_translation(-view.bounds.mean(axis=0))
+    largest = float(max(view.bounding_box.extents))
+    if not np.isfinite(largest) or largest <= 0:
+        raise ValueError("degenerate bounding box")
+    view.apply_scale(1.0 / largest)
+
+    elevation = trimesh.transformations.rotation_matrix(
+        np.deg2rad(THUMB_ELEVATION_DEG), [1, 0, 0]
+    )[:3, :3]
+    azimuth = trimesh.transformations.rotation_matrix(
+        np.deg2rad(THUMB_AZIMUTH_DEG), [0, 0, 1]
+    )[:3, :3]
+    rotation = elevation @ azimuth
+
+    image = render_frame(view.triangles @ rotation.T, view.face_normals @ rotation.T, size)
+    if Image is None:
+        write_png(path, image)
+        return
+    Image.fromarray(image, mode="RGB").save(path, format="PNG", optimize=True)
+
+
+def decimate_to(mesh: trimesh.Trimesh, target_faces: int) -> trimesh.Trimesh:
+    """process_mesh.decimate_if_needed with the preview's own target."""
+    if len(mesh.faces) <= target_faces or pymeshlab is None:
+        return mesh
+    meshset = pymeshlab.MeshSet()
+    meshset.add_mesh(pymeshlab.Mesh(vertex_matrix=mesh.vertices, face_matrix=mesh.faces))
+    meshset.meshing_decimation_quadric_edge_collapse(
+        targetfacenum=target_faces,
+        preserveboundary=True,
+        preservenormal=True,
+        preservetopology=True,
+        planarquadric=True,
+    )
+    out = meshset.current_mesh()
+    return trimesh.Trimesh(vertices=out.vertex_matrix(), faces=out.face_matrix(), process=True)
+
+
+def write_preview_glb(mesh: trimesh.Trimesh, path: str) -> None:
+    preview = decimate_to(mesh.copy(), PREVIEW_TARGET_FACES)
+    # glTF is Y-up and model-viewer applies no up-axis fix of its own.
+    preview.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
+    preview.export(path, file_type="glb")
+
+
+def analyze(
+    input_path: str,
+    source_format: str,
+    out_dir: str,
+    thumb_size: int,
+    max_faces_walls: int,
+) -> dict:
+    started = time.time()
+    timings: dict[str, float] = {}
+    warnings: list[str] = []
+
+    mark = time.time()
+    mesh = load_part(input_path, source_format)
+    source_units: str | None = None
+    object_count = 1
+    if source_format == "3mf":
+        source_units, object_count = read_3mf_model_meta(input_path)
+        object_count = max(object_count, 1)
+    timings["loadSeconds"] = round(time.time() - mark, 3)
+
+    mark = time.time()
+    geometry = measure(mesh, source_units, object_count, max_faces_walls)
+    timings["measureSeconds"] = round(time.time() - mark, 3)
+
+    mark = time.time()
+    write_canonical_stl(mesh, os.path.join(out_dir, "canonical.stl"))
+    timings["canonicalSeconds"] = round(time.time() - mark, 3)
+
+    # The thumbnail and the preview are cosmetic: a failure there must not void
+    # a measurement the customer can already be quoted on.
+    mark = time.time()
+    try:
+        write_thumbnail(mesh, os.path.join(out_dir, "thumb.png"), thumb_size)
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"thumbnail_failed: {exc}")
+        print(f"Warning: thumbnail failed: {exc}", file=sys.stderr)
+    timings["thumbSeconds"] = round(time.time() - mark, 3)
+
+    mark = time.time()
+    try:
+        write_preview_glb(mesh, os.path.join(out_dir, "preview.glb"))
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"preview_failed: {exc}")
+        print(f"Warning: preview GLB failed: {exc}", file=sys.stderr)
+    timings["previewSeconds"] = round(time.time() - mark, 3)
+
+    timings["totalSeconds"] = round(time.time() - started, 3)
+    return {"ok": True, "geometry": geometry, "timings": timings, "warnings": warnings}
+
+
+def write_report(out_dir: str, payload: dict) -> None:
+    with open(os.path.join(out_dir, "report.json"), "w") as handle:
+        json.dump(payload, handle, indent=2, allow_nan=False)
+
+
+def main() -> int:
+    limit_address_space()
+    parser = argparse.ArgumentParser(description="Measure an uploaded part for an instant quote")
+    parser.add_argument("input")
+    parser.add_argument("format", choices=["stl", "obj", "3mf"])
+    parser.add_argument("outdir")
+    parser.add_argument("--thumb-size", type=int, default=512)
+    parser.add_argument("--max-faces-walls", type=int, default=2_500_000)
+    args = parser.parse_args()
+
+    # The image is size² × 3 bytes before compression; an absurd value would
+    # hit RLIMIT_AS instead of producing a thumbnail.
+    if args.thumb_size < 64 or args.thumb_size > 2048:
+        print(f"Error: implausible thumbnail size {args.thumb_size}", file=sys.stderr)
+        return 2
+
+    try:
+        os.makedirs(args.outdir, exist_ok=True)
+    except OSError as exc:
+        print(f"Error: output directory unusable: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        report = analyze(
+            args.input, args.format, args.outdir, args.thumb_size, args.max_faces_walls
+        )
+        write_report(args.outdir, report)
+    except AnalysisError as exc:
+        print(f"Error: {exc.code}: {exc.message}", file=sys.stderr)
+        write_report(args.outdir, {"ok": False, "error": exc.code, "message": exc.message})
+        return 2
+    except Exception as exc:  # noqa: BLE001 - every failure gets a report
+        print(f"Error: internal: {exc}", file=sys.stderr)
+        write_report(args.outdir, {"ok": False, "error": "internal", "message": str(exc)})
+        return 2
+
+    geometry = report["geometry"]
+    print(
+        f"OK volume={geometry['volume']} area={geometry['area']:.3f} "
+        f"faces={geometry['faceCount']} bodies={geometry['bodyCount']} "
+        f"units={geometry['sourceUnits']}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

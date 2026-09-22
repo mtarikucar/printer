@@ -458,6 +458,19 @@ test("300 mm küp FDM'e sığmaz — too_large, ölçek 0.7", () => {
   );
   assert.equal(res.blocking, true);
 });
+test("fitScale MUTLAK ölçektir — mevcut ölçekle çarpılmaz, ona ATANIR", () => {
+  // 150 mm küp × ölçek 2 = 300 mm: yukarıdaki vakayla AYNI sığmazlık, farklı ölçek.
+  const p = part({ geometry: cube(150) }, { scale: 2 });
+  const issue = evaluatePartDfm(p, S).issues.find((i) => i.code === "too_large");
+  assert.ok(issue, "too_large bekleniyordu");
+  assert.equal(issue.params?.fitScale, 1.4, "mutlak ölçek = floor2(2 × 0.7); çarpan 0.7 DEĞİL");
+  // Önerilen ölçek gerçekten sığmalı: 150 × 1.4 = 210 ≤ 210.
+  const fixed = part({ geometry: cube(150) }, { scale: Number(issue.params?.fitScale) });
+  assert.ok(
+    !evaluatePartDfm(fixed, S).issues.some((i) => i.code === "too_large"),
+    "fitScale uygulanınca parça sığmalı"
+  );
+});
 test("1 mm küp — too_small", () => {
   assert.ok(codes(part({ geometry: cube(1) })).includes("too_small"));
 });

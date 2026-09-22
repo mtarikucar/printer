@@ -131,6 +131,25 @@ export const FEATURE_FLAG_KEYS = [
   "instant_quote_enabled",
 ] as const satisfies readonly FlagKey[];
 
+/**
+ * Kümelerin TEK kaynağı. "Her anahtar TAM OLARAK bir kümede" kuralı iki ayrı
+ * test dosyasında (`test-ops-spine`, `test-auto-assign`) sınanıyor; kural küme
+ * listesini BURADAN okuduğu sürece dördüncü bir küme eklemek o test dosyalarına
+ * dokunmayı gerektirmez — kümeyi eklemek yeter.
+ */
+export const FLAG_KEY_GROUPS = {
+  spend: AI_SPEND_FLAG_KEYS,
+  routing: AUTO_ASSIGN_FLAG_KEYS,
+  feature: FEATURE_FLAG_KEYS,
+} as const satisfies Record<string, readonly FlagKey[]>;
+
+/** Anahtarın kaç kümede geçtiği — sağlıklı değer DAİMA 1. */
+export function flagGroupCount(key: string): number {
+  return Object.values(FLAG_KEY_GROUPS).filter((group) =>
+    (group as readonly string[]).includes(key)
+  ).length;
+}
+
 export function isAiSpendFlag(key: FlagKey): boolean {
   return (AI_SPEND_FLAG_KEYS as readonly FlagKey[]).includes(key);
 }

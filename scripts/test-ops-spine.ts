@@ -9,8 +9,10 @@ import {
   FEATURE_FLAG_KEYS,
   FLAG_KEYS,
   FLAG_DEFAULTS,
+  FLAG_KEY_GROUPS,
   FLAG_LABELS_TR,
   flagForcedOffByKillSwitch,
+  flagGroupCount,
   isFlagKey,
 } from "../src/lib/config/flags";
 import {
@@ -71,12 +73,18 @@ test("everything that spends NEW money defaults off", () => {
     }
   }
   // No key may dodge the rule by belonging to no group at all — or to two.
+  // The group list is read from flags.ts, never restated here: a fourth group
+  // must not need an edit in two separate test files to stay honest.
   for (const key of FLAG_KEYS) {
-    const groups = [AI_SPEND_FLAG_KEYS, AUTO_ASSIGN_FLAG_KEYS, FEATURE_FLAG_KEYS].filter(
-      (group) => (group as readonly string[]).includes(key)
-    ).length;
-    assert.equal(groups, 1, `${key} must sit in exactly one group`);
+    assert.equal(flagGroupCount(key), 1, `${key} must sit in exactly one group`);
   }
+  assert.deepEqual(
+    Object.values(FLAG_KEY_GROUPS)
+      .flatMap((group) => [...group])
+      .sort(),
+    [...FLAG_KEYS].sort(),
+    "the groups together must cover FLAG_KEYS exactly"
+  );
   // Routing switches spend nothing new — they do by themselves what the admin
   // does by hand today — so they legitimately ship ON.
   for (const key of AUTO_ASSIGN_FLAG_KEYS) {

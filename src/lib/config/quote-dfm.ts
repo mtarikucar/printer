@@ -90,7 +90,8 @@ function geometryIssues(
   scaled: ScaledGeometry,
   geometry: PartGeometry,
   snapshot: PricingSnapshot,
-  tech: SnapshotTechnology
+  tech: SnapshotTechnology,
+  scale: number
 ): DfmIssue[] {
   const issues: DfmIssue[] = [];
   const sorted = scaled.sortedMm;
@@ -113,8 +114,11 @@ function geometryIssues(
     if (alternative) params.fitsTechnology = alternative.key;
     const build = sortedExtents(tech.buildMm);
     const ratio = Math.min(...sorted.map((v, i) => (build[i] as number) / v));
-    const fitScale = floorTo2(ratio);
-    // `fitScale` MEVCUT ölçeğe göre bir çarpandır: yeni ölçek = mevcut × fitScale.
+    // `fitScale` MUTLAK ölçektir: `config.scale` alanına DOĞRUDAN yazılacak değer
+    // (arayüz mevcut ölçekle ÇARPMAZ, ATAR). `scale = 1` iken oran ile aynıdır.
+    // Aşağı yuvarlanır ki önerilen ölçek her zaman gerçekten sığsın; 2 basamakta
+    // 0'a düşüyorsa (çok küçük ölçek) parametre hiç yazılmaz.
+    const fitScale = floorTo2(scale * ratio);
     if (fitScale > 0) params.fitScale = fitScale;
     issues.push({ code: "too_large", severity: "error", params });
   }
@@ -177,7 +181,8 @@ export function evaluatePartDfm(
     scaled = scaledGeometry(part.geometry, config.units, config.scale);
     // Konfig geçersiz olsa bile (ör. bilinmeyen renk) geometri kontrolleri
     // çalışır: müşteri iki sorunu tek seferde görsün.
-    if (tech) issues.push(...geometryIssues(scaled, part.geometry, snapshot, tech));
+    if (tech)
+      issues.push(...geometryIssues(scaled, part.geometry, snapshot, tech, config.scale));
   }
 
   if (config.quantity > snapshot.settings.maxAutoQtyPerPart) {

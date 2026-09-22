@@ -266,8 +266,12 @@ yeniden çalıştırır; script bunu kendiliğinden yapmaz.
 ### `quote-units.ts`
 `unitFactor(units)` (mm 1, cm 10, in 25.4); `scaledGeometry(geometry, units, scale)`
 → mm cinsinden `volumeMm3 = v·s³`, `areaMm2 = a·s²`, `extentsMm = e·s`, `wallP1Mm`;
-`suggestUnits(geometry)` sezgisi: 3MF `sourceUnits` varsa o; en büyük boyut < 10 →
-`in` öner; baskı hacmini aşıp /10 ile sığıyorsa `cm` öner.
+`suggestUnits(geometry, maxBuild)` sezgisi: 3MF `sourceUnits` varsa tartışma yok, o.
+Aksi hâlde öneri YALNIZ "sayılar şüpheli derecede küçük" durumunda verilir — en büyük
+boyut < 10, yani mm okunursa parça 1 cm'in altında kalır: inç yorumu `maxBuild`'e
+sığıyorsa `in`, sığmıyorsa cm yorumu sığıyorsa `cm`, ikisi de sığmıyorsa `null`.
+Baskı hacmini AŞAN parçaya birim ÖNERİLMEZ (`unitFactor(cm|in) > 1`; cm/inç parçayı
+küçültmez, büyütür): sığmayanın çözümü birim değil ölçektir, bkz. `too_large.fitScale`.
 
 ### `quote-pricing.ts`
 Girdi: snapshot, parça (geometri + konfig), teklif (lead tier, addons).
@@ -318,6 +322,14 @@ Error varsa ve geçerli manuel fiyat yoksa parça anlık fiyatlanmaz ("Manuel te
 iste"). Warning'ler ödemeden önce onay ister (`dfm_ack_hash`). Türkçe mesajlar
 `instantQuote.dfm.*` sözlük anahtarları.
 
+`too_large` parametreleri: `{maxX, maxY, maxZ}` seçili teknolojinin baskı hacmi;
+`fitsTechnology` (yalnız varsa) aynı parçanın SIĞDIĞI başka teknoloji anahtarı;
+`fitScale` **mutlak ölçek** — parçanın sığması için `config.scale` alanına yazılacak
+değer: `floor2(config.scale × min(sıralıBaskı[i] / sıralıMm[i]))`. Aşağı yuvarlanır ki
+önerilen ölçek her zaman gerçekten sığsın. ÇARPAN DEĞİLDİR: arayüz mevcut ölçekle
+çarpmaz, doğrudan ATAR (`config.scale = 1` iken ikisi aynı değeri verir, bu yüzden
+karıştırılması kolaydır). 2 basamakta 0'a düşüyorsa parametre hiç yazılmaz.
+
 ### `business-days.ts`
 `addBusinessDays(start, n, holidays, cutoffHour)` — İstanbul saatiyle; hafta sonu ve
 tatiller atlanır; cutoff sonrası verilen sipariş ertesi iş gününden sayılır.
@@ -328,6 +340,16 @@ max(addon extra) → kademe: `max(tier.minDays, base + tier.daysDelta)`.
 `quoteStatusPermissions(quote, {hasLiveDraft, now})` → `{canEdit, canCheckout,
 canRequestReview, canClaim, blockedReason}`; `checkoutReadiness(computed)` →
 eksik liste (analiz bekliyor, error, onaysız warning, süre doldu, fiyat yok, limit).
+
+Uygulama adı `checkoutBlockers(computed, parts, {termsAccepted, expired})`; boş dizi =
+teklif ödenebilir. Ürettiği Türkçe cümleler ve sırası: (1) parça yok — tek başına
+döner, (2) süre doldu, (3) N parçanın analizi sürüyor, (4) N parça manuel fiyat
+bekliyor (analizi süren parçalar burada sayılmaz), (5) "Fiyat hesaplanamadı" — bu
+cümle `!allPriced` için YAKALAYICIDIR ve yalnız (3) ile (4) boşken yazılır: aynı sorun
+müşteriye iki kez anlatılmaz, (6) N parça için uyarı onayı eksik, (7) toplam tutar
+anlık teklif sınırını aşıyor (`ComputedQuote.quoteIssues` içindeki `qty_over_auto`
+`{reason:"total"}` — yukarıdaki tablonun `total_over_auto` satırının karşılığı),
+(8) mesafeli satış sözleşmesi onayı.
 
 ### `quote-present.ts`
 **Tek serileştirici** `presentQuote(quote, parts, computed, viewer)`; `viewer =

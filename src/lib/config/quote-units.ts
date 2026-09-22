@@ -72,12 +72,13 @@ export function scaledGeometry(
  * neredeyse hiçbir zaman kastedilen şey değildir — dosya büyük olasılıkla inç
  * ya da santimetredir.
  *
- * SPEC'TEN SAPMA (bilinçli): tasarım metni "baskı hacmini aşıp /10 ile sığıyorsa
- * `cm` öner" diyor. `unitFactor(cm) = 10` olduğu için santimetre parçayı KÜÇÜLTMEZ,
- * BÜYÜTÜR; baskı hacmini aşan bir parçaya cm/inç önermek onu daha da büyütürdü.
- * Sığmayan parçanın çözümü birim değil ÖLÇEKTİR (bkz. DfM `too_large.fitScale`).
- * Bu yüzden `cm`, inç yorumunun baskı hacmine sığmadığı küçük parçalar için
- * kalan makul öneri olarak kullanılır.
+ * NEDEN "baskı hacmini aşana cm öner" DEĞİL: `unitFactor(cm) = 10` olduğu için
+ * santimetre parçayı KÜÇÜLTMEZ, BÜYÜTÜR; baskı hacmini aşan bir parçaya cm/inç
+ * önermek onu daha da büyütürdü. Sığmayan parçanın çözümü birim değil ÖLÇEKTİR
+ * (bkz. DfM `too_large.fitScale`). Bu yüzden `cm`, inç yorumunun baskı hacmine
+ * sığmadığı küçük parçalar için kalan makul öneri olarak kullanılır.
+ * (Tasarım metni 1.2 incelemesinden sonra bu kuralla eşitlendi — spec
+ * §quote-units; `maxBuild` parametresi de ancak böyle anlam kazanır.)
  */
 export function suggestUnits(g: PartGeometry, maxBuild: Vec3): QuoteUnits | null {
   if (g.sourceUnits) return g.sourceUnits;

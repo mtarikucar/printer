@@ -97,6 +97,10 @@ export function checkoutBlockers(
   ).length;
   if (manual > 0) blockers.push(`${manual} parça manuel fiyat bekliyor.`);
 
+  // `!allPriced` AYRI bir cümle değil YAKALAYICIDIR: fiyatın çıkmamasının sebebi
+  // zaten (3) analiz ya da (4) manuel cümlesiyle anlatıldıysa müşteriye aynı şeyi
+  // iki kez söylemeyiz. Kalan hâl "sebebini adlandıramadığımız fiyatsızlık"tır.
+  // (spec §quote-policy, cümle 5)
   if (!c.totals.allPriced && pending === 0 && manual === 0) {
     blockers.push("Fiyat hesaplanamadı — ekibimizden teklif isteyin.");
   }
@@ -110,6 +114,10 @@ export function checkoutBlockers(
     blockers.push(`${unacknowledged} parça için üretim uyarılarını onaylamanız gerekiyor.`);
   }
 
+  // Teklif düzeyindeki `total_over_auto` (spec §quote-dfm tablosu, §quote-policy
+  // cümle 7): parçaların hepsi tek tek fiyatlanabilir olsa da toplam anlık teklif
+  // sınırını aşıyorsa ödeme AÇILMAZ — aksi hâlde ekran "ödenebilir" derken uç
+  // reddederdi.
   if (c.quoteIssues.some((i) => i.code === "qty_over_auto" && i.params?.reason === "total")) {
     blockers.push("Toplam tutar anlık teklif sınırını aşıyor — ekibimizden teklif isteyin.");
   }

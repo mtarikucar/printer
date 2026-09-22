@@ -26,6 +26,29 @@ export const MAX_MESSAGE_LENGTH = 4000;
 
 export type QuoteChatViewer = "customer" | "admin";
 
+const CHAT_UNAVAILABLE =
+  "Teklif mesajlaşması henüz etkinleştirilmedi (veritabanı güncellemesi bekleniyor). Lütfen ekiple e-posta üzerinden iletişime geçin.";
+
+/**
+ * `quote_messages` tablosu HENÜZ YOK mu (42P01)?
+ *
+ * 0064 kesme noktalı bir migration'dır: ifadeler tek tek uygulanır, yani
+ * yarıda kalan bir geçiş `quotes`'u yaratmış ama `quote_messages`'ı
+ * yaratmamış olabilir. O ortamda teklif sayfası açılır, sohbet açılmaz —
+ * sayfayı 500'e düşürmek yerine sohbet KAPALI davranır (aynı kural
+ * `order-partner-chat.ts`'te de var).
+ *
+ * Drizzle 0.45 pg hatasını SARAR: yakalanan hatanın `.code`'u undefined'dır,
+ * gerçek kod `.cause` üzerindedir (bkz. drizzle-error-wrapping notu).
+ */
+function isChatTableMissing(err: unknown): boolean {
+  const code = (e: unknown) =>
+    typeof e === "object" && e !== null && "code" in e
+      ? String((e as { code?: unknown }).code)
+      : null;
+  return code(err) === "42P01" || code((err as { cause?: unknown })?.cause) === "42P01";
+}
+
 /** `isUnread` iki katılımcı bilir: "admin" ve "karşı taraf" (burada müşteri). */
 function unreadViewer(viewer: QuoteChatViewer): "admin" | "counterparty" {
   return viewer === "admin" ? "admin" : "counterparty";
@@ -39,7 +62,11 @@ export async function listQuoteMessages(
     .select()
     .from(quoteMessages)
     .where(eq(quoteMessages.quoteId, quoteId))
-    .orderBy(asc(quoteMessages.createdAt));
+    .orderBy(asc(quoteMessages.createdAt))
+    .catch((err: unknown) => {
+      if (isChatTableMissing(err)) return [];
+      throw err;
+    });
 
   const messages: SerializedMessage[] = rows.map((m) => ({
     id: m.id,
@@ -109,18 +136,25 @@ export async function createQuoteMessage(args: {
     }
   }
 
-  await db.insert(quoteMessages).values({
-    quoteId: args.quoteId,
-    sender: args.sender,
-    senderUserId: args.senderUserId ?? null,
-    senderEmail: args.senderEmail ?? null,
-    body,
-    attachmentKey,
-    attachmentThumbnailKey,
-    // Platform dışına taşıma sezgisi: mesajı ENGELLEMEZ, admin incelemesi için
-    // işaretler (sipariş sohbetiyle aynı kural).
-    flagged: containsContactInfo(body),
-  });
+  try {
+    await db.insert(quoteMessages).values({
+      quoteId: args.quoteId,
+      sender: args.sender,
+      senderUserId: args.senderUserId ?? null,
+      senderEmail: args.senderEmail ?? null,
+      body,
+      attachmentKey,
+      attachmentThumbnailKey,
+      // Platform dışına taşıma sezgisi: mesajı ENGELLEMEZ, admin incelemesi için
+      // işaretler (sipariş sohbetiyle aynı kural).
+      flagged: containsContactInfo(body),
+    });
+  } catch (err) {
+    if (isChatTableMissing(err)) {
+      throw new QuoteServiceError(CHAT_UNAVAILABLE, 503, "chat_unavailable");
+    }
+    throw err;
+  }
 
   // Canlı yayın ve bildirim EN İYİ ÇABA: mesaj yazıldıktan sonra Redis ya da
   // SMTP arızası isteği düşürmemeli.
@@ -151,27 +185,24 @@ export async function markQuoteMessagesRead(
   quoteId: string,
   viewer: QuoteChatViewer
 ): Promise<void> {
-  if (viewer === "admin") {
-    await db
-      .update(quoteMessages)
-      .set({ readByAdminAt: new Date() })
-      .where(
-        and(
+  const where =
+    viewer === "admin"
+      ? and(
           eq(quoteMessages.quoteId, quoteId),
           isNull(quoteMessages.readByAdminAt),
           ne(quoteMessages.sender, "admin")
         )
-      );
-    return;
+      : and(
+          eq(quoteMessages.quoteId, quoteId),
+          isNull(quoteMessages.readByCustomerAt),
+          eq(quoteMessages.sender, "admin")
+        );
+  const set =
+    viewer === "admin" ? { readByAdminAt: new Date() } : { readByCustomerAt: new Date() };
+  try {
+    await db.update(quoteMessages).set(set).where(where);
+  } catch (err) {
+    // Okunacak bir tablo yoksa okunmamış mesaj da yoktur: sessizce geçilir.
+    if (!isChatTableMissing(err)) throw err;
   }
-  await db
-    .update(quoteMessages)
-    .set({ readByCustomerAt: new Date() })
-    .where(
-      and(
-        eq(quoteMessages.quoteId, quoteId),
-        isNull(quoteMessages.readByCustomerAt),
-        eq(quoteMessages.sender, "admin")
-      )
-    );
 }

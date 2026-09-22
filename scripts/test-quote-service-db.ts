@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
@@ -38,6 +39,34 @@ process.env.UPLOAD_DIR = uploads;
 const admin = new pg.Client({ connectionString });
 let pool: pg.Pool | undefined;
 let checks = 0;
+
+/**
+ * Giden e-postalar: SMTP sürücüsü kayda alınır, sokete çıkılmaz.
+ *
+ * İki işi birden görür. (1) Bildirimler bu testte İDDİA EDİLEBİLİR hâle gelir —
+ * `quote-notify.ts`'in tek gözlenebilir çıktısı giden mektuptur. (2) Çıktı
+ * temiz kalır: yamasız koşuda her bildirim QA makinesinde
+ * `ECONNREFUSED :587` dökümü basıyordu; bu döküm bildirimin BEKLENEN
+ * (yutulan) davranışıydı, yani gerçek bir arıza gibi görünen gürültüydü.
+ */
+const sentMail: Array<{ to: string; subject: string; html: string }> = [];
+{
+  const SMTP = createRequire(import.meta.url)("nodemailer/lib/smtp-transport") as {
+    prototype: {
+      send(
+        mail: { data: { to: string; subject: string; html: string } },
+        callback: (
+          error: Error | null,
+          info: { accepted: string[]; rejected: string[] }
+        ) => void
+      ): void;
+    };
+  };
+  SMTP.prototype.send = (mail, callback) => {
+    sentMail.push({ to: mail.data.to, subject: mail.data.subject, html: mail.data.html });
+    callback(null, { accepted: [mail.data.to], rejected: [] });
+  };
+}
 
 const test = async (name: string, run: () => Promise<void>) => {
   await run();
@@ -109,6 +138,18 @@ async function main() {
       updatePart,
       updateQuote,
     } = await import("../src/lib/services/quote-service");
+    const {
+      createQuoteMessage,
+      listQuoteMessages,
+      markQuoteMessagesRead,
+      MAX_MESSAGE_LENGTH,
+    } = await import("../src/lib/services/quote-chat");
+    const {
+      notifyQuoteAbandoned,
+      notifyQuoteExpiring,
+      notifyQuoteMessage,
+      notifyReviewRequested,
+    } = await import("../src/lib/services/quote-notify");
     const { createStagedUpload, appendChunk, setStagedUploadMeta } = await import(
       "../src/lib/services/chunked-upload"
     );
@@ -636,6 +677,11 @@ async function main() {
 
     await test("requote parçaları YENİ anahtarlarla kopyalar, analizi taşır", async () => {
       const { canonicalKey } = await markAnalyzed(partCFdm);
+      // Kaynakta ADMİNİN verdiği bir manuel fiyat var: o fiyat kaynağın
+      // kataloğuna ve geçerlilik penceresine aitti, kopyaya geçmemeli.
+      await admin.query("UPDATE quote_parts SET manual_unit_price_kurus = 99900 WHERE id = $1", [
+        partCFdm,
+      ]);
       const [source] = await loadQuoteParts(quoteC.id);
 
       const created = await requote(await loadAccess(quoteC.id, userId));
@@ -666,9 +712,12 @@ async function main() {
         assert.ok(key.startsWith(`quote-parts/${copy.id}/`), `kopya kendi klasöründe: ${key}`);
         assert.ok(fs.existsSync(path.join(uploads, key)), `kopya diskte: ${key}`);
       }
+      assert.equal(copy.manualUnitPriceKurus, null, "manuel fiyat kopyaya GEÇMEZ");
       // Kaynak dosya DURUYOR: kopyalama taşıma değildir.
       assert.ok(fs.existsSync(path.join(uploads, source.sourceKey)));
-      assert.equal((await loadQuoteParts(quoteC.id)).length, 1, "kaynak teklif değişmedi");
+      const remaining = await loadQuoteParts(quoteC.id);
+      assert.equal(remaining.length, 1, "kaynak teklif değişmedi");
+      assert.equal(remaining[0].manualUnitPriceKurus, 99_900, "kaynağın manuel fiyatı duruyor");
     });
 
     // ─── Kütüphaneden parça ekleme ──────────────────────────────────────────
@@ -695,6 +744,194 @@ async function main() {
           err.code === "part_not_found"
       );
       assert.equal((await loadQuoteParts(quoteD.id)).length, 1, "reddedilen istek satır bırakmadı");
+    });
+
+    // ─── Bildirimler ────────────────────────────────────────────────────────
+
+    const customerEmail = `teklif-${userId}@ornek.test`;
+
+    /** Zilin bu türden kaç satırı var (talep uçları bildirimi `void` ile atar). */
+    const bellCount = async (type: string): Promise<number> =>
+      (
+        await admin.query(
+          "SELECT count(*)::int AS n FROM customer_notifications WHERE user_id = $1 AND type = $2",
+          [userId, type]
+        )
+      ).rows[0].n as number;
+
+    await test("inceleme talebi müşteriye ve admine yazar, gövdeler TUTAR taşımaz", async () => {
+      const before = await bellCount("quote_review_requested");
+      sentMail.length = 0;
+      await notifyReviewRequested(quoteB.id);
+
+      const toCustomer = sentMail.filter((m) => m.to === customerEmail);
+      const toAdmin = sentMail.filter((m) => m.to !== customerEmail);
+      assert.equal(toCustomer.length, 1, "müşteri bilgilendirildi");
+      assert.equal(toAdmin.length, 1, "admin sıraya alındı");
+      for (const mail of sentMail) {
+        assert.match(mail.subject, new RegExp(quoteB.number), "konu teklif numarasını taşır");
+        assert.match(
+          mail.html,
+          new RegExp(`/teklif/${quoteB.number}`),
+          "gövde tutar yerine teklife BAĞLANTI verir"
+        );
+        assert.doesNotMatch(
+          mail.html,
+          /₺|\bTL\b|kuruş/i,
+          "bildirim tutar taşımaz (sayfadaki fiyattan bağımsız olarak eskir)"
+        );
+      }
+
+      assert.equal(
+        await bellCount("quote_review_requested"),
+        before + 1,
+        "uygulama içi bildirim de düştü"
+      );
+    });
+
+    await test("satış hatırlatması TİCARİ İLETİ İZNİ ister, süre dolumu istemez", async () => {
+      sentMail.length = 0;
+      await notifyQuoteAbandoned(quoteB.id);
+      assert.equal(sentMail.length, 0, "izinsiz terk hatırlatması gönderilmez (ETK 6563)");
+
+      await notifyQuoteExpiring(quoteB.id);
+      assert.equal(sentMail.length, 1, "süre dolumu İŞLEMSELDİR, izin aranmaz");
+
+      await admin.query("UPDATE users SET marketing_consent = true WHERE id = $1", [userId]);
+      await notifyQuoteAbandoned(quoteB.id);
+      assert.equal(sentMail.length, 2, "izin verilince hatırlatma gider");
+      await admin.query("UPDATE users SET marketing_consent = false WHERE id = $1", [userId]);
+    });
+
+    await test("bildirim SMTP çökse de fırlatmaz, arızayı GÜNLÜĞE yazar", async () => {
+      const SMTP = createRequire(import.meta.url)("nodemailer/lib/smtp-transport") as {
+        prototype: { send(mail: unknown, callback: (e: Error | null) => void): void };
+      };
+      const working = SMTP.prototype.send;
+      SMTP.prototype.send = (_mail, callback) => callback(new Error("SMTP kapalı"));
+      // Yutma SESSİZ DEĞİLDİR: beklenen günlük satırları burada iddiaya
+      // dönüşür (ve testin çıktısını kirletmez).
+      const logged: string[] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(String(args[0]));
+      try {
+        // Çağıranın işlemi (talep kaydı, mesaj yazımı) bildirime rehin değildir.
+        await notifyQuoteMessage(quoteB.id, "customer");
+        await notifyReviewRequested(quoteB.id);
+      } finally {
+        console.error = realError;
+        SMTP.prototype.send = working;
+      }
+      assert.deepEqual(logged, [
+        "[quote-notify] notifyQuoteMessage başarısız (ölümcül değil)",
+        "[quote-notify] notifyReviewRequested başarısız (ölümcül değil)",
+      ]);
+    });
+
+    // ─── Sohbet ─────────────────────────────────────────────────────────────
+
+    await test("sohbet: okunmamış KARŞI tarafta birikir, okundu işareti yalnız onu düşürür", async () => {
+      await createQuoteMessage({
+        quoteId: quoteB.id,
+        sender: "customer",
+        senderUserId: userId,
+        body: "Bu parçayı üç gün içinde teslim alabilir miyim?",
+      });
+      let customerView = await listQuoteMessages(quoteB.id, "customer");
+      assert.equal(customerView.messages.length, 1);
+      assert.equal(customerView.messages[0].mine, true);
+      assert.equal(customerView.unreadCount, 0, "kendi mesajı okunmamış sayılmaz");
+
+      let adminView = await listQuoteMessages(quoteB.id, "admin");
+      assert.equal(adminView.unreadCount, 1, "müşterinin mesajı admin kuyruğuna düştü");
+      assert.equal(adminView.messages[0].mine, false);
+
+      await createQuoteMessage({
+        quoteId: quoteB.id,
+        sender: "admin",
+        senderEmail: "ekip@ornek.test",
+        body: "Üç gün için ekspres kademesi gerekiyor.",
+      });
+      customerView = await listQuoteMessages(quoteB.id, "customer");
+      assert.deepEqual(
+        customerView.messages.map((m) => m.senderType),
+        ["customer", "admin"],
+        "mesajlar zaman sırasında gelir"
+      );
+      assert.equal(customerView.unreadCount, 1);
+
+      await markQuoteMessagesRead(quoteB.id, "customer");
+      assert.equal((await listQuoteMessages(quoteB.id, "customer")).unreadCount, 0);
+      adminView = await listQuoteMessages(quoteB.id, "admin");
+      assert.equal(adminView.unreadCount, 1, "müşterinin okuması ADMİN kuyruğunu temizlemez");
+
+      await markQuoteMessagesRead(quoteB.id, "admin");
+      assert.equal((await listQuoteMessages(quoteB.id, "admin")).unreadCount, 0);
+    });
+
+    await test("sohbet: iletişim bilgisi işaretlenir, bozuk gövde ve ek dosya reddedilir", async () => {
+      await createQuoteMessage({
+        quoteId: quoteB.id,
+        sender: "customer",
+        senderUserId: userId,
+        body: "Bana 0532 111 22 33 numarasından ulaşın.",
+      });
+      const last = await admin.query(
+        "SELECT flagged FROM quote_messages WHERE quote_id = $1 ORDER BY created_at DESC LIMIT 1",
+        [quoteB.id]
+      );
+      assert.equal(last.rows[0].flagged, true, "platform dışına taşıma sezgisi işaretledi");
+
+      const rejects = (body: string, file: File | null, code: string) =>
+        assert.rejects(
+          createQuoteMessage({ quoteId: quoteB.id, sender: "customer", body, file }),
+          (err: unknown) =>
+            err instanceof QuoteServiceError && err.status === 400 && err.code === code
+        );
+      await rejects("   ", null, "empty_message");
+      await rejects("x".repeat(MAX_MESSAGE_LENGTH + 1), null, "message_too_long");
+      // Teknik etiket (INVALID_IMAGE) değil, TÜRKÇE tek cümle görünür.
+      await rejects(
+        "Çizim ekte.",
+        new File([Buffer.from("%PDF-1.4 sahte")], "cizim.pdf", { type: "application/pdf" }),
+        "invalid_attachment"
+      );
+
+      const [{ n }] = (
+        await admin.query(
+          "SELECT count(*)::int AS n FROM quote_messages WHERE quote_id = $1",
+          [quoteB.id]
+        )
+      ).rows;
+      assert.equal(n, 3, "reddedilen istekler satır bırakmadı");
+    });
+
+    await test("sohbet tablosu yokken 500 değil, TÜRKÇE bir kapalı kapı (42P01)", async () => {
+      await admin.query(`ALTER TABLE ${namespace}.quote_messages RENAME TO quote_messages_yok`);
+      try {
+        // Okuma: teklif sayfası sohbetsiz de açılabilmeli.
+        assert.deepEqual(await listQuoteMessages(quoteB.id, "customer"), {
+          messages: [],
+          unreadCount: 0,
+        });
+        // İşaretleme: okunacak bir şey yoksa sessizce geçer.
+        await markQuoteMessagesRead(quoteB.id, "customer");
+        await assert.rejects(
+          createQuoteMessage({
+            quoteId: quoteB.id,
+            sender: "customer",
+            senderUserId: userId,
+            body: "Tablo yokken yazılan mesaj.",
+          }),
+          (err: unknown) =>
+            err instanceof QuoteServiceError &&
+            err.status === 503 &&
+            err.code === "chat_unavailable" &&
+            /etkinleştirilmedi/.test(err.message)
+        );
+      } finally {
+        await admin.query(`ALTER TABLE ${namespace}.quote_messages_yok RENAME TO quote_messages`);
+      }
     });
 
     await queue.obliterate({ force: true }).catch(() => {});

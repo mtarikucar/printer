@@ -107,6 +107,10 @@ Tüm yeni tablolar `schema.ts` sonuna tek blok olarak eklenir. `orders` /
 `order_drafts` tanımlarına **dokunulmaz**; bağ `quote_checkouts.draft_id` ve
 `quotes.order_id` üzerinden kurulur. Durum/tür kolonları `text + CHECK`
 (pg enum'a değer eklemek down migration'da geri alınamaz — ev kuralı).
+Aşağıdaki tablolarda "timestamp" yazan her kolon `timestamp with time zone`
+olarak yazılır (0061/0062 ev örneği; geçerlilik/iş günü hesapları için güvenli tip).
+Tablolardaki CHECK listesi asgaridir: spec metninde geçen değer kuralları
+(ör. `support_factor ≥ 1`, `colors en az 1`) ayrı adlandırılmış CHECK'lere dönüşebilir.
 
 ### Katalog
 
@@ -123,8 +127,8 @@ Tüm yeni tablolar `schema.ts` sonuna tek blok olarak eklenir. `orders` /
 | tolerance_text | text | "±%0,5 (en az ±0,5 mm)" |
 | layer_options_um | jsonb int[] | FDM [100,200,300], SLA [50,100] |
 | default_layer_um | integer | |
-| infill_options_pct | jsonb int[] \| null | FDM [15,30,50,100]; null = katı |
-| default_infill_pct | integer \| null | |
+| infill_options_pct | jsonb int[] \| null | FDM [15,20,30,50,100]; null = katı |
+| default_infill_pct | integer \| null | FDM 20; SLA null |
 | shell_mm | double | FDM kabuk kalınlığı (efektif hacim) |
 | setup_fee_kurus | integer | parça satırı başına bir kez |
 | machine_rate_kurus_per_hour | integer | |
@@ -177,7 +181,7 @@ dini tatilleri; dini bayram tarihleri Diyanet takvimiyle admin tarafından doğr
 |---|---|
 | id uuid pk | |
 | seq integer GENERATED ALWAYS AS IDENTITY unique | |
-| number text GENERATED ALWAYS AS (`'T-' \|\| lpad(seq::text, 6, '0')`) STORED unique | yarış yok |
+| number text GENERATED ALWAYS AS (`'T-' \|\| lpad(seq::text, greatest(6, length(seq::text)), '0')`) STORED unique | yarış yok; 6 haneye kadar `lpad(seq::text, 6, '0')` ile birebir aynı, 7+ hanede KESMEZ (düz `lpad` `seq=1234567`'yi `T-123456`'ya kırpıp `seq=123456` ile çakışırdı). `formatQuoteNumber`'ın `padStart(6)`'sı ile aynı çıktı |
 | user_id → users null | |
 | anonymous_id text null | yalnız `user_id IS NULL` iken geçerli |
 | status text CHECK IN (`draft`,`needs_review`,`quoted`,`ordered`,`expired`,`cancelled`) | |
@@ -244,11 +248,18 @@ created_at.
 ### Down migration
 
 `0064_instant_quotes.down.sql`: tek `DO $$` bloğu; `SET LOCAL lock_timeout`; sahip
-tabloları `LOCK`; `quotes`'ta **hiç satır varsa** `RAISE EXCEPTION '0064 rollback
-refused: …'` (kullanıcı verisini asla silmez); yoksa bağımlılık sırasına göre `DROP
-TABLE IF EXISTS` (katalog tohumları tabloyla gider); journal satırını `created_at =
-<when>` ile siler. Idempotent. Round-trip testi: up ×2, dolu DB'de down reddi, down ×2,
-up.
+tabloları `LOCK`; **çalışma zamanı tablolarının herhangi birinde satır varsa**
+(`quotes`, `quote_checkouts`, `quote_parts`, `quote_messages`, `quote_admin_actions`,
+`print_catalog_changes`) `RAISE EXCEPTION '0064 rollback refused: …'` (kullanıcı ve
+operatör verisini asla silmez); yoksa bağımlılık sırasına göre `DROP TABLE IF EXISTS`
+(katalog tohumları tabloyla gider); journal satırını `created_at = <when>` ile siler.
+Idempotent. Round-trip testi: up ×2, dolu DB'de down reddi, down ×2, up.
+
+Operasyonel sonuç (runbook'a yazılır, Faz 7.1): `print_catalog_changes` bir denetim
+tablosudur ve **tek bir admin katalog düzenlemesi** 0064'ü bu script'le geri
+alınamaz yapar. Geri alma yine de isteniyorsa operatör denetim satırlarını bilerek ve
+kaydını alarak kendisi siler (`DELETE FROM print_catalog_changes;`), sonra down'ı
+yeniden çalıştırır; script bunu kendiliğinden yapmaz.
 
 ## Saf çekirdek modüller (`src/lib/config/`, `server-only` YOK)
 
@@ -328,6 +339,8 @@ küçük resim.
 
 ### `quote-number.ts`, `quote-hash.ts`
 `formatQuoteNumber`, `parseQuoteNumber`; `partConfigHash(part, tier)` (sha256).
+`formatQuoteNumber(seq) = 'T-' + String(seq).padStart(6, '0')` — 7+ hanede kırpma YOK;
+`quotes.number` generated kolonu (bkz. Teklif tablosu) birebir aynı çıktıyı verir.
 
 ## Yükleme ve analiz
 

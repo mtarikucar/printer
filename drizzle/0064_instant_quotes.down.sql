@@ -3,6 +3,14 @@
 -- müşteri ve operatör verisi asla silinmez. Katalog tohumu tablosuyla gider.
 -- Kilitler, kontroller, DDL ve journal satırının silinmesi tek işlemde atomiktir.
 -- Elle uygulanır (psql); journal'da yer almaz. Daha yeni migration'lar önce geri alınır.
+--
+-- OPERATÖR NOTU — ret kapsamı bilerek geniştir: `print_catalog_changes` bir DENETİM
+-- tablosudur, tek bir admin katalog düzenlemesi bu script'i kalıcı olarak reddettirir.
+-- Script denetim kaydını kendiliğinden SİLMEZ. Geri alma yine de isteniyorsa kaydı
+-- dışa aktarıp (ör. `\copy print_catalog_changes TO '...'`) bilerek temizlemek gerekir:
+--   DELETE FROM print_catalog_changes;   -- yalnız denetim geçmişi; tohum etkilenmez
+-- ardından bu dosya yeniden çalıştırılır. Teklif/ödeme satırları için böyle bir
+-- kestirme YOKTUR: onlar müşteri verisidir, 0064 canlı veriyle geri alınamaz.
 DO $$
 DECLARE
   table_name text;

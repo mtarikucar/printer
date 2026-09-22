@@ -96,6 +96,9 @@ async function lockQuote(tx: QuoteCacheTx, quoteId: string): Promise<Quote> {
   return quote;
 }
 
+/** Hem havuzun kendisi hem açık bir işlem okuyabilsin diye en dar arayüz. */
+type QuoteReader = Pick<QuoteCacheTx, "select">;
+
 /**
  * Bekleyen ödeme taslağı: teklif ↔ `order_drafts`.
  *
@@ -105,25 +108,21 @@ async function lockQuote(tx: QuoteCacheTx, quoteId: string): Promise<Quote> {
  */
 export async function liveDraftForQuote(
   quoteId: string,
-  tx?: QuoteCacheTx
+  tx?: QuoteReader
 ): Promise<{ draftId: string; reference: string } | null> {
-  const read = async (exec: QuoteCacheTx) => {
-    const [row] = await exec
-      .select({ draftId: orderDrafts.id, reference: orderDrafts.reference })
-      .from(quoteCheckouts)
-      .innerJoin(orderDrafts, eq(quoteCheckouts.draftId, orderDrafts.id))
-      .where(
-        and(
-          eq(quoteCheckouts.quoteId, quoteId),
-          inArray(orderDrafts.status, ["pending", "awaiting_review"])
-        )
+  const [row] = await (tx ?? db)
+    .select({ draftId: orderDrafts.id, reference: orderDrafts.reference })
+    .from(quoteCheckouts)
+    .innerJoin(orderDrafts, eq(quoteCheckouts.draftId, orderDrafts.id))
+    .where(
+      and(
+        eq(quoteCheckouts.quoteId, quoteId),
+        inArray(orderDrafts.status, ["pending", "awaiting_review"])
       )
-      .orderBy(desc(quoteCheckouts.createdAt))
-      .limit(1);
-    return row ?? null;
-  };
-  if (tx) return read(tx);
-  return db.transaction(read);
+    )
+    .orderBy(desc(quoteCheckouts.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 async function assertEditable(tx: QuoteCacheTx, quote: Quote): Promise<void> {
@@ -324,6 +323,10 @@ export async function addPartFromUpload(
     }
 
     const newId = randomUUID();
+    // Taşıma (rename) işlemin İÇİNDE: kimlik önce üretilir ki dosya kendi
+    // parçasının klasörüne gitsin. İşlem geri alınırsa dosya sahipsiz kalır —
+    // saklama süpürmesi onu toplar; ters sıra (önce satır, sonra taşıma) ise
+    // dosyasız bir parça bırakırdı ve o müşteriye "fiyat hesaplanamadı" olurdu.
     const sourceKey = await promoteStagedUpload(
       args.uploadId,
       `quote-parts/${newId}`,
@@ -665,6 +668,14 @@ async function applyPartPatch(
   return changed;
 }
 
+/**
+ * Parçanın yapılandırmasını değiştirir.
+ *
+ * Birim ve ölçek değişikliği YENİDEN ANALİZ KUYRUĞA ALMAZ: worker'ın raporu
+ * dosya birimindedir ve milimetreye çeviri saf matematiktir (`scaledGeometry`,
+ * bkz. quote-types.ts birim kuralı). Dosyayı ikinci kez ölçmek aynı sayıları
+ * verir, yalnız müşteriyi bekletirdi.
+ */
 export async function updatePart(
   access: QuoteAccess,
   partId: string,
@@ -673,8 +684,6 @@ export async function updatePart(
   await mutateQuote(access, async (tx, quote) => {
     const part = await loadPart(tx, quote.id, partId);
     const changed = await applyPartPatch(tx, quote, part, patch);
-    // Birim ve ölçek SAF MATEMATİKTİR: analiz raporu dosya birimindedir, bu
-    // yüzden yeniden analiz KUYRUĞA ALINMAZ (bkz. quote-types.ts birim kuralı).
     if (changed) await demoteQuotedToDraft(tx, quote);
   });
 }
@@ -1082,11 +1091,11 @@ export async function loadQuoteParts(quoteId: string): Promise<QuotePart[]> {
  */
 export async function loadPresentedQuote(access: QuoteAccess): Promise<PresentedQuote> {
   const quote = access.quote;
-  const [parts, live, catalogAt] = await Promise.all([
-    loadQuoteParts(quote.id),
-    liveDraftForQuote(quote.id),
-    catalogUpdatedAt(),
-  ]);
+  // Okumalar SIRAYLA: havuzda beş bağlantı var ve tek bir sayfa görüntülemesi
+  // için üçünü birden tutmak, iki eşzamanlı ziyaretçide havuzu tüketirdi.
+  const parts = await loadQuoteParts(quote.id);
+  const live = await liveDraftForQuote(quote.id);
+  const catalogAt = await catalogUpdatedAt();
 
   let orderNumber: string | null = null;
   if (quote.orderId) {

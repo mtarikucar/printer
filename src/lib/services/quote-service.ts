@@ -36,6 +36,7 @@ import { computeQuote, defaultPartConfig } from "@/lib/config/quote-compute";
 import { quotePermissions } from "@/lib/config/quote-policy";
 import {
   QUOTE_UNITS,
+  REVIEW_KINDS,
   type CustomerQuoteListItem,
   type InvoiceType,
   type LeadTierKey,
@@ -43,6 +44,7 @@ import {
   type PresentedQuote,
   type PricingSnapshot,
   type QuoteUnits,
+  type ReviewKind,
   type SnapshotTechnology,
 } from "@/lib/config/quote-types";
 import { scaledGeometry } from "@/lib/config/quote-units";
@@ -57,8 +59,14 @@ import type { QuoteAccess } from "@/lib/services/quote-access";
 import { recomputeQuoteCache, type QuoteCacheTx } from "@/lib/services/quote-cache";
 import { catalogUpdatedAt, loadActiveSnapshot } from "@/lib/services/quote-catalog";
 import { validateStagedQuoteModel } from "@/lib/services/quote-model-validation";
+import { notifyReviewRequested } from "@/lib/services/quote-notify";
 import { presentQuote, toPricingInputs } from "@/lib/services/quote-present";
-import { deleteFile, getPublicUrl, saveFile } from "@/lib/services/storage";
+import {
+  deleteFile,
+  getPublicUrl,
+  linkOrCopyStoredFile,
+  saveFile,
+} from "@/lib/services/storage";
 import { parseTaxId } from "@/lib/services/tax-id";
 import type { TurkishAddress } from "@/lib/db/schema";
 
@@ -366,6 +374,9 @@ export async function addPartFromUpload(
       }
       throw err;
     }
+    // Parça KÜMESİNİ değiştirmek, tek bir parçanın ayarını değiştirmekten daha
+    // büyük bir düzenlemedir: verilen fiyat artık bu parça kümesine ait değil.
+    await demoteQuotedToDraft(tx, quote);
     return { partId: newId, position: total };
   });
 
@@ -619,6 +630,10 @@ function configChanged(part: QuotePart, next: ResolvedPartConfig): boolean {
  * `quoted` bir teklifte fiyatı etkileyen bir düzenleme onu `draft`'a döndürür:
  * verilen fiyat artık o konfigürasyona ait değildir. `needs_review` KALIR —
  * müşteri beklerken parçasını düzeltebilir, ama inceleme sırası düşmez.
+ *
+ * PARÇA EKLEME/ÇOĞALTMA/SİLME de buraya uğrar: `recomputeQuoteCache` toplamı
+ * yeniden yazdığı hâlde durum `quoted` kalsaydı, teklif kimsenin fiyatlamadığı
+ * bir parça kümesi için "fiyat verildi" demeye devam ederdi.
  */
 async function demoteQuotedToDraft(tx: QuoteCacheTx, quote: Quote): Promise<void> {
   if (quote.status !== "quoted") return;
@@ -708,6 +723,7 @@ export async function bulkUpdateParts(
             isNull(quoteParts.deletedAt)
           )
         );
+      await demoteQuotedToDraft(tx, quote);
       return;
     }
     let changed = false;
@@ -728,6 +744,7 @@ export async function deletePart(access: QuoteAccess, partId: string): Promise<v
       .update(quoteParts)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(quoteParts.id, part.id));
+    await demoteQuotedToDraft(tx, quote);
   });
 }
 
@@ -799,6 +816,7 @@ export async function duplicatePart(
       manualPricedAt: part.manualPricedAt,
       manualPricedByEmail: part.manualPricedByEmail,
     });
+    await demoteQuotedToDraft(tx, quote);
     return { newId: copyId, needsAnalysis: !analysisReady, position: total };
   });
 
@@ -1071,6 +1089,549 @@ export async function repriceQuote(access: QuoteAccess): Promise<void> {
     },
     { requireEdit: false }
   );
+}
+
+// ─── İnceleme talebi (manuel / RFQ / hedef fiyat) ───────────────────────────
+
+export interface ReviewRequest {
+  kind: ReviewKind;
+  note: string;
+  /** Yalnız `target_price`: parça başına müşterinin önerdiği birim fiyat. */
+  targets?: Array<{ partId: string; unitKurus: number }>;
+}
+
+const MIN_REVIEW_NOTE = 10;
+const MAX_TARGETS = 100;
+
+/**
+ * İnceleme talebinin gövdesi. Not en az on karakter: "fiyat verin" diyen boş
+ * bir talep admini ekranın karşısında tahmin yürütmeye bırakır (admin tarafının
+ * gerekçe alt sınırıyla aynı kural).
+ */
+export function parseReviewRequest(raw: unknown): ReviewRequest {
+  const body = asObject(raw);
+  for (const key of Object.keys(body)) {
+    if (!["kind", "note", "targets"].includes(key)) {
+      throw new QuoteServiceError(INVALID_OPTION, 400, "unknown_field");
+    }
+  }
+  if (!REVIEW_KINDS.includes(body.kind as ReviewKind)) {
+    throw new QuoteServiceError(INVALID_OPTION, 400, "invalid_option");
+  }
+  const note = optionalText(body.note, MAX_NOTE_LENGTH);
+  if (note === null || note.length < MIN_REVIEW_NOTE) {
+    throw new QuoteServiceError(
+      `Talebinizi en az ${MIN_REVIEW_NOTE} karakterle anlatın.`,
+      400,
+      "note_too_short"
+    );
+  }
+  const request: ReviewRequest = { kind: body.kind as ReviewKind, note };
+  if ("targets" in body && body.targets !== undefined && body.targets !== null) {
+    if (!Array.isArray(body.targets) || body.targets.length > MAX_TARGETS) {
+      throw new QuoteServiceError(INVALID_OPTION, 400, "invalid_option");
+    }
+    request.targets = body.targets.map((entry) => {
+      const target = asObject(entry);
+      if (typeof target.partId !== "string") {
+        throw new QuoteServiceError(INVALID_OPTION, 400, "invalid_option");
+      }
+      return {
+        partId: target.partId,
+        unitKurus: integerIn(target.unitKurus, 1, MAX_AMOUNT_KURUS),
+      };
+    });
+  }
+  return request;
+}
+
+/**
+ * "Manuel teklif iste" / "RFQ" / "Hedef fiyat öner".
+ *
+ * `quotePermissions.canRequestReview` KAPIYI TUTAR: `canEdit` açık olduğu hâlde
+ * zaten incelemede olan bir teklif ikinci kez sıraya girmemeli (admin aynı işi
+ * iki kez görür ve müşteriye iki kez cevap yazılır).
+ *
+ * Hedef fiyat, parçaların `target_unit_price_kurus` kolonuna yazılır: admin
+ * kabul ederse aynı sayı manuel fiyat olur, bu yüzden notun içinde değil
+ * kolonda durur.
+ */
+export async function requestReview(access: QuoteAccess, args: ReviewRequest): Promise<void> {
+  await mutateQuote(access, async (tx, quote) => {
+    const live = await liveDraftForQuote(quote.id, tx);
+    const permissions = quotePermissions(
+      { status: quote.status, expiresAt: quote.expiresAt, orderId: quote.orderId },
+      { hasLiveDraft: live !== null, now: new Date() }
+    );
+    if (!permissions.canRequestReview) {
+      throw new QuoteServiceError(
+        permissions.blockedReason ?? "Bu teklif için inceleme istenemez.",
+        409,
+        "review_blocked"
+      );
+    }
+
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(quoteParts)
+      .where(and(eq(quoteParts.quoteId, quote.id), isNull(quoteParts.deletedAt)));
+    if (total === 0) {
+      throw new QuoteServiceError(
+        "Teklifte parça yok — önce bir model yükleyin.",
+        400,
+        "no_parts"
+      );
+    }
+
+    if (args.kind === "target_price") {
+      if (!args.targets || args.targets.length === 0) {
+        throw new QuoteServiceError(
+          "Hedef fiyat için en az bir parçaya birim fiyat yazın.",
+          400,
+          "no_targets"
+        );
+      }
+      for (const target of args.targets) {
+        // `loadPart` parçanın BU teklife ait olduğunu doğrular: başka bir
+        // teklifin parçasına hedef fiyat yazılamaz.
+        const part = await loadPart(tx, quote.id, target.partId);
+        await tx
+          .update(quoteParts)
+          .set({ targetUnitPriceKurus: target.unitKurus, updatedAt: new Date() })
+          .where(eq(quoteParts.id, part.id));
+      }
+    }
+
+    const now = new Date();
+    await tx
+      .update(quotes)
+      .set({
+        status: "needs_review",
+        reviewKind: args.kind,
+        reviewNote: args.note,
+        reviewRequestedAt: now,
+        // Yeni talep, eski kararı geçersiz kılar: admin ekranı "cevaplandı"
+        // görünen bir satırı sıraya geri almalı.
+        reviewedAt: null,
+        reviewedByEmail: null,
+        updatedAt: now,
+      })
+      .where(eq(quotes.id, quote.id));
+  });
+
+  // Bildirim EN İYİ ÇABA: e-posta sunucusu düşse de talep kaydedilmiş olmalı.
+  void notifyReviewRequested(access.quote.id);
+}
+
+// ─── Teknolojiye göre bölme ─────────────────────────────────────────────────
+
+/** Yeni teklife kopyalanan, teklif düzeyindeki müşteri alanları. */
+function inheritedQuoteFields(quote: Quote) {
+  return {
+    title: quote.title,
+    customerNote: quote.customerNote,
+    poNumber: quote.poNumber,
+    invoiceType: quote.invoiceType,
+    companyName: quote.companyName,
+    taxId: quote.taxId,
+    taxIdType: quote.taxIdType,
+    taxOffice: quote.taxOffice,
+    billingAddress: quote.billingAddress,
+    termsAcceptedAt: quote.termsAcceptedAt,
+    termsVersion: quote.termsVersion,
+  };
+}
+
+/**
+ * Teklifi teknolojiye göre böler: İLK teknoloji yerinde kalır, her diğer
+ * teknoloji kendi teklifine TAŞINIR.
+ *
+ * Neden taşınır (kopyalanmaz): parçanın dosyası, analizi ve manuel fiyatı
+ * aynen geçerlidir ve iki teklifte birden durması, müşterinin aynı parçayı iki
+ * kez ödemesine açık bir kapı olurdu.
+ *
+ * Yeni teklifler kaynağın SNAPSHOT'INI ve geçerlilik süresini devralır: bölme
+ * bir yeniden fiyatlama değildir, fiyat değişmemelidir.
+ */
+export async function splitByTechnology(
+  access: QuoteAccess
+): Promise<{ newQuoteNumbers: string[] }> {
+  return mutateQuote(access, async (tx, quote) => {
+    const parts = await tx
+      .select()
+      .from(quoteParts)
+      .where(and(eq(quoteParts.quoteId, quote.id), isNull(quoteParts.deletedAt)))
+      .orderBy(asc(quoteParts.sortOrder), asc(quoteParts.createdAt));
+
+    const groups = new Map<string, QuotePart[]>();
+    for (const part of parts) {
+      const group = groups.get(part.technologyKey);
+      if (group) group.push(part);
+      else groups.set(part.technologyKey, [part]);
+    }
+    if (groups.size < 2) {
+      throw new QuoteServiceError(
+        "Teklifteki parçaların hepsi aynı teknolojide; bölünecek bir şey yok.",
+        400,
+        "single_technology"
+      );
+    }
+
+    const [staying, ...moving] = [...groups.values()];
+    const newQuoteNumbers: string[] = [];
+    for (const group of moving) {
+      const [created] = await tx
+        .insert(quotes)
+        .values({
+          userId: quote.userId,
+          anonymousId: quote.userId ? null : quote.anonymousId,
+          leadTier: quote.leadTier,
+          addonKeys: quote.addonKeys,
+          pricingSnapshot: quote.pricingSnapshot,
+          snapshotTakenAt: quote.snapshotTakenAt,
+          expiresAt: quote.expiresAt,
+          sourceQuoteId: quote.id,
+          ...inheritedQuoteFields(quote),
+        })
+        .returning({ id: quotes.id, number: quotes.number });
+
+      let sortOrder = 0;
+      for (const part of group) {
+        await tx
+          .update(quoteParts)
+          .set({ quoteId: created.id, sortOrder: sortOrder++, updatedAt: new Date() })
+          .where(eq(quoteParts.id, part.id));
+      }
+      await recomputeQuoteCache(created.id, tx);
+      newQuoteNumbers.push(created.number);
+    }
+
+    // Kalan parçaların sırası delikli kalmasın (ekran `sort_order` ile çizer).
+    let sortOrder = 0;
+    for (const part of staying) {
+      await tx
+        .update(quoteParts)
+        .set({ sortOrder: sortOrder++, updatedAt: new Date() })
+        .where(eq(quoteParts.id, part.id));
+    }
+    // Kaynak teklifin parça kümesi küçüldü: verilen fiyat artık ona ait değil.
+    await demoteQuotedToDraft(tx, quote);
+
+    return { newQuoteNumbers };
+  });
+}
+
+// ─── Paylaşım bağlantısı ────────────────────────────────────────────────────
+
+const SHARE_TOKEN_LENGTH = 32;
+
+/**
+ * Paylaşım token'ını üretir / yeniler / iptal eder.
+ *
+ * YALNIZ SAHİP: "bu teklifi bağlantısı olan herkese açıyorum" kararı admin'in
+ * ya da paylaşım izleyicisinin değil, müşterinin kararıdır (sunucu da
+ * `shareUrl`'ü yalnız sahibe gönderiyor).
+ *
+ * `requireEdit: false` bilerek: paylaşım bir OKUMA izni verir, düzenleme
+ * değil. Süresi dolmuş ya da siparişe dönmüş bir teklifi patronuna göstermek
+ * tam da müşterinin isteyeceği şeydir.
+ */
+export async function setShareToken(
+  access: QuoteAccess,
+  action: "create" | "rotate" | "revoke"
+): Promise<string | null> {
+  if (!access.viewer.isOwner) {
+    throw new QuoteServiceError(
+      "Paylaşım bağlantısını yalnız teklif sahibi yönetebilir.",
+      403,
+      "not_owner"
+    );
+  }
+  return mutateQuote(
+    access,
+    async (tx, quote) => {
+      if (action === "revoke") {
+        await tx
+          .update(quotes)
+          .set({ shareToken: null, updatedAt: new Date() })
+          .where(eq(quotes.id, quote.id));
+        return null;
+      }
+      // `create` İKİ KEZ çağrılabilir olmalı: müşteri bağlantıyı yeniden
+      // kopyalamak için düğmeye bastığında eskisi geçersizleşmemeli.
+      if (action === "create" && quote.shareToken) return quote.shareToken;
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const token = nanoid(SHARE_TOKEN_LENGTH);
+        try {
+          // İç içe işlem = SAVEPOINT. Tekil indeks çakışması dış işlemi
+          // iptal ederdi ve sıradaki deneme "current transaction is aborted"
+          // alırdı; savepoint yalnız başarısız denemeyi geri alır.
+          await tx.transaction(async (sp) => {
+            await sp
+              .update(quotes)
+              .set({ shareToken: token, updatedAt: new Date() })
+              .where(eq(quotes.id, quote.id));
+          });
+          return token;
+        } catch (err) {
+          if (pgErrorCode(err) !== "23505") throw err;
+        }
+      }
+      throw new QuoteServiceError(
+        "Paylaşım bağlantısı üretilemedi; tekrar deneyin.",
+        500,
+        "share_token_failed"
+      );
+    },
+    { requireEdit: false }
+  );
+}
+
+// ─── Parça kopyalama (yeniden teklif + kütüphaneden ekleme) ─────────────────
+
+/** Depolama anahtarının dosya adı; kopya aynı adla yeni parçanın klasörüne gider. */
+function storedFileName(key: string): string {
+  return key.split("/").pop() || "dosya";
+}
+
+/**
+ * Parçanın yapılandırmasını HEDEF snapshot'a göre çözer.
+ *
+ * Kaynak parçanın malzemesi yeni katalogda yoksa (pasifleştirilmiş) kopya
+ * varsayılan yapılandırmayla açılır: geçersiz bir konfigürasyonla açılan teklif
+ * müşteriye ilk açılışta `config_invalid` gösterirdi. Adet/birim/ölçek ve
+ * kritik tolerans korunur — onlar katalogdan bağımsız müşteri kararlarıdır.
+ */
+function configForSnapshot(part: QuotePart, snapshot: PricingSnapshot): ResolvedPartConfig {
+  try {
+    return resolveConfig(part, {}, snapshot);
+  } catch {
+    const fallback = defaultPartConfig(snapshot, part.geometry);
+    return {
+      ...fallback,
+      quantity: part.quantity,
+      units: part.units,
+      scale: part.scale,
+      criticalTolerance: part.criticalTolerance,
+    };
+  }
+}
+
+/**
+ * Kaynak parçayı hedef teklife kopyalar.
+ *
+ * Dosyalar `linkOrCopyStoredFile` ile ÇOĞALTILIR (aynı diskte sabit bağ):
+ * anahtarı paylaşmak, kaynak teklifin saklama süpürmesi dosyayı silince yeni
+ * teklifi de dosyasız bırakırdı. Analizi biten parça yeniden ANALİZ EDİLMEZ —
+ * aynı dosyanın geometrisi aynıdır; müşteri kopyayı anında fiyatlı görür.
+ */
+async function copyPartInto(
+  tx: QuoteCacheTx,
+  quoteId: string,
+  source: QuotePart,
+  sortOrder: number,
+  snapshot: PricingSnapshot
+): Promise<{ partId: string; needsAnalysis: boolean }> {
+  const newId = randomUUID();
+  const subdir = `quote-parts/${newId}`;
+  const copyKey = async (key: string | null): Promise<string | null> =>
+    key ? linkOrCopyStoredFile(key, subdir, storedFileName(key)) : null;
+
+  const analysisReady =
+    source.analysisStatus === "ready" && source.geometry !== null && source.canonicalStlKey !== null;
+
+  const sourceKey = await linkOrCopyStoredFile(
+    source.sourceKey,
+    subdir,
+    storedFileName(source.sourceKey)
+  );
+  const canonicalStlKey = analysisReady ? await copyKey(source.canonicalStlKey) : null;
+  const previewGlbKey = analysisReady ? await copyKey(source.previewGlbKey) : null;
+  const thumbnailKey = analysisReady ? await copyKey(source.thumbnailKey) : null;
+  const drawingKey = await copyKey(source.drawingKey);
+
+  const config = configForSnapshot(source, snapshot);
+  await tx.insert(quoteParts).values({
+    id: newId,
+    quoteId,
+    sortOrder,
+    name: source.name,
+    fileName: source.fileName,
+    sourceKey,
+    sourceFormat: source.sourceFormat,
+    sourceBytes: source.sourceBytes,
+    sourceSha256: source.sourceSha256,
+    // `upload_id` TEKİLDİR: sahnelenmiş yükleme kaydı yalnız ilk parçaya aittir.
+    uploadId: null,
+    analysisStatus: analysisReady ? "ready" : "queued",
+    geometry: analysisReady ? source.geometry : null,
+    canonicalStlKey,
+    previewGlbKey,
+    thumbnailKey,
+    ...config,
+    note: source.note,
+    drawingKey,
+    drawingName: drawingKey ? source.drawingName : null,
+    // Manuel fiyat KOPYALANMAZ: admin onu kaynak teklifin kataloğu ve
+    // geçerlilik penceresi için vermişti.
+  });
+  return { partId: newId, needsAnalysis: !analysisReady };
+}
+
+// ─── Yeniden teklif al ──────────────────────────────────────────────────────
+
+/**
+ * Kaynak teklifin parçalarıyla BUGÜNÜN kataloğundan yeni bir teklif açar.
+ *
+ * `repriceQuote`'tan farkı: kaynak teklife dokunulmaz. Siparişe dönmüş ya da
+ * süresi dolmuş bir teklif bu yolla tekrar alınabilir — tek koşul sahiplik.
+ */
+export async function requote(access: QuoteAccess): Promise<{ number: string }> {
+  if (!access.viewer.isOwner) {
+    throw new QuoteServiceError(
+      "Yeniden teklif yalnız teklif sahibine açıktır.",
+      403,
+      "not_owner"
+    );
+  }
+  const snapshot = await loadActiveSnapshot();
+  const sourceParts = await loadQuoteParts(access.quote.id);
+  if (sourceParts.length === 0) {
+    throw new QuoteServiceError("Teklifte kopyalanacak parça yok.", 400, "no_parts");
+  }
+  if (sourceParts.some((p) => p.filesPurgedAt !== null)) {
+    throw new QuoteServiceError(
+      "Bu teklifin dosyaları saklama süresi dolduğu için silindi; modelleri yeniden yükleyin.",
+      409,
+      "files_purged"
+    );
+  }
+
+  const now = new Date();
+  const quote = access.quote;
+  // Teslim kademesi ve ek hizmetler YENİ katalogda doğrulanır: katalogdan
+  // kalkmış bir ek hizmet sessizce düşer, geçersiz bir kademe varsayılana döner.
+  const leadTier = snapshot.settings.leadTiers.some((t) => t.key === quote.leadTier)
+    ? quote.leadTier
+    : "standard";
+  const addonKeys = quote.addonKeys.filter((key) => snapshot.addons.some((a) => a.key === key));
+
+  const { created, queued } = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(quotes)
+      .values({
+        userId: quote.userId,
+        anonymousId: quote.userId ? null : quote.anonymousId,
+        leadTier,
+        addonKeys,
+        pricingSnapshot: snapshot,
+        snapshotTakenAt: now,
+        expiresAt: new Date(now.getTime() + snapshot.settings.quoteValidDays * 86_400_000),
+        sourceQuoteId: quote.id,
+        ...inheritedQuoteFields(quote),
+      })
+      .returning({ id: quotes.id, number: quotes.number });
+
+    const queuedIds: string[] = [];
+    let sortOrder = 0;
+    for (const part of sourceParts) {
+      const copy = await copyPartInto(tx, row.id, part, sortOrder++, snapshot);
+      if (copy.needsAnalysis) queuedIds.push(copy.partId);
+    }
+    await recomputeQuoteCache(row.id, tx);
+    return { created: row, queued: queuedIds };
+  });
+
+  for (const [index, partId] of queued.entries()) {
+    await enqueuePartAnalysis(partId, 0, index + 1);
+  }
+  return { number: created.number };
+}
+
+// ─── Kütüphaneden parça ekleme ──────────────────────────────────────────────
+
+/**
+ * Müşterinin parça kütüphanesinden bu teklife parça kopyalar.
+ *
+ * Sahiplik KAYNAK TARAFINDA da aranır: parça, `userId`'nin kendi tekliflerinden
+ * birine ait olmalı. Aksi hâlde kütüphane ucu, parça kimliğini tahmin eden
+ * birine başkasının dosyasını kopyalama yolu açardı.
+ */
+export async function importParts(
+  access: QuoteAccess,
+  sourcePartIds: string[],
+  userId: string
+): Promise<number> {
+  const wanted = [...new Set(sourcePartIds)];
+  if (wanted.length === 0) {
+    throw new QuoteServiceError("Hiç parça seçilmedi.", 400, "no_parts");
+  }
+  if (wanted.length > access.quote.pricingSnapshot.settings.maxPartsPerQuote) {
+    throw new QuoteServiceError(
+      `Tek seferde en fazla ${access.quote.pricingSnapshot.settings.maxPartsPerQuote} parça eklenebilir.`,
+      400,
+      "part_limit"
+    );
+  }
+
+  const rows = await db
+    .select({ part: quoteParts })
+    .from(quoteParts)
+    .innerJoin(quotes, eq(quotes.id, quoteParts.quoteId))
+    .where(
+      and(
+        inArray(quoteParts.id, wanted),
+        eq(quotes.userId, userId),
+        isNull(quoteParts.deletedAt),
+        isNull(quoteParts.filesPurgedAt)
+      )
+    );
+  if (rows.length !== wanted.length) {
+    throw new QuoteServiceError(
+      "Seçilen parçalardan bazıları bulunamadı.",
+      404,
+      "part_not_found"
+    );
+  }
+  // İstemcinin sıralaması korunur: müşteri kütüphanede seçtiği sırayı teklifte
+  // görmeli.
+  const sources = wanted.map((id) => rows.find((r) => r.part.id === id)!.part);
+
+  const queued: string[] = [];
+  const imported = await mutateQuote(access, async (tx, quote) => {
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(quoteParts)
+      .where(and(eq(quoteParts.quoteId, quote.id), isNull(quoteParts.deletedAt)));
+    const max = quote.pricingSnapshot.settings.maxPartsPerQuote;
+    if (total + sources.length > max) {
+      throw new QuoteServiceError(
+        `Bir teklifte en fazla ${max} parça olabilir. Kalan parçalar için yeni bir teklif açın.`,
+        409,
+        "part_limit"
+      );
+    }
+
+    let sortOrder = total;
+    for (const source of sources) {
+      const copy = await copyPartInto(
+        tx,
+        quote.id,
+        source,
+        sortOrder++,
+        quote.pricingSnapshot
+      );
+      if (copy.needsAnalysis) queued.push(copy.partId);
+    }
+    await demoteQuotedToDraft(tx, quote);
+    return sources.length;
+  });
+
+  for (const [index, partId] of queued.entries()) {
+    await enqueuePartAnalysis(partId, 0, index + 1);
+  }
+  return imported;
 }
 
 // ─── Okuma ──────────────────────────────────────────────────────────────────

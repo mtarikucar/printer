@@ -8,6 +8,7 @@
  * Bu dosya bir ROTA DEĞİLDİR (App Router yalnız `route.ts` adını rota sayar).
  */
 import { NextResponse, type NextRequest } from "next/server";
+import type { PresentedQuote } from "@/lib/config/quote-types";
 import {
   quoteApiEnabled,
   resolveQuoteAccess,
@@ -92,13 +93,36 @@ export async function accessOr404(
  * Her mutasyon sürümü artırır ve fiyatı yeniden hesaplar; istemciye eski
  * gövdeyi geri vermek, bir sonraki isteğinde sürüm çakışması demek olurdu.
  */
+export async function presentedBody(
+  request: NextRequest,
+  idOrNumber: string
+): Promise<PresentedQuote | null> {
+  const fresh = await resolveQuoteAccess(idOrNumber, { shareToken: shareTokenOf(request) });
+  if (!fresh) return null;
+  return loadPresentedQuote(fresh);
+}
+
 export async function presentedResponse(
   request: NextRequest,
   idOrNumber: string
 ): Promise<NextResponse> {
-  const fresh = await resolveQuoteAccess(idOrNumber, { shareToken: shareTokenOf(request) });
-  if (!fresh) return quoteNotFound();
-  return NextResponse.json(await loadPresentedQuote(fresh));
+  const body = await presentedBody(request, idOrNumber);
+  if (!body) return quoteNotFound();
+  return NextResponse.json(body);
+}
+
+/**
+ * Taze gövde + ucun kendi sonucu (bölmede yeni numaralar, içe aktarmada sayı).
+ * Ekranın iki istek atmasına gerek kalmasın diye tek cevapta birleşir.
+ */
+export async function presentedWith(
+  request: NextRequest,
+  idOrNumber: string,
+  extra: Record<string, unknown>
+): Promise<NextResponse> {
+  const body = await presentedBody(request, idOrNumber);
+  if (!body) return quoteNotFound();
+  return NextResponse.json({ ...extra, quote: body });
 }
 
 /** Gövdeyi JSON olarak okur; bozuk gövde 400 ile reddedilir. */

@@ -94,13 +94,18 @@ async function main() {
       createQuote,
       deletePart,
       duplicatePart,
+      importParts,
       listCustomerParts,
       listCustomerQuotes,
       loadPresentedQuote,
       loadQuoteParts,
       QuoteServiceError,
       repriceQuote,
+      requestReview,
+      requote,
       setDrawing,
+      setShareToken,
+      splitByTechnology,
       updatePart,
       updateQuote,
     } = await import("../src/lib/services/quote-service");
@@ -238,6 +243,15 @@ async function main() {
         new Set(jobs.map((j) => j.id)).size,
         20,
         "iş kimlikleri tekil (bullmq ikinci eklemeyi yutmadı)"
+      );
+      // Öncelik parçanın SIRASIDIR, BİRDEN başlayarak: bullmq'da `0`
+      // "önceliksiz" demektir ve o iş öncelikli kümeye hiç girmez — sıfırdan
+      // başlayan bir sayım, ilk parçayı kardeşlerinden farklı bir listeye
+      // koyup sıralamayı bozardı.
+      assert.deepEqual(
+        [...new Set(jobs.map((j) => j.opts.priority))].sort((a, b) => (a ?? 0) - (b ?? 0)),
+        Array.from({ length: 20 }, (_, i) => i + 1),
+        "yirmi iş, 1..20 önceliğiyle"
       );
       await queue.obliterate({ force: true });
     });
@@ -445,6 +459,242 @@ async function main() {
     await test("kütüphane BAŞKASININ parçalarını göstermez", async () => {
       const { items } = await listCustomerParts(randomUUID(), 1);
       assert.deepEqual(items, []);
+    });
+
+    // ─── `quoted` + parça KÜMESİ değişimi → `draft` ─────────────────────────
+
+    const statusOf = async (quoteId: string) =>
+      (await admin.query("SELECT status FROM quotes WHERE id = $1", [quoteId])).rows[0]
+        .status as string;
+    const markQuoted = async (quoteId: string) => {
+      await admin.query("UPDATE quotes SET status = 'quoted' WHERE id = $1", [quoteId]);
+    };
+
+    await test("fiyatlanmış teklifte parça EKLEME/ÇOĞALTMA/SİLME teklifi taslağa düşürür", async () => {
+      await markQuoted(quoteB.id);
+      const copy = await duplicatePart(await loadAccess(quoteB.id, userId), partB);
+      assert.equal(await statusOf(quoteB.id), "draft", "çoğaltma fiyatı geçersiz kılar");
+
+      await markQuoted(quoteB.id);
+      await deletePart(await loadAccess(quoteB.id, userId), copy.partId);
+      assert.equal(await statusOf(quoteB.id), "draft", "silme fiyatı geçersiz kılar");
+
+      await markQuoted(quoteB.id);
+      const uploadId = await stage("fixture-demote", `u:${userId}`);
+      const added = await addPartFromUpload(await loadAccess(quoteB.id, userId), {
+        uploadId,
+        fileName: "ek-parca.stl",
+      });
+      assert.equal(await statusOf(quoteB.id), "draft", "yeni parça fiyatı geçersiz kılar");
+
+      await markQuoted(quoteB.id);
+      await bulkUpdateParts(await loadAccess(quoteB.id, userId), [added.partId], {
+        delete: true,
+      });
+      assert.equal(await statusOf(quoteB.id), "draft", "toplu silme fiyatı geçersiz kılar");
+    });
+
+    // ─── İnceleme talebi ────────────────────────────────────────────────────
+
+    await test("hedef fiyat talebi teklifi needs_review yapar ve fiyatı parçaya yazar", async () => {
+      await requestReview(await loadAccess(quoteB.id, userId), {
+        kind: "target_price",
+        note: "Bu parçayı 120 TL birim fiyatla alabilir miyiz?",
+        targets: [{ partId: partB, unitKurus: 12_000 }],
+      });
+      const [row] = await db.select().from(quotes).where(eq(quotes.id, quoteB.id)).limit(1);
+      assert.equal(row.status, "needs_review");
+      assert.equal(row.reviewKind, "target_price");
+      assert.match(row.reviewNote ?? "", /120 TL/);
+      assert.ok(row.reviewRequestedAt, "talep zamanı damgalandı");
+      const [part] = await loadQuoteParts(quoteB.id);
+      assert.equal(part.targetUnitPriceKurus, 12_000);
+    });
+
+    await test("incelemedeki teklif İKİNCİ kez sıraya girmez", async () => {
+      await assert.rejects(
+        requestReview(await loadAccess(quoteB.id, userId), {
+          kind: "manual",
+          note: "Bir de manuel bakar mısınız?",
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "review_blocked"
+      );
+    });
+
+    // ─── Teknolojiye göre bölme ─────────────────────────────────────────────
+
+    let quoteC = { id: "", number: "" };
+    let partCFdm = "";
+    await test("iki teknolojili teklif hazırlandı", async () => {
+      quoteC = await createQuote({ userId, anonymousId: null, termsAccepted: true });
+      const first = await addPartFromUpload(await loadAccess(quoteC.id, userId), {
+        uploadId: await stage("fixture-c1", `u:${userId}`),
+        fileName: "fdm-parca.stl",
+      });
+      partCFdm = first.partId;
+      const second = await addPartFromUpload(await loadAccess(quoteC.id, userId), {
+        uploadId: await stage("fixture-c2", `u:${userId}`),
+        fileName: "sla-parca.stl",
+      });
+      await updatePart(await loadAccess(quoteC.id, userId), second.partId, {
+        technologyKey: "sla",
+      });
+      assert.equal((await loadQuoteParts(quoteC.id)).length, 2);
+    });
+
+    await test("splitByTechnology ikinci teknolojiyi YENİ teklife taşır", async () => {
+      const { newQuoteNumbers } = await splitByTechnology(await loadAccess(quoteC.id, userId));
+      assert.equal(newQuoteNumbers.length, 1);
+
+      const stayed = await loadQuoteParts(quoteC.id);
+      assert.equal(stayed.length, 1, "ilk teknoloji yerinde kaldı");
+      assert.equal(stayed[0].id, partCFdm);
+      assert.equal(stayed[0].technologyKey, "fdm");
+
+      const [split] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.number, newQuoteNumbers[0]))
+        .limit(1);
+      assert.equal(split.sourceQuoteId, quoteC.id, "yeni teklif kaynağını bilir");
+      assert.equal(split.userId, userId);
+      assert.equal(split.status, "draft");
+      assert.equal(
+        split.snapshotTakenAt.getTime(),
+        (await loadAccess(quoteC.id, userId)).quote.snapshotTakenAt.getTime(),
+        "bölme yeniden fiyatlama DEĞİLDİR: snapshot devralınır"
+      );
+      const moved = await loadQuoteParts(split.id);
+      assert.equal(moved.length, 1);
+      assert.equal(moved[0].technologyKey, "sla");
+    });
+
+    await test("tek teknolojili teklif bölünemez", async () => {
+      await assert.rejects(
+        splitByTechnology(await loadAccess(quoteC.id, userId)),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 400 &&
+          err.code === "single_technology"
+      );
+    });
+
+    // ─── Paylaşım bağlantısı ────────────────────────────────────────────────
+
+    await test("paylaşım token'ı üretilir, yenilenir ve iptal edilir", async () => {
+      const created = await setShareToken(await loadAccess(quoteC.id, userId), "create");
+      assert.equal(created?.length, 32);
+      const again = await setShareToken(await loadAccess(quoteC.id, userId), "create");
+      assert.equal(again, created, "ikinci 'create' eski bağlantıyı bozmaz");
+
+      const rotated = await setShareToken(await loadAccess(quoteC.id, userId), "rotate");
+      assert.equal(rotated?.length, 32);
+      assert.notEqual(rotated, created, "yenileme yeni token verir");
+
+      const revoked = await setShareToken(await loadAccess(quoteC.id, userId), "revoke");
+      assert.equal(revoked, null);
+      const [row] = await db.select().from(quotes).where(eq(quotes.id, quoteC.id)).limit(1);
+      assert.equal(row.shareToken, null, "iptal kolonu boşaltır");
+    });
+
+    // ─── Yeniden teklif al ──────────────────────────────────────────────────
+
+    /** Analizi bitmiş bir parça taklidi: geometri + gerçek bir canonical dosya. */
+    async function markAnalyzed(partId: string): Promise<{ canonicalKey: string }> {
+      const canonicalKey = `quote-parts/${partId}/canonical-test.stl`;
+      fs.mkdirSync(path.dirname(path.join(uploads, canonicalKey)), { recursive: true });
+      fs.writeFileSync(path.join(uploads, canonicalKey), stlFixture("canonical"));
+      await admin.query(
+        `UPDATE quote_parts
+            SET analysis_status = 'ready', canonical_stl_key = $2, geometry = $3::jsonb
+          WHERE id = $1`,
+        [
+          partId,
+          canonicalKey,
+          JSON.stringify({
+            volume: 8000,
+            area: 2400,
+            extents: { x: 20, y: 20, z: 20 },
+            bodyCount: 1,
+            isWatertight: true,
+            isVolume: true,
+            volumeEstimated: false,
+            faceCount: 12,
+            wallP1: 20,
+            wallP5: 20,
+            overhangArea: 400,
+            sourceUnits: null,
+            objectCount: 1,
+          }),
+        ]
+      );
+      return { canonicalKey };
+    }
+
+    await test("requote parçaları YENİ anahtarlarla kopyalar, analizi taşır", async () => {
+      const { canonicalKey } = await markAnalyzed(partCFdm);
+      const [source] = await loadQuoteParts(quoteC.id);
+
+      const created = await requote(await loadAccess(quoteC.id, userId));
+      assert.match(created.number, /^T-\d{6,}$/);
+      assert.notEqual(created.number, quoteC.number);
+
+      const [fresh] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.number, created.number))
+        .limit(1);
+      assert.equal(fresh.sourceQuoteId, quoteC.id);
+      assert.ok(
+        fresh.snapshotTakenAt.getTime() > source.createdAt.getTime(),
+        "yeniden teklif BUGÜNÜN kataloğunu dondurur"
+      );
+
+      const copies = await loadQuoteParts(fresh.id);
+      assert.equal(copies.length, 1);
+      const copy = copies[0];
+      assert.equal(copy.analysisStatus, "ready", "analiz kopyalanır, yeniden çalışmaz");
+      assert.deepEqual(copy.geometry, source.geometry);
+      assert.equal(copy.sourceSha256, source.sourceSha256);
+      assert.equal(copy.uploadId, null, "tekil yükleme kaydı kopyalanmaz");
+      assert.notEqual(copy.sourceKey, source.sourceKey, "dosya YENİ anahtara kopyalandı");
+      assert.notEqual(copy.canonicalStlKey, canonicalKey);
+      for (const key of [copy.sourceKey, copy.canonicalStlKey!]) {
+        assert.ok(key.startsWith(`quote-parts/${copy.id}/`), `kopya kendi klasöründe: ${key}`);
+        assert.ok(fs.existsSync(path.join(uploads, key)), `kopya diskte: ${key}`);
+      }
+      // Kaynak dosya DURUYOR: kopyalama taşıma değildir.
+      assert.ok(fs.existsSync(path.join(uploads, source.sourceKey)));
+      assert.equal((await loadQuoteParts(quoteC.id)).length, 1, "kaynak teklif değişmedi");
+    });
+
+    // ─── Kütüphaneden parça ekleme ──────────────────────────────────────────
+
+    await test("importParts kütüphane parçasını kopyalar, yabancıya kapalıdır", async () => {
+      const quoteD = await createQuote({ userId, anonymousId: null, termsAccepted: true });
+      const imported = await importParts(
+        await loadAccess(quoteD.id, userId),
+        [partCFdm],
+        userId
+      );
+      assert.equal(imported, 1);
+      const [copy] = await loadQuoteParts(quoteD.id);
+      assert.equal(copy.analysisStatus, "ready");
+      assert.ok(copy.sourceKey.startsWith(`quote-parts/${copy.id}/`));
+      assert.ok(fs.existsSync(path.join(uploads, copy.sourceKey)));
+
+      // Başka bir kullanıcının kimliğiyle aynı parça: kaynak sahipliği tutmaz.
+      await assert.rejects(
+        importParts(await loadAccess(quoteD.id, userId), [partCFdm], randomUUID()),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 404 &&
+          err.code === "part_not_found"
+      );
+      assert.equal((await loadQuoteParts(quoteD.id)).length, 1, "reddedilen istek satır bırakmadı");
     });
 
     await queue.obliterate({ force: true }).catch(() => {});

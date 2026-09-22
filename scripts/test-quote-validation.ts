@@ -14,7 +14,7 @@
  * Fikstürler Task 0.1'den gelir (`scripts/fixtures/quote/`, üreteci
  * `make_quote_fixtures.py`). DB, Redis, ağ yok: `UPLOAD_DIR` geçici bir dizine
  * çevrilir ve modül ONDAN SONRA import edilir (staging yolu modül yüklenirken
- * çözülür).
+ * çözülür); `REDIS_URL` ise SİLİNİR — aşağıdaki gerekçeye bak.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -29,6 +29,12 @@ const FIXTURES = join(import.meta.dirname, "fixtures", "quote");
 // UPLOAD_DIR modül yüklenirken okunur → import'lardan ÖNCE ayarla.
 const uploadRoot = mkdtempSync(join(tmpdir(), "quote-validation-"));
 process.env.UPLOAD_DIR = uploadRoot;
+// Bu bir BİRİM testi: `validateStagedQuoteModel` → `getStagedUploadMeta` yolu
+// REDIS_URL varsa gerçek bir Redis'e uzanır. Kabuk ortamı onu taşıyorsa test ya
+// kullanıcının geliştirme Redis'ine `upload-meta-*` anahtarı yazar, ya da
+// erişilemeyen bir adreste beklemeye girer. Anahtarı burada silmek testi
+// ortamdan bağımsız kılar (üretim kodu Redis'siz yola düşer).
+delete process.env.REDIS_URL;
 const STAGING = join(uploadRoot, "staging");
 
 let failures = 0;

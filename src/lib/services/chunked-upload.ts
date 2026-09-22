@@ -208,13 +208,69 @@ function metaKey(uploadId: string): string {
   return `upload-meta-${uploadId}`;
 }
 
+// ─── Redis'e SINIRLI bağımlılık ─────────────────────────────────────────────
+//
+// `/api/uploads/chunk` bu defterden ÖNCE de çalışıyordu ve Redis düşünce
+// çalışmayı SÜRDÜRMELİDİR: 350 MB'lık bir panel yüklemesi sahiplik kaydı
+// yüzünden ölmemeli. Ama paylaşılan bağlantı BullMQ için `maxRetriesPerRequest:
+// null` ile kurulur (`src/lib/queue/connection.ts`), yani Redis erişilemezken
+// komutlar REDDEDİLMEZ — çevrimdışı kuyrukta sonsuza kadar bekler. `try/catch`
+// yalnız reddi yakalar, askıyı yakalamaz; bu yüzden her çağrının bir ÜST SINIRI
+// var.
+//
+// Zaman aşımı ayrıca kısa bir devre kesici açar: 350 MB ≈ 44 parça demek, her
+// parçada 1,5 sn beklemek Redis kapalıyken yüklemeye dakikalar eklerdi.
+const REDIS_CALL_TIMEOUT_MS = 1500;
+const REDIS_COOLDOWN_MS = 30_000;
+const REDIS_TIMED_OUT = Symbol("redis-timed-out");
+
+let redisColdUntil = 0;
+
 async function getRedisOrNull() {
   if (!process.env.REDIS_URL) return null;
+  if (Date.now() < redisColdUntil) return null; // devre kesici açık
   try {
     const mod = await import("@/lib/queue/connection");
     return mod.getRedisConnection();
   } catch {
     return null;
+  }
+}
+
+type RedisOutcome<T> = { ok: true; value: T } | { ok: false };
+
+/**
+ * Bir Redis komutunu zaman sınırıyla çalıştırır. Zaman aşımı veya hata → devre
+ * kesici açılır ve `{ ok: false }` döner; çağıran kendi Redis'siz yoluna düşer.
+ *
+ * Geciken söz (promise) sonradan reddederse yarışın kendi işleyicisi onu
+ * yutar — "unhandled rejection" oluşmaz. Zamanlayıcı her durumda temizlenir ki
+ * olay döngüsünü boş yere ayakta tutmasın.
+ */
+async function redisCall<T>(op: string, run: () => Promise<T>): Promise<RedisOutcome<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const value = await Promise.race([
+      run(),
+      new Promise<typeof REDIS_TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(REDIS_TIMED_OUT), REDIS_CALL_TIMEOUT_MS);
+      }),
+    ]);
+    if (value === REDIS_TIMED_OUT) {
+      redisColdUntil = Date.now() + REDIS_COOLDOWN_MS;
+      console.warn(
+        `[chunked-upload] Redis ${op} ${REDIS_CALL_TIMEOUT_MS} ms içinde yanıtlamadı — ` +
+          `${REDIS_COOLDOWN_MS / 1000} sn boyunca Redis'siz devam ediliyor.`
+      );
+      return { ok: false };
+    }
+    return { ok: true, value };
+  } catch (err) {
+    redisColdUntil = Date.now() + REDIS_COOLDOWN_MS;
+    console.warn(`[chunked-upload] Redis ${op} başarısız, Redis'siz devam ediliyor:`, err);
+    return { ok: false };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -224,12 +280,10 @@ export async function setStagedUploadMeta(
 ): Promise<void> {
   const redis = await getRedisOrNull();
   if (redis) {
-    try {
-      await redis.set(metaKey(uploadId), JSON.stringify(meta), "PX", STAGING_TTL_MS);
-      return;
-    } catch (err) {
-      console.warn("[chunked-upload] Redis'e sahiplik yazılamadı, belleğe düşüldü:", err);
-    }
+    const written = await redisCall("SET upload-meta", () =>
+      redis.set(metaKey(uploadId), JSON.stringify(meta), "PX", STAGING_TTL_MS)
+    );
+    if (written.ok) return;
   }
   memoryMeta.set(uploadId, { value: meta, expiresAt: Date.now() + STAGING_TTL_MS });
 }
@@ -237,19 +291,19 @@ export async function setStagedUploadMeta(
 export async function getStagedUploadMeta(uploadId: string): Promise<StagedUploadMeta | null> {
   const redis = await getRedisOrNull();
   if (redis) {
-    try {
-      const raw = await redis.get(metaKey(uploadId));
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<StagedUploadMeta>;
+    const read = await redisCall("GET upload-meta", () => redis.get(metaKey(uploadId)));
+    if (read.ok && read.value) {
+      try {
+        const parsed = JSON.parse(read.value) as Partial<StagedUploadMeta>;
         if (typeof parsed?.owner === "string") {
           return {
             owner: parsed.owner,
             expectedSize: typeof parsed.expectedSize === "number" ? parsed.expectedSize : null,
           };
         }
+      } catch (err) {
+        console.warn("[chunked-upload] Redis'teki sahiplik kaydı çözümlenemedi:", err);
       }
-    } catch (err) {
-      console.warn("[chunked-upload] Redis'ten sahiplik okunamadı:", err);
     }
   }
   const entry = memoryMeta.get(uploadId);
@@ -283,22 +337,23 @@ export async function chargeAnonymousDailyBytes(
     if (!warnedAboutMissingQuotaStore) {
       warnedAboutMissingQuotaStore = true;
       console.warn(
-        "[chunked-upload] REDIS_URL yok — misafir günlük yükleme kotası uygulanmıyor."
+        "[chunked-upload] Redis kullanılamıyor (REDIS_URL yok ya da devre kesici açık) — " +
+          "misafir günlük yükleme kotası uygulanmıyor."
       );
     }
     return { used: 0, overQuota: false };
   }
   const day = istanbulDateKey(new Date()).replaceAll("-", "");
   const key = `chunk:bytes:anon:${anonymousId}:${day}`;
-  try {
-    const used = await redis.incrby(key, Math.max(0, Math.trunc(bytes)));
-    // 48 sa: gün İstanbul takvimine göre döner, anahtarın kendisi çöp olmasın.
-    await redis.expire(key, 48 * 60 * 60);
-    return { used, overQuota: used > ANON_DAILY_UPLOAD_BYTES };
-  } catch (err) {
-    console.warn("[chunked-upload] Günlük kota sayacı okunamadı:", err);
-    return { used: 0, overQuota: false };
-  }
+  const used = await redisCall("INCRBY chunk:bytes", () =>
+    redis.incrby(key, Math.max(0, Math.trunc(bytes)))
+  );
+  // Sayaç okunamadıysa kota uygulanamaz; yükleme yine de yürüsün (yukarıdaki
+  // gerekçe) — ama `expire` için ikinci bir bekleme daha yaşanmasın.
+  if (!used.ok) return { used: 0, overQuota: false };
+  // 48 sa: gün İstanbul takvimine göre döner, anahtarın kendisi çöp olmasın.
+  await redisCall("EXPIRE chunk:bytes", () => redis.expire(key, 48 * 60 * 60));
+  return { used: used.value, overQuota: used.value > ANON_DAILY_UPLOAD_BYTES };
 }
 
 /** Drops staged files nobody completed. Called by the cleanup worker. */

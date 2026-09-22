@@ -18,7 +18,7 @@ import {
   stagedSize,
   uploadOwnerKey,
 } from "@/lib/services/chunked-upload";
-import { extractClientIp, rateLimitAsync } from "@/lib/services/rate-limit";
+import { extractClientIp, rateLimit, rateLimitAsync } from "@/lib/services/rate-limit";
 import { handleRouteFailure, UPLOAD_FAILED_ERROR } from "@/lib/api/route-error";
 
 // Streaming route: never let Next try to buffer or cache the body.
@@ -37,6 +37,15 @@ export const runtime = "nodejs";
  * birlikte kaydedilir, böylece bir misafirin yüklemesini başka bir misafir
  * sürdüremez. Girişli çağıranların (admin/üretici/boyacı/müşteri) davranışı
  * bundan etkilenmez: aynı sıra, aynı cevaplar.
+ *
+ * ARIZA MODU DA DEĞİŞMEZ. Bu uç eskiden Redis'e hiç dokunmuyordu; sahiplik
+ * defteri onu bir Redis çağrısına bağladı. Paylaşılan bağlantı BullMQ için
+ * `maxRetriesPerRequest: null` ile kurulduğundan Redis düştüğünde komutlar
+ * reddedilmez, SONSUZA KADAR bekler — yani 300 MB'lık bir panel yüklemesi hiç
+ * cevap alamazdı. Bu yüzden buradan çağrılan her Redis yolu üst sınırlıdır
+ * (`chunked-upload.ts` → `redisCall`, `boundedRateLimit`) ve sınırı aşınca
+ * Redis'siz yola düşer: Redis'siz bir kurulumda yükleme AYNEN çalışır, yalnız
+ * misafir kotası uygulanmaz.
  */
 
 /**
@@ -91,6 +100,42 @@ function notOwner() {
   );
 }
 
+/**
+ * Misafir kapısı için oran limiti — ama ASILMADAN.
+ *
+ * `rateLimitAsync` Redis'i BullMQ bağlantısı üzerinden kullanır
+ * (`maxRetriesPerRequest: null`): Redis erişilemezken komut reddedilmez,
+ * çevrimdışı kuyrukta bekler ve istek hiç cevap dönmez. Kendi `catch`'i bunu
+ * yakalayamaz. Bu yüzden çağrıya üst sınır koyuyoruz; sınırı aşarsa modülün
+ * kendi belgelenmiş yedeğine — süreç içi sayaca — düşüyoruz. Süreç içi sayaç
+ * çok örnekli kurulumda zayıftır, ama kapıyı tamamen açmaktan da, isteği
+ * sonsuza kadar askıda tutmaktan da iyidir.
+ */
+const RATE_LIMIT_TIMEOUT_MS = 1500;
+
+async function boundedRateLimit(
+  key: string,
+  limit: number,
+  windowMs: number
+): Promise<{ success: boolean; remaining: number }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      rateLimitAsync(key, limit, windowMs),
+      new Promise<{ success: boolean; remaining: number }>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn(
+            `[uploads/chunk] Oran limiti deposu ${RATE_LIMIT_TIMEOUT_MS} ms içinde yanıtlamadı — süreç içi sayaca düşüldü (${key}).`
+          );
+          resolve(rateLimit(key, limit, windowMs));
+        }, RATE_LIMIT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** İstemcinin `PUT` gövdesinde bildirdiği toplam boyut (isteğe bağlı). */
 async function declaredSize(request: NextRequest): Promise<number | null> {
   if (!request.headers.get("content-type")?.includes("json")) return null;
@@ -105,9 +150,9 @@ async function handlePUT(request: NextRequest) {
   if (!owner) {
     const ip = extractClientIp(request);
     const anonymousId = await getOrCreateAnonymousId();
-    const perIp = await rateLimitAsync(`chunk:put:ip:${ip}`, 60, 3600_000);
+    const perIp = await boundedRateLimit(`chunk:put:ip:${ip}`, 60, 3600_000);
     if (!perIp.success) return tooManyRequests();
-    const perAnon = await rateLimitAsync(`chunk:put:anon:${anonymousId}`, 40, 3600_000);
+    const perAnon = await boundedRateLimit(`chunk:put:anon:${anonymousId}`, 40, 3600_000);
     if (!perAnon.success) return tooManyRequests();
     // 0 bayt = salt okuma; kota zaten dolduysa oturumu hiç açma.
     const quota = await chargeAnonymousDailyBytes(anonymousId, 0);

@@ -4,6 +4,7 @@ import { join, resolve } from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { nanoid } from "nanoid";
+import { istanbulDateKey } from "@/lib/config/business-days";
 
 /**
  * Chunked upload staging.
@@ -125,6 +126,32 @@ export async function readStagedHead(
   }
 }
 
+/**
+ * Reads an arbitrary byte range of a staged file.
+ *
+ * A 3MF is a zip: its table of contents sits at the END of the file and points
+ * BACKWARDS at each entry. Head/tail samples cannot express that, and reading
+ * the whole file would undo the point of streaming it to disk — so the quote
+ * validator seeks. The returned buffer is truncated at EOF, never padded.
+ */
+export async function readStagedRange(
+  uploadId: string,
+  offset: number,
+  length: number
+): Promise<Buffer> {
+  const { open } = await import("fs/promises");
+  const want = Math.max(0, Math.trunc(length));
+  if (want === 0) return Buffer.alloc(0);
+  const fh = await open(stagingPathFor(uploadId), "r");
+  try {
+    const buf = Buffer.alloc(want);
+    const { bytesRead } = await fh.read(buf, 0, want, Math.max(0, Math.trunc(offset)));
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
 /** Reads the last N bytes of a staged file (ASCII STL's `endsolid` lives there). */
 export async function readStagedTail(
   uploadId: string,
@@ -141,6 +168,136 @@ export async function readStagedTail(
     return buf.subarray(0, bytesRead);
   } finally {
     await fh.close();
+  }
+}
+
+// ─── Sahiplik ve kota defteri ───────────────────────────────────────────────
+//
+// Staging artık misafire de açık (anlık teklif motoru). Dosyanın kendisi
+// diskte, ama "bu yüklemeyi kim başlattı" ve "ne kadar bayt bildirdi" bilgisi
+// Redis'te durur: birden fazla Next örneği aynı yüklemeyi sürdürebilsin diye.
+// Redis yoksa (yerel geliştirme) bellek içi bir harita devreye girer — tek
+// süreç için doğrudur, ölçeklenmez; kota ise Redis'siz UYGULANMAZ (aşağıya bak).
+
+export interface StagedUploadMeta {
+  /** `uploadOwnerKey` çıktısı: `u:<id>` | `a:<id>` | `<rol>:<id>`. */
+  owner: string;
+  /** İstemcinin bildirdiği toplam boyut; bildirmediyse null. */
+  expectedSize: number | null;
+}
+
+/**
+ * Sahip anahtarı. Üye `u:`, misafir `a:`, panel oturumları kendi rolleriyle
+ * ayrılır — böylece aynı ham kimlik iki farklı sahiplik alanında çakışmaz.
+ * Kimliksiz anahtar ÜRETİLMEZ: boş dize depodaki her sahiple eşleşirdi.
+ */
+export function uploadOwnerKey(v: {
+  userId?: string | null;
+  anonymousId?: string | null;
+  role?: string;
+}): string {
+  const id = v.userId || v.anonymousId;
+  if (!id) throw new Error("uploadOwnerKey: kimlik gerekli");
+  if (v.role) return `${v.role}:${id}`;
+  return v.userId ? `u:${id}` : `a:${id}`;
+}
+
+const memoryMeta = new Map<string, { value: StagedUploadMeta; expiresAt: number }>();
+
+function metaKey(uploadId: string): string {
+  return `upload-meta-${uploadId}`;
+}
+
+async function getRedisOrNull() {
+  if (!process.env.REDIS_URL) return null;
+  try {
+    const mod = await import("@/lib/queue/connection");
+    return mod.getRedisConnection();
+  } catch {
+    return null;
+  }
+}
+
+export async function setStagedUploadMeta(
+  uploadId: string,
+  meta: StagedUploadMeta
+): Promise<void> {
+  const redis = await getRedisOrNull();
+  if (redis) {
+    try {
+      await redis.set(metaKey(uploadId), JSON.stringify(meta), "PX", STAGING_TTL_MS);
+      return;
+    } catch (err) {
+      console.warn("[chunked-upload] Redis'e sahiplik yazılamadı, belleğe düşüldü:", err);
+    }
+  }
+  memoryMeta.set(uploadId, { value: meta, expiresAt: Date.now() + STAGING_TTL_MS });
+}
+
+export async function getStagedUploadMeta(uploadId: string): Promise<StagedUploadMeta | null> {
+  const redis = await getRedisOrNull();
+  if (redis) {
+    try {
+      const raw = await redis.get(metaKey(uploadId));
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<StagedUploadMeta>;
+        if (typeof parsed?.owner === "string") {
+          return {
+            owner: parsed.owner,
+            expectedSize: typeof parsed.expectedSize === "number" ? parsed.expectedSize : null,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[chunked-upload] Redis'ten sahiplik okunamadı:", err);
+    }
+  }
+  const entry = memoryMeta.get(uploadId);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    memoryMeta.delete(uploadId);
+    return null;
+  }
+  return entry.value;
+}
+
+/** Misafir başına günlük sahnelenebilir bayt tavanı. */
+export const ANON_DAILY_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
+
+let warnedAboutMissingQuotaStore = false;
+
+/**
+ * Misafirin günlük bayt defterine yazar ve toplamı döndürür. `bytes = 0` salt
+ * okuma (yüklemeden önceki kapı kontrolü) anlamına gelir.
+ *
+ * Redis yoksa kota UYGULANMAZ: süreç belleğindeki bir sayaç, birden çok örnek
+ * ardında hiçbir şeyi sınırlamaz ve yalnızca yanlış bir güven duygusu verir.
+ * Bunun yerine bir kez yüksek sesle uyarıyoruz.
+ */
+export async function chargeAnonymousDailyBytes(
+  anonymousId: string,
+  bytes: number
+): Promise<{ used: number; overQuota: boolean }> {
+  const redis = await getRedisOrNull();
+  if (!redis) {
+    if (!warnedAboutMissingQuotaStore) {
+      warnedAboutMissingQuotaStore = true;
+      console.warn(
+        "[chunked-upload] REDIS_URL yok — misafir günlük yükleme kotası uygulanmıyor."
+      );
+    }
+    return { used: 0, overQuota: false };
+  }
+  const day = istanbulDateKey(new Date()).replaceAll("-", "");
+  const key = `chunk:bytes:anon:${anonymousId}:${day}`;
+  try {
+    const used = await redis.incrby(key, Math.max(0, Math.trunc(bytes)));
+    // 48 sa: gün İstanbul takvimine göre döner, anahtarın kendisi çöp olmasın.
+    await redis.expire(key, 48 * 60 * 60);
+    return { used, overQuota: used > ANON_DAILY_UPLOAD_BYTES };
+  } catch (err) {
+    console.warn("[chunked-upload] Günlük kota sayacı okunamadı:", err);
+    return { used: 0, overQuota: false };
   }
 }
 

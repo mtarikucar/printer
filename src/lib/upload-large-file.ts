@@ -27,13 +27,32 @@ export interface LargeUploadResult {
   size: number;
 }
 
+export interface LargeUploadOptions extends Omit<UploadOptions, "timeoutMs"> {
+  /**
+   * Toplam boyutu sunucuya ÖNCEDEN bildirir. Sunucu bunu sahneleme kaydına
+   * yazar ve bildirilen boyutu aşan parçayı 413 ile reddeder — misafir
+   * yüklemelerinde "önce küçük dosya göster, sonra gigabayt yolla" oyununu
+   * kapatan şey budur.
+   */
+  expectedSize?: boolean;
+}
+
 export async function uploadLargeFile(
   file: File,
-  opts: Omit<UploadOptions, "timeoutMs"> = {}
+  opts: LargeUploadOptions = {}
 ): Promise<LargeUploadResult> {
-  const { onProgress, signal } = opts;
+  const { onProgress, signal, expectedSize } = opts;
 
-  const initRes = await fetch("/api/uploads/chunk", { method: "PUT", signal });
+  const initRes = await fetch("/api/uploads/chunk", {
+    method: "PUT",
+    signal,
+    ...(expectedSize
+      ? {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ size: file.size }),
+        }
+      : {}),
+  });
   if (!initRes.ok) {
     throw new UploadError(
       (await initRes.json().catch(() => ({}))).error || "Yükleme başlatılamadı.",

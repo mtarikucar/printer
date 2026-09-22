@@ -67,6 +67,18 @@ export async function getSessionUser(): Promise<{
 
 const ANONYMOUS_COOKIE = "anonymous_session";
 
+/**
+ * Yalnız OKUR: çerez yoksa üretmez ve yazmaz.
+ *
+ * `getOrCreateAnonymousId` her çağrıda çerez yazar; bir sahiplik kontrolünde bu
+ * yanlıştır — sahibi olmayan bir isteğe taze kimlik verip onu "yeni sahip"
+ * gibi göstermek yerine, kimliksiz istek kimliksiz kalmalıdır.
+ */
+export async function getAnonymousId(): Promise<string | null> {
+  const cookieStore = await cookies();
+  return cookieStore.get(ANONYMOUS_COOKIE)?.value ?? null;
+}
+
 export async function getOrCreateAnonymousId(): Promise<string> {
   const cookieStore = await cookies();
   const existing = cookieStore.get(ANONYMOUS_COOKIE)?.value;

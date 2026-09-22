@@ -221,8 +221,8 @@ dini tatilleri; dini bayram tarihleri Diyanet takvimiyle admin tarafından doğr
 | note text | "Ek üretim gereklilikleri" |
 | drawing_key, drawing_name | teknik çizim PDF |
 | critical_tolerance boolean | true → manuel |
-| dfm_ack_hash text null | onaylanan uyarı kümesinin özeti |
-| manual_unit_price_kurus int null, manual_price_hash text null, manual_priced_at, manual_priced_by_email | hash = geometri sha + konfig + teslim kademesi; değişince geçersiz |
+| dfm_ack_key text null | onaylanan uyarı kümesinin özeti |
+| manual_unit_price_kurus int null, manual_price_key text null, manual_priced_at, manual_priced_by_email | hash = geometri sha + konfig + teslim kademesi; değişince geçersiz |
 | target_unit_price_kurus int null | müşterinin hedef fiyatı |
 | deleted_at null | yumuşak silme (worker yarışı) |
 | files_purged_at null | saklama süpürücüsü |
@@ -288,7 +288,7 @@ Girdi: snapshot, parça (geometri + konfig), teklif (lead tier, addons).
 7. Adet indirimi: `qty_breaks`'ten `bps` → `unitDisc = unitBase × (10000 − bps)/10000`.
 8. `U = ceil(((setup + unitDisc × q) / q) × tier.multiplierBps / 10000)`;
    **`line = U × q`** (birim × adet her zaman satıra eşit).
-9. Manuel fiyat geçerliyse (`manual_price_hash === hash(part, tier)`) `U = manual`.
+9. Manuel fiyat geçerliyse (`manual_price_key === hash(part, tier)`) `U = manual`.
 10. Teklif: `parts = Σ line`; addons (fixed / per_part × parça / per_unit × Σq);
     `minOrderTopUp = max(0, min_order − (parts + addons))` ayrı satır;
     `total = parts + addons + topUp` (KDV dahil). KDV hariç = `computeKdv(total, 2000)`.
@@ -319,7 +319,7 @@ qtyDiscountBps, tierBps}, priceBreaks[], hours, grams}` ve teklif
 | config_invalid | error | anahtar snapshot'ta yok/aktif değil, katman/doluluk teknolojiye uymuyor |
 
 Error varsa ve geçerli manuel fiyat yoksa parça anlık fiyatlanmaz ("Manuel teklif
-iste"). Warning'ler ödemeden önce onay ister (`dfm_ack_hash`). Türkçe mesajlar
+iste"). Warning'ler ödemeden önce onay ister (`dfm_ack_key`). Türkçe mesajlar
 `instantQuote.dfm.*` sözlük anahtarları.
 
 `too_large` parametreleri: `{maxX, maxY, maxZ}` seçili teknolojinin baskı hacmi;

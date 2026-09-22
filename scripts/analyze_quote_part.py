@@ -375,6 +375,14 @@ def write_report(out_dir: str, payload: dict) -> None:
         json.dump(payload, handle, indent=2, allow_nan=False)
 
 
+def write_failure(out_dir: str, code: str, message: str) -> None:
+    """Best effort: the exit code is the contract, the report is the detail."""
+    try:
+        write_report(out_dir, {"ok": False, "error": code, "message": message})
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: failure report not written: {exc}", file=sys.stderr)
+
+
 def main() -> int:
     limit_address_space()
     parser = argparse.ArgumentParser(description="Measure an uploaded part for an instant quote")
@@ -404,17 +412,17 @@ def main() -> int:
         write_report(args.outdir, report)
     except AnalysisError as exc:
         print(f"Error: {exc.code}: {exc.message}", file=sys.stderr)
-        write_report(args.outdir, {"ok": False, "error": exc.code, "message": exc.message})
+        write_failure(args.outdir, exc.code, exc.message)
         return 2
     except MemoryError as exc:
         # Its own code: "this part is too heavy for the machine" is a different
         # message to the customer than "this file is broken".
         print(f"Error: out_of_memory: {exc}", file=sys.stderr)
-        write_report(args.outdir, {"ok": False, "error": "out_of_memory", "message": str(exc)})
+        write_failure(args.outdir, "out_of_memory", str(exc))
         return 2
     except Exception as exc:  # noqa: BLE001 - every failure gets a report
         print(f"Error: internal: {exc}", file=sys.stderr)
-        write_report(args.outdir, {"ok": False, "error": "internal", "message": str(exc)})
+        write_failure(args.outdir, "internal", str(exc))
         return 2
 
     geometry = report["geometry"]

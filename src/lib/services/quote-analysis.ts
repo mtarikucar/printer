@@ -256,8 +256,15 @@ export async function analyzeQuotePart(
  * İki takılma biçimi vardır ve ikisi de Redis'in unutkanlığındandır: iş hiç
  * eklenememiş (`queued`, kimse almadı) ya da worker işi aldıktan sonra ölmüş
  * (`analyzing`, kilit düştü). Süpürme durumu `queued`'a geri alır ve İŞİ
- * YENİDEN EKLER — saklanan tamamlanmış bir iş aynı kimlikle eklenemediği için
- * kimlik bir sonraki deneme numarasını taşır.
+ * YENİDEN EKLER.
+ *
+ * DENEME SAYACI BURADA DA ARTAR, ve bu süpürmenin işe yaramasının tek
+ * koşuludur: iş kimliği `…-r<deneme>`dir, bullmq aynı özel kimlikle ikinci bir
+ * eklemeyi SESSİZCE yutar (`addStandardJob-9.lua` → `handleDuplicatedJob`) ve
+ * `removeOnFail: {count:500}` yüzünden eski kimlik haftalarca Redis'te durur.
+ * Sayaç artmasaydı `queued`'da takılan bir parça her turda aynı kimliğe
+ * eklenir, hiç çalışmaz, ama süpürme "kurtarıldı" diye sayardı: müşteri
+ * fiyatını sonsuza dek beklerdi. Artan sayaç her tura yeni bir kimlik verir.
  */
 export async function requeueStuckQuoteParts(olderThanMs: number): Promise<number> {
   const now = Date.now();
@@ -266,7 +273,11 @@ export async function requeueStuckQuoteParts(olderThanMs: number): Promise<numbe
 
   const stuck = await db
     .update(quoteParts)
-    .set({ analysisStatus: "queued", updatedAt: new Date() })
+    .set({
+      analysisStatus: "queued",
+      analysisAttempt: sql`${quoteParts.analysisAttempt} + 1`,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         isNull(quoteParts.deletedAt),
@@ -282,11 +293,12 @@ export async function requeueStuckQuoteParts(olderThanMs: number): Promise<numbe
         )
       )
     )
+    // `RETURNING` güncellenmiş satırı verir: `attempt` zaten artmış değerdir.
     .returning({ id: quoteParts.id, attempt: quoteParts.analysisAttempt });
 
   for (const part of stuck) {
     try {
-      await enqueuePartAnalysis(part.id, part.attempt + 1, RECOVERY_PRIORITY);
+      await enqueuePartAnalysis(part.id, part.attempt, RECOVERY_PRIORITY);
     } catch (err) {
       // Bir parçanın eklenememesi süpürmeyi bitirmesin: kalanlar kurtulsun,
       // bu parçayı bir sonraki tur yeniden bulur.

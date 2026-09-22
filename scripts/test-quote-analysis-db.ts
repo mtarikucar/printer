@@ -84,7 +84,9 @@ async function main() {
     const { analyzeQuotePart, requeueStuckQuoteParts } = await import(
       "../src/lib/services/quote-analysis"
     );
+    const { recomputeQuoteCache } = await import("../src/lib/services/quote-cache");
     const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
+    const { sql } = await import("drizzle-orm");
     const { SEED_SNAPSHOT } = await import("../src/lib/config/quote-seed");
 
     const queue = getQuoteAnalysisQueue();
@@ -234,9 +236,10 @@ async function main() {
       );
       assert.equal(await requeueStuckQuoteParts(10 * 60_000), 1);
       assert.equal((await rowOf(stuck)).analysis_status, "queued");
+      assert.equal((await rowOf(stuck)).analysis_attempt, 2, "süpürme deneme sayacını artırdı");
       assert.equal((await rowOf(fresh)).analysis_status, "queued", "taze parça zaten sırada");
       assert.equal((await rowOf(fresh)).analysis_attempt, 0, "taze parçaya dokunulmadı");
-      // Yeniden kuyruğa alma GERÇEKTEN iş ekler: kimlik bir sonraki denemeyi taşır.
+      // Yeniden kuyruğa alma GERÇEKTEN iş ekler: kimlik artan deneme sayacını taşır.
       const job = await queue.getJob(`quote-part-analysis-${stuck}-r2`);
       assert.equal(job?.data.partId, stuck);
     });
@@ -250,6 +253,127 @@ async function main() {
       );
       assert.equal(await requeueStuckQuoteParts(10 * 60_000), 0);
       assert.equal((await rowOf(ghost)).analysis_status, "analyzing");
+    });
+
+    await test("üst üste süpürme her turda TAZE iş kimliği üretir", async () => {
+      const idle = await makePart("scripts/fixtures/quote/cube20.stl");
+      const age = () =>
+        admin.query(
+          "UPDATE quote_parts SET updated_at = now() - interval '30 minutes' WHERE id = $1",
+          [idle]
+        );
+
+      await age();
+      assert.equal(await requeueStuckQuoteParts(10 * 60_000), 1);
+      assert.equal((await rowOf(idle)).analysis_attempt, 1);
+      assert.equal(
+        (await queue.getJob(`quote-part-analysis-${idle}-r1`))?.data.partId,
+        idle,
+        "birinci tur işi ekledi"
+      );
+
+      // İkinci tur KRİTİK: iş hâlâ kuyrukta duruyor (çalıştıracak worker yok) ve
+      // bullmq aynı özel kimlikle gelen eklemeyi sessizce yutar. Sayaç artmasaydı
+      // ikinci tur yine `-r1` derdi, hiçbir iş eklenmezdi, ama süpürme yine
+      // "1 kurtarıldı" derdi — parça sonsuza dek 'queued' kalırdı.
+      await age();
+      assert.equal(await requeueStuckQuoteParts(10 * 60_000), 1);
+      assert.equal((await rowOf(idle)).analysis_attempt, 2);
+      assert.equal(
+        (await queue.getJob(`quote-part-analysis-${idle}-r2`))?.data.partId,
+        idle,
+        "ikinci tur YENİ kimlikle iş ekledi"
+      );
+    });
+
+    // Kayıp güncelleme tuzağı: yeniden hesap PARÇALARI kilidi ALDIKTAN SONRA
+    // okumazsa, kilit bırakılırken arada değişen parçaları göremez ve bayat
+    // toplamı yazar. Kilit tutulurken parçaları değiştirip sonucu ölçüyoruz.
+    await test("yeniden hesap parçaları kilidi aldıktan SONRA okur", async () => {
+      const cacheOf = async () =>
+        (
+          await admin.query("SELECT version, total_kurus FROM quotes WHERE id = $1", [quoteId])
+        ).rows[0] as { version: number; total_kurus: number | null };
+      const before = await cacheOf();
+      assert.equal(before.total_kurus, null, "hazır olmayan parçalar yüzünden tutar yok");
+
+      const locker = new pg.Client({ connectionString });
+      await locker.connect();
+      try {
+        await locker.query(`SET search_path TO ${namespace}`);
+        await locker.query("BEGIN");
+        await locker.query("SELECT id FROM quotes WHERE id = $1 FOR UPDATE", [quoteId]);
+
+        let settled = false;
+        let failure: unknown;
+        const pending = recomputeQuoteCache(quoteId)
+          .then((r) => {
+            settled = true;
+            return r;
+          })
+          .catch((err: unknown) => {
+            settled = true;
+            failure = err;
+            return null;
+          });
+        await new Promise((r) => setTimeout(r, 300));
+        assert.equal(settled, false, "kilit tutulurken yeniden hesap BEKLER");
+        assert.equal((await cacheOf()).version, before.version, "bekleyen hesap yazmadı");
+
+        // Kilit BEKLENİRKEN teklif fiyatlanabilir hâle geliyor: geriye yalnız
+        // 'ready' parçalar kalıyor. Parçaları önceden okumuş bir hesap bunu
+        // göremez ve NULL tutarı yazar.
+        await admin.query(
+          `UPDATE quote_parts SET deleted_at = now()
+             WHERE quote_id = $1 AND deleted_at IS NULL AND analysis_status <> 'ready'`,
+          [quoteId]
+        );
+        await locker.query("COMMIT");
+
+        const result = await pending;
+        if (failure) throw failure;
+        assert.ok(result, "kilit bırakılınca tamamlanır");
+        const after = await cacheOf();
+        assert.equal(after.version, before.version + 1);
+        assert.ok(
+          after.total_kurus !== null && after.total_kurus > 0,
+          `kilitten sonraki okuma taze parçaları gördü: total_kurus=${after.total_kurus}`
+        );
+        assert.equal(result!.totalKurus, after.total_kurus, "dönen sonuç kolonla aynı");
+      } finally {
+        await locker.query("ROLLBACK").catch(() => {});
+        await locker.end();
+      }
+    });
+
+    await test("çağıranın işlemine katılır: kendi kilidine takılmaz", async () => {
+      const before = (
+        await admin.query("SELECT version FROM quotes WHERE id = $1", [quoteId])
+      ).rows[0].version as number;
+      const joined = db.transaction(async (tx) => {
+        // Task 2.4'ün yapacağı şey: teklifi KENDİ işleminde kilitle, sonra
+        // önbelleği aynı işlemde yeniden hesapla. Yeniden hesap ikinci bir
+        // bağlantı açsaydı çağıranın kilidine takılır, işlem kendini beklerdi.
+        await tx.execute(sql`SELECT id FROM quotes WHERE id = ${quoteId} FOR UPDATE`);
+        return recomputeQuoteCache(quoteId, tx);
+      });
+      // Kendini bekleyen bir işlem testi sonsuza dek astığı için süre sınırı:
+      // arıza "takıldı" diye görünsün, sessizce beklemesin.
+      let hangTimer: NodeJS.Timeout | undefined;
+      const result = await Promise.race([
+        joined,
+        new Promise<never>((_, reject) => {
+          hangTimer = setTimeout(
+            () => reject(new Error("yeniden hesap çağıranın kilidine takıldı")),
+            15_000
+          );
+        }),
+      ]).finally(() => clearTimeout(hangTimer));
+      assert.ok(result, "çağıranın işleminde hesap yapıldı");
+      const after = (
+        await admin.query("SELECT version FROM quotes WHERE id = $1", [quoteId])
+      ).rows[0].version as number;
+      assert.equal(after, before + 1, "yazım çağıranın commit'iyle geldi");
     });
 
     await queue.obliterate({ force: true }).catch(() => {});

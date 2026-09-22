@@ -78,9 +78,16 @@ export function getQuoteMaintenanceQueue(): Queue {
 /**
  * Parçayı analiz kuyruğuna alır.
  *
- * `attempt` iş kimliğinin parçasıdır: TAMAMLANMIŞ ama hâlâ saklanan bir iş
- * aynı kimlikle yeniden eklenemez, dolayısıyla yeniden analiz (kurtarma
- * süpürmesi, admin'in elle tetiklemesi) bir sonraki deneme numarasıyla gelir.
+ * `attempt` iş kimliğinin parçasıdır ve ÇAĞIRANIN SÖZLEŞMESİDİR: bullmq,
+ * saklanan (tamamlanmış ya da başarısız) bir işin kimliğiyle gelen ikinci
+ * eklemeyi hata vermeden YUTAR — `add()` var olan işi döndürür, yeni iş
+ * çalışmaz. Bu yüzden her ekleme, o parça için daha önce KULLANILMAMIŞ bir
+ * `attempt` ile gelmelidir. Kural tek cümle: **`attempt` her zaman satırın
+ * `analysis_attempt` kolonunun o anki değeridir**, ve yeniden ekleyen taraf
+ * kolonu önce artırır (`requeueStuckQuoteParts` böyle yapar). İlk ekleme
+ * (parça yeni eklendi, kolon 0) bu yüzden `0` ile gelir; süpürmenin ürettiği
+ * kimlikler 1, 2, … diye artar ve hiçbiri tekrar etmez.
+ *
  * `priority` yalnız kurtarma için verilir: taze müşteri yüklemesi, saatlerdir
  * bekleyen bir artığın arkasında kuyruğa girmemeli (büyük sayı = düşük öncelik).
  */

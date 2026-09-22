@@ -61,9 +61,13 @@ interface StoredOutputs {
  * Python'un geçici dizine bıraktığı çıktıları kalıcı anahtarlara taşır.
  *
  * Kanonik STL ZORUNLUDUR (üretici onu basar). Önizleme GLB'si ve küçük resim
- * KOZMETİKTİR: python onları yazamazsa (ya da sharp dönüştüremezse) ölçüm yine
- * geçerlidir ve müşteri fiyatını alır — resimsiz bir satır, fiyatsız bir
+ * KOZMETİKTİR: python onları yazamazsa (ya da sharp PNG'yi çeviremezse) ölçüm
+ * yine geçerlidir ve müşteri fiyatını alır — resimsiz bir satır, fiyatsız bir
  * tekliften iyidir.
+ *
+ * Depolama hatası buna dahil DEĞİLDİR ve bilerek yukarı fırlar: kanonik kopya
+ * hemen yukarıda başarılı olmuştur, yani disk yazılabilir; ondan sonra gelen
+ * bir yazım hatası gerçek bir arızadır ve `failed` olarak görünmelidir.
  */
 async function storeOutputs(
   partId: string,

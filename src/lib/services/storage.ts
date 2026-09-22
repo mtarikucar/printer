@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir, rm, access } from "fs/promises";
+import { writeFile, readFile, mkdir, rm, access, copyFile, link } from "fs/promises";
 import { constants as fsConstants } from "fs";
 import { join, resolve, relative, sep, isAbsolute, posix } from "path";
 import crypto from "node:crypto";
@@ -61,6 +61,57 @@ export async function saveFile(
   await mkdir(dir, { recursive: true });
   const filePath = join(dir, filename);
   await writeFile(filePath, buffer);
+  return `${subdir}/${filename}`;
+}
+
+/**
+ * Store a file that already exists on disk, WITHOUT reading it into memory.
+ *
+ * The analysis worker's outputs (a canonical STL, a preview GLB) are
+ * multi-megabyte files the python pass wrote into a temp dir. `saveFile` would
+ * allocate the whole thing as a Buffer first; on a retry storm that is how a
+ * single-vCPU worker box runs out of memory. Copy the bytes instead.
+ */
+export async function saveFileFromPath(
+  srcPath: string,
+  subdir: string,
+  filename: string
+): Promise<string> {
+  const dir = join(UPLOAD_DIR, subdir);
+  const filePath = join(dir, filename);
+  assertSafePath(filePath);
+  await mkdir(dir, { recursive: true });
+  await copyFile(srcPath, filePath);
+  return `${subdir}/${filename}`;
+}
+
+/**
+ * Duplicate an ALREADY STORED file under a second key.
+ *
+ * A hard link first: the quote→order hand-off gives the same multi-MB mesh a
+ * second, order-scoped key, and two names for one inode cost nothing. The link
+ * fails across filesystems (a bind-mounted uploads volume) and on filesystems
+ * without hard links, so a real copy is the fallback — the caller must get a
+ * file either way.
+ *
+ * Deleting one key leaves the other readable: `deleteFile` unlinks a name, and
+ * the bytes survive while any name remains.
+ */
+export async function linkOrCopyStoredFile(
+  srcKey: string,
+  subdir: string,
+  filename: string
+): Promise<string> {
+  const srcPath = absoluteFilePath(srcKey);
+  const dir = join(UPLOAD_DIR, subdir);
+  const filePath = join(dir, filename);
+  assertSafePath(filePath);
+  await mkdir(dir, { recursive: true });
+  try {
+    await link(srcPath, filePath);
+  } catch {
+    await copyFile(srcPath, filePath);
+  }
   return `${subdir}/${filename}`;
 }
 

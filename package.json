@@ -128,7 +128,8 @@
     "test:dispute-migration:db": "npx tsx scripts/test-dispute-migration-db.ts",
     "test:quote-migration:db": "npx tsx scripts/test-quote-migration-db.ts",
     "test:quote-core": "npx tsx scripts/test-quote-core.ts",
-    "test:quote-validation": "npx tsx scripts/test-quote-validation.ts"
+    "test:quote-validation": "npx tsx scripts/test-quote-validation.ts",
+    "test:quote-analysis:db": "npx tsx scripts/test-quote-analysis-db.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

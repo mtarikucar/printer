@@ -1,5 +1,6 @@
 import { publishRealtime } from "./bus";
 import { topics } from "./events";
+import type { AnalysisStatus } from "@/lib/config/quote-types";
 
 interface OrderEventInput {
   orderId: string;
@@ -97,5 +98,42 @@ export async function emitPainterNotification(painterId: string): Promise<void> 
   await publishRealtime([topics.painter(painterId)], {
     kind: "notification",
     scope: "painter",
+  });
+}
+
+/** Teklif olaylarının gideceği konular: oda + admin + (varsa) sahip. */
+function quoteTopics(quoteId: string, userId?: string | null): string[] {
+  const t = [topics.quote(quoteId), topics.admin()];
+  if (userId) t.push(topics.customer(userId));
+  return t;
+}
+
+/**
+ * Bir parçanın analiz durumu değişti.
+ *
+ * BEKLEMEZ (`void`): analiz worker'ı python'u besleyen tek çekirdeği tutar ve
+ * yayın en iyi çaba işidir — `publishRealtime` hatayı zaten yutar, çağıran da
+ * Redis'i beklemek zorunda kalmasın. Anonim teklifin sahibi yoktur; o hâlde
+ * yalnız teklif odası ile admin haber alır.
+ */
+export function emitQuotePartChanged(args: {
+  quoteId: string;
+  partId: string;
+  status: AnalysisStatus;
+  userId?: string | null;
+}): void {
+  void publishRealtime(quoteTopics(args.quoteId, args.userId), {
+    kind: "quote_part",
+    quoteId: args.quoteId,
+    partId: args.partId,
+    status: args.status,
+  });
+}
+
+/** Teklifin kendisi değişti (yeniden fiyatlama, admin eylemi, durum geçişi). */
+export function emitQuoteChanged(args: { quoteId: string; userId?: string | null }): void {
+  void publishRealtime(quoteTopics(args.quoteId, args.userId), {
+    kind: "quote",
+    quoteId: args.quoteId,
   });
 }

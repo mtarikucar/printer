@@ -1,6 +1,8 @@
 // Shared, isomorphic (client + server safe) realtime event + topic definitions.
 // No Node imports here so this module can be bundled into client components.
 
+import type { AnalysisStatus } from "@/lib/config/quote-types";
+
 export type RealtimeEvent =
   | {
       kind: "order";
@@ -12,6 +14,12 @@ export type RealtimeEvent =
     }
   | { kind: "message"; orderId: string; channel: string; senderType: string }
   | { kind: "notification"; scope: "customer" | "manufacturer" | "painter" }
+  // Teklif parçasının analiz durumu değişti. FİYAT VE GEOMETRİ TAŞIMAZ: bu
+  // kanal fiyat kapısını tanımaz, arayüz haberi alınca teklifi kendi
+  // yetkisiyle yeniden çeker.
+  | { kind: "quote_part"; quoteId: string; partId: string; status: AnalysisStatus }
+  // Teklifin kendisi değişti (yeniden fiyatlama, admin eylemi, durum geçişi).
+  | { kind: "quote"; quoteId: string }
   | { kind: "badge" };
 
 // A connection subscribes to a SET of topics; an event is published with the
@@ -26,6 +34,9 @@ export const topics = {
   painter: (painterId: string) => `painter:${painterId}`,
   customer: (userId: string) => `customer:${userId}`,
   track: (orderNumber: string) => `track:${orderNumber}`,
+  // Teklif odası: sahibi (ya da anonim çerez sahibi) açık teklif sayfasında
+  // parça analizini canlı izler.
+  quote: (quoteId: string) => `quote:${quoteId}`,
 };
 
 export interface RealtimeEnvelope {

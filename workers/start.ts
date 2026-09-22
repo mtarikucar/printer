@@ -18,6 +18,8 @@ import { startModelApprovalSlaWorker } from "../src/lib/queue/workers/model-appr
 import { startWorkshopCloseWorker } from "../src/lib/queue/workers/workshop-close.worker";
 import { startPainterAcceptSlaWorker } from "../src/lib/queue/workers/painter-accept-sla.worker";
 import { startManufacturerAcceptSlaWorker } from "../src/lib/queue/workers/manufacturer-accept-sla.worker";
+import { startQuotePartAnalysisWorker } from "../src/lib/queue/workers/quote-part-analysis.worker";
+import { getQuoteAnalysisQueue } from "../src/lib/queue/quote-queues";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -91,6 +93,9 @@ const painterAcceptSlaWorker = startPainterAcceptSlaWorker();
 // ürünüyse / iş yola çıkmışsa yalnız bayraklanır. Boyacı ikizinin (
 // painter-accept-sla) üretici tarafındaki karşılığı.
 const manufacturerAcceptSlaWorker = startManufacturerAcceptSlaWorker();
+// Anlık teklif: parça geometrisini ölçen python geçişi. mesh-processing ile
+// aynı çekirdeği paylaşır, bu yüzden eşzamanlılığı 1'dir.
+const quotePartAnalysisWorker = startQuotePartAnalysisWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -172,6 +177,15 @@ getPainterAcceptSlaQueue().upsertJobScheduler(
   { name: "painter-accept-sla" }
 );
 
+// Müşteri fiyatını bekliyor: Redis bir işi kaybederse (yeniden başlatma, iş
+// eklenirken düşen bağlantı) parça sonsuza kadar "sırada" kalırdı. Beş dakikada
+// bir takılanları geri kuyruğa al.
+getQuoteAnalysisQueue().upsertJobScheduler(
+  "quote-analysis-recovery",
+  { every: 300_000 },
+  { name: "recover" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -191,6 +205,7 @@ console.log("  - wa-agent (concurrency: 4, 30/min, attempts: 1)");
 console.log("  - model-approval-sla (repeatable: every 6h)");
 console.log("  - workshop-close (repeatable: every 1h)");
 console.log("  - painter-accept-sla (repeatable: every 1h)");
+console.log("  - quote-part-analysis (concurrency: 1, python; recovery: every 5m)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -213,6 +228,7 @@ async function shutdown() {
     workshopCloseWorker.close(),
     painterAcceptSlaWorker.close(),
     manufacturerAcceptSlaWorker.close(),
+    quotePartAnalysisWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

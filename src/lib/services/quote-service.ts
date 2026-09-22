@@ -1242,6 +1242,31 @@ function inheritedQuoteFields(quote: Quote) {
   };
 }
 
+/** Bölmenin PARA etkisi — yalnız fiyat görebilen izleyiciye döner. */
+export interface SplitTotals {
+  /** Bölmeden önceki teklif toplamı; parçaların hepsi fiyatlanamıyorsa `null`. */
+  beforeKurus: number | null;
+  /** Bölmeden sonra ORTAYA ÇIKAN TÜM tekliflerin toplamı (kaynak dahil). */
+  afterKurus: number | null;
+  /** `afterKurus - beforeKurus`; ikisinden biri bilinmiyorsa `null`. */
+  deltaKurus: number | null;
+}
+
+export interface SplitResult {
+  newQuoteNumbers: string[];
+  /** YALNIZ `viewer.canSeePrices` iken vardır. */
+  totals?: SplitTotals;
+}
+
+/** Bir parça kümesinin teklif toplamı — fiyatlanamıyorsa `null`. */
+function groupTotalKurus(quote: Quote, group: QuotePart[]): number | null {
+  const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(group), {
+    leadTier: quote.leadTier,
+    addonKeys: quote.addonKeys,
+  });
+  return computed.totals.allPriced ? computed.totals.totalKurus : null;
+}
+
 /**
  * Teklifi teknolojiye göre böler: İLK teknoloji yerinde kalır, her diğer
  * teknoloji kendi teklifine TAŞINIR.
@@ -1250,12 +1275,27 @@ function inheritedQuoteFields(quote: Quote) {
  * aynen geçerlidir ve iki teklifte birden durması, müşterinin aynı parçayı iki
  * kez ödemesine açık bir kapı olurdu.
  *
- * Yeni teklifler kaynağın SNAPSHOT'INI ve geçerlilik süresini devralır: bölme
- * bir yeniden fiyatlama değildir, fiyat değişmemelidir.
+ * PARÇA fiyatları değişmez: yeni teklifler kaynağın SNAPSHOT'INI, kademesini ve
+ * geçerlilik süresini devralır — bölme bir yeniden fiyatlama değildir.
+ *
+ * Ama TEKLİF BAŞINA işleyen iki kalem, bölmeden sonra her teklifte AYRICA
+ * işler ve toplam BÜYÜR:
+ *   - sabit ücretli ek hizmetler (`priceType: "fixed"` — sertifika, ölçüm
+ *     raporu, veri sayfası; `addonLines` çarpanı 1'dir),
+ *   - asgari sipariş tamamlaması (`minOrderKurus`).
+ * Bu bilerek böyledir ve bölmenin amacının doğal sonucudur: bölünen her teklif
+ * AYRI bir siparişe, ayrı bir üreticiye gider (spec §"Sahip kararları" 1);
+ * belgeyi o siparişi basan üretici düzenler ve her sipariş asgari tutarı
+ * ayrıca karşılamak zorundadır. Seçilen ek hizmetleri yeni teklife hiç
+ * taşımamak, müşterinin istediği sertifikayı sessizce düşürürdü — daha kötüsü.
+ *
+ * Bu yüzden fark SESSİZ BIRAKILMAZ: `totals` bölmeden önceki ve sonraki
+ * toplamı da taşır, ekran artışı gösterebilsin. `totals` yalnız
+ * `viewer.canSeePrices` iken vardır — anonim sahip de bölebilir ama fiyat
+ * göremez (global kısıt: fiyat, kapıyı geçmemiş izleyiciye hiç çıkmaz).
  */
-export async function splitByTechnology(
-  access: QuoteAccess
-): Promise<{ newQuoteNumbers: string[] }> {
+export async function splitByTechnology(access: QuoteAccess): Promise<SplitResult> {
+  const canSeePrices = access.viewer.canSeePrices;
   return mutateQuote(access, async (tx, quote) => {
     const parts = await tx
       .select()
@@ -1278,6 +1318,16 @@ export async function splitByTechnology(
     }
 
     const [staying, ...moving] = [...groups.values()];
+
+    // Para etkisi, yazımdan ÖNCE ve saf `computeQuote` ile ölçülür: aynı
+    // hesap birazdan her teklifin önbelleğine yazılacak, ikinci bir sayı
+    // üretmiyoruz.
+    const beforeKurus = groupTotalKurus(quote, parts);
+    const afterParts = [staying, ...moving].map((group) => groupTotalKurus(quote, group));
+    const afterKurus = afterParts.every((t) => t !== null)
+      ? afterParts.reduce((sum, t) => sum + (t ?? 0), 0)
+      : null;
+
     const newQuoteNumbers: string[] = [];
     for (const group of moving) {
       const [created] = await tx
@@ -1317,7 +1367,16 @@ export async function splitByTechnology(
     // Kaynak teklifin parça kümesi küçüldü: verilen fiyat artık ona ait değil.
     await demoteQuotedToDraft(tx, quote);
 
-    return { newQuoteNumbers };
+    if (!canSeePrices) return { newQuoteNumbers };
+    return {
+      newQuoteNumbers,
+      totals: {
+        beforeKurus,
+        afterKurus,
+        deltaKurus:
+          beforeKurus !== null && afterKurus !== null ? afterKurus - beforeKurus : null,
+      },
+    };
   });
 }
 

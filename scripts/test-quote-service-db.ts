@@ -623,6 +623,100 @@ async function main() {
       );
     });
 
+    // Bölmenin PARA etkisi: parça fiyatları aynı kalır, ama TEKLİF BAŞINA
+    // işleyen iki kalem (sabit ek hizmet + asgari sipariş tamamlaması) her
+    // teklifte ayrıca işler. Sayılar burada ÇİVİLENİR: `splitByTechnology`
+    // toplamın değişmediğini iddia ediyordu ve hiçbir iddia buna bakmıyordu.
+    const FDM_CUBE_KURUS = 7_400; // 20 mm küp, fdm/pla, standart kademe
+    const SLA_CUBE_KURUS = 11_400; // aynı küp, sla/standard_resin
+    const MIN_ORDER_KURUS = 20_000; // quote-seed.ts settings.minOrderKurus
+    const OLCUM_RAPORU_KURUS = 125_000; // quote-seed.ts addons, priceType "fixed"
+
+    /** İki teknolojili, İKİ PARÇASI DA ANALİZLİ teklif — toplamı ölçülebilsin. */
+    async function twoTechPricedQuote(tag: string, addonKeys: string[]) {
+      const created = await createQuote({ userId, anonymousId: null, termsAccepted: true });
+      const fdm = await addPartFromUpload(await loadAccess(created.id, userId), {
+        uploadId: await stage(`${tag}-fdm`, `u:${userId}`),
+        fileName: `${tag}-fdm.stl`,
+      });
+      const sla = await addPartFromUpload(await loadAccess(created.id, userId), {
+        uploadId: await stage(`${tag}-sla`, `u:${userId}`),
+        fileName: `${tag}-sla.stl`,
+      });
+      await updatePart(await loadAccess(created.id, userId), sla.partId, {
+        technologyKey: "sla",
+      });
+      await markAnalyzed(fdm.partId);
+      await markAnalyzed(sla.partId);
+      // Analizi ham SQL yazdı; önbelleği tazeleyen tek yol bir mutasyondur.
+      await updateQuote(await loadAccess(created.id, userId), { title: tag, addonKeys });
+      const [row] = await db.select().from(quotes).where(eq(quotes.id, created.id)).limit(1);
+      assert.ok(row.totalKurus !== null, "iki parça da fiyatlandı");
+      return { ...created, totalKurus: row.totalKurus! };
+    }
+
+    const totalsAfterSplit = async (sourceId: string, numbers: string[]) => {
+      const [source] = await db.select().from(quotes).where(eq(quotes.id, sourceId)).limit(1);
+      const moved = await Promise.all(
+        numbers.map(async (number) => {
+          const [row] = await db.select().from(quotes).where(eq(quotes.number, number)).limit(1);
+          return row;
+        })
+      );
+      return { source, moved };
+    };
+
+    await test("bölme ASGARİ SİPARİŞ tamamlamasını teklif başına işletir", async () => {
+      const quoteMin = await twoTechPricedQuote("bolme-asgari", []);
+      // İki küçük parça tek teklifte asgariyi BİR kez tamamlıyordu.
+      assert.equal(quoteMin.totalKurus, MIN_ORDER_KURUS);
+
+      const result = await splitByTechnology(await loadAccess(quoteMin.id, userId));
+      assert.equal(result.newQuoteNumbers.length, 1);
+      const { source, moved } = await totalsAfterSplit(quoteMin.id, result.newQuoteNumbers);
+
+      // Artık İKİ sipariş var ve her biri asgariyi ayrıca karşılıyor.
+      assert.equal(source.totalKurus, MIN_ORDER_KURUS, "kaynak asgariye tamamlandı");
+      assert.equal(moved[0].totalKurus, MIN_ORDER_KURUS, "yeni teklif de tamamlandı");
+      assert.deepEqual(result.totals, {
+        beforeKurus: MIN_ORDER_KURUS,
+        afterKurus: 2 * MIN_ORDER_KURUS,
+        deltaKurus: MIN_ORDER_KURUS,
+      });
+    });
+
+    await test("bölme SABİT ek hizmeti her teklifte ayrıca işletir, farkı geri döner", async () => {
+      const quoteAddon = await twoTechPricedQuote("bolme-ek-hizmet", ["olcum_raporu"]);
+      assert.equal(
+        quoteAddon.totalKurus,
+        FDM_CUBE_KURUS + SLA_CUBE_KURUS + OLCUM_RAPORU_KURUS,
+        "bölmeden önce ölçüm raporu TEK kez"
+      );
+
+      const result = await splitByTechnology(await loadAccess(quoteAddon.id, userId));
+      const { source, moved } = await totalsAfterSplit(quoteAddon.id, result.newQuoteNumbers);
+      assert.deepEqual(moved[0].addonKeys, ["olcum_raporu"], "ek hizmet seçimi devralınır");
+
+      // Bilerek: bölünen her teklif ayrı bir siparişe / ayrı bir üreticiye
+      // gider, raporu o üretici düzenler. Sessiz kalmaz: fark `totals`'ta.
+      assert.equal(source.totalKurus, FDM_CUBE_KURUS + OLCUM_RAPORU_KURUS);
+      assert.equal(moved[0].totalKurus, SLA_CUBE_KURUS + OLCUM_RAPORU_KURUS);
+      assert.deepEqual(result.totals, {
+        beforeKurus: quoteAddon.totalKurus,
+        afterKurus: quoteAddon.totalKurus + OLCUM_RAPORU_KURUS,
+        deltaKurus: OLCUM_RAPORU_KURUS,
+      });
+    });
+
+    await test("fiyat göremeyen sahibin bölme cevabında TEK bir tutar yoktur", async () => {
+      const quoteAnon = await twoTechPricedQuote("bolme-anonim", ["olcum_raporu"]);
+      // `loadAccess(..., null)` = anonim sahip: düzenleyebilir, fiyat göremez.
+      const result = await splitByTechnology(await loadAccess(quoteAnon.id, null));
+      assert.equal(result.newQuoteNumbers.length, 1);
+      assert.equal("totals" in result, false, "anahtar null olarak bile durmaz");
+      assert.equal(/Kurus"|"totals"/.test(JSON.stringify(result)), false);
+    });
+
     // ─── Paylaşım bağlantısı ────────────────────────────────────────────────
 
     await test("paylaşım token'ı üretilir, yenilenir ve iptal edilir", async () => {

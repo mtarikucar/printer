@@ -4,6 +4,11 @@
  * İlk teknoloji yerinde kalır, her diğer teknoloji kendi teklifine taşınır.
  * Cevap hem yeni numaraları hem kaynak teklifin TAZE gövdesini taşır: ekran
  * bölmeden sonra ikinci bir istek atmak zorunda kalmasın.
+ *
+ * `totals` (yalnız fiyat görebilen izleyiciye) bölmeden önceki ve sonraki
+ * toplamı da verir: teklif başına işleyen kalemler (sabit ek hizmetler, asgari
+ * sipariş tamamlaması) bölmeden sonra her teklifte ayrıca işlediği için toplam
+ * BÜYÜYEBİLİR ve ekran bunu sessiz geçmemelidir (bkz. `splitByTechnology`).
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { CUSTOMER_ACTION_FAILED_ERROR, handleRouteFailure } from "@/lib/api/route-error";
@@ -19,8 +24,10 @@ async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse>
   const found = await accessOr404(request, id, { forEdit: true });
   if ("response" in found) return found.response;
 
-  const { newQuoteNumbers } = await splitByTechnology(found.access);
-  return presentedWith(request, id, { newQuoteNumbers });
+  // `totals` YOKSA hiç yazılmaz: fiyat anahtarı, fiyat göremeyen izleyicinin
+  // gövdesinde `null` olarak bile durmamalı.
+  const result = await splitByTechnology(found.access);
+  return presentedWith(request, id, { ...result });
 }
 
 export async function POST(request: NextRequest, ctx: Ctx) {

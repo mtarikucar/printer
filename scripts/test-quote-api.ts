@@ -132,7 +132,12 @@ function makePart(overrides: Partial<QuotePart> = {}): QuotePart {
 
 const sign = (key: string) => `https://dosya.test/${key}?imza=1`;
 
-function present(viewer: QuoteViewer, quote = makeQuote(), parts = [makePart()]) {
+function present(
+  viewer: QuoteViewer,
+  quote = makeQuote(),
+  parts = [makePart()],
+  extra: { liveDraftReference?: string | null; orderNumber?: string | null } = {}
+) {
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
     leadTier: quote.leadTier,
     addonKeys: quote.addonKeys,
@@ -143,8 +148,8 @@ function present(viewer: QuoteViewer, quote = makeQuote(), parts = [makePart()])
     snapshot: quote.pricingSnapshot,
     computed,
     viewer,
-    liveDraftReference: null,
-    orderNumber: null,
+    liveDraftReference: extra.liveDraftReference ?? null,
+    orderNumber: extra.orderNumber ?? null,
     catalogChanged: false,
     now: NOW,
     sign,
@@ -342,6 +347,27 @@ test("giriş yapmış paylaşım izleyicisi fiyatı görür ama GLB'yi göremez"
   assert.ok(view.totals);
   assert.equal(view.parts[0].previewGlbUrl, null);
   assert.equal("invoice" in view, false);
+});
+
+test("paylaşım görünümünde ÖDEME REFERANSI ve SİPARİŞ NUMARASI yok", () => {
+  // İkisi de oturumsuz açılan kamuya açık sayfaların anahtarıdır:
+  // `/pay/<ref>` tam tutarı ve kartla öde düğmesini, `/track/<no>` siparişin
+  // takibini hiçbir kontrol olmadan gösterir. Paylaşım bağlantısını alan kişi
+  // fiyatı göremiyorsa, fiyatı gösteren sayfanın adresini de alamamalı.
+  const keys = { liveDraftReference: "FIG-ABCD1234", orderNumber: "FIG-000999" };
+  for (const viewer of [SHARE_VIEW, { ...SHARE_VIEW, canSeePrices: true }]) {
+    const view = present(viewer, makeQuote(), [makePart()], keys);
+    assert.equal(view.liveDraftReference, null);
+    assert.equal(view.orderNumber, null);
+    assert.equal(
+      /FIG-ABCD1234|FIG-000999/.test(JSON.stringify(view)),
+      false,
+      "referans gövdenin hiçbir yerinde geçmemeli"
+    );
+  }
+  const owner = present(OWNER_VIEW, makeQuote(), [makePart()], keys);
+  assert.equal(owner.liveDraftReference, "FIG-ABCD1234");
+  assert.equal(owner.orderNumber, "FIG-000999");
 });
 
 // ─── Ödeme hazırlığı ve teslim tarihi ───────────────────────────────────────

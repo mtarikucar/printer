@@ -284,8 +284,14 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
     catalogChangedSinceSnapshot: input.catalogChanged,
     termsAccepted: quote.termsAcceptedAt !== null,
     locked: !permissions.canEdit,
-    liveDraftReference: input.liveDraftReference,
-    orderNumber: input.orderNumber,
+    // İkisi de KAMUYA AÇIK, oturumsuz sayfaların anahtarıdır: `/pay/<ref>`
+    // ödeme sayfası tam tutarı ve kartla öde düğmesini, `/track/<no>` sipariş
+    // takibini hiçbir oturum kontrolü olmadan gösterir. Paylaşım bağlantısını
+    // alan kişiye bunları vermek hem sahipliği hem fiyat kapısını dolanmak
+    // olurdu — bu yüzden `invoice`/`shareUrl` ile aynı kapıdan geçerler.
+    // `locked` alanı zaten bekleyen ödemeyi (referans vermeden) anlatıyor.
+    liveDraftReference: viewer.isOwner ? input.liveDraftReference : null,
+    orderNumber: viewer.isOwner ? input.orderNumber : null,
     viewer,
     catalog: presentCatalog(snapshot, canSeePrices),
     parts: presentedParts,

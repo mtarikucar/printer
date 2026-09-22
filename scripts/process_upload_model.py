@@ -3,11 +3,11 @@
 
 Usage:  process_upload_model.py <input.stl|obj|glb> <output.glb> <report.json> <target_height_mm>
 
-Reuses the geometry helpers from process_mesh.py. Loads the user mesh, keeps the
-largest body, decimates if huge, scales to the target print height, repairs to a
-closed volume, then writes a GLB preview + a JSON report with the *scaled* volume
-(mm³), bounding box, watertightness, and print-risk flags. The volume drives
-auto pricing server-side (uploadModelPriceKurus)."""
+Reuses the geometry helpers from process_mesh.py. Loads the user mesh, fuses its
+shells into one body, decimates if huge, scales to the target print height,
+repairs to a closed volume, then writes a GLB preview + a JSON report with the
+*scaled* volume (mm³), bounding box, watertightness, and print-risk flags. The
+volume drives auto pricing server-side (uploadModelPriceKurus)."""
 import sys
 import json
 import time
@@ -15,14 +15,17 @@ import time
 # Same dir on sys.path when run as `python3 scripts/process_upload_model.py`.
 from process_mesh import (  # type: ignore
     load_mesh,
-    keep_largest_component,
+    merge_components,
     decimate_if_needed,
     scale_to_target,
     repair_with_pymeshlab,
-    repair_self_intersections,
-    validate_mesh,
-    estimate_min_wall_thickness_mm,
+    build_report,
+    estimate_wall_percentiles,
 )
+
+# build_report() also returns these. The upload report contract predates them
+# and its callers (upload/model route, product-spec) never read them.
+NOT_IN_REPORT_CONTRACT = ("volume_cm3", "fill_ratio")
 
 
 def process(input_path: str, output_glb_path: str, report_path: str, target_height_mm: float):
@@ -30,25 +33,24 @@ def process(input_path: str, output_glb_path: str, report_path: str, target_heig
     repairs: list[str] = []
 
     mesh = load_mesh(input_path)  # trimesh.load handles .stl / .obj / .glb by ext
-    mesh, dropped = keep_largest_component(mesh)
+    # Unions every shell >= 2% of the largest; `dropped` flags a real feature
+    # (0.1%-2% of the largest) that had to be left out.
+    mesh, _merged_count, dropped = merge_components(mesh, repairs)
     mesh = decimate_if_needed(mesh, repairs=repairs)
     # target_height_mm <= 0 → keep the model's true size (product-spec mode):
     # we only need a GLB preview + real volume/bbox, not a print-scaled mesh.
     if target_height_mm and target_height_mm > 0:
         mesh = scale_to_target(mesh, target_height_mm)
 
-    # Try to close the mesh so volume is meaningful; tolerate failures.
-    try:
-        mesh = repair_with_pymeshlab(mesh, repairs)
-    except Exception:
-        try:
-            mesh = repair_self_intersections(mesh, repairs)
-        except Exception:
-            pass
+    # Close the mesh so volume is meaningful. Never raises: on failure it hands
+    # back the mesh unchanged.
+    mesh = repair_with_pymeshlab(mesh, repairs)
 
-    info = validate_mesh(mesh)
-    min_wall = estimate_min_wall_thickness_mm(mesh)
-    volume_mm3 = float(mesh.volume) if info.get("is_volume") else None
+    info = build_report(mesh)
+    for key in NOT_IN_REPORT_CONTRACT:
+        info.pop(key, None)
+    min_wall = estimate_wall_percentiles(mesh)[0]
+    volume_mm3 = float(abs(mesh.volume)) if info.get("is_volume") else None
 
     print_risk: list[str] = []
     if not info.get("is_volume"):

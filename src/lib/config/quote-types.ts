@@ -537,3 +537,41 @@ export interface PresentedQuote {
   /** YALNIZ `viewer.canSeePrices` iken var. */
   totals?: QuoteTotals | null;
 }
+
+// ─── Müşteri listeleri (hesap sayfaları) ────────────────────────────────────
+
+/** `/account/teklifler` satırı. Fiyat kolonları yalnız giriş yapmış sahibe gider. */
+export interface CustomerQuoteListItem {
+  id: string;
+  number: string;
+  status: QuoteStatus;
+  title: string | null;
+  partCount: number;
+  unitCount: number;
+  /** Fiyatlanamayan teklifte null (önbellek kolonu). */
+  totalKurus: number | null;
+  leadDays: number | null;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  expired: boolean;
+  orderNumber: string | null;
+}
+
+/** `/account/parcalar` satırı: aynı dosya (sha256) tek kez listelenir. */
+export interface LibraryPart {
+  /** En son yüklenen kopyanın parça kimliği — yeni teklife o kopyalanır. */
+  partId: string;
+  name: string;
+  fileName: string;
+  sourceFormat: QuoteSourceFormat;
+  sha256: string;
+  thumbnailUrl: string | null;
+  dimensionsMm: Vec3 | null;
+  volumeCm3: number | null;
+  quoteId: string;
+  quoteNumber: string;
+  createdAt: string;
+  /** Bu dosyanın müşterinin tekliflerinde kaç kez kullanıldığı. */
+  useCount: number;
+}

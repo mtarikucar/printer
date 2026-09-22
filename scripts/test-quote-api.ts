@@ -1,0 +1,465 @@
+/**
+ * Teklif ucunun İKİ kapısı, DB'siz: KİM görebilir (erişim matrisi) ve NE
+ * görünür (tek serileştirici).
+ *
+ * Fiyat gizleme bir görünüm ayarı değil, GÜVENLİK sınırıdır: fiyat kapısı
+ * kapalı bir izleyicinin gövdesinde hiçbir fiyat anahtarı BULUNMAMALIDIR —
+ * `null` bile değil, anahtarın kendisi olmamalı. Bu yüzden iddia tek tek
+ * alanlara değil, serileştirilmiş JSON'un TAMAMINA bakar: yarın sunucuya
+ * eklenen yeni bir fiyat alanı bu testi kendiliğinden düşürür.
+ */
+import assert from "node:assert/strict";
+import { addBusinessDays, istanbulDateKey } from "../src/lib/config/business-days";
+import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
+import { computeQuote } from "../src/lib/config/quote-compute";
+import { partPricingKey } from "../src/lib/config/quote-keys";
+import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
+import type { PartGeometry, QuoteViewer } from "../src/lib/config/quote-types";
+import type { Quote, QuotePart } from "../src/lib/db/schema";
+import { resolveQuoteViewer } from "../src/lib/services/quote-access";
+import { presentQuote, toPricingInputs } from "../src/lib/services/quote-present";
+
+const OWNER_ID = "22222222-2222-4222-8222-222222222222";
+const STRANGER_ID = "33333333-3333-4333-8333-333333333333";
+const SHARE_TOKEN = "s".repeat(32);
+const NOW = new Date("2026-09-23T09:00:00.000Z");
+
+/** 20 mm'lik kapalı küp: analizi biten, otomatik fiyatlanabilen bir parça. */
+const CUBE: PartGeometry = {
+  volume: 8000,
+  area: 2400,
+  extents: { x: 20, y: 20, z: 20 },
+  bodyCount: 1,
+  isWatertight: true,
+  isVolume: true,
+  volumeEstimated: false,
+  faceCount: 12,
+  wallP1: 20,
+  wallP5: 20,
+  overhangArea: 400,
+  sourceUnits: null,
+  objectCount: 1,
+};
+
+function makeQuote(overrides: Partial<Quote> = {}): Quote {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    seq: 1,
+    number: "T-000001",
+    userId: OWNER_ID,
+    anonymousId: null,
+    status: "draft",
+    reviewKind: null,
+    reviewNote: null,
+    reviewRequestedAt: null,
+    reviewedAt: null,
+    reviewedByEmail: null,
+    title: "Braket projesi",
+    leadTier: "standard",
+    addonKeys: ["uygunluk_sertifikasi"],
+    customerNote: "Montaj deliklerine dikkat",
+    poNumber: "PO-42",
+    invoiceType: "corporate",
+    companyName: "Acme Mühendislik A.Ş.",
+    taxId: "1234567890",
+    taxIdType: "vkn",
+    taxOffice: "Kadıköy",
+    billingAddress: null,
+    pricingSnapshot: SEED_SNAPSHOT,
+    snapshotTakenAt: new Date("2026-09-20T00:00:00.000Z"),
+    version: 3,
+    totalKurus: null,
+    leadDays: null,
+    expiresAt: new Date("2026-10-20T00:00:00.000Z"),
+    shareToken: SHARE_TOKEN,
+    termsAcceptedAt: new Date("2026-09-20T00:00:00.000Z"),
+    termsVersion: "2026-08-31",
+    orderId: null,
+    sourceQuoteId: null,
+    expiryReminderSentAt: null,
+    abandonedReminderSentAt: null,
+    createdAt: new Date("2026-09-20T00:00:00.000Z"),
+    updatedAt: new Date("2026-09-21T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function makePart(overrides: Partial<QuotePart> = {}): QuotePart {
+  return {
+    id: "44444444-4444-4444-8444-444444444441",
+    quoteId: "11111111-1111-4111-8111-111111111111",
+    sortOrder: 0,
+    name: "Braket",
+    fileName: "braket.stl",
+    sourceKey: "quote-parts/p1/source.stl",
+    sourceFormat: "stl",
+    sourceBytes: 2048,
+    sourceSha256: "a".repeat(64),
+    uploadId: "upload-1",
+    analysisStatus: "ready",
+    analysisAttempt: 1,
+    analysisError: null,
+    geometry: CUBE,
+    canonicalStlKey: "quote-parts/p1/canonical.stl",
+    previewGlbKey: "quote-parts/p1/preview.glb",
+    thumbnailKey: "quote-parts/p1/thumb.webp",
+    units: "mm",
+    scale: 1,
+    technologyKey: "fdm",
+    materialKey: "pla",
+    colorKey: "beyaz",
+    finishKey: "ham",
+    layerUm: 200,
+    infillPct: 20,
+    quantity: 2,
+    note: null,
+    drawingKey: null,
+    drawingName: null,
+    criticalTolerance: false,
+    dfmAckKey: null,
+    manualUnitPriceKurus: null,
+    manualPriceKey: null,
+    manualPricedAt: null,
+    manualPricedByEmail: null,
+    targetUnitPriceKurus: 12345,
+    deletedAt: null,
+    filesPurgedAt: null,
+    createdAt: new Date("2026-09-20T00:00:00.000Z"),
+    updatedAt: new Date("2026-09-20T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+const sign = (key: string) => `https://dosya.test/${key}?imza=1`;
+
+function present(viewer: QuoteViewer, quote = makeQuote(), parts = [makePart()]) {
+  const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
+    leadTier: quote.leadTier,
+    addonKeys: quote.addonKeys,
+  });
+  return presentQuote({
+    quote,
+    parts,
+    snapshot: quote.pricingSnapshot,
+    computed,
+    viewer,
+    liveDraftReference: null,
+    orderNumber: null,
+    catalogChanged: false,
+    now: NOW,
+    sign,
+    shareBaseUrl: "https://figurunica.test/teklif/T-000001",
+  });
+}
+
+const OWNER_VIEW: QuoteViewer = {
+  canSeePrices: true,
+  canEdit: true,
+  isOwner: true,
+  isShare: false,
+  isAdmin: false,
+};
+const ANON_VIEW: QuoteViewer = {
+  canSeePrices: false,
+  canEdit: true,
+  isOwner: true,
+  isShare: false,
+  isAdmin: false,
+};
+const SHARE_VIEW: QuoteViewer = {
+  canSeePrices: false,
+  canEdit: false,
+  isOwner: false,
+  isShare: true,
+  isAdmin: false,
+};
+
+const tests: Array<[string, () => void]> = [];
+const test = (name: string, fn: () => void) => tests.push([name, fn]);
+
+// ─── Erişim matrisi (spec §"Erişim ve fiyat gizleme") ───────────────────────
+
+test("sahip: oturum kullanıcısı teklifin sahibiyse düzenler ve fiyatı görür", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: OWNER_ID,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: false,
+  });
+  assert.deepEqual(viewer, OWNER_VIEW);
+});
+
+test("anonim çerez: düzenler ama FİYAT GÖRMEZ", () => {
+  const viewer = resolveQuoteViewer(makeQuote({ userId: null, anonymousId: "anon-1" }), {
+    sessionUserId: null,
+    anonymousId: "anon-1",
+    shareToken: null,
+    isAdmin: false,
+  });
+  assert.deepEqual(viewer, ANON_VIEW);
+});
+
+test("anonim çerez teklif devralındıktan sonra geçersizdir", () => {
+  const viewer = resolveQuoteViewer(makeQuote({ userId: OWNER_ID, anonymousId: "anon-1" }), {
+    sessionUserId: null,
+    anonymousId: "anon-1",
+    shareToken: null,
+    isAdmin: false,
+  });
+  assert.equal(viewer, null);
+});
+
+test("paylaşım token'ı: salt okunur, girişsizken fiyatsız", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: null,
+    anonymousId: null,
+    shareToken: SHARE_TOKEN,
+    isAdmin: false,
+  });
+  assert.deepEqual(viewer, SHARE_VIEW);
+});
+
+test("paylaşım token'ı + oturum: fiyat açılır, düzenleme yine kapalı", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: STRANGER_ID,
+    anonymousId: null,
+    shareToken: SHARE_TOKEN,
+    isAdmin: false,
+  });
+  assert.deepEqual(viewer, { ...SHARE_VIEW, canSeePrices: true });
+});
+
+test("sahip paylaşım bağlantısıyla gelse de SAHİP kalır", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: OWNER_ID,
+    anonymousId: null,
+    shareToken: SHARE_TOKEN,
+    isAdmin: false,
+  });
+  assert.deepEqual(viewer, OWNER_VIEW);
+});
+
+test("yanlış paylaşım token'ı erişim vermez", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: null,
+    anonymousId: null,
+    shareToken: "x".repeat(32),
+    isAdmin: false,
+  });
+  assert.equal(viewer, null);
+});
+
+test("teklifte token yokken boş token eşleşmez", () => {
+  const viewer = resolveQuoteViewer(makeQuote({ shareToken: null }), {
+    sessionUserId: null,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: false,
+  });
+  assert.equal(viewer, null);
+});
+
+test("yabancı (T-numarası tahmini) erişemez", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: STRANGER_ID,
+    anonymousId: "baska-anon",
+    shareToken: null,
+    isAdmin: false,
+  });
+  assert.equal(viewer, null);
+});
+
+test("admin oturumu her teklifi görür", () => {
+  const viewer = resolveQuoteViewer(makeQuote(), {
+    sessionUserId: null,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: true,
+  });
+  assert.deepEqual(viewer, {
+    canSeePrices: true,
+    canEdit: true,
+    isOwner: false,
+    isShare: false,
+    isAdmin: true,
+  });
+});
+
+// ─── Tek serileştirici: fiyat kapısı ────────────────────────────────────────
+
+test("sahip: toplamlar, parça fiyatı, fatura ve paylaşım bağlantısı görünür", () => {
+  const view = present(OWNER_VIEW);
+  assert.ok(view.totals, "sahip toplamları görür");
+  assert.equal(view.totals?.allPriced, true);
+  assert.ok((view.parts[0].price?.unitKurus ?? 0) > 0, "birim fiyat hesaplandı");
+  assert.equal(view.parts[0].price?.source, "auto");
+  assert.equal(view.parts[0].targetUnitPriceKurus, 12345);
+  assert.equal(view.invoice?.companyName, "Acme Mühendislik A.Ş.");
+  assert.equal(view.shareUrl, `https://figurunica.test/teklif/T-000001?t=${SHARE_TOKEN}`);
+  assert.equal(view.customerNote, "Montaj deliklerine dikkat");
+  assert.ok(view.leadOptions.every((o) => typeof o.totalKurus === "number"));
+});
+
+test("fiyat kapısı kapalıyken gövdede TEK BİR fiyat anahtarı yok", () => {
+  const view = present(ANON_VIEW);
+  const json = JSON.stringify(view);
+  const leak = /"price"|"totals"|Kurus"/.exec(json);
+  assert.equal(leak, null, `fiyat anahtarı sızdı: ${leak?.[0]}`);
+  assert.equal("totals" in view, false);
+  assert.equal("price" in view.parts[0], false);
+  assert.equal("targetUnitPriceKurus" in view.parts[0], false);
+  assert.equal("totalKurus" in view.leadOptions[0], false);
+  assert.equal("priceKurus" in view.catalog.addons[0], false);
+  assert.equal("priceType" in view.catalog.addons[0], false);
+  // Fiyatsız izleyici de teslim süresini ve seçenek adlarını görmeye devam eder.
+  assert.equal(typeof view.leadOptions[0].leadDays, "number");
+  assert.ok(view.catalog.technologies.length > 0);
+});
+
+test("fiyat kapısı kapalıyken teklif düzeyindeki limit uyarısı da kuruş taşımaz", () => {
+  // 1000 adet × 2 kat ölçek → otomatik teklif tavanını (₺100.000) aşar; uyarı
+  // parametresinde `maxTotalKurus` vardır ve gizlenmesi gerekir.
+  const view = present(ANON_VIEW, makeQuote(), [makePart({ quantity: 1000, scale: 2 })]);
+  const issue = view.quoteIssues.find((i) => i.code === "qty_over_auto");
+  assert.ok(issue, "teklif düzeyinde limit uyarısı bekleniyordu");
+  assert.equal("maxTotalKurus" in (issue?.params ?? {}), false);
+  assert.equal(/Kurus"/.test(JSON.stringify(view)), false);
+});
+
+test("paylaşım görünümü: GLB, fatura, paylaşım bağlantısı ve özel notlar yok", () => {
+  const view = present(SHARE_VIEW);
+  assert.equal(view.parts[0].previewGlbUrl, null);
+  assert.equal(view.parts[0].thumbnailUrl, sign("quote-parts/p1/thumb.webp"));
+  assert.equal("invoice" in view, false);
+  assert.equal("shareUrl" in view, false);
+  assert.equal(view.customerNote, null);
+  assert.equal(view.poNumber, null);
+  assert.equal(/Kurus"/.test(JSON.stringify(view)), false);
+});
+
+test("giriş yapmış paylaşım izleyicisi fiyatı görür ama GLB'yi göremez", () => {
+  const view = present({ ...SHARE_VIEW, canSeePrices: true });
+  assert.ok(view.totals);
+  assert.equal(view.parts[0].previewGlbUrl, null);
+  assert.equal("invoice" in view, false);
+});
+
+// ─── Ödeme hazırlığı ve teslim tarihi ───────────────────────────────────────
+
+test("readiness.blockers `checkoutBlockers` cümlelerini aynen taşır", () => {
+  const view = present(OWNER_VIEW, makeQuote({ termsAcceptedAt: null }));
+  assert.equal(view.termsAccepted, false);
+  assert.equal(view.readiness.canCheckout, false);
+  assert.deepEqual(view.readiness.blockers, [
+    "Mesafeli satış sözleşmesini ve ön bilgilendirmeyi onaylayın.",
+  ]);
+});
+
+test("her şey hazırsa ödeme açıktır ve engel listesi boştur", () => {
+  const view = present(OWNER_VIEW);
+  assert.deepEqual(view.readiness.blockers, []);
+  assert.equal(view.readiness.canCheckout, true);
+  assert.equal(view.locked, false);
+});
+
+test("bekleyen ödeme teklifi kilitler ama ödemeye devam açık kalır", () => {
+  const quote = makeQuote();
+  const parts = [makePart()];
+  const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
+    leadTier: quote.leadTier,
+    addonKeys: quote.addonKeys,
+  });
+  const view = presentQuote({
+    quote,
+    parts,
+    snapshot: quote.pricingSnapshot,
+    computed,
+    viewer: OWNER_VIEW,
+    liveDraftReference: "FIG-ABCD1234",
+    orderNumber: null,
+    catalogChanged: true,
+    now: NOW,
+    sign,
+    shareBaseUrl: "https://figurunica.test/teklif/T-000001",
+  });
+  assert.equal(view.locked, true);
+  assert.equal(view.liveDraftReference, "FIG-ABCD1234");
+  assert.equal(view.readiness.canCheckout, true);
+  assert.equal(view.catalogChangedSinceSnapshot, true);
+});
+
+test("süresi dolmuş teklif kilitlidir ve engel cümlesini taşır", () => {
+  const view = present(OWNER_VIEW, makeQuote({ expiresAt: new Date("2026-09-01T00:00:00.000Z") }));
+  assert.equal(view.expired, true);
+  assert.equal(view.locked, true);
+  assert.equal(view.readiness.canCheckout, false);
+  assert.ok(view.readiness.blockers.includes("Teklifin süresi doldu — yeniden fiyatlayın."));
+});
+
+test("shipByDate iş günü takviminden gelir", () => {
+  const view = present(OWNER_VIEW);
+  const leadDays = view.totals?.leadDays ?? null;
+  assert.equal(typeof leadDays, "number");
+  const expected = istanbulDateKey(
+    addBusinessDays(
+      NOW,
+      leadDays!,
+      SEED_SNAPSHOT.settings.holidays,
+      SEED_SNAPSHOT.settings.cutoffHour
+    )
+  );
+  assert.equal(view.shipByDate, expected);
+});
+
+test("fiyatlanamayan teklifte shipByDate yoktur", () => {
+  const view = present(OWNER_VIEW, makeQuote(), [
+    makePart({ analysisStatus: "queued", geometry: null, thumbnailKey: null }),
+  ]);
+  assert.equal(view.shipByDate, null);
+  assert.equal(view.parts[0].dimensionsMm, null);
+  assert.ok(view.readiness.blockers.some((b) => b.includes("analizi sürüyor")));
+});
+
+// ─── DB'den gelen manuel fiyatın doğrulanması (taşıma maddesi b) ────────────
+
+test("geçerli manuel fiyat fiyat çekirdeğine ulaşır", () => {
+  const part = makePart({ finishKey: "boyali", manualUnitPriceKurus: 45000 });
+  const valid = makePart({
+    ...part,
+    manualPriceKey: partPricingKey(toPricingInputs([part])[0], "standard"),
+  });
+  const view = present(OWNER_VIEW, makeQuote(), [valid]);
+  assert.equal(view.parts[0].price?.source, "manual");
+  assert.equal(view.parts[0].price?.unitKurus, 45000);
+});
+
+test("aralık dışı manuel fiyat hesaba GİRMEZ", () => {
+  for (const bad of [0, -1, 1.5, MAX_AMOUNT_KURUS + 1]) {
+    const part = makePart({ finishKey: "boyali", manualUnitPriceKurus: bad });
+    const withKey = makePart({
+      ...part,
+      manualPriceKey: partPricingKey(toPricingInputs([part])[0], "standard"),
+    });
+    const [input] = toPricingInputs([withKey]);
+    assert.equal(input.manualUnitPriceKurus, null, `${bad} reddedilmeliydi`);
+    assert.equal(input.manualPriceKey, null, `${bad} anahtarı da düşmeliydi`);
+    const view = present(OWNER_VIEW, makeQuote(), [withKey]);
+    assert.equal(view.parts[0].price ?? null, null);
+    assert.equal(view.parts[0].needsManualPrice, true);
+  }
+});
+
+let failures = 0;
+for (const [name, fn] of tests) {
+  try {
+    fn();
+    console.log(`  ok  ${name}`);
+  } catch (err) {
+    failures++;
+    console.error(`  FAIL ${name}`);
+    console.error(err);
+    break;
+  }
+}
+console.log(`${tests.length - failures}/${tests.length} passed`);
+if (failures > 0) process.exit(1);

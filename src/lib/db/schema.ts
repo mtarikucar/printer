@@ -3652,3 +3652,396 @@ export type OrderRefundAllocation = typeof orderRefundAllocations.$inferSelect;
 export type NewOrderRefundAllocation = typeof orderRefundAllocations.$inferInsert;
 export type GiftCreditReturn = typeof giftCreditReturns.$inferSelect;
 export type NewGiftCreditReturn = typeof giftCreditReturns.$inferInsert;
+
+// ═══ Anlık teklif motoru (0064) ═══
+// Xometry benzeri anlık teklif: baskı kataloğu (teknoloji / malzeme / yüzey /
+// ek hizmet + tek satırlık fiyat ayarı), teklifler ve parçaları, ödeme köprüsü,
+// teklif sohbeti ve admin denetim izi. Durum/tür kolonları pg enum DEĞİL,
+// `text` + adlandırılmış CHECK: enum değeri down migration'da geri alınamaz.
+// `orders` / `order_drafts` tanımlarına dokunulmaz; bağ `quote_checkouts.draft_id`
+// ve `quotes.order_id` üzerinden kurulur.
+import {
+  ADDON_PRICE_TYPES,
+  ANALYSIS_STATUSES,
+  CATALOG_ENTITIES,
+  COST_LINE_KINDS,
+  INVOICE_TYPES,
+  LEAD_TIER_KEYS,
+  QUOTE_ADMIN_ACTIONS,
+  QUOTE_SOURCE_FORMATS,
+  QUOTE_STATUSES,
+  QUOTE_UNITS,
+  REVIEW_KINDS,
+} from "../config/quote-types";
+import type {
+  AddonPriceType,
+  AnalysisStatus,
+  CatalogEntity,
+  FrozenQuoteAddon,
+  FrozenQuotePart,
+  InvoiceType,
+  LeadTier,
+  LeadTierKey,
+  MaterialProperties,
+  PartGeometry,
+  PricingSnapshot,
+  QtyBreak,
+  QuoteAdminAction,
+  QuoteCostLineKind,
+  QuoteSourceFormat,
+  QuoteStatus,
+  QuoteUnits,
+  ReviewKind,
+  SnapshotColor,
+} from "../config/quote-types";
+
+/** CHECK listesini tip sözleşmesinden üretir: liste değişirse yeni migration çıkar. */
+const quoteInList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
+
+export const printTechnologies = pgTable("print_technologies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  // `orders.material` eşlemesi; atama motoru bu değerle üretici filtreler.
+  orderMaterial: text("order_material").$type<"resin" | "filament">().notNull(),
+  capabilityTag: text("capability_tag").notNull(),
+  buildXMm: integer("build_x_mm").notNull(),
+  buildYMm: integer("build_y_mm").notNull(),
+  buildZMm: integer("build_z_mm").notNull(),
+  minWallMm: doublePrecision("min_wall_mm").notNull(),
+  minFeatureMm: doublePrecision("min_feature_mm").notNull(),
+  toleranceText: text("tolerance_text").notNull(),
+  layerOptionsUm: jsonb("layer_options_um").$type<number[]>().notNull(),
+  defaultLayerUm: integer("default_layer_um").notNull(),
+  // null = katı baskı (SLA); dizi = FDM doluluk seçenekleri.
+  infillOptionsPct: jsonb("infill_options_pct").$type<number[]>(),
+  defaultInfillPct: integer("default_infill_pct"),
+  shellMm: doublePrecision("shell_mm").notNull().default(0),
+  setupFeeKurus: integer("setup_fee_kurus").notNull(),
+  machineRateKurusPerHour: integer("machine_rate_kurus_per_hour").notNull(),
+  throughputCm3PerHour: doublePrecision("throughput_cm3_per_hour").notNull(),
+  heightHoursPerMm: doublePrecision("height_hours_per_mm").notNull(),
+  minUnitPriceKurus: integer("min_unit_price_kurus").notNull(),
+  baseLeadDays: integer("base_lead_days").notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("print_technologies_key_chk", sql`${t.key} ~ '^[a-z0-9_]{2,32}$'`),
+  check("print_technologies_order_material_chk", sql`${t.orderMaterial} IN ('resin', 'filament')`),
+]);
+
+export const printMaterials = pgTable("print_materials", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  technologyId: uuid("technology_id").notNull().references(() => printTechnologies.id, { onDelete: "restrict" }),
+  key: text("key").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  properties: jsonb("properties").$type<MaterialProperties>().notNull().default({}),
+  densityGCm3: doublePrecision("density_g_cm3").notNull(),
+  priceKurusPerGram: integer("price_kurus_per_gram").notNull(),
+  supportFactor: doublePrecision("support_factor").notNull().default(1),
+  // `pmat_<slug>`: üretici yetenek etiketi; null = her üretici basabilir.
+  capabilityTag: text("capability_tag"),
+  colors: jsonb("colors").$type<SnapshotColor[]>().notNull(),
+  leadDaysExtra: integer("lead_days_extra").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("print_materials_tech_key_uq").on(t.technologyId, t.key),
+  check("print_materials_support_factor_chk", sql`${t.supportFactor} >= 1`),
+  check("print_materials_colors_chk", sql`jsonb_typeof(${t.colors}) = 'array' AND jsonb_array_length(${t.colors}) >= 1`),
+]);
+
+export const printFinishes = pgTable("print_finishes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // null = her teknolojiye uygun.
+  technologyId: uuid("technology_id").references(() => printTechnologies.id, { onDelete: "restrict" }),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  fixedKurus: integer("fixed_kurus").notNull().default(0),
+  perCm2Kurus: integer("per_cm2_kurus").notNull().default(0),
+  leadDaysExtra: integer("lead_days_extra").notNull().default(0),
+  requiresManual: boolean("requires_manual").notNull().default(false),
+  costLineKind: text("cost_line_kind").$type<QuoteCostLineKind>().notNull().default("production"),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("print_finishes_cost_line_kind_chk", sql`${t.costLineKind} IN (${quoteInList(COST_LINE_KINDS)})`),
+]);
+
+export const printAddons = pgTable("print_addons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  priceType: text("price_type").$type<AddonPriceType>().notNull(),
+  priceKurus: integer("price_kurus").notNull(),
+  leadDaysExtra: integer("lead_days_extra").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("print_addons_price_type_chk", sql`${t.priceType} IN (${quoteInList(ADDON_PRICE_TYPES)})`),
+]);
+
+/** Tek satır (id = 1): fiyat/teslim politikası ve anlık teklif limitleri. */
+export const quotePricingSettings = pgTable("quote_pricing_settings", {
+  id: integer("id").primaryKey().default(1),
+  qtyBreaks: jsonb("qty_breaks").$type<QtyBreak[]>().notNull(),
+  leadTiers: jsonb("lead_tiers").$type<LeadTier[]>().notNull(),
+  minOrderKurus: integer("min_order_kurus").notNull(),
+  maxAutoTotalKurus: integer("max_auto_total_kurus").notNull(),
+  maxAutoQtyPerPart: integer("max_auto_qty_per_part").notNull(),
+  maxPartsPerQuote: integer("max_parts_per_quote").notNull(),
+  maxFileBytes: integer("max_file_bytes").notNull(),
+  quoteValidDays: integer("quote_valid_days").notNull(),
+  retentionDaysAfterExpiry: integer("retention_days_after_expiry").notNull(),
+  priceBreakQuantities: jsonb("price_break_quantities").$type<number[]>().notNull(),
+  /** ISO tarih (YYYY-MM-DD), İstanbul takvimi. */
+  holidays: jsonb("holidays").$type<string[]>().notNull(),
+  cutoffHour: integer("cutoff_hour").notNull(),
+  havaleDiscountApplies: boolean("havale_discount_applies").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+}, (t) => [
+  check("quote_pricing_settings_singleton_chk", sql`${t.id} = 1`),
+]);
+
+/** Katalog denetimi: her katalog yazımı ile AYNI işlemde bir satır. */
+export const printCatalogChanges = pgTable("print_catalog_changes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  entity: text("entity").$type<CatalogEntity>().notNull(),
+  entityId: uuid("entity_id"),
+  action: text("action").$type<"create" | "update">().notNull(),
+  adminEmail: text("admin_email").notNull(),
+  before: jsonb("before").$type<Record<string, unknown>>(),
+  after: jsonb("after").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("print_catalog_changes_entity_chk", sql`${t.entity} IN (${quoteInList(CATALOG_ENTITIES)})`),
+  check("print_catalog_changes_action_chk", sql`${t.action} IN ('create', 'update')`),
+]);
+
+export const quotes = pgTable("quotes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  seq: integer("seq").generatedAlwaysAsIdentity().unique(),
+  // Numara sıradan türetilir: yarış yok. `lpad` uzun sırayı KESMESİN diye
+  // genişlik en az 6'dır (quote-number.ts `padStart(6)` ile birebir aynı).
+  number: text("number").notNull().unique()
+    .generatedAlwaysAs(sql`'T-' || lpad(seq::text, greatest(6, length(seq::text)), '0')`),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "restrict" }),
+  /** Yalnız `user_id IS NULL` iken geçerli; giriş yapınca teklif devralınır. */
+  anonymousId: text("anonymous_id"),
+  status: text("status").$type<QuoteStatus>().notNull().default("draft"),
+  reviewKind: text("review_kind").$type<ReviewKind>(),
+  reviewNote: text("review_note"),
+  reviewRequestedAt: timestamp("review_requested_at", { withTimezone: true }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewedByEmail: text("reviewed_by_email"),
+  title: text("title"),
+  leadTier: text("lead_tier").$type<LeadTierKey>().notNull().default("standard"),
+  addonKeys: jsonb("addon_keys").$type<string[]>().notNull().default([]),
+  customerNote: text("customer_note"),
+  poNumber: text("po_number"),
+  invoiceType: text("invoice_type").$type<InvoiceType>().notNull().default("individual"),
+  companyName: text("company_name"),
+  taxId: text("tax_id"),
+  taxIdType: text("tax_id_type").$type<"vkn" | "tckn">(),
+  taxOffice: text("tax_office"),
+  billingAddress: jsonb("billing_address").$type<TurkishAddress>(),
+  /** Teklif oluşturulurken/yeniden fiyatlanırken dondurulan aktif katalog. */
+  pricingSnapshot: jsonb("pricing_snapshot").$type<PricingSnapshot>().notNull(),
+  snapshotTakenAt: timestamp("snapshot_taken_at", { withTimezone: true }).notNull().defaultNow(),
+  version: integer("version").notNull().default(1),
+  // Liste/rapor önbelleği; fiyatlanamayan teklifte null kalır.
+  totalKurus: integer("total_kurus"),
+  leadDays: integer("lead_days"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  shareToken: text("share_token"),
+  termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
+  termsVersion: text("terms_version"),
+  orderId: uuid("order_id").references(() => orders.id, { onDelete: "restrict" }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceQuoteId: uuid("source_quote_id").references((): any => quotes.id, { onDelete: "restrict" }),
+  expiryReminderSentAt: timestamp("expiry_reminder_sent_at", { withTimezone: true }),
+  abandonedReminderSentAt: timestamp("abandoned_reminder_sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("quotes_share_token_uq").on(t.shareToken),
+  uniqueIndex("quotes_order_id_uq").on(t.orderId),
+  index("quotes_user_idx").on(t.userId, t.createdAt.desc()),
+  index("quotes_anon_idx").on(t.anonymousId),
+  index("quotes_status_idx").on(t.status, t.reviewRequestedAt),
+  check("quotes_status_chk", sql`${t.status} IN (${quoteInList(QUOTE_STATUSES)})`),
+  check("quotes_review_kind_chk", sql`${t.reviewKind} IS NULL OR ${t.reviewKind} IN (${quoteInList(REVIEW_KINDS)})`),
+  check("quotes_lead_tier_chk", sql`${t.leadTier} IN (${quoteInList(LEAD_TIER_KEYS)})`),
+  check("quotes_invoice_type_chk", sql`${t.invoiceType} IN (${quoteInList(INVOICE_TYPES)})`),
+  check("quotes_tax_id_type_chk", sql`${t.taxIdType} IS NULL OR ${t.taxIdType} IN ('vkn', 'tckn')`),
+]);
+
+export const quoteParts = pgTable("quote_parts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "restrict" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  name: text("name").notNull(),
+  fileName: text("file_name").notNull(),
+  sourceKey: text("source_key").notNull(),
+  sourceFormat: text("source_format").$type<QuoteSourceFormat>().notNull(),
+  sourceBytes: bigint("source_bytes", { mode: "number" }).notNull(),
+  sourceSha256: text("source_sha256").notNull(),
+  /** Staging yükleme talebinin tekilliği: ikinci promote aynı parçayı döner. */
+  uploadId: text("upload_id"),
+  analysisStatus: text("analysis_status").$type<AnalysisStatus>().notNull().default("queued"),
+  analysisAttempt: integer("analysis_attempt").notNull().default(0),
+  analysisError: text("analysis_error"),
+  /** Worker raporu — DOSYA BİRİMİNDE; milimetreye çeviri `scaledGeometry` ile. */
+  geometry: jsonb("geometry").$type<PartGeometry>(),
+  canonicalStlKey: text("canonical_stl_key"),
+  previewGlbKey: text("preview_glb_key"),
+  thumbnailKey: text("thumbnail_key"),
+  units: text("units").$type<QuoteUnits>().notNull().default("mm"),
+  scale: doublePrecision("scale").notNull().default(1),
+  // Anahtarlar teklifin kendi snapshot'ına bakar (katalog FK'si değil).
+  technologyKey: text("technology_key").notNull(),
+  materialKey: text("material_key").notNull(),
+  colorKey: text("color_key").notNull(),
+  finishKey: text("finish_key").notNull(),
+  layerUm: integer("layer_um"),
+  infillPct: integer("infill_pct"),
+  quantity: integer("quantity").notNull().default(1),
+  note: text("note"),
+  drawingKey: text("drawing_key"),
+  drawingName: text("drawing_name"),
+  criticalTolerance: boolean("critical_tolerance").notNull().default(false),
+  /** Onaylanan DfM uyarı kümesinin özeti; küme değişince onay düşer. */
+  dfmAckHash: text("dfm_ack_hash"),
+  manualUnitPriceKurus: integer("manual_unit_price_kurus"),
+  /** Geometri sha + konfigürasyon + teslim kademesi; değişince manuel fiyat geçersiz. */
+  manualPriceHash: text("manual_price_hash"),
+  manualPricedAt: timestamp("manual_priced_at", { withTimezone: true }),
+  manualPricedByEmail: text("manual_priced_by_email"),
+  targetUnitPriceKurus: integer("target_unit_price_kurus"),
+  /** Yumuşak silme: analiz worker'ı ile yarışı önler. */
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  filesPurgedAt: timestamp("files_purged_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("quote_parts_upload_id_uq").on(t.uploadId),
+  index("quote_parts_quote_idx").on(t.quoteId, t.sortOrder),
+  index("quote_parts_sha_idx").on(t.sourceSha256),
+  check("quote_parts_source_format_chk", sql`${t.sourceFormat} IN (${quoteInList(QUOTE_SOURCE_FORMATS)})`),
+  check("quote_parts_analysis_status_chk", sql`${t.analysisStatus} IN (${quoteInList(ANALYSIS_STATUSES)})`),
+  check("quote_parts_units_chk", sql`${t.units} IN (${quoteInList(QUOTE_UNITS)})`),
+  check("quote_parts_quantity_chk", sql`${t.quantity} BETWEEN 1 AND 100000`),
+  check("quote_parts_scale_chk", sql`${t.scale} > 0.0099 AND ${t.scale} < 100.01`),
+]);
+
+/** Ödeme köprüsü: teklif ↔ `order_drafts`. Dondurulmuş parça tanımlarını taşır. */
+export const quoteCheckouts = pgTable("quote_checkouts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "restrict" }),
+  draftId: uuid("draft_id").notNull().references(() => orderDrafts.id, { onDelete: "restrict" }),
+  quoteVersion: integer("quote_version").notNull(),
+  amountKurus: integer("amount_kurus").notNull(),
+  partsSnapshot: jsonb("parts_snapshot").$type<FrozenQuotePart[]>().notNull(),
+  addonsSnapshot: jsonb("addons_snapshot").$type<FrozenQuoteAddon[]>().notNull().default([]),
+  leadTier: text("lead_tier").$type<LeadTierKey>().notNull().default("standard"),
+  leadDays: integer("lead_days").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("quote_checkouts_draft_id_uq").on(t.draftId),
+  index("quote_checkouts_quote_idx").on(t.quoteId),
+  check("quote_checkouts_lead_tier_chk", sql`${t.leadTier} IN (${quoteInList(LEAD_TIER_KEYS)})`),
+]);
+
+export const quoteMessages = pgTable("quote_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "restrict" }),
+  sender: text("sender").$type<"customer" | "admin">().notNull(),
+  senderUserId: uuid("sender_user_id").references(() => users.id, { onDelete: "restrict" }),
+  senderEmail: text("sender_email"),
+  body: text("body").notNull(),
+  attachmentKey: text("attachment_key"),
+  attachmentThumbnailKey: text("attachment_thumbnail_key"),
+  readByAdminAt: timestamp("read_by_admin_at", { withTimezone: true }),
+  readByCustomerAt: timestamp("read_by_customer_at", { withTimezone: true }),
+  flagged: boolean("flagged").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("quote_messages_quote_idx").on(t.quoteId, t.createdAt),
+  check("quote_messages_sender_chk", sql`${t.sender} IN ('customer', 'admin')`),
+]);
+
+export const quoteAdminActions = pgTable("quote_admin_actions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "restrict" }),
+  quotePartId: uuid("quote_part_id").references(() => quoteParts.id, { onDelete: "restrict" }),
+  action: text("action").$type<QuoteAdminAction>().notNull(),
+  adminEmail: text("admin_email").notNull(),
+  reason: text("reason").notNull(),
+  before: jsonb("before").$type<Record<string, unknown>>(),
+  after: jsonb("after").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("quote_admin_actions_action_chk", sql`${t.action} IN (${quoteInList(QUOTE_ADMIN_ACTIONS)})`),
+]);
+
+export const printTechnologiesRelations = relations(printTechnologies, ({ many }) => ({
+  materials: many(printMaterials),
+  finishes: many(printFinishes),
+}));
+
+export const printMaterialsRelations = relations(printMaterials, ({ one }) => ({
+  technology: one(printTechnologies, {
+    fields: [printMaterials.technologyId],
+    references: [printTechnologies.id],
+  }),
+}));
+
+export const printFinishesRelations = relations(printFinishes, ({ one }) => ({
+  technology: one(printTechnologies, {
+    fields: [printFinishes.technologyId],
+    references: [printTechnologies.id],
+  }),
+}));
+
+export const quotesRelations = relations(quotes, ({ one, many }) => ({
+  user: one(users, { fields: [quotes.userId], references: [users.id] }),
+  order: one(orders, { fields: [quotes.orderId], references: [orders.id] }),
+  parts: many(quoteParts),
+  checkouts: many(quoteCheckouts),
+  messages: many(quoteMessages),
+  adminActions: many(quoteAdminActions),
+}));
+
+export const quotePartsRelations = relations(quoteParts, ({ one }) => ({
+  quote: one(quotes, { fields: [quoteParts.quoteId], references: [quotes.id] }),
+}));
+
+export const quoteCheckoutsRelations = relations(quoteCheckouts, ({ one }) => ({
+  quote: one(quotes, { fields: [quoteCheckouts.quoteId], references: [quotes.id] }),
+  draft: one(orderDrafts, { fields: [quoteCheckouts.draftId], references: [orderDrafts.id] }),
+}));
+
+export const quoteMessagesRelations = relations(quoteMessages, ({ one }) => ({
+  quote: one(quotes, { fields: [quoteMessages.quoteId], references: [quotes.id] }),
+}));
+
+export const quoteAdminActionsRelations = relations(quoteAdminActions, ({ one }) => ({
+  quote: one(quotes, { fields: [quoteAdminActions.quoteId], references: [quotes.id] }),
+  part: one(quoteParts, { fields: [quoteAdminActions.quotePartId], references: [quoteParts.id] }),
+}));
+
+export type Quote = typeof quotes.$inferSelect;
+export type QuotePart = typeof quoteParts.$inferSelect;

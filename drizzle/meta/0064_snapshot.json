@@ -10955,8 +10955,8 @@
           "notNull": true,
           "default": false
         },
-        "dfm_ack_hash": {
-          "name": "dfm_ack_hash",
+        "dfm_ack_key": {
+          "name": "dfm_ack_key",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -10967,8 +10967,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "manual_price_hash": {
-          "name": "manual_price_hash",
+        "manual_price_key": {
+          "name": "manual_price_key",
           "type": "text",
           "primaryKey": false,
           "notNull": false

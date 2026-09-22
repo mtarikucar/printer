@@ -3923,11 +3923,11 @@ export const quoteParts = pgTable("quote_parts", {
   drawingKey: text("drawing_key"),
   drawingName: text("drawing_name"),
   criticalTolerance: boolean("critical_tolerance").notNull().default(false),
-  /** Onaylanan DfM uyarı kümesinin özeti; küme değişince onay düşer. */
-  dfmAckHash: text("dfm_ack_hash"),
+  /** Onaylanan DfM uyarı kümesinin anahtarı; küme değişince onay düşer. */
+  dfmAckKey: text("dfm_ack_key"),
   manualUnitPriceKurus: integer("manual_unit_price_kurus"),
   /** Geometri sha + konfigürasyon + teslim kademesi; değişince manuel fiyat geçersiz. */
-  manualPriceHash: text("manual_price_hash"),
+  manualPriceKey: text("manual_price_key"),
   manualPricedAt: timestamp("manual_priced_at", { withTimezone: true }),
   manualPricedByEmail: text("manual_priced_by_email"),
   targetUnitPriceKurus: integer("target_unit_price_kurus"),

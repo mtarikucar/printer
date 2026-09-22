@@ -140,7 +140,10 @@ async function main() {
     const near = await insertQuote({ seq: 123456 });
     check("seven-digit sequences keep a distinct number", [big.number, near.number], ["T-1234567", "T-123456"]);
 
-    const part = await insertPart(first.id, { upload_id: "upload-1" });
+    const part = await insertPart(first.id, { upload_id: "upload-1", manual_price_key: "fiyat-anahtari", dfm_ack_key: "uyari-anahtari" });
+    // Ruling R7: these columns hold partPricingKey()/dfmWarningKey() output, so they are keys, not hashes.
+    check("part key columns carry the contract vocabulary",
+      [part.manual_price_key, part.dfm_ack_key], ["fiyat-anahtari", "uyari-anahtari"]);
     await client.query("INSERT INTO quote_checkouts (quote_id,draft_id,quote_version,amount_kurus,parts_snapshot,lead_days) VALUES ($1,$2,1,25000,'[]'::jsonb,5)", [first.id, ids.draft]);
     await client.query("INSERT INTO quote_messages (quote_id,sender,body) VALUES ($1,'customer','Merhaba')", [first.id]);
     await client.query("INSERT INTO quote_admin_actions (quote_id,quote_part_id,action,admin_email,reason) VALUES ($1,$2,'manual_price','admin@example.invalid','Elle fiyat')", [first.id, part.id]);

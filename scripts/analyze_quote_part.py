@@ -61,7 +61,20 @@ except ImportError:  # pragma: no cover - deployment guard
     pymeshlab = None
 
 # A runaway mesh must die inside the worker, not take the box down with it.
-ADDRESS_SPACE_LIMIT_BYTES = 3 * 1024**3
+#
+# RLIMIT_AS counts RESERVED address space, not memory in use, and this stack
+# reserves a lot of it up front. Measured on a 16-core Linux box with the
+# scripts/requirements.txt versions (/proc/self/status VmPeak vs VmHWM):
+#
+#   import trimesh + pymeshlab   1.78 GB reserved,  0.17 GB resident
+#   327k-face part, full run     3.38 GB reserved,  0.46 GB resident
+#   1.31M-face part, full run    4.17 GB reserved,  1.33 GB resident
+#
+# So the 3 GB the plan suggested killed an ordinary 327k-face part with
+# "Unable to allocate 15.0 MiB" while it was using under half a gigabyte. 8 GB
+# leaves room for the 2.5M-face wall-measurement ceiling and still stops a mesh
+# that tries to allocate its way through the host.
+ADDRESS_SPACE_LIMIT_BYTES = 8 * 1024**3
 # <model-viewer> gets a light mesh; the price and the printer use the original.
 PREVIEW_TARGET_FACES = 200_000
 # cos(135°): steeper than 45° from the build plate, i.e. it needs support.
@@ -392,6 +405,12 @@ def main() -> int:
     except AnalysisError as exc:
         print(f"Error: {exc.code}: {exc.message}", file=sys.stderr)
         write_report(args.outdir, {"ok": False, "error": exc.code, "message": exc.message})
+        return 2
+    except MemoryError as exc:
+        # Its own code: "this part is too heavy for the machine" is a different
+        # message to the customer than "this file is broken".
+        print(f"Error: out_of_memory: {exc}", file=sys.stderr)
+        write_report(args.outdir, {"ok": False, "error": "out_of_memory", "message": str(exc)})
         return 2
     except Exception as exc:  # noqa: BLE001 - every failure gets a report
         print(f"Error: internal: {exc}", file=sys.stderr)

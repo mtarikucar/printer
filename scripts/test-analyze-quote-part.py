@@ -176,16 +176,30 @@ def main() -> int:
             check("two_bodies.stl: both bodies kept in the volume",
                   near(geometry.get("volume"), 2000.0, 1.0), f"volume={geometry.get('volume')}")
 
-        # The same file with the heavy-computation cap below its face count:
-        # walls are skipped and the body count comes from the capped path.
+        # The two ceilings are INDEPENDENT. Wall ceiling below the face count:
+        # walls are dropped, the body count still comes from split().
         report, _ = analyze("two_bodies.stl", "stl", workdir + "/capped", "--max-faces-walls", "5")
         if report and report.get("ok"):
             geometry = report.get("geometry") or {}
-            check("two_bodies.stl (capped): walls skipped",
+            check("two_bodies.stl (walls capped): walls skipped",
                   geometry.get("wallP1") is None and geometry.get("wallP5") is None,
                   f"wallP1={geometry.get('wallP1')} wallP5={geometry.get('wallP5')}")
-            check("two_bodies.stl (capped): bodyCount still 2", geometry.get("bodyCount") == 2,
-                  f"bodyCount={geometry.get('bodyCount')}")
+            check("two_bodies.stl (walls capped): bodyCount still 2",
+                  geometry.get("bodyCount") == 2, f"bodyCount={geometry.get('bodyCount')}")
+
+        # Body ceiling below the face count, wall ceiling left at its default:
+        # the connected-components path counts the same 2 shells and the walls
+        # are still measured — neither flag reaches into the other's decision.
+        report, _ = analyze(
+            "two_bodies.stl", "stl", workdir + "/bodies-capped", "--max-faces-bodies", "5"
+        )
+        if report and report.get("ok"):
+            geometry = report.get("geometry") or {}
+            check("two_bodies.stl (bodies capped): bodyCount still 2",
+                  geometry.get("bodyCount") == 2, f"bodyCount={geometry.get('bodyCount')}")
+            check("two_bodies.stl (bodies capped): walls still measured",
+                  near(geometry.get("wallP1"), 10.0, 0.01) and near(geometry.get("wallP5"), 10.0, 0.01),
+                  f"wallP1={geometry.get('wallP1')} wallP5={geometry.get('wallP5')}")
 
         # ── open_box.stl: not watertight, volume only as an estimate ─────────
         report, _ = analyze("open_box.stl", "stl", workdir)
@@ -246,6 +260,24 @@ def main() -> int:
                   json.dumps(report)[:300])
         else:
             check("broken.stl: failure report written", False, "missing report.json")
+
+        # ── the RLIMIT_AS ceiling is a flag, not a number baked into the file ─
+        # A deployment that wants a tighter ceiling than the measured default
+        # passes it in; an implausible one is refused with the documented
+        # exit 2 instead of dying inside an allocation later on.
+        report, _ = analyze(
+            "cube20.stl", "stl", workdir + "/as-limit", "--max-address-space-gb", "6"
+        )
+        if report:
+            check("cube20.stl (--max-address-space-gb 6): report ok", report.get("ok") is True,
+                  json.dumps(report)[:200])
+        proc = subprocess.run(
+            [sys.executable, CLI, os.path.join(FIXTURES, "cube20.stl"), "stl",
+             os.path.join(workdir, "as-limit-bad"), "--max-address-space-gb", "0.5"],
+            capture_output=True, text=True, timeout=120,
+        )
+        check("--max-address-space-gb 0.5 is refused with exit 2", proc.returncode == 2,
+              f"exit={proc.returncode} {proc.stderr.strip()[-200:]}")
 
     if failures:
         print(f"\n{len(failures)} check(s) failed")

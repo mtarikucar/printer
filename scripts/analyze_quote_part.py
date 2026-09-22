@@ -4,6 +4,8 @@
 Usage:
     analyze_quote_part.py <input> <stl|obj|3mf> <outdir>
                           [--thumb-size 512] [--max-faces-walls 2500000]
+                          [--max-faces-bodies 2500000]
+                          [--max-address-space-gb 8]
 
 Writes into <outdir>:
     report.json    {"ok": true, "geometry": <PartGeometry>, "timings": {…}}
@@ -66,17 +68,32 @@ except ImportError:  # pragma: no cover - deployment guard
 # reserves a lot of it up front. Measured on a 16-core Linux box with the
 # scripts/requirements.txt versions (/proc/self/status VmPeak vs VmHWM):
 #
-#   import trimesh + pymeshlab   1.78 GB reserved,  0.17 GB resident
-#   327k-face part, full run     3.38 GB reserved,  0.46 GB resident
-#   1.31M-face part, full run    4.17 GB reserved,  1.33 GB resident
+#   import trimesh + pymeshlab   1.70 GB reserved,  0.16 GB resident
+#   327k-face part, full run     3.20 GB reserved,  0.52 GB resident
+#   1.31M-face part, full run    4.21 GB reserved,  1.51 GB resident
 #
-# So the 3 GB the plan suggested killed an ordinary 327k-face part with
-# "Unable to allocate 15.0 MiB" while it was using under half a gigabyte. 8 GB
-# leaves room for the 2.5M-face wall-measurement ceiling and still stops a mesh
-# that tries to allocate its way through the host.
-ADDRESS_SPACE_LIMIT_BYTES = 8 * 1024**3
+# So the 3 GB the plan suggested kills an ordinary 327k-face part
+# ("out_of_memory: Unable to allocate 7.50 MiB for an array with shape
+# (983040,)", reproducible with `--max-address-space-gb 3`) while that part is
+# using half a gigabyte of real memory. The default is therefore the measured
+# 8 GB — room for the 2.5M-face wall ceiling, still a stop for a mesh trying to
+# allocate its way through the host — and `--max-address-space-gb` turns the
+# number into a deployment knob instead of a constant baked into this file: a
+# smaller container can be given the plan's 3 GB without editing the script.
+DEFAULT_ADDRESS_SPACE_GB = 8.0
+# Below this the process cannot even finish `import trimesh` (1.70 GB reserved).
+MIN_ADDRESS_SPACE_GB = 2.0
+MAX_ADDRESS_SPACE_GB = 256.0
 # <model-viewer> gets a light mesh; the price and the printer use the original.
 PREVIEW_TARGET_FACES = 200_000
+# Two INDEPENDENT ceilings that happen to start at the same number. Wall
+# percentiles are dropped above the first one (there is no cheaper way to get
+# them); the body count is never dropped, it only switches above the second one
+# to `connected_components`, which counts the same shells without building a
+# submesh for each. Splitting them means the wall ceiling can be tuned for a
+# slow box without silently changing how bodies are counted, and vice versa.
+DEFAULT_MAX_FACES_WALLS = 2_500_000
+DEFAULT_MAX_FACES_BODIES = 2_500_000
 # cos(135°): steeper than 45° from the build plate, i.e. it needs support.
 OVERHANG_NORMAL_Z = -0.707
 # Faces whose highest vertex sits this deep in the bottom slab rest ON the
@@ -106,11 +123,11 @@ class AnalysisError(Exception):
         self.message = message
 
 
-def limit_address_space() -> None:
+def limit_address_space(limit_gb: float) -> None:
     """Best effort RLIMIT_AS. A hard limit below ours is left alone."""
     try:
         _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        target = ADDRESS_SPACE_LIMIT_BYTES
+        target = int(limit_gb * 1024**3)
         if hard != resource.RLIM_INFINITY:
             target = min(target, hard)
         resource.setrlimit(resource.RLIMIT_AS, (target, hard))
@@ -212,10 +229,12 @@ def measure(
     source_units: str | None,
     object_count: int,
     max_faces_walls: int,
+    max_faces_bodies: int,
 ) -> dict:
     """The PartGeometry payload, measured on the untouched full-resolution mesh."""
     face_count = len(mesh.faces)
-    capped = face_count > max_faces_walls
+    walls_capped = face_count > max_faces_walls
+    bodies_capped = face_count > max_faces_bodies
     extents = np.asarray(mesh.extents, dtype=float)
     watertight = bool(mesh.is_watertight)
 
@@ -235,7 +254,7 @@ def measure(
 
     wall_p1: float | None = None
     wall_p5: float | None = None
-    if not capped:
+    if not walls_capped:
         wall_p1, wall_p5 = estimate_wall_percentiles(repaired if repaired is not None else mesh)
 
     return {
@@ -246,7 +265,7 @@ def measure(
             "y": required_number(extents[1], "extents.y"),
             "z": required_number(extents[2], "extents.z"),
         },
-        "bodyCount": count_bodies(mesh, capped),
+        "bodyCount": count_bodies(mesh, bodies_capped),
         "isWatertight": watertight,
         "isVolume": bool(mesh.is_volume),
         "volumeEstimated": volume_estimated,
@@ -326,6 +345,7 @@ def analyze(
     out_dir: str,
     thumb_size: int,
     max_faces_walls: int,
+    max_faces_bodies: int,
 ) -> dict:
     started = time.time()
     timings: dict[str, float] = {}
@@ -341,7 +361,7 @@ def analyze(
     timings["loadSeconds"] = round(time.time() - mark, 3)
 
     mark = time.time()
-    geometry = measure(mesh, source_units, object_count, max_faces_walls)
+    geometry = measure(mesh, source_units, object_count, max_faces_walls, max_faces_bodies)
     timings["measureSeconds"] = round(time.time() - mark, 3)
 
     mark = time.time()
@@ -384,13 +404,29 @@ def write_failure(out_dir: str, code: str, message: str) -> None:
 
 
 def main() -> int:
-    limit_address_space()
     parser = argparse.ArgumentParser(description="Measure an uploaded part for an instant quote")
     parser.add_argument("input")
     parser.add_argument("format", choices=["stl", "obj", "3mf"])
     parser.add_argument("outdir")
     parser.add_argument("--thumb-size", type=int, default=512)
-    parser.add_argument("--max-faces-walls", type=int, default=2_500_000)
+    parser.add_argument(
+        "--max-faces-walls",
+        type=int,
+        default=DEFAULT_MAX_FACES_WALLS,
+        help="above this face count wallP1/wallP5 are reported as null",
+    )
+    parser.add_argument(
+        "--max-faces-bodies",
+        type=int,
+        default=DEFAULT_MAX_FACES_BODIES,
+        help="above this face count bodyCount switches to the connected-components path",
+    )
+    parser.add_argument(
+        "--max-address-space-gb",
+        type=float,
+        default=DEFAULT_ADDRESS_SPACE_GB,
+        help="RLIMIT_AS ceiling in GB (reserved address space, not resident memory)",
+    )
     args = parser.parse_args()
 
     # The image is size² × 3 bytes before compression; an absurd value would
@@ -398,6 +434,19 @@ def main() -> int:
     if args.thumb_size < 64 or args.thumb_size > 2048:
         print(f"Error: implausible thumbnail size {args.thumb_size}", file=sys.stderr)
         return 2
+    if not (MIN_ADDRESS_SPACE_GB <= args.max_address_space_gb <= MAX_ADDRESS_SPACE_GB):
+        print(
+            f"Error: implausible address space limit {args.max_address_space_gb} GB",
+            file=sys.stderr,
+        )
+        return 2
+    if args.max_faces_walls < 1 or args.max_faces_bodies < 1:
+        print("Error: face ceilings must be positive", file=sys.stderr)
+        return 2
+
+    # After parsing (argparse allocates nothing) so the ceiling is the one the
+    # caller asked for; the interpreter's own imports are already reserved.
+    limit_address_space(args.max_address_space_gb)
 
     try:
         os.makedirs(args.outdir, exist_ok=True)
@@ -407,7 +456,12 @@ def main() -> int:
 
     try:
         report = analyze(
-            args.input, args.format, args.outdir, args.thumb_size, args.max_faces_walls
+            args.input,
+            args.format,
+            args.outdir,
+            args.thumb_size,
+            args.max_faces_walls,
+            args.max_faces_bodies,
         )
         write_report(args.outdir, report)
     except AnalysisError as exc:

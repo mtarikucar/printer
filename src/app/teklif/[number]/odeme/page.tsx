@@ -41,12 +41,12 @@ export default async function QuoteCheckoutPage({
   const { number } = await params;
   if (!(await quoteApiEnabled())) notFound();
 
-  const decoded = decodeURIComponent(number);
+  // Adres parçası Next tarafından zaten çözülmüştür (bkz. `../page.tsx`).
   // Paylaşım token'ı BİLEREK okunmaz: ödeme sahibin işidir.
-  const access = await resolveQuoteAccess(decoded);
+  const access = await resolveQuoteAccess(number);
   if (!access) notFound();
 
-  const workspace = `/teklif/${encodeURIComponent(decoded)}`;
+  const workspace = `/teklif/${encodeURIComponent(number)}`;
   const { quote, viewer, sessionUserId } = access;
   if (!viewer.isOwner || !viewer.canSeePrices || quote.userId !== sessionUserId) {
     redirect(workspace);

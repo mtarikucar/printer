@@ -33,7 +33,10 @@ export default async function QuoteWorkspacePage({
   if (!(await quoteApiEnabled())) notFound();
 
   const shareToken = typeof query.t === "string" ? query.t : null;
-  const access = await resolveQuoteAccess(decodeURIComponent(number), { shareToken });
+  // Next dinamik parçayı ZATEN çözer; ikinci bir çözüm `T-000123%` gibi bir
+  // adreste `URIError` fırlatır ve ziyaretçi 404 yerine 500 görür. Erişim
+  // çözümü uuid ya da `T-` numarası olmayan her şeyi sorgusuz reddeder.
+  const access = await resolveQuoteAccess(number, { shareToken });
   if (!access) notFound();
 
   const quote = await loadPresentedQuote(access);

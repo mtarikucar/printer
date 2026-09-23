@@ -9,6 +9,8 @@
  * eklenen yeni bir fiyat alanı bu testi kendiliğinden düşürür.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { addBusinessDays, istanbulDateKey } from "../src/lib/config/business-days";
 import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
 import { computeQuote } from "../src/lib/config/quote-compute";
@@ -16,7 +18,7 @@ import { partPricingKey } from "../src/lib/config/quote-keys";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import type { PartGeometry, QuoteViewer } from "../src/lib/config/quote-types";
 import type { Quote, QuotePart } from "../src/lib/db/schema";
-import { resolveQuoteViewer } from "../src/lib/services/quote-access";
+import { resolveQuoteAccess, resolveQuoteViewer } from "../src/lib/services/quote-access";
 import { toPricingPartInput } from "../src/lib/services/quote-cache";
 import { presentQuote, toPricingInputs } from "../src/lib/services/quote-present";
 
@@ -180,8 +182,8 @@ const SHARE_VIEW: QuoteViewer = {
   isAdmin: false,
 };
 
-const tests: Array<[string, () => void]> = [];
-const test = (name: string, fn: () => void) => tests.push([name, fn]);
+const tests: Array<[string, () => void | Promise<void>]> = [];
+const test = (name: string, fn: () => void | Promise<void>) => tests.push([name, fn]);
 
 // ─── Erişim matrisi (spec §"Erişim ve fiyat gizleme") ───────────────────────
 
@@ -492,17 +494,45 @@ test("aralık dışı manuel fiyat hesaba GİRMEZ", () => {
   assert.equal(toPricingPartInput(keyed).manualPriceKey, keyed.manualPriceKey);
 });
 
-let failures = 0;
-for (const [name, fn] of tests) {
-  try {
-    fn();
-    console.log(`  ok  ${name}`);
-  } catch (err) {
-    failures++;
-    console.error(`  FAIL ${name}`);
-    console.error(err);
-    break;
+// ─── Adresten gelen numara (taşıma notu m2) ─────────────────────────────────
+
+test("bozuk kaçışlı numara FIRLATMAZ, 404'e düşer", async () => {
+  // Next dinamik parçayı ZATEN çözer; ikinci bir `decodeURIComponent` `a%`
+  // üzerinde `URIError` fırlatır ve ziyaretçi 404 yerine 500 görür (Sentry'de
+  // de uygulama hatası olarak birikir). Erişim çözümü uuid ya da `T-` numarası
+  // olmayan her şeyi zaten SORGUSUZ reddeder, yani bu çağrı veritabanına
+  // gitmez.
+  for (const bad of ["a%", "%", "T-%E0%A4%A", "T-000123%"]) {
+    assert.equal(await resolveQuoteAccess(bad), null, `${bad} 404 vermedi`);
   }
+});
+
+test("teklif sayfaları adresteki numarayı İKİNCİ kez çözmez", () => {
+  const root = join(import.meta.dirname, "..", "src/app/teklif/[number]");
+  for (const file of ["page.tsx", "belge/page.tsx", "odeme/page.tsx"]) {
+    const source = readFileSync(join(root, file), "utf8");
+    assert.ok(
+      !source.includes("decodeURIComponent("),
+      `${file} adres parçasını ikinci kez çözüyor`
+    );
+  }
+});
+
+async function main(): Promise<void> {
+  let failures = 0;
+  for (const [name, fn] of tests) {
+    try {
+      await fn();
+      console.log(`  ok  ${name}`);
+    } catch (err) {
+      failures++;
+      console.error(`  FAIL ${name}`);
+      console.error(err);
+      break;
+    }
+  }
+  console.log(`${tests.length - failures}/${tests.length} passed`);
+  if (failures > 0) process.exit(1);
 }
-console.log(`${tests.length - failures}/${tests.length} passed`);
-if (failures > 0) process.exit(1);
+
+void main();

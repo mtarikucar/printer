@@ -37,7 +37,8 @@ export default async function QuoteDocumentPage({
   if (!(await quoteApiEnabled())) notFound();
 
   const shareToken = typeof query.t === "string" ? query.t : null;
-  const access = await resolveQuoteAccess(decodeURIComponent(number), { shareToken });
+  // Adres parçası Next tarafından zaten çözülmüştür (bkz. `../page.tsx`).
+  const access = await resolveQuoteAccess(number, { shareToken });
   if (!access) notFound();
 
   const { viewer } = access;
@@ -46,7 +47,7 @@ export default async function QuoteDocumentPage({
   const allowed = viewer.isOwner || viewer.isAdmin || (viewer.isShare && viewer.canSeePrices);
   if (!allowed) {
     redirect(
-      `/teklif/${encodeURIComponent(decodeURIComponent(number))}${
+      `/teklif/${encodeURIComponent(number)}${
         shareToken ? `?t=${encodeURIComponent(shareToken)}` : ""
       }`
     );

@@ -72,7 +72,13 @@ import {
   type QuoteTotals,
   type QuoteViewer,
 } from "../src/lib/config/quote-types";
-import { buildTrackedUrl } from "../src/lib/analytics/client";
+import {
+  buildTrackedHref,
+  buildTrackedUrl,
+  hasUntrackedParams,
+  track,
+} from "../src/lib/analytics/client";
+import { hasGTM } from "../src/lib/analytics/config";
 import { EVENTS, isEventName } from "../src/lib/analytics/events";
 import { serializeJsonLd } from "../src/lib/seo/jsonld";
 import { isNoindexPath } from "../src/lib/seo/policy";
@@ -1533,15 +1539,145 @@ test("toplu silme ONAY ister ve düğmesi 'Seçimi temizle'den ayrılır", () =>
   assert.match(deleteButton, /rose|red/, "silme düğmesi yıkıcı olduğunu göstermiyor");
 });
 
-test("paylaşım token'ı analitiğe GÖNDERİLMEZ", () => {
+/** `track()` çağrısında hangi satıcı ucunun tetiklendiğini toplayan sahte tarayıcı. */
+function trackInFakeBrowser(
+  href: string,
+  referrer = ""
+): { dataLayer: unknown[]; gtag: unknown[][]; fbq: unknown[][]; ttq: unknown[][] } {
+  const parsed = new URL(href);
+  const calls = {
+    dataLayer: [] as unknown[],
+    gtag: [] as unknown[][],
+    fbq: [] as unknown[][],
+    ttq: [] as unknown[][],
+  };
+  const location = {
+    href: parsed.href,
+    origin: parsed.origin,
+    pathname: parsed.pathname,
+    search: parsed.search,
+  };
+  const consent = encodeURIComponent(JSON.stringify({ analytics: true, marketing: true }));
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved = {
+    window: g.window,
+    document: g.document,
+    location: g.location,
+    fetch: g.fetch,
+  };
+  g.window = {
+    location,
+    dataLayer: calls.dataLayer,
+    gtag: (...args: unknown[]) => void calls.gtag.push(args),
+    fbq: (...args: unknown[]) => void calls.fbq.push(args),
+    ttq: { track: (...args: unknown[]) => void calls.ttq.push(args) },
+  };
+  g.document = { cookie: `fig_consent=${consent}`, referrer };
+  g.location = location;
+  // Sunucu aynası birinci taraftır; testte ağa çıkmasın.
+  g.fetch = () => Promise.resolve(undefined);
+  try {
+    track("page_view", { pagePath: buildTrackedUrl(location.pathname, location.search) });
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete g[key];
+      else g[key] = value;
+    }
+  }
+  return calls;
+}
+
+test("paylaşım token'ı üçüncü taraf etiketlerine GÖNDERİLMEZ", () => {
   // `?t=` bir taşıyıcı kimlik bilgisidir: teklifi ve (giriş yapmış izleyicide)
-  // bütün fiyatları açar. `page_location` ile GTM/GA4'e gitmesi, kimliği üçüncü
-  // tarafın günlüklerine ve URL raporlarına yazar.
+  // bütün fiyatları açar. Üçüncü tarafa gitmesi kimliği o tarafın günlüklerine
+  // ve GA mülkünün URL raporlarına yazar.
   assert.equal(buildTrackedUrl("/teklif/T-1", "?t=abc&utm_source=x"), "/teklif/T-1?utm_source=x");
   assert.equal(buildTrackedUrl("/teklif/T-1", "?t=abc"), "/teklif/T-1");
   assert.equal(buildTrackedUrl("/teklif/T-1", ""), "/teklif/T-1");
   assert.equal(buildTrackedUrl("/3d-baski", "?utm_source=x"), "/3d-baski?utm_source=x");
   assert.ok(!buildTrackedUrl("/teklif/T-1", "?t=abc&utm_source=x").includes("abc"));
+
+  assert.equal(hasUntrackedParams("?t=abc"), true);
+  assert.equal(hasUntrackedParams("?utm_source=x&t=abc"), true);
+  assert.equal(hasUntrackedParams("?utm_source=x"), false);
+  assert.equal(hasUntrackedParams(""), false);
+
+  assert.equal(
+    buildTrackedHref("https://x.tr/teklif/T-1?t=abc&utm_source=x"),
+    "https://x.tr/teklif/T-1?utm_source=x"
+  );
+  assert.equal(buildTrackedHref("https://x.tr/teklif/T-1?t=abc"), "https://x.tr/teklif/T-1");
+  // Ayıklanacak bir şey yoksa adres OLDUĞU GİBİ döner (yeniden kodlanmaz).
+  assert.equal(buildTrackedHref("https://x.tr/ara?q=a%20b"), "https://x.tr/ara?q=a%20b");
+  assert.equal(buildTrackedHref("bozuk"), "");
+
+  // ── Davranış: kimlik bilgisi taşıyan adreste HİÇBİR satıcı ucu tetiklenmez.
+  // `buildTrackedUrl` yalnız bizim kendi `pagePath` alanımızı temizler; gtag.js
+  // `page_location`ı, Meta `dl`yi, TikTok sayfa adresini, GTM kabı da
+  // `{{Page URL}}`i `document.location`dan KENDİSİ okur.
+  const shared = trackInFakeBrowser("https://x.tr/teklif/T-000123?t=" + "a".repeat(32));
+  assert.deepEqual(shared.gtag, [], "GA4 olayı kimlik bilgisi taşıyan adreste gönderildi");
+  assert.deepEqual(shared.fbq, [], "Meta pikseli kimlik bilgisi taşıyan adreste tetiklendi");
+  assert.deepEqual(shared.ttq, [], "TikTok pikseli kimlik bilgisi taşıyan adreste tetiklendi");
+  assert.deepEqual(shared.dataLayer, [], "dataLayer kimlik bilgisi taşıyan adreste beslendi");
+
+  // ── Davranış: normal adreste GA4 olayı gider ve sayfa alanları AÇIKÇA geçilir
+  // (otomatik `document.location` değeri ezilsin diye), yönlendiren de ayıklanır.
+  const normal = trackInFakeBrowser(
+    "https://x.tr/sepet?utm_source=x",
+    "https://x.tr/teklif/T-000123?t=" + "a".repeat(32)
+  );
+  assert.equal(normal.gtag.length, 1, "GA4 olayı hiç gitmedi");
+  const [verb, eventName, params] = normal.gtag[0] as [string, string, Record<string, unknown>];
+  assert.equal(verb, "event");
+  assert.equal(eventName, "page_view");
+  assert.equal(params.page_location, "https://x.tr/sepet?utm_source=x");
+  assert.equal(params.page_path, "/sepet?utm_source=x");
+  assert.equal(params.page_referrer, "https://x.tr/teklif/T-000123");
+  assert.ok(
+    !JSON.stringify(normal.gtag).includes("a".repeat(32)),
+    "token GA4 olayının içinde kaldı"
+  );
+  assert.equal(normal.fbq.length, 1, "Meta pikseli normal adreste de susuyor");
+  assert.equal(normal.ttq.length, 1, "TikTok pikseli normal adreste de susuyor");
+  if (hasGTM) {
+    assert.equal(normal.dataLayer.length, 1);
+    assert.equal(
+      (normal.dataLayer[0] as Record<string, unknown>).page_location,
+      "https://x.tr/sepet?utm_source=x"
+    );
+  }
+
+  // Dört satıcı ucunun dördü de aynı kapının ARKASINDA duruyor.
+  const client = fs.readFileSync(path.resolve("src/lib/analytics/client.ts"), "utf8");
+  const gated = client.slice(client.indexOf("const credentialInUrl"), client.indexOf("mirrorToServer("));
+  for (const call of ["pushDataLayer(", "window.gtag(", "window.fbq(", "window.ttq.track("]) {
+    assert.ok(gated.includes(call), `${call} kimlik bilgisi kapısının dışında kaldı`);
+  }
+
+  // Yükleyiciler: GTM kabı ve iki piksel böyle bir adreste HİÇ yüklenmez,
+  // GA4 yapılandırması da ayıklanmış adresi taşır.
+  const scripts = fs.readFileSync(
+    path.resolve("src/components/analytics/analytics-scripts.tsx"),
+    "utf8"
+  );
+  for (const id of ['id="gtm"', 'id="meta-pixel"', 'id="tiktok-pixel"']) {
+    const start = scripts.indexOf(id);
+    assert.ok(start > 0, `${id} yükleyicisi bulunamadı`);
+    const body = scripts.slice(start, scripts.indexOf("</Script>", start));
+    assert.match(body, /\$\{HAS_CREDENTIAL\}/, `${id} kimlik bilgisi taşıyan adreste de yükleniyor`);
+  }
+  assert.match(
+    scripts,
+    /send_page_view:false,page_location:\$\{TRACKED_HREF\}/,
+    "GA4 yapılandırması ham adresi taşıyor"
+  );
+
+  // Paylaşım bağlantısından çıkıldığında token YÖNLENDİREN alanıyla da gitmesin.
+  for (const file of ["src/app/teklif/[number]/page.tsx", "src/app/teklif/[number]/belge/page.tsx"]) {
+    const source = fs.readFileSync(path.resolve(file), "utf8");
+    assert.match(source, /referrer: "origin"/, `${file} yönlendiren ilkesini daraltmıyor`);
+  }
 
   for (const file of ["src/components/analytics/analytics.tsx", "src/lib/analytics/client.ts"]) {
     const source = fs.readFileSync(path.resolve(file), "utf8");

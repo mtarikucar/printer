@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getBankDetails } from "@/lib/config/payment";
@@ -24,6 +25,9 @@ import "./belge.css";
  * `noindex` kök düzenden gelir (`isNoindexPath("/teklif")`).
  */
 export const dynamic = "force-dynamic";
+
+/** `?t=` taşıyan adres yönlendiren alanıyla dışarı sızmasın — bkz. `../page.tsx`. */
+export const metadata: Metadata = { referrer: "origin" };
 
 export default async function QuoteDocumentPage({
   params,

@@ -40,8 +40,25 @@ function readCookie(name: string): string | undefined {
  * hâliyle `page_location`a girerse GTM/GA4'e (ve kurulu her piksele) gönderilir,
  * oradan üçüncü tarafın günlüklerine ve GA mülkünün URL raporlarına yazılır —
  * saldırgan bir adım atmadan, yalnız bağlantı paylaşıldığı için.
+ *
+ * Etiket YÜKLEYİCİLERİ de bu listeyi okur (`analytics-scripts.tsx`): liste tek
+ * kaynaktır, iki yerde ayrı ayrı yazılırsa biri güncellenmeden kalır.
  */
-const UNTRACKED_QUERY_PARAMS = ["t"];
+export const UNTRACKED_QUERY_PARAMS = ["t"];
+
+/**
+ * Verilen sorgu dizgisi taşıyıcı kimlik bilgisi taşıyor mu?
+ *
+ * Bunun `true` olduğu bir adreste HİÇBİR üçüncü taraf etiketi çalıştırılmaz:
+ * Meta (`dl`), TikTok ve GTM kabının yerleşik `{{Page URL}}` değişkeni adresi
+ * `document.location`dan KENDİLERİ okur ve bunu olay parametresiyle ezmenin
+ * desteklenen bir yolu yoktur.
+ */
+export function hasUntrackedParams(search: string): boolean {
+  if (!search) return false;
+  const params = new URLSearchParams(search);
+  return UNTRACKED_QUERY_PARAMS.some((key) => params.has(key));
+}
 
 /**
  * İzlenen adres: yol + kimlik bilgisi AYIKLANMIŞ sorgu dizgisi.
@@ -50,16 +67,62 @@ const UNTRACKED_QUERY_PARAMS = ["t"];
  */
 export function buildTrackedUrl(pathname: string, search: string): string {
   if (!search) return pathname;
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(search);
-  } catch {
-    // Çözülemeyen sorgu dizgisi ölçüme HAM gönderilmez.
-    return pathname;
-  }
+  const params = new URLSearchParams(search);
   for (const key of UNTRACKED_QUERY_PARAMS) params.delete(key);
   const rest = params.toString();
   return rest ? `${pathname}?${rest}` : pathname;
+}
+
+/**
+ * Kimlik bilgisi ayıklanmış MUTLAK adres — GA4'ün `page_location` /
+ * `page_referrer` alanları mutlak adres bekler.
+ *
+ * Ayıklanacak bir şey yoksa adres OLDUĞU GİBİ döner: `URL` üzerinden geçirmek
+ * sorgu dizgisini yeniden kodlar (`a b` → `a+b`) ve rapordaki adres çubuktakine
+ * benzemez olurdu. Çözülemeyen adreste boş dize döner; çağıran alanı hiç
+ * göndermez (ham adres göndermektense alan eksik kalsın).
+ */
+export function buildTrackedHref(href: string): string {
+  if (!href) return "";
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return "";
+  }
+  let removed = false;
+  for (const key of UNTRACKED_QUERY_PARAMS) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      removed = true;
+    }
+  }
+  return removed ? url.toString() : href;
+}
+
+/**
+ * GA4'e / dataLayer'a AÇIKÇA geçilen sayfa alanları.
+ *
+ * gtag.js gönderdiği her olaya `page_location` ve `page_referrer` değerlerini
+ * `document.location` / `document.referrer`dan KENDİSİ ekler. Aynı adları olayın
+ * parametrelerinde göndermek otomatik değeri EZER — `buildTrackedUrl` yalnız
+ * bizim kendi `pagePath` alanımızı temizlediği için bu ezme olmadan token GA4'e
+ * gitmeye devam ederdi.
+ */
+function trackedPageFields(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const out: Record<string, string> = {};
+  const href = buildTrackedHref(window.location.href);
+  if (href) {
+    out.page_location = href;
+    out.page_path = buildTrackedUrl(window.location.pathname, window.location.search);
+  }
+  const referrer = typeof document !== "undefined" ? document.referrer : "";
+  if (referrer) {
+    const trackedReferrer = buildTrackedHref(referrer);
+    if (trackedReferrer) out.page_referrer = trackedReferrer;
+  }
+  return out;
 }
 
 function newId(): string {
@@ -165,7 +228,18 @@ export function track(name: EventName, payload: TrackPayload = {}): string {
     console.debug("[analytics] track", name, { eventId, allowed, ...payload });
   }
 
-  if (allowed && typeof window !== "undefined") {
+  // Adres çubuğunda taşıyıcı kimlik bilgisi varken HİÇBİR tarayıcı etiketi
+  // çalıştırılmaz. `page_location`ı ezmek yalnız gtag.js'i kurtarır; Meta (`dl`),
+  // TikTok ve GTM kabının `{{Page URL}}` değişkeni adresi kendileri okur ve
+  // ezilemez. Aynı yükleyiciler `analytics-scripts.tsx` içinde de bu kapıyla
+  // durdurulur — burası, kimliksiz bir belgeden kimlikli bir adrese istemci
+  // tarafı geçiş olursa diye ikinci kapıdır. Olay yine de birinci taraf sunucu
+  // aynasına (yolu ayıklanmış hâliyle) yazılır, yani ölçüm kaybolmaz.
+  const credentialInUrl =
+    typeof window !== "undefined" && hasUntrackedParams(window.location.search);
+  const page = trackedPageFields();
+
+  if (allowed && typeof window !== "undefined" && !credentialInUrl) {
     // GTM dataLayer (normalised) — let the container fan out if present.
     if (hasGTM) {
       pushDataLayer({
@@ -178,6 +252,8 @@ export function track(name: EventName, payload: TrackPayload = {}): string {
         quantity: payload.quantity,
         reference: payload.reference,
         ...payload,
+        // Ayıklanmış adres EN SONDA: `payload` bu alanları ezemesin.
+        ...page,
       });
     }
 
@@ -187,6 +263,7 @@ export function track(name: EventName, payload: TrackPayload = {}): string {
         value,
         currency,
         transaction_id: payload.reference,
+        ...page,
       };
       if (items) params.items = items.ga4;
       window.gtag("event", def.client.ga4, clean(params));

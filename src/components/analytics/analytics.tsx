@@ -33,7 +33,10 @@ export function Analytics() {
  * root layout doesn't get forced into dynamic rendering / a Suspense boundary.
  *
  * The query string goes through `buildTrackedUrl`, which drops bearer-token
- * parameters (the quote share link's `?t=`) before the URL reaches GTM/GA4.
+ * parameters (the quote share link's `?t=`) from the app's own `pagePath` field.
+ * That alone does NOT stop the vendors' automatic URL capture — `track()` and
+ * the tag loaders refuse to run any third-party tag at all while such a token is
+ * in the address bar (see `client.ts` / `analytics-scripts.tsx`).
  */
 function PageViewTracker() {
   const pathname = usePathname();

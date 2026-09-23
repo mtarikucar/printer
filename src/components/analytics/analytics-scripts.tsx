@@ -11,7 +11,27 @@ import {
   hasMetaPixel,
   hasTikTokPixel,
 } from "@/lib/analytics/config";
+import { UNTRACKED_QUERY_PARAMS } from "@/lib/analytics/client";
 import { useConsent } from "./consent-context";
+
+const UNTRACKED = JSON.stringify(UNTRACKED_QUERY_PARAMS);
+
+/**
+ * Adres çubuğunda taşıyıcı kimlik bilgisi (teklif paylaşım `?t=`) var mı?
+ *
+ * Satır içi yükleyicilerin gövdesine gömülen bir ifade; karar TARAYICIDA,
+ * çalışma anında verilir (işaretleme her iki tarafta aynı kalır, hidrasyon
+ * uyuşmazlığı olmaz). Çözülemeyen bir sorgu dizgisinde `true` döner: şüphede
+ * kalan adreste etiket YÜKLENMEZ.
+ */
+const HAS_CREDENTIAL = `(function(){try{var p=new URLSearchParams(location.search);return ${UNTRACKED}.some(function(k){return p.has(k)})}catch(e){return true}})()`;
+
+/**
+ * Kimlik bilgisi ayıklanmış MUTLAK adres — GA4 yapılandırmasına `page_location`
+ * olarak verilir ki gtag.js'in KENDİ başına gönderdiği olaylar (gelişmiş ölçüm:
+ * kaydırma, dış bağlantı…) da ham adresi taşımasın.
+ */
+const TRACKED_HREF = `(function(){try{var u=new URL(location.href);var c=0;${UNTRACKED}.forEach(function(k){if(u.searchParams.has(k)){u.searchParams.delete(k);c++}});return c?u.toString():location.href}catch(e){return location.pathname}})()`;
 
 /**
  * Loads the configured browser tags. Ordering matters:
@@ -23,6 +43,15 @@ import { useConsent } from "./consent-context";
  *      granted (KVKK: no advertising cookies before explicit consent).
  *
  * Renders nothing when no tag IDs are configured, so it's safe to always mount.
+ *
+ * GÜVENLİK KAPISI — adres çubuğu taşıyıcı kimlik bilgisi taşıyorsa (teklif
+ * paylaşım bağlantısının `?t=` parametresi) GTM kabı ve iki reklam pikseli HİÇ
+ * yüklenmez. Bu SDK'lar olayın adresini `document.location`dan kendileri okur
+ * (Meta `dl`, TikTok sayfa adresi, GTM `{{Page URL}}`) ve bunu bir olay
+ * parametresiyle ezmenin desteklenen yolu yoktur; tek güvenli davranış onları
+ * o belgede hiç çalıştırmamaktır. Paylaşım sayfası zaten `noindex` ve özel bir
+ * yüzeydir; olay birinci taraf sunucu aynasına (yolu ayıklanmış) yazılmaya
+ * devam eder.
  */
 export function AnalyticsScripts() {
   const { consent } = useConsent();
@@ -51,7 +80,11 @@ export function AnalyticsScripts() {
               wait_for_update: 500
             });
             gtag('js', new Date());
-            ${hasGA4 ? `gtag('config','${GA4_ID}',{anonymize_ip:true,send_page_view:false});` : ""}
+            ${
+              hasGA4
+                ? `gtag('config','${GA4_ID}',{anonymize_ip:true,send_page_view:false,page_location:${TRACKED_HREF}});`
+                : ""
+            }
           `,
           }}
         />
@@ -61,7 +94,7 @@ export function AnalyticsScripts() {
       {hasGTM && (
         <>
           <Script id="gtm" strategy="afterInteractive">
-            {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+            {`(function(w,d,s,l,i){if(${HAS_CREDENTIAL})return;w[l]=w[l]||[];w[l].push({'gtm.start':
               new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
               j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
               'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
@@ -91,7 +124,8 @@ export function AnalyticsScripts() {
       {/* 3a — Meta (Facebook) Pixel — marketing consent required. */}
       {hasMetaPixel && consent.marketing && (
         <Script id="meta-pixel" strategy="afterInteractive">
-          {`!function(f,b,e,v,n,t,s)
+          {`if(!${HAS_CREDENTIAL}){
+            !function(f,b,e,v,n,t,s)
             {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
             n.callMethod.apply(n,arguments):n.queue.push(arguments)};
             if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
@@ -101,14 +135,16 @@ export function AnalyticsScripts() {
             'https://connect.facebook.net/en_US/fbevents.js');
             fbq('consent','grant');
             fbq('init', '${META_PIXEL_ID}');
-            fbq('track', 'PageView');`}
+            fbq('track', 'PageView');
+            }`}
         </Script>
       )}
 
       {/* 3b — TikTok Pixel — marketing consent required. */}
       {hasTikTokPixel && consent.marketing && (
         <Script id="tiktok-pixel" strategy="afterInteractive">
-          {`!function (w, d, t) {w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];
+          {`!function (w, d, t) {if(${HAS_CREDENTIAL})return;
+            w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];
             ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"];
             ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};
             for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);

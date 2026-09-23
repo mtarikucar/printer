@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
 import { quoteApiEnabled, resolveQuoteAccess } from "@/lib/services/quote-access";
@@ -18,6 +19,16 @@ import { QuoteWorkspaceClient } from "./workspace-client";
  * `noindex` kök düzenden gelir (`isNoindexPath("/teklif")`, 3.1).
  */
 export const dynamic = "force-dynamic";
+
+/**
+ * `referrer: "origin"` — bu sayfanın adresi `?t=` taşıyıcı kimlik bilgisini
+ * taşıyabilir. Varsayılan ilkede aynı köken bir gezinmede `document.referrer`
+ * TAM adres olur; ziyaretçi paylaşım bağlantısından anasayfaya geçtiğinde token
+ * oradaki piksellere "yönlendiren" alanıyla giderdi. Bu ilkeyle yalnız köken
+ * aktarılır. (Teklif sayfaları zaten `noindex`; yönlendiren ölçümü burada bir
+ * şey ifade etmiyor.)
+ */
+export const metadata: Metadata = { referrer: "origin" };
 
 export default async function QuoteWorkspacePage({
   params,

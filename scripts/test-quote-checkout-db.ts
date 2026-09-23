@@ -203,16 +203,16 @@ async function main() {
     const { db } = await import("../src/lib/db");
     pool = (db as typeof db & { $client: pg.Pool }).$client;
     const { and, eq, isNull } = await import("drizzle-orm");
-    const { orderDrafts, quoteCheckouts, quoteParts, quotes, users } = await import(
-      "../src/lib/db/schema"
-    );
+    const { analyticsEvents, orderDrafts, quoteCheckouts, quoteParts, quotes, users } =
+      await import("../src/lib/db/schema");
     const { computeQuote } = await import("../src/lib/config/quote-compute");
     const { defaultPartConfig } = await import("../src/lib/config/quote-compute");
     const { loadActiveSnapshot } = await import("../src/lib/services/quote-catalog");
     const { toPricingInputs } = await import("../src/lib/services/quote-present");
     const { QuoteServiceError } = await import("../src/lib/services/quote-service");
     const { deriveIdempotencyKey } = await import("../src/lib/services/idempotency");
-    const { createQuoteCheckout } = await import("../src/lib/services/quote-checkout");
+    const { cancelPendingQuoteCheckout, createQuoteCheckout, pendingQuoteCheckout } =
+      await import("../src/lib/services/quote-checkout");
     const { quoteCheckoutSchema } = await import("../src/lib/validators/quote-checkout");
 
     const snapshot = await loadActiveSnapshot();
@@ -929,6 +929,281 @@ async function main() {
       assert.ok(
         jobs.slice(before).find((j) => j.opts.jobId === `card-expire-${draft.id}`),
         "token başarısız olsa da card-expire kuyruğa alındı"
+      );
+    });
+
+    await test("bekleyen ödeme BAŞKA yöntemle istendiğinde 409, taslak YERİNDE kalır", async () => {
+      // Ölçülen hâl: (1) müşteri kartı seçiyor, PayTR token vermiyor, taslak
+      // BİLEREK `pending` kalıyor; (2) müşteri radyoyu havaleye alıyor ve form
+      // artık tutar−%3 gösteriyor; (3) sunucu canlı KART taslağını geri
+      // veriyor, ekran `/pay/<ref>`e gidiyor: orada yalnız "Kart ile Öde" ve
+      // indirimsiz tutar var, IBAN yok, yöntem değiştirilemiyor — üstelik
+      // teklif 72 saat kilitli kalıyor.
+      const switcher = await makeUser();
+      const q = await makeQuote(switcher.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const key = `qa-switch-${randomUUID()}`;
+      const input = (paymentMethod: "card" | "bank_transfer") =>
+        quoteCheckoutSchema.parse(
+          body({ expectedVersion: quote.version, expectedTotalKurus: total, paymentMethod })
+        );
+
+      paytrFails = true;
+      const logged: unknown[][] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(args);
+      try {
+        await assert.rejects(
+          createQuoteCheckout({
+            quoteId: quote.id,
+            userId: switcher.id,
+            email: switcher.email,
+            input: input("card"),
+            req: fakeRequest({ "idempotency-key": key }),
+          }),
+          (err: unknown) => err instanceof QuoteServiceError && err.status === 502
+        );
+      } finally {
+        paytrFails = false;
+        console.error = realError;
+      }
+      assert.equal(logged.length, 1, "PayTR arızası bir kez günlüğe yazıldı");
+
+      const before = jobs.length;
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: switcher.id,
+          email: switcher.email,
+          input: input("bank_transfer"),
+          // AYNI anahtar: `withIdempotency` hata üzerine istemini siler, yani
+          // bu bir tekrar oynatma değil gerçek bir ikinci istektir.
+          req: fakeRequest({ "idempotency-key": key }),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "pending_other_method" &&
+          /kart/i.test(err.message) &&
+          err.message.includes("/pay/")
+      );
+
+      const drafts = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.userId, switcher.id));
+      assert.equal(drafts.length, 1, "ikinci taslak açılmadı");
+      assert.equal(drafts[0].paymentMethod, "card", "yöntem yerinde DEĞİŞMEDİ");
+      assert.equal(drafts[0].status, "pending");
+      assert.equal(drafts[0].havaleDiscountKurus, 0);
+      assert.equal(jobs.length, before, "havale hatırlatma/süre işleri kuyruğa girmedi");
+
+      // ÇIKIŞ KAPISI: 409 tek başına dar kapıyı yeniden adlandırmaktan ibaret
+      // olurdu. PayTR ekranını hiç görmemiş kart taslağı iptal edilebilir.
+      const pending = await pendingQuoteCheckout(quote.id);
+      assert.ok(pending, "bekleyen ödeme özeti okunur");
+      assert.equal(pending!.paymentMethod, "card");
+      assert.equal(pending!.paymentUrl, `/pay/${drafts[0].reference}`);
+      assert.equal(pending!.cancellable, true);
+
+      await assert.rejects(
+        cancelPendingQuoteCheckout({ quoteId: quote.id, userId: (await makeUser()).id }),
+        (err: unknown) => err instanceof QuoteServiceError && err.status === 403,
+        "başkasının bekleyen ödemesi iptal edilemez"
+      );
+
+      const cancelled = await cancelPendingQuoteCheckout({
+        quoteId: quote.id,
+        userId: switcher.id,
+      });
+      assert.equal(cancelled.reference, drafts[0].reference);
+      const [after] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, drafts[0].id));
+      assert.equal(after.status, "cancelled");
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "teklifin kilidi açıldı");
+
+      const havale = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: switcher.id,
+        email: switcher.email,
+        input: input("bank_transfer"),
+        req: fakeRequest({ "idempotency-key": `qa-switch-2-${randomUUID()}` }),
+      });
+      assert.equal(havale.paymentMethod, "bank_transfer");
+      assert.equal(havale.reused, false, "yeni taslak açıldı");
+      assert.equal(havale.finalAmountKurus, total - Math.floor(total * 0.03));
+    });
+
+    await test("token alınmış kart taslağı İPTAL EDİLEMEZ", async () => {
+      // Kapı dar: PayTR ekranını görmüş (dolayısıyla ödemiş olabilecek) bir
+      // taslağı müşteri iptal edemez. `paytr_test_mode` ilk başarılı token'la
+      // yazılır ve `/pay` yeniden basımında da yazılır.
+      const started = await makeUser();
+      const q = await makeQuote(started.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: started.id,
+        email: started.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: computed.totals.totalKurus,
+          })
+        ),
+        req: fakeRequest(),
+      });
+      assert.ok(result.paytrToken, "token alındı");
+      const pending = await pendingQuoteCheckout(quote.id);
+      assert.equal(pending!.cancellable, false);
+      await assert.rejects(
+        cancelPendingQuoteCheckout({ quoteId: quote.id, userId: started.id }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "draft_not_cancellable"
+      );
+      const [draft] = await db
+        .select({ status: orderDrafts.status })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(draft.status, "pending", "taslak yerinde kaldı");
+    });
+
+    await test("aynı anahtarla dürüst tekrar oran limitinden JETON YEMEZ", async () => {
+      // Oran limiti kapıda dursaydı (saatte 10), aynı isteği aynı anahtarla
+      // tekrar gönderen müşteri 11. denemede bir saatlik 429 yerdi — üstelik
+      // tekrar oynatma hiçbir maliyetli iş yapmıyor: ne PayTR, ne e-posta.
+      const loyal = await makeUser();
+      const q = await makeQuote(loyal.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const key = `qa-replay-${randomUUID()}`;
+      const input = quoteCheckoutSchema.parse(
+        body({
+          expectedVersion: quote.version,
+          expectedTotalKurus: computed.totals.totalKurus,
+        })
+      );
+      const paytrBefore = paytrCalls.length;
+      const jobsBefore = jobs.length;
+
+      const results = [];
+      for (let attempt = 0; attempt < 12; attempt++) {
+        results.push(
+          await createQuoteCheckout({
+            quoteId: quote.id,
+            userId: loyal.id,
+            email: loyal.email,
+            input,
+            req: fakeRequest({ "idempotency-key": key }),
+          })
+        );
+      }
+
+      assert.equal(results.length, 12, "on ikisi de cevap aldı (429 yok)");
+      for (const r of results) {
+        assert.equal(r.reference, results[0].reference, "hepsi AYNI saklı cevap");
+      }
+      assert.equal(paytrCalls.length, paytrBefore + 1, "tek PayTR token'ı basıldı");
+      assert.equal(jobs.length, jobsBefore + 1, "tek son tarih işi kuyruğa alındı");
+      const drafts = await db
+        .select({ id: orderDrafts.id })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.userId, loyal.id));
+      assert.equal(drafts.length, 1, "tek taslak");
+    });
+
+    await test("aynı Idempotency-Key başlığı iki isteği BİRBİRİNE BAĞLAMAZ", async () => {
+      // Başlık anahtarın KENDİSİ olsaydı, paylaşılan `quotes.checkout`
+      // kapsamında aynı dizgiyi gönderen ikinci çağıran birincinin taslak
+      // referansını ve PayTR token'ını tekrar oynatırdı.
+      const shared = "paylasilan-idempotency-anahtari";
+      const twin = await makeUser();
+      const stranger = await makeUser();
+      const first = await makeQuote(twin.id, [{ geometry: CUBE }]);
+      const second = await makeQuote(twin.id, [{ geometry: CUBE, quantity: 2 }]);
+      const third = await makeQuote(stranger.id, [{ geometry: CUBE }]);
+
+      const start = async (quoteId: string, user: { id: string; email: string }) => {
+        const { quote, computed } = await expected(quoteId);
+        return createQuoteCheckout({
+          quoteId: quote.id,
+          userId: user.id,
+          email: user.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: quote.version,
+              expectedTotalKurus: computed.totals.totalKurus,
+            })
+          ),
+          req: fakeRequest({ "idempotency-key": shared }),
+        });
+      };
+
+      const a = await start(first.id, twin);
+      const b = await start(second.id, twin); // aynı müşteri, BAŞKA teklif
+      const c = await start(third.id, stranger); // başka müşteri
+      const references = new Set([a.reference, b.reference, c.reference]);
+      assert.equal(references.size, 3, "üç istek üç ayrı referans aldı");
+      for (const r of [a, b, c]) {
+        assert.equal(r.reused, false);
+        assert.ok(r.iframeUrl, "her biri KENDİ PayTR token'ını aldı");
+      }
+      for (const quoteId of [first.id, second.id, third.id]) {
+        const rows = await db
+          .select({ id: quoteCheckouts.id })
+          .from(quoteCheckouts)
+          .where(eq(quoteCheckouts.quoteId, quoteId));
+        assert.equal(rows.length, 1, "her teklif için bir köprü satırı");
+      }
+    });
+
+    await test("havale analitik olayı NET tutarı kaydeder (piksel ile aynı sayı)", async () => {
+      // Tarayıcı `add_payment_info`'yu tutar−%3 ile yolluyor ve olay kimliğini
+      // sunucuya veriyor; sunucu brüt yazarsa Meta/TikTok aynı kimlikli iki
+      // kayıttan birini atar ve havale dönüşümleri rastgele %3 sapar.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 4 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const eventId = `qa-payinfo-${randomUUID()}`;
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            paymentMethod: "bank_transfer",
+            analyticsEventId: eventId,
+          })
+        ),
+        req: fakeRequest(),
+      });
+      assert.equal(result.finalAmountKurus, total - Math.floor(total * 0.03));
+
+      // `recordEvent` ateşle-unut çağrılır: satır birkaç tik sonra düşer.
+      let row: { valueKurus: number | null; reference: string | null } | undefined;
+      for (let i = 0; i < 200 && !row; i++) {
+        [row] = await db
+          .select({
+            valueKurus: analyticsEvents.valueKurus,
+            reference: analyticsEvents.reference,
+          })
+          .from(analyticsEvents)
+          .where(eq(analyticsEvents.eventId, eventId));
+        if (!row) await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.ok(row, "add_payment_info kaydı yazıldı");
+      assert.equal(row!.reference, result.reference);
+      assert.equal(
+        row!.valueKurus,
+        result.finalAmountKurus,
+        "sunucu kaydı ile pikselin tutarı AYNI olmalı"
       );
     });
 

@@ -15,7 +15,6 @@
  * verilir, böylece hem rota hem test aynı işlevi çağırır.
  */
 import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
-import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
 import type {
   ComputedQuote,
@@ -34,24 +33,15 @@ import type { Quote, QuotePart } from "@/lib/db/schema";
 import { toPricingPartInput } from "@/lib/services/quote-cache";
 
 /**
- * DB satırlarını fiyat çekirdeğinin girdisine çevirir ve manuel fiyatı
- * DOĞRULAR.
+ * DB satırlarını fiyat çekirdeğinin girdisine çevirir.
  *
- * Manuel fiyat tek "dışarıdan gelen para"dır: admin yazar, kolon `integer`
- * olduğu için aralık kontrolü DB'de yoktur ve yanlış bir satır (0, negatif,
- * ondalık ya da ₺2.000.000 üstü) doğrudan müşteriye gösterilen ve tahsil
- * edilen tutara dönüşürdü. Geçersiz değer SESSİZCE DÜŞER (anahtarıyla
- * birlikte): parça "manuel fiyat bekliyor" hâline geri döner, ki bu yanlış
- * bir fiyattan iyidir.
+ * Manuel fiyatın aralık doğrulaması ORTAK ÇEVİRİCİDEDİR
+ * (`toPricingPartInput`, `quote-cache.ts`): teklif önbelleği o işlevi doğrudan
+ * çağırır ve buradan geçmez, yani kapının burada durması önbellekteki toplamı
+ * ödemede tahsil edilenden ayırırdı. Burada yalnız eşleme kalır.
  */
 export function toPricingInputs(parts: QuotePart[]): PricingPartInput[] {
-  return parts.map((part) => {
-    const input = toPricingPartInput(part);
-    const value = input.manualUnitPriceKurus;
-    const usable =
-      value !== null && Number.isSafeInteger(value) && value > 0 && value <= MAX_AMOUNT_KURUS;
-    return usable ? input : { ...input, manualUnitPriceKurus: null, manualPriceKey: null };
-  });
+  return parts.map(toPricingPartInput);
 }
 
 /** Katalogdaki en büyük baskı zarfı — birim önerisinin üst sınırı. */
@@ -242,6 +232,12 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
   const blockers = checkoutBlockers(computed, toPricingInputs(parts), {
     termsAccepted: quote.termsAcceptedAt !== null,
     expired,
+    // `quoted` TEK YERDE yazılır: `finishPricing`, `allPriced` kapısının
+    // arkasında (`quote-admin.ts`). Fiyatı etkileyen her müşteri düzenlemesi
+    // `demoteQuotedToDraft` ile taslağa geri düşürür, yani muafiyet otomatik
+    // fiyatlamaya sızamaz. `reviewedAt` bunu yapamazdı: hem `repriceQuote` hem
+    // de iki ret yolu `reviewedAt`i bırakıp durumu `draft`a çeviriyor.
+    adminPriced: quote.status === "quoted",
   });
   // Politika engeli (sipariş olmuş / iptal / incelemede) ödemeyi kapatıyorsa
   // müşteri SEBEBİNİ de görmeli. Bekleyen ödemede `canCheckout` açıktır —

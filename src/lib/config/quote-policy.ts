@@ -73,7 +73,7 @@ export function quotePermissions(
 export function checkoutBlockers(
   c: ComputedQuote,
   parts: PricingPartInput[],
-  q: { termsAccepted: boolean; expired: boolean }
+  q: { termsAccepted: boolean; expired: boolean; adminPriced: boolean }
 ): string[] {
   const blockers: string[] = [];
 
@@ -115,10 +115,22 @@ export function checkoutBlockers(
   }
 
   // Teklif düzeyindeki `total_over_auto` (spec §quote-dfm tablosu, §quote-policy
-  // cümle 7): parçaların hepsi tek tek fiyatlanabilir olsa da toplam anlık teklif
-  // sınırını aşıyorsa ödeme AÇILMAZ — aksi hâlde ekran "ödenebilir" derken uç
-  // reddederdi.
-  if (c.quoteIssues.some((i) => i.code === "qty_over_auto" && i.params?.reason === "total")) {
+  // cümle 7): parçaların hepsi tek tek fiyatlanabilir olsa da toplam ANLIK
+  // teklif sınırını aşıyorsa ödeme AÇILMAZ — aksi hâlde ekran "ödenebilir"
+  // derken uç reddederdi.
+  //
+  // `adminPriced` TEK muafiyet: sınır "bu tutarı bir insan görmeden otomatik
+  // veremeyiz" demektir, "bu tutar tahsil edilemez" demek değil. İnsan görüp
+  // fiyatladıysa (teklif `quoted`) sınırın işi bitmiştir; aksi hâlde admin
+  // ₺100.000 üstü bir teklifi "Fiyatlandı" diye yollar, müşteri "hazır"
+  // e-postasını alır ve ödeme sayfası onu geri çevirir — üstelik tavan
+  // doğrulayıcı tavanına (`CATALOG_LIMITS.maxPriceKurus`) dayandığı için
+  // panelden yükseltilemez. Gerçek ödeme tavanı `MAX_AMOUNT_KURUS`tur ve
+  // ödeme servisinde ayrıca uygulanır.
+  if (
+    !q.adminPriced &&
+    c.quoteIssues.some((i) => i.code === "qty_over_auto" && i.params?.reason === "total")
+  ) {
     blockers.push("Toplam tutar anlık teklif sınırını aşıyor — ekibimizden teklif isteyin.");
   }
 

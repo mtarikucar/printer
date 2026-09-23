@@ -591,12 +591,92 @@ test("teklif toplamı otomatik sınırı aşarsa quoteIssues'a düşer", () => {
   assert.ok(issue, "toplam sınırı aşınca teklif düzeyinde konu açılmalı");
   assert.equal(issue.params?.reason, "total");
   assert.equal(issue.severity, "error");
-  // Her parça tek tek fiyatlansa bile sınırı aşan toplam ödemeye gidemez.
+  // Her parça tek tek OTOMATİK fiyatlansa bile sınırı aşan toplam ödemeye
+  // gidemez: bu teklifi bir insan görmemiştir.
   const parts = [part({ geometry: cube(200) }, { quantity: 10 })];
   assert.ok(
-    checkoutBlockers(big, parts, { termsAccepted: true, expired: false }).some((s) =>
-      /sınır/i.test(s)
-    )
+    checkoutBlockers(big, parts, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: false,
+    }).some((s) => /sınır/i.test(s))
+  );
+});
+test("admin fiyatladıysa teklif düzeyindeki tavan ödemeyi KAPATMAZ", () => {
+  // Ölçülen hâl: admin B2B teklifi elle fiyatlıyor (tek parça, 1200 adet, birim
+  // 12.500 kuruş → 15.000.000 kuruş), `allPriced` doğru olduğu için durum
+  // "quoted" yazılıyor ve "Teklifiniz hazır" e-postası gidiyor; ama teklif
+  // düzeyindeki OTOMATİK tavan (10.000.000) koşulsuz engellediği için müşteri
+  // ödeyemiyor. Tavan `maxPriceKurus` doğrulayıcısının tepesinde olduğundan
+  // admin panelinden de yükseltilemiyor: ₺100.000 üstü her ciro kapalı.
+  const CAP = "Toplam tutar anlık teklif sınırını aşıyor — ekibimizden teklif isteyin.";
+  const cfg: PartConfig = { ...BASE_CONFIG, quantity: 1200 };
+  const key = partPricingKey({ sourceSha256: "sha-cube-20", config: cfg }, "standard");
+  const parts = [
+    part({ manualUnitPriceKurus: 12_500, manualPriceKey: key }, { quantity: 1200 }),
+  ];
+  const computed = computeQuote(S, parts, { leadTier: "standard", addonKeys: [] });
+  assert.equal(computed.totals.allPriced, true, "manuel fiyat 'yüksek adet' hatasını açar");
+  assert.equal(computed.totals.totalKurus, 15_000_000);
+  assert.ok(
+    computed.quoteIssues.some(
+      (i) => i.code === "qty_over_auto" && i.params?.reason === "total"
+    ),
+    "teklif düzeyindeki tavan konusu yine açılır (admin ekranı görsün)"
+  );
+  assert.deepEqual(
+    checkoutBlockers(computed, parts, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: false,
+    }),
+    [CAP],
+    "insan görmemiş teklifte tavan engeldir"
+  );
+  assert.deepEqual(
+    checkoutBlockers(computed, parts, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: true,
+    }),
+    [],
+    "admin fiyatladıysa tavan engel değildir"
+  );
+
+  // Karışık teklif: bir parça otomatik, bir parça manuel — toplam yine tavanın
+  // üstünde. Muafiyet TEKLİF düzeyindedir, parça başına değil.
+  const mixed = [
+    parts[0]!,
+    part({ id: "p2", geometry: cube(200) }, { quantity: 10 }),
+  ];
+  const mixedComputed = computeQuote(S, mixed, { leadTier: "standard", addonKeys: [] });
+  assert.equal(mixedComputed.totals.allPriced, true);
+  assert.ok(mixedComputed.totals.totalKurus > S.settings.maxAutoTotalKurus);
+  assert.deepEqual(
+    checkoutBlockers(mixedComputed, mixed, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: false,
+    }),
+    [CAP]
+  );
+  assert.deepEqual(
+    checkoutBlockers(mixedComputed, mixed, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: true,
+    }),
+    []
+  );
+
+  // Muafiyet DİĞER engelleri açmaz: sözleşme onayı hâlâ şarttır.
+  assert.deepEqual(
+    checkoutBlockers(computed, parts, {
+      termsAccepted: false,
+      expired: false,
+      adminPriced: true,
+    }),
+    ["Mesafeli satış sözleşmesini ve ön bilgilendirmeyi onaylayın."]
   );
 });
 
@@ -772,13 +852,21 @@ test("checkoutBlockers hazır teklifte boş döner", () => {
   const parts = [part({}, { quantity: 10 })];
   const computed = computeQuote(S, parts, { leadTier: "standard", addonKeys: [] });
   assert.deepEqual(
-    checkoutBlockers(computed, parts, { termsAccepted: true, expired: false }),
+    checkoutBlockers(computed, parts, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: false,
+    }),
     []
   );
 });
 test("checkoutBlockers eksikleri Türkçe sayar", () => {
   const empty = computeQuote(S, [], { leadTier: "standard", addonKeys: [] });
-  const noParts = checkoutBlockers(empty, [], { termsAccepted: true, expired: false });
+  const noParts = checkoutBlockers(empty, [], {
+    termsAccepted: true,
+    expired: false,
+    adminPriced: false,
+  });
   assert.equal(noParts.length, 1);
   assert.match(noParts[0]!, /parça/i);
 
@@ -787,6 +875,7 @@ test("checkoutBlockers eksikleri Türkçe sayar", () => {
   const pendingList = checkoutBlockers(pending, pendingParts, {
     termsAccepted: true,
     expired: false,
+    adminPriced: false,
   });
   assert.ok(pendingList.some((s) => /analiz/i.test(s)));
 
@@ -795,29 +884,46 @@ test("checkoutBlockers eksikleri Türkçe sayar", () => {
   const manualList = checkoutBlockers(manual, manualParts, {
     termsAccepted: true,
     expired: false,
+    adminPriced: false,
   });
   assert.ok(manualList.includes("1 parça manuel fiyat bekliyor."));
 
   const warnParts = [part({ geometry: { ...CUBE_20MM, wallP1: 0.5 } }, { quantity: 10 })];
   const warn = computeQuote(S, warnParts, { leadTier: "standard", addonKeys: [] });
-  const warnList = checkoutBlockers(warn, warnParts, { termsAccepted: true, expired: false });
+  const warnList = checkoutBlockers(warn, warnParts, {
+    termsAccepted: true,
+    expired: false,
+    adminPriced: false,
+  });
   assert.ok(warnList.some((s) => /onay/i.test(s)), "onaysız uyarı ödemeyi durdurur");
   const acked = [{ ...warnParts[0]!, dfmAckKey: warn.parts[0]!.dfm.warningKey }];
   const ackedComputed = computeQuote(S, acked, { leadTier: "standard", addonKeys: [] });
   assert.deepEqual(
-    checkoutBlockers(ackedComputed, acked, { termsAccepted: true, expired: false }),
+    checkoutBlockers(ackedComputed, acked, {
+      termsAccepted: true,
+      expired: false,
+      adminPriced: false,
+    }),
     []
   );
 
   const okParts = [part({}, { quantity: 10 })];
   const okComputed = computeQuote(S, okParts, { leadTier: "standard", addonKeys: [] });
   assert.ok(
-    checkoutBlockers(okComputed, okParts, { termsAccepted: false, expired: false }).some((s) =>
+    checkoutBlockers(okComputed, okParts, {
+      termsAccepted: false,
+      expired: false,
+      adminPriced: false,
+    }).some((s) =>
       /sözleşme/i.test(s)
     )
   );
   assert.ok(
-    checkoutBlockers(okComputed, okParts, { termsAccepted: true, expired: true }).some((s) =>
+    checkoutBlockers(okComputed, okParts, {
+      termsAccepted: true,
+      expired: true,
+      adminPriced: false,
+    }).some((s) =>
       /süre/i.test(s)
     )
   );

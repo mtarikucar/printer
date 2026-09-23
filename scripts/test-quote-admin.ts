@@ -757,6 +757,44 @@ async function main() {
     assert.equal(sample.ok, true);
   });
 
+  await test("karar ekranı teklif DÜZEYİNDEKİ konuları da çizer (tavanı admin önce görsün)", () => {
+    // Ölçülen hâl: admin ₺100.000 üstü bir teklifi elle fiyatlıyor, `allPriced`
+    // doğru olduğu için ekran "Fiyatlandı" + sıfır engel gösteriyor, "Teklifiniz
+    // hazır" e-postası gidiyor ve tavanı ilk öğrenen MÜŞTERİ oluyor (ödeme
+    // sayfası geri çeviriyor). `blockers` yalnız parça başına fiyatsızlığı
+    // sayar; teklif düzeyindeki konu ayrı bir alandır ve gövdede zaten vardı.
+    const client = read("src/app/admin/teklifler/[id]/client.tsx");
+    assert.match(
+      client,
+      /quote\.quoteIssues\.length > 0/,
+      "quoteIssues ekranda hiç çizilmiyor"
+    );
+    assert.match(
+      client,
+      /quote\.quoteIssues\.map\(\(issue, index\) => \(\s*<li[\s\S]*?dfmMessage\(d, issue\)/,
+      "quoteIssues ortak dfmMessage çevirmeniyle yazılmıyor"
+    );
+    // Muafiyetin kapısı: politika `adminPriced`i ister, iki çağıran da onu
+    // `status === "quoted"`ten türetir (aynı cevabı ekran da uç da versin).
+    const policy = read("src/lib/config/quote-policy.ts");
+    assert.match(policy, /adminPriced: boolean/, "politika muafiyet kapısını almıyor");
+    assert.match(
+      policy.replace(/\s+/g, " "),
+      /if \( !q\.adminPriced && c\.quoteIssues\.some/,
+      "tavan engeli admin fiyatından muaf değil"
+    );
+    for (const rel of [
+      "src/lib/services/quote-present.ts",
+      "src/lib/services/quote-checkout.ts",
+    ]) {
+      assert.match(
+        read(rel),
+        /adminPriced: quote\.status === "quoted"/,
+        `${rel}: muafiyet farklı bir kaynaktan türetiliyor`
+      );
+    }
+  });
+
   await test("liste sayfası sekmeyi doğrular ve sayfalamayı pageSize+1 ile okur", () => {
     const service = read("src/lib/services/quote-admin.ts");
     assert.match(service, /ADMIN_QUOTE_PAGE_SIZE \+ 1/, "hasNext için fazladan satır okunmuyor");

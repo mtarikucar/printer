@@ -305,17 +305,53 @@ function freezeParts(
   });
 }
 
+/** Taslağın ödeme yöntemi; kolon teklif dışı bir değer taşırsa kart sayılır. */
+function draftMethod(draft: Draft): "card" | "bank_transfer" {
+  return draft.paymentMethod === "bank_transfer" ? "bank_transfer" : "card";
+}
+
+/** Bekleyen ödemenin müşteriye gösterilecek sayfası. */
+function draftPaymentPath(draft: Draft): string {
+  return draftMethod(draft) === "bank_transfer"
+    ? `/havale/${draft.reference}`
+    : `/pay/${draft.reference}`;
+}
+
+const METHOD_LABELS: Record<"card" | "bank_transfer", string> = {
+  card: "kart",
+  bank_transfer: "havale/EFT",
+};
+
+/**
+ * Bekleyen taslağı MÜŞTERİ iptal edebilir mi?
+ *
+ * Yalnız "hiç başlamamış" kart taslağı: `paytr_test_mode` ilk başarılı
+ * token'la yazılır (`/api/pay/[reference]/paytr` yeniden basımında da), yani
+ * NULL olması müşterinin PayTR ekranını hiç görmediğinin kanıtıdır. Havale
+ * taslağı iptal edilmez: IBAN talimatı gönderilmiş, hatırlatma/süre işleri
+ * kuyruğa girmiştir ve müşteri parayı yollamış olabilir. Hediye kartı ve
+ * terfi etmiş taslak da dışarıda: rezerve fonu serbest bırakmak ikinci bir
+ * algoritma ister (admin yolu `_actions.ts` bunu politikayla reddediyor).
+ */
+function pendingDraftCancellable(draft: Draft): boolean {
+  return (
+    draft.status === "pending" &&
+    draftMethod(draft) === "card" &&
+    draft.paytrTestMode === null &&
+    draft.promotedOrderId === null &&
+    draft.giftCardId === null
+  );
+}
+
 /** Bekleyen ödemenin cevabı: yeni token basılmaz, müşteri ödeme sayfasına gider. */
 function reusedResult(draft: Draft): QuoteCheckoutResult {
-  const paymentMethod = draft.paymentMethod === "bank_transfer" ? "bank_transfer" : "card";
   return {
     reference: draft.reference,
-    paymentMethod,
+    paymentMethod: draftMethod(draft),
     // Kartta `/pay/<ref>` TAZE bir merchant oid ile yeni token basar: PayTR
     // aynı oid ile ikinci token vermez, bu yüzden burada token üretmek
     // müşteriyi çalışmayan bir iframe'e göndermek olurdu.
-    redirectUrl:
-      paymentMethod === "bank_transfer" ? `/havale/${draft.reference}` : `/pay/${draft.reference}`,
+    redirectUrl: draftPaymentPath(draft),
     finalAmountKurus:
       draft.amountKurus - draft.giftCardAmountKurus - draft.havaleDiscountKurus,
     reused: true,
@@ -378,7 +414,28 @@ async function freezeCheckout(args: {
         .from(orderDrafts)
         .where(eq(orderDrafts.id, live.draftId))
         .limit(1);
-      if (existing) return { reused: existing };
+      if (existing) {
+        // …ama YÖNTEM aynıysa. Bekleyen kart taslağını havale isteyen bir
+        // isteğe geri vermek, müşteriyi indirimsiz tutarla ve IBAN'sız bir
+        // "Kart ile Öde" sayfasına yollamaktır (aynası da doğru: havale
+        // taslağı + "Kart" = yalnız IBAN gösteren sayfa). Yöntemi YERİNDE
+        // değiştirmek ucuz değil — havale indirimi, son tarih ve
+        // hatırlatma/süre işleri yeniden kurulmalı — bu yüzden dürüst cevap
+        // 409'dur; çıkış kapısı `cancelPendingQuoteCheckout`.
+        if (draftMethod(existing) !== input.paymentMethod) {
+          const label = METHOD_LABELS[draftMethod(existing)];
+          const way = pendingDraftCancellable(existing)
+            ? " Yöntemi değiştirmek için teklif sayfasından bekleyen ödemeyi iptal edin."
+            : "";
+          throw new QuoteServiceError(
+            `Bu teklif için ${label} ile başlatılmış bekleyen bir ödeme var. ` +
+              `Aynı yöntemle devam edin: ${draftPaymentPath(existing)}.${way}`,
+            409,
+            "pending_other_method"
+          );
+        }
+        return { reused: existing };
+      }
     }
 
     const now = new Date();
@@ -410,6 +467,10 @@ async function freezeCheckout(args: {
     const blockers = checkoutBlockers(computed, inputs, {
       termsAccepted: quote.termsAcceptedAt !== null,
       expired: quote.status === "expired" || now.getTime() > quote.expiresAt.getTime(),
+      // Ekranla AYNI cevap (`quote-present.ts`): admin'in elle fiyatladığı
+      // teklif anlık fiyat tavanından muaftır. Gerçek ödeme tavanı aşağıdaki
+      // `MAX_AMOUNT_KURUS` kontrolüdür ve bu muafiyet ona dokunmaz.
+      adminPriced: quote.status === "quoted",
     });
     if (blockers.length > 0) {
       throw new QuoteServiceError(blockers.join(" "), 400, "checkout_blocked");
@@ -557,10 +618,11 @@ async function freezeCheckout(args: {
  * Ödemeyi başlatır: taslağı yazar, sonra PayTR token'ını ya da havale
  * talimatını üretir.
  *
- * Oran limiti ve idempotency KAPIDA durur, işin içinde değil: aynı gövdeyle
- * iki kez tıklayan müşteri iki PayTR token'ı ve iki e-posta almamalı. Domain
- * tarafında ikinci bir koruma daha var (canlı taslak aynı referansı döndürür),
- * ama o ancak ilk işlem commit olduktan sonra görünür.
+ * Idempotency KAPIDA durur: aynı gövdeyle iki kez tıklayan müşteri iki PayTR
+ * token'ı ve iki e-posta almamalı. Oran limiti ise idempotency'nin İÇİNDE —
+ * tekrar oynatılan bir cevap hiçbir maliyetli iş yapmaz, bu yüzden jeton da
+ * yememeli. Domain tarafında ikinci bir koruma daha var (canlı taslak aynı
+ * referansı döndürür), ama o ancak ilk işlem commit olduktan sonra görünür.
  */
 export async function createQuoteCheckout(args: {
   quoteId: string;
@@ -569,19 +631,12 @@ export async function createQuoteCheckout(args: {
   input: QuoteCheckoutInput;
   req: NextRequest;
 }): Promise<QuoteCheckoutResult> {
-  const limited = await rateLimitAsync(
-    `quote-checkout:user:${args.userId}`,
-    RATE_LIMIT,
-    RATE_WINDOW_MS
-  );
-  if (!limited.success) {
-    throw new QuoteServiceError(
-      "Çok fazla ödeme denemesi yapıldı. Lütfen bir süre sonra tekrar deneyin.",
-      429,
-      "rate_limited"
-    );
-  }
-
+  // Anahtar HER ZAMAN türetilir; başlık yalnız bir GİRDİDİR. Başlığı anahtarın
+  // KENDİSİ yapmak, hemen altındaki gerekçeyi (teklif kimliği de özete girsin)
+  // paylaşılan `quotes.checkout` kapsamında iptal ederdi: aynı dizgiyi gönderen
+  // iki çağıran çakışır ve ikincisine birincinin taslak referansı + PayTR
+  // token'ı TEKRAR OYNATILIR.
+  //
   // Türetilen anahtar TEKLİFİN KİMLİĞİNİ de özetler. `QuoteCheckoutInput`
   // hangi teklifin ödendiğini SÖYLEMEZ (sürüm, tutar, adres, yöntem, fatura);
   // yalnız gövdeyi özetlersek, başlık göndermeyen bir istemcide aynı
@@ -589,17 +644,36 @@ export async function createQuoteCheckout(args: {
   // ödeme birincinin referansı + PayTR iframe'iyle TEKRAR OYNATILIR — ikinci
   // teklif hiç taslak görmeden "başarılı" görünür. `/api/orders` bu deliğe
   // düşmez, çünkü onun gövdesi ürün kimliğini taşır (route.ts:131).
-  const header = args.req.headers.get("idempotency-key");
-  const key =
-    header && header.length >= 8 && header.length <= 200
-      ? header
-      : deriveIdempotencyKey({ quoteId: args.quoteId, input: args.input }, args.userId);
+  const raw = args.req.headers.get("idempotency-key");
+  const header = raw && raw.length >= 8 && raw.length <= 200 ? raw : null;
+  const key = deriveIdempotencyKey(
+    { quoteId: args.quoteId, header, input: header ? undefined : args.input },
+    args.userId
+  );
 
   const outcome = await withIdempotency<QuoteCheckoutResult>({
     scope: "quotes.checkout",
     key,
     ttlSeconds: IDEMPOTENCY_TTL_SECONDS,
-    run: () => runCheckout(args),
+    // Oran limiti İŞİN İÇİNDE: dürüst bir tekrar (aynı anahtar, aynı gövde)
+    // hiç iş yapmadan saklı cevabı alır ve sayaçtan jeton YEMEMELİ. Dışarıda
+    // dururken on tekrar, taslağı çoktan açılmış bir teklifte bir saatlik 429
+    // demekti.
+    run: async () => {
+      const limited = await rateLimitAsync(
+        `quote-checkout:user:${args.userId}`,
+        RATE_LIMIT,
+        RATE_WINDOW_MS
+      );
+      if (!limited.success) {
+        throw new QuoteServiceError(
+          "Çok fazla ödeme denemesi yapıldı. Lütfen bir süre sonra tekrar deneyin.",
+          429,
+          "rate_limited"
+        );
+      }
+      return runCheckout(args);
+    },
   });
   if (outcome.status === "in_progress") {
     throw new QuoteServiceError(
@@ -642,12 +716,19 @@ async function runCheckout(args: {
 
   // Sunucu gerçeği "ödeme başlatıldı". Tarayıcının verdiği kimlik varsa aynı
   // kimlikle kaydedilir ki piksel ile bu kayıt Meta/TikTok'ta tekilleşsin.
+  //
+  // Tutar müşterinin GERÇEKTEN ödeyeceği tutardır (havalede %3 düşülmüş):
+  // tarayıcı `add_payment_info`'yu zaten bu değerle yolluyor ve platformlar
+  // aynı kimlikli iki kayıttan birini atıyor — brüt yazmak, havale
+  // dönüşümlerinin rastgele %3 sapmasına yol açıyordu.
+  // Kartta indirim 0'dır, yani bu her iki yolda da tahsil edilen tutardır.
+  const finalAmountKurus = amountKurus - havaleDiscountKurus;
   void recordEvent({
     name: "add_payment_info",
     eventId: args.input.analyticsEventId ?? `payinit:${draft.reference}`,
     source: "server",
     reference: draft.reference,
-    valueKurus: amountKurus,
+    valueKurus: finalAmountKurus,
     userId: args.userId,
     attribution,
     consent: attribution.consent ?? null,
@@ -657,7 +738,6 @@ async function runCheckout(args: {
   }).catch(() => {});
 
   if (draft.paymentMethod === "bank_transfer") {
-    const finalAmountKurus = amountKurus - havaleDiscountKurus;
     const bank = getBankDetails();
     const paymentQueue = getPaymentDeadlineQueue();
     await paymentQueue.add(
@@ -761,4 +841,120 @@ async function runCheckout(args: {
       "paytr_failed"
     );
   }
+}
+
+/** Teklifin bekleyen ödemesi — ödeme sayfasının "ne yapabilirim"i. */
+export interface PendingQuoteCheckout {
+  reference: string;
+  paymentMethod: "card" | "bank_transfer";
+  /** Müşterinin ödemeye devam edeceği sayfa (`/pay/…` ya da `/havale/…`). */
+  paymentUrl: string;
+  /** Taslak iptal edilip başka bir yöntemle yeniden başlanabilir mi? */
+  cancellable: boolean;
+}
+
+/**
+ * Bekleyen ödemeyi ÖZETLER (yazmaz).
+ *
+ * `/teklif/<n>/odeme` bunu okur: bekleyen bir ödeme varken koşulsuz
+ * `/pay/<ref>`e yollamak, havale taslağını kart sayfasına düşürüyordu ve
+ * yöntemini değiştirmek isteyen müşteriye hiçbir kapı bırakmıyordu.
+ */
+export async function pendingQuoteCheckout(
+  quoteId: string
+): Promise<PendingQuoteCheckout | null> {
+  const live = await liveDraftForQuote(quoteId);
+  if (!live) return null;
+  const [draft] = await db
+    .select()
+    .from(orderDrafts)
+    .where(eq(orderDrafts.id, live.draftId))
+    .limit(1);
+  if (!draft) return null;
+  return {
+    reference: draft.reference,
+    paymentMethod: draftMethod(draft),
+    paymentUrl: draftPaymentPath(draft),
+    cancellable: pendingDraftCancellable(draft),
+  };
+}
+
+/**
+ * Hiç başlamamış kart taslağını İPTAL eder ve teklifin kilidini açar.
+ *
+ * Yöntem değiştirmenin TEK çıkış kapısı budur: bekleyen taslak dururken teklif
+ * salt okunurdur ve `createQuoteCheckout` farklı yöntemli isteği 409 ile
+ * reddeder (`pending_other_method`), yani kapı olmasaydı müşteri
+ * `CARD_DEADLINE_HOURS` boyunca karta kilitli kalırdı. Kapının dar tutulması
+ * bilinçli: `pendingDraftCancellable` yalnız PayTR ekranını hiç görmemiş kart
+ * taslağını geçirir.
+ */
+export async function cancelPendingQuoteCheckout(args: {
+  quoteId: string;
+  userId: string;
+}): Promise<{ reference: string }> {
+  const reference = await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    // Kilit sırası `freezeCheckout` ile AYNI: önce teklif, sonra taslak.
+    const [quote] = await tx
+      .select()
+      .from(quotes)
+      .where(eq(quotes.id, args.quoteId))
+      .for("update");
+    if (!quote) throw new QuoteServiceError("Teklif bulunamadı.", 404, "quote_not_found");
+    if (quote.userId !== args.userId) {
+      throw new QuoteServiceError("Bu teklif hesabınıza bağlı değil.", 403, "not_owner");
+    }
+
+    const live = await liveDraftForQuote(quote.id, tx);
+    if (!live) {
+      throw new QuoteServiceError(
+        "Bu teklif için bekleyen bir ödeme yok.",
+        409,
+        "no_pending_draft"
+      );
+    }
+    const [draft] = await tx
+      .select()
+      .from(orderDrafts)
+      .where(eq(orderDrafts.id, live.draftId))
+      .for("update");
+    if (!draft || !pendingDraftCancellable(draft)) {
+      throw new QuoteServiceError(
+        "Bu ödeme iptal edilemez; ödeme sayfasından devam edin.",
+        409,
+        "draft_not_cancellable"
+      );
+    }
+
+    // Koşullu yazım: son tarih işçisi ya da webhook araya girdiyse satır
+    // tutmaz ve iptal SESSİZCE başarılı görünmez.
+    const [cancelled] = await tx
+      .update(orderDrafts)
+      .set({
+        status: "cancelled",
+        paytrFailureReason: "Müşteri iptali: ödeme başlatılmadan vazgeçildi.",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(orderDrafts.id, draft.id),
+          eq(orderDrafts.status, "pending"),
+          isNull(orderDrafts.promotedOrderId)
+        )
+      )
+      .returning({ reference: orderDrafts.reference });
+    if (!cancelled) {
+      throw new QuoteServiceError(
+        "Bu ödeme artık iptal edilemez; sayfayı yenileyin.",
+        409,
+        "draft_not_cancellable"
+      );
+    }
+    return cancelled.reference;
+  });
+
+  // Teklif yeniden düzenlenebilir: açık duran sekmeler bunu görmeli.
+  emitQuoteChanged({ quoteId: args.quoteId, userId: args.userId });
+  return { reference };
 }

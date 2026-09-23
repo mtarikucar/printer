@@ -534,6 +534,20 @@ export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
             </Card>
           )}
 
+          {/* Teklif DÜZEYİNDEKİ konular (tavan aşımı gibi): `blockers` yalnız
+              parça başına fiyatsızlığı sayar, bu yüzden tavanı ayrı göstermek
+              şart — aksi hâlde admin ekranda "Fiyatlandı" görür ve sınırı ilk
+              öğrenen müşteri olurdu. */}
+          {quote.quoteIssues.length > 0 && (
+            <Card title="Teklif düzeyinde konular" tone="warning">
+              <ul className="list-disc pl-5 text-sm text-amber-900">
+                {quote.quoteIssues.map((issue, index) => (
+                  <li key={`${issue.code}-${index}`}>{dfmMessage(d, issue)}</li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           <Card title="Diğer kararlar">
             <label className="block text-sm">
               <span className="block text-xs text-gray-500">Süre uzatma (gün)</span>

@@ -61,6 +61,37 @@ const rowOf = async (partId: string) =>
     thumbnail_key: string | null;
   };
 
+/**
+ * İkili STL kutusu (12 üçgen, dışa bakan sarım): fikstür dosyası yazmadan
+ * baskı zarfını dolduran, su geçirmez ve gerçekten fiyatlanabilen bir parça.
+ */
+function stlBox(x: number, y: number, z: number): Buffer {
+  const v: Array<[number, number, number]> = [
+    [0, 0, 0], [x, 0, 0], [x, y, 0], [0, y, 0],
+    [0, 0, z], [x, 0, z], [x, y, z], [0, y, z],
+  ];
+  const tris: Array<[number, number, number]> = [
+    [0, 2, 1], [0, 3, 2], // alt (−z)
+    [4, 5, 6], [4, 6, 7], // üst (+z)
+    [0, 1, 5], [0, 5, 4], // ön (−y)
+    [1, 2, 6], [1, 6, 5], // sağ (+x)
+    [2, 3, 7], [2, 7, 6], // arka (+y)
+    [3, 0, 4], [3, 4, 7], // sol (−x)
+  ];
+  const buf = Buffer.alloc(84 + tris.length * 50);
+  buf.writeUInt32LE(tris.length, 80);
+  tris.forEach((tri, i) => {
+    const off = 84 + i * 50; // 0..11 normal (0,0,0 — okuyucu sarımdan türetir)
+    tri.forEach((index, corner) => {
+      const p = v[index]!;
+      buf.writeFloatLE(p[0], off + 12 + corner * 12);
+      buf.writeFloatLE(p[1], off + 16 + corner * 12);
+      buf.writeFloatLE(p[2], off + 20 + corner * 12);
+    });
+  });
+  return buf;
+}
+
 async function main() {
   await admin.connect();
   try {
@@ -374,6 +405,99 @@ async function main() {
         await admin.query("SELECT version FROM quotes WHERE id = $1", [quoteId])
       ).rows[0].version as number;
       assert.equal(after, before + 1, "yazım çağıranın commit'iyle geldi");
+    });
+
+    // `quotes.total_kurus` int4'tür, motor ise 2^31 üstü bir toplam
+    // hesaplayabilir: iki SLA parçası baskı zarfında (210×118×214) ve her biri
+    // otomatik üst sınır olan 1000 adette → 3.707.748.000 kuruş. Kıstırma
+    // olmadan Postgres 22003 verir, yeniden hesabın İŞLEMİ ÇÖKER ve en kötü
+    // düşüş noktası analiz worker'ıdır: parça `ready` olarak commit edilmiştir,
+    // `failed` yazımı `analysis_status='analyzing'` koşuluna takılıp hiçbir
+    // satırı tutmaz, iş "skipped" deyip BAŞARIYLA biter. Müşterinin sayfası
+    // "analiz sürüyor"da kalır, `total_kurus` NULL kalır ve o tekliffe yapılan
+    // HER yazım (admin manuel fiyat, müşteri PATCH, "teklif iste") 500 verir.
+    await test("2^31 üstü toplam analizi düşürmez: önbellek NULL kalır, sonraki yazım geçer", async () => {
+      const bigQuoteId = (
+        await admin.query(
+          `INSERT INTO quotes(anonymous_id, pricing_snapshot, expires_at)
+           VALUES('anon-overflow', $1, now() + interval '30 days') RETURNING id`,
+          [JSON.stringify(SEED_SNAPSHOT)]
+        )
+      ).rows[0].id as string;
+
+      const sla = {
+        quote_id: bigQuoteId,
+        technology_key: "sla",
+        material_key: "standard_resin",
+        color_key: "gri",
+        finish_key: "ham",
+        layer_um: 50,
+        quantity: 1000,
+      };
+      const cacheOfBig = async () =>
+        (
+          await admin.query("SELECT total_kurus, lead_days FROM quotes WHERE id = $1", [
+            bigQuoteId,
+          ])
+        ).rows[0] as { total_kurus: number | null; lead_days: number | null };
+
+      // (1) Ödenebilir teklif: önbellek GERÇEK toplamı yazmaya devam eder.
+      const small = await makePart("scripts/fixtures/quote/cube20.stl", {
+        quote_id: bigQuoteId,
+        name: "Numune",
+      });
+      assert.equal(await analyzeQuotePart(small), "ready");
+      const afterSmall = await cacheOfBig();
+      assert.ok(
+        afterSmall.total_kurus !== null && afterSmall.total_kurus > 0,
+        `ödenebilir toplam yazılır: total_kurus=${afterSmall.total_kurus}`
+      );
+      assert.ok(afterSmall.lead_days !== null);
+
+      // (2) Ödeme tavanının (₺2.000.000) üstü ama int4'ün altı: yazım
+      // patlamazdı, ama ödenemeyecek bir tutarı listede göstermenin anlamı yok.
+      const box = stlBox(210, 118, 214);
+      const first = await makePart(box, { ...sla, name: "Kasa A" });
+      assert.equal(await analyzeQuotePart(first), "ready");
+      const afterFirst = await cacheOfBig();
+      assert.equal(
+        afterFirst.total_kurus,
+        null,
+        "ödeme tavanının üstündeki tutar GÖSTERİM önbelleğinde durmaz"
+      );
+      assert.equal(afterFirst.lead_days, null, "tutar yoksa iş günü de yazılmaz");
+
+      // (3) İkinci kasa toplamı 2^31'in üstüne çıkarır: kıstırma olmasa
+      // Postgres 22003 verir ve iş sessizce "skipped" derdi.
+      const second = await makePart(box, { ...sla, name: "Kasa B" });
+      assert.equal(
+        await analyzeQuotePart(second),
+        "ready",
+        "taşan toplam analizi 'skipped'e düşürmemeli — iş sessizce başarılı olurdu"
+      );
+      const row = await rowOf(second);
+      assert.equal(row.analysis_status, "ready");
+      assert.equal(row.analysis_error, null);
+      assert.equal((await cacheOfBig()).total_kurus, null);
+
+      // Teklife yapılan sonraki yazımlar (mutateQuote hepsini bununla bitirir)
+      // artık patlamıyor: ne kendi işleminde ne de çağıranın işleminde.
+      const own = await recomputeQuoteCache(bigQuoteId);
+      assert.ok(own, "kendi işleminde yeniden hesap tamamlandı");
+      assert.equal(own!.totalKurus, null);
+      const joined = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT id FROM quotes WHERE id = ${bigQuoteId} FOR UPDATE`);
+        return recomputeQuoteCache(bigQuoteId, tx);
+      });
+      assert.ok(joined, "çağıranın işleminde yeniden hesap tamamlandı");
+      assert.equal(joined!.totalKurus, null);
+      // Hesap gerçekten taşan tutarı BULDU, sadece yazmadı: aksi hâlde bu test
+      // "fiyatlanamayan teklif" hâlini ölçüyor olurdu.
+      assert.equal(joined!.computed.totals.allPriced, true, "teklif fiyatlanabilir");
+      assert.ok(
+        joined!.computed.totals.totalKurus > 2 ** 31,
+        `toplam gerçekten 2^31 üstü: ${joined!.computed.totals.totalKurus}`
+      );
     });
 
     await queue.obliterate({ force: true }).catch(() => {});

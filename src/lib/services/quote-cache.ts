@@ -16,16 +16,32 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { quoteParts, quotes, type QuotePart } from "@/lib/db/schema";
+import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
 import { computeQuote } from "@/lib/config/quote-compute";
 import type { ComputedQuote, PricingPartInput } from "@/lib/config/quote-types";
 
 /**
- * Parça satırını fiyat çekirdeğinin girdisine çevirir.
+ * Parça satırını fiyat çekirdeğinin girdisine çevirir ve manuel fiyatı
+ * DOĞRULAR.
  *
  * Tek dönüşüm noktası: kolonlardan `PartConfig` kuran ikinci bir kopya, bir gün
  * bir alanı unutup müşteriye başka, ödemede başka fiyat gösterirdi.
+ *
+ * Manuel fiyat tek "dışarıdan gelen para"dır: admin yazar, kolon `integer`
+ * olduğu için aralık kontrolü DB'de YOKTUR (CHECK yok) ve yanlış bir satır (0,
+ * negatif, ondalık ya da ₺2.000.000 üstü) doğrudan gösterilen VE tahsil edilen
+ * tutara dönüşürdü. Kapı `computeQuote`'un ÖNÜNDE, ortak çeviricide durur:
+ * `recomputeQuoteCache` bu işlevi doğrudan çağırır ve ikinci bir sarmalayıcıya
+ * uğramaz, yani kapı yalnız `toPricingInputs`ta olsaydı önbellekteki toplam
+ * ödemede tahsil edilenden sapabilirdi. Geçersiz değer SESSİZCE DÜŞER
+ * (anahtarıyla birlikte): parça "manuel fiyat bekliyor" hâline döner, ki bu
+ * yanlış bir fiyattan iyidir.
  */
 export function toPricingPartInput(part: QuotePart): PricingPartInput {
+  const manual = part.manualUnitPriceKurus;
+  const manualUsable =
+    manual !== null && Number.isSafeInteger(manual) && manual > 0 && manual <= MAX_AMOUNT_KURUS;
+
   return {
     id: part.id,
     analysisStatus: part.analysisStatus,
@@ -43,8 +59,8 @@ export function toPricingPartInput(part: QuotePart): PricingPartInput {
       scale: part.scale,
       criticalTolerance: part.criticalTolerance,
     },
-    manualUnitPriceKurus: part.manualUnitPriceKurus,
-    manualPriceKey: part.manualPriceKey,
+    manualUnitPriceKurus: manualUsable ? manual : null,
+    manualPriceKey: manualUsable ? part.manualPriceKey : null,
     dfmAckKey: part.dfmAckKey,
   };
 }
@@ -87,8 +103,20 @@ async function recomputeInTx(
     addonKeys: quote.addonKeys,
   });
 
-  const totalKurus = computed.totals.allPriced ? computed.totals.totalKurus : null;
-  const leadDays = computed.totals.allPriced ? computed.totals.leadDays : null;
+  // Kolon `integer`dır, motorun toplamı ise 2^31'i AŞABİLİR (baskı zarfında iki
+  // SLA parçası × 1000 adet yeter). Kıstırma olmadan Postgres 22003 verir ve
+  // yeniden hesabın işlemi çöker; en kötü düşüş noktası analiz worker'ıdır —
+  // parça `ready` commit edilmiş olur, `failed` yazımı koşuluna takılır, iş
+  // "skipped" deyip BAŞARIYLA biter ve o teklife yapılan her sonraki yazım
+  // 500 verir. Burası GÖSTERİM önbelleğidir (bkz. dosya başlığı): ödenebilir
+  // tavanın (`MAX_AMOUNT_KURUS`, ödeme servisinde uygulanır) üstündeki bir
+  // sayının listede durmasının hiçbir anlamı yok, NULL doğru cevaptır.
+  const payable =
+    computed.totals.allPriced &&
+    Number.isSafeInteger(computed.totals.totalKurus) &&
+    computed.totals.totalKurus <= MAX_AMOUNT_KURUS;
+  const totalKurus = payable ? computed.totals.totalKurus : null;
+  const leadDays = payable ? computed.totals.leadDays : null;
 
   const [updated] = await tx
     .update(quotes)
@@ -108,7 +136,10 @@ async function recomputeInTx(
  * Teklifi yeniden hesaplar ve önbellek kolonlarını yazar; `version` bir artar.
  *
  * Fiyatlanamayan teklifte (`allPriced` değil) tutar ve iş günü NULL kalır:
- * yarım bir toplam, listede tam bir fiyat gibi okunurdu.
+ * yarım bir toplam, listede tam bir fiyat gibi okunurdu. Ödenebilir tavanın
+ * (`MAX_AMOUNT_KURUS`) üstündeki toplam da NULL yazılır — hem kolon `integer`
+ * olduğu için (2^31 üstü toplam işlemi çökertirdi) hem de tahsil edilemeyecek
+ * bir sayının gösterim önbelleğinde işi yok.
  *
  * Teklif yoksa null döner — silinmiş/erişilemez bir teklif için analiz
  * tamamlanması worker'ı düşürmemeli.

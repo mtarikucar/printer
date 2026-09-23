@@ -17,6 +17,7 @@ import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import type { PartGeometry, QuoteViewer } from "../src/lib/config/quote-types";
 import type { Quote, QuotePart } from "../src/lib/db/schema";
 import { resolveQuoteViewer } from "../src/lib/services/quote-access";
+import { toPricingPartInput } from "../src/lib/services/quote-cache";
 import { presentQuote, toPricingInputs } from "../src/lib/services/quote-present";
 
 const OWNER_ID = "22222222-2222-4222-8222-222222222222";
@@ -472,7 +473,23 @@ test("aralık dışı manuel fiyat hesaba GİRMEZ", () => {
     const view = present(OWNER_VIEW, makeQuote(), [withKey]);
     assert.equal(view.parts[0].price ?? null, null);
     assert.equal(view.parts[0].needsManualPrice, true);
+
+    // Kapı ORTAK ÇEVİRİCİDE durmalı, yalnız bu sarmalayıcıda değil: teklif
+    // önbelleği (`recomputeQuoteCache`) `toPricingPartInput`i doğrudan çağıran
+    // TEK `computeQuote` müşterisidir, ve kolonda CHECK yoktur. Kapı burada
+    // olmazsa önbellekteki toplam, ödemede tahsil edilecek tutarla çelişir.
+    const raw = toPricingPartInput(withKey);
+    assert.equal(raw.manualUnitPriceKurus, null, `${bad} çeviricide reddedilmeliydi`);
+    assert.equal(raw.manualPriceKey, null, `${bad} anahtarı çeviricide düşmeliydi`);
   }
+  // Geçerli değer AYNEN geçer: kapı fiyatı yutmamalı.
+  const good = makePart({ finishKey: "boyali", manualUnitPriceKurus: 45000 });
+  const keyed = makePart({
+    ...good,
+    manualPriceKey: partPricingKey(toPricingInputs([good])[0], "standard"),
+  });
+  assert.equal(toPricingPartInput(keyed).manualUnitPriceKurus, 45000);
+  assert.equal(toPricingPartInput(keyed).manualPriceKey, keyed.manualPriceKey);
 });
 
 let failures = 0;

@@ -619,3 +619,34 @@ export interface AdminQuoteListItem {
   expired: boolean;
   orderNumber: string | null;
 }
+
+/**
+ * Admin YAZIM sonucu (manuel fiyat, hedef fiyat kararı, süre uzatma, inceleme
+ * kapatma, yeniden açma). Rotalar (`outcomeResponse`) ve karar ekranı
+ * (`successNotice`) bu şekli okur.
+ *
+ * `quoted` NEDEN AYRI BİR ALAN: "durum `quoted` olur" MUTLU YOLDUR ve her
+ * parçası fiyatlanabilen teklifte aynen öyle olur. Fiyatlanamayan bir parça
+ * kaldığında durum `quoted` OLMAZ, çünkü `recomputeQuoteCache` `total_kurus`u
+ * ancak HER parça fiyatlıyken yazar: koşulsuz bir `quoted`, "Teklifiniz hazır"
+ * e-postasıyla birlikte tutarsız (`status = quoted`, `total_kurus = NULL`) ve
+ * ÖDENEMEYEN bir teklif bırakırdı (`checkoutBlockers` ödemeyi kapalı tutar).
+ * O yüzden yazım yine kaydedilir, `quoted:false` döner ve `blockers` hangi
+ * parçanın neden fiyatsız kaldığını AYNEN müşteriye gösterilebilecek cümleyle
+ * söyler.
+ */
+export interface AdminQuoteWriteResult {
+  ok: true;
+  quoted: boolean;
+  blockers: string[];
+}
+
+/** Beklenen ret: rota bunu olduğu gibi gövdeye çevirir (`{error, code}`). */
+export interface AdminQuoteRefusal {
+  ok: false;
+  status: number;
+  code: string;
+  error: string;
+}
+
+export type AdminQuoteOutcome = AdminQuoteWriteResult | AdminQuoteRefusal;

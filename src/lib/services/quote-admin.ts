@@ -43,6 +43,9 @@ import { computeQuote } from "@/lib/config/quote-compute";
 import { partPricingKey } from "@/lib/config/quote-keys";
 import type {
   AdminQuoteListItem,
+  AdminQuoteOutcome,
+  AdminQuoteRefusal,
+  AdminQuoteWriteResult,
   AnalysisStatus,
   ComputedPart,
   DfmIssue,
@@ -86,22 +89,14 @@ export class AdminQuoteError extends Error {
 }
 
 /**
- * Yazma sonucu.
- *
- * `quoted` alanı "müşterinin ödeyebileceği bir teklif çıktı mı" sorusunun
- * cevabıdır: brief'in mutlu yolu (durum `quoted`) ancak HER parça fiyatlıyken
- * gerçekleşir. `blockers` eksik kalan parçaları adıyla sayar, böylece admin
- * ekranda ne yapacağını görür.
+ * Yazma sonucu — şekil SÖZLEŞME dosyasında durur
+ * (`src/lib/config/quote-types.ts`), çünkü onu rotalar ve karar ekranı da
+ * okuyor: `quoted` alanı "müşterinin ödeyebileceği bir teklif çıktı mı"
+ * sorusunun cevabıdır ve mutlu yol (durum `quoted`) ancak HER parça
+ * fiyatlıyken gerçekleşir. `blockers` eksik kalan parçaları adıyla sayar.
+ * Gerekçesi ve ölçümü: `quote-types.ts` → `AdminQuoteWriteResult`.
  */
-export interface AdminQuoteWriteResult {
-  ok: true;
-  quoted: boolean;
-  blockers: string[];
-}
-
-export type AdminQuoteOutcome =
-  | AdminQuoteWriteResult
-  | { ok: false; status: number; code: string; error: string };
+export type { AdminQuoteOutcome, AdminQuoteRefusal, AdminQuoteWriteResult };
 
 /** Beklenen retleri değere çevirir; geri kalanı olduğu gibi yukarı bırakır. */
 export async function adminQuoteOutcome(
@@ -931,7 +926,18 @@ function priceSnapshot(parts: QuotePart[]) {
   }));
 }
 
-/** Yazımdan sonraki her şey: bildirim, canlı olay, admin rozeti. */
+/**
+ * Yazımdan sonraki her şey: bildirim, canlı olay, admin rozeti.
+ *
+ * BURADA VERİTABANI YAZIMI YOKTUR ve olmamalıdır. Önbellek yeniden hesabı
+ * (`recomputeQuoteCache`) bilerek çağıranın İŞLEMİNDE yapılır, commit'ten
+ * sonra değil: `recomputeQuoteCache` `tx` almadan kendi işlemini açar, yani
+ * commit ile hesap arasında satır `status = 'quoted'` + `total_kurus = NULL`
+ * görünür (ölçüldü) — o pencerede müşteri "Fiyatlandı" ama ödenemez bir
+ * teklif görür, denetim satırının `after.totalKurus`'u da satırla çelişir.
+ * Süreç pencerede ölürse bu hâl KALICI olur. `tx` parametresi tam bu çağıran
+ * biçimi için var (`quote-cache.ts`).
+ */
 function afterCommit(args: {
   quoteId: string;
   userId: string | null;
@@ -991,11 +997,18 @@ async function applyManualPrices(
 
 /**
  * Fiyatlama yazımının ortak kuyruğu: yeniden hesapla, SONUCA göre durumu
- * belirle, denetim satırını yaz.
+ * belirle, denetim satırını yaz — ÜÇÜ DE AYNI İŞLEMDE.
  *
  * Durum ancak HER parça fiyatlıyken `quoted` olur (kural 4): "teklifiniz
  * hazır" diyen bir bildirimin ardından ödeme düğmesinin kapalı olması,
- * müşteriye yalan söylemektir.
+ * müşteriye yalan söylemektir. Ölçüm (QA Postgres): koşulsuz `quoted`
+ * yazıldığında satır `status = 'quoted'` + `total_kurus = NULL` kalıyor,
+ * "Teklifiniz hazır" e-postası gidiyor ve `checkoutBlockers` ödemeyi yine
+ * kapalı tutuyor ("1 parça manuel fiyat bekliyor.").
+ *
+ * Yeniden hesabın burada (işlemin içinde) olmasının gerekçesi `afterCommit`
+ * başlığında; kısaca: commit'ten sonra çağrılan bir hesap, arada
+ * "fiyatlandı ama tutarsız" bir pencere bırakır.
  */
 async function finishPricing(
   ctx: WriteContext,

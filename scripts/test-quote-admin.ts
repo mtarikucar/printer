@@ -38,6 +38,7 @@ import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import {
   QUOTE_STATUSES,
   REVIEW_KINDS,
+  type AdminQuoteOutcome,
   type PartConfig,
   type QuoteStatus,
   type ReviewKind,
@@ -695,6 +696,65 @@ async function main() {
       /Teklif fiyatlandı; müşteriye bildirim gönderildi/,
       "fiyat cümlesi yine yedi düğmeye ortak"
     );
+  });
+
+  await test("önbellek yeniden hesabı YAZIMLA AYNI işlemde koşar (commit sonrası ikinci işlem yok)", () => {
+    // Ölçüldü (QA Postgres): hesap commit'ten SONRA çağrılırsa arada satır
+    // `status='quoted'` + `total_kurus=NULL` görünür ve denetim satırının
+    // `after.totalKurus`'u satırla çelişir; süreç o pencerede ölürse hâl
+    // KALICI olur. `recomputeQuoteCache` `tx` almadan KENDİ işlemini açar
+    // (`quote-cache.ts`), bu yüzden her çağrı çağıranın işlemini taşımalı.
+    const service = read("src/lib/services/quote-admin.ts");
+    const calls = [...service.matchAll(/recomputeQuoteCache\(([^)]*)\)/g)].map((m) => m[1]);
+    assert.ok(calls.length >= 4, `beklenen çağrı sayısı bulunamadı: ${calls.length}`);
+    for (const args of calls) {
+      assert.match(args, /,\s*(ctx\.)?tx\s*$/, `işlemsiz yeniden hesap: recomputeQuoteCache(${args})`);
+    }
+    // `afterCommit` yalnız bildirim/olay yayar: oraya düşen bir DB yazımı,
+    // yukarıdaki pencerenin ta kendisidir.
+    const after = service.match(/function afterCommit\([\s\S]*?\n}\n/)?.[0] ?? "";
+    assert.ok(after.length > 0, "afterCommit gövdesi bulunamadı");
+    assert.doesNotMatch(after, /recomputeQuoteCache|\btx\b|db\.transaction|\.update\(|\.insert\(/);
+  });
+
+  await test("durum 'quoted' YALNIZ her parça fiyatlıyken yazılır, bildirim de ona bağlı", () => {
+    // Ölçüldü (QA Postgres): koşulsuz `quoted` yazıldığında satır
+    // `status='quoted'` + `total_kurus=NULL` kalıyor ("hepsi fiyatlı değil"
+    // demek), "Teklifiniz hazır" e-postası gidiyor ve `checkoutBlockers`
+    // ödemeyi yine kapalı tutuyor: müşteri ödeyemediği bir "Fiyatlandı"
+    // teklif görüyor.
+    const service = read("src/lib/services/quote-admin.ts");
+    const finish = service.match(/async function finishPricing\([\s\S]*?\n}\n/)?.[0] ?? "";
+    assert.ok(finish.length > 0, "finishPricing gövdesi bulunamadı");
+    assert.match(
+      finish.replace(/\s+/g, " "),
+      /if \(allPriced\) \{ await ctx\.tx \.update\(quotes\) \.set\(\{ status: "quoted"/,
+      "durum yazımı allPriced kapısının ARKASINDA değil"
+    );
+    assert.match(
+      service,
+      /notify: result\.quoted \? \(\) => notifyManualQuoteReady/,
+      "'Teklifiniz hazır' bildirimi fiyatlı olmaya bağlı değil"
+    );
+  });
+
+  await test("yazım sonucu sözleşmesi SÖZLEŞME dosyasında (quote-types.ts) durur", () => {
+    // `{ok:true; quoted; blockers}` brief'in `{ok:true}`sinin üst kümesi ve
+    // üç tüketicisi var (rotalar, karar ekranı, testler): şekli servise
+    // gömmek, sözleşmeyi görünmez bir yan etki yapardı.
+    const types = read("src/lib/config/quote-types.ts");
+    assert.match(types, /export interface AdminQuoteWriteResult \{[\s\S]*?quoted: boolean;[\s\S]*?blockers: string\[\];/);
+    assert.match(types, /export type AdminQuoteOutcome =/);
+    const service = read("src/lib/services/quote-admin.ts");
+    assert.doesNotMatch(
+      service,
+      /export interface AdminQuoteWriteResult/,
+      "sözleşme serviste yeniden tanımlanmış (iki kaynak)"
+    );
+    assert.match(service, /AdminQuoteWriteResult,?\n?/, "servis sözleşmeyi kullanmıyor");
+    // Tip düzeyinde de bağlanır (tsc bu dosyayı da derler).
+    const sample: AdminQuoteOutcome = { ok: true, quoted: false, blockers: ["P01 Parça: fiyat yok"] };
+    assert.equal(sample.ok, true);
   });
 
   await test("liste sayfası sekmeyi doğrular ve sayfalamayı pageSize+1 ile okur", () => {

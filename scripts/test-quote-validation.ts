@@ -391,6 +391,60 @@ async function main() {
     assert.equal((await readStagedRange(id, 50, 4)).length, 0);
   });
 
+  console.log("\nupload-large-file — 413'ün iki anlamı");
+
+  const { uploadLargeFile } = await import("../src/lib/upload-large-file");
+
+  /**
+   * `fetch`i sahteler: PUT sahneleme açar, her POST `reply(n)` ile yanıtlanır.
+   * Dönen dizi çağrıların fiillerini taşır — kaç deneme yapıldığı budur.
+   */
+  async function driveUpload(
+    reply: (postIndex: number) => Response
+  ): Promise<{ calls: string[]; error: Error | null }> {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async (_input: unknown, init?: { method?: string }) => {
+      const method = init?.method ?? "GET";
+      calls.push(method);
+      if (method === "PUT") {
+        return Response.json({ uploadId: "u".repeat(24), chunkSize: 8 * 1024 * 1024 });
+      }
+      return reply(posts++);
+    }) as typeof globalThis.fetch;
+    try {
+      await uploadLargeFile(new File([new Uint8Array(1024)], "buyuk.stl"));
+      return { calls, error: null };
+    } catch (err) {
+      return { calls, error: err as Error };
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  await test("413 + size_exceeded TEK denemede durur, sunucunun cümlesini gösterir", async () => {
+    const { calls, error } = await driveUpload(() =>
+      Response.json(
+        { error: "Dosya bildirilen boyutu aştı.", code: "size_exceeded" },
+        { status: 413 }
+      )
+    );
+    assert.equal(error?.message, "Dosya bildirilen boyutu aştı.");
+    // Dört deneme + üç geri çekilme beklemesi değil: TEK POST.
+    assert.deepEqual(calls, ["PUT", "POST"], `POST ${calls.length - 1} kez denendi`);
+  });
+
+  await test("413 + chunk_too_large parçayı küçültüp DEVAM eder", async () => {
+    const { calls, error } = await driveUpload((i) =>
+      i === 0
+        ? Response.json({ error: "Yükleme parçası çok büyük.", code: "chunk_too_large" }, { status: 413 })
+        : Response.json({ size: 1024 })
+    );
+    assert.equal(error, null, `yükleme düştü: ${error?.message}`);
+    assert.deepEqual(calls, ["PUT", "POST", "POST"], "vekil 413'ü artık uyarlanmıyor");
+  });
+
   console.log(
     failures === 0
       ? "\n✅ quote-validation: tüm kontroller geçti"

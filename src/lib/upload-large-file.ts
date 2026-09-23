@@ -88,6 +88,9 @@ export async function uploadLargeFile(
     let attempt = 0;
     for (;;) {
       attempt++;
+      // Gövde BİR KEZ okunur; 413 dalı onu tüketirse son çare mesajı da aynı
+      // çözümlenmiş gövdeden okunmalı, yoksa "bağlantı koptu" der geçer.
+      let consumed: { error?: string; code?: string } | null = null;
       const res = await fetch(
         `/api/uploads/chunk?uploadId=${encodeURIComponent(uploadId)}&offset=${offset}`,
         { method: "POST", body: blob, signal }
@@ -112,10 +115,27 @@ export async function uploadLargeFile(
           break;
         }
       }
-      if (res && res.status === 413 && chunkSize > MIN_CHUNK_SIZE) {
-        chunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(chunkSize / 2));
-        reslice = true;
-        break; // retry this offset with the smaller chunk
+      if (res && res.status === 413) {
+        consumed = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+        // 413'ün İKİ anlamı var. `chunk_too_large` (ya da gövdesiz bir vekil
+        // 413'ü) "parçan büyük" der — küçültüp devam ederiz. `size_exceeded`
+        // ise "DOSYA bildirilen boyutu aştı" der; parçayı küçültmek bunu
+        // düzeltmez, yalnız aynı reddi dört kez tekrarlayıp müşteriye
+        // "bağlantı koptu" yazar. Orada hemen durup sunucunun cümlesini
+        // gösteriyoruz.
+        if (consumed.code === "size_exceeded") {
+          throw new UploadError(
+            String(consumed.error || "Dosya bildirilen boyutu aştı."),
+            413,
+            false,
+            consumed
+          );
+        }
+        if (chunkSize > MIN_CHUNK_SIZE) {
+          chunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(chunkSize / 2));
+          reslice = true;
+          break; // retry this offset with the smaller chunk
+        }
       }
       if (res && res.status === 404) {
         throw new UploadError(
@@ -124,10 +144,9 @@ export async function uploadLargeFile(
         );
       }
       if (attempt >= MAX_CHUNK_ATTEMPTS) {
-        const message =
-          (res && (await res.json().catch(() => ({}))).error) ||
-          "Parça gönderilemedi — bağlantı koptu.";
-        throw new UploadError(String(message), res?.status ?? 0);
+        const body = consumed ?? (res ? await res.json().catch(() => ({})) : {});
+        const message = (body as { error?: string }).error || "Parça gönderilemedi — bağlantı koptu.";
+        throw new UploadError(String(message), res?.status ?? 0, false, body);
       }
       // Back off a little before retrying the same chunk.
       await new Promise((r) => setTimeout(r, 400 * attempt));

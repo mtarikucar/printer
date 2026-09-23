@@ -14,7 +14,9 @@
  * Çalıştırma: npx tsx scripts/test-quote-cutover.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import Module from "node:module";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -258,5 +260,98 @@ test("hesap bağlantıları bayrak kapalıyken 404'e götürmez", async () => {
     assert.match(html, /href="\/account\/parcalar"/, `${variant}: Parça kütüphanem yok`);
     assert.ok(html.includes(tr["instantQuote.account.quotes.title"]));
     assert.ok(html.includes(tr["instantQuote.account.parts.title"]));
+  }
+});
+
+// ─── `/api/uploads/chunk` misafir kapısı ────────────────────────────────────
+//
+// Bu uç dalın EN BÜYÜK geçiş riskidir. Dal öncesinde (5a46616) her fiil
+// oturumsuz çağırana 401 dönüyordu; dal onu "misafir de sahneleyebilir"e
+// çevirdi ama BAYRAĞA bağlamadı. Yani `instant_quote_enabled` hiç açılmadan,
+// yalnız birleştirmeyle, canlı sitede kimliksiz bir "diske yaz" ucu doğardı.
+//
+// Gerçek istek kurmak burada pahalı (next-auth + üretici/boyacı çerezleri +
+// Redis), bu yüzden kapı KAYNAKTAN pinlenir: üç misafir dalı da aynı bayrak
+// kapısından geçmeli ve kapı zaman aşımında KAPALI saymalı.
+const chunkRouteSource = readFileSync(
+  join(import.meta.dirname, "..", "src/app/api/uploads/chunk/route.ts"),
+  "utf8"
+);
+
+/** `async function <ad>(` gövdesini sütun-0 kapanışına kadar alır. */
+function chunkRouteFn(name: string): string {
+  const start = chunkRouteSource.indexOf(`async function ${name}(`);
+  assert.ok(start >= 0, `${name} bulunamadı`);
+  const rest = chunkRouteSource.slice(start);
+  const end = rest.indexOf("\n}");
+  assert.ok(end > 0, `${name} gövdesi kapanmadı`);
+  return rest.slice(0, end);
+}
+
+test("bayrak KAPALIYKEN misafir sahnelemesi 401 — üç fiil de kapıdan geçer", () => {
+  assert.match(
+    chunkRouteSource,
+    /quoteApiEnabled[\s\S]*?from "@\/lib\/services\/quote-access"/,
+    "kapı paylaşılan `quoteApiEnabled` yerine kendi kopyasını kullanıyor"
+  );
+  const gate = chunkRouteFn("guestSurfaceEnabled");
+  assert.match(gate, /quoteApiEnabled/, "misafir kapısı bayrağa bakmıyor");
+  assert.match(gate, /GUEST_GATE_CLOSED/, "zaman aşımı kapalı tarafa düşmüyor");
+  assert.match(
+    chunkRouteSource,
+    /const GUEST_GATE_CLOSED = false;/,
+    "kapının zaman aşımı tarafı `false` değil"
+  );
+  for (const handler of ["handlePUT", "handlePOST", "handleGET"]) {
+    assert.match(
+      chunkRouteFn(handler),
+      /guestSurfaceEnabled\(\)\)\) return unauthorized\(\)/,
+      `${handler}: misafir dalı bayrak kapısından geçmiyor`
+    );
+  }
+});
+
+// Aynı gerekçe teknik çizim ucunda: `partId` depolama yoluna giriyor, ve bir
+// istek gövdesi (20 MB PDF) kurup çalıştırmak buradaki en pahalı iş olurdu.
+// Ucun İKİ kapısı kaynaktan pinlenir — biçim kontrolü gövdeden ÖNCE, ve POST'un
+// kardeşi (`parts/route.ts`) gibi bir oran limiti var.
+test("teknik çizim ucu parça kimliğini GÖVDEDEN ÖNCE doğrular", () => {
+  const drawingRoute = readFileSync(
+    join(import.meta.dirname, "..", "src/app/api/quotes/[id]/parts/[partId]/drawing/route.ts"),
+    "utf8"
+  );
+  assert.match(
+    drawingRoute,
+    /UUID_RE[\s\S]*?from "@\/lib\/services\/quote-access"/,
+    "uç kendi uuid kopyasını taşıyor"
+  );
+  const guard = "if (!UUID_RE.test(partId)) return quoteNotFound();";
+  assert.equal(
+    drawingRoute.split(guard).length - 1,
+    3,
+    "POST/DELETE/GET üçünde de kimlik kapısı yok"
+  );
+  // Kapı `formData()` çağrısından ÖNCE gelmeli.
+  assert.ok(
+    drawingRoute.indexOf(guard) < drawingRoute.indexOf("request.formData()"),
+    "kimlik kapısı gövde okunduktan sonra"
+  );
+  assert.match(drawingRoute, /rateLimitAsync\(\s*`quote:drawing:ip:/, "POST'ta oran limiti yok");
+});
+
+test("sahneleme sahipliği oturum TÜRÜNE göre atlanmaz", () => {
+  // Karşılaştırmayı `if (anonymousId && …)` içine koymak, elinde bir yükleme
+  // kimliği olan HERHANGİ bir girişli çağıranı başkasının sahnelemesine
+  // yazabilir hâle getirir. Kimlik 24 karakterlik bir nanoid olduğu için bugün
+  // erişilemiyor; asimetriyi kaynakta kapatmak bir refactor uzaklıkta.
+  for (const handler of ["handlePOST", "handleGET"]) {
+    const body = chunkRouteFn(handler);
+    assert.match(body, /const expected = owner \?\?/, `${handler}: beklenen sahip hesaplanmıyor`);
+    assert.match(body, /meta\?\.owner !== expected/, `${handler}: sahiplik karşılaştırması yok`);
+    assert.doesNotMatch(
+      body,
+      /if \(anonymousId[^\n]*\bmeta\b/,
+      `${handler}: sahiplik kontrolü hâlâ misafir koşulunun içinde`
+    );
   }
 });

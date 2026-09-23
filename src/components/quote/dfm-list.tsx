@@ -71,7 +71,9 @@ export function dfmMessage(
     );
   }
   if (issue.params?.fitScale !== undefined) {
-    extra.push(fill(d["instantQuote.dfm.too_large.fitScale"], params));
+    // Parametrenin adı `fitScale`, cümledeki yer tutucu `{scale}`: eşlemeyi
+    // yapmazsak müşteri "Ölçeği {scale} yaparsanız sığar." okur.
+    extra.push(fill(d["instantQuote.dfm.too_large.fitScale"], { scale: params.fitScale }));
   }
   return [base, ...extra].join(" ");
 }

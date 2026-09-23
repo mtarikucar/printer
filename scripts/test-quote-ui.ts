@@ -21,6 +21,7 @@ import { LocaleProvider } from "../src/lib/i18n/locale-context";
 import { PriceGateModal } from "../src/components/quote/price-gate-modal";
 import { QuotePartCard } from "../src/components/quote/part-card";
 import { QuoteBulkBar } from "../src/components/quote/bulk-bar";
+import { dfmMessage } from "../src/components/quote/dfm-list";
 import {
   QuoteWorkspaceClient,
   groupPartsByTechnology,
@@ -542,6 +543,43 @@ test("katalogdan düşen malzeme parçayı malzeme seçimine yönlendirir", () =
   const html = renderPartCard(part, quoteFixture({ parts: [part] }));
   assert.match(html, /malzeme seçin/i);
   assert.match(html, /Özellikleri düzenle/);
+});
+
+test("baskı hacmine sığmayan parça çözümü rakamla söyler", () => {
+  // `quote-dfm.ts` parametreyi `fitScale` / `fitsTechnology` adıyla üretiyor,
+  // sözlük cümleleri `{scale}` / `{technology}` bekliyor: eşleme kopunca
+  // müşteri ekranda yer tutucunun kendisini okur.
+  const message = dfmMessage(
+    tr,
+    {
+      code: "too_large",
+      severity: "error",
+      params: { maxX: 250, maxY: 210, maxZ: 210, fitScale: 0.75, fitsTechnology: "sla" },
+    },
+    catalogFixture
+  );
+  assert.match(message, /250 × 210 × 210 mm/);
+  assert.match(message, /Ölçeği 0,75 yaparsanız sığar\./);
+  assert.match(message, /SLA ile basılabilir\./, "teknoloji ANAHTARI adına çevrilmemiş");
+  assert.doesNotMatch(message, /\{\w+\}/, "cümlede doldurulmamış yer tutucu kaldı");
+});
+
+test("teklif toplamı sınırı aşınca fiyatsız izleyiciye yer tutucu kalmaz", () => {
+  // Fiyat kapısı kapalıyken `maxTotalKurus` gövdeye HİÇ girmiyor; cümle
+  // tutarı anmadan kurulmalı.
+  const gated = dfmMessage(tr, {
+    code: "qty_over_auto",
+    severity: "error",
+    params: { reason: "total" },
+  });
+  assert.doesNotMatch(gated, /\{maxTotal\}/);
+  assert.doesNotMatch(gated, /₺/);
+  const open = dfmMessage(tr, {
+    code: "qty_over_auto",
+    severity: "error",
+    params: { reason: "total", maxTotalKurus: 5000000 },
+  });
+  assert.match(open, /50\.000,00/);
 });
 
 test("parçalar teknolojiye göre katalog sırasıyla gruplanır", () => {

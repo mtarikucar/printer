@@ -22,6 +22,7 @@ import { PriceGateModal } from "../src/components/quote/price-gate-modal";
 import { QuotePartCard } from "../src/components/quote/part-card";
 import { QuoteBulkBar } from "../src/components/quote/bulk-bar";
 import { dfmMessage } from "../src/components/quote/dfm-list";
+import { validateQuoteFiles } from "../src/components/quote/dropzone";
 import {
   QuoteWorkspaceClient,
   groupPartsByTechnology,
@@ -543,6 +544,32 @@ test("katalogdan düşen malzeme parçayı malzeme seçimine yönlendirir", () =
   const html = renderPartCard(part, quoteFixture({ parts: [part] }));
   assert.match(html, /malzeme seçin/i);
   assert.match(html, /Özellikleri düzenle/);
+});
+
+test("dosya elemesi uzantıyı, boyutu ve parça tavanını Türkçe anlatır", () => {
+  // Tarayıcı kontrolü bir KOLAYLIK (uç aynı kuralları yeniden uygular); işi
+  // müşteriye saniyesinde söylemek. Sığan dosyalar elenenlerden etkilenmez.
+  const file = (name: string, size: number) =>
+    ({ name, size }) as unknown as File;
+  const { accepted, errors } = validateQuoteFiles(
+    [
+      file("govde.stl", 1_000),
+      file("cizim.step", 1_000),
+      file("dev.obj", 200 * 1024 * 1024),
+      file("kapak.3mf", 2_000),
+      file("taban.stl", 3_000),
+    ],
+    { maxFileBytes: 100 * 1024 * 1024, maxParts: 2, currentCount: 0, d: tr }
+  );
+  assert.deepEqual(
+    accepted.map((f) => f.name),
+    ["govde.stl", "kapak.3mf"]
+  );
+  assert.deepEqual(errors, [
+    "cizim.step: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
+    "dev.obj: dosya 100 MB sınırını aşıyor.",
+    "Bir teklifte en fazla 2 parça olabilir.",
+  ]);
 });
 
 test("baskı hacmine sığmayan parça çözümü rakamla söyler", () => {

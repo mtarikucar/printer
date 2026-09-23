@@ -422,7 +422,6 @@ function renderWorkspace(quote: PresentedQuote, shareToken: string | null = null
 function renderPartCard(part: PresentedPart, quote: PresentedQuote): string {
   return inLocale(
     createElement(QuotePartCard, {
-      quoteId: quote.id,
       part,
       catalog: quote.catalog,
       viewer: quote.viewer,

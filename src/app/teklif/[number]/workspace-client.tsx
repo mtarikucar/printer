@@ -431,7 +431,6 @@ export function QuoteWorkspaceClient({
                   {group.parts.map((part) => (
                     <QuotePartCard
                       key={part.id}
-                      quoteId={quoteId}
                       part={part}
                       catalog={catalog}
                       viewer={{ ...viewer, canEdit }}

@@ -30,7 +30,6 @@ import { QuotePriceBreakTable } from "./price-break-table";
  */
 
 export interface QuotePartCardProps {
-  quoteId: string;
   part: PresentedPart;
   catalog: PresentedCatalog;
   viewer: QuoteViewer;

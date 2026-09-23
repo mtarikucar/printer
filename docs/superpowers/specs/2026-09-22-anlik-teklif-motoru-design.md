@@ -5,6 +5,15 @@
 > okuyucu + eksiksizlik eleştirmeni ile incelendi (özetler bu dosyanın sonundaki
 > "Kaynak notları"nda). Bu belge hem tasarım hem uygulama sözleşmesidir.
 
+**Durum — 2026-09-23 (Faz 7.1 ile tamamlandı):** bütün fazlar uygulandı;
+`instant_quote_enabled` varsayılan **KAPALI**, yani dağıtım tek başına hiçbir müşteri
+yüzeyini değiştirmez. Bayrak `/admin/ayarlar`'dan açıldığı an: `/create?path=upload`
+eski akışı `/3d-baski`'ya yönlendirir, yol seçicinin yükleme kartı ile üst menü, footer
+ve hesap menüsü bağlantıları anlık teklif motoruna döner (hepsi tek bir çalışma zamanı
+sondası paylaşır: `GET /api/quotes/catalog`). Bayrağı geri kapatmak bu yüzeylerin
+hepsini gizler ve veriyi olduğu gibi bırakır. Şemayı geri almak (`0064 … down.sql`) ise
+denetim satırı yüzünden reddedilebilir — operatör notu: `scripts/db/README.md`.
+
 ## Amaç
 
 Xometry'nin Anlık Fiyat Motoru'nun (IQE) 3D baskıya düşen bütün müşteri akışını
@@ -578,6 +587,13 @@ saklama süpürücüsü.
   `path-selector` bağlantıları bayrağa göre. Eski `/quote/[id]` ve `/api/upload/model`
   çalışmaya devam eder (geometri düzeltmesi sayesinde); en son `quoteExpiresAt`
   geçince arşivlenir.
+- Yönlendirme ÇALIŞMA ZAMANINDA verilir, `next.config` yönlendirmesiyle değil: o
+  derleme anında sabitlenir ve admin panelinden çevrilen bayrağı izleyemez. Karar tek
+  bir istemci sondasından gelir (`src/lib/quote/instant-quote-flag.ts` → `GET
+  /api/quotes/catalog`, bayrak kapalıyken 404 dönmeyen tek uç). Sonuç modül düzeyinde
+  paylaşılır: aynı sayfadaki dört yüzey (üst menü, footer, yol seçici, eski akış) tek
+  istek atar. Uç cevabı İZLEYİCİYE göre olduğu için (`quoteApiEnabled`) admin, bayrak
+  kapalıyken de bağlantıları görür; normal müşteri 404'e götüren bağlantı görmez.
 
 ## Eski akış düzeltmeleri (Faz 0, bağımsız)
 

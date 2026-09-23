@@ -51,3 +51,33 @@ git add drizzle/ && git commit             # commit SQL + journal + snapshot
 
 Do **not** reintroduce `drizzle-kit push` in the deploy. `scripts/db/prod-sync-hotfix.sql`
 is a one-time catch-up tool, not part of the ongoing pipeline.
+
+## Rolling back 0064 (instant quote engine)
+
+`drizzle/0064_instant_quotes.down.sql` is applied **by hand** (`psql "$DATABASE_URL" -f …`),
+never by the migrate service: it is not in the journal, and any newer migration must be
+rolled back first.
+
+It refuses to run when **any** of `quotes`, `quote_checkouts`, `quote_parts`,
+`quote_messages`, `quote_admin_actions` or `print_catalog_changes` holds a row, and exits
+with `0064 rollback refused: <table> contains quote or catalog history`. Nothing is dropped
+in that case — the whole script is one transaction.
+
+Read that list carefully before planning a rollback window: **`print_catalog_changes` is an
+audit table, and a single catalogue edit in `/admin/baski-katalogu` puts a row in it.** So a
+day of internal testing with the flag off is enough to make the down script refuse forever.
+That is the intended design — the script never deletes operator or customer data on its own.
+
+If the rollback is still wanted, the operator removes the audit history **deliberately**,
+after exporting it:
+
+```bash
+psql "$DATABASE_URL" -c "\copy print_catalog_changes TO 'print_catalog_changes-$(date +%F).csv' CSV HEADER"
+psql "$DATABASE_URL" -c "DELETE FROM print_catalog_changes;"   # audit trail only; the seed lives in the catalogue tables
+psql "$DATABASE_URL" -f drizzle/0064_instant_quotes.down.sql
+```
+
+There is **no** such shortcut for the other five tables: those are customer data (quotes,
+their parts, files, messages, payment attempts). Once a real quote exists, 0064 is not
+reversible — turn `instant_quote_enabled` off in `/admin/ayarlar` instead, which hides every
+new surface (the pages 404 for non-admins) and leaves the data intact.

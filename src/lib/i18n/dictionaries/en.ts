@@ -1053,6 +1053,10 @@ const en = {
   "instantQuote.checkout.versionMismatch":
     "The quote changed while you were on this page. Refresh to see the current total.",
 
+  // instantQuote — cutover from the legacy upload flow (flag on)
+  "instantQuote.cutover.cta": "Open instant quoting",
+  "instantQuote.cutover.title": "Taking you to instant quoting…",
+
   // instantQuote — DfM (manufacturability) messages; the code and its params
   // come from `quote-dfm.ts`, the sentence is built HERE.
   "instantQuote.dfm.ack": "I have read the warnings",

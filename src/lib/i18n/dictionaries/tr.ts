@@ -1054,6 +1054,10 @@ const tr: Dictionary = {
   "instantQuote.checkout.versionMismatch":
     "Teklif siz ödeme sayfasındayken değişti. Güncel tutarı görmek için sayfayı yenileyin.",
 
+  // instantQuote — eski yükleme akışından geçiş (bayrak açıkken)
+  "instantQuote.cutover.cta": "Anlık teklif sayfasını aç",
+  "instantQuote.cutover.title": "Sizi anlık teklif sayfasına götürüyoruz…",
+
   // instantQuote — DfM (üretilebilirlik) mesajları; kod + parametreler
   // `quote-dfm.ts`'ten gelir, cümle BURADA kurulur.
   "instantQuote.dfm.ack": "Uyarıları okudum",

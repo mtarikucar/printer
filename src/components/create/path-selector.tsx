@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { SiteHeader } from "@/components/site-header";
+import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
 
 // Three entry paths by INPUT type, all live:
 //  - photo: a photo of a person/pet/object → 3D (the design template is chosen
@@ -23,6 +24,12 @@ function hideOnError(e: React.SyntheticEvent<HTMLImageElement>) {
 
 export function CreatePathSelector() {
   const d = useDictionary();
+  // Faz 7.1 — GEÇİŞ: bayrak açıkken "hazır modelim var" yolu doğrudan anlık
+  // teklif motoruna gider. Kart metni aynı kalır (müşterinin sorusu değişmedi),
+  // yalnız hedef değişir; bayrak kapalıyken eski akış yerinde durur.
+  const instantQuoteEnabled = useInstantQuoteEnabled();
+  const hrefFor = (path: (typeof PATHS)[number]) =>
+    path.key === "upload" && instantQuoteEnabled === true ? "/3d-baski" : path.href;
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -47,7 +54,7 @@ export function CreatePathSelector() {
           {PATHS.map((p) => (
             <Link
               key={p.key}
-              href={p.href}
+              href={hrefFor(p)}
               className="group card relative flex flex-col overflow-hidden p-0 transition-transform hover:-translate-y-1"
             >
               <div className="aspect-[16/10] w-full overflow-hidden bg-gradient-to-br from-green-50 to-bg-elevated">

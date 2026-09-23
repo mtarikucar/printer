@@ -338,6 +338,11 @@ test("üst menü figurunica:auth-changed olayında oturumu yeniden okur", async 
       "@/lib/i18n/locale-context": {
         useDictionary: () => new Proxy({}, { get: (_t, key) => String(key) }),
       },
+      // Anlık teklif bayrağının sondası da bir hook: `react` taklidi yalnız
+      // site-header'ın KENDİ import'unu değiştirdiği için, başka modülden gelen
+      // hook gerçek React'i çağırır ve render'sız ortamda patlar. Bu testin
+      // konusu oturum tazelemesi; bayrak kapalı varsayılır (menü eski hâlinde).
+      "@/lib/quote/instant-quote-flag": { useInstantQuoteEnabled: () => false },
     },
     {
       window: fakeWindow,

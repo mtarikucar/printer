@@ -15,6 +15,7 @@ import {
   buildWhatsAppUrl,
 } from "@/lib/config/contact";
 import { SOCIAL_LINKS } from "@/lib/config/business-identity";
+import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
 
 const s = (key: string) => (styles as Record<string, string>)[key] ?? "";
 const cx = (...names: Array<string | false | null | undefined>) =>
@@ -562,6 +563,8 @@ export function CtaBand({ d }: { d: FigurunicaDict }) {
 }
 
 export function FigFooter({ d }: { d: FigurunicaDict }) {
+  const instantQuoteEnabled = useInstantQuoteEnabled();
+
   return (
     <footer className={s("footer")}>
       <div className={s("footer-top")}>
@@ -645,9 +648,15 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
         <Link href="/toplu-siparis" className={s("footer-link")}>
           {d["landing.fig.footer.nav.bulk"]}
         </Link>
-        <Link href="/3d-baski" className={s("footer-link")}>
-          {d["instantQuote.nav.link"]}
-        </Link>
+        {/* Bayrak kapalıyken footer bu bağlantıyı VERMEZ: sayfa açılıyor ama
+            ziyaretçiye "Yakında" diyor, yükleyicisi yok. Bayrak çevrildiği an
+            bağlantı kendiliğinden geri gelir (sonda çalışma zamanında sorar).
+            Sayfanın kendisi site haritasında kalmaya devam eder. */}
+        {instantQuoteEnabled === true && (
+          <Link href="/3d-baski" className={s("footer-link")}>
+            {d["instantQuote.nav.link"]}
+          </Link>
+        )}
         <Link href="/create" className={s("footer-link")}>
           {d["landing.fig.footer.nav.create"]}
         </Link>

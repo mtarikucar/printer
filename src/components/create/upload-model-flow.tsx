@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ModelViewer } from "@/components/model-viewer";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
@@ -15,6 +16,7 @@ import {
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import { uploadLargeFile } from "@/lib/upload-large-file";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
+import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
 
 const HEIGHTS = [40, 60, 80, 120, 160];
 const MATERIALS = ["resin", "filament"] as const;
@@ -32,9 +34,19 @@ interface UploadResult {
 // server-side (/api/upload/model), then shows a 3D preview + an auto price or a
 // "needs quote" path. v1 ends at a print request (quote-bridge); the priced
 // uploadedModel feeds the order pipeline once an admin confirms.
+//
+// Faz 7.1 — GEÇİŞ: `instant_quote_enabled` açıkken bu akışın yerini anlık
+// teklif motoru alır ve ziyaretçi `/3d-baski`'ya taşınır. Karar ÇALIŞMA
+// ZAMANINDA verilir (bayrak admin panelinden çevrilir), bu yüzden yönlendirme
+// bileşenin içinde durur; derleme anında sabitlenen bir `next.config`
+// yönlendirmesi bayrağı izleyemezdi. Bayrak kapalıyken aşağısı bire bir eski
+// akıştır. Eski `/quote/[id]` ve `/api/upload/model` KAPANMAZ: e-postayla
+// gönderilmiş bağlantılar son teklif süresi dolana kadar çalışmaya devam eder.
 export function UploadModelFlow() {
   const d = useDictionary();
   const locale = useLocale();
+  const router = useRouter();
+  const instantQuoteEnabled = useInstantQuoteEnabled();
   const turnstileRef = useRef<TurnstileRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,6 +62,12 @@ export function UploadModelFlow() {
   const [requesting, setRequesting] = useState(false);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // `replace`, `push` değil: geri düğmesi müşteriyi kapatılmış akışa geri
+  // atmamalı, yoksa iki sayfa arasında gidip gelir.
+  useEffect(() => {
+    if (instantQuoteEnabled === true) router.replace("/3d-baski");
+  }, [instantQuoteEnabled, router]);
 
   const pickFile = (file: File) => {
     const ext = file.name.toLowerCase().split(".").pop();
@@ -131,6 +149,27 @@ export function UploadModelFlow() {
       setRequesting(false);
     }
   };
+
+  // Yönlendirme sürerken ESKİ FORM ÇİZİLMEZ: bir an için görünen dosya seçici,
+  // müşteriyi kapanmakta olan akışa dosya yüklemeye davet ederdi. Yönlendirme
+  // bir sebeple gerçekleşmezse elle tıklanacak bağlantı kalır.
+  if (instantQuoteEnabled === true) {
+    return (
+      <main className="min-h-screen bg-bg-base">
+        <SiteHeader />
+        <section className="mx-auto flex max-w-xl flex-col items-center gap-5 px-5 py-24 text-center">
+          <span className="h-10 w-10 animate-spin rounded-full border-4 border-green-500/20 border-t-green-500" />
+          <p className="text-text-secondary">{d["instantQuote.cutover.title"]}</p>
+          <Link
+            href="/3d-baski"
+            className="rounded-full bg-green-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-green-700"
+          >
+            {d["instantQuote.cutover.cta"]}
+          </Link>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-bg-base">

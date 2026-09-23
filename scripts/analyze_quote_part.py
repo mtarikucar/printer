@@ -106,12 +106,32 @@ DEFAULT_MAX_FACES_BODIES = 2_500_000
 # count is estimated from the BYTES first — no mesh loaded — and an oversized
 # part is refused with its own code. Raise this only together with `mem_limit`.
 DEFAULT_MAX_INPUT_FACES = 1_500_000
-# Smallest legal ASCII facet block ("facet normal … / outer loop / 3 × vertex /
-# endloop / endfacet") is ~130 bytes, so size/130 is an upper bound on faces.
-ASCII_STL_MIN_FACET_BYTES = 130
+# Binary STL: 80-byte header + uint32 facet count, then 50 bytes per facet.
+# (size - 84) // 50 is therefore a true ceiling on the facets a binary file can
+# hold, whatever its header claims and whatever trails it.
+BINARY_STL_HEADER_BYTES = 84
+BINARY_STL_FACET_BYTES = 50
+# Smallest legal ASCII facet block, written with single spaces, one-character
+# numbers and no indentation:
+#   "facet normal 0 0 0\n"  19 + "outer loop\n"  11 + 3 × "vertex 0 0 0\n"  39
+#   + "endloop\n"  8 + "endfacet\n"  9  =  86 bytes
+# (the old 130 was a guess at *typical* formatting, not a floor — at 130 a
+# compact ASCII file under-counts by ~1.5×). size // 86 is the ceiling.
+ASCII_STL_MIN_FACET_BYTES = 86
 TRIANGLE_TOKEN = b"<triangle"
-# A face line is the only line in an OBJ that starts with "f ".
-OBJ_FACE_TOKEN = b"\nf "
+# An OBJ face line starts with the token "f". It declares ONE FACE ELEMENT, not
+# one triangle: trimesh fans an n-gon into n-2 triangles while loading
+# (exchange/obj.py), so a quad mesh — the default Blender/Maya export — yields
+# twice as many triangles as face lines. Counting the lines is therefore an
+# UNDER-estimate, which is the one thing the precheck may never produce; the
+# indices on each line are counted instead (see count_obj_triangles).
+OBJ_FACE_TOKEN = b"f"
+# trimesh merges backslash continuations before parsing (`text.replace("\\\n",
+# "")`), so one face element may span several physical lines.
+OBJ_CONTINUATION = b"\\"
+# Above this the counter stops buffering a single unterminated line and folds
+# its finished tokens in, so a newline-free OBJ cannot grow the scan buffer.
+OBJ_MAX_LINE_BYTES = 4 * 1024 * 1024
 # cos(135°): steeper than 45° from the build plate, i.e. it needs support.
 OVERHANG_NORMAL_Z = -0.707
 # Faces whose highest vertex sits this deep in the bottom slab rest ON the
@@ -153,23 +173,109 @@ def limit_address_space(limit_gb: float) -> None:
         print(f"Warning: RLIMIT_AS not applied: {exc}", file=sys.stderr)
 
 
-def count_token(stream, token: bytes, limit_bytes: int) -> int:
+def count_token(stream, token: bytes, limit_bytes: int) -> int | None:
     """Occurrences of `token` in a stream, read in chunks (constant memory).
 
     The window overlap is what makes it exact across chunk boundaries.
+    `None` when the stream is longer than `limit_bytes`: a count that stopped
+    early is an UNDER-estimate, and no caller of this module may act on one.
     """
     count = 0
     overlap = b""
     read = 0
     while read < limit_bytes:
-        chunk = stream.read(XML_CHUNK_BYTES)
+        chunk = stream.read(min(XML_CHUNK_BYTES, limit_bytes - read))
         if not chunk:
-            break
+            return count
         read += len(chunk)
         window = overlap + chunk
         count += window.count(token)
         overlap = window[-(len(token) - 1) :]
-    return count
+    return None if stream.read(1) else count
+
+
+def count_obj_triangles(stream, limit_bytes: int) -> int | None:
+    """Upper bound on the triangles an OBJ yields AFTER triangulation.
+
+    Every `f` line is one face element with k vertex references, which trimesh
+    fans into k-2 triangles, so the bound is Σ max(1, k-2) — not the number of
+    face lines (a quad mesh is exactly 2× that). Backslash continuations are
+    folded the way trimesh folds them, and only the token count is carried
+    across lines, so memory stays constant on any input.
+
+    `None` when the stream is longer than `limit_bytes` (see `count_token`).
+    """
+    total = 0
+    tail = b""
+    read = 0
+    # State of the logical line being assembled across continuations.
+    open_line = False  # previous physical line ended with a backslash
+    is_face = False  # …and that logical line is an `f` line
+    tokens = 0  # whitespace-separated tokens seen on it so far, `f` included
+
+    def fold(part: bytes, *, continued: bool) -> int:
+        """Fold one piece of a logical line in; returns triangles completed."""
+        nonlocal open_line, is_face, tokens
+        if open_line:
+            if is_face:
+                tokens += len(part.split())
+        else:
+            # Only `f` lines are split: a 1M-vertex file must not pay for it.
+            stripped = part.lstrip()
+            is_face = stripped[:1] == OBJ_FACE_TOKEN and (
+                len(stripped) == 1 or stripped[1:2].isspace()
+            )
+            tokens = len(stripped.split()) if is_face else 0
+        if continued:
+            open_line = True
+            return 0
+        open_line = False
+        if not is_face:
+            return 0
+        is_face = False
+        # tokens = "f" + k references ⇒ k - 2 triangles, never below 1 so a
+        # malformed line still counts as geometry rather than as nothing.
+        return max(1, tokens - 3)
+
+    def consume(line: bytes) -> int:
+        """One physical line, its backslash continuation folded as trimesh's."""
+        if line.endswith(b"\r"):
+            line = line[:-1]
+        continued = line.endswith(OBJ_CONTINUATION)
+        return fold(line[:-1] if continued else line, continued=continued)
+
+    while True:
+        if read >= limit_bytes:
+            # Past the cap: only a file that ends exactly here is countable.
+            if stream.read(1):
+                return None
+            break
+        chunk = stream.read(min(XML_CHUNK_BYTES, limit_bytes - read))
+        if not chunk:
+            break
+        read += len(chunk)
+        buffer = tail + chunk
+        cut = buffer.rfind(b"\n")
+        if cut == -1:
+            tail = buffer
+            if len(tail) > OBJ_MAX_LINE_BYTES:
+                # A whole OBJ written on one line: fold the complete tokens in
+                # and carry only the last, possibly unfinished one, so the
+                # buffer cannot grow with the file.
+                split_at = tail.rfind(b" ")
+                if split_at > 0:
+                    total += fold(tail[:split_at], continued=True)
+                    tail = tail[split_at:]
+            continue
+        tail = buffer[cut + 1 :]
+        for line in buffer[:cut].split(b"\n"):
+            total += consume(line)
+    if tail:
+        total += consume(tail)
+    if open_line and is_face:
+        # The file ended on a continuation; the face it opened still counts.
+        total += max(1, tokens - 3)
+    return total
 
 
 def estimate_face_count(input_path: str, source_format: str) -> int | None:
@@ -178,23 +284,41 @@ def estimate_face_count(input_path: str, source_format: str) -> int | None:
     `None` means "cannot be told cheaply": the precheck then lets the file
     through rather than refusing a part it has not measured. Every branch is an
     over-estimate or exact, never an under-estimate that would let an
-    OOM-sized mesh past.
+    OOM-sized mesh past. Branch by branch, the bound is:
+
+      stl, header size matches the file     exact (the declared facet count)
+      stl, anything else                    max((size-84)//50, size//86), the
+                                            larger of the binary-with-trailing-
+                                            bytes and compact-ASCII ceilings
+      obj                                   Σ max(1, references-2) per face
+                                            line, i.e. the post-triangulation
+                                            count (see count_obj_triangles)
+      3mf                                   `<triangle` elements, exact
+      obj/3mf longer than XML_SCAN_LIMIT    None (a truncated scan would
+                                            under-count)
     """
     try:
         size = os.path.getsize(input_path)
         if source_format == "stl":
             with open(input_path, "rb") as handle:
-                head = handle.read(84)
-            if len(head) == 84:
+                head = handle.read(BINARY_STL_HEADER_BYTES)
+            if len(head) == BINARY_STL_HEADER_BYTES:
                 declared = int.from_bytes(head[80:84], "little")
                 # The only reliable binary-vs-ASCII test: the size the header
                 # implies. ("solid" is not one — binary writers use it too.)
-                if 84 + 50 * declared == size:
+                if BINARY_STL_HEADER_BYTES + BINARY_STL_FACET_BYTES * declared == size:
                     return declared
-            return size // ASCII_STL_MIN_FACET_BYTES
+            # Either ASCII, or binary whose header count disagrees with the
+            # file (trailing bytes, a truncated tail, a lying writer). Take the
+            # larger of the two byte ceilings so neither reading can slip past.
+            return max(
+                (size - BINARY_STL_HEADER_BYTES) // BINARY_STL_FACET_BYTES,
+                size // ASCII_STL_MIN_FACET_BYTES,
+                0,
+            )
         if source_format == "obj":
             with open(input_path, "rb") as handle:
-                return count_token(handle, OBJ_FACE_TOKEN, XML_SCAN_LIMIT_BYTES)
+                return count_obj_triangles(handle, XML_SCAN_LIMIT_BYTES)
         if source_format == "3mf":
             # 3MF is a ZIP: 32 MB on disk can be 300 MB of XML, which is the
             # one format where the byte ceiling says nothing about the mesh.

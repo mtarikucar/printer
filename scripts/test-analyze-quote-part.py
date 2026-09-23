@@ -25,6 +25,11 @@ from PIL import Image
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPTS_DIR)
 CLI = os.path.join(SCRIPTS_DIR, "analyze_quote_part.py")
+sys.path.insert(0, SCRIPTS_DIR)
+# The precheck is also exercised directly: the point of it is that the estimate
+# is an UPPER BOUND on the triangles trimesh produces, and the only way to
+# assert that is to compare it with the loaded mesh.
+import analyze_quote_part  # noqa: E402
 FIXTURES = os.path.join(SCRIPTS_DIR, "fixtures", "quote")
 QUOTE_TYPES_TS = os.path.join(REPO_ROOT, "src", "lib", "config", "quote-types.ts")
 # render_turntable.BG_RGB — anything else in the image is the model.
@@ -317,6 +322,91 @@ def main() -> int:
         if report:
             check("cube20.stl (--max-input-faces 20000): report ok", report.get("ok") is True,
                   json.dumps(report)[:200])
+
+        # ── the estimate is an UPPER BOUND on triangles, not a line count ────
+        # An OBJ `f` line is one face ELEMENT: trimesh fans a quad into two
+        # triangles while loading, so counting face lines under-counts a quad
+        # mesh (the default Blender/Maya export) exactly 2× and lets an
+        # OOM-sized part past the ceiling.
+        quad_cube = os.path.join(workdir, "quad-cube.obj")
+        with open(quad_cube, "w") as handle:
+            for x, y, z in [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+                            (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]:
+                handle.write(f"v {x} {y} {z}\n")
+            for quad in ("1 2 3 4", "5 6 7 8", "1 2 6 5",
+                         "2 3 7 6", "3 4 8 7", "4 1 5 8"):
+                handle.write(f"f {quad}\n")
+        estimated = analyze_quote_part.estimate_face_count(quad_cube, "obj")
+        loaded = len(trimesh.load(quad_cube, force="mesh").faces)
+        check("quad OBJ: estimate is an upper bound on the loaded triangles",
+              estimated is not None and estimated >= loaded,
+              f"estimate={estimated} loaded={loaded} (6 face lines, 12 triangles)")
+        check("quad OBJ: estimate is not the face-line count",
+              estimated == 12, f"estimate={estimated}, expected 12")
+
+        # The failure this closes, end to end: a quad OBJ that is small on disk
+        # and has FEWER face lines than the ceiling, but more triangles than
+        # the 2 GB worker can hold. It must be refused, not loaded.
+        quads = 800_000  # → 1.6M triangles, 800k face lines, ~8 MB on disk
+        dense_obj = os.path.join(workdir, "dense-quads.obj")
+        with open(dense_obj, "wb") as handle:
+            handle.write(b"v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\n")
+            handle.write(b"f 1 2 3 4\n" * quads)
+        size_mb = os.path.getsize(dense_obj) / 1024 / 1024
+        check("dense quad OBJ fixture is inside the advertised upload ceiling",
+              size_mb < 32, f"{size_mb:.1f} MB")
+        check("dense quad OBJ has fewer face LINES than the ceiling "
+              "(what the old estimate counted)",
+              quads < 1_500_000, f"{quads} face lines")
+        outdir = os.path.join(workdir, "dense-quads")
+        proc = subprocess.run(
+            [sys.executable, CLI, dense_obj, "obj", outdir,
+             "--max-input-faces", "1500000"],
+            capture_output=True, text=True, timeout=120,
+        )
+        check("dense quad OBJ over the triangle ceiling: exit 2", proc.returncode == 2,
+              f"exit={proc.returncode} {proc.stderr.strip()[-200:]}")
+        report_path = os.path.join(outdir, "report.json")
+        if os.path.exists(report_path):
+            with open(report_path) as handle:
+                report = json.load(handle)
+            check("dense quad OBJ: refused as too_many_faces before load",
+                  report.get("ok") is False and report.get("error") == "too_many_faces",
+                  json.dumps(report)[:300])
+        else:
+            check("dense quad OBJ: failure report written", False, "missing report.json")
+
+        # ── STL byte bounds ─────────────────────────────────────────────────
+        # A binary STL whose declared count no longer matches the file size
+        # (trailing bytes) falls back to the byte ceiling, which must still sit
+        # above the real facet count.
+        sphere = trimesh.creation.icosphere(subdivisions=3, radius=5.0)
+        trailing = os.path.join(workdir, "trailing.stl")
+        sphere.export(trailing)
+        check("binary STL: header count read exactly",
+              analyze_quote_part.estimate_face_count(trailing, "stl") == len(sphere.faces),
+              f"{analyze_quote_part.estimate_face_count(trailing, 'stl')} vs {len(sphere.faces)}")
+        with open(trailing, "ab") as handle:
+            handle.write(b"\x00" * 7)
+        estimated = analyze_quote_part.estimate_face_count(trailing, "stl")
+        check("binary STL with trailing bytes: still an upper bound",
+              estimated is not None and estimated >= len(sphere.faces),
+              f"estimate={estimated} facets={len(sphere.faces)}")
+        # …and an ASCII STL written at the 86-byte floor (single spaces,
+        # one-character numbers, no indentation) must not out-run the bound.
+        facet = ("facet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 0 0 0\n"
+                 "vertex 0 0 0\nendloop\nendfacet\n")
+        check("the assumed ASCII facet floor is the real one",
+              len(facet) == analyze_quote_part.ASCII_STL_MIN_FACET_BYTES,
+              f"{len(facet)} vs {analyze_quote_part.ASCII_STL_MIN_FACET_BYTES}")
+        ascii_stl = os.path.join(workdir, "floor.stl")
+        facets = 4000
+        with open(ascii_stl, "w") as handle:
+            handle.write("solid s\n" + facet * facets + "endsolid s\n")
+        estimated = analyze_quote_part.estimate_face_count(ascii_stl, "stl")
+        check("floor-formatted ASCII STL: still an upper bound",
+              estimated is not None and estimated >= facets,
+              f"estimate={estimated} facets={facets}")
 
     if failures:
         print(f"\n{len(failures)} check(s) failed")

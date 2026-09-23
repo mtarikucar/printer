@@ -1,26 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { quotePricingSettings } from "@/lib/db/schema";
-import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
-import { getPainterSession } from "@/lib/services/painter-auth";
 import { quoteApiEnabled } from "@/lib/services/quote-access";
-import {
-  getAnonymousId,
-  getOrCreateAnonymousId,
-  getSessionUser,
-} from "@/lib/services/customer-auth";
+import { getAnonymousId, getOrCreateAnonymousId } from "@/lib/services/customer-auth";
 import {
   UPLOAD_CHUNK_SIZE_BYTES,
   appendChunk,
   chargeAnonymousDailyBytes,
   createStagedUpload,
-  getStagedUploadMeta,
   isValidUploadId,
+  readStagedUploadMeta,
+  resolveAuthenticatedUploadOwner,
   setStagedUploadMeta,
   stagedSize,
+  stagedUploadOwnershipAllowed,
   uploadOwnerKey,
+  type StagedUploadMeta,
 } from "@/lib/services/chunked-upload";
 import { extractClientIp, rateLimit, rateLimitAsync } from "@/lib/services/rate-limit";
 import { handleRouteFailure, UPLOAD_FAILED_ERROR } from "@/lib/api/route-error";
@@ -40,8 +36,11 @@ export const runtime = "nodejs";
  * ve anonim kimlik başına oran limiti, (çerez + IP) günlük bayt kotası, tek
  * dosya tavanı — ve sahneleme sahibiyle birlikte kaydedilir, böylece bir
  * misafirin yüklemesini başka bir misafir sürdüremez. Girişli çağıranların
- * (admin/üretici/boyacı/müşteri) davranışı bundan etkilenmez: aynı sıra, aynı
- * cevaplar.
+ * (admin/üretici/boyacı/müşteri) yolu aynı sırayla çözülür ve hiçbir misafir
+ * kapısına uğramaz; TEK fark sahiplik karşılaştırmasının artık onlar için de
+ * yapılmasıdır — kendi sahnelemeleri dışında bir kimliğe yazamazlar. Bu
+ * karşılaştırma yüklemeyi bir ARIZA yüzünden kesmez: defter cevap vermezse
+ * girişli çağıran geçer, gerekçesi `ownedStagedUpload`'ta.
  *
  * VE MİSAFİR KAPISI BAYRAĞA BAĞLIDIR. `instant_quote_enabled` kapalıyken bu uç
  * eskisi gibi davranır: oturumsuz her fiil 401. Aksi hâlde yalnız birleştirme,
@@ -58,24 +57,16 @@ export const runtime = "nodejs";
  */
 
 /**
- * Oturumlu çağıranın sahiplik anahtarı; oturum yoksa null. Oturum sorgularının
- * SIRASI bilerek eski `isAuthenticated` ile aynıdır.
+ * Oturumlu çağıranın sahiplik anahtarı; oturum yoksa null.
+ *
+ * Tek gövde `chunked-upload.ts` içinde (`resolveAuthenticatedUploadOwner`):
+ * sahnelemeyi KAYDEDEN buradaki uç ile onu teklife BAĞLAYAN
+ * `resolveQuoteAccess` aynı sırayı ve aynı yedekleri okumak zorunda. İkinci bir
+ * kopya, bir gün yalnız birinin değiştiği gün demek olurdu — ve o gün her
+ * bağlama isteği 403 alırdı.
  */
 async function authenticatedOwner(): Promise<string | null> {
-  const admin = await auth().catch(() => null);
-  const adminUser = admin?.user as { role?: string; email?: string | null } | undefined;
-  if (adminUser?.role === "admin") {
-    return uploadOwnerKey({ role: "admin", userId: adminUser.email || "admin" });
-  }
-  const manufacturer = await getManufacturerSession().catch(() => null);
-  if (manufacturer) {
-    return uploadOwnerKey({ role: "manufacturer", userId: manufacturer.manufacturerId });
-  }
-  const painter = await getPainterSession().catch(() => null);
-  if (painter) return uploadOwnerKey({ role: "painter", userId: painter.painterId });
-  const customer = await getSessionUser().catch(() => null);
-  if (customer) return uploadOwnerKey({ userId: customer.userId });
-  return null;
+  return (await resolveAuthenticatedUploadOwner()).primary;
 }
 
 function unauthorized() {
@@ -248,6 +239,39 @@ async function guestFileCapBytes(): Promise<number> {
   return guestFileCap.bytes;
 }
 
+/**
+ * Sahiplik kapısı — KOŞULSUZ, ama "bilmiyorum" ile "başkasının" ayrı.
+ *
+ * Karşılaştırma her çağıran için yapılır (bkz. `handlePOST`). Ama sahiplik
+ * defteri Redis'tir ve bu uç ona bilerek üst sınır koyar: zaman aşımı devre
+ * kesiciyi açar ve sonraki okumalar Redis'i hiç denemez. O hâlde kayıt "yok"
+ * görünür — oysa PUT onu Redis'e YAZMIŞTIR ve süreç belleğinde kopyası yoktur.
+ * Bunu "yabancı" saymak, 350 MB'lık bir panel yüklemesini 44. parçada
+ * "bu yükleme oturumu size ait değil" ile öldürürdü; üstelik tam da bu dosyanın
+ * korumayı üstlendiği yolda (girişli çağıran eskiden bu karşılaştırmaya hiç
+ * girmiyordu).
+ *
+ * Bu yüzden: kayıt VARSA eşleşme zorunlu (herkes için). Kayıt yoksa ve defter
+ * CEVAP VERDİYSE red (kimlik gerçekten yabancı ya da süresi dolmuş). Defter
+ * cevap vermediyse yalnız GİRİŞLİ çağıran geçer — misafirin bütün kotası aynı
+ * deftere bağlı olduğundan onu geçirmek kotayı da kapıyı da anlamsız kılardı.
+ */
+async function ownedStagedUpload(
+  uploadId: string,
+  expected: string | null,
+  authenticated: boolean
+): Promise<{ ok: boolean; meta: StagedUploadMeta | null }> {
+  const read = await readStagedUploadMeta(uploadId);
+  const ok = stagedUploadOwnershipAllowed(read, expected, authenticated);
+  if (ok && !read.meta) {
+    console.warn(
+      "[uploads/chunk] Sahiplik defteri cevap vermedi — girişli çağıranın yüklemesi " +
+        "sürdürülüyor (sahiplik doğrulanamadı)."
+    );
+  }
+  return { ok, meta: read.meta };
+}
+
 /** İstemcinin `PUT` gövdesinde bildirdiği toplam boyut (isteğe bağlı). */
 async function declaredSize(request: NextRequest): Promise<number | null> {
   if (!request.headers.get("content-type")?.includes("json")) return null;
@@ -308,9 +332,10 @@ async function handlePOST(request: NextRequest) {
   // Sahiplik KOŞULSUZDUR: sahnelenmiş dosya yalnız onu açan kimliğindir.
   // Karşılaştırmayı misafir koşulunun içine almak, elinde bir yükleme kimliği
   // olan HER girişli çağıranı başkasının sahnelemesine yazar hâle getirir.
+  // (Defter cevap vermezse ne olduğu `ownedStagedUpload`'ta.)
   const expected = owner ?? (anonymousId ? uploadOwnerKey({ anonymousId }) : null);
-  const meta = await getStagedUploadMeta(uploadId);
-  if (!expected || meta?.owner !== expected) return notOwner();
+  const staged = await ownedStagedUpload(uploadId, expected, owner !== null);
+  if (!staged.ok) return notOwner();
 
   // BAŞLIK YOKSA NaN: `Number(null)` 0 verir ve uzunluk bildirmeyen (chunked)
   // bir gövde misafir tavanının altından sessizce geçerdi.
@@ -327,8 +352,9 @@ async function handlePOST(request: NextRequest) {
   }
 
   const claimed = Number.isFinite(declaredLength) ? Math.max(0, declaredLength) : 0;
-  if (meta.expectedSize != null) {
-    if (offset > meta.expectedSize || offset + claimed > meta.expectedSize) return sizeExceeded();
+  const expectedSize = staged.meta?.expectedSize ?? null;
+  if (expectedSize != null) {
+    if (offset > expectedSize || offset + claimed > expectedSize) return sizeExceeded();
   }
 
   if (anonymousId) {
@@ -373,8 +399,8 @@ async function handleGET(request: NextRequest) {
   // Sahiplik KOŞULSUZDUR (gerekçe `handlePOST`'ta): sahnelemenin boyutunu da
   // yalnız onu açan kimlik okuyabilir.
   const expected = owner ?? (anonymousId ? uploadOwnerKey({ anonymousId }) : null);
-  const meta = await getStagedUploadMeta(uploadId);
-  if (!expected || meta?.owner !== expected) return notOwner();
+  const staged = await ownedStagedUpload(uploadId, expected, owner !== null);
+  if (!staged.ok) return notOwner();
 
   const size = await stagedSize(uploadId);
   if (size === null) {

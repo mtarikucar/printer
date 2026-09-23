@@ -202,6 +202,94 @@ export function uploadOwnerKey(v: {
   return v.userId ? `u:${id}` : `a:${id}`;
 }
 
+/** İsteğin GİRİŞLİ kimlikleri; oturum yoksa `primary: null` ve boş `keys`. */
+export interface AuthenticatedUploadOwner {
+  /**
+   * Sahneleme bu anahtarla KAYDEDİLİR. Sıra eski `isAuthenticated`
+   * sorgusundan gelir: admin → üretici → boyacı → müşteri.
+   */
+  primary: string | null;
+  /**
+   * Aynı tarayıcının AYNI ANDA taşıdığı bütün anahtarlar, aynı sırada.
+   * Sahneleme tek anahtarla kaydedilir ama çözüm bir KÜME ister: bir
+   * tarayıcıda hem üretici çerezi hem müşteri oturumu bulunabilir ve dosyayı
+   * hangi çerezle sahnelediği, bağlarken hangisinin okunduğuna bağlı olmamalı.
+   */
+  keys: string[];
+}
+
+/** Çağıranın ZATEN okuduğu oturumlar; `undefined` = "sen oku". */
+export interface UploadOwnerPrefetch {
+  /** NextAuth admin e-postası (`null` = admin değil). */
+  adminEmail?: string | null;
+  /** `customer_session` kullanıcı kimliği (`null` = oturum yok). */
+  customerUserId?: string | null;
+}
+
+async function quietly<T>(run: () => Promise<T>): Promise<T | null> {
+  try {
+    return await run();
+  } catch {
+    // Okunamayan oturum = OTURUM YOK. Sahiplik kapısı bir hata yüzünden
+    // sessizce açılmaz, kapanır.
+    return null;
+  }
+}
+
+/**
+ * Sahneleme sahipliğinin TEK kaynağı.
+ *
+ * `/api/uploads/chunk` yüklemeyi bu anahtarla kaydeder; `resolveQuoteAccess`
+ * aynı fonksiyonla aday kümesini kurar. İki ayrı kopya, bir gün birinin admin
+ * yedeğini ("admin") ya da rol sırasını değiştirdiği gün demek olurdu: o gün
+ * her bağlama isteği 403 "Bu yükleme size ait değil." alırdı.
+ *
+ * Oturum modülleri TEMBEL yüklenir: bu dosyayı worker zinciri de (analiz →
+ * doğrulama) import ediyor ve orada `next/headers` yoktur.
+ */
+export async function resolveAuthenticatedUploadOwner(
+  prefetch: UploadOwnerPrefetch = {}
+): Promise<AuthenticatedUploadOwner> {
+  const keys: string[] = [];
+
+  const adminEmail =
+    prefetch.adminEmail !== undefined
+      ? prefetch.adminEmail
+      : await quietly(async () => {
+          const { auth } = await import("@/lib/auth/config");
+          const session = await auth();
+          const user = session?.user as { role?: string; email?: string | null } | undefined;
+          // Kimliksiz anahtar üretilemez; `quote-access` de aynı yedeği kullanır.
+          return user?.role === "admin" ? user.email || "admin" : null;
+        });
+  if (adminEmail) keys.push(uploadOwnerKey({ role: "admin", userId: adminEmail }));
+
+  const manufacturer = await quietly(async () => {
+    const { getManufacturerSession } = await import("@/lib/services/manufacturer-auth");
+    return getManufacturerSession();
+  });
+  if (manufacturer) {
+    keys.push(uploadOwnerKey({ role: "manufacturer", userId: manufacturer.manufacturerId }));
+  }
+
+  const painter = await quietly(async () => {
+    const { getPainterSession } = await import("@/lib/services/painter-auth");
+    return getPainterSession();
+  });
+  if (painter) keys.push(uploadOwnerKey({ role: "painter", userId: painter.painterId }));
+
+  const customerUserId =
+    prefetch.customerUserId !== undefined
+      ? prefetch.customerUserId
+      : await quietly(async () => {
+          const { getSessionUser } = await import("@/lib/services/customer-auth");
+          return (await getSessionUser())?.userId ?? null;
+        });
+  if (customerUserId) keys.push(uploadOwnerKey({ userId: customerUserId }));
+
+  return { primary: keys[0] ?? null, keys };
+}
+
 const memoryMeta = new Map<string, { value: StagedUploadMeta; expiresAt: number }>();
 
 function metaKey(uploadId: string): string {
@@ -288,31 +376,79 @@ export async function setStagedUploadMeta(
   memoryMeta.set(uploadId, { value: meta, expiresAt: Date.now() + STAGING_TTL_MS });
 }
 
-export async function getStagedUploadMeta(uploadId: string): Promise<StagedUploadMeta | null> {
+/**
+ * Sahiplik kaydını okur ve "KAYIT YOK" ile "DEFTER CEVAP VERMEDİ"yi ayırır.
+ *
+ * `getStagedUploadMeta` ikisini de `null` diye döndürür ve bu, sahiplik
+ * karşılaştırmasını koşulsuz yapan çağıran için yanlış cevaptır: Redis'e
+ * yazılmış bir kaydı okuyamamak (zaman aşımı → devre kesici) o yüklemeyi
+ * SAHİPSİZ gösterir ve 350 MB'lık bir panel yüklemesi 44. parçada "bu yükleme
+ * size ait değil" ile ölür. `known: false` "bilmiyorum" demektir; kararı
+ * çağıran verir (`/api/uploads/chunk` → girişli çağıranda AÇIK, misafirde
+ * KAPALI taraf).
+ */
+export interface StagedUploadMetaRead {
+  /** Defter cevap verdi mi (Redis okundu ya da zaten bellek otorite). */
+  known: boolean;
+  /** Kayıt; yoksa null. `known: false` iken her zaman null. */
+  meta: StagedUploadMeta | null;
+}
+
+export async function readStagedUploadMeta(uploadId: string): Promise<StagedUploadMetaRead> {
+  // REDIS_URL hiç yoksa defter BELLEKTİR ve o her zaman cevap verir; Redis
+  // yapılandırılmışken bellek yalnız bir yedektir, otorite değil.
+  let storeAnswered = !process.env.REDIS_URL;
   const redis = await getRedisOrNull();
   if (redis) {
     const read = await redisCall("GET upload-meta", () => redis.get(metaKey(uploadId)));
-    if (read.ok && read.value) {
-      try {
-        const parsed = JSON.parse(read.value) as Partial<StagedUploadMeta>;
-        if (typeof parsed?.owner === "string") {
-          return {
-            owner: parsed.owner,
-            expectedSize: typeof parsed.expectedSize === "number" ? parsed.expectedSize : null,
-          };
+    if (read.ok) {
+      storeAnswered = true;
+      if (read.value) {
+        try {
+          const parsed = JSON.parse(read.value) as Partial<StagedUploadMeta>;
+          if (typeof parsed?.owner === "string") {
+            return {
+              known: true,
+              meta: {
+                owner: parsed.owner,
+                expectedSize: typeof parsed.expectedSize === "number" ? parsed.expectedSize : null,
+              },
+            };
+          }
+        } catch (err) {
+          console.warn("[chunked-upload] Redis'teki sahiplik kaydı çözümlenemedi:", err);
         }
-      } catch (err) {
-        console.warn("[chunked-upload] Redis'teki sahiplik kaydı çözümlenemedi:", err);
       }
     }
   }
   const entry = memoryMeta.get(uploadId);
-  if (!entry) return null;
-  if (entry.expiresAt < Date.now()) {
-    memoryMeta.delete(uploadId);
-    return null;
-  }
-  return entry.value;
+  if (entry && entry.expiresAt >= Date.now()) return { known: true, meta: entry.value };
+  if (entry) memoryMeta.delete(uploadId);
+  return { known: storeAnswered, meta: null };
+}
+
+export async function getStagedUploadMeta(uploadId: string): Promise<StagedUploadMeta | null> {
+  return (await readStagedUploadMeta(uploadId)).meta;
+}
+
+/**
+ * Sahiplik kararı — okuma sonucundan. SAF tutulur ki testi bir Redis arızası
+ * kurmadan, üç ekseni de (kayıt var/yok, defter cevap verdi/vermedi, çağıran
+ * girişli/misafir) tek tabloda yazılabilsin.
+ *
+ * Kural: kayıt VARSA eşleşme zorunlu — kimse başkasının sahnelemesine yazamaz.
+ * Kayıt yoksa ve defter cevap verdiyse red. Defter cevap VERMEDİYSE karar
+ * verilemez; bu hâlde yalnız girişli çağıran geçer (gerekçe
+ * `/api/uploads/chunk` → `ownedStagedUpload`), misafir geçmez.
+ */
+export function stagedUploadOwnershipAllowed(
+  read: StagedUploadMetaRead,
+  expected: string | null,
+  authenticated: boolean
+): boolean {
+  if (!expected) return false;
+  if (read.meta) return read.meta.owner === expected;
+  return !read.known && authenticated;
 }
 
 /** Misafir başına günlük sahnelenebilir bayt tavanı. */

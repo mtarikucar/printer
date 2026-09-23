@@ -129,8 +129,11 @@ async function main() {
   } = await import("../src/lib/services/quote-model-validation");
   const {
     readStagedRange,
+    readStagedUploadMeta,
+    resolveAuthenticatedUploadOwner,
     setStagedUploadMeta,
     getStagedUploadMeta,
+    stagedUploadOwnershipAllowed,
     uploadOwnerKey,
   } = await import("../src/lib/services/chunked-upload");
 
@@ -382,6 +385,72 @@ async function main() {
     // Kimliksiz anahtar ÜRETİLMEZ: boş dize her sahibe eşleşirdi.
     assert.throws(() => uploadOwnerKey({}), /kimlik/i);
     assert.throws(() => uploadOwnerKey({ userId: null, anonymousId: null }), /kimlik/i);
+  });
+
+  await test("resolveAuthenticatedUploadOwner: TEK gövde, sabit rol sırası", async () => {
+    // Sahnelemeyi KAYDEDEN uç ile onu teklife BAĞLAYAN erişim çözümü aynı
+    // gövdeyi çağırır; ikinci bir kopya, bir gün yalnız birinin sırası ya da
+    // admin yedeği değiştiğinde her bağlama isteğini 403'e çevirirdi.
+    // Panel çerezleri istek dışında okunamaz (`next/headers`) ve okunamayan
+    // oturum = OTURUM YOK; kalan iki ekseni çağıran veriyor.
+    const admin = await resolveAuthenticatedUploadOwner({
+      adminEmail: "yonetici@ornek.test",
+      customerUserId: "user-9",
+    });
+    assert.deepEqual(admin.keys, ["admin:yonetici@ornek.test", "u:user-9"]);
+    assert.equal(
+      admin.primary,
+      "admin:yonetici@ornek.test",
+      "sahneleme İLK eşleşen kimlikle kaydedilir"
+    );
+    assert.deepEqual(await resolveAuthenticatedUploadOwner({ adminEmail: null, customerUserId: "user-9" }), {
+      primary: "u:user-9",
+      keys: ["u:user-9"],
+    });
+    assert.deepEqual(await resolveAuthenticatedUploadOwner({ adminEmail: null, customerUserId: null }), {
+      primary: null,
+      keys: [],
+    });
+    // E-postasız admin oturumu da anahtarsız kalmaz (`admin` yedeği).
+    const fallback = await resolveAuthenticatedUploadOwner({
+      adminEmail: "admin",
+      customerUserId: null,
+    });
+    assert.deepEqual(fallback.keys, ["admin:admin"]);
+  });
+
+  await test("readStagedUploadMeta: 'kayıt yok' ile 'defter cevap vermedi' ayrı", async () => {
+    // Bu testte REDIS_URL yoktur: defter BELLEKTİR ve her zaman cevap verir,
+    // yani eksik kayıt gerçekten "kayıt yok"tur (`known: true`).
+    assert.deepEqual(await readStagedUploadMeta("stagedUploadYokYokYok00"), {
+      known: true,
+      meta: null,
+    });
+    const id = await stage(Buffer.from("x"));
+    await setStagedUploadMeta(id, { owner: "a:kimse", expectedSize: 1 });
+    assert.deepEqual(await readStagedUploadMeta(id), {
+      known: true,
+      meta: { owner: "a:kimse", expectedSize: 1 },
+    });
+  });
+
+  await test("sahiplik kararı: kayıt varsa eşleşme şart, 'bilmiyorum'da yalnız girişli geçer", () => {
+    const mine = { known: true, meta: { owner: "u:1", expectedSize: null } };
+    const foreign = { known: true, meta: { owner: "a:baska", expectedSize: null } };
+    const missing = { known: true, meta: null }; // defter cevap verdi: kayıt YOK
+    const unknown = { known: false, meta: null }; // defter CEVAP VERMEDİ
+    for (const authenticated of [true, false]) {
+      assert.equal(stagedUploadOwnershipAllowed(mine, "u:1", authenticated), true);
+      assert.equal(stagedUploadOwnershipAllowed(foreign, "u:1", authenticated), false);
+      assert.equal(stagedUploadOwnershipAllowed(missing, "u:1", authenticated), false);
+      // Kimliksiz çağıran hiçbir hâlde geçmez.
+      assert.equal(stagedUploadOwnershipAllowed(mine, null, authenticated), false);
+      assert.equal(stagedUploadOwnershipAllowed(unknown, null, authenticated), false);
+    }
+    // Redis susarsa 350 MB'lık panel yüklemesi 44. parçada ölmez…
+    assert.equal(stagedUploadOwnershipAllowed(unknown, "manufacturer:m-1", true), true);
+    // …ama misafir geçmez: bütün kotası aynı deftere bağlıdır.
+    assert.equal(stagedUploadOwnershipAllowed(unknown, "a:anon-1", false), false);
   });
 
   await test("readStagedRange istenen aralığı döndürür, dosya sonunda kırpar", async () => {

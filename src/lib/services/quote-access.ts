@@ -15,7 +15,7 @@ import { db } from "@/lib/db";
 import { quotes, type Quote } from "@/lib/db/schema";
 import { formatQuoteNumber, parseQuoteNumber } from "@/lib/config/quote-number";
 import type { QuoteViewer } from "@/lib/config/quote-types";
-import { uploadOwnerKey } from "@/lib/services/chunked-upload";
+import { resolveAuthenticatedUploadOwner } from "@/lib/services/chunked-upload";
 import { isFlagEnabled } from "@/lib/services/flags";
 
 export interface QuoteAccess {
@@ -23,15 +23,20 @@ export interface QuoteAccess {
   viewer: QuoteViewer;
   sessionUserId: string | null;
   /**
-   * Çağıranın PANEL sahiplik anahtarı (`admin:<e-posta>`), yoksa null.
+   * Çağıranın taşıdığı TÜM sahneleme sahiplik anahtarları
+   * (`admin:<e-posta>` | `manufacturer:<id>` | `painter:<id>` | `u:<id>`).
    *
-   * Sahnelenmiş yüklemeyi teklife bağlarken aday sahipler arasına girer:
-   * `quoteApiEnabled()` yöneticiyi bayrak kapalıyken de içeri alır, yani
-   * lansman öncesi iç testi yapan kişi dosyayı kendi admin oturumuyla
-   * sahneler — o yükleme `admin:<e-posta>` ile kaydedilir ve başka hiçbir
-   * aday ona eşleşmez.
+   * Sahnelenmiş yüklemeyi teklife bağlarken aday sahipler arasına girerler.
+   * Neden bir küme: `/api/uploads/chunk` yüklemeyi çağıranın İLK eşleşen
+   * kimliğiyle kaydeder (admin → üretici → boyacı → müşteri). Aynı tarayıcıda
+   * bir panel çerezi ile müşteri oturumu bir arada bulunabilir — örneğin
+   * `/manufacturer`'da açık bir üretici kendi hesabıyla teklif oluştururken —
+   * ve o zaman dosya `manufacturer:<id>` ile kaydedilir. Yalnız müşteri
+   * anahtarına bakmak, bu kişiye KENDİ dosyası için 403 demek olurdu.
+   * `quoteApiEnabled()` yöneticiyi bayrak kapalıyken de içeri aldığından
+   * lansman öncesi iç testi de bu kümeye dayanır.
    */
-  panelOwnerKey?: string | null;
+  uploadOwnerKeys?: string[];
 }
 
 export interface QuoteViewerContext {
@@ -197,10 +202,19 @@ export async function resolveQuoteAccess(
   if (!viewer) return null;
   if (opts.forEdit && !viewer.canEdit) return null;
 
+  // Sahiplik anahtarları sahnelemeyi KAYDEDEN uçla aynı gövdeden çıkar
+  // (`resolveAuthenticatedUploadOwner`); burada yalnız zaten okunmuş iki oturum
+  // ona geri verilir, ikinci bir `auth()`/`getSessionUser()` turu olmasın diye.
+  // Geriye kalan üretici/boyacı okuması çerez + JWT doğrulamasıdır, sorgusuz.
+  const { keys } = await resolveAuthenticatedUploadOwner({
+    adminEmail: admin?.email ?? null,
+    customerUserId: identity.sessionUserId,
+  });
+
   return {
     quote,
     viewer,
     sessionUserId: identity.sessionUserId,
-    panelOwnerKey: admin ? uploadOwnerKey({ role: "admin", userId: admin.email }) : null,
+    uploadOwnerKeys: keys,
   };
 }

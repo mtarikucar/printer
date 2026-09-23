@@ -347,11 +347,51 @@ test("sahneleme sahipliği oturum TÜRÜNE göre atlanmaz", () => {
   for (const handler of ["handlePOST", "handleGET"]) {
     const body = chunkRouteFn(handler);
     assert.match(body, /const expected = owner \?\?/, `${handler}: beklenen sahip hesaplanmıyor`);
-    assert.match(body, /meta\?\.owner !== expected/, `${handler}: sahiplik karşılaştırması yok`);
+    assert.match(
+      body,
+      /ownedStagedUpload\(uploadId, expected, owner !== null\)/,
+      `${handler}: sahiplik karşılaştırması yok`
+    );
+    assert.match(body, /if \(!staged\.ok\) return notOwner\(\);/, `${handler}: karar uygulanmıyor`);
     assert.doesNotMatch(
       body,
-      /if \(anonymousId[^\n]*\bmeta\b/,
+      /if \(anonymousId[^\n]*\b(meta|staged)\b/,
       `${handler}: sahiplik kontrolü hâlâ misafir koşulunun içinde`
     );
   }
+  // Karar SAF bir gövdededir (`chunked-upload.ts`), üç ekseni de orada test
+  // edilir; uç yalnız onu çağırır ve "defter cevap vermedi" hâlini uydurmaz.
+  assert.match(
+    chunkRouteFn("ownedStagedUpload"),
+    /stagedUploadOwnershipAllowed\(read, expected, authenticated\)/,
+    "uç sahiplik kararını kendi yeniden yazıyor"
+  );
+});
+
+// Sahnelemeyi KAYDEDEN uç ile onu teklife BAĞLAYAN erişim çözümü aynı sahiplik
+// anahtarlarını üretmek zorunda: bir tarayıcı hem panel çerezi hem müşteri
+// oturumu taşıyabilir ve dosya panel anahtarıyla kaydedilir. İki ayrı kopya,
+// bir gün yalnız birinin değiştiği (ve her bağlamanın 403 aldığı) gün demek.
+test("sahiplik anahtarları TEK gövdeden çıkar", () => {
+  assert.match(
+    chunkRouteSource,
+    /resolveAuthenticatedUploadOwner[\s\S]*?from "@\/lib\/services\/chunked-upload"/,
+    "uç sahiplik anahtarını paylaşılan gövdeden almıyor"
+  );
+  assert.doesNotMatch(
+    chunkRouteSource,
+    /role: "(admin|manufacturer|painter)"/,
+    "uç kendi rol anahtarını üretiyor"
+  );
+  const access = readFileSync(
+    join(import.meta.dirname, "..", "src/lib/services/quote-access.ts"),
+    "utf8"
+  );
+  assert.match(
+    access,
+    /resolveAuthenticatedUploadOwner\(\{/,
+    "erişim çözümü aynı gövdeyi kullanmıyor"
+  );
+  assert.doesNotMatch(access, /uploadOwnerKey\(\{ role:/, "erişim çözümü kendi kopyasını taşıyor");
+  assert.match(access, /uploadOwnerKeys: keys/, "aday kümesi erişime taşınmıyor");
 });

@@ -282,10 +282,15 @@ export async function addPartFromUpload(
   // bakmak, müşteriye KENDİ dosyası için "size ait değil" demek olurdu.
   // `quotes.anonymous_id` devralmada bilerek yerinde bırakılır (`claimQuote`) —
   // o kolon "bu tarayıcı bu teklifi açtı"nın kanıtıdır, burada da o işi görür.
+  //
+  // Küme çağıranın PANEL kimliklerini de taşır (`uploadOwnerKeys`): aynı
+  // tarayıcıda açık bir üretici/boyacı/admin oturumu varsa sahneleme onun
+  // anahtarıyla kaydedilir (`/api/uploads/chunk` ilk eşleşeni seçer), müşteri
+  // oturumuyla değil.
   const candidates = [
     access.sessionUserId && uploadOwnerKey({ userId: access.sessionUserId }),
     access.quote.anonymousId && uploadOwnerKey({ anonymousId: access.quote.anonymousId }),
-    access.panelOwnerKey,
+    ...(access.uploadOwnerKeys ?? []),
   ].filter(Boolean) as string[];
   const meta = await getStagedUploadMeta(args.uploadId);
   if (!meta) {

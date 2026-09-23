@@ -155,7 +155,9 @@ async function main() {
       appendChunk,
       chargeAnonymousDailyBytes,
       createStagedUpload,
+      readStagedUploadMeta,
       setStagedUploadMeta,
+      uploadOwnerKey,
     } = await import("../src/lib/services/chunked-upload");
     const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
 
@@ -378,6 +380,69 @@ async function main() {
           err.status === 403 &&
           err.code === "upload_not_owned"
       );
+    });
+
+    // Aynı tarayıcı AYNI ANDA bir panel çerezi (üretici/boyacı/admin) ile bir
+    // müşteri oturumu taşıyabilir. `/api/uploads/chunk` sahnelemeyi İLK eşleşen
+    // kimlikle kaydeder — yani dosya `manufacturer:<id>` ile kaydedilir, müşteri
+    // anahtarıyla değil. Aday kümesi çağıranın panel anahtarlarını taşımazsa bu
+    // kişi KENDİ dosyası için 403 alır; lansman öncesi iç testi yapan kişi de
+    // öyle.
+    await test("panel oturumuyla sahnelenen dosya kendi sahneleyenine bağlanır", async () => {
+      const anonD = `anon-${randomUUID()}`;
+      const quoteD = await createQuote({ userId: null, anonymousId: anonD, termsAccepted: true });
+      const panelKey = uploadOwnerKey({ role: "manufacturer", userId: randomUUID() });
+      const staged = await stage("fixture-panel", panelKey);
+      const access = await loadAccess(quoteD.id, null);
+
+      // Panel anahtarı taşınmazsa çağıran KENDİ dosyasına yabancıdır.
+      await assert.rejects(
+        addPartFromUpload(access, { uploadId: staged, fileName: "panel.stl" }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 403 &&
+          err.code === "upload_not_owned"
+      );
+
+      // Taşınınca bağlanır…
+      const added = await addPartFromUpload(
+        { ...access, uploadOwnerKeys: [panelKey] },
+        { uploadId: staged, fileName: "panel.stl" }
+      );
+      assert.ok(added.partId, "panel sahnelemesi kendi sahibine bağlanamadı");
+
+      // …ama BAŞKA bir panel kimliğinin sahnelemesi hâlâ reddedilir.
+      const foreign = await stage(
+        "fixture-panel-foreign",
+        uploadOwnerKey({ role: "painter", userId: randomUUID() })
+      );
+      await assert.rejects(
+        addPartFromUpload(
+          { ...access, uploadOwnerKeys: [panelKey] },
+          { uploadId: foreign, fileName: "yabanci.stl" }
+        ),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 403 &&
+          err.code === "upload_not_owned"
+      );
+    });
+
+    // Sahiplik defteri CANLI Redis'te: "kayıt yok" ile "defter cevap vermedi"
+    // aynı şey değildir. `/api/uploads/chunk` ikincisinde girişli çağıranı
+    // geçirir; birincisinde geçirse sahiplik kapısı hiç olmazdı. Üretimde
+    // REDIS_URL hep dolu olduğundan asıl riskli hâl budur.
+    await test("sahiplik defteri: canlı Redis'te eksik kayıt 'bilinmiyor' DEĞİLDİR", async () => {
+      assert.deepEqual(
+        await readStagedUploadMeta("stagedUploadYokYokYok00"),
+        { known: true, meta: null },
+        "canlı defterde eksik kayıt cevapsız sayıldı"
+      );
+      const id = await stage("fixture-defter", "a:defter");
+      assert.deepEqual(await readStagedUploadMeta(id), {
+        known: true,
+        meta: { owner: "a:defter", expectedSize: stlFixture("fixture-defter").length },
+      });
     });
 
     await test("misafir günlük bayt kotası IP defterini de yükler", async () => {

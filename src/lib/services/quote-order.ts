@@ -33,7 +33,7 @@ import {
   quoteCheckouts,
   quotes,
 } from "@/lib/db/schema";
-import { dedupeFileNames, safeModelFileName } from "@/lib/config/order-model";
+import { dedupeFileNames, MAX_MODEL_FILE_STEM, safeModelFileName } from "@/lib/config/order-model";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
 import type { FrozenQuotePart } from "@/lib/config/quote-types";
 import { emitOrderChanged } from "@/lib/realtime/emit";
@@ -317,11 +317,26 @@ export async function findQuoteOrdersMissingFiles(
  * adı taşısa bile ("gövde" ×2) dosyalar karışmaz, ve üretici listeyi teklif
  * belgesindeki sırayla okur. Adet adın içindedir çünkü üretici tek bir STL'den
  * kaç kopya basacağını dosya adından görmeli.
+ *
+ * PARÇA ADI, EK İÇİN BÜTÇE AYRILARAK kırpılır. `attachOrderModelFilesTx`
+ * birleşmiş adı `safeModelFileName`den BİR KEZ DAHA geçiriyor ve o kırpma
+ * SONDAN yapılıyor (`MAX_MODEL_FILE_STEM`) — yani adet tam da kesilen yerde
+ * duruyor. Bütçe ayrılmasaydı 94 karakterlik bir CAD adı `_x7`yi yutar,
+ * üretici kopya sayısını göremez ve 7 yerine 1 basardı; üstelik diskteki
+ * anahtar (kırpma ÖNCESİ addan türüyor) kayıtlı adla çelişirdi.
  */
 export function quotePartFileName(part: FrozenQuotePart): string {
   const position = String(part.position + 1).padStart(2, "0");
-  const safe = safeModelFileName(part.name).replace(/\.stl$/i, "");
-  return `P${position}_${safe}_x${part.quantity}.stl`;
+  const prefix = `P${position}_`;
+  const suffix = `_x${part.quantity}`;
+  const budget = MAX_MODEL_FILE_STEM - prefix.length - suffix.length;
+  const stem = safeModelFileName(part.name).replace(/\.stl$/i, "");
+  // Sondaki ayırıcılar atılır: kırpma bir ayırıcının üstüne denk gelirse
+  // "…Export__x7.stl" gibi çift ayırıcılı bir ad çıkardı — üstelik diskteki
+  // ASCII ad tekrarlı alt çizgileri birleştirdiği için (asciiFileName) kayıtlı
+  // ad ile anahtar ayrı yazılmış olurdu.
+  const safe = (budget > 0 ? stem.slice(0, budget).replace(/[\s._-]+$/, "") : "") || "model";
+  return `${prefix}${safe}${suffix}.stl`;
 }
 
 /**

@@ -375,11 +375,22 @@ async function main() {
 
     // ─── Ödenen teklif ────────────────────────────────────────────────────
 
+    // Gerçek bir CAD dışa aktarım adı kadar uzun: parça adı varsayılan olarak
+    // DOSYA ADINDAN geliyor ve teklif servisi onu 120 karakterde kesiyor
+    // (quote-service MAX_NAME_LENGTH). Adın sonundaki adet eki (`_x7`) tam da
+    // kırpmanın yediği uçta duruyor — üreticinin kaç kopya basacağı orada yazılı.
+    const LONG_PART_NAME =
+      "Alt_Sasi_Baglanti_Braketi_Sol_Revize_3_Montaj_Deligi_Genisletilmis_Surum_2026_09_CAD_Export_v2".padEnd(
+        120,
+        "_Nihai"
+      );
+
     const buyer = await makeUser();
     const quote = await makeQuote(buyer.id, [
       // Ad bilerek Türkçe + boşluklu: görünen ad korunmalı, diskteki ad ASCII olmalı.
       { name: "Gövde Üst", geometry: MM_CUBE, units: "mm", cubeEdge: 20, quantity: 2 },
       { name: "Kapak", geometry: INCH_CUBE, units: "in", cubeEdge: 1, quantity: 1 },
+      { name: LONG_PART_NAME, geometry: MM_CUBE, units: "mm", cubeEdge: 20, quantity: 7 },
     ]);
 
     const [quoteRow] = await db.select().from(quotes).where(eq(quotes.id, quote.id)).limit(1);
@@ -523,9 +534,32 @@ async function main() {
       assert.deepEqual([...new Set(files.map((f) => f.kind))], ["stl"]);
       attachedNames = files.map((f) => f.fileName);
       assert.deepEqual(
-        attachedNames,
+        attachedNames.slice(0, 2),
         ["P01_Gövde Üst_x2.stl", "P02_Kapak_x1.stl"],
         "üreticinin gördüğü ad: sıra + parça adı + adet"
+      );
+
+      // UZUN AD: adet eki KAYITLI ADDA da durmalı. Birleşmiş ad
+      // `attachOrderModelFilesTx` içinde ikinci kez `safeModelFileName`den
+      // geçiyor ve o kırpma SONDAN yapılıyor; bütçe ayrılmasaydı 120 karakterlik
+      // bu ad `_x7`yi yutar, üretici 7 yerine 1 basardı.
+      const long = files[2];
+      assert.ok(long.fileName.startsWith("P03_"), long.fileName);
+      assert.ok(long.fileName.endsWith("_x7.stl"), `adet eki kırpılmış: ${long.fileName}`);
+      assert.ok(
+        long.fileName.replace(/\.stl$/, "").length <= 100,
+        `gövde tavanı aşıyor: ${long.fileName.length}`
+      );
+      assert.ok(
+        LONG_PART_NAME.startsWith(long.fileName.slice("P03_".length, -"_x7.stl".length)),
+        "ad yalnız SONDAN kırpılır, baştaki ayırt edici kısım korunur"
+      );
+      // Anahtar kırpma ÖNCESİ addan türüyordu: ikisi aynı adı taşımalı.
+      assert.ok(long.fileKey.endsWith("_x7.stl"), long.fileKey);
+      assert.equal(
+        path.basename(long.fileKey),
+        long.fileName,
+        "diskteki ad ile kayıtlı ad (ASCII olduğu için) birebir aynı"
       );
       // Diskteki ad ASCII'dir: imzalı dosya URL'i anahtarı ham gömüyor.
       for (const file of files) {
@@ -752,6 +786,43 @@ async function main() {
       assert.equal(name(9, "taban.stl", 1), "P10_taban_x1.stl");
       // Yol parçaları ve kontrol karakterleri temizlenir (safeModelFileName).
       assert.equal(name(0, "../../etc/passwd", 1), "P01_passwd_x1.stl");
+    });
+
+    await test("dosya adı kuralı: uzun adda adet eki KIRPILMAZ", async () => {
+      // `attachOrderModelFilesTx` kaydetmeden önce adı bir kez daha
+      // `safeModelFileName`den geçiriyor ve o kırpma SONDAN yapılıyor
+      // (MAX_MODEL_FILE_STEM). Ek için bütçe ayrılmasaydı adet sessizce
+      // düşerdi. Sınav: ikinci geçiş adı DEĞİŞTİRMEMELİ.
+      const { safeModelFileName, MAX_MODEL_FILE_STEM } = await import(
+        "../src/lib/config/order-model"
+      );
+      const name = (position: number, partName: string, quantity: number) =>
+        quotePartFileName({
+          position,
+          name: partName,
+          quantity,
+        } as Parameters<typeof quotePartFileName>[0]);
+
+      for (const [partName, position, quantity, suffix] of [
+        [LONG_PART_NAME, 2, 7, "_x7.stl"],
+        ["A".repeat(200), 0, 1, "_x1.stl"],
+        // Dört haneli adet eki daha çok yer kapıyor: bütçe ADETE göre ayrılır.
+        ["B".repeat(120), 0, 100_000, "_x100000.stl"],
+        // Kırpma bir ayırıcının üstüne düşerse ayırıcı atılır (çift alt çizgi yok).
+        ["C".repeat(92) + "___", 0, 3, "C_x3.stl"],
+      ] as const) {
+        const built = name(position, partName, quantity);
+        assert.ok(built.endsWith(suffix), `${suffix} kırpıldı: ${built}`);
+        assert.equal(
+          safeModelFileName(built),
+          built,
+          `ikinci normalleştirme adı değiştiriyor: ${built}`
+        );
+        assert.ok(
+          built.replace(/\.stl$/, "").length <= MAX_MODEL_FILE_STEM,
+          `gövde ${built.length} karakter`
+        );
+      }
     });
 
     console.log(`${checks} quote order DB checks passed`);

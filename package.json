@@ -133,6 +133,7 @@
     "test:quote-api": "npx tsx scripts/test-quote-api.ts",
     "test:quote-service:db": "npx tsx scripts/test-quote-service-db.ts",
     "test:quote-checkout:db": "npx tsx scripts/test-quote-checkout-db.ts",
+    "test:quote-order:db": "npx tsx scripts/test-quote-order-db.ts",
     "test:quote-ui": "npx tsx scripts/test-quote-ui.ts",
     "test:auth-fixes": "npx tsx scripts/test-auth-fixes.ts"
   },

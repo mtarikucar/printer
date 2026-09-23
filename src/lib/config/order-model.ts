@@ -23,6 +23,17 @@ export const MAX_ORDER_MODEL_FILES = 50;
 /** Başlık doğrulaması için okunacak bayt: binary STL'nin 80 baytlık başlığı + üçgen sayısı. */
 export const MODEL_HEAD_BYTES = 84;
 
+/**
+ * `safeModelFileName`in gövdeye (uzantısız kısım) uyguladığı tavan.
+ *
+ * Dışa açık çünkü AD ÜRETEN çağıranlar bütçeyi önceden ayırmak zorunda:
+ * kırpma SONDAN yapılır, yani adın sonuna anlam taşıyan bir ek koyan
+ * (ör. teklif parçalarındaki `_x<adet>`) bir üretici bu sayıyı bilmeden ekini
+ * sessizce kaybeder. Sabiti iki yerde ayrı yazmak, biri değiştiğinde diğerini
+ * bayatlatırdı.
+ */
+export const MAX_MODEL_FILE_STEM = 100;
+
 export function orderModelKindOf(fileName: string): OrderModelKind | null {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
   return (ORDER_MODEL_FORMATS as readonly string[]).includes(ext) ? (ext as OrderModelKind) : null;
@@ -49,7 +60,7 @@ export function safeModelFileName(raw: string): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!stem || stem === "." || stem === "..") stem = "model";
-  stem = stem.slice(0, 100);
+  stem = stem.slice(0, MAX_MODEL_FILE_STEM);
   return ext ? `${stem}.${ext}` : stem;
 }
 

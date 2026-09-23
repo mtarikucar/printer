@@ -324,13 +324,20 @@ let warnedAboutMissingQuotaStore = false;
  * Misafirin günlük bayt defterine yazar ve toplamı döndürür. `bytes = 0` salt
  * okuma (yüklemeden önceki kapı kontrolü) anlamına gelir.
  *
+ * İKİ DEFTER birden yüklenir: çerez (`anonymous_session`) ve IP. Çerez tek
+ * başına bir kota taşıyamaz — `getOrCreateAnonymousId()` onu imzasız üretir,
+ * sunucuda karşılığı yoktur ve her istekte silip yenilemek taze bir 2 GB satın
+ * alırdı. IP defteri çerezden bağımsız birikir; ikisinden BİRİ dolduğunda kapı
+ * kapanır. `ip` verilmezse (çağıranın adresi yoksa) yalnız çerez defteri işler.
+ *
  * Redis yoksa kota UYGULANMAZ: süreç belleğindeki bir sayaç, birden çok örnek
  * ardında hiçbir şeyi sınırlamaz ve yalnızca yanlış bir güven duygusu verir.
  * Bunun yerine bir kez yüksek sesle uyarıyoruz.
  */
 export async function chargeAnonymousDailyBytes(
   anonymousId: string,
-  bytes: number
+  bytes: number,
+  ip?: string | null
 ): Promise<{ used: number; overQuota: boolean }> {
   const redis = await getRedisOrNull();
   if (!redis) {
@@ -344,16 +351,23 @@ export async function chargeAnonymousDailyBytes(
     return { used: 0, overQuota: false };
   }
   const day = istanbulDateKey(new Date()).replaceAll("-", "");
-  const key = `chunk:bytes:anon:${anonymousId}:${day}`;
-  const used = await redisCall("INCRBY chunk:bytes", () =>
-    redis.incrby(key, Math.max(0, Math.trunc(bytes)))
-  );
-  // Sayaç okunamadıysa kota uygulanamaz; yükleme yine de yürüsün (yukarıdaki
-  // gerekçe) — ama `expire` için ikinci bir bekleme daha yaşanmasın.
-  if (!used.ok) return { used: 0, overQuota: false };
-  // 48 sa: gün İstanbul takvimine göre döner, anahtarın kendisi çöp olmasın.
-  await redisCall("EXPIRE chunk:bytes", () => redis.expire(key, 48 * 60 * 60));
-  return { used: used.value, overQuota: used.value > ANON_DAILY_UPLOAD_BYTES };
+  const amount = Math.max(0, Math.trunc(bytes));
+  const keys = [`chunk:bytes:anon:${anonymousId}:${day}`];
+  if (ip) keys.push(`chunk:bytes:ip:${ip}:${day}`);
+
+  let used = 0;
+  let overQuota = false;
+  for (const key of keys) {
+    const total = await redisCall("INCRBY chunk:bytes", () => redis.incrby(key, amount));
+    // Sayaç okunamadıysa o defter uygulanamaz; yükleme yine de yürüsün
+    // (yukarıdaki gerekçe) — ama `expire` için ikinci bir bekleme yaşanmasın.
+    if (!total.ok) continue;
+    // 48 sa: gün İstanbul takvimine göre döner, anahtarın kendisi çöp olmasın.
+    await redisCall("EXPIRE chunk:bytes", () => redis.expire(key, 48 * 60 * 60));
+    used = Math.max(used, total.value);
+    if (total.value > ANON_DAILY_UPLOAD_BYTES) overQuota = true;
+  }
+  return { used, overQuota };
 }
 
 /** Drops staged files nobody completed. Called by the cleanup worker. */

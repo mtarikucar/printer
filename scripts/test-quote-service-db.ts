@@ -150,9 +150,13 @@ async function main() {
       notifyQuoteMessage,
       notifyReviewRequested,
     } = await import("../src/lib/services/quote-notify");
-    const { createStagedUpload, appendChunk, setStagedUploadMeta } = await import(
-      "../src/lib/services/chunked-upload"
-    );
+    const {
+      ANON_DAILY_UPLOAD_BYTES,
+      appendChunk,
+      chargeAnonymousDailyBytes,
+      createStagedUpload,
+      setStagedUploadMeta,
+    } = await import("../src/lib/services/chunked-upload");
     const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
 
     const queue = getQuoteAnalysisQueue();
@@ -182,6 +186,20 @@ async function main() {
       await setStagedUploadMeta(uploadId, { owner, expectedSize: bytes.length });
       return uploadId;
     }
+
+    /** UPLOAD_DIR altındaki her dosyanın göreli yolu (sıralı). */
+    const storedFiles = (): string[] => {
+      const out: string[] = [];
+      const walk = (dir: string, prefix: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+          else out.push(rel);
+        }
+      };
+      walk(uploads, "");
+      return out.sort();
+    };
 
     const livePartCount = async (quoteId: string) =>
       (
@@ -324,6 +342,56 @@ async function main() {
       assert.equal(await claimQuote(quoteA.id, randomUUID(), anonId), false);
     });
 
+    // Fiyat kapısı bir MODALDIR: müşteri kayıt olurken çalışma alanı ayakta
+    // kalır ve o sırada yürüyen yükleme tamamlanır. Sahneleme kaydındaki sahip
+    // `a:<çerez>` olarak donmuştur; `callerKey` ise girişten sonra `u:<id>`
+    // olur. Aday kümesi iki anahtarı da taşımazsa müşteri KENDİ dosyası için
+    // "size ait değil" cevabı alır — hem de tam kazanım hunisinin ortasında.
+    await test("giriş yapınca UÇUŞTAKİ misafir yüklemesi teklife bağlanır", async () => {
+      const anonC = `anon-${randomUUID()}`;
+      const userC = randomUUID();
+      await admin.query(`INSERT INTO users (id, email, full_name) VALUES ($1, $2, $3)`, [
+        userC,
+        `kapi-${userC}@ornek.test`,
+        "Fiyat Kapısı Müşterisi",
+      ]);
+      const quoteC = await createQuote({ userId: null, anonymousId: anonC, termsAccepted: true });
+      // Dosya misafirken sahnelenir…
+      const staged = await stage("fixture-gate", `a:${anonC}`);
+      const foreign = await stage("fixture-gate-foreign", `a:${randomUUID()}`);
+      // …müşteri fiyatı görmek için kayıt olur…
+      assert.equal(await claimQuote(quoteC.id, userC, anonC), true);
+      // …ve yükleme yine de bağlanır.
+      const added = await addPartFromUpload(await loadAccess(quoteC.id, userC), {
+        uploadId: staged,
+        fileName: "kapi.stl",
+      });
+      assert.ok(added.partId, "uçuştaki yükleme bağlanamadı");
+      // Gerçekten yabancı bir çerezin sahnelemesi hâlâ reddedilir.
+      await assert.rejects(
+        addPartFromUpload(await loadAccess(quoteC.id, userC), {
+          uploadId: foreign,
+          fileName: "yabanci.stl",
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 403 &&
+          err.code === "upload_not_owned"
+      );
+    });
+
+    await test("misafir günlük bayt kotası IP defterini de yükler", async () => {
+      // `anonymous_session` imzasızdır ve sunucuda karşılığı yoktur: her istekte
+      // taze bir çerez üretmek taze bir 2 GB kotası satın alırdı. IP defteri
+      // çerezden bağımsız birikir, ikisinden biri dolduğunda kapı kapanır.
+      const ip = `ip-${randomUUID()}`;
+      const half = Math.floor(ANON_DAILY_UPLOAD_BYTES / 2) + 1;
+      const first = await chargeAnonymousDailyBytes(`anon-${randomUUID()}`, half, ip);
+      assert.equal(first.overQuota, false, "tek misafir tavanın altında kalmalı");
+      const second = await chargeAnonymousDailyBytes(`anon-${randomUUID()}`, half, ip);
+      assert.equal(second.overQuota, true, "çerez tazelemek IP kotasını sıfırladı");
+    });
+
     // ─── Yapılandırma ───────────────────────────────────────────────────────
 
     let quoteB = { id: "", number: "" };
@@ -410,6 +478,46 @@ async function main() {
       assert.equal(part.drawingName, "teknik çizim.pdf");
       assert.ok(part.drawingKey?.startsWith(`quote-parts/${partB}/drawing-`));
       assert.ok(fs.existsSync(path.join(uploads, part.drawingKey!)), "dosya diske yazıldı");
+    });
+
+    await test("sahipliği kanıtlanmamış parça için TEK BAYT yazılmaz", async () => {
+      // Çizim yolu ham `partId`den kuruluyordu ve `saveFile` çağrısı sahiplik
+      // kontrolünden ÖNCE yürüyordu: `../../` taşıyan bir parça kimliği dosyayı
+      // UPLOAD_DIR'in dışına koyar, ardından sorgu patlar ve uç 500 döner —
+      // dosya çoktan diskte. Sıra doğruysa hiçbir yol yazmaya ulaşmaz.
+      const escape = `kacak-${namespace}`;
+      const outside = path.resolve(uploads, "..", escape);
+      const before = storedFiles();
+      const pdf = () => new File(["%PDF-1.7\n%…\n"], "cizim.pdf", { type: "application/pdf" });
+
+      // (a) Yol gezintisi: hem kodlanmış hem çözülmüş hâli.
+      for (const evil of [`..%2F..%2F${escape}`, `../../${escape}`]) {
+        await assert.rejects(
+          setDrawing(await loadAccess(quoteB.id, userId), evil, pdf()),
+          (err: unknown) =>
+            err instanceof QuoteServiceError &&
+            err.status === 404 &&
+            err.code === "part_not_found",
+          `kabul edildi: ${evil}`
+        );
+      }
+
+      // (b) Biçimi kusursuz ama BAŞKA teklifin parçası.
+      const [foreignPart] = await db
+        .select({ id: quoteParts.id })
+        .from(quoteParts)
+        .where(eq(quoteParts.quoteId, quoteA.id))
+        .limit(1);
+      await assert.rejects(
+        setDrawing(await loadAccess(quoteB.id, userId), foreignPart.id, pdf()),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 404 &&
+          err.code === "part_not_found"
+      );
+
+      assert.equal(fs.existsSync(outside), false, "UPLOAD_DIR DIŞINA dosya yazıldı");
+      assert.deepEqual(storedFiles(), before, "reddedilen çizim diske dosya bıraktı");
     });
 
     // ─── Yeniden fiyatlama ──────────────────────────────────────────────────

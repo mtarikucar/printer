@@ -52,14 +52,22 @@ function decodeToFixpoint(input: string): string | null {
   return null;
 }
 
+/**
+ * `assertSafePath` KLASÖR AÇILMADAN ÖNCE: bu yardımcı ~25 yerden çağrılır ve
+ * `subdir` bazılarında istekten gelen bir kimlik taşır. Sırayı tersine çevirmek
+ * (`mkdir` sonra kontrol) gezintiyi engellerdi ama klasörü zaten açmış olurdu.
+ * Kardeş yardımcıların (`saveFileFromPath`, `linkOrCopyStoredFile`,
+ * `absoluteFilePath`) hepsinde bu kontrol vardı; eksik olan tek kapı buydu.
+ */
 export async function saveFile(
   buffer: Buffer,
   subdir: string,
   filename: string
 ): Promise<string> {
   const dir = join(UPLOAD_DIR, subdir);
-  await mkdir(dir, { recursive: true });
   const filePath = join(dir, filename);
+  assertSafePath(filePath);
+  await mkdir(dir, { recursive: true });
   await writeFile(filePath, buffer);
   return `${subdir}/${filename}`;
 }

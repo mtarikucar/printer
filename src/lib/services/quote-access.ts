@@ -15,12 +15,23 @@ import { db } from "@/lib/db";
 import { quotes, type Quote } from "@/lib/db/schema";
 import { formatQuoteNumber, parseQuoteNumber } from "@/lib/config/quote-number";
 import type { QuoteViewer } from "@/lib/config/quote-types";
+import { uploadOwnerKey } from "@/lib/services/chunked-upload";
 import { isFlagEnabled } from "@/lib/services/flags";
 
 export interface QuoteAccess {
   quote: Quote;
   viewer: QuoteViewer;
   sessionUserId: string | null;
+  /**
+   * Çağıranın PANEL sahiplik anahtarı (`admin:<e-posta>`), yoksa null.
+   *
+   * Sahnelenmiş yüklemeyi teklife bağlarken aday sahipler arasına girer:
+   * `quoteApiEnabled()` yöneticiyi bayrak kapalıyken de içeri alır, yani
+   * lansman öncesi iç testi yapan kişi dosyayı kendi admin oturumuyla
+   * sahneler — o yükleme `admin:<e-posta>` ile kaydedilir ve başka hiçbir
+   * aday ona eşleşmez.
+   */
+  panelOwnerKey?: string | null;
 }
 
 export interface QuoteViewerContext {
@@ -34,7 +45,12 @@ export interface QuoteViewerContext {
   isAdmin: boolean;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * Tek uuid kalıbı. Teklif kimliğini aramak için doğduğu yer burası; PARÇA
+ * kimliğini doğrulayanlar da (uç + servis) aynı kalıbı okur — ikinci bir kopya,
+ * bir gün yalnız birinin sıkılaştırıldığı gün demek olurdu.
+ */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Erişim matrisi (spec §"Erişim ve fiyat gizleme"). `null` = 404.
@@ -83,22 +99,34 @@ export function resolveQuoteViewer(
 }
 
 /**
- * NextAuth admin oturumu var mı.
+ * NextAuth admin oturumu — yoksa null.
+ *
+ * Yalnız "var mı" değil E-POSTA da döner, çünkü sahiplik anahtarı ondan
+ * kurulur (`admin:<e-posta>`) ve erişim çözümü oturumu zaten bir kez okuyor;
+ * ikinci bir `auth()` çağrısı aynı isteğe ikinci bir tur eklerdi.
  *
  * `@/lib/auth/config` TEMBEL yüklenir: bu modülü teklif servisleri ve (dolaylı
  * olarak) worker zinciri de import ediyor; next-auth sağlayıcı zincirini her
  * seferinde çözmek gereksiz ve ortam değişkeni uyarılarını her betiğe taşır.
  */
-export async function isAdminSession(): Promise<boolean> {
+async function adminSession(): Promise<{ email: string } | null> {
   try {
     const { auth } = await import("@/lib/auth/config");
     const session = await auth();
-    return (session?.user as { role?: string } | undefined)?.role === "admin";
+    const user = session?.user as { role?: string; email?: string | null } | undefined;
+    if (user?.role !== "admin") return null;
+    // Kimliksiz anahtar üretilemez; `uploads/chunk` de aynı yedeği kullanır.
+    return { email: user.email || "admin" };
   } catch {
     // Admin oturumu okunamıyorsa istek admin DEĞİLDİR; erişim kapısı sessizce
     // açılmaz.
-    return false;
+    return null;
   }
+}
+
+/** NextAuth admin oturumu var mı. */
+export async function isAdminSession(): Promise<boolean> {
+  return (await adminSession()) !== null;
 }
 
 /**
@@ -160,14 +188,19 @@ export async function resolveQuoteAccess(
   const [quote] = await db.select().from(quotes).where(condition).limit(1);
   if (!quote) return null;
 
-  const [identity, admin] = await Promise.all([requestIdentity(), isAdminSession()]);
+  const [identity, admin] = await Promise.all([requestIdentity(), adminSession()]);
   const viewer = resolveQuoteViewer(quote, {
     ...identity,
     shareToken: opts.shareToken ?? null,
-    isAdmin: admin,
+    isAdmin: admin !== null,
   });
   if (!viewer) return null;
   if (opts.forEdit && !viewer.canEdit) return null;
 
-  return { quote, viewer, sessionUserId: identity.sessionUserId };
+  return {
+    quote,
+    viewer,
+    sessionUserId: identity.sessionUserId,
+    panelOwnerKey: admin ? uploadOwnerKey({ role: "admin", userId: admin.email }) : null,
+  };
 }

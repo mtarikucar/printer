@@ -55,7 +55,7 @@ import {
   promoteStagedUpload,
   uploadOwnerKey,
 } from "@/lib/services/chunked-upload";
-import type { QuoteAccess } from "@/lib/services/quote-access";
+import { UUID_RE, type QuoteAccess } from "@/lib/services/quote-access";
 import { recomputeQuoteCache, type QuoteCacheTx } from "@/lib/services/quote-cache";
 import { catalogUpdatedAt, loadActiveSnapshot } from "@/lib/services/quote-catalog";
 import { validateStagedQuoteModel } from "@/lib/services/quote-model-validation";
@@ -275,11 +275,18 @@ export async function addPartFromUpload(
   // Yükleme sahipliği: sahnelenmiş dosya yalnız onu yükleyen kimliğin
   // teklifine bağlanabilir. Kayıt yoksa dosya da güvenilmezdir (süresi dolmuş
   // ya da başkasının oturumundan kalmış olabilir).
-  const callerKey = access.sessionUserId
-    ? uploadOwnerKey({ userId: access.sessionUserId })
-    : access.quote.anonymousId
-      ? uploadOwnerKey({ anonymousId: access.quote.anonymousId })
-      : null;
+  //
+  // Sahiplik TEK bir anahtar değil, bir ADAY KÜMESİDİR. Sahneleme kimliği PUT
+  // anında donar (`a:<çerez>`), oysa fiyat kapısı bir modaldır: müşteri dosya
+  // yüklenirken kayıt olabilir ve o andan sonra `u:<id>` olur. Tek anahtara
+  // bakmak, müşteriye KENDİ dosyası için "size ait değil" demek olurdu.
+  // `quotes.anonymous_id` devralmada bilerek yerinde bırakılır (`claimQuote`) —
+  // o kolon "bu tarayıcı bu teklifi açtı"nın kanıtıdır, burada da o işi görür.
+  const candidates = [
+    access.sessionUserId && uploadOwnerKey({ userId: access.sessionUserId }),
+    access.quote.anonymousId && uploadOwnerKey({ anonymousId: access.quote.anonymousId }),
+    access.panelOwnerKey,
+  ].filter(Boolean) as string[];
   const meta = await getStagedUploadMeta(args.uploadId);
   if (!meta) {
     throw new QuoteServiceError(
@@ -288,7 +295,7 @@ export async function addPartFromUpload(
       "unknown_upload"
     );
   }
-  if (!callerKey || meta.owner !== callerKey) {
+  if (candidates.length === 0 || !candidates.includes(meta.owner)) {
     throw new QuoteServiceError("Bu yükleme size ait değil.", 403, "upload_not_owned");
   }
 
@@ -644,6 +651,11 @@ async function demoteQuotedToDraft(tx: QuoteCacheTx, quote: Quote): Promise<void
 }
 
 async function loadPart(tx: QuoteCacheTx, quoteId: string, partId: string): Promise<QuotePart> {
+  // Biçimi uuid OLMAYAN kimlik sorguya hiç gitmez: Postgres onu `22P02` ile
+  // patlatır ve müşteriye "parça bulunamadı" yerine gövdesiz bir 500 döner.
+  // Daha kötüsü, bu satırın ÖNÜNDE çalışan her şey (bir zamanlar çizim
+  // yazımı) o ham kimliği zaten kullanmış olur.
+  if (!UUID_RE.test(partId)) throw new QuoteServiceError(PART_NOT_FOUND, 404, "part_not_found");
   const [part] = await tx
     .select()
     .from(quoteParts)
@@ -837,7 +849,13 @@ export async function setDrawing(
   partId: string,
   file: File | null
 ): Promise<void> {
-  let stored: { key: string; name: string } | null = null;
+  // Baytlar burada DOĞRULANIR ama HENÜZ YAZILMAZ.
+  //
+  // Depolama yolu ham `partId`den kurulur; yazma sahiplik kanıtından önce
+  // yürürse `../../` taşıyan bir kimlik dosyayı UPLOAD_DIR'in dışına koyar
+  // (ve `mkdir -p` klasörü açar), ardından sorgu patlar. Yazma bu yüzden
+  // `loadPart`ın ARDINDA, teklif kilidinin altında.
+  let pending: { bytes: Buffer; name: string } | null = null;
   if (file) {
     if (file.size <= 0 || file.size > DRAWING_MAX_BYTES) {
       throw new QuoteServiceError("Teknik çizim en fazla 20 MB olabilir.", 400, "drawing_too_large");
@@ -848,22 +866,30 @@ export async function setDrawing(
     if (bytes.length < 5 || bytes.subarray(0, 4).toString("latin1") !== "%PDF") {
       throw new QuoteServiceError("Teknik çizim yalnız PDF olabilir.", 400, "drawing_not_pdf");
     }
-    const name = safeDrawingName(file.name || "cizim.pdf");
-    const key = await saveFile(bytes, `quote-parts/${partId}`, `drawing-${nanoid(8)}.pdf`);
-    stored = { key, name };
+    pending = { bytes, name: safeDrawingName(file.name || "cizim.pdf") };
   }
 
-  const previousKey = await mutateQuote(access, async (tx, quote) => {
+  const { previousKey, stored } = await mutateQuote(access, async (tx, quote) => {
     const part = await loadPart(tx, quote.id, partId);
+    const next = pending
+      ? {
+          key: await saveFile(
+            pending.bytes,
+            `quote-parts/${part.id}`,
+            `drawing-${nanoid(8)}.pdf`
+          ),
+          name: pending.name,
+        }
+      : null;
     await tx
       .update(quoteParts)
       .set({
-        drawingKey: stored?.key ?? null,
-        drawingName: stored?.name ?? null,
+        drawingKey: next?.key ?? null,
+        drawingName: next?.name ?? null,
         updatedAt: new Date(),
       })
       .where(eq(quoteParts.id, part.id));
-    return part.drawingKey;
+    return { previousKey: part.drawingKey, stored: next };
   });
 
   // Eski dosya ancak satır yazıldıktan SONRA silinir: işlem geri alınsaydı

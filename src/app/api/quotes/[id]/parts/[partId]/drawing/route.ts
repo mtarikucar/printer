@@ -11,7 +11,9 @@ import {
   CUSTOMER_READ_FAILED_ERROR,
   handleRouteFailure,
 } from "@/lib/api/route-error";
+import { UUID_RE } from "@/lib/services/quote-access";
 import { drawingKeyFor, QuoteServiceError, setDrawing } from "@/lib/services/quote-service";
+import { extractClientIp, rateLimitAsync } from "@/lib/services/rate-limit";
 import { getFileBuffer } from "@/lib/services/storage";
 import {
   accessOr404,
@@ -26,8 +28,24 @@ type Ctx = { params: Promise<{ id: string; partId: string }> };
 
 async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const { id, partId } = await ctx.params;
+  // Biçim kontrolü GÖVDE OKUNMADAN: `partId` depolama yoluna girer, ve 20 MB'ı
+  // okuyup sonra reddetmek saldırgana bedava bir yükleme kanalı bırakır.
+  if (!UUID_RE.test(partId)) return quoteNotFound();
   const found = await accessOr404(request, id, { forEdit: true });
   if ("response" in found) return found.response;
+
+  const limit = await rateLimitAsync(
+    `quote:drawing:ip:${extractClientIp(request)}`,
+    200,
+    60 * 60 * 1000
+  );
+  if (!limit.success) {
+    throw new QuoteServiceError(
+      "Çok fazla teknik çizim yüklediniz; bir süre sonra tekrar deneyin.",
+      429,
+      "rate_limited"
+    );
+  }
 
   const form = await request.formData();
   const file = form.get("file");
@@ -40,6 +58,7 @@ async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse>
 
 async function handleDELETE(request: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const { id, partId } = await ctx.params;
+  if (!UUID_RE.test(partId)) return quoteNotFound();
   const found = await accessOr404(request, id, { forEdit: true });
   if ("response" in found) return found.response;
 
@@ -49,6 +68,7 @@ async function handleDELETE(request: NextRequest, ctx: Ctx): Promise<NextRespons
 
 async function handleGET(request: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const { id, partId } = await ctx.params;
+  if (!UUID_RE.test(partId)) return quoteNotFound();
   const found = await accessOr404(request, id);
   if ("response" in found) return found.response;
   const { viewer, quote } = found.access;

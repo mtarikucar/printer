@@ -30,6 +30,11 @@ async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse>
   const { id, partId } = await ctx.params;
   // Biçim kontrolü GÖVDE OKUNMADAN: `partId` depolama yoluna girer, ve 20 MB'ı
   // okuyup sonra reddetmek saldırgana bedava bir yükleme kanalı bırakır.
+  //
+  // Kalıp bilerek `quote_not_found`: bu kapı teklife bile bakmadan, uçtaki ortak
+  // 404 ile kapanır. Biçimi doğru ama teklifte olmayan parça ise servisten
+  // `part_not_found` 404 alır (`quote-service.ts` → `loadPart`). İkisi de
+  // Türkçe cümleli 404 olduğundan kimlik saydırmaz.
   if (!UUID_RE.test(partId)) return quoteNotFound();
   const found = await accessOr404(request, id, { forEdit: true });
   if ("response" in found) return found.response;

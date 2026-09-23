@@ -655,6 +655,21 @@ async function demoteQuotedToDraft(tx: QuoteCacheTx, quote: Quote): Promise<void
     .where(eq(quotes.id, quote.id));
 }
 
+/**
+ * Parçayı teklifin İÇİNDEN yükler; bulunamazsa 404 `part_not_found`.
+ *
+ * Kod adı bilerek `part_not_found`, `quote_not_found` DEĞİL: buraya gelindiğinde
+ * teklif bulunmuştur, eksik olan yalnız parçadır — ve bu gövde `updatePart`,
+ * `duplicatePart`, `deletePart`, `setDrawing` tarafından paylaşılır, dördü de
+ * bugün `part_not_found` döner. İKİ KATMANLI sözleşme:
+ *   • uç (route) — biçimi uuid olmayan `partId` servise hiç ulaşmaz, uç
+ *     `quote_not_found` 404 kalıbını döner (teklif ucunun ortak kalıbı);
+ *   • servis (burası) — biçim doğruysa ama parça yoksa/başkasınınsa
+ *     `part_not_found` 404.
+ * İkisi de gövdesinde Türkçe cümle taşıyan 404'tür, yani hiçbiri kimlik
+ * saydırmaz. Pinler: `scripts/test-quote-cutover.ts` (uç kalıbı, kaynaktan) ve
+ * `scripts/test-quote-service-db.ts` (servis kodu, çalışır hâlde).
+ */
 async function loadPart(tx: QuoteCacheTx, quoteId: string, partId: string): Promise<QuotePart> {
   // Biçimi uuid OLMAYAN kimlik sorguya hiç gitmez: Postgres onu `22P02` ile
   // patlatır ve müşteriye "parça bulunamadı" yerine gövdesiz bir 500 döner.

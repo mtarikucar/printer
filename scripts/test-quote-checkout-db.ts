@@ -108,6 +108,12 @@ const require_ = createRequire(import.meta.url);
 /** PayTR token ucu: ağ yok, ama imza/sepet gerçekten üretilir. */
 const paytrCalls: Array<Record<string, string>> = [];
 let paytrFails = false;
+/**
+ * PayTR CEVAP VERİRKEN araya giren ikinci sekme (tek atımlık).
+ * Gerçek yarışın testte tekrarlanabilir karşılığı: token çağrısı sürerken
+ * başka bir istek aynı taslağa dokunur.
+ */
+let paytrDuring: (() => Promise<void>) | null = null;
 {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -116,6 +122,11 @@ let paytrFails = false;
       const body = init?.body;
       const form = body instanceof URLSearchParams ? Object.fromEntries(body) : {};
       paytrCalls.push(form as Record<string, string>);
+      if (paytrDuring) {
+        const during = paytrDuring;
+        paytrDuring = null;
+        await during();
+      }
       if (paytrFails) {
         return new Response(JSON.stringify({ status: "failed", reason: "qa refused" }), {
           status: 200,
@@ -1071,6 +1082,83 @@ async function main() {
         .from(orderDrafts)
         .where(eq(orderDrafts.reference, result.reference));
       assert.equal(draft.status, "pending", "taslak yerinde kaldı");
+    });
+
+    await test("token basılırken İPTAL edilen taslağın token'ı MÜŞTERİYE VERİLMEZ", async () => {
+      // İki sekme: A kartla ödemeyi başlatır; PayTR cevaplarken B bekleyen
+      // taslağı iptal eder (o an `paytr_test_mode` NULL, yani kapı açık).
+      // Koşulsuz yazımda A iframe'i alırdı, müşteri öderdi ve webhook
+      // `DRAFT_NOT_PROMOTABLE` alıp 200'le onaylardı: para tahsil, sipariş yok.
+      const racer = await makeUser();
+      const q = await makeQuote(racer.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      let cancelledReference = "";
+      paytrDuring = async () => {
+        const out = await cancelPendingQuoteCheckout({
+          quoteId: quote.id,
+          userId: racer.id,
+        });
+        cancelledReference = out.reference;
+      };
+      const callsBefore = paytrCalls.length;
+
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: racer.id,
+          email: racer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: quote.version,
+              expectedTotalKurus: computed.totals.totalKurus,
+            })
+          ),
+          req: fakeRequest(),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "draft_cancelled"
+      );
+
+      // Yarışın gerçekten kurulduğunun kanıtı: token çağrısı YAPILDI ve iptal
+      // tam o sırada çalıştı.
+      assert.equal(paytrCalls.length, callsBefore + 1, "PayTR token'ı gerçekten istendi");
+      assert.equal(paytrDuring, null, "araya girme çalıştı");
+      assert.ok(cancelledReference, "taslak token beklenirken iptal edildi");
+
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, cancelledReference));
+      assert.equal(draft.status, "cancelled", "iptal yerinde kaldı");
+      assert.equal(
+        draft.paytrTestMode,
+        null,
+        "iptal edilmiş taslağa canlı token damgası yazılmaz"
+      );
+      assert.equal(
+        await pendingQuoteCheckout(quote.id),
+        null,
+        "teklif kilitli kalmadı: müşteri yeniden başlayabilir"
+      );
+
+      // Kapı kapandıktan sonra normal yol hâlâ açık: yeni taslak token alır.
+      const retry = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: racer.id,
+        email: racer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: computed.totals.totalKurus,
+          })
+        ),
+        req: fakeRequest(),
+      });
+      assert.equal(retry.reused, false, "iptalden sonra YENİ taslak açıldı");
+      assert.notEqual(retry.reference, cancelledReference);
+      assert.equal(retry.paytrToken, "qa-token");
     });
 
     await test("aynı anahtarla dürüst tekrar oran limitinden JETON YEMEZ", async () => {

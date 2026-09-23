@@ -327,7 +327,12 @@ const METHOD_LABELS: Record<"card" | "bank_transfer", string> = {
  *
  * Yalnız "hiç başlamamış" kart taslağı: `paytr_test_mode` ilk başarılı
  * token'la yazılır (`/api/pay/[reference]/paytr` yeniden basımında da), yani
- * NULL olması müşterinin PayTR ekranını hiç görmediğinin kanıtıdır. Havale
+ * NULL olması müşterinin PayTR ekranını hiç görmediğinin kanıtıdır. Kolonun
+ * yazımı ile token'ın tarayıcıya dönüşü arasındaki AÇIK aralık da güvenli:
+ * `runCheckout` o yazımı `status = 'pending'` koşuluna bağlar ve satır
+ * tutmazsa 409 `draft_cancelled` atar, yani bu arada iptal edilen taslağın
+ * token'ı müşteriye HİÇ ulaşmaz (aksi hâlde ödenen ama siparişe dönmeyen
+ * bir taslak kalırdı). Havale
  * taslağı iptal edilmez: IBAN talimatı gönderilmiş, hatırlatma/süre işleri
  * kuyruğa girmiştir ve müşteri parayı yollamış olabilir. Hediye kartı ve
  * terfi etmiş taslak da dışarıda: rezerve fonu serbest bırakmak ikinci bir
@@ -787,8 +792,12 @@ async function runCheckout(args: {
   );
 
   const address = draft.shippingAddress;
+  // `try` YALNIZ token çağrısını sarar: altındaki koşullu yazım da buraya
+  // girseydi, onun 409'u (aşağıda) `catch` tarafından yutulup "PayTR
+  // başarısız" diye 502'ye çevrilirdi.
+  let paytr: Awaited<ReturnType<typeof createPaytrToken>>;
   try {
-    const paytr = await createPaytrToken({
+    paytr = await createPaytrToken({
       orderNumber: draft.reference,
       email: args.email,
       amountKurus,
@@ -808,39 +817,59 @@ async function runCheckout(args: {
       }),
       locale: draft.locale,
     });
-
-    await db
-      .update(orderDrafts)
-      .set({
-        paytrMerchantOid: paytr.merchantOid,
-        paytrTestMode: paytr.testMode,
-        updatedAt: new Date(),
-      })
-      .where(eq(orderDrafts.id, draft.id));
-
-    return {
-      reference: draft.reference,
-      paymentMethod: "card",
-      iframeUrl: paytr.iframeUrl,
-      paytrToken: paytr.token,
-      finalAmountKurus: amountKurus,
-      reused: false,
-    };
   } catch (err) {
     const reason = err instanceof Error ? err.message : "unknown";
     console.error("PayTR token creation failed for quote draft", draft.reference, err);
     // Taslak `pending` KALIR: müşteri `/pay/<ref>` üzerinden tekrar
     // deneyebilsin (orada taze bir merchant oid ile yeni token basılır).
+    // Koşul, arada iptal edilmiş taslağın iptal notunu ezmemek için.
     await db
       .update(orderDrafts)
       .set({ paytrFailureReason: `PayTR token error: ${reason}`, updatedAt: new Date() })
-      .where(eq(orderDrafts.id, draft.id));
+      .where(and(eq(orderDrafts.id, draft.id), eq(orderDrafts.status, "pending")));
     throw new QuoteServiceError(
       "Ödeme başlatılamadı. Teklif sayfasındaki bekleyen ödeme bağlantısından tekrar deneyebilirsiniz.",
       502,
       "paytr_failed"
     );
   }
+
+  // KOŞULLU yazım: token basılırken taslak hâlâ bekliyor muydu?
+  //
+  // İki sekme: A kartla ödemeyi başlatır; PayTR cevaplarken B bekleyen
+  // taslağı iptal eder — o an `paytr_test_mode` henüz NULL olduğu için
+  // `pendingDraftCancellable` iptali geçirir. Koşulsuz yazım, iptal edilmiş
+  // taslağın üstüne CANLI bir token yazar ve tarayıcıya iframe'i verirdi:
+  // müşteri öder, webhook `promoteDraftToOrder`dan `DRAFT_NOT_PROMOTABLE`
+  // alır ve tasarım gereği 200'le onaylar (`api/webhooks/paytr/route.ts`) —
+  // para tahsil edilir, sipariş doğmaz, müşteriye hiçbir hata görünmez.
+  // Satır tutmazsa token tarayıcıya HİÇ ulaşmaz; PayTR'daki oid ödenmeden
+  // zaman aşımına uğrar.
+  const [kept] = await db
+    .update(orderDrafts)
+    .set({
+      paytrMerchantOid: paytr.merchantOid,
+      paytrTestMode: paytr.testMode,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(orderDrafts.id, draft.id), eq(orderDrafts.status, "pending")))
+    .returning({ id: orderDrafts.id });
+  if (!kept) {
+    throw new QuoteServiceError(
+      "Bu ödeme iptal edildi; ödemeyi yeniden başlatın.",
+      409,
+      "draft_cancelled"
+    );
+  }
+
+  return {
+    reference: draft.reference,
+    paymentMethod: "card",
+    iframeUrl: paytr.iframeUrl,
+    paytrToken: paytr.token,
+    finalAmountKurus: amountKurus,
+    reused: false,
+  };
 }
 
 /** Teklifin bekleyen ödemesi — ödeme sayfasının "ne yapabilirim"i. */

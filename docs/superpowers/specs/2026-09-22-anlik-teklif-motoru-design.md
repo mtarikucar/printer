@@ -166,7 +166,7 @@ lead_days_extra, active, sort_order, timestamps.
 **`quote_pricing_settings`** (tek satır, `id = 1` CHECK): qty_breaks jsonb
 `[{minQty, discountBps}]`, lead_tiers jsonb `[{key, name, multiplierBps, daysDelta,
 minDays}]` (key ∈ economy|standard|express), min_order_kurus, max_auto_total_kurus,
-max_auto_qty_per_part, max_parts_per_quote (20), max_file_bytes (100 MB),
+max_auto_qty_per_part, max_parts_per_quote (20), max_file_bytes (32 MB),
 quote_valid_days (30), retention_days_after_expiry (90), price_break_quantities jsonb
 int[] ([1,5,10,25,50,100]), holidays jsonb string[] (ISO tarih), cutoff_hour (14),
 havale_discount_applies boolean, updated_at, updated_by.
@@ -385,7 +385,7 @@ küçük resim.
   dizin (≤10k girdi) `[Content_Types].xml` + `3D/*.model`, şifreli giriş reddi, yöntem
   0/8, zip-bomb koruması (toplam ≤1,5 GB, oran ≤1000:1). `chunked-upload.ts`'e
   `readStagedRange`.
-- **Limitler:** dosya ≤ `max_file_bytes` (100 MB), teklif başına ≤ 20 parça
+- **Limitler:** dosya ≤ `max_file_bytes` (32 MB; worker `mem_limit` 2 GB ile ölçülmüş zarf), teklif başına ≤ 20 parça
   (`quotes FOR UPDATE` altında sayılır), `upload_id` unique.
 - **Script** `scripts/analyze_quote_part.py <input> <fmt> <outdir>`: `process_mesh`
   yardımcılarını (load/repair/decimate/wall) ve `render_turntable`

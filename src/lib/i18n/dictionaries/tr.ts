@@ -1311,6 +1311,7 @@ const tr: Dictionary = {
   "instantQuote.workspace.empty": "Bu teklifte henüz parça yok.",
   "instantQuote.workspace.expiresAt": "Geçerlilik",
   "instantQuote.workspace.reprice": "Yeniden fiyatla",
+  "instantQuote.workspace.requote": "Yeniden teklif al",
   "instantQuote.workspace.review.note": "Notunuz",
   "instantQuote.workspace.review.noteTooShort":
     "Talebinizi en az {min} karakterle anlatın.",

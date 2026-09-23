@@ -1310,6 +1310,7 @@ const en = {
   "instantQuote.workspace.empty": "This quote has no parts yet.",
   "instantQuote.workspace.expiresAt": "Valid until",
   "instantQuote.workspace.reprice": "Reprice",
+  "instantQuote.workspace.requote": "Request a new quote",
   "instantQuote.workspace.review.note": "Your note",
   "instantQuote.workspace.review.noteTooShort":
     "Describe your request in at least {min} characters.",

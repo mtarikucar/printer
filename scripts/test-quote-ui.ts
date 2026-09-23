@@ -54,6 +54,7 @@ import {
   catalogAnchorKurus,
   formatAnchorPrice,
   materialAnchorKurus,
+  minOrderSentence,
   technologyAnchorKurus,
 } from "../src/app/3d-baski/pricing-anchors";
 import { QuoteListTable } from "../src/app/account/teklifler/quotes-client";
@@ -69,6 +70,7 @@ import {
   type PresentedCatalog,
   type PresentedPart,
   type PresentedQuote,
+  type PricingSnapshot,
   type QuoteTotals,
   type QuoteViewer,
 } from "../src/lib/config/quote-types";
@@ -1010,6 +1012,33 @@ test("katalog değişen ve süresi dolan teklif yeniden fiyatlamaya çağırır"
   assert.match(expired, /Yeniden fiyatla/);
 });
 
+test("kapanmış teklifin çıkışı var: sahibine 'Yeniden teklif al'", () => {
+  // Uç (POST /api/quotes/[id]/requote) ve servisi yazılıydı, düğmesi yoktu:
+  // siparişe dönmüş bir teklif yeniden fiyatlanamaz (409), yani aynı parçaları
+  // tekrar sipariş etmenin ekranda HİÇBİR yolu yoktu.
+  const ordered = renderBanners(
+    pricedQuote({ status: "ordered", locked: true, orderNumber: "FG-2026-0042" })
+  );
+  assert.match(ordered, /Yeniden teklif al/);
+  assert.match(ordered, /href="\/track\/FG-2026-0042"/, "takip bağlantısı kayboldu");
+
+  const expired = renderBanners(pricedQuote({ status: "expired", expired: true, locked: true }));
+  assert.match(expired, /Yeniden teklif al/);
+  assert.match(expired, /Yeniden fiyatla/, "süresi dolanda asıl eylem yeniden fiyatlamadır");
+
+  // Uç yalnız SAHİBE açık: paylaşım bağlantısıyla gelen 404, admin 403 alır —
+  // düğme onlara gösterilseydi tıklayan kişiye hata penceresi açardı.
+  const shared = renderBanners(
+    pricedQuote({
+      status: "ordered",
+      locked: true,
+      orderNumber: null,
+      viewer: { ...PRICED, isOwner: false, isShare: true, canEdit: false },
+    })
+  );
+  assert.ok(!shared.includes("Yeniden teklif al"), "paylaşım izleyicisine düğme çizildi");
+});
+
 test("kilitli teklif ödemeye, siparişe dönen teklif takibe bağlanır", () => {
   const locked = renderBanners(pricedQuote({ locked: true, liveDraftReference: "FG-DRAFT-7" }));
   assert.match(locked, /bekleyen bir ödeme/);
@@ -1319,6 +1348,44 @@ test("açılış sayfası katalogdaki her rakamı yayımlar (alıntılanabilirli
   assert.ok(html.includes("KDV dahil"));
 });
 
+test("çapa geçen her yüzey asgari sipariş tutarını da yazar", () => {
+  // Çapa 20 mm küpün BİRİM fiyatıdır (₺74); o sepet ödeme ekranında
+  // `min_order_kurus` ile ₺200'e tamamlanır. Asgariyi yazmayan bir sayfa,
+  // alıntılanmak için yazılmış olduğu hâlde 2,7 katlık bir sürpriz vaat eder.
+  const floor = formatAnchorPrice(SEED_SNAPSHOT.settings.minOrderKurus);
+  assert.equal(floor, "₺200");
+
+  const landing = renderLanding();
+  assert.ok(landing.includes("₺74'ten başlayan"), "çapa yok");
+  assert.ok(landing.includes(floor), "çapa var ama asgari sipariş tutarı yok");
+  assert.ok(
+    landing.includes(minOrderSentence(SEED_SNAPSHOT.settings.minOrderKurus)!),
+    "asgari sipariş cümlesi tek kaynaktan gelmiyor"
+  );
+  // SSS'nin altında değil, çapanın YANINDA: ziyaretçi ₺74'ü ilk gördüğü yerde
+  // ₺200'ü de görmeli ("Modelini yükle" ilk adımın başlığı, kahramanın sonu).
+  const hero = landing.slice(0, landing.indexOf("Modelini yükle"));
+  assert.ok(hero.includes("₺74'ten başlayan"), "kahraman bölümünde çapa yok");
+  assert.ok(hero.includes(floor), "asgari sipariş tutarı çapanın yanında değil");
+
+  // Bayrak kapalıyken de (SEO yüzeyi aynı kalır) ve malzeme kütüphanesinde de.
+  assert.ok(renderLanding(createElement(ComingSoonNote)).includes(floor));
+  const library = plain(inLocale(createElement(MaterialLibrary, { snapshot: SEED_SNAPSHOT })));
+  assert.ok(library.includes("₺74'ten başlayan"), "kütüphanede çapa yok");
+  assert.ok(library.includes(floor), "kütüphanede asgari sipariş tutarı yok");
+
+  // Rakam KATALOGDAN gelir: elle yazılsaydı asgari değiştiğinde sayfa yalan söylerdi.
+  const bumped: PricingSnapshot = {
+    ...SEED_SNAPSHOT,
+    settings: { ...SEED_SNAPSHOT.settings, minOrderKurus: 25000 },
+  };
+  const html = plain(
+    inLocale(createElement(PrintServiceLanding, { snapshot: bumped, uploader: null }))
+  );
+  assert.ok(html.includes("₺250"), "asgari sipariş tutarı sayfaya sabit yazılmış");
+  assert.ok(!html.includes("₺200"), "eski asgari tutar sayfada kalmış");
+});
+
 test("açılış sayfası dört adımı ve gizlilik taahhüdünü aynen yazar", () => {
   const html = renderLanding();
   for (const step of [
@@ -1361,13 +1428,16 @@ test("SSS müşterinin ilk sorduklarını RAKAMLA yanıtlar", () => {
     "STL",
     "OBJ",
     "3MF",
-    "100 MB",
+    // Tavan katalogdan gelir: sabit yazılsaydı tavan düştüğünde SSS'nin eski
+    // rakamı yazdığını değil, testin eski rakamı aradığını öğrenirdik.
+    `${SEED_SNAPSHOT.settings.maxFileBytes / 1048576} MB`,
     "20 parça",
     "hesap",
     "iş günü",
     "STEP",
     "manuel teklif",
     "Kurumsal",
+    "Asgari sipariş",
   ]) {
     assert.ok(body.includes(needle), `SSS "${needle}" konusuna değinmiyor`);
   }

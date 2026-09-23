@@ -10,7 +10,9 @@ import {
   ANCHOR_BASIS_TR,
   anchorSentence,
   catalogAnchorKurus,
+  formatAnchorPrice,
   materialAnchorKurus,
+  minOrderSentence,
   technologyAnchorKurus,
 } from "./pricing-anchors";
 
@@ -133,7 +135,7 @@ export interface FaqEntry {
 
 /**
  * Sık sorulanlar. Her cevap katalogdaki bir RAKAMLA bağlanır: "hızlı teslim"
- * değil "3 iş günü", "büyük dosya" değil "100 MB". Rakamsız cümle ne müşteriye
+ * değil "3 iş günü", "büyük dosya" değil "32 MB". Rakamsız cümle ne müşteriye
  * karar verdirir ne de alıntılanır.
  */
 export function landingFaq(snapshot: PricingSnapshot): FaqEntry[] {
@@ -143,6 +145,8 @@ export function landingFaq(snapshot: PricingSnapshot): FaqEntry[] {
   const leadSentence = snapshot.technologies
     .map((t) => `${t.name} ${t.baseLeadDays} iş günü`)
     .join(", ");
+
+  const minOrder = minOrderSentence(s.minOrderKurus);
 
   const tierSentence = [
     economy
@@ -160,6 +164,16 @@ export function landingFaq(snapshot: PricingSnapshot): FaqEntry[] {
       q: "Hangi dosya formatlarını yükleyebilirim?",
       a: `STL, OBJ ve 3MF. Tek teklifte en çok ${s.maxPartsPerQuote} parça, dosya başına en çok ${megabytes(s.maxFileBytes)} MB. Ölçü birimini (mm, cm, inç) parça başına değiştirebilirsiniz; 3MF dosyasının kendi birimi varsa otomatik okunur.`,
     },
+    // Asgari tutar sıfırlanırsa soru da kalkar: "yok" diyen bir SSS maddesi,
+    // olmayan bir kuralı anlatmaktan iyidir.
+    ...(minOrder
+      ? [
+          {
+            q: "Asgari sipariş tutarı var mı?",
+            a: `${minOrder} Yani ${formatAnchorPrice(s.minOrderKurus)} altında kalan bir sepette aradaki fark "asgari sipariş tamamlaması" satırı olarak eklenir; adet artırmak ya da aynı teklife başka parçalar eklemek bu farkı gerçek üretime çevirir.`,
+          },
+        ]
+      : []),
     {
       q: "Fiyatı görmek için hesap açmam gerekiyor mu?",
       a: "Yükleme, 3B önizleme, ölçüler ve üretilebilirlik uyarıları için gerekmez. Fiyatı görmek için hesap açmanız gerekir: e-posta ve telefonunuzu bir kez verirsiniz, açtığınız teklif de o hesaba bağlanır.",
@@ -325,7 +339,8 @@ function TechnologyComparison({ snapshot }: { snapshot: PricingSnapshot }): JSX.
 
       <p className="mt-4 text-xs leading-relaxed text-text-muted">
         Başlangıç fiyatları {ANCHOR_BASIS_TR} içindir; gerçek fiyat parçanızın hacmine,
-        yüzey alanına, yüksekliğine ve adedine göre hesaplanır. Türkiye içi kargo ücretsizdir.
+        yüzey alanına, yüksekliğine ve adedine göre hesaplanır.{" "}
+        {minOrderSentence(snapshot.settings.minOrderKurus)} Türkiye içi kargo ücretsizdir.
       </p>
     </section>
   );
@@ -542,6 +557,11 @@ export function PrintServiceLanding({
                 </dd>
               </div>
             </dl>
+            {/* Çapa ile ödeme ekranı arasındaki TEK fark bu cümledir; rakamın
+                hemen altında durmazsa "₺74" yanlış bir söz olur. */}
+            <p className="mt-3 max-w-xl text-xs leading-relaxed text-text-muted">
+              {minOrderSentence(snapshot.settings.minOrderKurus)}
+            </p>
           </div>
           <div className="lg:pt-10">{uploader}</div>
         </div>
@@ -572,7 +592,7 @@ export function MaterialLibrary({ snapshot }: { snapshot: PricingSnapshot }): JS
           <p className="mt-5 max-w-2xl text-lg leading-relaxed text-text-secondary">
             Aşağıdaki değerler malzeme üreticilerinin veri sayfalarından alınmıştır ve
             fiyat hesabında da bu değerler kullanılır. Başlangıç fiyatları{" "}
-            {ANCHOR_BASIS_TR} içindir.
+            {ANCHOR_BASIS_TR} içindir. {minOrderSentence(snapshot.settings.minOrderKurus)}
           </p>
           <Link href="/3d-baski" className="btn-primary mt-7 inline-flex !px-5 !py-2.5 text-sm">
             Teklif alın

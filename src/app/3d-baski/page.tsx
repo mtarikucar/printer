@@ -6,7 +6,7 @@ import { isFlagEnabled } from "@/lib/services/flags";
 import { isAdminSession } from "@/lib/services/quote-access";
 import { loadLandingSnapshot } from "./catalog";
 import { LandingUploader } from "./landing-uploader";
-import { anchorSentence, technologyAnchorKurus } from "./pricing-anchors";
+import { anchorSentence, formatAnchorPrice, technologyAnchorKurus } from "./pricing-anchors";
 import { ComingSoonNote, PrintServiceLanding } from "./sections";
 
 /**
@@ -36,8 +36,9 @@ export async function generateMetadata(): Promise<Metadata> {
     title: "3D Baskı Servisi — Anlık Teklif",
     description:
       `STL, OBJ veya 3MF dosyanızı yükleyin, fiyatı anında görün. ${anchors}` +
-      ` (20 mm küp, 1 adet, KDV dahil). Tek teklifte ${snapshot.settings.maxPartsPerQuote}` +
-      " parçaya kadar; Türkiye içi kargo ücretsiz.",
+      " (20 mm küp, 1 adet, KDV dahil; asgari sipariş" +
+      ` ${formatAnchorPrice(snapshot.settings.minOrderKurus)}). Tek teklifte` +
+      ` ${snapshot.settings.maxPartsPerQuote} parçaya kadar; Türkiye içi kargo ücretsiz.`,
   };
 }
 

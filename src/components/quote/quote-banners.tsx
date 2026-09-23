@@ -1,10 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type JSX, type ReactNode } from "react";
 import type { PresentedQuote } from "@/lib/config/quote-types";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { QuoteApiError, repriceQuote, splitQuoteByTechnology } from "@/lib/quote/client-api";
+import {
+  QuoteApiError,
+  repriceQuote,
+  requoteQuote,
+  splitQuoteByTechnology,
+} from "@/lib/quote/client-api";
 
 /**
  * Teklifin ÜSTÜNDEKİ durum bantları.
@@ -85,6 +91,7 @@ export function QuoteBanners({
   onQuoteChanged: (quote: PresentedQuote) => void;
 }): JSX.Element | null {
   const d = useDictionary();
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [splitNumbers, setSplitNumbers] = useState<string[]>([]);
@@ -125,6 +132,37 @@ export function QuoteBanners({
       run(() => repriceQuote(quote.id, { shareToken }))
     );
 
+  /**
+   * "Yeniden teklif al": AYNI parçalarla YENİ bir teklif açar; kaynak teklife
+   * dokunulmaz. `reprice`ten farkı budur — siparişe dönmüş bir teklif yeniden
+   * fiyatlanamaz (uç 409 verir), süresi dolanda ise müşteri eski teklifi
+   * olduğu gibi (ör. karşı tarafa gönderdiği hâliyle) saklamak isteyebilir.
+   * Uç yalnız SAHİBE açıktır (admin 403, paylaşım izleyicisi 404).
+   */
+  const requote = () =>
+    actionButton(d["instantQuote.workspace.requote"], () => {
+      setBusy(true);
+      setError(null);
+      void (async () => {
+        try {
+          const { number } = await requoteQuote(quote.id, { shareToken });
+          // Yeni teklife GİDİLİR: müşteri numarayı adres çubuğuna yazmamalı.
+          // `busy` bilerek açık bırakılır — gezinme sırasında düğme kapalı kalır.
+          router.push(`/teklif/${encodeURIComponent(number)}`);
+        } catch (e) {
+          setError(e instanceof QuoteApiError ? e.message : d["common.error"]);
+          setBusy(false);
+        }
+      })();
+    });
+
+  /** Bir bantta birden fazla eylem: tek düğme gibi hizalanır. */
+  const actionRow = (...nodes: Array<JSX.Element | null>) => {
+    const kept = nodes.filter((n): n is JSX.Element => n !== null);
+    if (kept.length === 0) return undefined;
+    return <div className="flex shrink-0 flex-wrap items-center gap-2">{kept}</div>;
+  };
+
   const banners: JSX.Element[] = [];
 
   // ── Durum bandı (en fazla bir tane) ──────────────────────────────────────
@@ -136,14 +174,15 @@ export function QuoteBanners({
         message={d["instantQuote.workspace.banner.ordered"]}
         // `orderNumber` yalnız sahibin gövdesinde vardır; paylaşım izleyicisi
         // takip sayfasına (oturumsuz açılır) götürülmez.
-        action={
+        action={actionRow(
           quote.orderNumber
             ? actionLink(
                 d["instantQuote.workspace.banner.orderedAction"],
                 `/track/${encodeURIComponent(quote.orderNumber)}`
               )
-            : undefined
-        }
+            : null,
+          quote.viewer.isOwner ? requote() : null
+        )}
       />
     );
   } else if (quote.locked && quote.liveDraftReference) {
@@ -164,7 +203,10 @@ export function QuoteBanners({
         key="expired"
         tone="warning"
         message={d["instantQuote.workspace.banner.expired"]}
-        action={quote.viewer.canEdit ? reprice() : undefined}
+        action={actionRow(
+          quote.viewer.canEdit ? reprice() : null,
+          quote.viewer.isOwner ? requote() : null
+        )}
       />
     );
   } else {

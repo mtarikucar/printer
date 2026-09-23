@@ -216,3 +216,24 @@ export function anchorSentence(kurus: number): string {
 export function anchorJsonPrice(kurus: number): string {
   return (Math.ceil(kurus / 100)).toFixed(2);
 }
+
+/**
+ * Çapanın YANINDA durması zorunlu cümle: asgari sipariş tutarı.
+ *
+ * Çapa tek bir parçanın BİRİM fiyatıdır (20 mm küp ×1 = ₺74), oysa o sepet
+ * ödeme ekranında `min_order_kurus` ile ₺200'e tamamlanır. Asgariyi yazmayan
+ * bir "₺74'ten başlayan" cümlesi, sayfanın tek işi alıntılanmak olduğu için
+ * (indekslenen `<meta description>`, yapay zekâ yanıtları) müşteriye 2,7 katlık
+ * bir sürpriz hazırlar. Bu yüzden çapa cümlesi geçen HER yüzeyde bu cümle de
+ * geçer; `scripts/test-quote-ui.ts` ikisini birlikte arar.
+ *
+ * Ek almamak için kurulmuş bir cümle: tutar katalogdan geldiği için "₺200'dür"
+ * gibi bir çekim her rakamda ayrı kural isterdi.
+ */
+export function minOrderSentence(minOrderKurus: number): string | null {
+  if (minOrderKurus <= 0) return null;
+  return (
+    `Asgari sipariş tutarı ${formatAnchorPrice(minOrderKurus)}: ` +
+    "daha düşük tutarlı siparişlerde toplam bu tutara tamamlanır."
+  );
+}

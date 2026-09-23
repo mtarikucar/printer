@@ -830,6 +830,208 @@ clearSignalEnv();
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * TEKLİF SİPARİŞİ: ÇOKLU MALZEME, POLİMER ETİKETİ, BÜYÜK FORMAT
+ *
+ * Teklif siparişi parçalarının teknolojileri kadar malzeme ister; figür
+ * siparişi tek bir `orders.material` taşır. PARİTE ŞARTI: alanlar
+ * VERİLMEDİĞİNDE bugünkü sipariş bire bir aynı skorlanmalı — aşağıdaki ilk
+ * kontrol tam olarak bunu, derin eşitlikle sınar.
+ * ────────────────────────────────────────────────────────────────────────── */
+{
+  const rank = (
+    order: ManufacturerScoringOrder,
+    manufacturers: ManufacturerScoringRow[],
+    signals: Parameters<typeof scoreManufacturers>[0]["signals"]
+  ) =>
+    scoreManufacturers({
+      order,
+      manufacturers,
+      weights: V1_WEIGHTS,
+      distanceModel: "tiered",
+      signals,
+      // Büyük format kuralının TEK sahibi K2'nin saf fonksiyonu.
+      largeFormatBlocked: largeFormatPlacementBlocked,
+    });
+
+  // (1) PARİTE: varsayılanlar bugünkü davranışı BİREBİR üretir. `standart`
+  //     preset 150 mm ≥ 120 mm olduğu için açık hâlin büyük format değeri true.
+  for (const [label, signals] of [
+    ["sinyaller kapalı", undefined],
+    ["sinyaller açık", ALL_ON],
+  ] as const) {
+    check(
+      `PARİTE: teklif alanları verilmeyince sipariş açıkça yazılmış hâliyle AYNI skorlanır (${label})`,
+      JSON.stringify(rank(PAINT_ORDER, POOL, signals)) ===
+        JSON.stringify(
+          rank(
+            {
+              ...PAINT_ORDER,
+              requiredMaterials: ["resin"],
+              requiredPolymerTags: [],
+              largeFormatRequired: true,
+            },
+            POOL,
+            signals
+          )
+        )
+    );
+  }
+
+  const QUOTE_ORDER: ManufacturerScoringOrder = {
+    city: "İstanbul",
+    material: "resin",
+    needsPainting: false,
+    // Teklif siparişinde figür ölçüsü YOKTUR: büyük format bilgisi parçaların
+    // kendi ölçülerinden gelir.
+    style: null,
+    figurineSize: null,
+  };
+
+  // (2) KARIŞIK TEKLİF (FDM + SLA): iki malzemeyi de beyan eden atölye gerekir.
+  const materialShops = [
+    mfgRow({ manufacturerId: "resin-only", capabilities: ["material_resin"] }),
+    mfgRow({
+      manufacturerId: "both",
+      capabilities: ["material_resin", "material_filament"],
+    }),
+    mfgRow({ manufacturerId: "unevaluated", capabilities: null }),
+  ];
+  const mixed = new Map(
+    rank(
+      { ...QUOTE_ORDER, requiredMaterials: ["resin", "filament"] },
+      materialShops,
+      undefined
+    ).map((c) => [c.manufacturerId, c])
+  );
+  check(
+    "karışık teklif, tek malzeme beyan eden atölyeyi EKSİK olanı adıyla söyleyerek eler",
+    mixed.get("resin-only")?.eligible === false &&
+      mixed.get("resin-only")?.ineligibleReason === "Malzeme uyumsuz (filament)",
+    mixed.get("resin-only")?.ineligibleReason
+  );
+  check(
+    "iki malzemeyi de beyan eden atölye karışık teklifte uygundur",
+    mixed.get("both")?.eligible === true
+  );
+  check(
+    "beyanı olmayan (değerlendirilmemiş) atölye karışık teklifte de kapsam dışı kalmaz",
+    mixed.get("unevaluated")?.eligible === true
+  );
+  check(
+    "tek malzemeli siparişin gerekçe cümlesi DEĞİŞMEDİ",
+    rank(QUOTE_ORDER, [mfgRow({ capabilities: ["material_filament"] })], undefined)[0]
+      ?.ineligibleReason === "Malzeme uyumsuz (reçine)"
+  );
+
+  // (3) POLİMER ETİKETİ — esnek kural.
+  const polymerShops = [
+    mfgRow({
+      manufacturerId: "pla-only",
+      capabilities: ["material_filament", "pmat_pla"],
+    }),
+    mfgRow({
+      manufacturerId: "petg",
+      capabilities: ["material_filament", "pmat_petg"],
+    }),
+    mfgRow({ manufacturerId: "no-polymer-tag", capabilities: ["material_filament"] }),
+  ];
+  const petg = new Map(
+    rank(
+      {
+        ...QUOTE_ORDER,
+        material: "filament",
+        requiredMaterials: ["filament"],
+        requiredPolymerTags: ["pmat_petg"],
+      },
+      polymerShops,
+      undefined
+    ).map((c) => [c.manufacturerId, c])
+  );
+  check(
+    "yalnız pmat_pla beyan eden atölye PETG parçasını ALAMAZ",
+    petg.get("pla-only")?.eligible === false &&
+      petg.get("pla-only")?.ineligibleReason === "Polimer uyumsuz (petg)",
+    petg.get("pla-only")?.ineligibleReason
+  );
+  check(
+    "etiketi beyan eden atölye uygundur",
+    petg.get("petg")?.eligible === true
+  );
+  check(
+    "hiç pmat_* beyan etmemiş atölye ELENMEZ (esnek kural: canlıdaki üç atölye de böyle)",
+    petg.get("no-polymer-tag")?.eligible === true
+  );
+  check(
+    "polimer talebi yokken pmat_* beyan eden atölye de elenmez",
+    rank({ ...QUOTE_ORDER, material: "filament" }, polymerShops, undefined).every(
+      (c) => c.eligible
+    )
+  );
+
+  // (4) BÜYÜK FORMAT teklif parçalarından gelir: figür ölçüsü olmayan siparişte
+  //     kural ancak açıkça istendiğinde konuşur ve yalnız sinyal AÇIKKEN eler.
+  const formatShops = [
+    mfgRow({
+      manufacturerId: "declared",
+      capabilities: ["material_resin", "large_format"],
+    }),
+    mfgRow({
+      manufacturerId: "evaluated-without",
+      capabilities: ["material_resin", "style_anime"],
+    }),
+    mfgRow({ manufacturerId: "unevaluated", capabilities: ["material_resin"] }),
+  ];
+  const bigQuote = { ...QUOTE_ORDER, largeFormatRequired: true };
+  const big = new Map(
+    rank(bigQuote, formatShops, ALL_ON).map((c) => [c.manufacturerId, c])
+  );
+  check(
+    "teklifin büyük format işi, yeteneği beyan etmemiş DEĞERLENDİRİLMİŞ atölyeyi eler",
+    big.get("evaluated-without")?.eligible === false &&
+      big.get("evaluated-without")?.ineligibleReason ===
+        "Büyük format yeteneği beyan edilmemiş"
+  );
+  check(
+    "yeteneği beyan eden atölye teklifin büyük format işinde uygundur",
+    big.get("declared")?.eligible === true
+  );
+  check(
+    "değerlendirilmemiş atölye teklifte de bugünkü davranışını korur (K2 istisnası)",
+    big.get("unevaluated")?.eligible === true
+  );
+  check(
+    "büyük format gereksinimi taşımayan teklifte kimse elenmez",
+    rank(QUOTE_ORDER, formatShops, ALL_ON).every(
+      (c) => c.ineligibleReason !== "Büyük format yeteneği beyan edilmemiş"
+    )
+  );
+  check(
+    "büyük format sinyali KAPALIYKEN teklif gereksinimi de kimseyi elemez",
+    rank(bigQuote, formatShops, undefined).every((c) => c.eligible)
+  );
+  check(
+    "gölge açıklaması teklifin büyük format talebini damgalar",
+    big.get("declared")?.shadow?.largeFormatRequired === true
+  );
+
+  // (5) Kuralın kendisi: figür ölçüsü olmayan sipariş için gereksinim DIŞARIDAN
+  //     verilebilir; değerlendirilmemiş atölye istisnası aynen sürer.
+  check(
+    "büyük format kuralı dışarıdan verilen gereksinimi kabul eder",
+    largeFormatPlacementBlocked(null, ["material_resin", "style_anime"], true) === true &&
+      largeFormatPlacementBlocked(null, ["material_resin", "style_anime"], false) ===
+        false &&
+      largeFormatPlacementBlocked(null, [], true) === false &&
+      largeFormatPlacementBlocked(null, ["large_format"], true) === false
+  );
+  check(
+    "gereksinim verilmediğinde kural figür ölçüsünden okumaya devam eder",
+    largeFormatPlacementBlocked("standart", ["material_resin", "style_anime"]) === true &&
+      largeFormatPlacementBlocked(null, ["material_resin", "style_anime"]) === false
+  );
+}
+
 // ─── Farkın AÇIKLAMASI ───────────────────────────────────────────
 {
   const live = scoreWith(undefined);
@@ -985,6 +1187,16 @@ check(
 check(
   "sıralayıcı kapsama hesabının İKİNCİ bir kopyasını taşımaz",
   !/computeCoveragePlan\(/.test(rankerSrc)
+);
+// Teklif gereksinimi de aynı kurala tabi: etiket ailelerinin kuralı saf
+// yetenek modülünde durur, sıralayıcı yalnız sonucu okur.
+check(
+  "teklif gereksinimi tek bir yükleyiciden gelir",
+  rankerSrc.includes("quoteOrderRequirements(")
+);
+check(
+  "sıralayıcı etiket ailesi kurallarının İKİNCİ bir kopyasını taşımaz",
+  !/startsWith\("pmat_"\)/.test(rankerSrc) && !/startsWith\("material_"\)/.test(rankerSrc)
 );
 
 // ─── Summary ─────────────────────────────────────────────────────

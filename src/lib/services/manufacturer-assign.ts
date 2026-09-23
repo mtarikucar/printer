@@ -21,6 +21,7 @@ import {
   capabilityMatch,
   orderRequirements,
 } from "@/lib/services/capability";
+import { quoteOrderRequirements } from "@/lib/services/manufacturer-assignment";
 import {
   MANUFACTURER_CAPACITY_FULL_ERROR,
   manufacturerCapacityGate,
@@ -231,15 +232,26 @@ export const ASSIGN_FAILURE_MESSAGES: Record<AssignFailure, string> = {
  * kendiliğinden daralır ve filtre tam anlamıyla sert olur.
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** Bu iş, bu atölyenin beyan etmediği bir büyük format işi mi? (saf; DB yok) */
+/**
+ * Bu iş, bu atölyenin beyan etmediği bir büyük format işi mi? (saf; DB yok)
+ *
+ * `needsLargeFormat` GEREKSİNİMİ DIŞARIDAN SÖYLER ve anlık teklif siparişi
+ * için zorunludur: o siparişte figür ölçüsü yoktur, ölçüyü teklifin parçaları
+ * verir (`quoteRequirements`). Verilmediğinde kural bugünkü gibi figür
+ * eşiğinden okur, yani mevcut çağıranlar için hiçbir şey değişmez.
+ * "Değerlendirilmemiş atölye" istisnası HER İKİ yolda da aynen geçerlidir.
+ */
 export function largeFormatPlacementBlocked(
   figurineSize: string | null | undefined,
-  capabilities: string[] | null | undefined
+  capabilities: string[] | null | undefined,
+  needsLargeFormat?: boolean
 ): boolean {
-  const needsLargeFormat = orderRequirements({
-    figurineSize: figurineSize ?? undefined,
-  }).includes("large_format");
-  if (!needsLargeFormat) return false;
+  const needsIt =
+    needsLargeFormat ??
+    orderRequirements({ figurineSize: figurineSize ?? undefined }).includes(
+      "large_format"
+    );
+  if (!needsIt) return false;
   if (capabilityMatch(capabilities, ["large_format"])) return false;
   // Değerlendirilmemiş atölye (yalnız malzeme etiketi ya da hiç etiket yok):
   // bugünkü davranış korunur — bkz. yukarıdaki gerekçe.
@@ -382,17 +394,22 @@ export function sellerPlacementGuard(manufacturerId: string): SQL {
 export const SELLER_OVERRIDE_REASON_MIN_LENGTH = 10;
 
 /**
- * Yerleştirme kararının siparişten okuduğu her şey — TEK sorguda.
+ * Yerleştirme kararının siparişten okuduğu her şey.
  *
  * Satıcı (ve adı) reddi ADIYLA söyleyebilmek için; `figurineSize` ise büyük
- * format sert filtresi için. İkinci bir okuma açmak yerine aynı satırdan
- * alınır: iki okuma arasında sipariş değişirse kapı iki farklı gerçeğe göre
- * karar verirdi.
+ * format sert filtresi için. İkisi AYNI satırdan alınır: iki okuma arasında
+ * sipariş değişirse kapı iki farklı gerçeğe göre karar verirdi.
+ *
+ * Teklif gereksinimi ayrı bir okumadır ve olmak zorundadır: ödenen parça
+ * tanımı başka tablolarda (`quotes` + `quote_checkouts`) durur ve kuralın tek
+ * sahibi sıralayıcının da okuduğu `quoteOrderRequirements`tir. Bu satır ödeme
+ * anında DONDURULMUŞTUR, yani iki okuma arasında değişmez.
  */
 async function loadPlacementFacts(orderId: string): Promise<{
   sellerManufacturerId: string | null;
   sellerName: string | null;
   figurineSize: string | null;
+  quoteLargeFormat: boolean | undefined;
 }> {
   const [row] = await db
     .select({
@@ -404,12 +421,18 @@ async function loadPlacementFacts(orderId: string): Promise<{
     .leftJoin(manufacturers, eq(manufacturers.id, orders.sellerManufacturerId))
     .where(eq(orders.id, orderId))
     .limit(1);
+  // ANLIK TEKLİF SİPARİŞİ: figür ölçüsü yoktur, büyük format gereksinimini
+  // ödenen parçaların ölçüleri söyler. Kural ikinci kez YAZILMAZ; sıralayıcının
+  // okuduğu AYNI yükleyiciden gelir — ekran ile uç aynı cevabı vermeli.
+  // `undefined` = bu sipariş bir teklif siparişi değil → figür eşiği geçerli.
+  const quoteReq = await quoteOrderRequirements(orderId);
   // Sipariş yoksa mülkiyet de yoktur: cevabı aşağıdaki korumalı UPDATE verir
   // (not_assignable), yoksa var olmayan bir sipariş "satıcının" sanılırdı.
   return {
     sellerManufacturerId: row?.sellerManufacturerId ?? null,
     sellerName: row?.sellerName ?? null,
     figurineSize: row?.figurineSize ?? null,
+    quoteLargeFormat: quoteReq?.largeFormat,
   };
 }
 
@@ -570,7 +593,8 @@ export async function assignManufacturerToOrder(
   // cevaplayabilmeli.
   const largeFormatBlocked = largeFormatPlacementBlocked(
     ownership.figurineSize,
-    manufacturer.capabilities
+    manufacturer.capabilities,
+    ownership.quoteLargeFormat
   );
   // KAPASİTE ÖLÇÜSÜ YALNIZ SİNYAL AÇIKKEN OKUNUR. Uygulanmayacak bir ölçü için
   // her yerleştirmede üç sorgu açmak, ölçmenin bedelini canlıya yüklerdi —

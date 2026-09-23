@@ -5,6 +5,8 @@ import {
   orders,
   orderItems,
   manufacturerActions,
+  quoteCheckouts,
+  quotes,
 } from "@/lib/db/schema";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { regionOf } from "@/lib/data/turkey-regions";
@@ -24,8 +26,14 @@ import {
 } from "@/lib/config/manufacturer-scoring";
 import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
 import {
-  manufacturerSupportsMaterial,
+  manufacturerSupportsAllMaterials,
+  manufacturerSupportsPolymers,
+  missingPolymerTags,
   orderRequirements,
+  quoteRequirementsFromSnapshot,
+  unsupportedMaterials,
+  POLYMER_CAPABILITY_PREFIX,
+  type QuoteRequirements,
 } from "@/lib/services/capability";
 // Faz 5 sinyalleri. Sıralayıcı env OKUMAZ: yalnız `signalsForProfile()`in
 // verdiği kümeye bakar, yani "canlı skora yeni bir sinyal sızdı mı?" sorusunun
@@ -656,6 +664,42 @@ async function qcRejectionHistoryFor(
 
 
 /**
+ * Bu siparişin ANLIK TEKLİFTEN gelen atama gereksinimleri; teklif siparişi
+ * değilse null.
+ *
+ * TEK YÜKLEYİCİ: hem sıralayıcı hem atama kapısı (manufacturer-assign.ts ·
+ * `loadPlacementFacts`) buradan okur. İki okuma iki ayrı kural yazsaydı ekran
+ * bir atölyeyi aday gösterirken uç onu reddedebilirdi.
+ *
+ * Köprü `quotes.order_id`dir (`orders`/`order_drafts` tanımlarına teklif kolonu
+ * eklenmedi) ve okunan tanım ÖDENEN tanımdır: canlı `quote_parts` değil, ödeme
+ * anında dondurulmuş `quote_checkouts.parts_snapshot` + teklifin kendi katalog
+ * anlık görüntüsü. Müşteri neye para ödediyse üretici onu basacak.
+ *
+ * MALİYET: teklifsiz siparişte tek bir indeksli sorgu (`quotes_order_id_uq`)
+ * boş döner ve gereksinimler yazılmaz — sıralama bugünküyle birebir aynıdır.
+ */
+export async function quoteOrderRequirements(
+  orderId: string
+): Promise<QuoteRequirements | null> {
+  const [row] = await db
+    .select({
+      pricingSnapshot: quotes.pricingSnapshot,
+      partsSnapshot: quoteCheckouts.partsSnapshot,
+    })
+    .from(quotes)
+    .innerJoin(quoteCheckouts, eq(quoteCheckouts.quoteId, quotes.id))
+    .where(eq(quotes.orderId, orderId))
+    // Aynı teklif için ikinci bir taslak ödendiyse (çift ödeme) EN SON
+    // dondurulan tanım basılacak olandır.
+    .orderBy(desc(quoteCheckouts.createdAt))
+    .limit(1);
+  if (!row) return null;
+  // Kural burada YENİDEN YAZILMAZ: saf yetenek modülü çevirir (capability.ts).
+  return quoteRequirementsFromSnapshot(row.pricingSnapshot, row.partsSnapshot);
+}
+
+/**
  * Bu DENEMEYE özgü dışlanan atölyenin uygunsuzluk gerekçesi.
  *
  * Sabit olarak duruyor ki çağıran (order-confirm) "hiç aday çıkmadı"yı
@@ -797,6 +841,19 @@ export interface ManufacturerScoringOrder {
   figurineSize: string | null;
   declinedManufacturerIds?: readonly string[];
   excludeManufacturerIds?: readonly string[];
+  /* ── Anlık teklif siparişi (parçalardan türeyen gereksinimler) ────────────
+   * ÜÇÜ DE İSTEĞE BAĞLI ve verilmediklerinde bugünkü kural aynen çalışır:
+   * `[material]`, polimer talebi YOK, büyük format figür ölçüsünden. Bu, bir
+   * tercih değil PARİTE şartıdır — teklifsiz her sipariş bugünküyle ALAN ALAN
+   * aynı skorlanmak zorunda (scripts/test-scoring-v2.ts derin eşitlikle
+   * sınıyor). Değerleri tek bir yer doldurur: `quoteOrderRequirements`.
+   * ─────────────────────────────────────────────────────────────────────── */
+  /** Siparişin gerektirdiği TÜM malzemeler; yoksa `[material]`. */
+  requiredMaterials?: readonly string[];
+  /** Gerekli `pmat_*` polimer etiketleri; yoksa talep yok (esnek kural). */
+  requiredPolymerTags?: readonly string[];
+  /** Büyük format gereksinimi; yoksa figür ölçüsünden (`orderRequirements`). */
+  largeFormatRequired?: boolean;
 }
 
 export interface ManufacturerScoringInput {
@@ -812,10 +869,17 @@ export interface ManufacturerScoringInput {
   signals?: Phase5SignalSet;
   /** K1'in hesaplanan kapsama planı; yoksa elle yazılmış liste kullanılır. */
   coverageOf?: CoverageResolver;
-  /** Büyük format kuralı (K2'nin saf fonksiyonu); yoksa sinyal konuşmaz. */
+  /**
+   * Büyük format kuralı (K2'nin saf fonksiyonu); yoksa sinyal konuşmaz.
+   *
+   * Üçüncü argüman, gereksinimi DIŞARIDAN söyler: teklif siparişinde figür
+   * ölçüsü yoktur, ölçüyü parçalar verir. Verilmediğinde kural kendi figür
+   * eşiğini okur — yani bugünkü çağıranlar için hiçbir şey değişmez.
+   */
   largeFormatBlocked?: (
     figurineSize: string | null,
-    capabilities: string[] | null
+    capabilities: string[] | null,
+    needsLargeFormat?: boolean
   ) => boolean;
 }
 
@@ -850,7 +914,16 @@ export function scoreManufacturers(
         figurineSize: input.order.figurineSize ?? undefined,
       })
     : [];
-  const largeFormatRequired = required.includes("large_format");
+  // Teklif siparişinde büyük formatı parçaların ÖLÇÜSÜ söyler (figür ölçüsü
+  // yoktur); verilmediyse bugünkü figür kuralı geçerlidir. Sinyal kapalıyken
+  // ikisi de susar — kapının anahtarı tektir.
+  const largeFormatRequired =
+    signals.largeFormat &&
+    (input.order.largeFormatRequired ?? required.includes("large_format"));
+  // Malzeme ve polimer talepleri: teklif siparişinde parçalardan, aksi hâlde
+  // bugünkü tek malzemeden.
+  const requiredMaterials = input.order.requiredMaterials ?? [orderMaterial];
+  const requiredPolymerTags = input.order.requiredPolymerTags ?? [];
 
   const candidates = input.manufacturers.map((m): CandidateScore => {
     const city = m.il;
@@ -927,7 +1000,13 @@ export function scoreManufacturers(
     // değildir.
     const largeFormatOk = !(
       largeFormatRequired &&
-      (input.largeFormatBlocked?.(input.order.figurineSize, m.capabilities) ?? false)
+      (input.largeFormatBlocked?.(
+        input.order.figurineSize,
+        m.capabilities,
+        // Teklif siparişinin gereksinimi kurala AÇIKÇA verilir; yoksa kural
+        // figür ölçüsünü kendisi okur (bugünkü davranış).
+        input.order.largeFormatRequired
+      ) ?? false)
     );
 
     let eligible = true;
@@ -940,15 +1019,28 @@ export function scoreManufacturers(
     // Material hard-filter: an order routes only to manufacturers that declare
     // they print its material. Legacy manufacturers with no declared material
     // tags are treated as able to print any material (manufacturerSupportsMaterial).
+    // Teklif siparişi birden çok malzeme isteyebilir; HEPSİNİ basabilen atölye
+    // gerekir (manufacturerSupportsAllMaterials) ve gerekçe EKSİK olanı adıyla
+    // söyler — tek malzemeli siparişte cümle bugünküyle birebir aynıdır.
     if (excludedIds.has(m.manufacturerId)) {
       eligible = false;
       ineligibleReason = EXCLUDED_THIS_ATTEMPT_REASON;
     } else if (declinedIds.has(m.manufacturerId)) {
       eligible = false;
       ineligibleReason = "Bu siparişi daha önce reddetti / iptal etti";
-    } else if (!manufacturerSupportsMaterial(m.capabilities, orderMaterial)) {
+    } else if (!manufacturerSupportsAllMaterials(m.capabilities, requiredMaterials)) {
       eligible = false;
-      ineligibleReason = `Malzeme uyumsuz (${MATERIAL_LABEL_TR[orderMaterial] ?? orderMaterial})`;
+      ineligibleReason = `Malzeme uyumsuz (${unsupportedMaterials(m.capabilities, requiredMaterials)
+        .map((mat) => MATERIAL_LABEL_TR[mat] ?? mat)
+        .join(", ")})`;
+      // Polimer (`pmat_*`) MALZEMEDEN SONRA sorulur: teknoloji uyuşmuyorsa
+      // polimeri tartışmanın anlamı yok. Kural ESNEKTİR — hiç `pmat_*` beyan
+      // etmemiş atölye her polimeri basabilir sayılır (capability.ts).
+    } else if (!manufacturerSupportsPolymers(m.capabilities, requiredPolymerTags)) {
+      eligible = false;
+      ineligibleReason = `Polimer uyumsuz (${missingPolymerTags(m.capabilities, requiredPolymerTags)
+        .map((tag) => tag.slice(POLYMER_CAPABILITY_PREFIX.length))
+        .join(", ")})`;
       // Büyük format MALZEMEDEN SONRA sorulur: ikisi de "bu atölye bunu basabilir
       // mi" kapısıdır ve malzeme uyuşmazlığı daha temel bir cevaptır.
     } else if (!largeFormatOk) {
@@ -1282,6 +1374,11 @@ export async function rankManufacturersDetailed(
     };
   });
 
+  // Teklif siparişi mi: gereksinimler ödenen parçalardan gelir. Teklifsiz
+  // siparişte null döner ve aşağıdaki alanlar HİÇ yazılmaz — skor bugünküyle
+  // alan alan aynı kalır.
+  const quoteReq = await quoteOrderRequirements(orderId);
+
   const scoringOrder: ManufacturerScoringOrder = {
     city: orderCity,
     material: orderMaterial,
@@ -1290,6 +1387,18 @@ export async function rankManufacturersDetailed(
     figurineSize: order.figurineSize,
     declinedManufacturerIds: [...declinedIds],
     excludeManufacturerIds: [...excludedIds],
+    ...(quoteReq
+      ? {
+          // Malzeme listesi boş KALAMAZ (çözümlenen her parça birini yazar);
+          // yine de boş gelirse siparişin kendi malzemesine düşülür — boş
+          // liste "malzeme kapısı yok" demek olurdu ve aday havuzunu sessizce
+          // genişletirdi.
+          requiredMaterials:
+            quoteReq.materials.length > 0 ? quoteReq.materials : [orderMaterial],
+          requiredPolymerTags: quoteReq.polymerTags,
+          largeFormatRequired: quoteReq.largeFormat,
+        }
+      : {}),
   };
 
   for (const profile of wanted) {

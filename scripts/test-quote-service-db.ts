@@ -495,6 +495,9 @@ async function main() {
       const shared = first.items.find((p) => p.sha256 === sharedSha)!;
       assert.equal(shared.useCount, 2, "kaç teklifte kullanıldığı sayılır");
       assert.equal(shared.quoteNumber, third.number, "en son kopya gösterilir");
+      // Malzeme adı teklifin KENDİ anlık görüntüsünden çözülür (3.3): bugünün
+      // kataloğuna bakmak, kaldırılmış bir malzemeyi kütüphanede boş bırakırdı.
+      assert.equal(shared.lastMaterialName, "PLA", "son kullanılan malzeme adı yok");
     });
 
     await test("kütüphane BAŞKASININ parçalarını göstermez", async () => {

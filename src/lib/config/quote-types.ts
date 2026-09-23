@@ -569,6 +569,12 @@ export interface LibraryPart {
   thumbnailUrl: string | null;
   dimensionsMm: Vec3 | null;
   volumeCm3: number | null;
+  /**
+   * Bu dosyanın EN SON hangi malzemeyle fiyatlandığı — o teklifin kendi
+   * anlık görüntüsünden okunur (katalogdan değil): malzeme sonradan
+   * kaldırılmış olsa bile müşterinin gördüğü ad değişmez. Ad çözülemezse null.
+   */
+  lastMaterialName: string | null;
   quoteId: string;
   quoteNumber: string;
   createdAt: string;

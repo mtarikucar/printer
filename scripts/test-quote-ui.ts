@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { createElement, type FunctionComponent } from "react";
+import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { LocaleProvider } from "../src/lib/i18n/locale-context";
@@ -42,11 +42,28 @@ import {
   isOwnershipConflict,
 } from "../src/app/teklif/[number]/workspace-client";
 import { QuoteApiError } from "../src/lib/quote/client-api";
+import {
+  ComingSoonNote,
+  MaterialLibrary,
+  PrintServiceLanding,
+  landingFaq,
+} from "../src/app/3d-baski/sections";
+import {
+  catalogAnchorKurus,
+  formatAnchorPrice,
+  materialAnchorKurus,
+  technologyAnchorKurus,
+} from "../src/app/3d-baski/pricing-anchors";
+import { QuoteListTable } from "../src/app/account/teklifler/quotes-client";
+import { PartLibraryGrid } from "../src/app/account/parcalar/parts-client";
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
+import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import {
   DFM_CODES,
   QUOTE_STATUSES,
+  type CustomerQuoteListItem,
+  type LibraryPart,
   type PresentedCatalog,
   type PresentedPart,
   type PresentedQuote,
@@ -54,7 +71,9 @@ import {
   type QuoteViewer,
 } from "../src/lib/config/quote-types";
 import { EVENTS, isEventName } from "../src/lib/analytics/events";
+import { serializeJsonLd } from "../src/lib/seo/jsonld";
 import { isNoindexPath } from "../src/lib/seo/policy";
+import { buildPrintServiceJsonLd } from "../src/lib/seo/service";
 import robots from "../src/app/robots";
 
 const PREFIX = "instantQuote.";
@@ -1071,4 +1090,271 @@ test("belgenin yazdırma düğmesi çıktıya girmez", () => {
   const html = inLocale(createElement(QuoteDocumentPrintButton, {}));
   assert.match(html, /no-print/, "yazdır düğmesi çıktıdan gizlenmemiş");
   assert.match(html, /Yazdır \/ PDF/);
+});
+
+// ─── Açılış sayfası (/3d-baski) ve malzeme kütüphanesi ──────────────────────
+
+/**
+ * React metin içeriğinde `'` ve `&` gibi karakterleri kaçırır (`&#x27;`). Çapa
+ * cümlesi (`₺74'den başlayan`) kesme işareti taşıdığı için testler markup'ı
+ * okunur hâle getirip öyle arar — aksi hâlde her assertion kaçış dizisi
+ * ezberlemek zorunda kalırdı.
+ */
+function plain(html: string): string {
+  return html
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+function renderLanding(
+  uploader: ReactNode = createElement("div", { id: "uploader-slot" })
+): string {
+  return plain(
+    inLocale(createElement(PrintServiceLanding, { snapshot: SEED_SNAPSHOT, uploader }))
+  );
+}
+
+test("başlangıç fiyatı katalogdan hesaplanır, elle yazılmaz", () => {
+  // Altın değer (test-quote-core G1 ile aynı hesap): 20 mm küp → V 8 cm³,
+  // A 24 cm²; FDM/PLA, 1 adet, standart kademe. Malzeme + makine (≈2991 kr)
+  // taban birim fiyatın (4900) altında kaldığı için taban devreye girer,
+  // üstüne kurulum ücreti (2500) biner → 7400.
+  assert.equal(technologyAnchorKurus(SEED_SNAPSHOT, "fdm"), 7400);
+  // SLA: standart reçine 8 cm³ katı → malzeme 3174 + makine 3200 = 6374, taban
+  // 7900'ün altında; kurulum 3500 → 11400.
+  assert.equal(technologyAnchorKurus(SEED_SNAPSHOT, "sla"), 11400);
+  assert.equal(catalogAnchorKurus(SEED_SNAPSHOT), 7400);
+  assert.equal(technologyAnchorKurus(SEED_SNAPSHOT, "yok"), null);
+});
+
+test("çapa lira olarak YUKARI yuvarlanır (yayımlanan rakam gerçeğin altında kalmaz)", () => {
+  assert.equal(formatAnchorPrice(7400), "₺74");
+  assert.equal(formatAnchorPrice(7401), "₺75");
+  assert.equal(formatAnchorPrice(1234500), "₺12.345");
+});
+
+test("teknolojinin çapası o teknolojinin EN UCUZ malzemesidir", () => {
+  for (const tech of SEED_SNAPSHOT.technologies) {
+    const anchor = technologyAnchorKurus(SEED_SNAPSHOT, tech.key);
+    assert.ok(anchor !== null, `${tech.key} çapası hesaplanamadı`);
+    const perMaterial = SEED_SNAPSHOT.materials
+      .filter((m) => m.technologyKey === tech.key)
+      .map((m) => materialAnchorKurus(SEED_SNAPSHOT, m));
+    assert.ok(
+      perMaterial.every((p) => p !== null),
+      `${tech.key}: malzeme çapası hesaplanamadı`
+    );
+    assert.equal(anchor, Math.min(...(perMaterial as number[])));
+  }
+});
+
+test("açılış sayfası katalogdaki her rakamı yayımlar (alıntılanabilirlik)", () => {
+  const html = renderLanding();
+  assert.match(html, /ANLIK 3D BASKI TEKLİFİ/);
+  assert.ok(html.includes("₺74'den başlayan"), "FDM çapası yok");
+  assert.ok(html.includes("₺114'den başlayan"), "SLA çapası yok");
+  for (const tech of SEED_SNAPSHOT.technologies) {
+    assert.ok(html.includes(tech.name), `${tech.key} adı yok`);
+    assert.ok(
+      html.includes(`${tech.buildMm.x} × ${tech.buildMm.y} × ${tech.buildMm.z} mm`),
+      `${tech.key} baskı hacmi yok`
+    );
+    assert.ok(html.includes(tech.toleranceText), `${tech.key} toleransı yok`);
+    assert.ok(html.includes(`${tech.baseLeadDays} iş günü`), `${tech.key} teslim süresi yok`);
+  }
+  // Çapanın hangi parçaya ait olduğu SAYFADA yazmazsa rakam alıntılanamaz.
+  assert.ok(html.includes("20 mm küp"), "çapanın dayanağı yazılmamış");
+  assert.ok(html.includes("KDV dahil"));
+});
+
+test("açılış sayfası dört adımı ve gizlilik taahhüdünü aynen yazar", () => {
+  const html = renderLanding();
+  for (const step of [
+    "Modelini yükle",
+    "Özelliklerini seç",
+    "Anında fiyatını gör",
+    "Üretime gönder",
+  ]) {
+    assert.ok(html.includes(step), `${step} adımı yok`);
+  }
+  assert.ok(
+    html.includes(
+      "Dosyalarınız yalnızca siparişinizi üreten, atanmış üretim ortağıyla paylaşılır."
+    ),
+    "gizlilik taahhüdü yok"
+  );
+});
+
+test("malzeme kartları kütüphane sayfasındaki kendi çapalarına bağlanır", () => {
+  const html = renderLanding();
+  for (const material of SEED_SNAPSHOT.materials) {
+    assert.ok(html.includes(material.name), `${material.key} adı yok`);
+    assert.ok(
+      html.includes(`href="/3d-baski/malzemeler#${material.key}"`),
+      `${material.key} bağlantısı yok`
+    );
+  }
+});
+
+test("SSS müşterinin ilk sorduklarını RAKAMLA yanıtlar", () => {
+  const faq = landingFaq(SEED_SNAPSHOT);
+  assert.ok(faq.length >= 6, `SSS çok kısa: ${faq.length}`);
+  const html = renderLanding();
+  for (const { q, a } of faq) {
+    assert.ok(html.includes(q), `soru sayfada yok: ${q}`);
+    assert.ok(html.includes(a), `cevap sayfada yok: ${q}`);
+  }
+  const body = faq.map((f) => `${f.q} ${f.a}`).join(" ");
+  for (const needle of [
+    "STL",
+    "OBJ",
+    "3MF",
+    "100 MB",
+    "20 parça",
+    "hesap",
+    "iş günü",
+    "STEP",
+    "manuel teklif",
+    "Kurumsal",
+  ]) {
+    assert.ok(body.includes(needle), `SSS "${needle}" konusuna değinmiyor`);
+  }
+});
+
+test("bayrak kapalıyken yükleyici yok ama SEO yüzeyi duruyor", () => {
+  const html = renderLanding(createElement(ComingSoonNote));
+  assert.match(html, /Yakında/);
+  assert.doesNotMatch(html, /type="file"/, "kapalı bayrakta dosya girişi çizildi");
+  // Katalog rakamları kalır: bayrak, arama motorunun okuduğu sayfayı kapatmaz.
+  assert.ok(html.includes("₺74'den başlayan"));
+});
+
+test("malzeme kütüphanesi her malzemeye çapa, özellik ve renk verir", () => {
+  const html = plain(inLocale(createElement(MaterialLibrary, { snapshot: SEED_SNAPSHOT })));
+  for (const material of SEED_SNAPSHOT.materials) {
+    assert.ok(html.includes(`id="${material.key}"`), `${material.key} çapası yok`);
+    assert.ok(html.includes(material.name), `${material.key} adı yok`);
+    for (const color of material.colors) {
+      assert.ok(html.includes(color.name), `${material.key}/${color.key} rengi yok`);
+    }
+  }
+  assert.ok(html.includes("₺74'den başlayan"), "PLA çapası kütüphanede yok");
+  // Şeffaf PETG'nin renk farkı gizlenmez.
+  assert.ok(html.includes("+₺5"), "renk ek ücreti yazılmamış");
+});
+
+test("Service JSON-LD fiyatı katalogdan alır ve kuruluşa bağlar", () => {
+  const node = buildPrintServiceJsonLd(SEED_SNAPSHOT) as Record<string, unknown>;
+  assert.equal(node["@type"], "Service");
+  const offers = node.offers as Record<string, unknown>;
+  assert.equal(offers["@type"], "AggregateOffer");
+  assert.equal(offers.priceCurrency, "TRY");
+  assert.equal(offers.lowPrice, "74.00");
+  assert.equal((offers.offers as unknown[]).length, SEED_SNAPSHOT.technologies.length);
+  const provider = node.provider as Record<string, unknown>;
+  assert.match(String(provider["@id"]), /#organization$/);
+  // Emitter sessizce "{}" yazarsa yapısal veri hiç yayımlanmamış olur.
+  assert.notEqual(serializeJsonLd(node), "{}");
+});
+
+// ─── Hesap sayfaları ────────────────────────────────────────────────────────
+
+const QUOTE_ROW: CustomerQuoteListItem = {
+  id: "11111111-1111-4111-8111-111111111111",
+  number: "T-000123",
+  status: "quoted",
+  title: "Kalıp seti",
+  partCount: 3,
+  unitCount: 12,
+  totalKurus: 148000,
+  leadDays: 5,
+  createdAt: "2026-09-20T09:00:00.000Z",
+  updatedAt: "2026-09-20T09:00:00.000Z",
+  expiresAt: "2026-10-20T09:00:00.000Z",
+  expired: false,
+  orderNumber: null,
+};
+
+test("teklif listesi numarayı, durumu, tutarı ve bağlantıyı yazar", () => {
+  const html = plain(inLocale(createElement(QuoteListTable, { items: [QUOTE_ROW] })));
+  assert.ok(html.includes("T-000123"));
+  assert.ok(html.includes("Kalıp seti"));
+  assert.ok(html.includes("Teklif hazır"), "durum rozeti yok");
+  assert.match(html, /1\.480,00/, "tutar yok");
+  assert.ok(html.includes('href="/teklif/T-000123"'), "teklif bağlantısı yok");
+});
+
+test("fiyatlanamamış teklif rakam uydurmaz, siparişe dönen teklif siparişe bağlanır", () => {
+  const html = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [
+          { ...QUOTE_ROW, number: "T-000124", totalKurus: null, status: "draft" },
+          {
+            ...QUOTE_ROW,
+            number: "T-000125",
+            status: "ordered",
+            orderNumber: "FG-2026-0042",
+          },
+        ],
+      })
+    )
+  );
+  assert.ok(html.includes("—"), "tutarı olmayan satırda tire yok");
+  assert.ok(html.includes('href="/track/FG-2026-0042"'), "sipariş bağlantısı yok");
+});
+
+test("süresi geçmiş taslak 'Taslak' demez, siparişe dönen teklif süre yüzünden bozulmaz", () => {
+  // Saatlik bakım işi satıra dokunmadan önce de müşteri doğru şeyi görmeli:
+  // açtığında karşılaşacağı ekran süre dolumu uyarısıdır.
+  const stale = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [{ ...QUOTE_ROW, status: "draft", expired: true }],
+      })
+    )
+  );
+  assert.ok(stale.includes("Süresi doldu"), "süresi geçmiş taslak taslak olarak gösterildi");
+  assert.ok(!stale.includes("Taslak"));
+
+  const ordered = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [{ ...QUOTE_ROW, status: "ordered", expired: true, orderNumber: "FG-1" }],
+      })
+    )
+  );
+  assert.ok(ordered.includes("Siparişe dönüştü"), "siparişe dönen teklif süresi dolmuş sayıldı");
+});
+
+const LIBRARY_ROW: LibraryPart = {
+  partId: "22222222-2222-4222-8222-222222222222",
+  name: "Braket",
+  fileName: "braket.stl",
+  sourceFormat: "stl",
+  sha256: "a".repeat(64),
+  thumbnailUrl: null,
+  dimensionsMm: { x: 120, y: 80, z: 40 },
+  volumeCm3: 42.5,
+  lastMaterialName: "PLA",
+  quoteId: "11111111-1111-4111-8111-111111111111",
+  quoteNumber: "T-000123",
+  createdAt: "2026-09-20T09:00:00.000Z",
+  useCount: 2,
+};
+
+test("parça kütüphanesi ölçüyü, malzemeyi ve kullanım sayısını yazar", () => {
+  const html = plain(
+    inLocale(
+      createElement(PartLibraryGrid, { items: [LIBRARY_ROW], selected: [], onToggle: noop })
+    )
+  );
+  assert.ok(html.includes("Braket"));
+  assert.ok(html.includes("120 × 80 × 40 mm"));
+  assert.ok(html.includes("PLA"), "son kullanılan malzeme yok");
+  assert.ok(html.includes("2 teklifte kullanıldı"));
+  assert.ok(html.includes("T-000123"), "kaynak teklif numarası yok");
 });

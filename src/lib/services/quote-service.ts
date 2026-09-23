@@ -1826,6 +1826,7 @@ interface LibraryRow extends Record<string, unknown> {
   geometry: QuotePart["geometry"];
   units: QuoteUnits;
   scale: number;
+  material_name: string | null;
   quote_id: string;
   quote_number: string;
   created_at: Date;
@@ -1851,6 +1852,13 @@ export async function listCustomerParts(
         p.id AS part_id, p.name, p.file_name, p.source_format, p.source_sha256,
         p.thumbnail_key, p.geometry, p.units, p.scale,
         q.id AS quote_id, q.number AS quote_number, p.created_at,
+        (
+          SELECT m ->> 'name'
+          FROM jsonb_array_elements(q.pricing_snapshot -> 'materials') AS m
+          WHERE m ->> 'key' = p.material_key
+            AND m ->> 'technologyKey' = p.technology_key
+          LIMIT 1
+        ) AS material_name,
         count(*) OVER (PARTITION BY p.source_sha256)::int AS use_count
       FROM ${quoteParts} p
       JOIN ${quotes} q ON q.id = p.quote_id
@@ -1877,6 +1885,11 @@ export async function listCustomerParts(
       thumbnailUrl: row.thumbnail_key ? getPublicUrl(row.thumbnail_key) : null,
       dimensionsMm: scaled?.extentsMm ?? null,
       volumeCm3: scaled?.volumeCm3 ?? null,
+      // Malzeme adı teklifin KENDİ anlık görüntüsünden çözülür: bugünün
+      // kataloğuna bakmak, kaldırılmış bir malzemeyi "bilinmiyor" göstermek
+      // ya da adı değişmiş bir malzemeyi geçmişe dönük yeniden adlandırmak
+      // olurdu. Snapshot'ta eşleşme yoksa alan null kalır.
+      lastMaterialName: row.material_name,
       quoteId: row.quote_id,
       quoteNumber: row.quote_number,
       createdAt: new Date(row.created_at).toISOString(),

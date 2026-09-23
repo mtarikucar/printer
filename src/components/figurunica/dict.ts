@@ -116,6 +116,10 @@ export const FIGURUNICA_KEYS = [
   "landing.fig.footer.nav.products",
   "landing.fig.footer.nav.bulk",
   "landing.fig.footer.nav.create",
+  // Anlık teklif motorunun açılış sayfası. Etiket başlıktakiyle AYNI anahtardan
+  // gelir (`instantQuote.nav.link`): aynı hedefin site içinde iki farklı adla
+  // anılması, müşteriye iki ayrı sayfa varmış gibi görünürdü.
+  "instantQuote.nav.link",
   "landing.fig.footer.legal.distance",
   "landing.fig.footer.legal.preinfo",
   "landing.fig.footer.legal.returns",

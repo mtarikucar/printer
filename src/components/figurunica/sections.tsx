@@ -645,6 +645,9 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
         <Link href="/toplu-siparis" className={s("footer-link")}>
           {d["landing.fig.footer.nav.bulk"]}
         </Link>
+        <Link href="/3d-baski" className={s("footer-link")}>
+          {d["instantQuote.nav.link"]}
+        </Link>
         <Link href="/create" className={s("footer-link")}>
           {d["landing.fig.footer.nav.create"]}
         </Link>

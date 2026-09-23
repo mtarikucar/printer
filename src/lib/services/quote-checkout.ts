@@ -582,11 +582,18 @@ export async function createQuoteCheckout(args: {
     );
   }
 
+  // Türetilen anahtar TEKLİFİN KİMLİĞİNİ de özetler. `QuoteCheckoutInput`
+  // hangi teklifin ödendiğini SÖYLEMEZ (sürüm, tutar, adres, yöntem, fatura);
+  // yalnız gövdeyi özetlersek, başlık göndermeyen bir istemcide aynı
+  // kullanıcının aynı biçimli İKİ FARKLI teklifi tek anahtara çöker ve ikinci
+  // ödeme birincinin referansı + PayTR iframe'iyle TEKRAR OYNATILIR — ikinci
+  // teklif hiç taslak görmeden "başarılı" görünür. `/api/orders` bu deliğe
+  // düşmez, çünkü onun gövdesi ürün kimliğini taşır (route.ts:131).
   const header = args.req.headers.get("idempotency-key");
   const key =
     header && header.length >= 8 && header.length <= 200
       ? header
-      : deriveIdempotencyKey(args.input, args.userId);
+      : deriveIdempotencyKey({ quoteId: args.quoteId, input: args.input }, args.userId);
 
   const outcome = await withIdempotency<QuoteCheckoutResult>({
     scope: "quotes.checkout",

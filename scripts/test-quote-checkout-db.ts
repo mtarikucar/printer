@@ -211,6 +211,7 @@ async function main() {
     const { loadActiveSnapshot } = await import("../src/lib/services/quote-catalog");
     const { toPricingInputs } = await import("../src/lib/services/quote-present");
     const { QuoteServiceError } = await import("../src/lib/services/quote-service");
+    const { deriveIdempotencyKey } = await import("../src/lib/services/idempotency");
     const { createQuoteCheckout } = await import("../src/lib/services/quote-checkout");
     const { quoteCheckoutSchema } = await import("../src/lib/validators/quote-checkout");
 
@@ -302,10 +303,15 @@ async function main() {
       return { quote, parts, computed };
     }
 
+    /**
+     * Varsayılan gövde GEÇERLİDİR. Sıfır tutar burada durmaz: aksi hâlde her
+     * olumsuz iddia `expectedTotalKurus.min(1)` yüzünden geçer ve mesafeli
+     * sözleşme kapısı (MSY m.6/2-a) şemadan silinse bile test yeşil kalırdı.
+     */
     function body(overrides: Record<string, unknown> = {}) {
       return {
         expectedVersion: 1,
-        expectedTotalKurus: 0,
+        expectedTotalKurus: 150_000,
         shippingAddress: address,
         paymentMethod: "card" as const,
         distanceContractConsent: true as const,
@@ -318,25 +324,48 @@ async function main() {
     // ─── Doğrulayıcı ──────────────────────────────────────────────────────
 
     await test("şema onaysız / eksik gövdeyi reddeder, telefonu E.164'e çevirir", async () => {
+      // Her olumsuz vakada YALNIZ o alanın şikâyet ettiği iddia edilir; böylece
+      // bir kural silindiğinde başka bir kuralın hatası testi ayakta tutamaz.
+      const rejectedFor = (input: unknown, field: string, why: string) => {
+        const res = quoteCheckoutSchema.safeParse(input);
+        assert.equal(res.success, false, why);
+        assert.ok(
+          res.error!.issues.some((issue) => issue.path[0] === field),
+          `${why} — beklenen alan: ${field}, gelen: ${JSON.stringify(
+            res.error!.issues.map((i) => i.path.join("."))
+          )}`
+        );
+      };
+
+      // Önce varsayılanın gerçekten geçtiğini göster: olumsuz vakalar ancak o
+      // zaman "değiştirdiğim alan yüzünden" düşmüş olur.
       assert.equal(
-        quoteCheckoutSchema.safeParse(body({ distanceContractConsent: false })).success,
-        false,
+        quoteCheckoutSchema.safeParse(body()).success,
+        true,
+        "varsayılan gövde geçerli"
+      );
+      rejectedFor(
+        body({ distanceContractConsent: false }),
+        "distanceContractConsent",
         "mesafeli sözleşme onayı olmadan geçmez"
       );
-      assert.equal(
-        quoteCheckoutSchema.safeParse({ ...body(), shippingAddress: undefined }).success,
-        false
+      rejectedFor(
+        { ...body(), distanceContractConsent: undefined },
+        "distanceContractConsent",
+        "mesafeli sözleşme onayı alanı hiç yoksa da geçmez"
       );
-      assert.equal(
-        quoteCheckoutSchema.safeParse(body({ expectedTotalKurus: 0 })).success,
-        false,
+      rejectedFor(
+        { ...body(), shippingAddress: undefined },
+        "shippingAddress",
+        "teslimat adresi zorunlu"
+      );
+      rejectedFor(
+        body({ expectedTotalKurus: 0 }),
+        "expectedTotalKurus",
         "sıfır tutar beyanı geçmez"
       );
       const parsed = quoteCheckoutSchema.safeParse(
-        body({
-          expectedTotalKurus: 150_000,
-          shippingAddress: { ...address, telefon: "0532 123 45 67" },
-        })
+        body({ shippingAddress: { ...address, telefon: "0532 123 45 67" } })
       );
       assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
       assert.equal(parsed.data!.shippingAddress.telefon, "+905321234567");
@@ -485,6 +514,77 @@ async function main() {
         .where(eq(orderDrafts.userId, buyer.id));
       assert.equal(drafts.length, 1, "ikinci taslak YOK");
       assert.equal(jobs.length, before, "ikinci kez iş kuyruğa alınmaz");
+    });
+
+    await test("başlıksız istemcide İKİ FARKLI teklif tek anahtara ÇÖKMEZ", async () => {
+      // `QuoteCheckoutInput` hangi teklifin ödendiğini söylemez. Başlık
+      // göndermeyen bir istemci (admin/WhatsApp köprüsü) aynı kullanıcı için
+      // aynı biçimli iki teklifi arka arkaya ödediğinde, anahtar yalnız
+      // gövdeden türetilseydi ikinci istek BİRİNCİNİN referansı ve PayTR
+      // iframe'iyle tekrar oynatılır, ikinci teklif hiç taslak görmezdi.
+      const twin = await makeUser();
+      const first = await makeQuote(twin.id, [{ geometry: CUBE }]);
+      const second = await makeQuote(twin.id, [{ geometry: CUBE }]);
+      const a = await expected(first.id);
+      const b = await expected(second.id);
+      assert.equal(a.quote.version, b.quote.version, "iki teklif de aynı sürümde");
+      assert.equal(
+        a.computed.totals.totalKurus,
+        b.computed.totals.totalKurus,
+        "iki teklif de aynı tutarda — gövdeler birebir aynı"
+      );
+
+      const shared = () =>
+        quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: a.quote.version,
+            expectedTotalKurus: a.computed.totals.totalKurus,
+          })
+        );
+      // Tuzağın gerçekten kurulduğunun kanıtı: SADECE gövdeden türetilen
+      // anahtar bu iki istek için AYNI çıkar.
+      assert.equal(
+        deriveIdempotencyKey(shared(), twin.id),
+        deriveIdempotencyKey(shared(), twin.id),
+        "gövdeler aynı özetlenir"
+      );
+      assert.notEqual(
+        deriveIdempotencyKey({ quoteId: first.id, input: shared() }, twin.id),
+        deriveIdempotencyKey({ quoteId: second.id, input: shared() }, twin.id),
+        "teklif kimliği anahtarı ayırır"
+      );
+
+      // Başlık YOK: servisin kendi türettiği anahtar iş başında.
+      const one = await createQuoteCheckout({
+        quoteId: first.id,
+        userId: twin.id,
+        email: twin.email,
+        input: shared(),
+        req: fakeRequest(),
+      });
+      const two = await createQuoteCheckout({
+        quoteId: second.id,
+        userId: twin.id,
+        email: twin.email,
+        input: shared(),
+        req: fakeRequest(),
+      });
+
+      assert.notEqual(one.reference, two.reference, "ikinci teklif KENDİ referansını alır");
+      assert.equal(two.reused, false, "ikinci teklif tekrar oynatma değil");
+      assert.ok(two.iframeUrl, "ikinci teklif kendi PayTR token'ını alır");
+      const twinDrafts = await db
+        .select({ id: orderDrafts.id })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.userId, twin.id));
+      assert.equal(twinDrafts.length, 2, "her teklif için bir taslak");
+      for (const quoteId of [first.id, second.id]) {
+        const rows = await db
+          .select({ id: quoteCheckouts.id })
+          .from(quoteCheckouts)
+          .where(eq(quoteCheckouts.quoteId, quoteId));
+        assert.equal(rows.length, 1, "her teklif için bir köprü satırı");
+      }
     });
 
     await test("bayat expectedTotalKurus 409 ile reddedilir", async () => {

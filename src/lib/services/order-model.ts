@@ -7,6 +7,7 @@ import {
   modelUploadStage,
   nextModelSource,
   type ModelUploadStage,
+  type OrderModelSource,
 } from "@/lib/config/order-model-policy";
 import type { ManufacturerOrderStatus } from "./qc";
 import { notRefundedGuard } from "./manufacturer-assign";
@@ -62,9 +63,9 @@ export interface AttachOrderModelFilesArgs {
    */
   carryForward?: boolean;
   turntableKey?: string | null;
-  source: "meshy_auto" | "admin_upload";
+  source: OrderModelSource;
   note?: string;
-  uploadedByEmail?: string;
+  uploadedByEmail?: string | null;
 }
 
 export interface AttachOrderModelFilesResult {
@@ -86,7 +87,21 @@ export class TooManyModelFilesError extends Error {
   }
 }
 
-export async function attachOrderModelFiles(
+/** Drizzle işlem tutamacı — `db.transaction` geri çağrısının aldığı tip. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Tek yazma yolu — `attachOrderModelFiles` ile AYNI gövde, ama işlemi ÇAĞIRAN
+ * açar.
+ *
+ * Neden ayrıldı: ödenen teklifin parça dosyalarını bağlayan iş (quote-order.ts)
+ * aynı satırları yazmak zorunda ve kendi işlemini açıyor. Bu fonksiyon
+ * olmasaydı o iş bu gövdeyi KOPYALARDI — sürüm numarası, geri dolgu arşivi,
+ * "taşımadığı türü boşaltma" kuralı ve model kaynağı yapışkanlığı iki yerde
+ * yaşardı ve biri düzeltildiğinde diğeri bayatlardı.
+ */
+export async function attachOrderModelFilesTx(
+  tx: Tx,
   args: AttachOrderModelFilesArgs
 ): Promise<AttachOrderModelFilesResult> {
   if (args.files.length === 0) throw new Error("attachOrderModelFiles: no files");
@@ -107,178 +122,186 @@ export async function attachOrderModelFiles(
   const touchesTurntable = args.turntableKey !== undefined;
   const turntableKey = args.turntableKey ?? null;
 
-  // One transaction: a revision header without its files (or files pointing at
-  // a revision that never got a header) would show the manufacturer a model
-  // version that does not exist. The row lock serialises two concurrent
-  // uploads on the same order so they cannot both claim revision N+1 — and so
-  // a carry-forward merge always reads the revision it is building on.
-  return db.transaction(async (tx) => {
-    const [order] = await tx
-      .select({
-        modelGlbKey: orders.modelGlbKey,
-        modelGlbUrl: orders.modelGlbUrl,
-        modelStlKey: orders.modelStlKey,
-        modelStlUrl: orders.modelStlUrl,
-        modelUploadedAt: orders.modelUploadedAt,
-        // Korunacak alanlar: dönme videosu ve model KAYNAĞI (onay kapısı).
-        modelTurntableKey: orders.modelTurntableKey,
-        modelTurntableUrl: orders.modelTurntableUrl,
-        modelSource: orders.modelSource,
-      })
-      .from(orders)
-      .where(eq(orders.id, args.orderId))
-      .limit(1)
-      .for("update");
-    if (!order) throw new Error(`order ${args.orderId} not found`);
+  // The row lock serialises two concurrent uploads on the same order so they
+  // cannot both claim revision N+1 — and so a carry-forward merge always reads
+  // the revision it is building on.
+  const [order] = await tx
+    .select({
+      modelGlbKey: orders.modelGlbKey,
+      modelGlbUrl: orders.modelGlbUrl,
+      modelStlKey: orders.modelStlKey,
+      modelStlUrl: orders.modelStlUrl,
+      modelUploadedAt: orders.modelUploadedAt,
+      // Korunacak alanlar: dönme videosu ve model KAYNAĞI (onay kapısı).
+      modelTurntableKey: orders.modelTurntableKey,
+      modelTurntableUrl: orders.modelTurntableUrl,
+      modelSource: orders.modelSource,
+    })
+    .from(orders)
+    .where(eq(orders.id, args.orderId))
+    .limit(1)
+    .for("update");
+  if (!order) throw new Error(`order ${args.orderId} not found`);
 
-    const [{ maxRev }] = await tx
-      .select({
-        maxRev: sql<number>`coalesce(max(${orderModelRevisions.revision}), 0)::int`,
-      })
-      .from(orderModelRevisions)
-      .where(eq(orderModelRevisions.orderId, args.orderId));
+  const [{ maxRev }] = await tx
+    .select({
+      maxRev: sql<number>`coalesce(max(${orderModelRevisions.revision}), 0)::int`,
+    })
+    .from(orderModelRevisions)
+    .where(eq(orderModelRevisions.orderId, args.orderId));
 
-    let nextRev = (maxRev ?? 0) + 1;
+  let nextRev = (maxRev ?? 0) + 1;
 
-    // Backfill: an order that already carried a model but has no revision rows
-    // (uploaded before revisions existed) gets its current model archived first
-    // so it is not lost when the new one lands.
-    if ((maxRev ?? 0) === 0 && (order.modelGlbKey || order.modelStlKey)) {
-      const archivedAt = order.modelUploadedAt ?? new Date();
-      await tx.insert(orderModelRevisions).values({
-        orderId: args.orderId,
-        revision: 1,
-        glbKey: order.modelGlbKey,
-        glbUrl: order.modelGlbUrl,
-        stlKey: order.modelStlKey,
-        stlUrl: order.modelStlUrl,
-        note: "Önceki model (otomatik arşivlendi)",
-        createdAt: archivedAt,
-      });
-      const legacy: { kind: OrderModelKind; key: string }[] = [];
-      if (order.modelGlbKey) legacy.push({ kind: "glb", key: order.modelGlbKey });
-      if (order.modelStlKey) legacy.push({ kind: "stl", key: order.modelStlKey });
-      await tx.insert(orderModelFiles).values(
-        legacy.map((f, i) => ({
-          orderId: args.orderId,
-          revision: 1,
-          kind: f.kind,
-          fileKey: f.key,
-          fileName: `model.${f.kind}`,
-          sortOrder: i,
-          createdAt: archivedAt,
-        }))
-      );
-      nextRev = 2;
-    }
-
-    // Carry-forward: build on the revision being superseded, inside the same
-    // locked transaction so a concurrent upload cannot slip a revision in between.
-    let files = incoming;
-    let carriedCount = 0;
-    if (args.carryForward && nextRev > 1) {
-      const prevRows = await tx
-        .select()
-        .from(orderModelFiles)
-        .where(and(eq(orderModelFiles.orderId, args.orderId), eq(orderModelFiles.revision, nextRev - 1)))
-        .orderBy(orderModelFiles.sortOrder);
-      const previous: RevisionFileLike[] = prevRows.map((r) => ({
-        name: r.fileName,
-        kind: r.kind as OrderModelKind,
-        key: r.fileKey,
-        sizeBytes: r.sizeBytes,
-      }));
-      files = mergeRevisionFiles(previous, incoming);
-      const prevKeys = new Set(previous.map((p) => p.key));
-      carriedCount = files.filter((f) => prevKeys.has(f.key)).length;
-    }
-    if (files.length > MAX_ORDER_MODEL_FILES) throw new TooManyModelFilesError(files.length);
-
-    // Primaries come from the FINAL list: a carried GLB keeps the viewer alive
-    // when only corrected STL parts were uploaded.
-    const primaryGlb = files.find((f) => f.kind === "glb") ?? null;
-    const primaryStl = files.find((f) => f.kind === "stl") ?? null;
-    const glbUrl = primaryGlb ? getPublicUrl(primaryGlb.key) : null;
-    const stlUrl = primaryStl ? getPublicUrl(primaryStl.key) : null;
-
-    // Sürüm BAŞLIĞI sürümün kendi birincil dosyalarını yazar (geçmiş dürüst
-    // kalsın), ama siparişin CANLI kolonları sürümün TAŞIMADIĞI türü BOŞALTMAZ
-    // — tıpkı dönme videosu gibi: `undefined` = "dokunma".
-    //
-    // NEDEN: yalnız-STL bir düzeltme (baskı dosyasını düzeltmenin olağan yolu;
-    // GLB zaten zorunlu değil) GLB anahtarını null'lasaydı
-    // `requiresCustomerModelApproval` false'a düşerdi — müşteri onay KAPISI o
-    // kolonu okuyor — ve otomatik üretilmiş (meshy_auto) sipariş, müşteri
-    // modeli hiç görmeden onaylanıp üreticiye gönderilirdi. Müşterinin onay
-    // sayfası da modelsiz kalırdı. Sürümün getirmediği dosya silinmiş değildir;
-    // siparişin o anki dosyası olarak durur (P2A-1).
-    const liveGlbKey = primaryGlb?.key ?? order.modelGlbKey;
-    const liveStlKey = primaryStl?.key ?? order.modelStlKey;
-    const liveGlbUrl = primaryGlb
-      ? glbUrl
-      : (order.modelGlbUrl ?? (order.modelGlbKey ? getPublicUrl(order.modelGlbKey) : null));
-    const liveStlUrl = primaryStl
-      ? stlUrl
-      : (order.modelStlUrl ?? (order.modelStlKey ? getPublicUrl(order.modelStlKey) : null));
-
+  // Backfill: an order that already carried a model but has no revision rows
+  // (uploaded before revisions existed) gets its current model archived first
+  // so it is not lost when the new one lands.
+  if ((maxRev ?? 0) === 0 && (order.modelGlbKey || order.modelStlKey)) {
+    const archivedAt = order.modelUploadedAt ?? new Date();
     await tx.insert(orderModelRevisions).values({
       orderId: args.orderId,
-      revision: nextRev,
-      glbKey: primaryGlb?.key ?? null,
-      glbUrl,
-      stlKey: primaryStl?.key ?? null,
-      stlUrl,
-      note: args.note,
-      uploadedByEmail: args.uploadedByEmail,
+      revision: 1,
+      glbKey: order.modelGlbKey,
+      glbUrl: order.modelGlbUrl,
+      stlKey: order.modelStlKey,
+      stlUrl: order.modelStlUrl,
+      note: "Önceki model (otomatik arşivlendi)",
+      createdAt: archivedAt,
     });
-
+    const legacy: { kind: OrderModelKind; key: string }[] = [];
+    if (order.modelGlbKey) legacy.push({ kind: "glb", key: order.modelGlbKey });
+    if (order.modelStlKey) legacy.push({ kind: "stl", key: order.modelStlKey });
     await tx.insert(orderModelFiles).values(
-      files.map((f, i) => ({
+      legacy.map((f, i) => ({
         orderId: args.orderId,
-        revision: nextRev,
+        revision: 1,
         kind: f.kind,
         fileKey: f.key,
-        fileName: f.name,
-        sizeBytes: f.sizeBytes ?? null,
+        fileName: `model.${f.kind}`,
         sortOrder: i,
+        createdAt: archivedAt,
       }))
     );
+    nextRev = 2;
+  }
 
-    const turntableUrl = touchesTurntable
-      ? turntableKey
-        ? getPublicUrl(turntableKey)
-        : null
-      : (order.modelTurntableUrl ??
-        (order.modelTurntableKey ? getPublicUrl(order.modelTurntableKey) : null));
+  // Carry-forward: build on the revision being superseded, inside the same
+  // locked transaction so a concurrent upload cannot slip a revision in between.
+  let files = incoming;
+  let carriedCount = 0;
+  if (args.carryForward && nextRev > 1) {
+    const prevRows = await tx
+      .select()
+      .from(orderModelFiles)
+      .where(and(eq(orderModelFiles.orderId, args.orderId), eq(orderModelFiles.revision, nextRev - 1)))
+      .orderBy(orderModelFiles.sortOrder);
+    const previous: RevisionFileLike[] = prevRows.map((r) => ({
+      name: r.fileName,
+      kind: r.kind as OrderModelKind,
+      key: r.fileKey,
+      sizeBytes: r.sizeBytes,
+    }));
+    files = mergeRevisionFiles(previous, incoming);
+    const prevKeys = new Set(previous.map((p) => p.key));
+    carriedCount = files.filter((f) => prevKeys.has(f.key)).length;
+  }
+  if (files.length > MAX_ORDER_MODEL_FILES) throw new TooManyModelFilesError(files.length);
 
-    await tx
-      .update(orders)
-      .set({
-        modelGlbKey: liveGlbKey,
-        modelGlbUrl: liveGlbUrl,
-        modelStlKey: liveStlKey,
-        modelStlUrl: liveStlUrl,
-        ...(touchesTurntable
-          ? { modelTurntableKey: turntableKey, modelTurntableUrl: turntableUrl }
-          : {}),
-        // `meshy_auto` yapışkandır: müşteri onay kapısı bu kolonu okuyor
-        // (requiresCustomerModelApproval). Admin düzeltmesi kapıyı düşürmemeli —
-        // sürümü kimin yüklediği order_model_revisions.uploaded_by_email'de durur.
-        modelSource: nextModelSource(order.modelSource, args.source),
-        modelUploadedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, args.orderId));
+  // Primaries come from the FINAL list: a carried GLB keeps the viewer alive
+  // when only corrected STL parts were uploaded.
+  const primaryGlb = files.find((f) => f.kind === "glb") ?? null;
+  const primaryStl = files.find((f) => f.kind === "stl") ?? null;
+  const glbUrl = primaryGlb ? getPublicUrl(primaryGlb.key) : null;
+  const stlUrl = primaryStl ? getPublicUrl(primaryStl.key) : null;
 
-    return {
-      revision: nextRev,
-      glbUrl: liveGlbUrl,
-      stlUrl: liveStlUrl,
-      turntableUrl,
-      fileCount: files.length,
-      carriedCount,
-    };
+  // Sürüm BAŞLIĞI sürümün kendi birincil dosyalarını yazar (geçmiş dürüst
+  // kalsın), ama siparişin CANLI kolonları sürümün TAŞIMADIĞI türü BOŞALTMAZ
+  // — tıpkı dönme videosu gibi: `undefined` = "dokunma".
+  //
+  // NEDEN: yalnız-STL bir düzeltme (baskı dosyasını düzeltmenin olağan yolu;
+  // GLB zaten zorunlu değil) GLB anahtarını null'lasaydı
+  // `requiresCustomerModelApproval` false'a düşerdi — müşteri onay KAPISI o
+  // kolonu okuyor — ve otomatik üretilmiş (meshy_auto) sipariş, müşteri
+  // modeli hiç görmeden onaylanıp üreticiye gönderilirdi. Müşterinin onay
+  // sayfası da modelsiz kalırdı. Sürümün getirmediği dosya silinmiş değildir;
+  // siparişin o anki dosyası olarak durur (P2A-1).
+  const liveGlbKey = primaryGlb?.key ?? order.modelGlbKey;
+  const liveStlKey = primaryStl?.key ?? order.modelStlKey;
+  const liveGlbUrl = primaryGlb
+    ? glbUrl
+    : (order.modelGlbUrl ?? (order.modelGlbKey ? getPublicUrl(order.modelGlbKey) : null));
+  const liveStlUrl = primaryStl
+    ? stlUrl
+    : (order.modelStlUrl ?? (order.modelStlKey ? getPublicUrl(order.modelStlKey) : null));
+
+  await tx.insert(orderModelRevisions).values({
+    orderId: args.orderId,
+    revision: nextRev,
+    glbKey: primaryGlb?.key ?? null,
+    glbUrl,
+    stlKey: primaryStl?.key ?? null,
+    stlUrl,
+    note: args.note,
+    uploadedByEmail: args.uploadedByEmail,
   });
+
+  await tx.insert(orderModelFiles).values(
+    files.map((f, i) => ({
+      orderId: args.orderId,
+      revision: nextRev,
+      kind: f.kind,
+      fileKey: f.key,
+      fileName: f.name,
+      sizeBytes: f.sizeBytes ?? null,
+      sortOrder: i,
+    }))
+  );
+
+  const turntableUrl = touchesTurntable
+    ? turntableKey
+      ? getPublicUrl(turntableKey)
+      : null
+    : (order.modelTurntableUrl ??
+      (order.modelTurntableKey ? getPublicUrl(order.modelTurntableKey) : null));
+
+  await tx
+    .update(orders)
+    .set({
+      modelGlbKey: liveGlbKey,
+      modelGlbUrl: liveGlbUrl,
+      modelStlKey: liveStlKey,
+      modelStlUrl: liveStlUrl,
+      ...(touchesTurntable
+        ? { modelTurntableKey: turntableKey, modelTurntableUrl: turntableUrl }
+        : {}),
+      // `meshy_auto` yapışkandır: müşteri onay kapısı bu kolonu okuyor
+      // (requiresCustomerModelApproval). Admin düzeltmesi kapıyı düşürmemeli —
+      // sürümü kimin yüklediği order_model_revisions.uploaded_by_email'de durur.
+      modelSource: nextModelSource(order.modelSource, args.source),
+      modelUploadedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, args.orderId));
+
+  return {
+    revision: nextRev,
+    glbUrl: liveGlbUrl,
+    stlUrl: liveStlUrl,
+    turntableUrl,
+    fileCount: files.length,
+    carriedCount,
+  };
+}
+
+/**
+ * Kendi işlemini açan giriş noktası (admin yüklemesi, otomatik 3D worker'ı).
+ *
+ * Tek işlem: başlıksız dosya satırları (ya da dosyasız bir başlık) üreticiye
+ * var olmayan bir model sürümü gösterirdi.
+ */
+export async function attachOrderModelFiles(
+  args: AttachOrderModelFilesArgs
+): Promise<AttachOrderModelFilesResult> {
+  return db.transaction((tx) => attachOrderModelFilesTx(tx, args));
 }
 
 // ─── Single GLB(+STL) entry point — kept for the auto-3D worker ────────────

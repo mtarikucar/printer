@@ -244,6 +244,19 @@ export function modelUploadRequiresNote(o: ModelUploadOrderShape): boolean {
 }
 
 /**
+ * Siparişin modelini üreten ELLER. Kapalı liste: `orders.model_source` bir
+ * `text` kolondur ve serbest metne dönerse müşteri onay kapısı (aşağıda)
+ * sessizce tanımadığı bir değerle karşılaşır.
+ *
+ *  - `meshy_auto`     — otomatik 3D üretimi (onay kapısını AÇAN tek kaynak),
+ *  - `admin_upload`   — admin'in elle yüklediği model,
+ *  - `customer_quote` — müşterinin anlık teklifte kendi yüklediği parçalar;
+ *    ödeme onaylandıktan sonra `quote-order-files` işi siparişe bağlar.
+ */
+export const ORDER_MODEL_SOURCES = ["meshy_auto", "admin_upload", "customer_quote"] as const;
+export type OrderModelSource = (typeof ORDER_MODEL_SOURCES)[number];
+
+/**
  * Yeni sürüm sonrası siparişin GÖRÜNEN model kaynağı.
  *
  * `orders.model_source` yalnız "hangi el üretti" bilgisi değildir: müşteri onay
@@ -254,11 +267,16 @@ export function modelUploadRequiresNote(o: ModelUploadOrderShape): boolean {
  * Bu yüzden `meshy_auto` YAPIŞKANDIR. Sürümü gerçekte kimin yüklediği
  * kaybolmaz: `order_model_revisions.uploaded_by_email` + notu ve `admin_actions`
  * satırı onu tutar.
+ *
+ * Yapışkanlık YALNIZ `admin_upload`a karşıdır. `customer_quote` bir teklif
+ * siparişinin kendi dosyalarıdır ve o sipariş hiçbir zaman otomatik üretimden
+ * geçmez; onay kapısı da orada İSTENMEZ (müşteri bastıracağı meshi kendisi
+ * yükledi, gördüğü modeli onaylamaya gerek yok).
  */
 export function nextModelSource(
   existing: string | null,
-  incoming: "meshy_auto" | "admin_upload"
-): string {
+  incoming: OrderModelSource
+): OrderModelSource {
   if (existing === "meshy_auto" && incoming === "admin_upload") return "meshy_auto";
   return incoming;
 }

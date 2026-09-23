@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and, sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { db } from "@/lib/db";
-import { orders, adminActions, meshReports, generationAttempts } from "@/lib/db/schema";
+import { orders, adminActions, meshReports, generationAttempts, quotes } from "@/lib/db/schema";
+import { latestModelFiles } from "@/lib/services/order-model";
 import { getEmailQueue } from "@/lib/queue/queues";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -78,6 +79,30 @@ export async function POST(
     }
     if (current.status !== "review") {
       return NextResponse.json({ error: d["api.order.notInReview"] }, { status: 400 });
+    }
+
+    // Teklif siparişinin baskı dosyaları ödeme SONRASINDA, ayrı bir işte
+    // pişiriliyor (quote-order-files). Admin o iş bitmeden onaylarsa sipariş
+    // "onaylı + atanmamış" hâline girer ve otomatik atama üreticiye DOSYASIZ
+    // bir iş verirdi; üretici boş bir parça listesi görür. Kapı birkaç
+    // dakikalıktır: iş ya da beş dakikalık kurtarma taraması dosyaları ekler.
+    const [quoteOrder] = await db
+      .select({ id: quotes.id })
+      .from(quotes)
+      .where(eq(quotes.orderId, id))
+      .limit(1);
+    if (quoteOrder) {
+      const { files } = await latestModelFiles(id);
+      if (files.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Teklif dosyaları henüz siparişe eklenmedi; birkaç dakika sonra tekrar deneyin.",
+            code: "quote_files_pending",
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const needsCustomerApproval = requiresCustomerModelApproval(current);

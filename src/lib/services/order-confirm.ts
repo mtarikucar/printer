@@ -20,6 +20,8 @@ import {
 } from "@/lib/services/manufacturer-assignment-shadow";
 import { EXCLUDED_THIS_ATTEMPT_REASON } from "@/lib/services/manufacturer-assignment";
 import { getModelGenerationQueue } from "@/lib/queue/queues";
+import { enqueueQuoteOrderFiles } from "@/lib/queue/quote-queues";
+import { linkQuoteToOrderTx } from "@/lib/services/quote-order";
 import { isFlagEnabled } from "@/lib/services/flags";
 import {
   AUTO_ASSIGN_SKIP_NOTIFIES_ADMIN,
@@ -115,14 +117,25 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
       return { order, action: "noop" as const };
     }
 
+    // Ödenen teklif AYNI İŞLEMDE siparişe bağlanır (quote-order.ts): sipariş
+    // `review`'a geçerken `quotes.order_id` de yazılmış olur, yani "sipariş
+    // ilerledi ama teklif bağlanmadı" hâli doğmaz. Teklif kodu ödeme yolunun
+    // (promoteDraftToOrder / PayTR webhook'u) İÇİNE girmez: orada atılan bir
+    // hata, para tahsil edilmişken webhook'a 500 döndürürdü.
+    const quoteLink = await linkQuoteToOrderTx(tx, {
+      orderId,
+      draftId: order.draftId,
+    });
+
     // Upload orders: the model is already a print-ready mesh — skip straight to
-    // review for manufacturer assignment.
-    if (order.uploadedModelId) {
+    // review for manufacturer assignment. A quote order takes the same road:
+    // the customer supplied the mesh, only the files are baked asynchronously.
+    if (order.uploadedModelId || quoteLink) {
       await tx
         .update(orders)
         .set({ status: "review", updatedAt: new Date() })
         .where(eq(orders.id, orderId));
-      return { order, action: "upload" as const };
+      return { order, action: "upload" as const, quoteId: quoteLink?.quoteId ?? null };
     }
 
     // Custom orders: either the automatic pipeline or today's manual road.
@@ -136,6 +149,18 @@ export async function kickOffOrderProcessing(orderId: string, locale: Locale) {
   });
 
   if (result.action === "noop") return;
+
+  // Teklif dosyaları İŞLEM DIŞINDA pişirilir: yüz megabaytlık bir mesh'i
+  // kopyalamak/ölçeklemek, ödeme yolunun tuttuğu satır kilidinin arkasında
+  // yapılacak bir iş değil. Kuyruk erişilemezse sipariş yine `review`'dadır ve
+  // beş dakikalık kurtarma taraması (quote-order-files · recover) onu bulur.
+  if (result.action === "upload" && result.quoteId) {
+    try {
+      await enqueueQuoteOrderFiles(orderId, result.quoteId);
+    } catch (err) {
+      console.error(`[order-confirm] teklif dosya işi kuyruğa alınamadı: ${orderId}`, err);
+    }
+  }
 
   // Promote awaiting_model -> generating when the auto-3D road is open. Done
   // after the transaction so a slow provider call never holds a row lock, and

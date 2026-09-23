@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ORDER_MODEL_SOURCES,
   QC_RESET_MANUFACTURER_STATUSES,
   modelUploadAllowed,
   modelUploadRequiresNote,
@@ -282,6 +283,27 @@ check("admin yüklemesi meshy_auto kaynağını DÜŞÜRMEZ (onay kapısı korun
   // Otomatik üretim kendi kaynağını yazar.
   assert.equal(nextModelSource("admin_upload", "meshy_auto"), "meshy_auto");
   assert.equal(nextModelSource(null, "meshy_auto"), "meshy_auto");
+});
+
+// ─── Üçüncü el: ödenen teklifin kendi dosyaları (Task 4.2) ──────────────────
+
+check("model kaynakları KAPALI bir listedir ve teklif eli de içindedir", () => {
+  // Liste kapalı tutuluyor ki `orders.model_source` (text kolon) serbest metne
+  // dönmesin: `requiresCustomerModelApproval` bu kolonu okuyor.
+  assert.deepEqual([...ORDER_MODEL_SOURCES], ["meshy_auto", "admin_upload", "customer_quote"]);
+});
+
+check("teklif dosyaları kendi kaynağını yazar, meshy_auto yapışkanlığına takılmaz", () => {
+  // Teklif siparişi hiçbir zaman meshy_auto olmaz (otomatik üretim yolu yok);
+  // yapışkanlık YALNIZ admin düzeltmesine karşıdır, yoksa müşteri onay kapısı
+  // hiç açılmamış bir sipariş için açık kalırdı.
+  assert.equal(nextModelSource(null, "customer_quote"), "customer_quote");
+  assert.equal(nextModelSource("customer_quote", "customer_quote"), "customer_quote");
+  assert.equal(nextModelSource("meshy_auto", "customer_quote"), "customer_quote");
+  // Teklif siparişine admin düzeltme yüklerse kaynak admin'e geçer: teklif
+  // dosyası onay KAPISI taşımıyor, yani saklanacak bir şey yok.
+  assert.equal(nextModelSource("customer_quote", "admin_upload"), "admin_upload");
+  assert.equal(nextModelSource("customer_quote", "meshy_auto"), "meshy_auto");
 });
 
 // ─── QC fotoğrafı ↔ sürüm damgası (migration 0055) ──────────────────────────

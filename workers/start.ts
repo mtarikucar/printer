@@ -19,7 +19,8 @@ import { startWorkshopCloseWorker } from "../src/lib/queue/workers/workshop-clos
 import { startPainterAcceptSlaWorker } from "../src/lib/queue/workers/painter-accept-sla.worker";
 import { startManufacturerAcceptSlaWorker } from "../src/lib/queue/workers/manufacturer-accept-sla.worker";
 import { startQuotePartAnalysisWorker } from "../src/lib/queue/workers/quote-part-analysis.worker";
-import { getQuoteAnalysisQueue } from "../src/lib/queue/quote-queues";
+import { startQuoteOrderFilesWorker } from "../src/lib/queue/workers/quote-order-files.worker";
+import { getQuoteAnalysisQueue, getQuoteOrderFilesQueue } from "../src/lib/queue/quote-queues";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -96,6 +97,9 @@ const manufacturerAcceptSlaWorker = startManufacturerAcceptSlaWorker();
 // Anlık teklif: parça geometrisini ölçen python geçişi. mesh-processing ile
 // aynı çekirdeği paylaşır, bu yüzden eşzamanlılığı 1'dir.
 const quotePartAnalysisWorker = startQuotePartAnalysisWorker();
+// Anlık teklif: ödenen teklifin parça dosyalarını siparişe pişirir (hardlink ya
+// da float32 ölçekleme). Ödeme yolunun İÇİNDE çalışmaz.
+const quoteOrderFilesWorker = startQuoteOrderFilesWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -186,6 +190,15 @@ getQuoteAnalysisQueue().upsertJobScheduler(
   { name: "recover" }
 );
 
+// Sipariş ÖDENDİ ama dosyaları eklenmedi: dosya işi işlem sonrasında kuyruğa
+// giriyor ve Redis o an erişilemezse hiç doğmuyor. Beş dakikada bir siparişe
+// bağlı ama hiç model dosyası olmayan teklif siparişlerini tara.
+getQuoteOrderFilesQueue().upsertJobScheduler(
+  "quote-order-files-recovery",
+  { every: 300_000 },
+  { name: "recover" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -206,6 +219,7 @@ console.log("  - model-approval-sla (repeatable: every 6h)");
 console.log("  - workshop-close (repeatable: every 1h)");
 console.log("  - painter-accept-sla (repeatable: every 1h)");
 console.log("  - quote-part-analysis (concurrency: 1, python; recovery: every 5m)");
+console.log("  - quote-order-files (concurrency: 2; recovery: every 5m)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -229,6 +243,7 @@ async function shutdown() {
     painterAcceptSlaWorker.close(),
     manufacturerAcceptSlaWorker.close(),
     quotePartAnalysisWorker.close(),
+    quoteOrderFilesWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

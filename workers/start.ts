@@ -20,7 +20,12 @@ import { startPainterAcceptSlaWorker } from "../src/lib/queue/workers/painter-ac
 import { startManufacturerAcceptSlaWorker } from "../src/lib/queue/workers/manufacturer-accept-sla.worker";
 import { startQuotePartAnalysisWorker } from "../src/lib/queue/workers/quote-part-analysis.worker";
 import { startQuoteOrderFilesWorker } from "../src/lib/queue/workers/quote-order-files.worker";
-import { getQuoteAnalysisQueue, getQuoteOrderFilesQueue } from "../src/lib/queue/quote-queues";
+import { startQuoteMaintenanceWorker } from "../src/lib/queue/workers/quote-maintenance.worker";
+import {
+  getQuoteAnalysisQueue,
+  getQuoteMaintenanceQueue,
+  getQuoteOrderFilesQueue,
+} from "../src/lib/queue/quote-queues";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -100,6 +105,10 @@ const quotePartAnalysisWorker = startQuotePartAnalysisWorker();
 // Anlık teklif: ödenen teklifin parça dosyalarını siparişe pişirir (hardlink ya
 // da float32 ölçekleme). Ödeme yolunun İÇİNDE çalışmaz.
 const quoteOrderFilesWorker = startQuoteOrderFilesWorker();
+// Anlık teklif: gözetimsiz yarısı. Süresi geçen teklifi kapatır, süre dolumu
+// (işlemsel) ve terk (yalnız ticari ileti izniyle) hatırlatmalarını gönderir,
+// saklama süresi dolan teklif dosyalarını siler.
+const quoteMaintenanceWorker = startQuoteMaintenanceWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -199,6 +208,15 @@ getQuoteOrderFilesQueue().upsertJobScheduler(
   { name: "recover" }
 );
 
+// Teklifin süresi, hatırlatmaları ve dosya saklama süresi: saatte bir tur.
+// Turun bütün yazımları koşulludur, bu yüzden kaçan/tekrarlanan bir tetik
+// zararsızdır — kaçan tur yalnız hatırlatmayı bir saat geciktirir.
+getQuoteMaintenanceQueue().upsertJobScheduler(
+  "quote-maintenance-hourly",
+  { every: 3_600_000 },
+  { name: "tick" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -220,6 +238,7 @@ console.log("  - workshop-close (repeatable: every 1h)");
 console.log("  - painter-accept-sla (repeatable: every 1h)");
 console.log("  - quote-part-analysis (concurrency: 1, python; recovery: every 5m)");
 console.log("  - quote-order-files (concurrency: 2; recovery: every 5m)");
+console.log("  - quote-maintenance (concurrency: 1; repeatable: every 1h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -244,6 +263,7 @@ async function shutdown() {
     manufacturerAcceptSlaWorker.close(),
     quotePartAnalysisWorker.close(),
     quoteOrderFilesWorker.close(),
+    quoteMaintenanceWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

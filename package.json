@@ -134,6 +134,7 @@
     "test:quote-service:db": "npx tsx scripts/test-quote-service-db.ts",
     "test:quote-checkout:db": "npx tsx scripts/test-quote-checkout-db.ts",
     "test:quote-order:db": "npx tsx scripts/test-quote-order-db.ts",
+    "test:quote-maintenance:db": "npx tsx scripts/test-quote-maintenance-db.ts",
     "test:quote-ui": "npx tsx scripts/test-quote-ui.ts",
     "test:quote-admin-catalog": "npx tsx scripts/test-quote-admin-catalog.ts",
     "test:quote-admin": "npx tsx scripts/test-quote-admin.ts",

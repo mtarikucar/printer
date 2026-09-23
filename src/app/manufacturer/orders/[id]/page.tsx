@@ -306,9 +306,19 @@ export default async function ManufacturerOrderDetailPage({
   // Null "parça yok" DEĞİL "BİLİNMİYOR"dur — sessizce boş listeye
   // çevrildiğinde ekran yirmi parçalık bir işi tarifsiz gösterir ve atölye
   // yanlış malzemeyle basar. Bu yüzden aşağıdaki üretim kapısını da kapatır.
-  const quoteRead = await displayRead("teklif parçaları", id, loadOrderQuoteParts(order.id));
+  // Cevap BİLEREK bir nesneye sarılır: `loadOrderQuoteParts` null döndüğünde
+  // "bu sipariş teklif siparişi DEĞİL" der, `displayRead` null döndüğünde
+  // "okuma FIRLADI" der. Sarmalanmadan bu iki null aynı şeye düşer ve sıradan
+  // bir figür siparişinde de kapı kapanırdı (üretici hiçbir işe başlayamazdı).
+  // Aynı deyim yukarıda "müşterinin yüklediği model bilgileri" okumasında da
+  // kullanılıyor.
+  const quoteRead = await displayRead(
+    "teklif parçaları",
+    id,
+    (async () => ({ q: await loadOrderQuoteParts(order.id) }))()
+  );
   const quotePartsUnreadable = quoteRead === null;
-  const quote = quoteRead ?? null;
+  const quote = quoteRead?.q ?? null;
 
   // Yeni bir model sürümü bu atölyeye DUYURULDU mu ve atölye onu onayladı mı.
   // Eski ekran yalnız pasif bir rozet gösteriyordu ("Model güncellendi"), yani

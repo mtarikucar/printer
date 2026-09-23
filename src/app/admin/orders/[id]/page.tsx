@@ -398,9 +398,18 @@ export default async function AdminOrderDetailPage({
   // admin'in denetleyeceği tanım O BELGEDİR: hangi parça, hangi malzeme, hangi
   // fiyat, hangi fatura bilgisi. `quote_parts` canlı kopya olduğu için değil,
   // `quote_checkouts.parts_snapshot` dondurulmuş kopya olduğu için okunur.
-  const quoteRead = await displayRead("teklif tanımı", order.id, loadOrderQuoteParts(order.id));
+  // Cevap BİLEREK bir nesneye sarılır: `loadOrderQuoteParts` null döndüğünde
+  // "bu sipariş teklif siparişi DEĞİL" der, `displayRead` null döndüğünde
+  // "okuma FIRLADI" der. Sarmalanmadan iki null aynı şeye düşer ve teklifle
+  // ilgisi olmayan HER siparişte "teklif tanımı okunamadı" uyarısı çıkardı —
+  // şeridi yalancı çıkaran uyarı, şeridin var oluş sebebini yok eder.
+  const quoteRead = await displayRead(
+    "teklif tanımı",
+    order.id,
+    (async () => ({ q: await loadOrderQuoteParts(order.id) }))()
+  );
   const quoteUnreadable = quoteRead === null;
-  const orderQuote = quoteRead ?? null;
+  const orderQuote = quoteRead?.q ?? null;
   const filesByRevision = new Map<number, typeof modelFileRows>();
   for (const f of modelFileRows) {
     const list = filesByRevision.get(f.revision) ?? [];

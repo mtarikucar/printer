@@ -512,6 +512,46 @@ async function main() {
       assert.deepEqual(money.warnings, [], "teklif dökümünde uyarı beklenmiyor");
     });
 
+    // Teklife BAĞLI OLMAYAN sıradan sipariş: cevap `null`, arıza DEĞİL.
+    //
+    // Üretici sayfası bu okumayı `displayRead` ile sarıyor ve `displayRead`ın
+    // `null`ı "okuma FIRLADI" demek. İki `null` aynı kefeye konduğunda sıradan
+    // HER siparişte üretim kapısı (baskı başlat / bitir / QC gönder) kapanıyor,
+    // admin ekranında da "teklif tanımı okunamadı" uyarısı çıkıyordu. Burada
+    // kanıtlanan ilk yarısı: sorgu teklifsiz siparişte de FIRLAMADAN `null`
+    // döner. İkinci yarısı (sayfaların cevabı nesneye sarıp iki `null`ı ayırt
+    // ettiği) `scripts/test-admin-order-routes.ts` içindeki yapısal çividir.
+    await test("teklifsiz sipariş: tanım okuması FIRLAMAZ, null döner (kapı açık kalır)", async () => {
+      const { loadOrderQuoteParts } = await import("../src/lib/services/quote-order");
+
+      const plainUser = await makeUser();
+      const plainOrderId = randomUUID();
+      await db.insert(orders).values({
+        id: plainOrderId,
+        orderNumber: `FIG-QA-${plainOrderId.slice(0, 8).toUpperCase()}`,
+        userId: plainUser.id,
+        email: plainUser.email,
+        customerName: "Sıradan Müşteri",
+        shippingAddress: address,
+        // Teklif siparişi DEĞİL: taslağı (ve dolayısıyla ödeme köprüsü) yok.
+        draftId: null,
+        orderType: "custom",
+        paymentMethod: "card",
+        amountKurus: 19900,
+      });
+
+      const view = await loadOrderQuoteParts(plainOrderId);
+      assert.equal(view, null, "teklifsiz sipariş için cevap null olmalı");
+
+      // Sayfaların kurduğu sarmalayıcının AYNISI: bayrak yalnız okuma
+      // fırladığında yanar, "teklif siparişi değil" cevabında yanmaz.
+      const quoteRead = await (async () => ({ q: await loadOrderQuoteParts(plainOrderId) }))().catch(
+        () => null
+      );
+      assert.notEqual(quoteRead, null, "okuma arızası YOK: bayrak yanmamalı");
+      assert.equal(quoteRead?.q, null, "sarmalayıcının içi 'teklif değil' cevabını taşır");
+    });
+
     await test("kickOffOrderProcessing teklifi BİR KEZ bağlar, sipariş review'a geçer", async () => {
       // Yükseltme sırasında bir kez çalıştı; buradaki iki çağrı (admin tekrarı /
       // webhook yarışı) sessiz olmalı.

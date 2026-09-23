@@ -877,14 +877,44 @@ for (const rel of STRIP_PAGES) {
 
 // "Modeli indir (STL/OBJ)" bağlantısı, ucun ÖN KOŞULUNA bağlı olmalı.
 //
-// Uç `uploadedModelId` yoksa 404 döner. Teklif siparişi de `orderType:
-// "upload"` taşıdığı için yalnız türe bakan bir koşul, her teklif siparişinde
-// garantili 404 veren bir düğme gösteriyordu.
-{
-  const flat = read(PAGE).replace(/\s+/g, " ");
+// Uç `uploadedModelId` yoksa 404 döner (admin ve üretici ucu aynı koşul).
+// Teklif siparişi de `orderType: "upload"` taşıdığı için yalnız türe bakan bir
+// koşul, HER teklif siparişinde garantili 404 veren bir düğme gösteriyordu.
+// Kural iki panelde de aranır: kuralı yalnız bir yüzeyde çivilemek, ikizini
+// sessizce bozuk bırakmaktı (üretici ekranı tam olarak böyle kaçmıştı).
+for (const rel of [PAGE, "src/app/manufacturer/orders/[id]/client.tsx"]) {
+  const flat = read(rel).replace(/\s+/g, " ");
+  // Koşul ya kaydın kimliğine (`uploadedModelId`) ya da serileştirilmiş
+  // kaydın kendisine (`uploadedModel`) bağlı olmalı; ikisi de "kayıt VAR"
+  // demektir, `orderType` tek başına demez.
   ok(
-    "admin: yüklenen model indirme bağlantısı uploadedModelId'ye bağlı",
-    /order\.uploadedModelId && \([^]{0,400}download-upload/.test(flat)
+    `${rel}: yüklenen model indirme bağlantısı kayda bağlı (türe değil)`,
+    /order\.uploadedModel(Id)? && \([^]{0,400}download-upload/.test(flat)
+  );
+}
+
+// Teklif tanımı okuması: "teklif siparişi DEĞİL" ile "okunamadı" AYNI null
+// olamaz.
+//
+// `loadOrderQuoteParts` null döndüğünde "bu sipariş bir teklife bağlı değil"
+// der; `displayRead` null döndüğünde "okuma fırladı" der. Çağrı doğrudan
+// sarıldığında iki cevap tek nulla düşüyordu: üretici ekranında SIRADAN her
+// siparişte üretim kapısı kapanıyor (baskı başlat/bitir, QC gönder), admin
+// ekranında ise her siparişte "teklif tanımı okunamadı" uyarısı çıkıyordu.
+// Çözüm, dosyada zaten kullanılan deyim: cevabı bir nesneye sarmak.
+for (const rel of [
+  "src/app/admin/orders/[id]/page.tsx",
+  "src/app/manufacturer/orders/[id]/page.tsx",
+]) {
+  const flat = read(rel).replace(/\s+/g, " ");
+  ok(
+    `${rel}: teklif okuması "teklif değil" ile "okunamadı"yı ayırıyor`,
+    /\{ q: await loadOrderQuoteParts\(/.test(flat) &&
+      // Doğrudan sarma (bozuk biçim) geri gelmemeli.
+      !/displayRead\([^;]{0,200}, loadOrderQuoteParts\(/.test(flat) &&
+      // Bayrak ile değerin ayrı okunduğu da çivilenir: `?.q` olmadan sarmalayıcı
+      // yalnız biçimsel kalırdı.
+      /\?\.q\b/.test(flat)
   );
 }
 

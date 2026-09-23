@@ -862,7 +862,13 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 "Download OBJ"}
             </a>
           )}
-          {order.orderType === "upload" && (
+          {/* Bağlantı TÜRE değil KAYDA bağlı: teklif siparişi de "upload"
+              türündedir ama yüklenmiş tek bir modeli yoktur (parçaları teklif
+              kartındadır) ve uç `uploadedModelId` olmadan 404 döner — her
+              teklif siparişinde ölü bir düğme. Kayıt okunamadığında da düğme
+              çıkmaz: şerit zaten "Müşterinin yüklediği model bilgileri"ni
+              okunamayan alanlar arasında yazıyor. */}
+          {order.orderType === "upload" && order.uploadedModel && (
             <a
               href={`/api/manufacturer/orders/${order.id}/download-upload`}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm font-semibold text-white shadow-sm shadow-emerald-200 transition-all hover:shadow-md hover:shadow-emerald-200"

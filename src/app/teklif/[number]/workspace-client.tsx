@@ -87,6 +87,74 @@ export function groupPartsByTechnology(
 }
 
 /**
+ * `POST /claim` hatası "bu teklif BAŞKA bir hesaba bağlı" mı demek?
+ *
+ * Uç, devralınamayan teklife 404 verir (`accessOr404`); başka her hata —
+ * ağa ulaşılamaması (`QuoteApiError` status 0), 401, 429, 5xx — sahiplik
+ * hakkında bir şey söylemez ve ekranı salt okunur hâle DÜŞÜRMEMELİDİR.
+ */
+export function isOwnershipConflict(e: unknown): boolean {
+  return e instanceof QuoteApiError && e.status === 404;
+}
+
+/**
+ * Cevapların uygulanma SIRASI.
+ *
+ * Yanıtların geliş sırası, isteklerin gidiş sırası değildir. 3 sn'lik yoklama
+ * tam da bir parça analiz edilirken çalışır — yani çok dosyalı bir bırakmanın
+ * ortasında: ikinci dosyanın `POST /parts` cevabından ÖNCE yola çıkmış bir
+ * yoklama, ondan SONRA dönerse az önce eklenen parçayı ekrandan silerdi (aynı
+ * yarış bir konfig yamasını geri alır, silinen parçayı diriltir).
+ *
+ * Kural iki cümledir:
+ *  - OKUMA (yoklama) sıra numarasını yola çıkarken alır ve daha yeni bir
+ *    gövdenin üstüne yazamaz.
+ *  - YAZIM cevabı tanım gereği en tazedir (yaptığı değişikliği zaten içerir),
+ *    bu yüzden sıra damgasını GELDİĞİ anda alır: kendisinden önce yola çıkmış
+ *    bütün yoklamalar böylece elenir.
+ *
+ * Ayrıca uçuşta yazım varken yoklama hiç yapılmaz: cevabı zaten taze gövdeyi
+ * getirecek, arada bir okuma daha sunucuyu boşuna meşgul eder.
+ */
+export interface QuoteResponseOrder {
+  /** Yola çıkan okumaya artan bir sıra numarası verir. */
+  next(): number;
+  /** Bu gövde uygulanmalı mı? Geç kalan cevap elenir. */
+  accept(seq: number): boolean;
+  /** Az önce alınan yazım cevabı için: sırayı en öne alır. */
+  claimLatest(): void;
+  beginWrite(): void;
+  endWrite(): void;
+  /** Uçuşta yazım var mı? */
+  isWriting(): boolean;
+}
+
+export function createResponseOrder(): QuoteResponseOrder {
+  let issued = 0;
+  let applied = 0;
+  let writes = 0;
+  return {
+    next: () => (issued += 1),
+    accept(seq) {
+      if (seq < applied) return false;
+      applied = seq;
+      return true;
+    },
+    claimLatest() {
+      issued += 1;
+      applied = issued;
+    },
+    beginWrite() {
+      writes += 1;
+    },
+    endWrite() {
+      writes = Math.max(0, writes - 1);
+    },
+    isWriting: () => writes > 0,
+  };
+}
+
+/**
  * 3.2b yuvası — teklif özeti (teslim kademesi, ek hizmetler, toplamlar,
  * "Ödemeye geç", manuel teklif / hedef fiyat / RFQ, not, PO).
  * TODO(Görev 3.2b): `quote-summary.tsx` bu yuvayı doldurur; kabuk düzeni
@@ -167,25 +235,42 @@ export function QuoteWorkspaceClient({
   const canEdit = viewer.canEdit && !readOnly;
   const parts = quote.parts;
 
-  const apply = useCallback((fresh: PresentedQuote) => {
+  // Tek bir çalışma alanı boyunca yaşayan sıra kapısı (bkz. createResponseOrder).
+  const [order] = useState(createResponseOrder);
+
+  const write = useCallback((fresh: PresentedQuote) => {
     setQuote(fresh);
     // Silinen parça seçili kalmasın: toplu işlem çubuğu olmayan bir parçayı
     // saymaya devam ederdi.
     setSelected((prev) => prev.filter((id) => fresh.parts.some((p) => p.id === id)));
   }, []);
 
+  /** Bir YAZIMDAN dönen taze gövde: sırada en öne geçer. */
+  const apply = useCallback(
+    (fresh: PresentedQuote) => {
+      order.claimLatest();
+      write(fresh);
+    },
+    [order, write]
+  );
+
   const refresh = useCallback(async () => {
+    const seq = order.next();
     try {
-      apply(await fetchQuote(quoteId, { shareToken }));
+      const fresh = await fetchQuote(quoteId, { shareToken });
+      // Bu okuma yola çıktıktan sonra daha yeni bir gövde uygulandıysa
+      // (çoğunlukla bir yazımın cevabı) elimizdeki artık eskidir.
+      if (order.accept(seq)) write(fresh);
     } catch {
       // Yoklama sessizdir: geçici bir ağ hatası için ekrana kırmızı bir
       // cümle yazmak, hiçbir şey yapmamış müşteriyi telaşlandırır.
     }
-  }, [apply, quoteId, shareToken]);
+  }, [order, quoteId, shareToken, write]);
 
   /** Mutasyonların ortak kabuğu: kilit, hata cümlesi, taze gövde. */
   const run = useCallback(
     async (fn: () => Promise<PresentedQuote>) => {
+      order.beginWrite();
       setBusy(true);
       setActionError(null);
       try {
@@ -193,10 +278,11 @@ export function QuoteWorkspaceClient({
       } catch (e) {
         setActionError(e instanceof QuoteApiError ? e.message : d["common.error"]);
       } finally {
+        order.endWrite();
         setBusy(false);
       }
     },
-    [apply, d]
+    [apply, d, order]
   );
 
   // ─── Canlılık ─────────────────────────────────────────────────────────────
@@ -210,10 +296,13 @@ export function QuoteWorkspaceClient({
     if (!pollNeeded) return;
     const timer = setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
+      // Uçuşta yazım varken yoklamaya gerek yok: cevabı zaten taze gövdeyi
+      // getirecek (ve sıra kapısı o yoklamayı nasıl olsa elerdi).
+      if (order.isWriting()) return;
       void refresh();
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [pollNeeded, refresh]);
+  }, [order, pollNeeded, refresh]);
 
   // ─── Yükleme ──────────────────────────────────────────────────────────────
 
@@ -231,6 +320,9 @@ export function QuoteWorkspaceClient({
       for (const file of accepted) {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         setUploads((prev) => [...prev, { id, fileName: file.name, progress: null }]);
+        // Yükleme de bir YAZIMDIR (`busy` onu kapsamaz): analiz sürerken
+        // çalışan yoklama, `POST /parts` cevabıyla yarışmamalı.
+        order.beginWrite();
         try {
           // `expectedSize`: sunucu bildirilen boyutu aşan parçayı 413 ile
           // keser — misafir yüklemelerinde kota bu bildirime dayanır.
@@ -256,11 +348,12 @@ export function QuoteWorkspaceClient({
               : fill(d["instantQuote.upload.failed"], { file: file.name });
           setUploadErrors((prev) => (prev.includes(message) ? prev : [...prev, message]));
         } finally {
+          order.endWrite();
           setUploads((prev) => prev.filter((u) => u.id !== id));
         }
       }
     },
-    [apply, canEdit, catalog.maxFileBytes, catalog.maxPartsPerQuote, d, parts.length, quoteId, shareToken, uploads.length]
+    [apply, canEdit, catalog.maxFileBytes, catalog.maxPartsPerQuote, d, order, parts.length, quoteId, shareToken, uploads.length]
   );
 
   // Sayfanın HER YERİNE bırakılabilir: müşteri dosyayı tam olarak bırakma
@@ -329,8 +422,8 @@ export function QuoteWorkspaceClient({
 
   /**
    * Fiyat kapısından çıkış: oturum açıldıktan SONRA teklif sahiplenilir ve
-   * gövde yeniden çekilir. Sahiplenme başarısızsa (teklif başka bir hesaba
-   * bağlı) ekran salt okunur uyarısına düşer — sessizce eski, fiyatsız
+   * gövde yeniden çekilir. Sahiplenme "bu teklif başkasının" diye
+   * reddedildiyse ekran salt okunur uyarısına düşer — sessizce eski, fiyatsız
    * görünümde kalmak müşteriye "giriş işe yaramadı" dedirtirdi.
    *
    * PAYLAŞIM görünümünde sahiplenme DENENMEZ: bağlantıyı almak devralma hakkı
@@ -348,8 +441,22 @@ export function QuoteWorkspaceClient({
         const fresh = await claimQuote(quoteId, { shareToken });
         apply(fresh);
         setReadOnly(!fresh.viewer.canSeePrices);
-      } catch {
-        setReadOnly(true);
+      } catch (e) {
+        // Sahiplik uyarısını YALNIZ ucun "bu teklif senin değil" cevabı
+        // yazdırır. Ağ kopması, 5xx ya da hız sınırı sahiplik hakkında
+        // HİÇBİR ŞEY söylemez: az önce giriş yapmış ve teklif gerçekten
+        // kendisinin olan müşteriye "başka bir hesaba bağlı" demek hem
+        // yanlıştır hem de ekranı ancak sayfa yenilemeyle çıkılabilen bir
+        // salt-okunur hâle kilitler (yükleme alanı, toplu çubuk ve bütün
+        // parça denetimleri kaybolur). Geçici hatada cümle gösterilir ve
+        // gövde yeniden çekilir: oturum artık açık olduğu için fiyatlar
+        // çoğu zaman bu okumayla gelir.
+        if (isOwnershipConflict(e)) {
+          setReadOnly(true);
+          return;
+        }
+        setActionError(e instanceof QuoteApiError ? e.message : d["common.error"]);
+        await refresh();
       }
     })();
   };

@@ -25,8 +25,11 @@ import { dfmMessage } from "../src/components/quote/dfm-list";
 import { validateQuoteFiles } from "../src/components/quote/dropzone";
 import {
   QuoteWorkspaceClient,
+  createResponseOrder,
   groupPartsByTechnology,
+  isOwnershipConflict,
 } from "../src/app/teklif/[number]/workspace-client";
+import { QuoteApiError } from "../src/lib/quote/client-api";
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
 import {
@@ -649,4 +652,56 @@ test("toplu işlem çubuğu seçim varken çıkar, yokken hiç çizilmez", () =>
   assert.match(html, /2 parça seçildi/);
   assert.match(html, /Seçilenlere uygula/);
   assert.match(html, /Seçilenleri sil/);
+});
+
+// ─── Çalışma alanı: cevap sırası ve sahiplenme hatası ───────────────────────
+
+test("sahiplenme hatasında yalnız 404 'bu teklif başkasının' demektir", () => {
+  // Salt okunur uyarısı ("Bu teklif başka bir hesaba bağlı") teklifin
+  // SAHİPLİĞİ hakkında bir iddiadır; onu yalnız ucun 404'ü kurabilir. Ağ
+  // kopması (status 0), 401, hız sınırı ve 5xx, az önce giriş yapmış GERÇEK
+  // sahibi kendi çalışma alanından etmemeli.
+  assert.equal(isOwnershipConflict(new QuoteApiError("Teklif bulunamadı.", 404)), true);
+  for (const status of [0, 401, 403, 429, 500, 502, 504]) {
+    assert.equal(
+      isOwnershipConflict(new QuoteApiError("geçici", status)),
+      false,
+      `status ${status} sahiplik çakışması sayıldı`
+    );
+  }
+  assert.equal(isOwnershipConflict(new Error("boom")), false);
+  assert.equal(isOwnershipConflict(null), false);
+});
+
+test("geç kalan yoklama, az önce eklenen parçayı ekrandan silemez", () => {
+  const order = createResponseOrder();
+  // T0 — analiz sürerken 3 sn'lik yoklama yola çıkar.
+  const stalePoll = order.next();
+  // T1 — ikinci dosyanın `POST /parts` cevabı gelir ve uygulanır.
+  order.claimLatest();
+  // T2 — T0'daki yoklama şimdi döner; gövdesinde yeni parça YOKTUR.
+  assert.equal(order.accept(stalePoll), false, "eski yoklama taze gövdenin üstüne yazdı");
+  // Yazımdan SONRA yola çıkan yoklama elbette uygulanır.
+  assert.equal(order.accept(order.next()), true);
+});
+
+test("sırayla dönen okumalar uygulanır, uçuşta yazım varken yoklama beklenir", () => {
+  const order = createResponseOrder();
+  const first = order.next();
+  const second = order.next();
+  assert.equal(order.accept(first), true);
+  assert.equal(order.accept(second), true);
+
+  assert.equal(order.isWriting(), false);
+  order.beginWrite();
+  order.beginWrite(); // çok dosyalı bırakma: iki yükleme iç içe
+  assert.equal(order.isWriting(), true);
+  order.endWrite();
+  assert.equal(order.isWriting(), true, "yazımlardan biri bitince kapı erken açıldı");
+  order.endWrite();
+  assert.equal(order.isWriting(), false);
+  order.endWrite(); // fazladan bitiş sayacı eksiye düşürmemeli
+  assert.equal(order.isWriting(), false);
+  order.beginWrite();
+  assert.equal(order.isWriting(), true, "sayaç eksiye düşmüş: yoklama yazımın üstüne biner");
 });

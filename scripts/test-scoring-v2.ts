@@ -1198,6 +1198,15 @@ check(
   "sıralayıcı etiket ailesi kurallarının İKİNCİ bir kopyasını taşımaz",
   !/startsWith\("pmat_"\)/.test(rankerSrc) && !/startsWith\("material_"\)/.test(rankerSrc)
 );
+// KAYNAK KİLİDİ (davranış değil): gereksinim, baskı dosyalarını yazan
+// `attachQuoteFilesToOrder` ile AYNI satırdan — siparişin kendi taslağından —
+// okunmalı. Teklifin "en son" ödemesine dönmek, geç onaylanan bir havalede
+// basılmayacak parçaların gereksinimini dayatırdı.
+check(
+  "teklif gereksinimi siparişin KENDİ taslağından okunur (basılacak tanım)",
+  /eq\(quoteCheckouts\.draftId, orders\.draftId\)/.test(rankerSrc) &&
+    !/orderBy\(desc\(quoteCheckouts\.createdAt\)\)/.test(rankerSrc)
+);
 
 // ─── Summary ─────────────────────────────────────────────────────
 console.log(`\n${pass}/${pass + fail} scoring-v2 checks passed`);

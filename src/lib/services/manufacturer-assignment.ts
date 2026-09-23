@@ -671,13 +671,25 @@ async function qcRejectionHistoryFor(
  * `loadPlacementFacts`) buradan okur. İki okuma iki ayrı kural yazsaydı ekran
  * bir atölyeyi aday gösterirken uç onu reddedebilirdi.
  *
- * Köprü `quotes.order_id`dir (`orders`/`order_drafts` tanımlarına teklif kolonu
- * eklenmedi) ve okunan tanım ÖDENEN tanımdır: canlı `quote_parts` değil, ödeme
- * anında dondurulmuş `quote_checkouts.parts_snapshot` + teklifin kendi katalog
- * anlık görüntüsü. Müşteri neye para ödediyse üretici onu basacak.
+ * Okunan tanım BASILACAK tanımdır: canlı `quote_parts` değil, siparişin KENDİ
+ * taslağı için ödeme anında dondurulmuş `quote_checkouts.parts_snapshot` +
+ * teklifin katalog anlık görüntüsü. Müşteri neye para ödediyse üretici onu
+ * basacak.
  *
- * MALİYET: teklifsiz siparişte tek bir indeksli sorgu (`quotes_order_id_uq`)
- * boş döner ve gereksinimler yazılmaz — sıralama bugünküyle birebir aynıdır.
+ * ANAHTAR `orders.draft_id`dir, teklifin en yeni ödemesi DEĞİL. Bir teklifin
+ * birden çok ödemesi olabilir: `freezeCheckout` canlı taslak yoksa YENİ bir
+ * taslak + checkout açar (quote-checkout.ts) ve her biri o ANKİ parçalardan
+ * dondurulur. Baskı dosyalarını yazan `attachQuoteFilesToOrder` ise siparişin
+ * taslağını (`quote_checkouts_draft_id_uq`) okur (quote-order.ts) — bu yüzden
+ * gereksinim de AYNI satırdan gelmeli. Aksi hâlde geç onaylanan bir havale
+ * eski taslaktan sipariş açtığında sıralayıcı, dosyaları hiç basılmayacak
+ * yeni taslağın teknoloji/polimer/büyük-format gereksinimlerini dayatırdı.
+ * `quotes` yalnız katalog anlık görüntüsü için ve teklif GERÇEKTEN bu siparişe
+ * bağlı mı diye katılır (çift ödemede bağlanmaz; o siparişe dosya da eklenmez).
+ *
+ * MALİYET: teklifsiz siparişte tek bir indeksli sorgu (`quotes_order_id_uq` +
+ * `quote_checkouts_draft_id_uq`) boş döner ve gereksinimler yazılmaz —
+ * sıralama bugünküyle birebir aynıdır.
  */
 export async function quoteOrderRequirements(
   orderId: string
@@ -687,12 +699,17 @@ export async function quoteOrderRequirements(
       pricingSnapshot: quotes.pricingSnapshot,
       partsSnapshot: quoteCheckouts.partsSnapshot,
     })
-    .from(quotes)
-    .innerJoin(quoteCheckouts, eq(quoteCheckouts.quoteId, quotes.id))
-    .where(eq(quotes.orderId, orderId))
-    // Aynı teklif için ikinci bir taslak ödendiyse (çift ödeme) EN SON
-    // dondurulan tanım basılacak olandır.
-    .orderBy(desc(quoteCheckouts.createdAt))
+    .from(orders)
+    .innerJoin(quotes, eq(quotes.orderId, orders.id))
+    .innerJoin(
+      quoteCheckouts,
+      and(
+        eq(quoteCheckouts.quoteId, quotes.id),
+        eq(quoteCheckouts.draftId, orders.draftId)
+      )
+    )
+    .where(eq(orders.id, orderId))
+    // `draft_id` tekil: eşleşen en çok bir checkout vardır, sıralamaya gerek yok.
     .limit(1);
   if (!row) return null;
   // Kural burada YENİDEN YAZILMAZ: saf yetenek modülü çevirir (capability.ts).

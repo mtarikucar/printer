@@ -85,7 +85,15 @@ export function QuoteDocument({
 
         <div className="text-right">
           <p className="quote-doc__muted text-xs">{d["instantQuote.document.title"]}</p>
-          <p className="font-mono text-xl font-semibold tracking-tight">{quote.number}</p>
+          {/* Numara ETİKETLİ yazılır. Etiketsiz bırakıldığında proformadaki
+              "Açıklama" satırıyla birlikte okunup havale açıklaması sanılıyordu;
+              oysa parayı eşleştiren referans bu değil (bkz. proforma bloğu). */}
+          <p className="font-mono text-xl font-semibold tracking-tight">
+            <span className="quote-doc__muted mr-1.5 font-sans text-xs font-normal">
+              {d["instantQuote.document.quoteNumber"]}
+            </span>
+            {quote.number}
+          </p>
           <dl className="mt-2 space-y-0.5 text-xs">
             <div className="flex justify-end gap-2">
               <dt className="quote-doc__muted">{d["instantQuote.document.issuedAt"]}</dt>
@@ -306,8 +314,27 @@ export function QuoteDocument({
             {bank.branch && (
               <Field label={d["instantQuote.document.branch"]} value={bank.branch} />
             )}
-            {/* Havale açıklaması teklif numarasıdır: ödemeyi eşleştiren tek ip ucu. */}
-            <Field label={d["instantQuote.document.reference"]} value={quote.number} />
+            {/*
+              Havale açıklaması GERÇEK ödeme referansıdır — teklif numarası
+              değil. `/havale/<referans>` yalnız taslak referansını (`FIG-…`)
+              çözer, dekont OCR'ı onu puanlar, hatırlatma/süre işleri ve %3
+              havale indirimi ona bağlıdır. Buraya `T-000123` yazmak müşteriyi
+              hiçbir şeyin eşleştirmediği bir havaleye yollardı: ne sipariş, ne
+              dekont yükleme sayfası, ne indirim — sipariş verdiğini sanırken
+              teklifin süresi dolardı. Referans henüz yoksa (ödeme adımına
+              girilmemiş) blok bilgilendirici kalır ve referansı nereden
+              alacağını söyler.
+            */}
+            {quote.liveDraftReference ? (
+              <Field
+                label={d["instantQuote.document.reference"]}
+                value={quote.liveDraftReference}
+              />
+            ) : (
+              <p className="quote-doc__muted sm:col-span-2">
+                {d["instantQuote.document.referencePending"]}
+              </p>
+            )}
           </dl>
         </section>
       )}

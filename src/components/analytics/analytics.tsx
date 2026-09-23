@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ConsentProvider } from "./consent-context";
 import { AnalyticsScripts } from "./analytics-scripts";
 import { CookieConsentBanner } from "./cookie-consent-banner";
-import { track } from "@/lib/analytics/client";
+import { buildTrackedUrl, track } from "@/lib/analytics/client";
 import { hasAnyClientTag } from "@/lib/analytics/config";
 
 /**
@@ -31,13 +31,19 @@ export function Analytics() {
  * Fires a `page_view` on initial load and on every client-side navigation.
  * Reads the query string from `window.location` (not useSearchParams) so the
  * root layout doesn't get forced into dynamic rendering / a Suspense boundary.
+ *
+ * The query string goes through `buildTrackedUrl`, which drops bearer-token
+ * parameters (the quote share link's `?t=`) before the URL reaches GTM/GA4.
  */
 function PageViewTracker() {
   const pathname = usePathname();
   const lastTracked = useRef<string | null>(null);
 
   useEffect(() => {
-    const full = pathname + (typeof window !== "undefined" ? window.location.search : "");
+    const full = buildTrackedUrl(
+      pathname,
+      typeof window !== "undefined" ? window.location.search : ""
+    );
     if (lastTracked.current === full) return; // guard double-fire in StrictMode
     lastTracked.current = full;
     track("page_view", { pagePath: full });

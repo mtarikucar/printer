@@ -145,8 +145,16 @@ export function QuoteSummary({
   // Yazan her denetim ikisini birden sormak zorunda.
   const editable = viewer.canEdit && !quote.locked;
   const canRequestReview = editable && quote.status !== "needs_review" && quote.parts.length > 0;
+  // Yüksek hacim uyarısı İKİ katmanda doğar ve ikisi birlikte sorulmak
+  // zorundadır: cap üstü adetli bir parça fiyatlanamadığı için `partsKurus`a
+  // hiç girmez, dolayısıyla TEKLİF düzeyindeki `qty_over_auto` hiç tetiklenmez.
+  // Yalnız teklif düzeyine bakan denetim, parça kartı "yüksek hacim teklifi
+  // isteyin" derken RFQ düğmesini saklardı; talep de yanlış sekmeye (manuel)
+  // düşerdi.
   const showRfq =
-    canRequestReview && quote.quoteIssues.some((issue) => issue.code === "qty_over_auto");
+    canRequestReview &&
+    (quote.quoteIssues.some((issue) => issue.code === "qty_over_auto") ||
+      quote.parts.some((part) => part.dfm.some((issue) => issue.code === "qty_over_auto")));
 
   return (
     <Card padding="none" className="overflow-hidden">
@@ -204,6 +212,13 @@ export function QuoteSummary({
           </dl>
 
           <p className="text-xs text-text-muted">{d["instantQuote.summary.freeShipping"]}</p>
+
+          {/* Anahtar YALNIZ toplamı çevirir; satır tutarları KDV dahil kalır.
+              Bu cümle olmazsa "KDV hariç" diyen müşteri toplamdan BÜYÜK
+              satırlar okur ve ikisini tek toplam sanar. */}
+          {kdvExcluded && (
+            <p className="text-xs text-text-muted">{d["instantQuote.summary.kdvLineNote"]}</p>
+          )}
         </div>
 
         {/* ── Toplam ────────────────────────────────────────────────────── */}
@@ -263,24 +278,41 @@ export function QuoteSummary({
         )}
 
         {/* ── Ödeme ─────────────────────────────────────────────────────── */}
-        {!viewer.canSeePrices ? (
-          // Kapı kapalıyken düğme ödemeye değil kapıya götürür: müşteri önce
-          // ne ödeyeceğini görmeli.
-          <button type="button" onClick={onRequestPrices} className="btn-primary w-full">
-            {d["instantQuote.summary.checkout"]}
-          </button>
-        ) : readiness.canCheckout ? (
-          <Link
-            href={`/teklif/${encodeURIComponent(quote.number)}/odeme`}
-            className="btn-primary block w-full text-center"
-          >
-            {d["instantQuote.summary.checkout"]}
-          </Link>
-        ) : (
-          <button type="button" disabled className="btn-primary w-full opacity-50">
-            {d["instantQuote.summary.checkout"]}
-          </button>
-        )}
+        {/* `readiness.canCheckout` teklifin DURUMUDUR, izleyicinin hakkı değil:
+            `quotePermissions` de `checkoutBlockers` de izleyiciyi hiç sormaz.
+            Ödeme sayfası ise paylaşım token'ını BİLEREK okumaz, yani oraya
+            giden paylaşım izleyicisi çıplak bir 404'e çarpar (uygulamada
+            `not-found.tsx` de yok). Giriş yapmış paylaşım izleyicisinin fiyatı
+            GÖRMESİ ile ÖDEYEBİLMESİ bu yüzden ayrı iki denetimdir. */}
+        <div className="space-y-1.5">
+          {!viewer.canSeePrices ? (
+            // Kapı kapalıyken düğme ödemeye değil kapıya götürür: müşteri önce
+            // ne ödeyeceğini görmeli.
+            <button type="button" onClick={onRequestPrices} className="btn-primary w-full">
+              {d["instantQuote.summary.checkout"]}
+            </button>
+          ) : readiness.canCheckout && viewer.isOwner ? (
+            <Link
+              href={`/teklif/${encodeURIComponent(quote.number)}/odeme`}
+              className="btn-primary block w-full text-center"
+            >
+              {d["instantQuote.summary.checkout"]}
+            </Link>
+          ) : (
+            <button type="button" disabled className="btn-primary w-full opacity-50">
+              {d["instantQuote.summary.checkout"]}
+            </button>
+          )}
+
+          {/* Sebepsiz kapalı düğme müşteriye yapacak tek şey bırakır: telefon
+              etmek. Engeller listesi teklifin kendi sebeplerini zaten yazıyor;
+              burada yazılan izleyiciye özgü olanı. */}
+          {viewer.canSeePrices && !viewer.isOwner && (
+            <p className="text-center text-xs text-text-muted">
+              {d["instantQuote.summary.ownerOnlyCheckout"]}
+            </p>
+          )}
+        </div>
 
         {/* ── İnceleme talepleri ────────────────────────────────────────── */}
         {canRequestReview && (

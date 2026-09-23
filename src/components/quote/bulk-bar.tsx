@@ -197,11 +197,16 @@ export function QuoteBulkBar({
           >
             {d["instantQuote.bulk.apply"]}
           </Button>
+          {/* Yıkıcı düğme, yanındaki "Seçimi temizle" ile aynı ağırlıkta
+              olamaz: ikisi de aynı satırda, aynı ölçüde ve yalnız metin
+              saydamlığıyla ayrılıyordu — mobilde ~28 px'lik iki komşu hedef,
+              Türkçe adları da birbirine yakın. Renk ve çerçeve, onay
+              diyaloğundan ÖNCE gelen ilk uyarıdır. */}
           <button
             type="button"
             disabled={busy}
             onClick={onDelete}
-            className="rounded-lg px-3 py-2 text-xs text-white/80 hover:bg-white/10 hover:text-white disabled:opacity-40"
+            className="rounded-lg border border-rose-300/50 px-3 py-2 text-xs font-medium text-rose-200 hover:bg-rose-500/25 hover:text-white disabled:opacity-40"
           >
             {d["instantQuote.bulk.delete"]}
           </button>

@@ -29,7 +29,7 @@ import {
  * SSS metni tek dilde, cümlenin içindeki rakamla birlikte yazılır.
  *
  * Rakamların hiçbiri elle yazılmaz: baskı hacmi, tolerans, teslim süresi,
- * limitler ve "₺X'den başlayan" çapası snapshot'tan hesaplanır. Yönetici
+ * limitler ve "₺X'ten başlayan" çapası snapshot'tan hesaplanır. Yönetici
  * kataloğu değiştirdiğinde bu sayfa kendiliğinden doğru kalır — yapay zekâ
  * aramasının alıntıladığı rakamın bayatlamaması buna bağlı.
  */

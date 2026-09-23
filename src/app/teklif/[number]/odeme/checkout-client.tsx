@@ -8,7 +8,7 @@ import { Card } from "@/components/ui";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
 import type { PresentedQuote, QuoteTotals } from "@/lib/config/quote-types";
 import type { TurkishAddress } from "@/lib/db/schema";
-import { formatCurrency } from "@/lib/i18n/format";
+import { formatCurrency, formatDateLong } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 /**
@@ -140,7 +140,12 @@ export function QuoteCheckoutClient({
 
             {quote.shipByDate && (
               <p className="text-xs text-text-muted">
-                {fill(d["instantQuote.lead.shipBy"], { date: quote.shipByDate })}
+                {/* Kademe seçici ve teklif belgesi tarihi okunur yazıyor;
+                    fişin ham gün anahtarını ("2026-11-02") basması yalnız
+                    burada kalmış bir kaçaktı. */}
+                {fill(d["instantQuote.lead.shipBy"], {
+                  date: formatDateLong(quote.shipByDate, "tr"),
+                })}
               </p>
             )}
             <p className="text-xs text-text-muted">{d["instantQuote.summary.freeShipping"]}</p>

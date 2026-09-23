@@ -33,6 +33,7 @@ import {
 } from "../src/components/quote/quote-summary";
 import { QuoteReviewDialog, parseMoneyInput } from "../src/components/quote/review-request-dialog";
 import { QuoteShareDialog } from "../src/components/quote/share-dialog";
+import { QuoteCheckoutClient } from "../src/app/teklif/[number]/odeme/checkout-client";
 import { QuoteDocument } from "../src/app/teklif/[number]/belge/quote-document";
 import { QuoteDocumentPrintButton } from "../src/app/teklif/[number]/belge/print-button";
 import {
@@ -49,6 +50,7 @@ import {
   landingFaq,
 } from "../src/app/3d-baski/sections";
 import {
+  anchorSentence,
   catalogAnchorKurus,
   formatAnchorPrice,
   materialAnchorKurus,
@@ -70,6 +72,7 @@ import {
   type QuoteTotals,
   type QuoteViewer,
 } from "../src/lib/config/quote-types";
+import { buildTrackedUrl } from "../src/lib/analytics/client";
 import { EVENTS, isEventName } from "../src/lib/analytics/events";
 import { serializeJsonLd } from "../src/lib/seo/jsonld";
 import { isNoindexPath } from "../src/lib/seo/policy";
@@ -896,6 +899,33 @@ test("ödemeye hazır teklif doğrudan ödeme sayfasına bağlanır", () => {
   assert.match(html, /href="\/teklif\/T-000123\/odeme"/);
 });
 
+test("paylaşım izleyicisine ödeme bağlantısı VERİLMEZ, sebebi yazılır", () => {
+  // Ödeme sayfası paylaşım token'ını BİLEREK okumaz (`odeme/page.tsx`): oraya
+  // giden paylaşım izleyicisi çıplak bir 404 görür. Giriş yapmış paylaşım
+  // izleyicisinin fiyatı görmesi (`canSeePrices`) ile ödeyebilmesi ayrı
+  // şeylerdir; düğme bunu ayırmazsa açık bir bağlantı boşluğa götürür.
+  const html = plain(
+    renderSummary(
+      pricedQuote({
+        viewer: {
+          canSeePrices: true,
+          canEdit: false,
+          isOwner: false,
+          isShare: true,
+          isAdmin: false,
+        },
+        readiness: { canCheckout: true, blockers: [] },
+      })
+    )
+  );
+  assert.doesNotMatch(html, /href="\/teklif\/T-000123\/odeme"/, "paylaşıma ödeme bağlantısı verilmiş");
+  assert.match(html, /disabled/, "paylaşım izleyicisinde ödeme düğmesi açık kalmış");
+  assert.ok(
+    html.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    "kapalı düğmenin sebebi yazılmamış"
+  );
+});
+
 test("RFQ düğmesi yalnız yüksek hacim uyarısı varken çıkar", () => {
   const rfq = "Yüksek hacim teklifi";
   assert.ok(!renderSummary(pricedQuote()).includes(rfq), "uyarı yokken RFQ önerilmiş");
@@ -907,6 +937,48 @@ test("RFQ düğmesi yalnız yüksek hacim uyarısı varken çıkar", () => {
     ).includes(rfq),
     "qty_over_auto varken RFQ önerilmemiş"
   );
+});
+
+test("PARÇA düzeyindeki yüksek hacim uyarısı da RFQ düğmesini açar", () => {
+  // Cap üstü adetli parça fiyatlanamaz, bu yüzden `partsKurus` küçük kalır ve
+  // TEKLİF düzeyinde `qty_over_auto` hiç doğmaz. Parça kartı "yüksek hacim
+  // teklifi isteyin" derken özetin o düğmeyi saklaması, talebi yanlış sekmeye
+  // (manuel) düşürürdü.
+  const html = renderSummary(
+    pricedQuote({
+      quoteIssues: [],
+      parts: [
+        partFixture({
+          dfm: [
+            {
+              code: "qty_over_auto",
+              severity: "error",
+              params: { quantity: 1500, maxQuantity: 1000 },
+            },
+          ],
+        }),
+      ],
+    })
+  );
+  assert.ok(html.includes("Yüksek hacim teklifi"), "parça uyarısı RFQ düğmesini açmadı");
+});
+
+test("KDV hariç görünüm satır tutarlarının KDV DAHİL olduğunu söyler", () => {
+  // Anahtar yalnız TOPLAMI değiştirir; satır tutarları KDV dahil kalır. Bu
+  // cümle olmazsa kurumsal müşteri toplamdan BÜYÜK satırlar okur ve ikisini
+  // tek toplam sanır. (`useSyncExternalStore`un sunucu anlık görüntüsü her
+  // zaman "KDV dahil" olduğu için tercih SSR'da çizilemez; iddia bu yüzden
+  // kaynağın kendisine bakar.)
+  const source = fs.readFileSync(
+    path.resolve("src/components/quote/quote-summary.tsx"),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /\{kdvExcluded && \([\s\S]{0,240}instantQuote\.summary\.kdvLineNote/,
+    "KDV hariç görünümde satır tutarı açıklaması yok"
+  );
+  assert.match(tr["instantQuote.summary.kdvLineNote"], /KDV dahil/);
 });
 
 test("paylaşım izleyicisi özet üzerinden teklifi değiştiremez", () => {
@@ -1066,7 +1138,7 @@ test("belge teklifin kimliğini, parçalarını ve geçerliliğini yazar", () =>
 });
 
 test("belge toplamı KDV dökümüyle ve havale bilgileriyle kapatır", () => {
-  const html = renderDocument(pricedQuote());
+  const html = renderDocument(pricedQuote({ liveDraftReference: "FIG-A1B2C3D4" }));
   assert.match(html, /148,00/, "toplam yok");
   assert.match(html, /120,00/, "KDV hariç tutar yok");
   assert.match(html, /28,00/, "KDV tutarı yok");
@@ -1074,8 +1146,31 @@ test("belge toplamı KDV dökümüyle ve havale bilgileriyle kapatır", () => {
   assert.match(html, /Proforma \/ Havale bilgileri/);
   assert.match(html, /TR33 0006 1005 1978 6457 8413 26/);
   assert.match(html, /Ziraat Bankası/);
-  // Havale açıklaması teklif numarasıdır: müşteri parayı yollarken bunu yazar.
+  // Havale açıklaması GERÇEK ödeme referansıdır: dekont eşleştirmesi, hatırlatma
+  // ve %3 havale indirimi taslak referansına (`FIG-…`) bağlıdır.
   assert.match(html, /Açıklama/);
+  assert.match(html, /FIG-A1B2C3D4/);
+});
+
+test("ödeme referansı yokken proforma teklif numarasını havale açıklaması diye yazmaz", () => {
+  // `T-000123` ile gönderilen havaleyi HİÇBİR ŞEY eşleştirmez: `/havale/<ref>`
+  // yalnız taslak referansını çözer, dekont OCR'ı onu arar, indirim ve
+  // hatırlatmalar ona bağlıdır. Referans yoksa belge müşteriyi ödeme adımına
+  // yollar — IBAN'a karşılıksız para yollatmaz.
+  const html = plain(renderDocument(pricedQuote({ liveDraftReference: null })));
+  assert.match(html, /Proforma \/ Havale bilgileri/, "proforma bloğu kaybolmuş");
+  assert.ok(
+    !html.includes(tr["instantQuote.document.reference"]),
+    "eşleşmeyen bir havale açıklaması yazılmış"
+  );
+  assert.ok(
+    html.includes(tr["instantQuote.document.referencePending"]),
+    "ödeme referansının nereden alınacağı yazılmamış"
+  );
+  // Teklif numarası belgede DURUR — ama "Teklif no" olarak, havale açıklaması
+  // olarak değil.
+  assert.ok(html.includes(tr["instantQuote.document.quoteNumber"]));
+  assert.ok(html.includes("T-000123"));
 });
 
 test("belge fiyat kapısını aynen uygular ve imzalı model adresi taşımaz", () => {
@@ -1096,7 +1191,7 @@ test("belgenin yazdırma düğmesi çıktıya girmez", () => {
 
 /**
  * React metin içeriğinde `'` ve `&` gibi karakterleri kaçırır (`&#x27;`). Çapa
- * cümlesi (`₺74'den başlayan`) kesme işareti taşıdığı için testler markup'ı
+ * cümlesi (`₺74'ten başlayan`) kesme işareti taşıdığı için testler markup'ı
  * okunur hâle getirip öyle arar — aksi hâlde her assertion kaçış dizisi
  * ezberlemek zorunda kalırdı.
  */
@@ -1136,6 +1231,54 @@ test("çapa lira olarak YUKARI yuvarlanır (yayımlanan rakam gerçeğin altınd
   assert.equal(formatAnchorPrice(1234500), "₺12.345");
 });
 
+test("çapa cümlesinin ayrılma eki sayının OKUNUŞUNA uyar", () => {
+  // Bu cümle sayfanın alıntılanan cümlesidir (arama motoru indeksler, asistan
+  // olduğu gibi tekrarlar): sabit `'den` eki katalogdaki DÖRT çapanın dördünü
+  // de yanlış yazıyordu. Ek kuraldır: sert ünsüz (p ç t k f h s ş) → `t`,
+  // kalın ünlü (a ı o u) → `an`.
+  const seeded: Array<[number, string]> = [
+    [7400, "₺74'ten başlayan"], // yetmiş dört
+    [11400, "₺114'ten başlayan"], // yüz on dört
+    [11586, "₺116'dan başlayan"], // yüz on altı
+    [12266, "₺123'ten başlayan"], // yüz yirmi üç
+  ];
+  for (const [kurus, sentence] of seeded) {
+    assert.equal(anchorSentence(kurus), sentence);
+  }
+  // Katalogun üretebileceği her sayı sözcüğü: birler, onlar, yüz ve binler.
+  const byWord: Array<[number, string]> = [
+    [1, "den"], // bir
+    [2, "den"], // iki
+    [3, "ten"], // üç
+    [4, "ten"], // dört
+    [5, "ten"], // beş
+    [6, "dan"], // altı
+    [7, "den"], // yedi
+    [8, "den"], // sekiz
+    [9, "dan"], // dokuz
+    [10, "dan"], // on
+    [20, "den"], // yirmi
+    [30, "dan"], // otuz
+    [40, "tan"], // kırk
+    [50, "den"], // elli
+    [60, "tan"], // altmış
+    [70, "ten"], // yetmiş
+    [80, "den"], // seksen
+    [90, "dan"], // doksan
+    [100, "den"], // yüz
+    [1000, "den"], // bin
+    [12000, "den"], // on iki bin
+    [2000000, "dan"], // iki milyon
+  ];
+  for (const [lira, suffix] of byWord) {
+    assert.equal(
+      anchorSentence(lira * 100),
+      `${formatAnchorPrice(lira * 100)}'${suffix} başlayan`,
+      `${lira} için ek yanlış`
+    );
+  }
+});
+
 test("teknolojinin çapası o teknolojinin EN UCUZ malzemesidir", () => {
   for (const tech of SEED_SNAPSHOT.technologies) {
     const anchor = technologyAnchorKurus(SEED_SNAPSHOT, tech.key);
@@ -1154,8 +1297,8 @@ test("teknolojinin çapası o teknolojinin EN UCUZ malzemesidir", () => {
 test("açılış sayfası katalogdaki her rakamı yayımlar (alıntılanabilirlik)", () => {
   const html = renderLanding();
   assert.match(html, /ANLIK 3D BASKI TEKLİFİ/);
-  assert.ok(html.includes("₺74'den başlayan"), "FDM çapası yok");
-  assert.ok(html.includes("₺114'den başlayan"), "SLA çapası yok");
+  assert.ok(html.includes("₺74'ten başlayan"), "FDM çapası yok");
+  assert.ok(html.includes("₺114'ten başlayan"), "SLA çapası yok");
   for (const tech of SEED_SNAPSHOT.technologies) {
     assert.ok(html.includes(tech.name), `${tech.key} adı yok`);
     assert.ok(
@@ -1229,7 +1372,7 @@ test("bayrak kapalıyken yükleyici yok ama SEO yüzeyi duruyor", () => {
   assert.match(html, /Yakında/);
   assert.doesNotMatch(html, /type="file"/, "kapalı bayrakta dosya girişi çizildi");
   // Katalog rakamları kalır: bayrak, arama motorunun okuduğu sayfayı kapatmaz.
-  assert.ok(html.includes("₺74'den başlayan"));
+  assert.ok(html.includes("₺74'ten başlayan"));
 });
 
 test("malzeme kütüphanesi her malzemeye çapa, özellik ve renk verir", () => {
@@ -1241,7 +1384,7 @@ test("malzeme kütüphanesi her malzemeye çapa, özellik ve renk verir", () => 
       assert.ok(html.includes(color.name), `${material.key}/${color.key} rengi yok`);
     }
   }
-  assert.ok(html.includes("₺74'den başlayan"), "PLA çapası kütüphanede yok");
+  assert.ok(html.includes("₺74'ten başlayan"), "PLA çapası kütüphanede yok");
   // Şeffaf PETG'nin renk farkı gizlenmez.
   assert.ok(html.includes("+₺5"), "renk ek ücreti yazılmamış");
 });
@@ -1357,4 +1500,76 @@ test("parça kütüphanesi ölçüyü, malzemeyi ve kullanım sayısını yazar"
   assert.ok(html.includes("PLA"), "son kullanılan malzeme yok");
   assert.ok(html.includes("2 teklifte kullanıldı"));
   assert.ok(html.includes("T-000123"), "kaynak teklif numarası yok");
+});
+
+// ─── Yıkıcı işlemler, sızdırmayan adres ve Türkçe kopya ─────────────────────
+
+test("toplu silme ONAY ister ve düğmesi 'Seçimi temizle'den ayrılır", () => {
+  // "Hepsini seç" bir onay kutusu yukarıda; çubukta "Seçilenleri sil" ile
+  // "Seçimi temizle" yan yana, aynı ölçüde iki düğme. Tek yanlış dokunuş 20
+  // parçayı birden siler (`deletedAt`), teklifi taslağa düşürür ve müşterinin
+  // geri alma yolu YOKTUR — tek parça silmesi zaten onay sorarken.
+  const source = fs.readFileSync(
+    path.resolve("src/app/teklif/[number]/workspace-client.tsx"),
+    "utf8"
+  );
+  const start = source.indexOf("<QuoteBulkBar");
+  assert.ok(start > 0, "toplu çubuk çağrısı bulunamadı");
+  const call = source.slice(start, source.indexOf("/>", start));
+  assert.match(call, /onDelete=\{[\s\S]*?window\.confirm/, "toplu silme onaysız");
+  assert.match(call, /instantQuote\.bulk\.deleteConfirm/, "onay cümlesi sözlükten gelmiyor");
+  assert.match(
+    tr["instantQuote.bulk.deleteConfirm"],
+    /\{count\}/,
+    "onay cümlesi kaç parçanın silineceğini söylemiyor"
+  );
+
+  // Görsel ayrım: silme düğmesi temizleme düğmesiyle aynı ağırlıkta olamaz.
+  const bar = fs.readFileSync(path.resolve("src/components/quote/bulk-bar.tsx"), "utf8");
+  const deleteButton = bar.slice(
+    bar.indexOf("onClick={onDelete}"),
+    bar.indexOf("onClick={onClear}")
+  );
+  assert.match(deleteButton, /rose|red/, "silme düğmesi yıkıcı olduğunu göstermiyor");
+});
+
+test("paylaşım token'ı analitiğe GÖNDERİLMEZ", () => {
+  // `?t=` bir taşıyıcı kimlik bilgisidir: teklifi ve (giriş yapmış izleyicide)
+  // bütün fiyatları açar. `page_location` ile GTM/GA4'e gitmesi, kimliği üçüncü
+  // tarafın günlüklerine ve URL raporlarına yazar.
+  assert.equal(buildTrackedUrl("/teklif/T-1", "?t=abc&utm_source=x"), "/teklif/T-1?utm_source=x");
+  assert.equal(buildTrackedUrl("/teklif/T-1", "?t=abc"), "/teklif/T-1");
+  assert.equal(buildTrackedUrl("/teklif/T-1", ""), "/teklif/T-1");
+  assert.equal(buildTrackedUrl("/3d-baski", "?utm_source=x"), "/3d-baski?utm_source=x");
+  assert.ok(!buildTrackedUrl("/teklif/T-1", "?t=abc&utm_source=x").includes("abc"));
+
+  for (const file of ["src/components/analytics/analytics.tsx", "src/lib/analytics/client.ts"]) {
+    const source = fs.readFileSync(path.resolve(file), "utf8");
+    assert.match(source, /buildTrackedUrl\(/, `${file} adresi süzmüyor`);
+    assert.doesNotMatch(
+      source,
+      /\+ *\(?(window\.)?location\.search/,
+      `${file} sorgu dizgisini ham birleştiriyor`
+    );
+  }
+});
+
+test("silme onayı ve ödeme fişi Türkçeyi doğru yazar", () => {
+  // (b) Ünsüz benzeşmesi: "teklifden" değil "tekliften".
+  assert.equal(tr["instantQuote.part.deleteConfirm"], "Bu parça tekliften silinsin mi?");
+
+  // (c) Fişteki tarih ISO gün anahtarı değil, okunur tarihtir — kademe seçici
+  // ve teklif belgesi zaten öyle yazıyor.
+  const html = plain(
+    inLocale(
+      createElement(QuoteCheckoutClient, {
+        quote: pricedQuote({ shipByDate: "2026-11-02" }),
+        totalKurus: 14800,
+        havaleDiscountKurus: 0,
+        savedAddress: null,
+      })
+    )
+  );
+  assert.ok(html.includes("2 Kasım 2026 tarihinde kargoda"), "tarih okunur yazılmamış");
+  assert.ok(!html.includes("2026-11-02"), "ham ISO gün anahtarı basılmış");
 });

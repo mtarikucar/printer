@@ -32,6 +32,36 @@ function readCookie(name: string): string | undefined {
   return m ? decodeURIComponent(m[1]) : undefined;
 }
 
+/**
+ * Analitiğe GİTMEYECEK sorgu parametreleri.
+ *
+ * `?t=` teklif paylaşım bağlantısının TAŞIYICI kimlik bilgisidir: teklifi açar
+ * ve giriş yapmış bir izleyiciye bütün fiyatları gösterir. Adres çubuğundaki
+ * hâliyle `page_location`a girerse GTM/GA4'e (ve kurulu her piksele) gönderilir,
+ * oradan üçüncü tarafın günlüklerine ve GA mülkünün URL raporlarına yazılır —
+ * saldırgan bir adım atmadan, yalnız bağlantı paylaşıldığı için.
+ */
+const UNTRACKED_QUERY_PARAMS = ["t"];
+
+/**
+ * İzlenen adres: yol + kimlik bilgisi AYIKLANMIŞ sorgu dizgisi.
+ *
+ * Kampanya parametreleri (`utm_*`, `gclid`) aynen kalır; ölçümün asıl işi onlar.
+ */
+export function buildTrackedUrl(pathname: string, search: string): string {
+  if (!search) return pathname;
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(search);
+  } catch {
+    // Çözülemeyen sorgu dizgisi ölçüme HAM gönderilmez.
+    return pathname;
+  }
+  for (const key of UNTRACKED_QUERY_PARAMS) params.delete(key);
+  const rest = params.toString();
+  return rest ? `${pathname}?${rest}` : pathname;
+}
+
 function newId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return "e_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -211,7 +241,10 @@ function mirrorToServer(
     visitorId: ctx.visitorId,
     sessionId: ctx.sessionId,
     consent: ctx.consent,
-    pagePath: typeof location !== "undefined" ? location.pathname + location.search : undefined,
+    pagePath:
+      typeof location !== "undefined"
+        ? buildTrackedUrl(location.pathname, location.search)
+        : undefined,
     payload,
   });
   try {

@@ -579,9 +579,24 @@ export function QuoteWorkspaceClient({
                       bulkUpdateQuoteParts(quoteId, selected, patch, { shareToken })
                     )
                   }
-                  onDelete={() =>
-                    void run(() => bulkDeleteQuoteParts(quoteId, selected, { shareToken }))
-                  }
+                  // Tek parça silmesi (`removePart`) zaten onay soruyor; toplu
+                  // silme ondan çok daha yıkıcı ve çok daha kolay: "Hepsini
+                  // seç" bir onay kutusu yukarıda, "Seçilenleri sil" ile
+                  // "Seçimi temizle" ise çubukta yan yana iki küçük düğme. Tek
+                  // yanlış dokunuş bütün parçaları `deletedAt`e yazar, teklifi
+                  // taslağa düşürür ve müşterinin geri alma yolu YOKTUR (her
+                  // okuma `deleted_at IS NULL` süzer).
+                  onDelete={() => {
+                    if (
+                      typeof window !== "undefined" &&
+                      !window.confirm(
+                        fill(d["instantQuote.bulk.deleteConfirm"], { count: selected.length })
+                      )
+                    ) {
+                      return;
+                    }
+                    void run(() => bulkDeleteQuoteParts(quoteId, selected, { shareToken }));
+                  }}
                   onClear={() => setSelected([])}
                 />
               )}

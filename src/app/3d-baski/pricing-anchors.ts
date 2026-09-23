@@ -1,5 +1,5 @@
 /**
- * Açılış sayfasının YAYIMLADIĞI fiyat çapaları ("₺74'den başlayan").
+ * Açılış sayfasının YAYIMLADIĞI fiyat çapaları ("₺74'ten başlayan").
  *
  * Neden var: fiyat kapısı bütün gerçek teklif rakamlarını girişin arkasına
  * alıyor. Hiç rakam yayımlamayan bir hizmet sayfası, bir yapay zekâ arama
@@ -149,16 +149,67 @@ export function catalogAnchorKurus(snapshot: PricingSnapshot): number | null {
 /**
  * Yayımlanan rakam: kuruş YUKARI yuvarlanarak tam liraya çevrilir.
  *
- * Yukarı yuvarlama zorunlu: "₺74'den başlayan" cümlesi gerçek fiyatın ALTINDA
+ * Yukarı yuvarlama zorunlu: "₺74'ten başlayan" cümlesi gerçek fiyatın ALTINDA
  * bir sayı gösterirse müşteriye söylenen ile ödeme ekranındaki rakam çelişir.
  */
 export function formatAnchorPrice(kurus: number): string {
   return `₺${Math.ceil(kurus / 100).toLocaleString("tr-TR")}`;
 }
 
-/** Sayfada geçen çapa cümlesi. Tek yerden üretilir ki her yerde aynı olsun. */
+const UNIT_WORDS = ["", "bir", "iki", "üç", "dört", "beş", "altı", "yedi", "sekiz", "dokuz"];
+const TENS_WORDS = ["", "on", "yirmi", "otuz", "kırk", "elli", "altmış", "yetmiş", "seksen", "doksan"];
+const SCALE_WORDS = ["", "bin", "milyon", "milyar"];
+
+/**
+ * Sayının OKUNUŞUNDAKİ son sözcük ("yetmiş dört" → "dört", "on iki bin" →
+ * "bin"). Ek rakama değil bu sözcüğe takılır.
+ */
+function finalNumberWord(value: number): string {
+  const n = Math.abs(Math.trunc(value));
+  if (n === 0) return "sıfır";
+  const unit = n % 10;
+  if (unit > 0) return UNIT_WORDS[unit];
+  const ten = Math.floor(n / 10) % 10;
+  if (ten > 0) return TENS_WORDS[ten];
+  if (Math.floor(n / 100) % 10 > 0) return "yüz";
+  for (let scale = 1; scale < SCALE_WORDS.length; scale++) {
+    if (Math.floor(n / 1000 ** scale) % 1000 > 0) return SCALE_WORDS[scale];
+  }
+  return SCALE_WORDS[SCALE_WORDS.length - 1];
+}
+
+/** Sert ünsüzler: ek `-d-` ile değil `-t-` ile başlar (ünsüz benzeşmesi). */
+const VOICELESS_FINALS = new Set(["p", "ç", "t", "k", "f", "h", "s", "ş"]);
+const BACK_VOWELS = new Set(["a", "ı", "o", "u"]);
+const VOWELS = "aeıioöuü";
+
+/** Bir sözcüğün ayrılma hâli eki: `dan` | `den` | `tan` | `ten`. */
+function ablativeSuffix(word: string): string {
+  const lower = word.toLocaleLowerCase("tr");
+  const consonant = VOICELESS_FINALS.has(lower.slice(-1)) ? "t" : "d";
+  let lastVowel = "";
+  for (const ch of lower) if (VOWELS.includes(ch)) lastVowel = ch;
+  return consonant + (BACK_VOWELS.has(lastVowel) ? "an" : "en");
+}
+
+/**
+ * Sayfada geçen çapa cümlesi. Tek yerden üretilir ki her yerde aynı olsun.
+ *
+ * Ek SABİT DEĞİL kuraldır. Bu cümle sitenin alıntılanan cümlesidir (arama
+ * motoru indeksler, yapay zekâ asistanı olduğu gibi tekrarlar), yani yazım
+ * hatası da olduğu gibi yayılır. İki kural birden işler:
+ *
+ *  - **Ünsüz benzeşmesi** — son sözcük sert ünsüzle (p ç t k f h s ş) bitiyorsa
+ *    ek `t` ile başlar: "dört" → "dörtten" → ₺74'ten.
+ *  - **Ünlü uyumu** — son ünlü kalınsa (a ı o u) `-an`, inceyse `-en`:
+ *    "altı" → "altıdan" → ₺116'dan.
+ *
+ * Ek, RAKAMIN son hanesine değil OKUNUŞUNUN son sözcüğüne bakar; katalogdaki
+ * dört çapa (₺74, ₺114, ₺116, ₺123) bunun üçünü birden örnekler.
+ */
 export function anchorSentence(kurus: number): string {
-  return `${formatAnchorPrice(kurus)}'den başlayan`;
+  const suffix = ablativeSuffix(finalNumberWord(Math.ceil(kurus / 100)));
+  return `${formatAnchorPrice(kurus)}'${suffix} başlayan`;
 }
 
 /** JSON-LD'nin beklediği ondalık dizgi (`"74.00"`). */

@@ -10,7 +10,12 @@ import type {
 } from "@/lib/config/quote-types";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { removePartDrawing, uploadPartDrawing, QuoteApiError } from "@/lib/quote/client-api";
+import {
+  partDrawingUrl,
+  removePartDrawing,
+  uploadPartDrawing,
+  QuoteApiError,
+} from "@/lib/quote/client-api";
 import type { PartPatch } from "@/lib/quote/client-api";
 import { fill } from "./format";
 import { QuoteModal } from "./modal-shell";
@@ -387,9 +392,17 @@ export function QuotePartConfigPanel({
               </Button>
               {part.drawingName && (
                 <>
-                  <span className="font-mono text-xs text-text-secondary">
+                  {/* Yüklenen çizim AÇILABİLİR olmalı: müşteri doğru dosyayı
+                      gönderdiğini ancak açarak doğrular (uç yalnız sahibe ve
+                      admine verir). */}
+                  <a
+                    href={partDrawingUrl(quoteId, part.id, shareToken)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-xs text-text-secondary underline underline-offset-2"
+                  >
                     {part.drawingName}
-                  </span>
+                  </a>
                   <button
                     type="button"
                     disabled={disabled || drawingBusy}

@@ -50,8 +50,12 @@ export async function issuePasswordResetToken(
   email: string,
   appUrl: string
 ): Promise<void> {
+  // Rows are stored lowercase (guest checkout, registration, login all
+  // normalise), so a capitalised address typed into /forgot-password must be
+  // normalised HERE — the route passes the raw text through, and a miss here
+  // is silent by design.
   const user = await db.query.users.findFirst({
-    where: eq(users.email, email),
+    where: eq(users.email, email.trim().toLowerCase()),
     columns: {
       id: true,
       fullName: true,

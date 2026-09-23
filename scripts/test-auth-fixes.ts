@@ -70,6 +70,7 @@ function resetHarness(user: FakeUser | undefined) {
   const mails: Array<{ to: string; subject: string; text: string; html: string }> = [];
   const updates: Array<Record<string, unknown>> = [];
   const columnsAsked: Array<Record<string, boolean>> = [];
+  const lookups: unknown[] = [];
   const mod = loadModule<{
     issuePasswordResetToken: (email: string, appUrl: string) => Promise<void>;
   }>("src/lib/services/password-reset.ts", {
@@ -90,8 +91,15 @@ function resetHarness(user: FakeUser | undefined) {
       db: {
         query: {
           users: {
-            findFirst: async ({ columns }: { columns: Record<string, boolean> }) => {
+            findFirst: async ({
+              columns,
+              where,
+            }: {
+              columns: Record<string, boolean>;
+              where: unknown;
+            }) => {
               columnsAsked.push(columns);
+              lookups.push(where);
               return user;
             },
           },
@@ -107,7 +115,7 @@ function resetHarness(user: FakeUser | undefined) {
     "@/lib/db/schema": { users: { id: "users.id", email: "users.email" } },
     "@/lib/services/customer-auth": { hashPassword: async (p: string) => `hash:${p}` },
   });
-  return { mod, mails, updates, columnsAsked };
+  return { mod, mails, updates, columnsAsked, lookups };
 }
 
 const guest: FakeUser = {
@@ -153,6 +161,15 @@ test("şifreli normal hesap eski sıfırlama akışını aynen yaşar", async ()
   assert.ok(link);
   assert.doesNotMatch(link, /claim=1/, "normal sıfırlama sahiplenme bağlantısı oldu");
   assert.equal(h.updates.length, 1);
+});
+
+test("şifre sıfırlama e-postayı küçük harfe indirerek arar", async () => {
+  // `/api/auth/forgot-password` yazılanı olduğu gibi geçiriyor; satırlar
+  // küçük harfle saklandığı için normalleştirme BURADA olmazsa büyük harfle
+  // yazan misafir kendi hesabını hiç bulamaz.
+  const h = resetHarness(guest);
+  await h.mod.issuePasswordResetToken("  Ayse@Example.COM ", "https://figurunica.com");
+  assert.equal((h.lookups[0] as { val: string }).val, "ayse@example.com");
 });
 
 test("hiç kullanıcı yoksa e-posta sızdırılmaz", async () => {

@@ -278,8 +278,10 @@ export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
                 />
               </label>
               <span className="text-sm text-gray-600">
-                Girilen satırların toplamı: <strong>{formatCurrency(totalManual, "tr")}</strong>{" "}
-                (ek hizmet ve asgari tamamlama hariç)
+                Yukarıya ELLE yazılan satırların toplamı:{" "}
+                <strong>{formatCurrency(totalManual, "tr")}</strong> — otomatik fiyatlı
+                parçalar, ek hizmetler ve asgari tamamlama HARİÇ. Teklifin gerçek toplamı
+                sağdaki kartta.
               </span>
             </div>
             <ReasonField value={reason} onChange={setReason} />

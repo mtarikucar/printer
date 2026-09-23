@@ -902,10 +902,11 @@ function afterCommit(args: {
   userId: string | null;
   notify?: () => Promise<void>;
 }): void {
+  // İkisi de gerekli ve ikisi de EN İYİ ÇABA (`publishRealtime` kendi hatasını
+  // yutar): `quote` olayı açık teklif sayfasını tazeler, `badge` ise admin
+  // kenar çubuğundaki "inceleme bekleyen" sayısını.
   emitQuoteChanged({ quoteId: args.quoteId, userId: args.userId });
-  void publishRealtime([topics.admin()], { kind: "badge" }).catch(() => {
-    /* rozet en iyi çaba */
-  });
+  void publishRealtime([topics.admin()], { kind: "badge" });
   if (args.notify) void args.notify();
 }
 

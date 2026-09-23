@@ -317,6 +317,52 @@ async function main() {
     assert.equal(res.unit, null);
   });
 
+  console.log("\nreklam edilen tavan ↔ analiz zarfı");
+
+  // Bu üç sayı bir VAAT ile bir KONTEYNER arasındaki sözleşmedir. Açılış
+  // sayfası "dosya başına N MB" yazar, müşteri o dosyayı yükler, worker onu
+  // `mem_limit` altında ÖLÇMEK zorundadır. Ölçüm (branch'in kendi
+  // analiz betiğiyle, /usr/bin/time -v): 327k yüz → 0,51 GiB RSS; 1,31M yüz →
+  // 1,50 GiB; 1,99M yüz / 94,7 MB → 2,43 GiB, yani 2 GiB'lik kapta OOM.
+  // 32 MiB'lik tavanın zarfı ≈ 0,8 GiB. Tavan büyütülecekse ÖNCE `mem_limit`
+  // büyür; bu test ikisinin birbirinden sessizce ayrılmasını engeller.
+  await test("tohumdaki maxFileBytes = SEED_MAX_FILE_BYTES ve worker mem_limit ile tutarlı", async () => {
+    const { SEED_SNAPSHOT, SEED_MAX_FILE_BYTES, QUOTE_ANALYSIS_MEM_LIMIT_GB } = await import(
+      "../src/lib/config/quote-seed"
+    );
+    assert.equal(SEED_MAX_FILE_BYTES, 32 * 1024 * 1024, "reklam edilen tavan 32 MB değil");
+    assert.equal(
+      SEED_SNAPSHOT.settings.maxFileBytes,
+      SEED_MAX_FILE_BYTES,
+      "tohum anlık görüntüsü sabitten ayrılmış"
+    );
+
+    const compose = await readFile(
+      join(import.meta.dirname, "..", "docker", "docker-compose.production.yml"),
+      "utf8"
+    );
+    const workerBlock = compose.slice(compose.indexOf("\n  worker:"));
+    const memLimit = /\n\s+mem_limit:\s*(\d+)g/.exec(workerBlock);
+    assert.ok(memLimit, "worker servisinde mem_limit yok");
+    assert.equal(
+      Number(memLimit[1]),
+      QUOTE_ANALYSIS_MEM_LIMIT_GB,
+      "worker mem_limit ile ölçülen analiz zarfı ayrışmış: ikisi birlikte değişir"
+    );
+
+    // SQL tohumu TypeScript aynasıyla aynı sayıyı yazmalı (DB testi de
+    // bakar, ama bu kontrol DB olmadan da kırmızıya döner).
+    const sql = await readFile(
+      join(import.meta.dirname, "..", "drizzle", "0064_instant_quotes.sql"),
+      "utf8"
+    );
+    const seedRow = sql.slice(sql.indexOf('INSERT INTO "quote_pricing_settings"'));
+    assert.ok(
+      seedRow.includes(String(SEED_MAX_FILE_BYTES)),
+      "0064 tohumu farklı bir max_file_bytes yazıyor"
+    );
+  });
+
   console.log("\nquote-model-validation — boyut ve biçim kapıları");
 
   await test("maxBytes aşılırsa → too_large", async () => {

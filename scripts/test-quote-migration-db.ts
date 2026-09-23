@@ -124,7 +124,7 @@ async function main() {
       `SELECT id, min_order_kurus, max_parts_per_quote, max_file_bytes, quote_valid_days, cutoff_hour, havale_discount_applies,
               jsonb_array_length(qty_breaks) AS breaks, jsonb_array_length(lead_tiers) AS tiers, jsonb_array_length(holidays) AS holidays
        FROM quote_pricing_settings`))[0],
-      { id: 1, min_order_kurus: 20000, max_parts_per_quote: 20, max_file_bytes: 104857600, quote_valid_days: 30, cutoff_hour: 14,
+      { id: 1, min_order_kurus: 20000, max_parts_per_quote: 20, max_file_bytes: 33554432, quote_valid_days: 30, cutoff_hour: 14,
         havale_discount_applies: true, breaks: 7, tiers: 3, holidays: 27 });
     check("seeded rows are all active", await rows(
       `SELECT count(*)::int AS inactive FROM (

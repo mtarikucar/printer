@@ -5,6 +5,7 @@ Usage:
     analyze_quote_part.py <input> <stl|obj|3mf> <outdir>
                           [--thumb-size 512] [--max-faces-walls 2500000]
                           [--max-faces-bodies 2500000]
+                          [--max-input-faces 1500000]
                           [--max-address-space-gb 8]
 
 Writes into <outdir>:
@@ -94,6 +95,23 @@ PREVIEW_TARGET_FACES = 200_000
 # slow box without silently changing how bodies are counted, and vice versa.
 DEFAULT_MAX_FACES_WALLS = 2_500_000
 DEFAULT_MAX_FACES_BODIES = 2_500_000
+# The mesh is measured at FULL resolution, so the face count — not the byte
+# count — decides whether the job fits in the worker container
+# (docker/docker-compose.production.yml: `mem_limit: 2g`). Measured with this
+# script and /usr/bin/time -v: 327k faces → 0.51 GiB RSS, 1.31M → 1.50 GiB,
+# 1.99M → 2.43 GiB, i.e. an OOM kill inside a 2 GiB cgroup. An OOM kill is the
+# worst possible failure here: the process dies mid-allocation, report.json is
+# never written, the part gets the generic "file unreadable" message and the
+# stuck-part sweep re-queues the same job every 20 minutes forever. So the face
+# count is estimated from the BYTES first — no mesh loaded — and an oversized
+# part is refused with its own code. Raise this only together with `mem_limit`.
+DEFAULT_MAX_INPUT_FACES = 1_500_000
+# Smallest legal ASCII facet block ("facet normal … / outer loop / 3 × vertex /
+# endloop / endfacet") is ~130 bytes, so size/130 is an upper bound on faces.
+ASCII_STL_MIN_FACET_BYTES = 130
+TRIANGLE_TOKEN = b"<triangle"
+# A face line is the only line in an OBJ that starts with "f ".
+OBJ_FACE_TOKEN = b"\nf "
 # cos(135°): steeper than 45° from the build plate, i.e. it needs support.
 OVERHANG_NORMAL_Z = -0.707
 # Faces whose highest vertex sits this deep in the bottom slab rest ON the
@@ -133,6 +151,64 @@ def limit_address_space(limit_gb: float) -> None:
         resource.setrlimit(resource.RLIMIT_AS, (target, hard))
     except Exception as exc:  # noqa: BLE001 - never fail the job over this
         print(f"Warning: RLIMIT_AS not applied: {exc}", file=sys.stderr)
+
+
+def count_token(stream, token: bytes, limit_bytes: int) -> int:
+    """Occurrences of `token` in a stream, read in chunks (constant memory).
+
+    The window overlap is what makes it exact across chunk boundaries.
+    """
+    count = 0
+    overlap = b""
+    read = 0
+    while read < limit_bytes:
+        chunk = stream.read(XML_CHUNK_BYTES)
+        if not chunk:
+            break
+        read += len(chunk)
+        window = overlap + chunk
+        count += window.count(token)
+        overlap = window[-(len(token) - 1) :]
+    return count
+
+
+def estimate_face_count(input_path: str, source_format: str) -> int | None:
+    """Upper bound on the triangle count, read from the BYTES — no mesh loaded.
+
+    `None` means "cannot be told cheaply": the precheck then lets the file
+    through rather than refusing a part it has not measured. Every branch is an
+    over-estimate or exact, never an under-estimate that would let an
+    OOM-sized mesh past.
+    """
+    try:
+        size = os.path.getsize(input_path)
+        if source_format == "stl":
+            with open(input_path, "rb") as handle:
+                head = handle.read(84)
+            if len(head) == 84:
+                declared = int.from_bytes(head[80:84], "little")
+                # The only reliable binary-vs-ASCII test: the size the header
+                # implies. ("solid" is not one — binary writers use it too.)
+                if 84 + 50 * declared == size:
+                    return declared
+            return size // ASCII_STL_MIN_FACET_BYTES
+        if source_format == "obj":
+            with open(input_path, "rb") as handle:
+                return count_token(handle, OBJ_FACE_TOKEN, XML_SCAN_LIMIT_BYTES)
+        if source_format == "3mf":
+            # 3MF is a ZIP: 32 MB on disk can be 300 MB of XML, which is the
+            # one format where the byte ceiling says nothing about the mesh.
+            with zipfile.ZipFile(input_path) as package:
+                entry = next(
+                    (n for n in package.namelist() if MODEL_ENTRY_RE.match(n)), None
+                )
+                if entry is None:
+                    return None
+                with package.open(entry) as handle:
+                    return count_token(handle, TRIANGLE_TOKEN, XML_SCAN_LIMIT_BYTES)
+    except Exception as exc:  # noqa: BLE001 - a hint must never fail the job
+        print(f"Warning: face precheck skipped: {exc}", file=sys.stderr)
+    return None
 
 
 def read_3mf_model_meta(input_path: str) -> tuple[str | None, int]:
@@ -346,10 +422,19 @@ def analyze(
     thumb_size: int,
     max_faces_walls: int,
     max_faces_bodies: int,
+    max_input_faces: int,
 ) -> dict:
     started = time.time()
     timings: dict[str, float] = {}
     warnings: list[str] = []
+
+    # BEFORE load_part: the kernel's OOM killer cannot be caught, a refusal can.
+    estimated_faces = estimate_face_count(input_path, source_format)
+    if estimated_faces is not None and estimated_faces > max_input_faces:
+        raise AnalysisError(
+            "too_many_faces",
+            f"Mesh has about {estimated_faces} triangles, above the {max_input_faces} ceiling",
+        )
 
     mark = time.time()
     mesh = load_part(input_path, source_format)
@@ -422,6 +507,12 @@ def main() -> int:
         help="above this face count bodyCount switches to the connected-components path",
     )
     parser.add_argument(
+        "--max-input-faces",
+        type=int,
+        default=DEFAULT_MAX_INPUT_FACES,
+        help="refuse a part whose estimated triangle count is above this (before loading it)",
+    )
+    parser.add_argument(
         "--max-address-space-gb",
         type=float,
         default=DEFAULT_ADDRESS_SPACE_GB,
@@ -440,7 +531,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if args.max_faces_walls < 1 or args.max_faces_bodies < 1:
+    if args.max_faces_walls < 1 or args.max_faces_bodies < 1 or args.max_input_faces < 1:
         print("Error: face ceilings must be positive", file=sys.stderr)
         return 2
 
@@ -462,6 +553,7 @@ def main() -> int:
             args.thumb_size,
             args.max_faces_walls,
             args.max_faces_bodies,
+            args.max_input_faces,
         )
         write_report(args.outdir, report)
     except AnalysisError as exc:

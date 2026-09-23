@@ -175,7 +175,7 @@ test("politika satırı SQL ile birebir", () => {
   assert.equal(s.maxAutoTotalKurus, 10000000);
   assert.equal(s.maxAutoQtyPerPart, 1000);
   assert.equal(s.maxPartsPerQuote, 20);
-  assert.equal(s.maxFileBytes, 104857600);
+  assert.equal(s.maxFileBytes, 33554432);
   assert.equal(s.quoteValidDays, 30);
   assert.equal(s.retentionDaysAfterExpiry, 90);
   assert.equal(s.cutoffHour, 14);

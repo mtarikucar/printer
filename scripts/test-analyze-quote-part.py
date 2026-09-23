@@ -279,6 +279,45 @@ def main() -> int:
         check("--max-address-space-gb 0.5 is refused with exit 2", proc.returncode == 2,
               f"exit={proc.returncode} {proc.stderr.strip()[-200:]}")
 
+        # ── face-count precheck: refused BEFORE the mesh is loaded ───────────
+        # The worker container is capped at 2 GB and the mesh is measured at
+        # full resolution, so a file that is small on disk but dense in
+        # triangles must be refused with its own code instead of being
+        # OOM-killed mid-allocation (no report.json, generic error, and a job
+        # the sweeper re-queues every 20 minutes).
+        dense = os.path.join(workdir, "dense-source.stl")
+        # icosphere(4) = 20 × 4⁴ = 5120 faces, written as a binary STL, so the
+        # estimate is read exactly out of the 84-byte header.
+        trimesh.creation.icosphere(subdivisions=4, radius=10.0).export(dense)
+        outdir = os.path.join(workdir, "too-many-faces")
+        proc = subprocess.run(
+            [sys.executable, CLI, dense, "stl", outdir, "--max-input-faces", "1000"],
+            capture_output=True, text=True, timeout=120,
+        )
+        check("dense part over --max-input-faces: exit 2", proc.returncode == 2,
+              f"exit={proc.returncode} {proc.stderr.strip()[-200:]}")
+        report_path = os.path.join(outdir, "report.json")
+        if os.path.exists(report_path):
+            with open(report_path) as handle:
+                report = json.load(handle)
+            check("dense part: its own error code (not a generic load failure)",
+                  report.get("ok") is False and report.get("error") == "too_many_faces",
+                  json.dumps(report)[:300])
+        else:
+            check("dense part: failure report written", False, "missing report.json")
+        # Nothing heavy ran: the refusal happens before load_part, so none of
+        # the side files exist.
+        check("dense part: stopped before writing any output file",
+              not os.path.exists(os.path.join(outdir, "canonical.stl")),
+              "canonical.stl was written, so the mesh was loaded anyway")
+        # …and the same file passes with a ceiling above its face count.
+        report, _ = analyze(
+            "cube20.stl", "stl", workdir + "/faces-ok", "--max-input-faces", "20000"
+        )
+        if report:
+            check("cube20.stl (--max-input-faces 20000): report ok", report.get("ok") is True,
+                  json.dumps(report)[:200])
+
     if failures:
         print(f"\n{len(failures)} check(s) failed")
         return 1

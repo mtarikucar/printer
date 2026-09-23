@@ -394,7 +394,7 @@ INSERT INTO "quote_pricing_settings" ("id", "qty_breaks", "lead_tiers", "min_ord
 	(1,
 	'[{"minQty":1,"discountBps":0},{"minQty":5,"discountBps":500},{"minQty":10,"discountBps":1000},{"minQty":25,"discountBps":1500},{"minQty":50,"discountBps":2000},{"minQty":100,"discountBps":2500},{"minQty":500,"discountBps":3000}]'::jsonb,
 	'[{"key":"economy","name":"Ekonomik","multiplierBps":9000,"daysDelta":3,"minDays":5},{"key":"standard","name":"Standart","multiplierBps":10000,"daysDelta":0,"minDays":3},{"key":"express","name":"Ekspres","multiplierBps":14000,"daysDelta":-2,"minDays":2}]'::jsonb,
-	20000, 10000000, 1000, 20, 104857600, 30, 90,
+	20000, 10000000, 1000, 20, 33554432, 30, 90,
 	'[1,5,10,25,50,100]'::jsonb,
 	'["2026-01-01","2026-03-20","2026-03-21","2026-03-22","2026-04-23","2026-05-01","2026-05-19","2026-05-27","2026-05-28","2026-05-29","2026-05-30","2026-07-15","2026-08-30","2026-10-29","2027-01-01","2027-03-09","2027-03-10","2027-03-11","2027-04-23","2027-05-01","2027-05-16","2027-05-17","2027-05-18","2027-05-19","2027-07-15","2027-08-30","2027-10-29"]'::jsonb,
 	14, true)

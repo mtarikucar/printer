@@ -14,6 +14,33 @@
  */
 import type { PricingSnapshot } from "@/lib/config/quote-types";
 
+/**
+ * Worker konteynerinin bellek tavanı, GB
+ * (`docker/docker-compose.production.yml` → `worker.mem_limit`).
+ *
+ * Burada durmasının sebebi aşağıdaki tavanla ÇİFT olmasıdır:
+ * `scripts/test-quote-validation.ts` ikisini compose dosyasına karşı
+ * karşılaştırır, biri diğerinden habersiz değişemez.
+ */
+export const QUOTE_ANALYSIS_MEM_LIMIT_GB = 2;
+
+/**
+ * Reklam edilen dosya tavanı (32 MiB) — pazarlama tercihi DEĞİL, ölçüm.
+ *
+ * `analyze_quote_part.py` tüm ağı tam çözünürlükte ölçer. Ölçülen zarf
+ * (/usr/bin/time -v): 327k yüz → 0,51 GiB RSS, 1,31M yüz → 1,50 GiB,
+ * 1,99M yüz / 94,7 MB → 2,43 GiB. Yani eski 100 MB'lık vaat, 2 GB'lik
+ * konteynerde OOM ile biten bir dosyayı KABUL ediyordu: python çocuk süreç
+ * ölür, parça "Dosya okunamadı" ile düşer, kötü tarafta ise iş 20 dakikada bir
+ * yeniden kuyruğa girer. 32 MiB'in zarfı ≈ 0,8 GiB.
+ *
+ * Tavanı büyütmek isteyen ÖNCE `mem_limit`i büyütür (ve betiğe
+ * `--max-address-space-gb` geçirir); alan `/admin/baski-katalogu` üzerinden
+ * düzenlenebilir olduğu için migration gerekmez, ama açılış sayfasının
+ * cümlesi de aynı sayıdan beslenir.
+ */
+export const SEED_MAX_FILE_BYTES = 33_554_432;
+
 export const SEED_SNAPSHOT: PricingSnapshot = {
   version: 1,
   takenAt: "2026-09-22T00:00:00.000Z",
@@ -335,7 +362,7 @@ export const SEED_SNAPSHOT: PricingSnapshot = {
     maxAutoTotalKurus: 10000000,
     maxAutoQtyPerPart: 1000,
     maxPartsPerQuote: 20,
-    maxFileBytes: 104857600,
+    maxFileBytes: SEED_MAX_FILE_BYTES,
     quoteValidDays: 30,
     retentionDaysAfterExpiry: 90,
     priceBreakQuantities: [1, 5, 10, 25, 50, 100],

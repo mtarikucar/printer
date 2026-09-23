@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { quotePricingSettings } from "@/lib/db/schema";
+import { SEED_MAX_FILE_BYTES } from "@/lib/config/quote-seed";
 import { quoteApiEnabled } from "@/lib/services/quote-access";
 import { getAnonymousId, getOrCreateAnonymousId } from "@/lib/services/customer-auth";
 import {
@@ -113,8 +114,8 @@ function sizeExceeded() {
  * `PUT` bir sahneleme YUVASI açar (ve diskte bir dosya); `POST` ona bayt ekler.
  * IP başına PUT tavanı yirmi parçalık bir teklifi ve yeniden denemeleri
  * taşıyacak kadar geniş, eski 60/sa'ten belirgin biçimde dar. POST'un bugüne
- * kadar hiç IP limiti yoktu; 100 MB'lık bir dosya 13 parça, IP başına saatte
- * 30 yuva demek ~390 meşru parça — 600 rahat bir tavan.
+ * kadar hiç IP limiti yoktu; tavandaki (32 MB) bir dosya 5 parça, IP başına
+ * saatte 30 yuva demek ~1000 meşru parça — 600 rahat bir tavan.
  *
  * Çerez tavanının IP'den yüksek olması kasıtlı: o EKSEN adres değiştirip
  * çerezini koruyan çağıranı yakalar, tek adresteki tavanı IP limiti koyar.
@@ -206,16 +207,16 @@ async function guestSurfaceEnabled(): Promise<boolean> {
 /**
  * Misafirin TEK sahnelemesi için bayt tavanı (`PricingSettings.maxFileBytes`).
  *
- * Günlük kota 2 GB'tır, ama tek bir yükleme onu tek başına yiyememeli: 100 MB
+ * Günlük kota 2 GB'tır, ama tek bir yükleme onu tek başına yiyememeli: tavan
  * zaten teklife BAĞLANABİLECEK en büyük dosya (`quote-service.ts` claim anında
  * aynı ayara bakar), fazlasını diske almanın karşılığı yok. Ayar yöneticinin
  * elinde olduğu için canlı okunur; her parça için bir sorgu atmamak adına kısa
  * ömürlü önbelleğe alınır. Okunamazsa son bilinen değer, o da yoksa tohumun
- * varsayılanı (`quote-seed.ts` → 100 MB) kullanılır.
+ * varsayılanı (`quote-seed.ts` → `SEED_MAX_FILE_BYTES`, 32 MB) kullanılır.
  */
 const GUEST_FILE_CAP_TTL_MS = 60_000;
 const GUEST_FILE_CAP_RETRY_MS = 10_000;
-const GUEST_FILE_CAP_FALLBACK_BYTES = 100 * 1024 * 1024;
+const GUEST_FILE_CAP_FALLBACK_BYTES = SEED_MAX_FILE_BYTES;
 let guestFileCap = { bytes: GUEST_FILE_CAP_FALLBACK_BYTES, until: 0 };
 
 async function guestFileCapBytes(): Promise<number> {
@@ -359,7 +360,7 @@ async function handlePOST(request: NextRequest) {
 
   if (anonymousId) {
     // Boyut bildirmek isteğe bağlıdır, bu yüzden bildirmeyen misafirin tek
-    // dosyası da sınırlanmalı: tavan katalogdan gelir (100 MB).
+    // dosyası da sınırlanmalı: tavan katalogdan gelir (tohumda 32 MB).
     if (offset + claimed > (await guestFileCapBytes())) return sizeExceeded();
     // Bayt YAZILMADAN ÖNCE işlenir: yazdıktan sonra reddetmek, istemciyi
     // kabul edilmiş bir parçayı tekrar göndermeye iter. Bildirilen uzunluk

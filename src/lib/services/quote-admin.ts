@@ -652,6 +652,9 @@ const ANALYSIS_ERROR_TEXT: Record<string, string> = {
   timeout: "Analiz zaman aşımına uğradı; dosya çok ağır olabilir.",
   exit_nonzero: "Analiz betiği dosyayı işleyemedi (bozuk ya da desteklenmeyen model).",
   bad_report: "Analiz çıktısı okunamadı; parçayı yeniden yükletin.",
+  too_heavy:
+    "Model bu makine için fazla ağır (yüz sayısı tavanın üstünde) — sadeleştirilmiş " +
+    "bir dosya isteyin ya da manuel fiyat girin.",
   unknown: "Analiz beklenmeyen bir hatayla düştü.",
 };
 

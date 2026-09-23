@@ -27,7 +27,7 @@ const VENV_PYTHON = "/opt/venv/bin/python3";
 export class MeshProcessError extends Error {
   constructor(
     message: string,
-    readonly code: "python_missing" | "exit_nonzero" | "timeout" | "bad_report",
+    readonly code: "python_missing" | "exit_nonzero" | "timeout" | "bad_report" | "too_heavy",
     readonly stderr?: string
   ) {
     super(message);
@@ -243,7 +243,11 @@ async function describeFailure(error: unknown, reportPath: string): Promise<unkn
       const detail = typeof report.message === "string" ? `: ${report.message}` : "";
       return new MeshProcessError(
         `Part analysis failed (${report.error})${detail}`,
-        "exit_nonzero",
+        // `quote_parts.analysis_error` yalnız bu KABA kodu saklar, python'un
+        // kendi kodunu değil. "Parça bu konteyner için fazla ağır" ise müşteriye
+        // ve admine "dosya bozuk"tan BAŞKA bir şey söylemek zorundadır: tek
+        // çıkışı sadeleştirilmiş bir model ya da manuel teklif.
+        report.error === "too_many_faces" ? "too_heavy" : "exit_nonzero",
         error.stderr
       );
     }

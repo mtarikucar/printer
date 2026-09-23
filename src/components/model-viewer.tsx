@@ -131,11 +131,20 @@ export function ModelViewer({
   previewMode = false,
   errorFallback,
   background = "#F3F2EC",
+  dimensionsMm,
 }: {
   url: string;
   className?: string;
   autoRotate?: boolean;
   previewMode?: boolean;
+  /**
+   * Parçanın milimetre ölçüleri. Verilirse sahnenin üstüne küçük bir rozet
+   * basılır: teklif ekranında "bu model ne kadar büyük" sorusunun cevabı
+   * görüntüleyicinin İÇİNDE olmalı — model normalize edilmiş birim küreye
+   * oturtulduğu için sahnedeki boyut ölçek hakkında hiçbir şey söylemez.
+   * Verilmezse (mevcut çağıranların hepsi) hiçbir şey değişmez.
+   */
+  dimensionsMm?: { x: number; y: number; z: number } | null;
   /**
    * Model dosyası okunamadığında (eksik, bozuk, ayrıştırılamaz) basılacak kutu.
    * Verilmezse nötr bir Türkçe cümle basılır. Çağıranın kendi cümlesini
@@ -303,6 +312,14 @@ export function ModelViewer({
           </CanvasBoundary>
         )}
       </div>
+      {dimensionsMm && canvasLive && (
+        <span className="absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 font-mono text-[11px] text-white backdrop-blur-sm">
+          {[dimensionsMm.x, dimensionsMm.y, dimensionsMm.z]
+            .map((v) => Number(v.toFixed(1)).toLocaleString("tr-TR"))
+            .join(" × ")}{" "}
+          mm
+        </span>
+      )}
       {!previewMode && canvasLive && (
         // Inspection surfaces get a reset affordance too — after zooming into a
         // detail there was previously no way back to the framed view.

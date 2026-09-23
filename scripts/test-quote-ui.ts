@@ -19,9 +19,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { LocaleProvider } from "../src/lib/i18n/locale-context";
 import { PriceGateModal } from "../src/components/quote/price-gate-modal";
+import { QuotePartCard } from "../src/components/quote/part-card";
+import { QuoteBulkBar } from "../src/components/quote/bulk-bar";
+import {
+  QuoteWorkspaceClient,
+  groupPartsByTechnology,
+} from "../src/app/teklif/[number]/workspace-client";
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
-import { DFM_CODES, QUOTE_STATUSES } from "../src/lib/config/quote-types";
+import {
+  DFM_CODES,
+  QUOTE_STATUSES,
+  type PresentedCatalog,
+  type PresentedPart,
+  type PresentedQuote,
+  type QuoteViewer,
+} from "../src/lib/config/quote-types";
 import { EVENTS, isEventName } from "../src/lib/analytics/events";
 import { isNoindexPath } from "../src/lib/seo/policy";
 import robots from "../src/app/robots";
@@ -232,4 +245,326 @@ test("robots teklif çalışma alanını kapatır, açılış sayfasına dokunma
   for (const path of disallow) {
     assert.ok(!"/3d-baski".startsWith(path), `açılış sayfası ${path} ile engellenmiş`);
   }
+});
+
+// ─── Çalışma alanı: /teklif/[number] (Görev 3.2a) ───────────────────────────
+
+const catalogFixture: PresentedCatalog = {
+  technologies: [
+    {
+      key: "fdm",
+      name: "FDM",
+      description: "Filament baskı",
+      buildMm: { x: 250, y: 210, z: 210 },
+      minWallMm: 1,
+      toleranceText: "±%0,5 (en az ±0,5 mm)",
+      layerOptionsUm: [100, 200, 300],
+      defaultLayerUm: 200,
+      infillOptionsPct: [15, 20, 30],
+      defaultInfillPct: 20,
+      baseLeadDays: 3,
+    },
+    {
+      key: "sla",
+      name: "SLA",
+      description: "Reçine baskı",
+      buildMm: { x: 145, y: 145, z: 175 },
+      minWallMm: 0.8,
+      toleranceText: "±%0,3",
+      layerOptionsUm: [50, 100],
+      defaultLayerUm: 50,
+      infillOptionsPct: null,
+      defaultInfillPct: null,
+      baseLeadDays: 4,
+    },
+  ],
+  materials: [
+    {
+      key: "pla",
+      technologyKey: "fdm",
+      name: "PLA",
+      description: "Genel amaçlı",
+      properties: { tensileMpa: 50 },
+      colors: [
+        { key: "black", name: "Siyah", hex: "#111111" },
+        { key: "white", name: "Beyaz", hex: "#FFFFFF" },
+      ],
+    },
+    {
+      key: "std_resin",
+      technologyKey: "sla",
+      name: "Standart reçine",
+      description: "İnce detay",
+      properties: {},
+      colors: [{ key: "grey", name: "Gri", hex: "#888888" }],
+    },
+  ],
+  finishes: [
+    {
+      key: "raw",
+      technologyKey: null,
+      name: "Ham (destek alınmış)",
+      description: "",
+      requiresManual: false,
+    },
+    { key: "painted", technologyKey: null, name: "Boyalı", description: "", requiresManual: true },
+  ],
+  addons: [{ key: "cert", name: "Uygunluk sertifikası", description: "", leadDaysExtra: 1 }],
+  leadTiers: [
+    { key: "economy", name: "Ekonomik" },
+    { key: "standard", name: "Standart" },
+    { key: "express", name: "Ekspres" },
+  ],
+  maxPartsPerQuote: 20,
+  maxFileBytes: 100 * 1024 * 1024,
+};
+
+function partFixture(over: Partial<PresentedPart> = {}): PresentedPart {
+  return {
+    id: "p1",
+    position: 0,
+    name: "Braket",
+    fileName: "braket.stl",
+    sourceFormat: "stl",
+    analysisStatus: "ready",
+    analysisError: null,
+    thumbnailUrl: "/api/files/thumb.webp",
+    previewGlbUrl: "/api/files/preview.glb",
+    dimensionsMm: { x: 120, y: 80, z: 40 },
+    volumeCm3: 42.5,
+    areaCm2: 180,
+    bodyCount: 1,
+    suggestedUnits: null,
+    config: {
+      technologyKey: "fdm",
+      materialKey: "pla",
+      colorKey: "black",
+      finishKey: "raw",
+      layerUm: 200,
+      infillPct: 20,
+      quantity: 2,
+      units: "mm",
+      scale: 1,
+      criticalTolerance: false,
+    },
+    note: null,
+    drawingName: null,
+    dfm: [],
+    dfmWarningKey: null,
+    dfmAcknowledged: false,
+    needsManualPrice: false,
+    leadDays: 5,
+    ...over,
+  };
+}
+
+const OWNER_NO_PRICES: QuoteViewer = {
+  canSeePrices: false,
+  canEdit: true,
+  isOwner: true,
+  isShare: false,
+  isAdmin: false,
+};
+
+function quoteFixture(over: Partial<PresentedQuote> = {}): PresentedQuote {
+  return {
+    id: "11111111-2222-3333-4444-555555555555",
+    number: "T-000123",
+    status: "draft",
+    reviewKind: null,
+    reviewNote: null,
+    title: null,
+    leadTier: "standard",
+    addonKeys: [],
+    customerNote: null,
+    poNumber: null,
+    version: 1,
+    createdAt: "2026-09-20T09:00:00.000Z",
+    updatedAt: "2026-09-20T09:00:00.000Z",
+    expiresAt: "2026-10-20T09:00:00.000Z",
+    expired: false,
+    catalogChangedSinceSnapshot: false,
+    termsAccepted: true,
+    locked: false,
+    liveDraftReference: null,
+    orderNumber: null,
+    viewer: OWNER_NO_PRICES,
+    catalog: catalogFixture,
+    parts: [partFixture()],
+    partCount: 1,
+    unitCount: 2,
+    quoteIssues: [],
+    leadOptions: [
+      { key: "economy", name: "Ekonomik", leadDays: 8 },
+      { key: "standard", name: "Standart", leadDays: 5 },
+      { key: "express", name: "Ekspres", leadDays: 3 },
+    ],
+    shipByDate: "2026-09-27",
+    readiness: { canCheckout: false, blockers: [] },
+    ...over,
+  };
+}
+
+function inLocale(node: ReturnType<typeof createElement>): string {
+  return renderToStaticMarkup(
+    createElement(
+      AppRouterContext.Provider,
+      { value: router },
+      createElement(Locale, { locale: "tr" }, node)
+    )
+  );
+}
+
+function renderWorkspace(quote: PresentedQuote): string {
+  return inLocale(
+    createElement(QuoteWorkspaceClient, { initialQuote: quote, shareToken: null })
+  );
+}
+
+function renderPartCard(part: PresentedPart, quote: PresentedQuote): string {
+  return inLocale(
+    createElement(QuotePartCard, {
+      quoteId: quote.id,
+      part,
+      catalog: quote.catalog,
+      viewer: quote.viewer,
+      selected: false,
+      onSelectChange: noop,
+      onPatch: noop,
+      onDuplicate: noop,
+      onDelete: noop,
+      onOpenViewer: noop,
+      onEditConfig: noop,
+      onRequestPrices: noop,
+    })
+  );
+}
+
+test("girişsiz çalışma alanı fiyat yerine yer tutucu basar", () => {
+  const html = renderWorkspace(quoteFixture());
+  assert.match(html, /–₺–,––/, "fiyat yer tutucusu yok");
+  assert.doesNotMatch(html, /₺\s?\d/, "fiyat kapısının arkasından rakam sızdı");
+  assert.match(html, /Fiyatı gör/);
+});
+
+test("giriş yapmış sahibe biçimlenmiş fiyat gösterilir", () => {
+  const html = renderWorkspace(
+    quoteFixture({
+      viewer: { ...OWNER_NO_PRICES, canSeePrices: true },
+      parts: [
+        partFixture({
+          price: {
+            unitKurus: 7400,
+            lineKurus: 14800,
+            source: "auto",
+            priceBreaks: [
+              { quantity: 1, unitKurus: 8000 },
+              { quantity: 5, unitKurus: 7000 },
+            ],
+          },
+        }),
+      ],
+      totals: {
+        allPriced: true,
+        partsKurus: 14800,
+        addonLines: [],
+        addonsKurus: 0,
+        minOrderTopUpKurus: 0,
+        totalKurus: 14800,
+        kdvExcludedKurus: 12333,
+        kdvKurus: 2467,
+        leadDays: 5,
+      },
+    })
+  );
+  assert.match(html, /74,00/, "birim fiyat biçimlenmemiş");
+  assert.match(html, /148,00/, "satır toplamı yok");
+  assert.doesNotMatch(html, /–₺–,––/, "fiyat görünürken yer tutucu basılmış");
+});
+
+test("uyarısı olan parça kartı onay kutusu gösterir", () => {
+  const part = partFixture({
+    dfm: [{ code: "multiple_bodies", severity: "warning", params: { count: 3 } }],
+    dfmWarningKey: "w-multiple_bodies",
+    dfmAcknowledged: false,
+  });
+  const html = renderPartCard(part, quoteFixture({ parts: [part] }));
+  assert.match(html, /Uyarıları okudum/);
+  assert.match(html, /type="checkbox"/);
+  assert.match(html, /3 ayrı gövdeden/, "DfM parametresi cümleye girmemiş");
+});
+
+test("analizi çöken parça yeniden yüklemeye yönlendirir, manuel fiyat demez", () => {
+  // Taşıma notu (c): çöken analiz ile manuel fiyat bekleyen parça AYRI hâllerdir;
+  // birinin çözümü dosyayı yeniden yüklemek, diğerininki beklemek.
+  const part = partFixture({
+    analysisStatus: "failed",
+    analysisError: "mesh okunamadı",
+    dimensionsMm: null,
+    volumeCm3: null,
+    dfm: [{ code: "analysis_failed", severity: "error" }],
+    needsManualPrice: true,
+  });
+  // Fiyatı GÖREBİLEN izleyici: "manuel fiyat bekliyor" rozetinin çıkabileceği
+  // tek hâl bu; kapı kapalıyken rozet zaten hiç çizilmiyor ve test bir şey
+  // kanıtlamazdı.
+  const html = renderPartCard(
+    part,
+    quoteFixture({ viewer: { ...OWNER_NO_PRICES, canSeePrices: true }, parts: [part] })
+  );
+  assert.match(html, /yeniden yükleyin/);
+  assert.doesNotMatch(html, /Manuel fiyat bekliyor/);
+});
+
+test("katalogdan düşen malzeme parçayı malzeme seçimine yönlendirir", () => {
+  const part = partFixture({
+    config: { ...partFixture().config, materialKey: "kaldirilmis" },
+    dfm: [{ code: "config_invalid", severity: "error" }],
+    needsManualPrice: true,
+  });
+  const html = renderPartCard(part, quoteFixture({ parts: [part] }));
+  assert.match(html, /malzeme seçin/i);
+  assert.match(html, /Özellikleri düzenle/);
+});
+
+test("parçalar teknolojiye göre katalog sırasıyla gruplanır", () => {
+  const base = partFixture().config;
+  const parts = [
+    partFixture({
+      id: "a",
+      config: { ...base, technologyKey: "sla", materialKey: "std_resin", colorKey: "grey" },
+    }),
+    partFixture({ id: "b" }),
+    partFixture({ id: "c", config: { ...base, technologyKey: "bilinmeyen" } }),
+  ];
+  assert.deepEqual(
+    groupPartsByTechnology(parts, catalogFixture).map((g) => [
+      g.key,
+      g.name,
+      g.parts.map((p) => p.id),
+    ]),
+    [
+      ["fdm", "FDM", ["b"]],
+      ["sla", "SLA", ["a"]],
+      ["bilinmeyen", "bilinmeyen", ["c"]],
+    ]
+  );
+});
+
+test("toplu işlem çubuğu seçim varken çıkar, yokken hiç çizilmez", () => {
+  const bar = (ids: string[]) =>
+    inLocale(
+      createElement(QuoteBulkBar, {
+        selectedIds: ids,
+        catalog: catalogFixture,
+        onApply: noop,
+        onDelete: noop,
+        onClear: noop,
+      })
+    );
+  assert.equal(bar([]), "");
+  const html = bar(["p1", "p2"]);
+  assert.match(html, /2 parça seçildi/);
+  assert.match(html, /Seçilenlere uygula/);
+  assert.match(html, /Seçilenleri sil/);
 });

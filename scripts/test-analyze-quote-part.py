@@ -11,12 +11,14 @@ The expected key set is READ OUT OF `src/lib/config/quote-types.ts`, so a key
 renamed on the TypeScript side fails here instead of silently producing a report
 no consumer can read.
 """
+import io
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 import numpy as np
 import trimesh
@@ -336,11 +338,12 @@ def main() -> int:
             for quad in ("1 2 3 4", "5 6 7 8", "1 2 6 5",
                          "2 3 7 6", "3 4 8 7", "4 1 5 8"):
                 handle.write(f"f {quad}\n")
-        estimated = analyze_quote_part.estimate_face_count(quad_cube, "obj")
+        estimated, truncated = analyze_quote_part.estimate_face_count(quad_cube, "obj")
         loaded = len(trimesh.load(quad_cube, force="mesh").faces)
         check("quad OBJ: estimate is an upper bound on the loaded triangles",
-              estimated is not None and estimated >= loaded,
-              f"estimate={estimated} loaded={loaded} (6 face lines, 12 triangles)")
+              estimated is not None and not truncated and estimated >= loaded,
+              f"estimate={estimated} truncated={truncated} loaded={loaded} "
+              "(6 face lines, 12 triangles)")
         check("quad OBJ: estimate is not the face-line count",
               estimated == 12, f"estimate={estimated}, expected 12")
 
@@ -384,11 +387,12 @@ def main() -> int:
         trailing = os.path.join(workdir, "trailing.stl")
         sphere.export(trailing)
         check("binary STL: header count read exactly",
-              analyze_quote_part.estimate_face_count(trailing, "stl") == len(sphere.faces),
+              analyze_quote_part.estimate_face_count(trailing, "stl")
+              == (len(sphere.faces), False),
               f"{analyze_quote_part.estimate_face_count(trailing, 'stl')} vs {len(sphere.faces)}")
         with open(trailing, "ab") as handle:
             handle.write(b"\x00" * 7)
-        estimated = analyze_quote_part.estimate_face_count(trailing, "stl")
+        estimated, _ = analyze_quote_part.estimate_face_count(trailing, "stl")
         check("binary STL with trailing bytes: still an upper bound",
               estimated is not None and estimated >= len(sphere.faces),
               f"estimate={estimated} facets={len(sphere.faces)}")
@@ -403,10 +407,93 @@ def main() -> int:
         facets = 4000
         with open(ascii_stl, "w") as handle:
             handle.write("solid s\n" + facet * facets + "endsolid s\n")
-        estimated = analyze_quote_part.estimate_face_count(ascii_stl, "stl")
+        estimated, _ = analyze_quote_part.estimate_face_count(ascii_stl, "stl")
         check("floor-formatted ASCII STL: still an upper bound",
               estimated is not None and estimated >= facets,
               f"estimate={estimated} facets={facets}")
+
+        # ── a scan cut short at XML_SCAN_LIMIT_BYTES keeps its partial count ──
+        # 3MF is a ZIP: the shipped 32 MiB upload ceiling holds a model part
+        # that inflates far past the 256 MiB scan limit (measured with
+        # zlib level 9: 20M `<triangle` elements = 610 MiB of XML compress to
+        # 1.5 MiB). Returning None for that case skipped the precheck
+        # altogether and handed ~20M triangles to load_part inside `mem_limit:
+        # 2g` — the OOM kill the precheck exists to prevent. The prefix count
+        # is a LOWER bound, so it cannot clear a file, but it can refuse one.
+        element = b'<triangle v1="1" v2="2" v3="3"/>'  # 32 bytes
+        count, truncated = analyze_quote_part.count_token(
+            io.BytesIO(element * 100), analyze_quote_part.TRIANGLE_TOKEN, 64)
+        check("count_token: a cut-short scan reports what it counted, not None",
+              (count, truncated) == (2, True), f"count={count} truncated={truncated}")
+        count, truncated = analyze_quote_part.count_token(
+            io.BytesIO(element * 100), analyze_quote_part.TRIANGLE_TOKEN, 100 * 32)
+        check("count_token: a stream ending exactly at the cap is not truncated",
+              (count, truncated) == (100, False), f"count={count} truncated={truncated}")
+        count, truncated = analyze_quote_part.count_obj_triangles(
+            io.BytesIO(b"f 1 2 3 4\n" * 10), 25)
+        check("count_obj_triangles: a cut-short scan reports what it counted",
+              truncated is True and 4 <= count <= 6, f"count={count} truncated={truncated}")
+
+        # …and the precheck acts on that partial count, before load_part.
+        oversize = os.path.join(workdir, "scan-limit.3mf")
+        with zipfile.ZipFile(oversize, "w", zipfile.ZIP_DEFLATED) as package:
+            package.writestr(
+                "3D/3dmodel.model",
+                b'<model unit="millimeter"><resources><object id="1"><mesh><triangles>'
+                + element * 20_000
+                + b"</triangles></mesh></object></resources></model>")
+        check("scan-limit 3MF fixture is tiny on disk (a ZIP hides the XML)",
+              os.path.getsize(oversize) < 64 * 1024,
+              f"{os.path.getsize(oversize)} bytes for 640 KB of model XML")
+        real_limit = analyze_quote_part.XML_SCAN_LIMIT_BYTES
+        try:
+            # 32 KiB of the 640 KB model part: ~1000 of the 20 000 triangles.
+            analyze_quote_part.XML_SCAN_LIMIT_BYTES = 32 * 1024
+            estimated, truncated = analyze_quote_part.estimate_face_count(oversize, "3mf")
+            check("3MF past the scan limit: partial count kept (was None)",
+                  truncated is True and estimated is not None and estimated >= 900,
+                  f"estimate={estimated} truncated={truncated}")
+            outdir = os.path.join(workdir, "scan-limit-out")
+            code = None
+            try:
+                analyze_quote_part.analyze(
+                    oversize, "3mf", outdir, 256,
+                    analyze_quote_part.DEFAULT_MAX_FACES_WALLS,
+                    analyze_quote_part.DEFAULT_MAX_FACES_BODIES,
+                    500)
+            except analyze_quote_part.AnalysisError as exc:
+                code = exc.code
+            check("3MF past the scan limit, prefix already over the ceiling: refused",
+                  code == "too_many_faces", f"code={code}")
+            # Below the ceiling the prefix proves nothing about the triangles —
+            # but the scan hitting its cap proves the model XML alone is bigger
+            # than the limit, and trimesh reads that entry WHOLE into memory.
+            code, message = None, ""
+            try:
+                analyze_quote_part.analyze(
+                    oversize, "3mf", outdir, 256,
+                    analyze_quote_part.DEFAULT_MAX_FACES_WALLS,
+                    analyze_quote_part.DEFAULT_MAX_FACES_BODIES,
+                    10_000_000)
+            except analyze_quote_part.AnalysisError as exc:
+                code, message = exc.code, exc.message
+            check("3MF past the scan limit, prefix under the ceiling: still refused",
+                  code == "too_many_faces" and "scan limit" in message,
+                  f"code={code} message={message}")
+            check("scan-limit refusal happens before load_part (no output written)",
+                  not os.path.exists(os.path.join(outdir, "canonical.stl")),
+                  "canonical.stl was written, so the mesh was loaded anyway")
+        finally:
+            analyze_quote_part.XML_SCAN_LIMIT_BYTES = real_limit
+        # With the real limit back, an ordinary 3MF is counted whole. The count
+        # is 13 for a 12-triangle cube because the `<triangles>` container tag
+        # starts with the token too — an over-estimate of one per mesh, which
+        # is the safe direction.
+        estimated, truncated = analyze_quote_part.estimate_face_count(
+            os.path.join(FIXTURES, "cube1in.3mf"), "3mf")
+        check("cube1in.3mf: counted whole, not truncated, still an upper bound",
+              truncated is False and estimated == 13,
+              f"estimate={estimated} truncated={truncated} (12 triangles + <triangles>)")
 
     if failures:
         print(f"\n{len(failures)} check(s) failed")

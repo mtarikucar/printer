@@ -173,12 +173,15 @@ def limit_address_space(limit_gb: float) -> None:
         print(f"Warning: RLIMIT_AS not applied: {exc}", file=sys.stderr)
 
 
-def count_token(stream, token: bytes, limit_bytes: int) -> int | None:
-    """Occurrences of `token` in a stream, read in chunks (constant memory).
+def count_token(stream, token: bytes, limit_bytes: int) -> tuple[int, bool]:
+    """(occurrences of `token`, truncated), read in chunks (constant memory).
 
     The window overlap is what makes it exact across chunk boundaries.
-    `None` when the stream is longer than `limit_bytes`: a count that stopped
-    early is an UNDER-estimate, and no caller of this module may act on one.
+    `truncated` is True when the stream is longer than `limit_bytes`: the count
+    then covers the scanned PREFIX only, so it is a LOWER bound on the whole
+    stream — never an upper one. The count is still handed back, because a
+    lower bound that already sits above the ceiling proves the refusal (see
+    `estimate_face_count`); dropping it left the caller with nothing at all.
     """
     count = 0
     overlap = b""
@@ -186,16 +189,17 @@ def count_token(stream, token: bytes, limit_bytes: int) -> int | None:
     while read < limit_bytes:
         chunk = stream.read(min(XML_CHUNK_BYTES, limit_bytes - read))
         if not chunk:
-            return count
+            return count, False
         read += len(chunk)
         window = overlap + chunk
         count += window.count(token)
         overlap = window[-(len(token) - 1) :]
-    return None if stream.read(1) else count
+    # A stream that ends exactly at the cap was read whole, not truncated.
+    return count, bool(stream.read(1))
 
 
-def count_obj_triangles(stream, limit_bytes: int) -> int | None:
-    """Upper bound on the triangles an OBJ yields AFTER triangulation.
+def count_obj_triangles(stream, limit_bytes: int) -> tuple[int, bool]:
+    """(triangles an OBJ yields AFTER triangulation, truncated).
 
     Every `f` line is one face element with k vertex references, which trimesh
     fans into k-2 triangles, so the bound is Σ max(1, k-2) — not the number of
@@ -203,9 +207,12 @@ def count_obj_triangles(stream, limit_bytes: int) -> int | None:
     folded the way trimesh folds them, and only the token count is carried
     across lines, so memory stays constant on any input.
 
-    `None` when the stream is longer than `limit_bytes` (see `count_token`).
+    `truncated` is True when the stream is longer than `limit_bytes`; the count
+    then covers the scanned prefix only and is a LOWER bound (see
+    `count_token`).
     """
     total = 0
+    truncated = False
     tail = b""
     read = 0
     # State of the logical line being assembled across continuations.
@@ -246,9 +253,9 @@ def count_obj_triangles(stream, limit_bytes: int) -> int | None:
 
     while True:
         if read >= limit_bytes:
-            # Past the cap: only a file that ends exactly here is countable.
-            if stream.read(1):
-                return None
+            # Past the cap: a file that ends exactly here was read whole; any
+            # byte beyond it makes what we counted a partial (lower) bound.
+            truncated = bool(stream.read(1))
             break
         chunk = stream.read(min(XML_CHUNK_BYTES, limit_bytes - read))
         if not chunk:
@@ -275,16 +282,16 @@ def count_obj_triangles(stream, limit_bytes: int) -> int | None:
     if open_line and is_face:
         # The file ended on a continuation; the face it opened still counts.
         total += max(1, tokens - 3)
-    return total
+    return total, truncated
 
 
-def estimate_face_count(input_path: str, source_format: str) -> int | None:
-    """Upper bound on the triangle count, read from the BYTES — no mesh loaded.
+def estimate_face_count(input_path: str, source_format: str) -> tuple[int | None, bool]:
+    """(triangle count read from the BYTES, scan truncated) — no mesh loaded.
 
     `None` means "cannot be told cheaply": the precheck then lets the file
-    through rather than refusing a part it has not measured. Every branch is an
-    over-estimate or exact, never an under-estimate that would let an
-    OOM-sized mesh past. Branch by branch, the bound is:
+    through rather than refusing a part it has not measured. With
+    `truncated` False every branch is an over-estimate or exact, never an
+    under-estimate that would let an OOM-sized mesh past. Branch by branch:
 
       stl, header size matches the file     exact (the declared facet count)
       stl, anything else                    max((size-84)//50, size//86), the
@@ -293,9 +300,17 @@ def estimate_face_count(input_path: str, source_format: str) -> int | None:
       obj                                   Σ max(1, references-2) per face
                                             line, i.e. the post-triangulation
                                             count (see count_obj_triangles)
-      3mf                                   `<triangle` elements, exact
-      obj/3mf longer than XML_SCAN_LIMIT    None (a truncated scan would
-                                            under-count)
+      3mf                                   `<triangle` elements — one more
+                                            than the triangles per mesh, since
+                                            the `<triangles>` container tag
+                                            starts with the token as well
+
+    With `truncated` True (an obj/3mf longer than XML_SCAN_LIMIT_BYTES) the
+    count covers the scanned prefix only, so it is a LOWER bound: it may not be
+    read as "the mesh fits", but a prefix count already above the ceiling
+    proves the whole file is above it. `analyze` handles both readings; earlier
+    this case returned `None` and the precheck was skipped altogether, which is
+    exactly how a 2 MB 3MF carrying 600 MB of model XML reached `load_part`.
     """
     try:
         size = os.path.getsize(input_path)
@@ -307,14 +322,17 @@ def estimate_face_count(input_path: str, source_format: str) -> int | None:
                 # The only reliable binary-vs-ASCII test: the size the header
                 # implies. ("solid" is not one — binary writers use it too.)
                 if BINARY_STL_HEADER_BYTES + BINARY_STL_FACET_BYTES * declared == size:
-                    return declared
+                    return declared, False
             # Either ASCII, or binary whose header count disagrees with the
             # file (trailing bytes, a truncated tail, a lying writer). Take the
             # larger of the two byte ceilings so neither reading can slip past.
-            return max(
-                (size - BINARY_STL_HEADER_BYTES) // BINARY_STL_FACET_BYTES,
-                size // ASCII_STL_MIN_FACET_BYTES,
-                0,
+            return (
+                max(
+                    (size - BINARY_STL_HEADER_BYTES) // BINARY_STL_FACET_BYTES,
+                    size // ASCII_STL_MIN_FACET_BYTES,
+                    0,
+                ),
+                False,
             )
         if source_format == "obj":
             with open(input_path, "rb") as handle:
@@ -327,12 +345,12 @@ def estimate_face_count(input_path: str, source_format: str) -> int | None:
                     (n for n in package.namelist() if MODEL_ENTRY_RE.match(n)), None
                 )
                 if entry is None:
-                    return None
+                    return None, False
                 with package.open(entry) as handle:
                     return count_token(handle, TRIANGLE_TOKEN, XML_SCAN_LIMIT_BYTES)
     except Exception as exc:  # noqa: BLE001 - a hint must never fail the job
         print(f"Warning: face precheck skipped: {exc}", file=sys.stderr)
-    return None
+    return None, False
 
 
 def read_3mf_model_meta(input_path: str) -> tuple[str | None, int]:
@@ -553,11 +571,30 @@ def analyze(
     warnings: list[str] = []
 
     # BEFORE load_part: the kernel's OOM killer cannot be caught, a refusal can.
-    estimated_faces = estimate_face_count(input_path, source_format)
+    estimated_faces, scan_truncated = estimate_face_count(input_path, source_format)
     if estimated_faces is not None and estimated_faces > max_input_faces:
+        # A truncated scan counted the prefix only, so the number is a lower
+        # bound — which is exactly why it still settles the question here.
+        bound = "at least" if scan_truncated else "about"
         raise AnalysisError(
             "too_many_faces",
-            f"Mesh has about {estimated_faces} triangles, above the {max_input_faces} ceiling",
+            f"Mesh has {bound} {estimated_faces} triangles, above the {max_input_faces} ceiling",
+        )
+    if scan_truncated:
+        # The prefix count came in under the ceiling, so nothing is proven
+        # about the triangles — but the scan reaching its cap proves the model
+        # XML alone is larger than XML_SCAN_LIMIT_BYTES, and trimesh reads that
+        # entry WHOLE into memory before parsing it (util.decompress →
+        # `src.read()`, budget 32 GiB). Inside `mem_limit: 2g` that is an OOM
+        # kill, i.e. no report.json and a job the sweep re-queues forever. At
+        # the advertised upload ceiling no honest file gets here: 256 MiB of
+        # model XML needs ~64 MiB of ZIP at the ratio real geometry compresses
+        # at, twice the ceiling. Refuse it, with the same code: the operator
+        # answer ("ask for a simplified file, or price it by hand") is the same.
+        raise AnalysisError(
+            "too_many_faces",
+            f"Model data is larger than the {XML_SCAN_LIMIT_BYTES}-byte scan limit "
+            "and cannot be measured inside the worker's memory budget",
         )
 
     mark = time.time()

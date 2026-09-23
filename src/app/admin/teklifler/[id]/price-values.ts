@@ -77,3 +77,76 @@ export function daysOrNaN(text: string): number {
   const clean = text.trim();
   return /^\d+$/.test(clean) ? Number(clean) : Number.NaN;
 }
+
+/** Karar ekranındaki yedi düğme (istek anahtarı = işlem kimliği). */
+export type AdminQuoteActionKey =
+  | "price"
+  | "target-accept"
+  | "target-counter"
+  | "target-reject"
+  | "extend"
+  | "reject"
+  | "reopen";
+
+export interface SuccessNotice {
+  text: string;
+  /** Fiyatsız kalan parçaların listesi şeridin altında gösterilsin mi? */
+  showBlockers: boolean;
+}
+
+/**
+ * Başarı şeridinin cümlesi — İŞLEME göre.
+ *
+ * Neden saf ve neden işlem başına: yedi düğme tek bir istek işlevini paylaşır
+ * ve cevaptaki `quoted` alanı yalnız FİYAT DEĞİŞTİREN üç işlem için anlamlıdır
+ * (süre uzatma, incelemeyi kapatma, yeniden açma ve hedef REDDİ her zaman
+ * `quoted: false` döner). Tek bir ortak cümle, süresi uzatılan FİYATLI bir
+ * teklifte "teklif henüz fiyatlı değil" der ve altına boş bir liste koyar;
+ * hedef reddinde ise gönderilmiş bir bildirimi "gönderilmedi" sayar. Para
+ * ekranında admin'e yanlış söylemek, müşteriye yanlış söylemenin ikizidir.
+ *
+ * `anonymous`: girişsiz ziyaretçinin teklifinde e-posta gönderilemez
+ * (`notify*` alıcı bulamaz), bu yüzden bildirim İDDİA EDİLMEZ.
+ */
+export function successNotice(
+  action: AdminQuoteActionKey,
+  result: { quoted?: boolean },
+  opts: { anonymous: boolean }
+): SuccessNotice {
+  const notified = opts.anonymous
+    ? "müşteri giriş yapmadığı için e-posta gönderilemedi, karar teklif sayfasında görünür"
+    : "müşteriye bildirim gönderildi";
+  switch (action) {
+    case "price":
+    case "target-accept":
+    case "target-counter":
+      return result.quoted === true
+        ? { text: `Teklif fiyatlandı; ${notified}.`, showBlockers: false }
+        : {
+            text:
+              "Kaydedildi. Teklif HENÜZ fiyatlı değil: aşağıdaki parçalar fiyatsız olduğu " +
+              "için müşteriye bildirim gönderilmedi.",
+            showBlockers: true,
+          };
+    case "target-reject":
+      return {
+        text: `Hedef fiyat reddedildi: teklif taslağa döndü, gerekçeniz teklif sayfasındaki nota yazıldı ve ${notified}.`,
+        showBlockers: false,
+      };
+    case "extend":
+      return {
+        text: "Geçerlilik süresi uzatıldı; teklifin tutarı değişmedi. Yeni bitiş tarihi ve durum aşağıda.",
+        showBlockers: false,
+      };
+    case "reject":
+      return {
+        text: "İnceleme fiyat verilmeden kapatıldı: teklif taslağa döndü ve gerekçeniz müşterinin teklif sayfasındaki nota yazıldı.",
+        showBlockers: false,
+      };
+    case "reopen":
+      return {
+        text: "Teklif yeniden açıldı: taslak durumuna döndü ve kataloğun geçerlilik süresi kadar yeni bir süre aldı.",
+        showBlockers: false,
+      };
+  }
+}

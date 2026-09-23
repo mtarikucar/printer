@@ -11,7 +11,14 @@ import type { QuoteStatus } from "@/lib/config/quote-types";
 import { formatCurrency, formatDateTime } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { AdminQuoteDetail, AdminQuotePartView } from "@/lib/services/quote-admin";
-import { daysOrNaN, fromKurus, rowsOf, toKurus } from "./price-values";
+import {
+  daysOrNaN,
+  fromKurus,
+  rowsOf,
+  successNotice,
+  toKurus,
+  type AdminQuoteActionKey,
+} from "./price-values";
 
 /**
  * Tek teklifin karar ekranı.
@@ -116,7 +123,12 @@ export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
     [prices, quote.parts]
   );
 
-  const call = async (key: string, path: string, body: unknown) => {
+  /**
+   * Yedi düğmenin ortak isteği. Başarı cümlesi İŞLEMDEN gelir
+   * (`successNotice`): cevabın `quoted` alanı yalnız fiyat değiştiren üç işlem
+   * için anlamlıdır, diğer dörtte her zaman `false`tur.
+   */
+  const call = async (key: AdminQuoteActionKey, path: string, body: unknown) => {
     setBusy(key);
     setError(null);
     setNotice(null);
@@ -135,12 +147,9 @@ export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
         setError(data.error ?? `İşlem tamamlanamadı (HTTP ${response.status}).`);
         return;
       }
-      setBlockers(data.blockers ?? []);
-      setNotice(
-        data.quoted
-          ? "Teklif fiyatlandı; müşteriye bildirim gönderildi."
-          : "Kaydedildi. Teklif HENÜZ fiyatlı değil: aşağıdaki parçalar fiyatsız olduğu için müşteriye bildirim gönderilmedi."
-      );
+      const success = successNotice(key, data, { anonymous: quote.anonymous });
+      setBlockers(success.showBlockers ? (data.blockers ?? []) : []);
+      setNotice(success.text);
       setReason("");
       setExtendReason("");
       router.refresh();

@@ -47,12 +47,14 @@ import {
   ADMIN_QUOTE_TAB_LABELS,
   adminManualPriceKey,
   isStaleReviewKind,
+  LIVE_DRAFT_REFUSAL,
   parseAdminQuoteTab,
   parseExtendDays,
   parseManualPriceRows,
   parseTargetCounters,
   quoteMatchesTab,
   requireReason,
+  restoredStatusAfterExtend,
   validateAdminUnitPrice,
   AdminQuoteError,
 } from "../src/lib/services/quote-admin";
@@ -60,7 +62,9 @@ import {
   daysOrNaN,
   fromKurus,
   rowsOf,
+  successNotice,
   toKurus,
+  type AdminQuoteActionKey,
 } from "../src/app/admin/teklifler/[id]/price-values";
 
 const ROOT = path.join(import.meta.dirname, "..");
@@ -170,6 +174,80 @@ async function main() {
         quoteMatchesTab(row(status, null, FUTURE), tab, NOW)
       );
       assert.ok(hits.length >= 1, `${status} hiçbir sekmede yok`);
+    }
+  });
+
+  await test("süre uzatma, CEVAPLANMAMIŞ incelemeyi kuyruktan düşürmez", () => {
+    // Süre dolumu işi `draft/quoted/needs_review`u ayrım yapmadan `expired`
+    // yapar; "expired" tek başına "fiyatlanmıştı" DEMEZ. Körü körüne `quoted`a
+    // çekmek, cevaplanmamış bir talebi üç inceleme sekmesinden ve rozetten
+    // sessizce düşürürdü.
+    for (const kind of REVIEW_KINDS) {
+      const restored = restoredStatusAfterExtend({
+        status: "expired",
+        reviewKind: kind,
+        reviewedAt: null,
+        // Otomatik fiyatı OLAN bir RFQ talebi de kuyrukta kalmalı:
+        // `total_kurus` dolu olsa bile talep cevaplanmamıştır.
+        totalKurus: kind === "rfq" ? 27899 : null,
+      });
+      assert.equal(restored, "needs_review", `${kind}: cevaplanmamış talep kuyruktan düştü`);
+      const back = { status: restored, reviewKind: kind, expiresAt: FUTURE };
+      const hits = (["review", "target", "rfq"] as const).filter((tab) =>
+        quoteMatchesTab(back, tab, NOW)
+      );
+      assert.equal(hits.length, 1, `${kind}: uzatmadan sonra inceleme sekmesinde değil`);
+    }
+  });
+
+  await test("süre uzatma FİYATSIZ teklifi 'Fiyatlandı' göstermez", () => {
+    // `total_kurus` ancak HER parça fiyatlıyken dolar (`recomputeQuoteCache`);
+    // NULL toplamlı bir `quoted`, kuyrukta "Fiyatlandı + fiyatlanmadı"
+    // çelişkisi, müşteride ödenemeyen bir "hazır" teklif demekti.
+    assert.equal(
+      restoredStatusAfterExtend({
+        status: "expired",
+        reviewKind: null,
+        reviewedAt: null,
+        totalKurus: null,
+      }),
+      "draft"
+    );
+    assert.equal(
+      restoredStatusAfterExtend({
+        status: "expired",
+        reviewKind: "manual",
+        reviewedAt: new Date("2026-09-10T00:00:00.000Z"),
+        totalKurus: null,
+      }),
+      "draft",
+      "cevaplanmış ama fiyatsız teklif de quoted OLMAZ"
+    );
+    // Cevaplanmış + fiyatlı: gerçekten "Fiyatlandı".
+    assert.equal(
+      restoredStatusAfterExtend({
+        status: "expired",
+        reviewKind: "manual",
+        reviewedAt: new Date("2026-09-10T00:00:00.000Z"),
+        totalKurus: 27899,
+      }),
+      "quoted"
+    );
+  });
+
+  await test("süre uzatma süresi DOLMAMIŞ teklifin durumuna dokunmaz", () => {
+    for (const status of QUOTE_STATUSES) {
+      if (status === "expired") continue;
+      assert.equal(
+        restoredStatusAfterExtend({
+          status,
+          reviewKind: "manual",
+          reviewedAt: null,
+          totalKurus: 27899,
+        }),
+        status,
+        `${status} durumu uzatmada değişti`
+      );
     }
   });
 
@@ -297,8 +375,31 @@ async function main() {
   const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
   const originalLoad = loader._load;
   let authorized = false;
+  /**
+   * Servisin beklenen REDDİ (409) — doluyken beş karar işlevi bu değeri döner.
+   * Retlerin kendisi DB ister; uçtan görünen şey, reddin cevaba nasıl
+   * çevrildiğidir: 409 + Türkçe cümle + kod, gövdesiz 500 DEĞİL.
+   */
+  let refusal: unknown = null;
+  /** Servisin stub'lanan karar işlevleri (geri kalanı GERÇEK kalır). */
+  const DECISION_FNS = [
+    "priceQuoteManually",
+    "decideTargetPrice",
+    "extendQuoteExpiry",
+    "rejectReview",
+    "reopenQuote",
+  ] as const;
 
   loader._load = function (name, ...args) {
+    if (name === "@/lib/services/quote-admin") {
+      const real = originalLoad.call(this, name, ...args) as Record<string, unknown>;
+      const wrapped: Record<string, unknown> = { ...real };
+      for (const fn of DECISION_FNS) {
+        const original = real[fn] as (arg: unknown) => Promise<unknown>;
+        wrapped[fn] = async (arg: unknown) => refusal ?? original(arg);
+      }
+      return wrapped;
+    }
     if (name === "@/lib/auth/require-admin") {
       return {
         requireAdmin: async () =>
@@ -385,8 +486,68 @@ async function main() {
         assert.equal(response.status, 400, `${label} bozuk gövdeyi geçirdi`);
       }
     });
+
+    await test("servisin 409 reddi AYNEN cevaba geçer (gövdesiz 500 değil)", async () => {
+      // Reddin KOŞULU (açık ödeme taslağı) DB ister; uçtan görünen ve burada
+      // çivilenen şey, `adminQuoteOutcome → outcomeResponse` yolunun beklenen
+      // retleri 409 + Türkçe cümle + kod olarak taşıdığıdır. Aynı yol
+      // "bayat expectedUpdatedAt" ve "hedef fiyat incelemesi değil" retlerini
+      // de taşır.
+      authorized = true;
+      refusal = { ok: false, status: 409, code: "live_draft", error: LIVE_DRAFT_REFUSAL };
+      assert.equal(
+        LIVE_DRAFT_REFUSAL,
+        "Bu teklif için açık bir ödeme var; önce ödeme süresinin dolmasını bekleyin.",
+        "brief'in birebir cümlesi değişmiş"
+      );
+      const bodies: Array<[string, AnyHandler, unknown]> = [
+        [
+          "POST /price",
+          price.POST as unknown as AnyHandler,
+          {
+            expectedUpdatedAt: new Date().toISOString(),
+            parts: [{ partId: "11111111-1111-4111-8111-111111111112", unitKurus: 7450 }],
+            expiresInDays: 30,
+            reason: "Müşteriyle konuşuldu, parça başı fiyat verildi.",
+          },
+        ],
+        [
+          "POST /target",
+          target.POST as unknown as AnyHandler,
+          {
+            decision: "accept",
+            reason: "Hedef fiyat maliyetimizin üstünde, kabul edildi.",
+            expectedUpdatedAt: new Date().toISOString(),
+          },
+        ],
+        [
+          "POST /extend",
+          extend.POST as unknown as AnyHandler,
+          { days: 15, reason: "Müşteri onay sürecini uzattı." },
+        ],
+        [
+          "POST /reject-review",
+          rejectReviewRoute.POST as unknown as AnyHandler,
+          { reason: "Bu parçayı bu ölçüde üretemiyoruz." },
+        ],
+        [
+          "POST /reopen",
+          reopen.POST as unknown as AnyHandler,
+          { reason: "Müşteri geç döndü, teklif yeniden açıldı." },
+        ],
+      ];
+      for (const [label, handler, body] of bodies) {
+        const response = (await handler(req("POST", body), idContext)) as unknown as NextResponse;
+        assert.equal(response.status, 409, `${label} 409 döndürmedi`);
+        const json = (await response.json()) as { error?: string; code?: string };
+        assert.equal(json.error, LIVE_DRAFT_REFUSAL, `${label}: cümle taşınmadı`);
+        assert.equal(json.code, "live_draft", `${label}: kod taşınmadı`);
+      }
+      refusal = null;
+    });
   } finally {
     authorized = false;
+    refusal = null;
     loader._load = originalLoad;
   }
 
@@ -450,6 +611,47 @@ async function main() {
     refuses("invalid_body", "NaN gün", () => parseExtendDays(JSON.parse(JSON.stringify(Number.NaN))));
   });
 
+  await test("başarı şeridi İŞLEME göre konuşur (fiyat dışı işlemde fiyat cümlesi yok)", () => {
+    // `quoted` alanı yalnız fiyat değiştiren üç işlemde anlamlıdır; diğer
+    // dördü HER ZAMAN `quoted:false` döner. Ortak cümle, süresi uzatılan
+    // FİYATLI bir teklifte "teklif henüz fiyatlı değil" derdi.
+    const plain: AdminQuoteActionKey[] = ["extend", "reject", "reopen", "target-reject"];
+    for (const action of plain) {
+      const notice = successNotice(action, { quoted: false }, { anonymous: false });
+      assert.doesNotMatch(notice.text, /fiyatlı değil/i, `${action}: fiyat cümlesi sızdı`);
+      assert.equal(notice.showBlockers, false, `${action}: boş engel listesi gösteriliyor`);
+      assert.ok(notice.text.length > 20, `${action}: cümle yok`);
+    }
+    // Hedef REDDİ bildirim GÖNDERİR (`notifyTargetDecision`): "gönderilmedi"
+    // demek, yapılmış bir işi yapılmamış saymaktır.
+    assert.match(
+      successNotice("target-reject", { quoted: false }, { anonymous: false }).text,
+      /bildirim gönderildi/
+    );
+    // Dört işlemin cümleleri birbirinden AYRI olmalı (kopyala-yapıştır kontrolü).
+    const texts = new Set(
+      plain.map((a) => successNotice(a, { quoted: false }, { anonymous: false }).text)
+    );
+    assert.equal(texts.size, plain.length, "işlemler aynı cümleyi paylaşıyor");
+  });
+
+  await test("fiyatlama işlemlerinde cümle sonucu söyler, anonim teklifte bildirim İDDİA ETMEZ", () => {
+    for (const action of ["price", "target-accept", "target-counter"] as const) {
+      assert.match(
+        successNotice(action, { quoted: true }, { anonymous: false }).text,
+        /fiyatlandı; müşteriye bildirim gönderildi/
+      );
+      const unpriced = successNotice(action, { quoted: false }, { anonymous: false });
+      assert.match(unpriced.text, /HENÜZ fiyatlı değil/);
+      assert.equal(unpriced.showBlockers, true, `${action}: eksik parçalar gösterilmiyor`);
+      // Girişsiz ziyaretçinin teklifinde e-posta gönderilemez.
+      assert.doesNotMatch(
+        successNotice(action, { quoted: true }, { anonymous: true }).text,
+        /müşteriye bildirim gönderildi/
+      );
+    }
+  });
+
   // ─── 6) Ekranın yapısal çivileri ──────────────────────────────────────────
 
   console.log("\n6) Ekranın yapısal çivileri");
@@ -483,6 +685,16 @@ async function main() {
     const client = read("src/app/admin/teklifler/[id]/client.tsx");
     assert.doesNotMatch(client, /toKurus\(e\.target\.value\)/, "her tuşta çevirim var");
     assert.match(client, /draftRows\(prices, "all"\)/, "gönderimde satır kurulmuyor");
+  });
+
+  await test("karar ekranı başarı cümlesini İŞLEMDEN alır", () => {
+    const client = read("src/app/admin/teklifler/[id]/client.tsx");
+    assert.match(client, /successNotice\(key, data/, "ortak cümle ekrana geri kopyalanmış");
+    assert.doesNotMatch(
+      client,
+      /Teklif fiyatlandı; müşteriye bildirim gönderildi/,
+      "fiyat cümlesi yine yedi düğmeye ortak"
+    );
   });
 
   await test("liste sayfası sekmeyi doğrular ve sayfalamayı pageSize+1 ile okur", () => {

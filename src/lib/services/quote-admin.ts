@@ -327,6 +327,40 @@ export function isStaleReviewKind(row: Pick<QuoteTabRow, "status" | "reviewKind"
 }
 
 /**
+ * Süresi dolmuş bir teklif "süreyi uzat" denince HANGİ duruma döner?
+ *
+ * `expired`, "fiyatlanmıştı" DEMEK DEĞİLDİR: süre dolumu işi `expires_at`i
+ * geçmiş `draft`/`quoted`/`needs_review` teklifleri ayrım yapmadan `expired`
+ * yapar (spec, "Teklif yaşam döngüsü"). Bu yüzden durumu körü körüne
+ * `quoted`a çekmek üç yerde birden yalan söylerdi:
+ *
+ *  - cevaplanmamış bir inceleme talebi üç inceleme sekmesinden de, kenar
+ *    çubuğu rozetinden de SESSİZCE düşerdi (kural 3'ün önlemeye çalıştığı
+ *    şeyin ta kendisi);
+ *  - kuyruk satırı "Fiyatlandı" + "fiyatlanmadı" çelişkisini gösterirdi;
+ *  - müşterinin çalışma alanında ödeyemeyeceği bir "Fiyatlandı" teklif
+ *    belirirdi (`total_kurus` NULL).
+ *
+ * Teklifin süre dolumundan ÖNCEKİ durumu hiçbir kolonda saklanmadığı için en
+ * yakın yeniden kurulum kolonlardan türetilir ve sıra önemlidir: önce
+ * CEVAPLANMAMIŞ inceleme (`review_kind` var, `reviewed_at` yok) — otomatik
+ * fiyatı olan bir RFQ talebi de kuyrukta kalmalıdır —, sonra fiyat
+ * (`total_kurus`; `recomputeQuoteCache` bu kolonu ancak HER parça fiyatlıyken
+ * doldurur), aksi hâlde `draft`.
+ */
+export function restoredStatusAfterExtend(row: {
+  status: QuoteStatus;
+  reviewKind: ReviewKind | null;
+  reviewedAt: Date | null;
+  totalKurus: number | null;
+}): QuoteStatus {
+  if (row.status !== "expired") return row.status;
+  if (row.reviewKind !== null && row.reviewedAt === null) return "needs_review";
+  if (row.totalKurus !== null) return "quoted";
+  return "draft";
+}
+
+/**
  * Satır bu sekmeye düşer mi?
  *
  * SQL ile birebir aynı kuralı taşır (aşağıdaki `tabCondition`); ikisinin
@@ -811,7 +845,8 @@ export async function loadAdminQuoteDetail(id: string): Promise<AdminQuoteDetail
 
 // ─── Yazma iskeleti ─────────────────────────────────────────────────────────
 
-const LIVE_DRAFT_REFUSAL =
+/** Açık ödeme reddinin BİREBİR cümlesi (rota testi bu değeri çivi olarak kullanır). */
+export const LIVE_DRAFT_REFUSAL =
   "Bu teklif için açık bir ödeme var; önce ödeme süresinin dolmasını bekleyin.";
 
 interface WriteContext {
@@ -1206,9 +1241,12 @@ export async function extendQuoteExpiry(args: {
       const now = new Date();
       const from = Math.max(now.getTime(), ctx.quote.expiresAt.getTime());
       const expiresAt = new Date(from + days * 86_400_000);
-      // Süresi dolmuş olarak İŞARETLENMİŞ bir teklif yeniden fiyatlıya döner:
-      // yeni bir bitiş tarihi varken "expired" durumu yalan olurdu.
-      const status: QuoteStatus = ctx.quote.status === "expired" ? "quoted" : ctx.quote.status;
+      // Süresi dolmuş olarak İŞARETLENMİŞ bir teklif açık duruma döner: yeni
+      // bir bitiş tarihi varken "expired" durumu yalan olurdu. Hangi açık
+      // duruma döneceği FİYAT VE İNCELEME DURUMUNDAN türetilir — bkz.
+      // `restoredStatusAfterExtend`; "expired" tek başına "fiyatlanmıştı"
+      // demek değildir.
+      const status = restoredStatusAfterExtend(ctx.quote);
       await tx
         .update(quotes)
         .set({ expiresAt, status, updatedAt: now })
@@ -1218,7 +1256,14 @@ export async function extendQuoteExpiry(args: {
         action: "extend_expiry",
         adminEmail: args.adminEmail,
         reason,
-        before: { status: ctx.quote.status, expiresAt: ctx.quote.expiresAt },
+        before: {
+          status: ctx.quote.status,
+          expiresAt: ctx.quote.expiresAt,
+          // Geri dönülen durumun NEDEN o durum olduğu denetimden okunabilsin.
+          totalKurus: ctx.quote.totalKurus,
+          reviewKind: ctx.quote.reviewKind,
+          reviewedAt: ctx.quote.reviewedAt,
+        },
         after: { status, expiresAt, days },
       });
       return ctx.quote.userId;

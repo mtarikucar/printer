@@ -685,6 +685,20 @@ async function runCheckout(args: {
     };
   }
 
+  // HER kart taslağı için son tarih işi (plan düzeltmesi): teklif canlı
+  // taslağı varken salt okunurdur, yani terk edilmiş bir iframe teklifi
+  // sonsuza dek kilitler ve müşteri havaleye de geçemezdi. `/api/orders` bu
+  // işi yalnız hediye kartı rezervasyonunda kuyruğa alır.
+  //
+  // Token'dan ÖNCE kuyruğa alınır: PayTR reddederse taslak `pending` kalıyor
+  // ve kilidi açacak tek şey bu iş oluyor — token'dan sonra sıraya koymak,
+  // tam da kurtarmayı en çok gereken hâlde onu atlardı.
+  await getPaymentDeadlineQueue().add(
+    "card-expire",
+    { draftId: draft.id, reference: draft.reference, type: "card_expire" },
+    { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
+  );
+
   const address = draft.shippingAddress;
   try {
     const paytr = await createPaytrToken({
@@ -716,16 +730,6 @@ async function runCheckout(args: {
         updatedAt: new Date(),
       })
       .where(eq(orderDrafts.id, draft.id));
-
-    // HER kart taslağı için son tarih işi (plan düzeltmesi): teklif canlı
-    // taslağı varken salt okunurdur, yani terk edilmiş bir iframe teklifi
-    // sonsuza dek kilitler ve müşteri havaleye de geçemezdi. `/api/orders`
-    // bu işi yalnız hediye kartı rezervasyonunda kuyruğa alır.
-    await getPaymentDeadlineQueue().add(
-      "card-expire",
-      { draftId: draft.id, reference: draft.reference, type: "card_expire" },
-      { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
-    );
 
     return {
       reference: draft.reference,

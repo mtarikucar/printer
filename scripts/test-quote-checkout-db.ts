@@ -790,6 +790,7 @@ async function main() {
       const q = await makeQuote(unlucky.id, [{ geometry: CUBE }]);
       const { quote, computed } = await expected(q.id);
       paytrFails = true;
+      const before = jobs.length;
       // Servis arızayı BİLEREK günlüğe basar; testin çıktısı temiz kalsın diye
       // yakalanır ve basıldığı burada iddia edilir.
       const logged: unknown[][] = [];
@@ -823,6 +824,12 @@ async function main() {
         .where(eq(orderDrafts.userId, unlucky.id));
       assert.equal(draft.status, "pending", "müşteri /pay üzerinden tekrar deneyebilsin");
       assert.match(draft.paytrFailureReason ?? "", /PayTR/);
+      // Kilidi açacak tek şey bu iş: token başarısız olsa bile kuyruğa girmeli,
+      // yoksa terk edilen taslak teklifi sonsuza dek kilitler.
+      assert.ok(
+        jobs.slice(before).find((j) => j.opts.jobId === `card-expire-${draft.id}`),
+        "token başarısız olsa da card-expire kuyruğa alındı"
+      );
     });
 
     console.log(`${checks} quote checkout DB checks passed`);

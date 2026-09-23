@@ -1,0 +1,122 @@
+/*
+ * Teklif belgesi — A4 kâğıt.
+ *
+ * Renkler BURADA sabitlenir, tema değişkenlerinden GELMEZ: belge koyu temada
+ * da beyaz kâğıt üstünde siyah mürekkeptir. Aksi hâlde müşteri koyu temadan
+ * yazdırdığında ya bomboş (tarayıcılar arka planları basmaz) ya da okunmaz bir
+ * çıktı alırdı.
+ *
+ * Ekranda görünen ile yazıcıdan çıkan aynı olsun diye ölçüler mm: sayfa 210mm
+ * geniş, kenar boşlukları 14–16mm. Ekranda bu sayfa gri bir zeminin üstünde
+ * durur; baskıda zemin ve gölge düşer.
+ */
+
+.quote-doc-page {
+  background: #e9e9ec;
+  min-height: 100vh;
+  padding: 16px 0 48px;
+}
+
+.quote-doc-bar {
+  max-width: 210mm;
+  margin: 0 auto 12px;
+  padding: 0 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quote-doc {
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 16mm 14mm;
+  background: #ffffff;
+  color: #14141a;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.quote-doc__muted {
+  color: #5c5c68;
+}
+
+/* Kimlik bloğunu tablodan ayıran tek kalın çizgi — belgenin tek "süsü". */
+.quote-doc__rule {
+  border-top: 2px solid #14141a;
+}
+
+.quote-doc__table {
+  border-collapse: collapse;
+}
+
+.quote-doc__table th,
+.quote-doc__table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid #d5d5dd;
+  vertical-align: top;
+}
+
+.quote-doc__table thead th {
+  border-bottom: 1px solid #14141a;
+  font-weight: 600;
+  color: #5c5c68;
+}
+
+.quote-doc__thumb {
+  width: 12mm;
+  height: 12mm;
+  object-fit: cover;
+  border: 1px solid #d5d5dd;
+  flex: none;
+}
+
+.quote-doc__total {
+  border-top: 1px solid #14141a;
+}
+
+.quote-doc__box {
+  border: 1px solid #d5d5dd;
+  padding: 10px 12px;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm;
+  }
+
+  /* Uygulamanın kendisi (başlık, düğmeler, zemin) çıktıya girmez. */
+  .no-print {
+    display: none !important;
+  }
+
+  .quote-doc-page {
+    background: #ffffff;
+    padding: 0;
+    min-height: 0;
+  }
+
+  .quote-doc {
+    width: auto;
+    max-width: none;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  /* Birden fazla sayfaya taşan parça listesinde başlık her sayfada tekrarlar
+     ve bir parçanın satırı iki sayfaya bölünmez. */
+  .quote-doc__table thead {
+    display: table-header-group;
+  }
+
+  .quote-doc__table tr {
+    break-inside: avoid;
+  }
+}

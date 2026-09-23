@@ -23,6 +23,18 @@ import { QuotePartCard } from "../src/components/quote/part-card";
 import { QuoteBulkBar } from "../src/components/quote/bulk-bar";
 import { dfmMessage } from "../src/components/quote/dfm-list";
 import { validateQuoteFiles } from "../src/components/quote/dropzone";
+import { QuoteBanners } from "../src/components/quote/quote-banners";
+import { QuoteChatPanel } from "../src/components/quote/quote-chat-panel";
+import {
+  QuoteSummary,
+  displayedTotalKurus,
+  readKdvExcludedPref,
+  writeKdvExcludedPref,
+} from "../src/components/quote/quote-summary";
+import { QuoteReviewDialog, parseMoneyInput } from "../src/components/quote/review-request-dialog";
+import { QuoteShareDialog } from "../src/components/quote/share-dialog";
+import { QuoteDocument } from "../src/app/teklif/[number]/belge/quote-document";
+import { QuoteDocumentPrintButton } from "../src/app/teklif/[number]/belge/print-button";
 import {
   QuoteWorkspaceClient,
   createResponseOrder,
@@ -38,6 +50,7 @@ import {
   type PresentedCatalog,
   type PresentedPart,
   type PresentedQuote,
+  type QuoteTotals,
   type QuoteViewer,
 } from "../src/lib/config/quote-types";
 import { EVENTS, isEventName } from "../src/lib/analytics/events";
@@ -704,4 +717,358 @@ test("sırayla dönen okumalar uygulanır, uçuşta yazım varken yoklama beklen
   assert.equal(order.isWriting(), false);
   order.beginWrite();
   assert.equal(order.isWriting(), true, "sayaç eksiye düşmüş: yoklama yazımın üstüne biner");
+});
+
+// ─── Özet paneli, bantlar, diyaloglar ve belge (Görev 3.2b) ────────────────
+
+const PRICED: QuoteViewer = { ...OWNER_NO_PRICES, canSeePrices: true };
+
+const TOTALS_FIXTURE: QuoteTotals = {
+  allPriced: true,
+  partsKurus: 14800,
+  addonLines: [],
+  addonsKurus: 0,
+  minOrderTopUpKurus: 0,
+  totalKurus: 14800,
+  // Bu iki rakam BİLEREK %20'lik bir bölmeyle tutarsız (14800/1,2 = 12333'tür).
+  // Uydurma olmaları testin amacı: ekran KDV'yi kendisi hesaplarsa 12333
+  // basar ve test kırmızıya döner — gerçek hayatta tutarı `computeKdv`
+  // belirler ve arayüz onu sorgulamadan yazmak zorundadır.
+  kdvExcludedKurus: 12000,
+  kdvKurus: 2800,
+  leadDays: 5,
+};
+
+function pricedQuote(over: Partial<PresentedQuote> = {}): PresentedQuote {
+  return quoteFixture({
+    viewer: PRICED,
+    parts: [
+      partFixture({
+        price: { unitKurus: 7400, lineKurus: 14800, source: "auto", priceBreaks: [] },
+      }),
+    ],
+    totals: TOTALS_FIXTURE,
+    leadOptions: [
+      { key: "economy", name: "Ekonomik", leadDays: 8, totalKurus: 14000 },
+      { key: "standard", name: "Standart", leadDays: 5, totalKurus: 14800 },
+      { key: "express", name: "Ekspres", leadDays: 3, totalKurus: 19800 },
+    ],
+    ...over,
+  });
+}
+
+function renderSummary(quote: PresentedQuote): string {
+  return inLocale(
+    createElement(QuoteSummary, {
+      quote,
+      onPatch: noop,
+      onRequestReview: noop,
+      onRequestPrices: noop,
+    })
+  );
+}
+
+function renderBanners(quote: PresentedQuote): string {
+  return inLocale(
+    createElement(QuoteBanners, { quote, shareToken: null, onQuoteChanged: noop })
+  );
+}
+
+test("özet, fiyat kapısı kapalıyken tek bir rakam bile basmaz", () => {
+  const html = renderSummary(quoteFixture());
+  assert.match(html, /Fiyatları görmek için giriş yapın/);
+  assert.doesNotMatch(html, /₺\s?\d/, "kapının arkasından özete rakam sızdı");
+  assert.match(html, /Ödemeye geç/, "ödeme düğmesi kapıyı açmak için de durmalı");
+});
+
+test("özet toplamı KDV dahil yazar ve hariç göstermeyi önerir", () => {
+  const html = renderSummary(pricedQuote());
+  assert.match(html, /148,00/, "toplam yok");
+  assert.match(html, /KDV dahil/);
+  assert.match(html, /KDV hariç göster/, "KDV anahtarı yok");
+  assert.match(html, /1 parça \(2 adet\)/);
+  assert.match(html, /Kargo: Ücretsiz/);
+});
+
+test("özet KDV hariç tutarı HESAPLAMAZ, sunucunun verdiğini basar", () => {
+  assert.equal(displayedTotalKurus(TOTALS_FIXTURE, false), 14800);
+  // 14800/1,2 = 12333; fikstür 12000 diyor. Gösterilen rakam sunucununkidir.
+  assert.equal(displayedTotalKurus(TOTALS_FIXTURE, true), 12000);
+});
+
+test("KDV tercihi okunamayan depoda ekranı çökertmez", () => {
+  // Gizli sekmede `localStorage` erişimi ATAR; tercih bir kolaylıktır, teklifi
+  // görüntülemenin şartı değil.
+  const throwing = {
+    getItem() {
+      throw new Error("SecurityError");
+    },
+    setItem() {
+      throw new Error("SecurityError");
+    },
+  } as unknown as Storage;
+  assert.equal(readKdvExcludedPref(throwing), false);
+  assert.doesNotThrow(() => writeKdvExcludedPref(throwing, true));
+  assert.equal(readKdvExcludedPref(null), false);
+
+  const store = new Map<string, string>();
+  const ok = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  } as unknown as Storage;
+  writeKdvExcludedPref(ok, true);
+  assert.equal(readKdvExcludedPref(ok), true);
+  writeKdvExcludedPref(ok, false);
+  assert.equal(readKdvExcludedPref(ok), false);
+});
+
+test("teslim kademeleri süresiyle ve tutarıyla listelenir", () => {
+  const html = renderSummary(pricedQuote());
+  for (const name of ["Ekonomik", "Standart", "Ekspres"]) {
+    assert.ok(html.includes(name), `${name} kademesi yok`);
+  }
+  assert.match(html, /8 iş günü/);
+  assert.match(html, /140,00/, "kademe başına tutar yok");
+  // Kargoya teslim tarihi YALNIZ seçili kademede: diğer kademelerin tarihini
+  // sunucu hesaplamadı, istemci de iş günü sayamaz.
+  assert.match(html, /tarihinde kargoda/);
+});
+
+test("ek hizmet ücreti hangi birime ait olduğunu söyler", () => {
+  const quote = pricedQuote({
+    catalog: {
+      ...catalogFixture,
+      addons: [
+        {
+          key: "cert",
+          name: "Uygunluk sertifikası",
+          description: "",
+          leadDaysExtra: 1,
+          priceKurus: 5000,
+          priceType: "per_unit",
+        },
+      ],
+    },
+  });
+  const html = renderSummary(quote);
+  assert.match(html, /Uygunluk sertifikası/);
+  assert.match(html, /50,00/);
+  assert.match(html, /adet başına/, "birim fiyatın neye göre işlediği yazmıyor");
+  assert.match(html, /\+1 iş günü/);
+});
+
+test("ödemeye geçilemiyorsa sebep yazılır ve düğme kapalı durur", () => {
+  const html = renderSummary(
+    pricedQuote({
+      readiness: {
+        canCheckout: false,
+        blockers: ["2 parçanın analizi sürüyor — birkaç saniye içinde tamamlanır."],
+      },
+    })
+  );
+  assert.match(html, /Ödemeye geçmeden önce:/);
+  assert.match(html, /2 parçanın analizi sürüyor/);
+  assert.match(html, /disabled/, "engelli teklifte ödeme düğmesi açık kalmış");
+  assert.doesNotMatch(html, /href="\/teklif\/T-000123\/odeme"/, "kapalı düğme bağlantı vermiş");
+});
+
+test("ödemeye hazır teklif doğrudan ödeme sayfasına bağlanır", () => {
+  const html = renderSummary(pricedQuote({ readiness: { canCheckout: true, blockers: [] } }));
+  assert.match(html, /href="\/teklif\/T-000123\/odeme"/);
+});
+
+test("RFQ düğmesi yalnız yüksek hacim uyarısı varken çıkar", () => {
+  const rfq = "Yüksek hacim teklifi";
+  assert.ok(!renderSummary(pricedQuote()).includes(rfq), "uyarı yokken RFQ önerilmiş");
+  assert.ok(
+    renderSummary(
+      pricedQuote({
+        quoteIssues: [{ code: "qty_over_auto", severity: "error", params: { reason: "total" } }],
+      })
+    ).includes(rfq),
+    "qty_over_auto varken RFQ önerilmemiş"
+  );
+});
+
+test("paylaşım izleyicisi özet üzerinden teklifi değiştiremez", () => {
+  const html = renderSummary(
+    pricedQuote({
+      viewer: { canSeePrices: true, canEdit: false, isOwner: false, isShare: true, isAdmin: false },
+      customerNote: null,
+      poNumber: null,
+    })
+  );
+  assert.match(html, /148,00/, "paylaşım izleyicisi toplamı görmeli");
+  assert.ok(!html.includes("Manuel teklif iste"), "salt okunur görünümde talep düğmesi var");
+  assert.ok(!html.includes("PO numarası"), "salt okunur görünümde PO alanı var");
+});
+
+test("katalog değişen ve süresi dolan teklif yeniden fiyatlamaya çağırır", () => {
+  const changed = renderBanners(pricedQuote({ catalogChangedSinceSnapshot: true }));
+  assert.match(changed, /Katalog güncellendi/);
+  assert.match(changed, /Yeniden fiyatla/);
+
+  const expired = renderBanners(pricedQuote({ status: "expired", expired: true, locked: true }));
+  assert.match(expired, /süresi doldu/);
+  assert.match(expired, /Yeniden fiyatla/);
+});
+
+test("kilitli teklif ödemeye, siparişe dönen teklif takibe bağlanır", () => {
+  const locked = renderBanners(pricedQuote({ locked: true, liveDraftReference: "FG-DRAFT-7" }));
+  assert.match(locked, /bekleyen bir ödeme/);
+  assert.match(locked, /href="\/pay\/FG-DRAFT-7"/);
+
+  const ordered = renderBanners(
+    pricedQuote({ status: "ordered", locked: true, orderNumber: "FG-2026-0042" })
+  );
+  assert.match(ordered, /siparişe dönüştü/);
+  assert.match(ordered, /href="\/track\/FG-2026-0042"/);
+  // Siparişe dönmüş teklif yeniden fiyatlanamaz: uç 409 verir, düğme yalan olur.
+  assert.ok(!ordered.includes("Yeniden fiyatla"), "siparişe dönen teklife yeniden fiyatla denmiş");
+});
+
+test("teknolojiye göre ayırma yalnız karışık teklifte önerilir", () => {
+  const single = renderBanners(pricedQuote());
+  assert.ok(!single.includes("Teknolojiye göre ayır"), "tek teknolojide ayırma önerilmiş");
+
+  const base = partFixture().config;
+  const mixed = renderBanners(
+    pricedQuote({
+      parts: [
+        partFixture({ id: "a" }),
+        partFixture({
+          id: "b",
+          config: { ...base, technologyKey: "sla", materialKey: "std_resin", colorKey: "grey" },
+        }),
+      ],
+    })
+  );
+  assert.match(mixed, /Teknolojiye göre ayır/);
+});
+
+test("paylaşım diyaloğu bağlantı yokken oluşturur, varken kopyalatır", () => {
+  const dialog = (quote: PresentedQuote) =>
+    inLocale(
+      createElement(QuoteShareDialog, { open: true, quote, onClose: noop, onQuoteChanged: noop })
+    );
+
+  const none = dialog(pricedQuote({ shareUrl: null }));
+  assert.match(none, /Paylaşım bağlantısı oluştur/);
+  assert.ok(!none.includes("Paylaşımı kapat"), "bağlantı yokken iptal düğmesi var");
+
+  const live = dialog(pricedQuote({ shareUrl: "https://ornek.test/teklif/T-000123?t=tok123" }));
+  assert.match(live, /tok123/);
+  assert.match(live, /Kopyala/);
+  assert.match(live, /Bağlantıyı yenile/);
+  assert.match(live, /Paylaşımı kapat/);
+});
+
+test("hedef fiyat diyaloğu her parça için bir birim fiyat alanı açar", () => {
+  const quote = pricedQuote({
+    parts: [partFixture({ id: "a", name: "Braket" }), partFixture({ id: "b", name: "Kapak" })],
+  });
+  const html = inLocale(
+    createElement(QuoteReviewDialog, {
+      open: true,
+      kind: "target_price",
+      quote,
+      shareToken: null,
+      onClose: noop,
+      onQuoteChanged: noop,
+    })
+  );
+  assert.match(html, /Hedef fiyat öner/);
+  assert.match(html, /Braket/);
+  assert.match(html, /Kapak/);
+  // Başlık bir kez (sütun başlığı), alan parça başına bir kez. Her alanın
+  // erişilebilir adı parçanın kendi adıdır (`label for`), yoksa ekran okuyucu
+  // iki özdeş "Hedef birim fiyat" alanı okurdu.
+  assert.equal((html.match(/Hedef birim fiyat/g) ?? []).length, 1);
+  assert.match(html, /id="target-a"/);
+  assert.match(html, /id="target-b"/);
+  assert.match(html, /for="target-a"/);
+});
+
+test("hedef fiyat alanı Türkçe yazılan tutarı kuruşa çevirir", () => {
+  assert.equal(parseMoneyInput("74,50"), 7450);
+  assert.equal(parseMoneyInput("74.50"), 7450);
+  assert.equal(parseMoneyInput(" 1.250,00 "), 125000);
+  assert.equal(parseMoneyInput("120"), 12000);
+  assert.equal(parseMoneyInput(""), null);
+  assert.equal(parseMoneyInput("abc"), null);
+  assert.equal(parseMoneyInput("-5"), null);
+  assert.equal(parseMoneyInput("0"), null);
+});
+
+test("teklif sohbeti yalnız sahibine açılır", () => {
+  const panel = (quote: PresentedQuote) => inLocale(createElement(QuoteChatPanel, { quote }));
+  assert.match(panel(pricedQuote()), /Teklif sohbeti/);
+  assert.equal(
+    panel(
+      pricedQuote({
+        viewer: {
+          canSeePrices: true,
+          canEdit: false,
+          isOwner: false,
+          isShare: true,
+          isAdmin: false,
+        },
+      })
+    ),
+    "",
+    "paylaşım izleyicisine sohbet açılmış"
+  );
+});
+
+// ─── Belge / proforma ───────────────────────────────────────────────────────
+
+const BANK_FIXTURE = {
+  bankName: "Ziraat Bankası",
+  accountHolder: "Figurunica",
+  iban: "TR33 0006 1005 1978 6457 8413 26",
+  branch: "Etimesgut",
+};
+
+function renderDocument(quote: PresentedQuote): string {
+  return inLocale(createElement(QuoteDocument, { quote, bank: BANK_FIXTURE }));
+}
+
+test("belge teklifin kimliğini, parçalarını ve geçerliliğini yazar", () => {
+  const html = renderDocument(pricedQuote({ poNumber: "SATINALMA-77", title: "Kalıp seti" }));
+  assert.match(html, /Figurunica/);
+  assert.match(html, /8841014310/, "satıcı VKN'si yok");
+  assert.match(html, /T-000123/);
+  assert.match(html, /SATINALMA-77/);
+  assert.match(html, /Braket/);
+  assert.match(html, /FDM/);
+  assert.match(html, /PLA/);
+  assert.match(html, /120 × 80 × 40 mm/);
+  assert.match(html, /Bu teklif 20 Ekim 2026 tarihine kadar geçerlidir\./);
+});
+
+test("belge toplamı KDV dökümüyle ve havale bilgileriyle kapatır", () => {
+  const html = renderDocument(pricedQuote());
+  assert.match(html, /148,00/, "toplam yok");
+  assert.match(html, /120,00/, "KDV hariç tutar yok");
+  assert.match(html, /28,00/, "KDV tutarı yok");
+  assert.match(html, /KDV dahil/);
+  assert.match(html, /Proforma \/ Havale bilgileri/);
+  assert.match(html, /TR33 0006 1005 1978 6457 8413 26/);
+  assert.match(html, /Ziraat Bankası/);
+  // Havale açıklaması teklif numarasıdır: müşteri parayı yollarken bunu yazar.
+  assert.match(html, /Açıklama/);
+});
+
+test("belge fiyat kapısını aynen uygular ve imzalı model adresi taşımaz", () => {
+  const html = renderDocument(quoteFixture());
+  assert.doesNotMatch(html, /₺\s?\d/, "kapının arkasından belgeye rakam sızdı");
+  assert.match(html, /Fiyatları görmek için giriş yapın/);
+  // Belge paylaşılan bir çıktıdır: imzalı GLB / kaynak adresi ASLA girmez.
+  assert.doesNotMatch(html, /\.glb/);
+});
+
+test("belgenin yazdırma düğmesi çıktıya girmez", () => {
+  const html = inLocale(createElement(QuoteDocumentPrintButton, {}));
+  assert.match(html, /no-print/, "yazdır düğmesi çıktıdan gizlenmemiş");
+  assert.match(html, /Yazdır \/ PDF/);
 });

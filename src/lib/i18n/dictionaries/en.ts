@@ -1010,6 +1010,8 @@ const en = {
   // instantQuote — add-ons
   "instantQuote.addons.leadExtra": "+{days} business days",
   "instantQuote.addons.none": "No add-ons available.",
+  "instantQuote.addons.perPart": "per part",
+  "instantQuote.addons.perUnit": "per unit",
   "instantQuote.addons.title": "Add-ons",
 
   // instantQuote — bulk action bar
@@ -1087,6 +1089,7 @@ const en = {
   // instantQuote — printable quote document (/teklif/<no>/belge)
   "instantQuote.document.accountHolder": "Account holder",
   "instantQuote.document.bank": "Bank",
+  "instantQuote.document.branch": "Branch",
   "instantQuote.document.column.line": "Amount",
   "instantQuote.document.column.part": "Part",
   "instantQuote.document.column.quantity": "Qty",
@@ -1272,6 +1275,8 @@ const en = {
   "instantQuote.workspace.banner.expired": "This quote expired — reprice it.",
   "instantQuote.workspace.banner.locked": "A payment is pending for this quote.",
   "instantQuote.workspace.banner.lockedAction": "Continue to payment",
+  "instantQuote.workspace.banner.mixedTechnologies":
+    "This quote mixes several printing technologies — split it so you can follow each one separately.",
   "instantQuote.workspace.banner.ordered": "This quote became an order.",
   "instantQuote.workspace.banner.orderedAction": "Track the order",
   "instantQuote.workspace.banner.readOnly":
@@ -1284,6 +1289,8 @@ const en = {
   "instantQuote.workspace.expiresAt": "Valid until",
   "instantQuote.workspace.reprice": "Reprice",
   "instantQuote.workspace.review.note": "Your note",
+  "instantQuote.workspace.review.noteTooShort":
+    "Describe your request in at least {min} characters.",
   "instantQuote.workspace.review.sent":
     "We got your request — our team will get back to you shortly.",
   "instantQuote.workspace.review.submit": "Send",
@@ -1292,6 +1299,7 @@ const en = {
     "Tell us your delivery plan and quantities; we reply within 24–48 hours.",
   "instantQuote.workspace.rfq.title": "Volume quote",
   "instantQuote.workspace.share": "Share",
+  "instantQuote.workspace.split.done": "Quote split. New quotes: {numbers}",
   "instantQuote.workspace.target.hint":
     "Enter the unit price you are aiming for, per part.",
   "instantQuote.workspace.target.title": "Suggest a target price",

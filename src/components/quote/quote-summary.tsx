@@ -1,0 +1,355 @@
+"use client";
+
+import Link from "next/link";
+import { useSyncExternalStore, type JSX, type ReactNode } from "react";
+import { Card, Textarea } from "@/components/ui";
+import { KDV_RATE_BPS } from "@/lib/config/prices";
+import type { PresentedQuote, QuoteTotals, ReviewKind } from "@/lib/config/quote-types";
+import { formatCurrency } from "@/lib/i18n/format";
+import { useDictionary } from "@/lib/i18n/locale-context";
+import type { QuotePatch } from "@/lib/quote/client-api";
+import { AddonsPicker } from "./addons-picker";
+import { fill } from "./format";
+import { LeadTierPicker } from "./lead-tier-picker";
+
+/**
+ * Teklif özeti — sağ sütunun yapışkan paneli.
+ *
+ * Panelin işi bir fişin işidir: müşteri "ne alıyorum, ne kadar tutuyor, neden
+ * henüz ödeyemiyorum" sorularının üçünü de tek bakışta okumalı. Bu yüzden
+ * engeller (blockers) gizlenmez — kapalı bir "Ödemeye geç" düğmesi sebebini
+ * söylemeden durduğunda müşterinin yapabileceği tek şey destek hattını
+ * aramaktır.
+ *
+ * **Hiçbir tutar burada hesaplanmaz.** Toplam da, KDV hariç tutar da, KDV de
+ * `PresentedQuote.totals` içinde sunucudan gelir; fiyat kapısını geçmemiş
+ * izleyicinin gövdesinde bu alan HİÇ YOKTUR (`presentQuote`), bu yüzden
+ * ekranda gösterilecek bir rakam da yoktur.
+ */
+
+/** KDV tercihi tarayıcıda saklanır; teklifin kendisine yazılmaz. */
+export const KDV_PREF_KEY = "figurunica.quote.kdvExcluded";
+
+/**
+ * Tercih bir DIŞ DEPODUR (localStorage), React durumu değil. `useState` +
+ * `useEffect` ile kopyalansaydı sunucunun ürettiği işaretleme ile tarayıcınınki
+ * ilk boyamada ayrışır, tutar bir an yanlış görünürdü. `useSyncExternalStore`
+ * bunun için var: sunucu anlık görüntüsü "KDV dahil", tarayıcıdaki gerçek
+ * değer ilk boyamadan itibaren geçerli.
+ */
+const prefListeners = new Set<() => void>();
+
+function subscribeKdvPref(onChange: () => void): () => void {
+  prefListeners.add(onChange);
+  return () => {
+    prefListeners.delete(onChange);
+  };
+}
+
+/**
+ * Hangi tutar gösterilecek. İki rakam da sunucudan gelir — burada bölme,
+ * çarpma ya da oran YOKTUR: KDV oranı bir gün değişirse ekran yanlış rakam
+ * basmakla kalmaz, sunucunun yazdığı tutardan da ayrışırdı.
+ */
+export function displayedTotalKurus(totals: QuoteTotals, kdvExcluded: boolean): number {
+  return kdvExcluded ? totals.kdvExcludedKurus : totals.totalKurus;
+}
+
+/**
+ * Tercihi okur. Gizli sekmede ve site verisi engellenmiş tarayıcıda
+ * `localStorage` erişimi ATAR; bir gösterim kolaylığı yüzünden teklif ekranı
+ * çökmemeli, bu yüzden her okuma/yazma kendi `try` bloğundadır.
+ */
+export function readKdvExcludedPref(storage: Storage | null): boolean {
+  try {
+    return storage?.getItem(KDV_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeKdvExcludedPref(storage: Storage | null, excluded: boolean): void {
+  try {
+    storage?.setItem(KDV_PREF_KEY, excluded ? "1" : "0");
+  } catch {
+    // Tercih kaydedilemedi; ekran çalışmaya devam eder.
+  }
+}
+
+/** `window.localStorage`'a erişimin KENDİSİ atabilir (engellenmiş site verisi). */
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Seçilen değer bellekte de tutulur: yazma başarısız olsa bile (gizli sekme)
+ * anahtar ÇALIŞMALIDIR. Yalnız depoya güvenseydik, yazamayan tarayıcıda
+ * düğmeye basan müşteri hiçbir şeyin değişmediğini görürdü.
+ */
+let cachedPref: boolean | null = null;
+
+function getKdvPref(): boolean {
+  if (typeof window === "undefined") return false;
+  if (cachedPref === null) cachedPref = readKdvExcludedPref(browserStorage());
+  return cachedPref;
+}
+
+function setKdvPref(excluded: boolean): void {
+  cachedPref = excluded;
+  writeKdvExcludedPref(browserStorage(), excluded);
+  for (const listener of prefListeners) listener();
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-sm text-text-secondary">{label}</dt>
+      <dd className="text-sm tabular-nums text-text-secondary">{children}</dd>
+    </div>
+  );
+}
+
+export interface QuoteSummaryProps {
+  quote: PresentedQuote;
+  busy?: boolean;
+  onPatch: (patch: QuotePatch) => void;
+  /**
+   * İnceleme diyaloğunu AÇAR, kendisi çizmez: bütün modallar çalışma alanının
+   * kökünde durur (bkz. `workspace-client.tsx`). Bir `position: fixed` diyalog
+   * dönüşüm uygulanmış bir atanın içinde kalırsa ekranın ortasına değil kartın
+   * içine yapışır; kökte duran modal bu tuzağı hiç göremez.
+   */
+  onRequestReview: (kind: ReviewKind) => void;
+  onRequestPrices: () => void;
+}
+
+export function QuoteSummary({
+  quote,
+  busy,
+  onPatch,
+  onRequestReview,
+  onRequestPrices,
+}: QuoteSummaryProps): JSX.Element {
+  const d = useDictionary();
+  // Sunucu anlık görüntüsü her zaman "KDV dahil": tercih yalnız tarayıcıda
+  // yaşar ve sunucu onu bilemez.
+  const kdvExcluded = useSyncExternalStore(subscribeKdvPref, getKdvPref, () => false);
+
+  const { viewer, totals, readiness } = quote;
+  // `viewer.canEdit` ERİŞİM hakkıdır (sahip mi, paylaşım mı); `locked` ise
+  // teklifin DURUMUDUR (siparişe dönmüş, süresi dolmuş, ödeme sürüyor).
+  // Yazan her denetim ikisini birden sormak zorunda.
+  const editable = viewer.canEdit && !quote.locked;
+  const canRequestReview = editable && quote.status !== "needs_review" && quote.parts.length > 0;
+  const showRfq =
+    canRequestReview && quote.quoteIssues.some((issue) => issue.code === "qty_over_auto");
+
+  return (
+    <Card padding="none" className="overflow-hidden">
+      <div className="border-b border-border-default px-4 py-3">
+        <h2 className="text-sm font-semibold text-text-primary">
+          {d["instantQuote.summary.title"]}
+        </h2>
+      </div>
+
+      <div className="space-y-5 px-4 py-4">
+        <LeadTierPicker
+          options={quote.leadOptions}
+          value={quote.leadTier}
+          shipByDate={quote.shipByDate}
+          disabled={!editable || busy}
+          onChange={(leadTier) => onPatch({ leadTier })}
+        />
+
+        <AddonsPicker
+          addons={quote.catalog.addons}
+          selected={quote.addonKeys}
+          disabled={!editable || busy}
+          onChange={(addonKeys) => onPatch({ addonKeys })}
+        />
+
+        {/* ── Fiş ───────────────────────────────────────────────────────── */}
+        <div className="space-y-2 border-t border-border-default pt-4">
+          <p className="text-xs text-text-muted">
+            {fill(d["instantQuote.summary.parts"], {
+              parts: quote.partCount,
+              units: quote.unitCount,
+            })}
+          </p>
+
+          <dl className="space-y-1.5">
+            <Row label={d["instantQuote.summary.partsSubtotal"]}>
+              {totals ? (
+                formatCurrency(totals.partsKurus, "tr")
+              ) : (
+                <span className="font-mono text-text-muted">{d["instantQuote.price.hidden"]}</span>
+              )}
+            </Row>
+
+            {totals?.addonLines.map((line) => (
+              <Row key={line.key} label={line.name}>
+                {formatCurrency(line.kurus, "tr")}
+              </Row>
+            ))}
+
+            {totals && totals.minOrderTopUpKurus > 0 && (
+              <Row label={d["instantQuote.summary.minOrderTopUp"]}>
+                {formatCurrency(totals.minOrderTopUpKurus, "tr")}
+              </Row>
+            )}
+          </dl>
+
+          <p className="text-xs text-text-muted">{d["instantQuote.summary.freeShipping"]}</p>
+        </div>
+
+        {/* ── Toplam ────────────────────────────────────────────────────── */}
+        <div className="border-t border-border-default pt-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm font-medium text-text-primary">
+              {d["instantQuote.summary.total"]}
+            </span>
+            <span className="text-xl font-semibold tabular-nums text-text-primary">
+              {totals ? (
+                formatCurrency(displayedTotalKurus(totals, kdvExcluded), "tr")
+              ) : (
+                <span className="font-mono text-text-muted">{d["instantQuote.price.hidden"]}</span>
+              )}
+            </span>
+          </div>
+
+          {totals ? (
+            <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-xs text-text-muted">
+                {kdvExcluded
+                  ? d["instantQuote.summary.kdvExcluded"]
+                  : d["instantQuote.summary.kdvIncluded"]}
+                {" · "}
+                {fill(d["instantQuote.summary.kdv"], { rate: KDV_RATE_BPS / 100 })}{" "}
+                <span className="tabular-nums">{formatCurrency(totals.kdvKurus, "tr")}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setKdvPref(!kdvExcluded)}
+                className="text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary"
+              >
+                {kdvExcluded
+                  ? d["instantQuote.summary.kdvToggleIncluded"]
+                  : d["instantQuote.summary.kdvToggleExcluded"]}
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-text-muted">
+              {d["instantQuote.summary.priceHidden"]}
+            </p>
+          )}
+        </div>
+
+        {/* ── Engeller ──────────────────────────────────────────────────── */}
+        {readiness.blockers.length > 0 && (
+          <div className="rounded-xl border border-border-default bg-bg-muted px-3 py-2.5">
+            <p className="text-xs font-medium text-text-secondary">
+              {d["instantQuote.summary.checkoutBlocked"]}
+            </p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-text-secondary">
+              {readiness.blockers.map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* ── Ödeme ─────────────────────────────────────────────────────── */}
+        {!viewer.canSeePrices ? (
+          // Kapı kapalıyken düğme ödemeye değil kapıya götürür: müşteri önce
+          // ne ödeyeceğini görmeli.
+          <button type="button" onClick={onRequestPrices} className="btn-primary w-full">
+            {d["instantQuote.summary.checkout"]}
+          </button>
+        ) : readiness.canCheckout ? (
+          <Link
+            href={`/teklif/${encodeURIComponent(quote.number)}/odeme`}
+            className="btn-primary block w-full text-center"
+          >
+            {d["instantQuote.summary.checkout"]}
+          </Link>
+        ) : (
+          <button type="button" disabled className="btn-primary w-full opacity-50">
+            {d["instantQuote.summary.checkout"]}
+          </button>
+        )}
+
+        {/* ── İnceleme talepleri ────────────────────────────────────────── */}
+        {canRequestReview && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+            <button
+              type="button"
+              onClick={() => onRequestReview("manual")}
+              className="text-text-secondary underline underline-offset-2 hover:text-text-primary"
+            >
+              {d["instantQuote.summary.requestManual"]}
+            </button>
+            <button
+              type="button"
+              onClick={() => onRequestReview("target_price")}
+              className="text-text-secondary underline underline-offset-2 hover:text-text-primary"
+            >
+              {d["instantQuote.summary.targetPrice"]}
+            </button>
+            {showRfq && (
+              <button
+                type="button"
+                onClick={() => onRequestReview("rfq")}
+                className="text-text-secondary underline underline-offset-2 hover:text-text-primary"
+              >
+                {d["instantQuote.summary.rfq"]}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Not ve satın alma emri ────────────────────────────────────── */}
+        {editable && (
+          <div className="space-y-3 border-t border-border-default pt-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-text-secondary">
+                {d["instantQuote.summary.note"]}
+              </span>
+              <Textarea
+                rows={3}
+                defaultValue={quote.customerNote ?? ""}
+                placeholder={d["instantQuote.summary.notePlaceholder"]}
+                disabled={busy}
+                onBlur={(e) => {
+                  const value = e.target.value.trim();
+                  if (value !== (quote.customerNote ?? "")) {
+                    onPatch({ customerNote: value || null });
+                  }
+                }}
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-text-secondary">
+                {d["instantQuote.summary.poNumber"]}
+              </span>
+              <input
+                type="text"
+                defaultValue={quote.poNumber ?? ""}
+                disabled={busy}
+                className="input-base !py-2 !text-sm"
+                onBlur={(e) => {
+                  const value = e.target.value.trim();
+                  if (value !== (quote.poNumber ?? "")) onPatch({ poNumber: value || null });
+                }}
+              />
+            </label>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}

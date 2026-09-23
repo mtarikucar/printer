@@ -1011,6 +1011,8 @@ const tr: Dictionary = {
   // instantQuote — ek hizmetler
   "instantQuote.addons.leadExtra": "+{days} iş günü",
   "instantQuote.addons.none": "Ek hizmet yok.",
+  "instantQuote.addons.perPart": "parça başına",
+  "instantQuote.addons.perUnit": "adet başına",
   "instantQuote.addons.title": "Ek hizmetler",
 
   // instantQuote — toplu işlem çubuğu
@@ -1088,6 +1090,7 @@ const tr: Dictionary = {
   // instantQuote — yazdırılabilir teklif belgesi (/teklif/<no>/belge)
   "instantQuote.document.accountHolder": "Hesap sahibi",
   "instantQuote.document.bank": "Banka",
+  "instantQuote.document.branch": "Şube",
   "instantQuote.document.column.line": "Tutar",
   "instantQuote.document.column.part": "Parça",
   "instantQuote.document.column.quantity": "Adet",
@@ -1273,6 +1276,8 @@ const tr: Dictionary = {
   "instantQuote.workspace.banner.expired": "Teklifin süresi doldu — yeniden fiyatlayın.",
   "instantQuote.workspace.banner.locked": "Bu teklif için bekleyen bir ödeme var.",
   "instantQuote.workspace.banner.lockedAction": "Ödemeye devam et",
+  "instantQuote.workspace.banner.mixedTechnologies":
+    "Bu teklifte birden fazla baskı teknolojisi var — ayrı tekliflere bölerek her birini ayrı takip edebilirsiniz.",
   "instantQuote.workspace.banner.ordered": "Bu teklif siparişe dönüştü.",
   "instantQuote.workspace.banner.orderedAction": "Siparişi takip et",
   "instantQuote.workspace.banner.readOnly":
@@ -1285,6 +1290,8 @@ const tr: Dictionary = {
   "instantQuote.workspace.expiresAt": "Geçerlilik",
   "instantQuote.workspace.reprice": "Yeniden fiyatla",
   "instantQuote.workspace.review.note": "Notunuz",
+  "instantQuote.workspace.review.noteTooShort":
+    "Talebinizi en az {min} karakterle anlatın.",
   "instantQuote.workspace.review.sent":
     "Talebiniz alındı — ekibimiz en kısa sürede dönecek.",
   "instantQuote.workspace.review.submit": "Gönder",
@@ -1293,6 +1300,7 @@ const tr: Dictionary = {
     "Teslim planınızı ve adetleri yazın; 24–48 saat içinde dönüyoruz.",
   "instantQuote.workspace.rfq.title": "Yüksek hacim teklifi",
   "instantQuote.workspace.share": "Paylaş",
+  "instantQuote.workspace.split.done": "Teklif bölündü. Yeni teklifler: {numbers}",
   "instantQuote.workspace.target.hint":
     "Parça başına hedeflediğiniz birim fiyatı yazın.",
   "instantQuote.workspace.target.title": "Hedef fiyat öner",

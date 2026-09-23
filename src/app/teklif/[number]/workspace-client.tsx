@@ -5,6 +5,7 @@ import type {
   PresentedCatalog,
   PresentedPart,
   PresentedQuote,
+  ReviewKind,
 } from "@/lib/config/quote-types";
 import { track } from "@/lib/analytics/client";
 import { QuoteBulkBar } from "@/components/quote/bulk-bar";
@@ -14,7 +15,12 @@ import { QuotePartCard } from "@/components/quote/part-card";
 import { QuotePartConfigPanel } from "@/components/quote/part-config-panel";
 import { QuotePartViewerModal } from "@/components/quote/part-viewer-modal";
 import { PriceGateModal } from "@/components/quote/price-gate-modal";
+import { QuoteBanners } from "@/components/quote/quote-banners";
+import { QuoteChatPanel } from "@/components/quote/quote-chat-panel";
 import { QuoteHeader } from "@/components/quote/quote-header";
+import { QuoteSummary } from "@/components/quote/quote-summary";
+import { QuoteReviewDialog } from "@/components/quote/review-request-dialog";
+import { QuoteShareDialog } from "@/components/quote/share-dialog";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import {
   QuoteApiError,
@@ -155,43 +161,42 @@ export function createResponseOrder(): QuoteResponseOrder {
 }
 
 /**
- * 3.2b yuvası — teklif özeti (teslim kademesi, ek hizmetler, toplamlar,
- * "Ödemeye geç", manuel teklif / hedef fiyat / RFQ, not, PO).
- * TODO(Görev 3.2b): `quote-summary.tsx` bu yuvayı doldurur; kabuk düzeni
- * (sağ sütun, yapışkan) hazır.
+ * Başlık eylemleri: teklif sohbeti ve paylaşım bağlantısı.
+ *
+ * İkisi de YALNIZ sahibindir — paylaşım bağlantısıyla gelen ziyaretçi ne
+ * yazışmayı okuyabilir ne de bağlantıyı başkasına devredebilir; uçlar da bunu
+ * böyle uyguluyor (`messages` sahiplik arar, `share` düzenleme hakkı arar).
  */
-function QuoteSummarySlot(props: {
+function QuoteHeaderActions({
+  quote,
+  onQuoteChanged,
+}: {
   quote: PresentedQuote;
   onQuoteChanged: (quote: PresentedQuote) => void;
-  onRequestPrices: () => void;
 }): JSX.Element | null {
-  void props; // 3.2b bu propları kullanacak; imza şimdiden sabit.
-  return null;
-}
+  const d = useDictionary();
+  const [shareOpen, setShareOpen] = useState(false);
 
-/**
- * 3.2b yuvası — bant satırı (katalog güncellendi / süre doldu / bekleyen
- * ödeme / siparişe dönüştü / incelemede) ve "Yeniden fiyatla" eylemi.
- * TODO(Görev 3.2b): bantlar buraya girer.
- */
-function QuoteBannerSlot(props: {
-  quote: PresentedQuote;
-  onQuoteChanged: (quote: PresentedQuote) => void;
-}): JSX.Element | null {
-  void props;
-  return null;
-}
+  if (!quote.viewer.isOwner) return null;
 
-/**
- * 3.2b yuvası — başlıktaki paylaşım diyaloğu ve teklif sohbeti düğmeleri.
- * TODO(Görev 3.2b): `share-dialog.tsx` + `quote-chat-panel.tsx` buraya girer.
- */
-function QuoteHeaderActionsSlot(props: {
-  quote: PresentedQuote;
-  onQuoteChanged: (quote: PresentedQuote) => void;
-}): JSX.Element | null {
-  void props;
-  return null;
+  return (
+    <>
+      <QuoteChatPanel quote={quote} />
+      <button
+        type="button"
+        onClick={() => setShareOpen(true)}
+        className="btn-secondary !px-4 !py-2 text-xs"
+      >
+        {d["instantQuote.workspace.share"]}
+      </button>
+      <QuoteShareDialog
+        open={shareOpen}
+        quote={quote}
+        onClose={() => setShareOpen(false)}
+        onQuoteChanged={onQuoteChanged}
+      />
+    </>
+  );
 }
 
 /** SSE olaylarını yeniden çekmeye çeviren görünmez dinleyici. */
@@ -230,6 +235,9 @@ export function QuoteWorkspaceClient({
   const [viewerPartId, setViewerPartId] = useState<string | null>(null);
   const [configPartId, setConfigPartId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  // İnceleme diyaloğu (manuel / RFQ / hedef fiyat) özetten AÇILIR ama burada,
+  // diğer bütün modallarla aynı yerde çizilir.
+  const [reviewKind, setReviewKind] = useState<ReviewKind | null>(null);
 
   const { viewer, catalog } = quote;
   const canEdit = viewer.canEdit && !readOnly;
@@ -471,12 +479,12 @@ export function QuoteWorkspaceClient({
         quote={quote}
         onPatch={patchQuote}
         shareToken={shareToken}
-        actions={<QuoteHeaderActionsSlot quote={quote} onQuoteChanged={apply} />}
+        actions={<QuoteHeaderActions quote={quote} onQuoteChanged={apply} />}
       />
 
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-5">
-          <QuoteBannerSlot quote={quote} onQuoteChanged={apply} />
+          <QuoteBanners quote={quote} shareToken={shareToken} onQuoteChanged={apply} />
 
           {readOnly && (
             <p className="rounded-xl border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-ink-2">
@@ -582,9 +590,11 @@ export function QuoteWorkspaceClient({
         </div>
 
         <aside className="lg:sticky lg:top-6 lg:self-start">
-          <QuoteSummarySlot
+          <QuoteSummary
             quote={quote}
-            onQuoteChanged={apply}
+            busy={busy}
+            onPatch={patchQuote}
+            onRequestReview={setReviewKind}
             onRequestPrices={() => setGateOpen(true)}
           />
         </aside>
@@ -602,6 +612,16 @@ export function QuoteWorkspaceClient({
         onPatch={patchPart}
         onQuoteChanged={apply}
       />
+      {reviewKind && (
+        <QuoteReviewDialog
+          open
+          kind={reviewKind}
+          quote={quote}
+          shareToken={shareToken}
+          onClose={() => setReviewKind(null)}
+          onQuoteChanged={apply}
+        />
+      )}
       <PriceGateModal
         open={gateOpen}
         onClose={() => setGateOpen(false)}

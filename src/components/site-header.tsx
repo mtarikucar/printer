@@ -25,16 +25,29 @@ export function SiteHeader() {
   const [authLoading, setAuthLoading] = useState(true);
   const [rootCats, setRootCats] = useState<{ path: string; name: string }[]>([]);
 
+  // Oturum durumu bir kez okunur — ama sayfa yenilenmeden oturum AÇILABİLİR
+  // (fiyat kapısı modalı, `price-gate-modal.tsx`). O zaman kullanıcı giriş
+  // yapmış olmasına rağmen üstte hâlâ "Giriş yap" durur. Modal işi bitince
+  // `figurunica:auth-changed` yayar, menü de kendini burada tazeler.
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          setUser(data.user);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setAuthLoading(false));
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) setUser(data?.user ?? null);
+      } catch {
+        // Ağ hatası oturumu DÜŞÜRMEZ: elde olan kullanıcı korunur.
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    };
+    load();
+    window.addEventListener("figurunica:auth-changed", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("figurunica:auth-changed", load);
+    };
   }, []);
 
   // Top-level categories for the "Pazaryeri" dropdown — data-driven from the
@@ -96,6 +109,8 @@ export function SiteHeader() {
         { href: "/create?path=photo", label: d["create.path.photo.title"] },
         { href: "/create?path=design", label: d["create.path.design.title"] },
         { href: "/create?path=upload", label: d["create.path.upload.title"] },
+        // Hazır modeli olan ziyaretçinin yolu: anlık fiyat + sipariş.
+        { href: "/3d-baski", label: d["instantQuote.nav.link"] },
       ],
     },
     {
@@ -341,6 +356,28 @@ export function SiteHeader() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                   {d["nav.myAccount"]}
+                </Link>
+                {/* Masaüstündeki kullanıcı menüsüyle aynı iki sayfa; mobilde
+                    o menü yok, bağlantılar buradan verilmezse ulaşılamaz. */}
+                <Link
+                  href="/account/teklifler"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-3 py-3 px-4 rounded-xl text-sm font-medium text-text-secondary hover:bg-bg-elevated transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  {d["instantQuote.account.quotes.title"]}
+                </Link>
+                <Link
+                  href="/account/parcalar"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-3 py-3 px-4 rounded-xl text-sm font-medium text-text-secondary hover:bg-bg-elevated transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                  {d["instantQuote.account.parts.title"]}
                 </Link>
                 <Link
                   href="/create"

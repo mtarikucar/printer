@@ -93,6 +93,10 @@ const DISALLOW = [
   "/track/",
   "/havale/",
   "/quote/",
+  // Instant-quote workspace, checkout and document. Private per customer and
+  // reachable by guessing a T-number. The landing page `/3d-baski` sits on its
+  // own prefix precisely so this block cannot reach it.
+  "/teklif/",
   "/yolculuk/",
   "/atolye/katil/",
   "/reset-password/",

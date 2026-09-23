@@ -36,22 +36,23 @@ async function handlePOST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { email, password } = body;
+    const { email: rawEmail, password } = body;
 
-    if (!email || !password) {
+    if (!rawEmail || !password) {
       return NextResponse.json(
         { error: d["api.auth.emailPasswordRequired"] },
         { status: 400 }
       );
     }
 
+    // One spelling for the lookup, the rate-limit bucket and every log line.
+    // Registration and guest checkout both store the lowercase form, so a
+    // capitalised login used to miss the row and answer "invalid credentials".
+    const email = String(rawEmail).trim().toLowerCase();
+
     // Per-email cap (narrow brute force / credential stuffing) — distinct
     // bucket so we throttle attackers regardless of IP rotation.
-    const rlEmail = await rateLimitAsync(
-      `login:email:${String(email).toLowerCase()}`,
-      8,
-      15 * 60 * 1000
-    );
+    const rlEmail = await rateLimitAsync(`login:email:${email}`, 8, 15 * 60 * 1000);
     if (!rlEmail.success) {
       return NextResponse.json(
         { error: "Too many login attempts. Please try again later." },

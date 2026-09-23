@@ -30,6 +30,11 @@ export const STATIC_ROUTES: Array<{
   // deliberately NOT at 0.9 — raise it once the page has a server shell.
   { path: "/create", changeFrequency: "weekly", priority: 0.5 },
   { path: "/figur", changeFrequency: "weekly", priority: 0.8 },
+  // Instant 3D-printing quote: the service landing page and its material
+  // library. Both are server-rendered with catalogue numbers, which is what
+  // makes them worth crawling; the quote workspace itself is noindex.
+  { path: "/3d-baski", changeFrequency: "weekly", priority: 0.9 },
+  { path: "/3d-baski/malzemeler", changeFrequency: "monthly", priority: 0.7 },
   { path: "/urunler", changeFrequency: "weekly", priority: 0.7 },
   { path: "/nasil-calisir", changeFrequency: "monthly", priority: 0.7 },
   { path: "/toplu-siparis", changeFrequency: "monthly", priority: 0.6 },

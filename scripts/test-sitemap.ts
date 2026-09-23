@@ -15,6 +15,8 @@ test("her herkese açık sayfa sitemap'te", () => {
     "",
     "/shop",
     "/create",
+    "/3d-baski",
+    "/3d-baski/malzemeler",
     "/figur",
     "/urunler",
     "/nasil-calisir",

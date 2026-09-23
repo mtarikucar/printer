@@ -29,7 +29,12 @@ async function handlePOST(request: NextRequest) {
   }
 
   const registerSchema = z.object({
-    email: z.string().email(d["api.auth.emailInvalid"]),
+    // Trim + lowercase BEFORE the format check, so the stored value and every
+    // later lookup use one spelling. Guest checkout already lowercases
+    // (`resolveOrCreateGuestUser`), so without this "Ahmet@x.com" registers a
+    // SECOND row for a person who already has "ahmet@x.com" — and then can't
+    // sign in with either.
+    email: z.string().trim().toLowerCase().email(d["api.auth.emailInvalid"]),
     password: z.string().min(6, d["api.auth.passwordMin"]),
     fullName: z.string().min(1, d["api.auth.fullNameRequired"]).max(100),
     phone: phoneField(),

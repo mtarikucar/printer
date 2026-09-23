@@ -974,6 +974,327 @@ const tr: Dictionary = {
   "tracker.tracking": "Kargo Takip:",
   "tracker.trackOnYurtici": "Yurtici Kargo'da Takip Et",
 
+  // ══════════════════════════════════════════════════════════════════════
+  // instantQuote.* — Anlık teklif motoru · BLOK BAŞI
+  //
+  // Müşteri yüzeyinin (açılış, çalışma alanı, parça kartı, özet, fiyat
+  // kapısı modalı, ödeme, belge, hesap sayfaları) TÜM metinleri tek blokta
+  // ve alt grupları alfabetik durur. Yeni anahtar bu iki işaret ARASINA,
+  // kendi alt grubuna eklenir; blok bölünmez ve dosya sonuna taşınmaz
+  // (tr.ts + en.ts birebir aynı anahtar kümesini taşımak zorunda).
+  // ══════════════════════════════════════════════════════════════════════
+
+  // instantQuote — hesap sayfaları (/account/teklifler, /account/parcalar)
+  "instantQuote.account.parts.addToExisting": "Açık teklife ekle",
+  "instantQuote.account.parts.addToQuote": "Yeni teklife ekle",
+  "instantQuote.account.parts.empty": "Henüz model yüklemediniz.",
+  "instantQuote.account.parts.emptyAction": "İlk teklifinizi oluşturun",
+  "instantQuote.account.parts.loadFailed": "Parça kütüphanesi yüklenemedi.",
+  "instantQuote.account.parts.subtitle":
+    "Yüklediğiniz modeller burada duruyor; aynı dosya bir kez listelenir.",
+  "instantQuote.account.parts.title": "Parça kütüphanem",
+  "instantQuote.account.parts.useCount": "{count} teklifte kullanıldı",
+  "instantQuote.account.quotes.column.expiry": "Geçerlilik",
+  "instantQuote.account.quotes.column.number": "Teklif",
+  "instantQuote.account.quotes.column.parts": "Parça",
+  "instantQuote.account.quotes.column.status": "Durum",
+  "instantQuote.account.quotes.column.title": "Proje",
+  "instantQuote.account.quotes.column.total": "Tutar",
+  "instantQuote.account.quotes.empty": "Henüz teklifiniz yok.",
+  "instantQuote.account.quotes.emptyAction": "Teklif oluştur",
+  "instantQuote.account.quotes.loadFailed": "Teklifler yüklenemedi.",
+  "instantQuote.account.quotes.open": "Teklifi aç",
+  "instantQuote.account.quotes.orderLink": "Siparişi gör",
+  "instantQuote.account.quotes.subtitle": "Açık ve geçmiş tekliflerinizin tamamı.",
+  "instantQuote.account.quotes.title": "Tekliflerim",
+
+  // instantQuote — ek hizmetler
+  "instantQuote.addons.leadExtra": "+{days} iş günü",
+  "instantQuote.addons.none": "Ek hizmet yok.",
+  "instantQuote.addons.title": "Ek hizmetler",
+
+  // instantQuote — toplu işlem çubuğu
+  "instantQuote.bulk.apply": "Seçilenlere uygula",
+  "instantQuote.bulk.clear": "Seçimi temizle",
+  "instantQuote.bulk.color": "Renk",
+  "instantQuote.bulk.delete": "Seçilenleri sil",
+  "instantQuote.bulk.finish": "Yüzey",
+  "instantQuote.bulk.material": "Malzeme",
+  "instantQuote.bulk.quantity": "Adet",
+  "instantQuote.bulk.selectAll": "Hepsini seç",
+  "instantQuote.bulk.selected": "{count} parça seçildi",
+  "instantQuote.bulk.technology": "Teknoloji",
+
+  // instantQuote — teklif sohbeti
+  "instantQuote.chat.empty": "Henüz mesaj yok. Sorunuzu yazın, ekibimiz yanıtlasın.",
+  "instantQuote.chat.open": "Sohbeti aç",
+  "instantQuote.chat.placeholder": "Mesajınız",
+  "instantQuote.chat.send": "Gönder",
+  "instantQuote.chat.sendFailed": "Mesaj gönderilemedi.",
+  "instantQuote.chat.title": "Teklif sohbeti",
+
+  // instantQuote — ödeme sayfası (/teklif/<no>/odeme)
+  "instantQuote.checkout.backToQuote": "Teklife dön",
+  "instantQuote.checkout.failed": "Ödeme başlatılamadı. Lütfen tekrar deneyin.",
+  "instantQuote.checkout.invoice.companyName": "Firma unvanı",
+  "instantQuote.checkout.invoice.corporate": "Kurumsal",
+  "instantQuote.checkout.invoice.individual": "Bireysel",
+  "instantQuote.checkout.invoice.taxId": "VKN / TCKN",
+  "instantQuote.checkout.invoice.taxOffice": "Vergi dairesi",
+  "instantQuote.checkout.invoice.title": "Fatura bilgileri",
+  "instantQuote.checkout.poNumber": "Sipariş (PO) numaranız",
+  "instantQuote.checkout.poNumberHint": "Faturanızda ve teklif belgesinde görünür.",
+  "instantQuote.checkout.submit": "Siparişi tamamla",
+  "instantQuote.checkout.submitting": "Gönderiliyor…",
+  "instantQuote.checkout.summaryTitle": "Sipariş özeti",
+  "instantQuote.checkout.title": "Ödeme",
+  "instantQuote.checkout.versionMismatch":
+    "Teklif siz ödeme sayfasındayken değişti. Güncel tutarı görmek için sayfayı yenileyin.",
+
+  // instantQuote — DfM (üretilebilirlik) mesajları; kod + parametreler
+  // `quote-dfm.ts`'ten gelir, cümle BURADA kurulur.
+  "instantQuote.dfm.ack": "Uyarıları okudum",
+  "instantQuote.dfm.ackHint": "Ödemeye geçmeden önce üretim uyarılarını onaylayın.",
+  "instantQuote.dfm.analysis_failed": "Dosya okunamadı — lütfen yeniden yükleyin.",
+  "instantQuote.dfm.analysis_pending":
+    "Parça geometrisi inceleniyor — birkaç saniye içinde tamamlanır.",
+  "instantQuote.dfm.config_invalid":
+    "Seçtiğiniz malzeme artık katalogda yok — devam etmek için malzeme seçin.",
+  "instantQuote.dfm.finish_manual":
+    "Bu yüzey işlemi elle fiyatlanıyor; birim fiyatı ekibimiz girecek.",
+  "instantQuote.dfm.multiple_bodies":
+    "Model {count} ayrı gövdeden oluşuyor; hepsi birlikte basılır.",
+  "instantQuote.dfm.no_volume":
+    "Kapalı bir hacim ölçülemedi — modelin yüzeyleri kapalı olmalı.",
+  "instantQuote.dfm.not_watertight":
+    "Model tam kapalı değil; ağırlık onarılmış kopyadan tahmin edildi.",
+  "instantQuote.dfm.qty_over_auto":
+    "{quantity} adet anlık fiyat sınırının üzerinde (en fazla {maxQuantity}) — yüksek hacim teklifi isteyin.",
+  "instantQuote.dfm.qty_over_auto.total":
+    "Toplam tutar anlık teklif sınırını ({maxTotal}) aşıyor — ekibimizden teklif isteyin.",
+  "instantQuote.dfm.thin_walls":
+    "İnce duvar: {wallMm} mm ölçüldü, bu teknoloji için en az {minMm} mm gerekiyor.",
+  "instantQuote.dfm.title": "Üretim notları",
+  "instantQuote.dfm.tolerance_manual":
+    "Kritik tolerans işaretli — teknik çizimle birlikte elle fiyatlanır.",
+  "instantQuote.dfm.too_large":
+    "Parça baskı hacmine sığmıyor (en fazla {maxX} × {maxY} × {maxZ} mm).",
+  "instantQuote.dfm.too_large.fitScale": "Ölçeği {scale} yaparsanız sığar.",
+  "instantQuote.dfm.too_large.fitsTechnology": "{technology} ile basılabilir.",
+  "instantQuote.dfm.too_small":
+    "Parça çok küçük: en büyük boyut {largestMm} mm, en az {minMm} mm olmalı.",
+
+  // instantQuote — yazdırılabilir teklif belgesi (/teklif/<no>/belge)
+  "instantQuote.document.accountHolder": "Hesap sahibi",
+  "instantQuote.document.bank": "Banka",
+  "instantQuote.document.column.line": "Tutar",
+  "instantQuote.document.column.part": "Parça",
+  "instantQuote.document.column.quantity": "Adet",
+  "instantQuote.document.column.spec": "Özellikler",
+  "instantQuote.document.column.unit": "Birim fiyat",
+  "instantQuote.document.company": "Firma",
+  "instantQuote.document.customer": "Müşteri",
+  "instantQuote.document.iban": "IBAN",
+  "instantQuote.document.issuedAt": "Düzenleme tarihi",
+  "instantQuote.document.leadTime": "Teslim süresi",
+  "instantQuote.document.poNumber": "PO numarası",
+  "instantQuote.document.print": "Yazdır / PDF",
+  "instantQuote.document.proforma": "Proforma / Havale bilgileri",
+  "instantQuote.document.quoteNumber": "Teklif no",
+  "instantQuote.document.reference": "Açıklama",
+  "instantQuote.document.taxId": "VKN / TCKN",
+  "instantQuote.document.taxOffice": "Vergi dairesi",
+  "instantQuote.document.title": "Teklif belgesi",
+  "instantQuote.document.validUntil": "Bu teklif {date} tarihine kadar geçerlidir.",
+
+  // instantQuote — teslim kademesi
+  "instantQuote.lead.days": "{days} iş günü",
+  "instantQuote.lead.shipBy": "{date} tarihinde kargoda",
+  "instantQuote.lead.title": "Teslim süresi",
+  "instantQuote.lead.unavailable": "Fiyat çıkınca hesaplanır",
+
+  // instantQuote — fiyat kapısı modalı
+  "instantQuote.modal.close": "Kapat",
+  "instantQuote.modal.email": "E-posta",
+  "instantQuote.modal.emailExists": "Bu e-posta kayıtlı — şifrenizle giriş yapın.",
+  "instantQuote.modal.failed": "İşlem tamamlanamadı. Lütfen tekrar deneyin.",
+  "instantQuote.modal.forgotPassword": "Şifremi unuttum",
+  "instantQuote.modal.fullName": "Ad soyad",
+  "instantQuote.modal.google.login": "Google ile devam et",
+  "instantQuote.modal.google.register": "Google ile kayıt ol",
+  "instantQuote.modal.googleOnly":
+    "Bu hesap Google ile açılmış. Google ile devam edin ya da şifrenizi belirleyin.",
+  "instantQuote.modal.kvkkLink": "Gizlilik Politikası",
+  "instantQuote.modal.kvkkPrefix": "Kişisel verileriniz",
+  "instantQuote.modal.kvkkSuffix": "kapsamında işlenir.",
+  "instantQuote.modal.marketingConsent":
+    "Kampanya ve duyurulardan haberdar olmak istiyorum.",
+  "instantQuote.modal.marketingConsentLink": "Ticari ileti izni",
+  "instantQuote.modal.orEmail": "veya e-posta ile",
+  "instantQuote.modal.password": "Şifre",
+  "instantQuote.modal.passwordHint": "En az 6 karakter",
+  "instantQuote.modal.phone": "Telefon",
+  "instantQuote.modal.phoneInvalid": "Geçerli bir telefon numarası girin.",
+  "instantQuote.modal.rateLimited":
+    "Çok fazla deneme. Lütfen biraz sonra tekrar deneyin.",
+  "instantQuote.modal.subtitle":
+    "Parçalarınız ve ayarlarınız kayıtlı kalır, hesabınıza bağlanır.",
+  "instantQuote.modal.submitLogin": "Giriş yap ve fiyatı gör",
+  "instantQuote.modal.submitRegister": "Kayıt ol ve fiyatı gör",
+  "instantQuote.modal.submitting": "Gönderiliyor…",
+  "instantQuote.modal.tab.login": "Giriş yap",
+  "instantQuote.modal.tab.register": "Kayıt ol",
+  "instantQuote.modal.title.login": "Teklifinizi görmek için giriş yapın",
+  "instantQuote.modal.title.register": "Teklifinizi görmek için hesap açın",
+
+  // instantQuote — menü / bağlantı etiketi
+  "instantQuote.nav.link": "3D baskı teklifi",
+
+  // instantQuote — parça kartı ve özellik paneli
+  "instantQuote.part.analyzing": "Parça geometrisi inceleniyor…",
+  "instantQuote.part.badge.analyzing": "İnceleniyor",
+  "instantQuote.part.badge.failed": "Okunamadı",
+  "instantQuote.part.badge.manualPrice": "Manuel fiyat bekliyor",
+  "instantQuote.part.badge.manualPriced": "Elle fiyatlandı",
+  "instantQuote.part.bodyCount": "{count} gövde",
+  "instantQuote.part.config.color": "Renk",
+  "instantQuote.part.config.criticalTolerance": "Kritik tolerans (teknik çizim gerekir)",
+  "instantQuote.part.config.done": "Bitti",
+  "instantQuote.part.config.drawing": "Teknik çizim (PDF)",
+  "instantQuote.part.config.drawingRemove": "Kaldır",
+  "instantQuote.part.config.drawingUpload": "PDF yükle",
+  "instantQuote.part.config.edit": "Özellikleri düzenle",
+  "instantQuote.part.config.finish": "Yüzey işlemi",
+  "instantQuote.part.config.finishManualBadge": "Elle fiyatlanır",
+  "instantQuote.part.config.infill": "Doluluk",
+  "instantQuote.part.config.infillValue": "%{pct}",
+  "instantQuote.part.config.layer": "Katman",
+  "instantQuote.part.config.layerValue": "{um} µm",
+  "instantQuote.part.config.material": "Malzeme",
+  "instantQuote.part.config.materialPlaceholder": "Malzeme seçin",
+  "instantQuote.part.config.materialProperties": "Malzeme özellikleri",
+  "instantQuote.part.config.note": "Parça notu",
+  "instantQuote.part.config.notePlaceholder": "Üretim ekibine iletmek istedikleriniz",
+  "instantQuote.part.config.quantity": "Adet",
+  "instantQuote.part.config.technology": "Teknoloji",
+  "instantQuote.part.config.title": "Özellikler",
+  "instantQuote.part.delete": "Sil",
+  "instantQuote.part.deleteConfirm": "Bu parça teklifden silinsin mi?",
+  "instantQuote.part.dimensions": "{x} × {y} × {z} mm",
+  "instantQuote.part.duplicate": "Çoğalt",
+  "instantQuote.part.nameLabel": "Parça adı",
+  "instantQuote.part.rename": "Yeniden adlandır",
+  "instantQuote.part.scale": "Ölçek",
+  "instantQuote.part.units": "Birim",
+  "instantQuote.part.unitsSuggestion": "Bu dosya {units} olabilir — uygula",
+  "instantQuote.part.viewModel": "3B görüntüle",
+  "instantQuote.part.volume": "{cm3} cm³",
+
+  // instantQuote — fiyat alanları
+  "instantQuote.price.breaks": "Adet kademeleri",
+  "instantQuote.price.breaks.quantity": "Adet",
+  "instantQuote.price.breaks.unit": "Birim fiyat",
+  "instantQuote.price.hidden": "–₺–,––",
+  "instantQuote.price.line": "Satır toplamı",
+  "instantQuote.price.see": "Fiyatı gör",
+  "instantQuote.price.unit": "Birim fiyat",
+
+  // instantQuote — paylaşım bağlantısı
+  "instantQuote.share.copied": "Kopyalandı",
+  "instantQuote.share.copy": "Kopyala",
+  "instantQuote.share.create": "Paylaşım bağlantısı oluştur",
+  "instantQuote.share.description":
+    "Bağlantıyı alan kişi teklifi görebilir; fiyatlar yalnız giriş yapanlara açıktır.",
+  "instantQuote.share.none": "Paylaşım bağlantısı yok.",
+  "instantQuote.share.revoke": "Paylaşımı kapat",
+  "instantQuote.share.rotate": "Bağlantıyı yenile",
+  "instantQuote.share.title": "Teklifi paylaş",
+
+  // instantQuote — teklif durumu rozetleri (QUOTE_STATUSES ile birebir)
+  "instantQuote.status.cancelled": "İptal edildi",
+  "instantQuote.status.draft": "Taslak",
+  "instantQuote.status.expired": "Süresi doldu",
+  "instantQuote.status.needs_review": "İncelemede",
+  "instantQuote.status.ordered": "Siparişe dönüştü",
+  "instantQuote.status.quoted": "Teklif hazır",
+
+  // instantQuote — sağ panel (özet)
+  "instantQuote.summary.addons": "Ek hizmetler",
+  "instantQuote.summary.checkout": "Ödemeye geç",
+  "instantQuote.summary.checkoutBlocked": "Ödemeye geçmeden önce:",
+  "instantQuote.summary.freeShipping": "Kargo: Ücretsiz",
+  "instantQuote.summary.kdv": "KDV (%{rate})",
+  "instantQuote.summary.kdvExcluded": "KDV hariç",
+  "instantQuote.summary.kdvIncluded": "KDV dahil",
+  "instantQuote.summary.kdvToggleExcluded": "KDV hariç göster",
+  "instantQuote.summary.kdvToggleIncluded": "KDV dahil göster",
+  "instantQuote.summary.minOrderTopUp": "Asgari sipariş tamamlaması",
+  "instantQuote.summary.note": "Teklif notu",
+  "instantQuote.summary.notePlaceholder": "Bu teklifle ilgili notunuz",
+  "instantQuote.summary.parts": "{parts} parça ({units} adet)",
+  "instantQuote.summary.partsSubtotal": "Parçalar",
+  "instantQuote.summary.poNumber": "PO numarası",
+  "instantQuote.summary.priceHidden": "Fiyatları görmek için giriş yapın.",
+  "instantQuote.summary.requestManual": "Manuel teklif iste",
+  "instantQuote.summary.rfq": "Yüksek hacim teklifi (RFQ)",
+  "instantQuote.summary.splitByTechnology": "Teknolojiye göre ayır",
+  "instantQuote.summary.targetPrice": "Hedef fiyat öner",
+  "instantQuote.summary.title": "Teklif özeti",
+  "instantQuote.summary.total": "Toplam",
+
+  // instantQuote — yükleme onayı (teklif açılışında bir kez)
+  "instantQuote.terms.accept":
+    "Yüklediğim tasarımların haklarına sahibim; yasaklı ürün içermediğini ve dosyaların yalnızca atanan üretim ortağıyla paylaşılacağını kabul ediyorum.",
+
+  // instantQuote — dosya yükleme
+  "instantQuote.upload.browse": "Dosya seç",
+  "instantQuote.upload.cta": "Teklife parça ekle",
+  "instantQuote.upload.drop": "Dosyaları buraya bırakın",
+  "instantQuote.upload.failed": "{file} yüklenemedi. Lütfen tekrar deneyin.",
+  "instantQuote.upload.hint": "STL, OBJ veya 3MF · en fazla {maxMb} MB",
+  "instantQuote.upload.invalidFormat":
+    "{file}: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
+  "instantQuote.upload.processing": "İşleniyor…",
+  "instantQuote.upload.tooLarge": "{file}: dosya {maxMb} MB sınırını aşıyor.",
+  "instantQuote.upload.tooManyParts": "Bir teklifte en fazla {max} parça olabilir.",
+  "instantQuote.upload.uploading": "Yükleniyor…",
+
+  // instantQuote — çalışma alanı başlığı ve bantları
+  "instantQuote.workspace.banner.catalogChanged":
+    "Katalog güncellendi — güncel fiyatlar için yeniden fiyatlayın.",
+  "instantQuote.workspace.banner.expired": "Teklifin süresi doldu — yeniden fiyatlayın.",
+  "instantQuote.workspace.banner.locked": "Bu teklif için bekleyen bir ödeme var.",
+  "instantQuote.workspace.banner.lockedAction": "Ödemeye devam et",
+  "instantQuote.workspace.banner.ordered": "Bu teklif siparişe dönüştü.",
+  "instantQuote.workspace.banner.orderedAction": "Siparişi takip et",
+  "instantQuote.workspace.banner.readOnly":
+    "Bu teklif başka bir hesaba bağlı — yalnızca görüntüleyebilirsiniz.",
+  "instantQuote.workspace.banner.review":
+    "Teklifiniz ekibimizin incelemesinde. Fiyatlar hazır olduğunda e-posta göndereceğiz.",
+  "instantQuote.workspace.createdAt": "Oluşturma",
+  "instantQuote.workspace.document": "Belge / PDF",
+  "instantQuote.workspace.empty": "Bu teklifte henüz parça yok.",
+  "instantQuote.workspace.expiresAt": "Geçerlilik",
+  "instantQuote.workspace.reprice": "Yeniden fiyatla",
+  "instantQuote.workspace.review.note": "Notunuz",
+  "instantQuote.workspace.review.sent":
+    "Talebiniz alındı — ekibimiz en kısa sürede dönecek.",
+  "instantQuote.workspace.review.submit": "Gönder",
+  "instantQuote.workspace.review.title": "Manuel teklif iste",
+  "instantQuote.workspace.rfq.hint":
+    "Teslim planınızı ve adetleri yazın; 24–48 saat içinde dönüyoruz.",
+  "instantQuote.workspace.rfq.title": "Yüksek hacim teklifi",
+  "instantQuote.workspace.share": "Paylaş",
+  "instantQuote.workspace.target.hint":
+    "Parça başına hedeflediğiniz birim fiyatı yazın.",
+  "instantQuote.workspace.target.title": "Hedef fiyat öner",
+  "instantQuote.workspace.target.unit": "Hedef birim fiyat",
+  "instantQuote.workspace.titlePlaceholder": "Proje adı ekleyin",
+
+  // ══════════════════════════════════════════════════════════════════════
+  // instantQuote.* — BLOK SONU
+  // ══════════════════════════════════════════════════════════════════════
+
   // Admin - Login
   "admin.login.title": "Yönetici Girişi",
 

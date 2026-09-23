@@ -17,6 +17,9 @@ export type EventName =
   | "page_view"
   | "view_item"
   | "photo_upload"
+  | "quote_upload"
+  | "sign_up"
+  | "generate_lead"
   | "add_to_cart"
   | "begin_checkout"
   | "add_payment_info"
@@ -53,6 +56,27 @@ export const EVENTS: Record<EventName, EventDef> = {
   photo_upload: {
     client: { ga4: "photo_upload", meta: "PhotoUpload", tiktok: "PhotoUpload" },
     server: { ga4: null, meta: null, tiktok: null },
+  },
+  // Custom event: a CAD/mesh file was added to an instant quote. Same shape as
+  // `photo_upload` — client-only, because the browser is the only place that
+  // knows a person (not a retry, not a worker) started the upload.
+  quote_upload: {
+    client: { ga4: "quote_upload", meta: "QuoteUpload", tiktok: "QuoteUpload" },
+    server: { ga4: null, meta: null, tiktok: null },
+  },
+  // Account created. Fires where the account is actually created — today that
+  // is the browser (register form / price-gate modal), so the pixels get it
+  // client-side; there is no server duplicate to deduplicate against.
+  sign_up: {
+    client: { ga4: "sign_up", meta: "CompleteRegistration", tiktok: "CompleteRegistration" },
+    server: { ga4: null, meta: null, tiktok: null },
+  },
+  // Qualified lead = a manual quote / RFQ / target-price request. Server truth
+  // (the request is only real once the route accepted it), so GA4 is owned by
+  // the server and the client never fires it.
+  generate_lead: {
+    client: { ga4: null, meta: null, tiktok: null },
+    server: { ga4: "generate_lead", meta: "Lead", tiktok: "SubmitForm" },
   },
   add_to_cart: {
     client: { ga4: "add_to_cart", meta: "AddToCart", tiktok: "AddToCart" },

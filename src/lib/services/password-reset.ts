@@ -52,11 +52,32 @@ export async function issuePasswordResetToken(
 ): Promise<void> {
   const user = await db.query.users.findFirst({
     where: eq(users.email, email),
-    columns: { id: true, fullName: true, email: true, passwordHash: true },
+    columns: {
+      id: true,
+      fullName: true,
+      email: true,
+      passwordHash: true,
+      isGuest: true,
+    },
   });
   if (!user) return;
-  // Google-only accounts can't be reset via password — they sign in via OAuth.
-  if (!user.passwordHash) return;
+
+  if (!user.passwordHash) {
+    // Two very different rows share "no password hash", and only one of them
+    // is a dead end if we stop here:
+    //  - Google-only account → the person signs in with OAuth; there is
+    //    nothing to reset, so staying silent is correct.
+    //  - GUEST checkout account (`isGuest`) → they have no password to reset
+    //    and register answers 409 "email exists" while login answers "created
+    //    with Google". Returning here left them with NO way into their own
+    //    orders and quotes. Send the claim link instead: it lands on the same
+    //    /reset-password screen (`?claim=1`) where they set their FIRST
+    //    password, which is exactly what `consumePasswordResetToken` does.
+    if (!user.isGuest) return;
+    const { claimUrl } = await issueGuestClaimToken(user.id, appUrl);
+    await sendResetMail(user, claimUrl, "claim");
+    return;
+  }
 
   const { raw, hash } = newToken();
   const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
@@ -70,35 +91,60 @@ export async function issuePasswordResetToken(
     })
     .where(eq(users.id, user.id));
 
-  const resetUrl = `${appUrl}/reset-password/${encodeURIComponent(raw)}`;
+  await sendResetMail(user, `${appUrl}/reset-password/${encodeURIComponent(raw)}`, "reset");
+}
 
-  // Direct SMTP send (not queued) — password resets are time-sensitive and
-  // we want the email to land within seconds. If SMTP is down we log but
-  // don't throw; the user sees a generic "we sent an email if you have an
-  // account" response either way.
+/**
+ * The reset / claim email. One template, two framings: "reset your password"
+ * for an existing password, "set your password" for a guest claiming the
+ * account their guest checkout created.
+ *
+ * Direct SMTP send (not queued) — these are time-sensitive and we want the
+ * email to land within seconds. If SMTP is down we log but don't throw; the
+ * caller returns the same generic "if you have an account we sent an email"
+ * response either way.
+ */
+async function sendResetMail(
+  user: { fullName: string; email: string },
+  url: string,
+  kind: "reset" | "claim"
+): Promise<void> {
+  const claim = kind === "claim";
+  const subject = claim
+    ? "Hesabınızın şifresini belirleyin — Figurunica"
+    : "Şifre sıfırlama bağlantınız — Figurunica";
+  const heading = claim ? "Hesabınızı tamamlayın" : "Şifre sıfırlama";
+  const lead = claim
+    ? "Siparişiniz e-posta adresinizle oluşturulmuştu ama hesabınızın henüz bir şifresi yok. Aşağıdaki butonla şifrenizi belirleyin; ardından siparişlerinizi ve tekliflerinizi görebilirsiniz."
+    : "Şifrenizi sıfırlamak için aşağıdaki butona basın.";
+  const validity = claim ? "30 gün" : "1 saat";
+  const cta = claim ? "Şifremi belirle" : "Şifreyi sıfırla";
+
   try {
     await transporter.sendMail({
       from: FROM_EMAIL,
       to: user.email,
-      subject: "Şifre sıfırlama bağlantınız — Figurunica",
+      subject,
       text: `Merhaba ${user.fullName},
 
-Şifrenizi sıfırlamak için aşağıdaki bağlantıyı tarayıcınıza yapıştırın. Bağlantı 1 saat içinde geçersiz olur:
+${lead}
 
-${resetUrl}
+${url}
+
+Bağlantı ${validity} içinde geçersiz olur.
 
 Bu isteği siz yapmadıysanız, bu e-postayı yok sayabilirsiniz — hesabınızda hiçbir değişiklik yapılmadı.
 
 — Figurunica
 `,
       html: `<div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
-        <h2 style="margin:0 0 16px;font-family:'Space Grotesk',serif">Şifre sıfırlama</h2>
+        <h2 style="margin:0 0 16px;font-family:'Space Grotesk',serif">${heading}</h2>
         <p>Merhaba ${escapeHtml(user.fullName)},</p>
-        <p>Şifrenizi sıfırlamak için aşağıdaki butona basın. Bağlantı <strong>1 saat</strong> içinde geçersiz olur.</p>
+        <p>${escapeHtml(lead)} Bağlantı <strong>${validity}</strong> içinde geçersiz olur.</p>
         <p style="margin:24px 0">
-          <a href="${resetUrl}" style="background:#10b981;color:#fff;padding:12px 24px;border-radius:12px;text-decoration:none;font-weight:600">Şifreyi sıfırla</a>
+          <a href="${url}" style="background:#10b981;color:#fff;padding:12px 24px;border-radius:12px;text-decoration:none;font-weight:600">${cta}</a>
         </p>
-        <p style="font-size:13px;color:#6b7280">Buton çalışmazsa, bu adresi tarayıcınıza yapıştırın:<br><span style="font-family:monospace;word-break:break-all">${resetUrl}</span></p>
+        <p style="font-size:13px;color:#6b7280">Buton çalışmazsa, bu adresi tarayıcınıza yapıştırın:<br><span style="font-family:monospace;word-break:break-all">${url}</span></p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
         <p style="font-size:13px;color:#6b7280">Bu isteği siz yapmadıysanız, bu e-postayı yok sayabilirsiniz — hesabınızda hiçbir değişiklik yapılmadı.</p>
       </div>`,

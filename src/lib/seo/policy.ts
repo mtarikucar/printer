@@ -31,6 +31,11 @@ export const NOINDEX_PREFIXES = [
   "/checkout",
   "/track",
   "/quote",
+  // Instant-quote workspace. A quote is one customer's private working file
+  // (their uploads, their prices), and its URL is guessable by number — it must
+  // never be indexed. The PUBLIC landing page deliberately lives on a different
+  // prefix (`/3d-baski`), so it is unaffected by this entry.
+  "/teklif",
   "/havale",
   "/pay",
 ] as const;

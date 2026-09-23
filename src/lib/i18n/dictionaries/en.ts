@@ -972,6 +972,328 @@ const en = {
   "tracker.tracking": "Tracking:",
   "tracker.trackOnYurtici": "Track on Yurtici Kargo",
 
+  // ══════════════════════════════════════════════════════════════════════
+  // instantQuote.* — Instant quote engine · BLOCK START
+  //
+  // Every customer-facing string of the quoting surface (landing, workspace,
+  // part card, summary, price-gate modal, checkout, document, account pages)
+  // lives in ONE block, sub-groups alphabetical. Add new keys BETWEEN these
+  // two markers, inside their sub-group; never split the block and never move
+  // it to the end of the file (tr.ts and en.ts must carry the identical key
+  // set — a missing key on either side fails tsc).
+  // ══════════════════════════════════════════════════════════════════════
+
+  // instantQuote — account pages (/account/teklifler, /account/parcalar)
+  "instantQuote.account.parts.addToExisting": "Add to an open quote",
+  "instantQuote.account.parts.addToQuote": "Add to a new quote",
+  "instantQuote.account.parts.empty": "You haven't uploaded a model yet.",
+  "instantQuote.account.parts.emptyAction": "Create your first quote",
+  "instantQuote.account.parts.loadFailed": "The part library could not be loaded.",
+  "instantQuote.account.parts.subtitle":
+    "Every model you have uploaded; the same file is listed once.",
+  "instantQuote.account.parts.title": "My part library",
+  "instantQuote.account.parts.useCount": "Used in {count} quotes",
+  "instantQuote.account.quotes.column.expiry": "Valid until",
+  "instantQuote.account.quotes.column.number": "Quote",
+  "instantQuote.account.quotes.column.parts": "Parts",
+  "instantQuote.account.quotes.column.status": "Status",
+  "instantQuote.account.quotes.column.title": "Project",
+  "instantQuote.account.quotes.column.total": "Total",
+  "instantQuote.account.quotes.empty": "You have no quotes yet.",
+  "instantQuote.account.quotes.emptyAction": "Create a quote",
+  "instantQuote.account.quotes.loadFailed": "Quotes could not be loaded.",
+  "instantQuote.account.quotes.open": "Open quote",
+  "instantQuote.account.quotes.orderLink": "View order",
+  "instantQuote.account.quotes.subtitle": "All your open and past quotes.",
+  "instantQuote.account.quotes.title": "My quotes",
+
+  // instantQuote — add-ons
+  "instantQuote.addons.leadExtra": "+{days} business days",
+  "instantQuote.addons.none": "No add-ons available.",
+  "instantQuote.addons.title": "Add-ons",
+
+  // instantQuote — bulk action bar
+  "instantQuote.bulk.apply": "Apply to selection",
+  "instantQuote.bulk.clear": "Clear selection",
+  "instantQuote.bulk.color": "Color",
+  "instantQuote.bulk.delete": "Delete selection",
+  "instantQuote.bulk.finish": "Finish",
+  "instantQuote.bulk.material": "Material",
+  "instantQuote.bulk.quantity": "Quantity",
+  "instantQuote.bulk.selectAll": "Select all",
+  "instantQuote.bulk.selected": "{count} parts selected",
+  "instantQuote.bulk.technology": "Technology",
+
+  // instantQuote — quote chat
+  "instantQuote.chat.empty": "No messages yet. Ask a question and our team will answer.",
+  "instantQuote.chat.open": "Open chat",
+  "instantQuote.chat.placeholder": "Your message",
+  "instantQuote.chat.send": "Send",
+  "instantQuote.chat.sendFailed": "The message could not be sent.",
+  "instantQuote.chat.title": "Quote chat",
+
+  // instantQuote — checkout page (/teklif/<no>/odeme)
+  "instantQuote.checkout.backToQuote": "Back to quote",
+  "instantQuote.checkout.failed": "Payment could not be started. Please try again.",
+  "instantQuote.checkout.invoice.companyName": "Company name",
+  "instantQuote.checkout.invoice.corporate": "Corporate",
+  "instantQuote.checkout.invoice.individual": "Individual",
+  "instantQuote.checkout.invoice.taxId": "Tax ID",
+  "instantQuote.checkout.invoice.taxOffice": "Tax office",
+  "instantQuote.checkout.invoice.title": "Invoice details",
+  "instantQuote.checkout.poNumber": "Your PO number",
+  "instantQuote.checkout.poNumberHint": "Shown on your invoice and quote document.",
+  "instantQuote.checkout.submit": "Place order",
+  "instantQuote.checkout.submitting": "Submitting…",
+  "instantQuote.checkout.summaryTitle": "Order summary",
+  "instantQuote.checkout.title": "Checkout",
+  "instantQuote.checkout.versionMismatch":
+    "The quote changed while you were on this page. Refresh to see the current total.",
+
+  // instantQuote — DfM (manufacturability) messages; the code and its params
+  // come from `quote-dfm.ts`, the sentence is built HERE.
+  "instantQuote.dfm.ack": "I have read the warnings",
+  "instantQuote.dfm.ackHint": "Acknowledge the production warnings before checking out.",
+  "instantQuote.dfm.analysis_failed": "This file could not be read — please upload it again.",
+  "instantQuote.dfm.analysis_pending":
+    "Analysing the geometry — this takes a few seconds.",
+  "instantQuote.dfm.config_invalid":
+    "The material you picked is no longer in the catalogue — choose a material to continue.",
+  "instantQuote.dfm.finish_manual":
+    "This finish is priced manually; our team will enter the unit price.",
+  "instantQuote.dfm.multiple_bodies":
+    "The model has {count} separate bodies; they are printed together.",
+  "instantQuote.dfm.no_volume":
+    "No closed volume could be measured — the model's surfaces must be closed.",
+  "instantQuote.dfm.not_watertight":
+    "The model is not watertight; weight was estimated from a repaired copy.",
+  "instantQuote.dfm.qty_over_auto":
+    "{quantity} pieces is over the instant-price limit ({maxQuantity} max) — request a volume quote.",
+  "instantQuote.dfm.qty_over_auto.total":
+    "The total is over the instant-quote limit ({maxTotal}) — request a quote from our team.",
+  "instantQuote.dfm.thin_walls":
+    "Thin wall: {wallMm} mm measured, this technology needs at least {minMm} mm.",
+  "instantQuote.dfm.title": "Production notes",
+  "instantQuote.dfm.tolerance_manual":
+    "Critical tolerance is flagged — priced manually together with your drawing.",
+  "instantQuote.dfm.too_large":
+    "The part does not fit the build volume ({maxX} × {maxY} × {maxZ} mm max).",
+  "instantQuote.dfm.too_large.fitScale": "It fits at scale {scale}.",
+  "instantQuote.dfm.too_large.fitsTechnology": "It fits with {technology}.",
+  "instantQuote.dfm.too_small":
+    "The part is too small: largest dimension {largestMm} mm, the minimum is {minMm} mm.",
+
+  // instantQuote — printable quote document (/teklif/<no>/belge)
+  "instantQuote.document.accountHolder": "Account holder",
+  "instantQuote.document.bank": "Bank",
+  "instantQuote.document.column.line": "Amount",
+  "instantQuote.document.column.part": "Part",
+  "instantQuote.document.column.quantity": "Qty",
+  "instantQuote.document.column.spec": "Specification",
+  "instantQuote.document.column.unit": "Unit price",
+  "instantQuote.document.company": "Company",
+  "instantQuote.document.customer": "Customer",
+  "instantQuote.document.iban": "IBAN",
+  "instantQuote.document.issuedAt": "Issued",
+  "instantQuote.document.leadTime": "Lead time",
+  "instantQuote.document.poNumber": "PO number",
+  "instantQuote.document.print": "Print / PDF",
+  "instantQuote.document.proforma": "Proforma / bank transfer details",
+  "instantQuote.document.quoteNumber": "Quote no",
+  "instantQuote.document.reference": "Reference",
+  "instantQuote.document.taxId": "Tax ID",
+  "instantQuote.document.taxOffice": "Tax office",
+  "instantQuote.document.title": "Quote document",
+  "instantQuote.document.validUntil": "This quote is valid until {date}.",
+
+  // instantQuote — lead tier
+  "instantQuote.lead.days": "{days} business days",
+  "instantQuote.lead.shipBy": "Ships by {date}",
+  "instantQuote.lead.title": "Lead time",
+  "instantQuote.lead.unavailable": "Calculated once the price is ready",
+
+  // instantQuote — price-gate modal
+  "instantQuote.modal.close": "Close",
+  "instantQuote.modal.email": "Email",
+  "instantQuote.modal.emailExists": "This email is registered — sign in with your password.",
+  "instantQuote.modal.failed": "That did not go through. Please try again.",
+  "instantQuote.modal.forgotPassword": "Forgot my password",
+  "instantQuote.modal.fullName": "Full name",
+  "instantQuote.modal.google.login": "Continue with Google",
+  "instantQuote.modal.google.register": "Sign up with Google",
+  "instantQuote.modal.googleOnly":
+    "This account was created with Google. Continue with Google or set a password.",
+  "instantQuote.modal.kvkkLink": "Privacy Policy",
+  "instantQuote.modal.kvkkPrefix": "Your personal data is processed under our",
+  "instantQuote.modal.kvkkSuffix": ".",
+  "instantQuote.modal.marketingConsent":
+    "I would like to hear about campaigns and announcements.",
+  "instantQuote.modal.marketingConsentLink": "Commercial message consent",
+  "instantQuote.modal.orEmail": "or with email",
+  "instantQuote.modal.password": "Password",
+  "instantQuote.modal.passwordHint": "At least 6 characters",
+  "instantQuote.modal.phone": "Phone",
+  "instantQuote.modal.phoneInvalid": "Enter a valid phone number.",
+  "instantQuote.modal.rateLimited":
+    "Too many attempts. Please try again in a little while.",
+  "instantQuote.modal.subtitle":
+    "Your parts and settings are kept and linked to your account.",
+  "instantQuote.modal.submitLogin": "Sign in and see the price",
+  "instantQuote.modal.submitRegister": "Sign up and see the price",
+  "instantQuote.modal.submitting": "Submitting…",
+  "instantQuote.modal.tab.login": "Sign in",
+  "instantQuote.modal.tab.register": "Sign up",
+  "instantQuote.modal.title.login": "Sign in to see your quote",
+  "instantQuote.modal.title.register": "Create an account to see your quote",
+
+  // instantQuote — nav / link label
+  "instantQuote.nav.link": "3D printing quote",
+
+  // instantQuote — part card and configuration panel
+  "instantQuote.part.analyzing": "Analysing the geometry…",
+  "instantQuote.part.badge.analyzing": "Analysing",
+  "instantQuote.part.badge.failed": "Unreadable",
+  "instantQuote.part.badge.manualPrice": "Awaiting a manual price",
+  "instantQuote.part.badge.manualPriced": "Priced manually",
+  "instantQuote.part.bodyCount": "{count} bodies",
+  "instantQuote.part.config.color": "Color",
+  "instantQuote.part.config.criticalTolerance": "Critical tolerance (drawing required)",
+  "instantQuote.part.config.done": "Done",
+  "instantQuote.part.config.drawing": "Technical drawing (PDF)",
+  "instantQuote.part.config.drawingRemove": "Remove",
+  "instantQuote.part.config.drawingUpload": "Upload PDF",
+  "instantQuote.part.config.edit": "Edit specification",
+  "instantQuote.part.config.finish": "Finish",
+  "instantQuote.part.config.finishManualBadge": "Priced manually",
+  "instantQuote.part.config.infill": "Infill",
+  "instantQuote.part.config.infillValue": "{pct}%",
+  "instantQuote.part.config.layer": "Layer height",
+  "instantQuote.part.config.layerValue": "{um} µm",
+  "instantQuote.part.config.material": "Material",
+  "instantQuote.part.config.materialPlaceholder": "Choose a material",
+  "instantQuote.part.config.materialProperties": "Material properties",
+  "instantQuote.part.config.note": "Part note",
+  "instantQuote.part.config.notePlaceholder": "Anything the production team should know",
+  "instantQuote.part.config.quantity": "Quantity",
+  "instantQuote.part.config.technology": "Technology",
+  "instantQuote.part.config.title": "Specification",
+  "instantQuote.part.delete": "Delete",
+  "instantQuote.part.deleteConfirm": "Remove this part from the quote?",
+  "instantQuote.part.dimensions": "{x} × {y} × {z} mm",
+  "instantQuote.part.duplicate": "Duplicate",
+  "instantQuote.part.nameLabel": "Part name",
+  "instantQuote.part.rename": "Rename",
+  "instantQuote.part.scale": "Scale",
+  "instantQuote.part.units": "Unit",
+  "instantQuote.part.unitsSuggestion": "This file looks like {units} — apply",
+  "instantQuote.part.viewModel": "View in 3D",
+  "instantQuote.part.volume": "{cm3} cm³",
+
+  // instantQuote — price fields
+  "instantQuote.price.breaks": "Quantity breaks",
+  "instantQuote.price.breaks.quantity": "Qty",
+  "instantQuote.price.breaks.unit": "Unit price",
+  "instantQuote.price.hidden": "–₺–,––",
+  "instantQuote.price.line": "Line total",
+  "instantQuote.price.see": "See the price",
+  "instantQuote.price.unit": "Unit price",
+
+  // instantQuote — share link
+  "instantQuote.share.copied": "Copied",
+  "instantQuote.share.copy": "Copy",
+  "instantQuote.share.create": "Create a share link",
+  "instantQuote.share.description":
+    "Anyone with the link can view the quote; prices require a sign-in.",
+  "instantQuote.share.none": "No share link yet.",
+  "instantQuote.share.revoke": "Turn sharing off",
+  "instantQuote.share.rotate": "Replace the link",
+  "instantQuote.share.title": "Share quote",
+
+  // instantQuote — quote status chips (one per QUOTE_STATUSES entry)
+  "instantQuote.status.cancelled": "Cancelled",
+  "instantQuote.status.draft": "Draft",
+  "instantQuote.status.expired": "Expired",
+  "instantQuote.status.needs_review": "In review",
+  "instantQuote.status.ordered": "Ordered",
+  "instantQuote.status.quoted": "Quoted",
+
+  // instantQuote — summary sidebar
+  "instantQuote.summary.addons": "Add-ons",
+  "instantQuote.summary.checkout": "Go to checkout",
+  "instantQuote.summary.checkoutBlocked": "Before checking out:",
+  "instantQuote.summary.freeShipping": "Shipping: Free",
+  "instantQuote.summary.kdv": "VAT ({rate}%)",
+  "instantQuote.summary.kdvExcluded": "VAT excluded",
+  "instantQuote.summary.kdvIncluded": "VAT included",
+  "instantQuote.summary.kdvToggleExcluded": "Show excluding VAT",
+  "instantQuote.summary.kdvToggleIncluded": "Show including VAT",
+  "instantQuote.summary.minOrderTopUp": "Minimum order top-up",
+  "instantQuote.summary.note": "Quote note",
+  "instantQuote.summary.notePlaceholder": "Your note about this quote",
+  "instantQuote.summary.parts": "{parts} parts ({units} pieces)",
+  "instantQuote.summary.partsSubtotal": "Parts",
+  "instantQuote.summary.poNumber": "PO number",
+  "instantQuote.summary.priceHidden": "Sign in to see prices.",
+  "instantQuote.summary.requestManual": "Request a manual quote",
+  "instantQuote.summary.rfq": "Volume quote (RFQ)",
+  "instantQuote.summary.splitByTechnology": "Split by technology",
+  "instantQuote.summary.targetPrice": "Suggest a target price",
+  "instantQuote.summary.title": "Quote summary",
+  "instantQuote.summary.total": "Total",
+
+  // instantQuote — upload terms (accepted once, when the quote is created)
+  "instantQuote.terms.accept":
+    "I own the rights to the designs I upload; they contain no prohibited item, and the files will only be shared with the assigned production partner.",
+
+  // instantQuote — file upload
+  "instantQuote.upload.browse": "Choose files",
+  "instantQuote.upload.cta": "Add parts to the quote",
+  "instantQuote.upload.drop": "Drop your files here",
+  "instantQuote.upload.failed": "{file} could not be uploaded. Please try again.",
+  "instantQuote.upload.hint": "STL, OBJ or 3MF · up to {maxMb} MB",
+  "instantQuote.upload.invalidFormat":
+    "{file}: only STL, OBJ and 3MF files can be uploaded.",
+  "instantQuote.upload.processing": "Processing…",
+  "instantQuote.upload.tooLarge": "{file}: the file is over the {maxMb} MB limit.",
+  "instantQuote.upload.tooManyParts": "A quote can hold at most {max} parts.",
+  "instantQuote.upload.uploading": "Uploading…",
+
+  // instantQuote — workspace header and banners
+  "instantQuote.workspace.banner.catalogChanged":
+    "The catalogue changed — reprice to get current prices.",
+  "instantQuote.workspace.banner.expired": "This quote expired — reprice it.",
+  "instantQuote.workspace.banner.locked": "A payment is pending for this quote.",
+  "instantQuote.workspace.banner.lockedAction": "Continue to payment",
+  "instantQuote.workspace.banner.ordered": "This quote became an order.",
+  "instantQuote.workspace.banner.orderedAction": "Track the order",
+  "instantQuote.workspace.banner.readOnly":
+    "This quote belongs to another account — you can only view it.",
+  "instantQuote.workspace.banner.review":
+    "Our team is reviewing your quote. We will email you when the prices are ready.",
+  "instantQuote.workspace.createdAt": "Created",
+  "instantQuote.workspace.document": "Document / PDF",
+  "instantQuote.workspace.empty": "This quote has no parts yet.",
+  "instantQuote.workspace.expiresAt": "Valid until",
+  "instantQuote.workspace.reprice": "Reprice",
+  "instantQuote.workspace.review.note": "Your note",
+  "instantQuote.workspace.review.sent":
+    "We got your request — our team will get back to you shortly.",
+  "instantQuote.workspace.review.submit": "Send",
+  "instantQuote.workspace.review.title": "Request a manual quote",
+  "instantQuote.workspace.rfq.hint":
+    "Tell us your delivery plan and quantities; we reply within 24–48 hours.",
+  "instantQuote.workspace.rfq.title": "Volume quote",
+  "instantQuote.workspace.share": "Share",
+  "instantQuote.workspace.target.hint":
+    "Enter the unit price you are aiming for, per part.",
+  "instantQuote.workspace.target.title": "Suggest a target price",
+  "instantQuote.workspace.target.unit": "Target unit price",
+  "instantQuote.workspace.titlePlaceholder": "Name this project",
+
+  // ══════════════════════════════════════════════════════════════════════
+  // instantQuote.* — BLOCK END
+  // ══════════════════════════════════════════════════════════════════════
+
   // Admin - Login
   "admin.login.title": "Admin Login",
 

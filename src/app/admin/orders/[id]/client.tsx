@@ -21,7 +21,7 @@ import {
   sizeDisplay,
   sizeDisplayTr,
 } from "@/lib/config/sizes";
-import { formatCurrency, formatDateTime, formatNumber } from "@/lib/i18n/format";
+import { formatCurrency, formatDate, formatDateTime, formatNumber } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { MESSAGE_TEMPLATES } from "@/lib/config/message-templates";
 import { OrderModelUploader } from "@/components/admin/order-model-uploader";
@@ -553,6 +553,12 @@ interface OrderData {
   modelStlUrl: string | null;
   modelUploadedAt: string | null;
   modelSource: string | null;
+  /**
+   * Müşterinin yüklediği modelin kaydı. Teklif siparişi de `orderType:
+   * "upload"` taşır ama böyle bir kaydı YOKTUR — indirme bağlantısı türe
+   * değil bu alana bakar (uç onsuz 404 döner).
+   */
+  uploadedModelId: string | null;
 }
 
 /**
@@ -771,7 +777,54 @@ interface Props {
       painterRanking?: boolean;
       /** Boyacı kararları okunamadı: gerekçe kartı BOŞ değil, bilinmiyor. */
       painterAssignmentDecisions?: boolean;
+      /** Teklif tanımı okunamadı: "teklif siparişi değil" DEMEK DEĞİLDİR. */
+      quote?: boolean;
     };
+    /**
+     * Siparişin ödendiği teklif belgesi (anlık teklif motoru). Admin görünümü
+     * FİYATLI: üretici panelindeki aynı liste fiyatsızdır.
+     */
+    quote?: {
+      quoteId: string;
+      number: string;
+      leadTier: string;
+      leadTierName: string | null;
+      leadDays: number;
+      shipByDate: string | null;
+      poNumber: string | null;
+      invoice: {
+        type: "individual" | "corporate";
+        companyName: string | null;
+        taxId: string | null;
+        taxIdType: "vkn" | "tckn" | null;
+        taxOffice: string | null;
+      } | null;
+      partCount: number;
+      unitCount: number;
+      addons: { key: string; name: string; kurus: number }[];
+      parts: {
+        partId: string;
+        position: number;
+        name: string;
+        fileName: string;
+        thumbnailUrl: string | null;
+        drawingUrl: string | null;
+        drawingName: string | null;
+        technologyName: string;
+        materialName: string;
+        colorName: string;
+        colorHex: string;
+        finishName: string;
+        layerUm: number | null;
+        infillPct: number | null;
+        quantity: number;
+        dimensionsMm: { x: number; y: number; z: number };
+        volumeCm3: number | null;
+        unitKurus: number;
+        lineKurus: number;
+        note: string | null;
+      }[];
+    } | null;
   };
   locale: string;
 }
@@ -2059,7 +2112,7 @@ function PartnerChatPanel({ orderId, loc }: { orderId: string; loc: Locale }) {
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, painterAssignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, painterAssignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures, quote } = data;
   // Turun onaylanamama sebebi TEK yerde cümleye çevrilir: kırmızı kutu, kapalı
   // onay düğmesinin başlığı, denetimli istisnanın bağlantısı ve onay kutusu
   // aynı sebebi anlatsın. Dördü ayrı ayrı yazıldığında ekran "eski baskı"
@@ -6181,6 +6234,199 @@ export function OrderDetailClient({ data, locale }: Props) {
               </div>
             )}
 
+            {/* ─── Teklif (anlık teklif motoru) ─────────
+                Siparişin parası bir teklif belgesinden geliyorsa, denetlenecek
+                tanım O belgedir: hangi parça, hangi malzeme, hangi fiyat, hangi
+                fatura bilgisi. Liste ÖDEME anında dondurulmuş kopyadır —
+                müşteri teklifin canlı kopyasını sonradan değiştirse bile bu
+                kart paranın karşılığını gösterir. */}
+            {readFailures?.quote && (
+              <div
+                role="alert"
+                className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+              >
+                <p className="font-semibold">Teklif tanımı şu anda okunamadı</p>
+                <p className="mt-1 text-amber-900/80">
+                  Bu siparişin bir teklife bağlı OLUP OLMADIĞI bilinmiyor; kartın
+                  yokluğu &quot;teklif siparişi değil&quot; anlamına gelmez. Para
+                  dökümündeki parça satırları da aynı kaynaktan gelir.
+                </p>
+              </div>
+            )}
+            {quote && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Teklif
+                  </h3>
+                  <Link
+                    href={`/admin/teklifler/${quote.quoteId}`}
+                    className="font-mono text-sm font-semibold text-blue-600 hover:text-blue-800"
+                  >
+                    {quote.number}
+                  </Link>
+                </div>
+                <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs font-medium text-gray-400">Kapsam</dt>
+                    <dd className="font-medium text-gray-900">
+                      {quote.partCount} parça · {quote.unitCount} adet
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-gray-400">Teslim kademesi</dt>
+                    <dd className="font-medium text-gray-900">
+                      {quote.leadTierName ?? quote.leadTier} · {quote.leadDays} iş günü
+                      {quote.shipByDate && (
+                        <span className="ml-1 text-gray-500">
+                          (kargoya {formatDate(quote.shipByDate, loc)})
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                  {quote.poNumber && (
+                    <div>
+                      <dt className="text-xs font-medium text-gray-400">
+                        Satın alma emri (PO)
+                      </dt>
+                      <dd className="font-medium text-gray-900">{quote.poNumber}</dd>
+                    </div>
+                  )}
+                  {quote.invoice && (
+                    <div>
+                      <dt className="text-xs font-medium text-gray-400">Fatura</dt>
+                      <dd className="font-medium text-gray-900">
+                        {quote.invoice.type === "corporate" ? "Kurumsal" : "Bireysel"}
+                        {quote.invoice.companyName && ` · ${quote.invoice.companyName}`}
+                        {quote.invoice.taxId && (
+                          <span className="block text-xs font-normal text-gray-600">
+                            {(quote.invoice.taxIdType ?? "vkn").toUpperCase()}{" "}
+                            {quote.invoice.taxId}
+                            {quote.invoice.taxOffice && ` · ${quote.invoice.taxOffice}`}
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="-mx-5 mt-4 overflow-x-auto px-5">
+                  <table className="w-full min-w-[620px] text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                        <th className="py-2 pr-3">Parça</th>
+                        <th className="py-2 pr-3">Teknoloji / Malzeme</th>
+                        <th className="py-2 pr-3">Renk / Yüzey</th>
+                        <th className="py-2 pr-3">Ölçü (mm)</th>
+                        <th className="py-2 pr-3 text-right">Adet</th>
+                        <th className="py-2 pr-3 text-right">Birim</th>
+                        <th className="py-2 text-right">Tutar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {quote.parts.map((p) => {
+                        const mm = (n: number) =>
+                          n.toLocaleString("tr-TR", { maximumFractionDigits: 1 });
+                        return (
+                          <tr key={p.partId} className="align-top">
+                            <td className="py-2.5 pr-3">
+                              <div className="flex items-start gap-2">
+                                {p.thumbnailUrl && (
+                                  /* eslint-disable-next-line @next/next/no-img-element */
+                                  <img
+                                    src={p.thumbnailUrl}
+                                    alt=""
+                                    className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 bg-gray-50 object-cover"
+                                  />
+                                )}
+                                <span className="min-w-0">
+                                  <span className="block font-medium text-gray-900">
+                                    P{String(p.position + 1).padStart(2, "0")} · {p.name}
+                                  </span>
+                                  <span
+                                    className="block truncate text-[11px] text-gray-400"
+                                    title={p.fileName}
+                                  >
+                                    {p.fileName}
+                                  </span>
+                                  {p.drawingUrl && (
+                                    <a
+                                      href={p.drawingUrl}
+                                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800"
+                                    >
+                                      Teknik çizim
+                                    </a>
+                                  )}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 pr-3 text-gray-900">
+                              <span className="block">{p.technologyName}</span>
+                              <span className="block text-[11px] text-gray-500">
+                                {p.materialName}
+                                {p.layerUm != null && ` · ${p.layerUm} µm`}
+                                {p.infillPct != null && ` · %${p.infillPct}`}
+                              </span>
+                            </td>
+                            <td className="py-2.5 pr-3 text-gray-900">
+                              <span className="flex items-center gap-1.5">
+                                <span
+                                  className="h-3 w-3 shrink-0 rounded-full border border-gray-300"
+                                  style={{ backgroundColor: p.colorHex }}
+                                />
+                                {p.colorName}
+                              </span>
+                              <span className="block text-[11px] text-gray-500">
+                                {p.finishName}
+                              </span>
+                            </td>
+                            <td className="py-2.5 pr-3 text-gray-700">
+                              {mm(p.dimensionsMm.x)}×{mm(p.dimensionsMm.y)}×
+                              {mm(p.dimensionsMm.z)}
+                              {p.volumeCm3 != null && (
+                                <span className="block text-[11px] text-gray-500">
+                                  {p.volumeCm3.toLocaleString("tr-TR", {
+                                    maximumFractionDigits: 1,
+                                  })}{" "}
+                                  cm³
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 pr-3 text-right font-semibold text-gray-900">
+                              {p.quantity}
+                            </td>
+                            <td className="py-2.5 pr-3 text-right text-gray-700">
+                              {formatCurrency(p.unitKurus, loc)}
+                            </td>
+                            <td className="py-2.5 text-right font-semibold text-gray-900">
+                              {formatCurrency(p.lineKurus, loc)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {quote.addons.map((a) => (
+                        <tr key={a.key}>
+                          <td className="py-2.5 pr-3 text-gray-900" colSpan={6}>
+                            {a.name}
+                            <span className="ml-2 text-[11px] text-gray-400">
+                              teklif ek hizmeti
+                            </span>
+                          </td>
+                          <td className="py-2.5 text-right font-semibold text-gray-900">
+                            {formatCurrency(a.kurus, loc)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-xs text-gray-400">
+                  Satırlar ödeme anında donduruldu; siparişin para dökümü de
+                  aynı kaynaktan kurulur. Asgari sipariş tamamlaması varsa
+                  dökümde ayrı satırdadır.
+                </p>
+              </div>
+            )}
+
             {/* ─── Para dökümü ─────────────────────────── */}
             <MoneyBreakdownCard money={money} loc={loc} />
             <OrderMoneySplitEditor orderId={order.id} />
@@ -6340,7 +6586,11 @@ export function OrderDetailClient({ data, locale }: Props) {
                 )}
               </div>
               <dl className="space-y-3 text-sm">
-                {order.orderType === "upload" && (
+                {/* Bağlantı TÜRE değil KAYDA bağlı: teklif siparişi de
+                    "upload" türündedir ama yüklenmiş tek bir modeli yoktur
+                    (parçaları teklif kartındadır) ve uç `uploadedModelId`
+                    olmadan 404 döner — her teklif siparişinde ölü bir düğme. */}
+                {order.orderType === "upload" && order.uploadedModelId && (
                   <div className="flex justify-between items-center">
                     <dt className="text-gray-400">3D Model</dt>
                     <dd>

@@ -13,6 +13,7 @@ import {
   partnerAdjustments,
   painters,
   payouts,
+  quoteCheckouts,
 } from "@/lib/db/schema";
 import {
   SHIP_REVERT_AUDIT_PREFIX,
@@ -129,6 +130,9 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
       quantity: true,
       productId: true,
       productTitleSnapshot: true,
+      // Teklif köprüsü: teklif tanımı `quote_checkouts.draft_id` üzerinden
+      // bulunur (`orders` tanımına teklif kolonu eklenmedi).
+      draftId: true,
       parentReference: true,
       workshopSessionId: true,
       selectedOptions: true,
@@ -154,7 +158,7 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
   // sayfası) — satırlar doğrudan sorgulanır. Hakediş satırları da düz join ile:
   // refund partnerleri siparişten koparır, ama hakedişin KİME yazıldığı
   // hakediş satırının kendisindedir.
-  const [items, siblings, mfrRows, painterRows] = await Promise.all([
+  const [items, siblings, mfrRows, painterRows, quoteRows] = await Promise.all([
     tx
       .select({
         title: orderItems.productTitleSnapshot,
@@ -231,6 +235,19 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
       .leftJoin(painterPayouts, eq(painterPayouts.id, painterEarnings.payoutId))
       .where(eq(painterEarnings.orderId, order.id))
       .limit(1),
+    // Teklif siparişinin ÖDENEN parça listesi. Canlı `quote_parts` değil:
+    // müşteri ödemeden sonra teklifini değiştirebilir, dökümü değiştiremez.
+    // Taslağı olmayan sipariş (elle açılan) hiç sorgulanmaz.
+    order.draftId
+      ? tx
+          .select({
+            parts: quoteCheckouts.partsSnapshot,
+            addons: quoteCheckouts.addonsSnapshot,
+          })
+          .from(quoteCheckouts)
+          .where(eq(quoteCheckouts.draftId, order.draftId))
+          .limit(1)
+      : Promise.resolve([]),
   ]);
 
   const toEarning = (r: (typeof mfrRows)[number] | undefined): EarningMoneySnapshot | null =>
@@ -315,6 +332,20 @@ async function loadOrderMoneySnapshotTx(tx: MoneyReadTx, orderId: string): Promi
     painterStatus: order.painterStatus,
     shippedAt: iso(order.shippedAt),
     earningReversal,
+    // Sıra teklif belgesindeki sıradır; dökümdeki satırlar üreticinin gördüğü
+    // parça listesiyle aynı sırada okunsun.
+    quoteParts: [...(quoteRows[0]?.parts ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((p) => ({
+        name: p.name,
+        technologyName: p.technologyName,
+        materialName: p.materialName,
+        colorName: p.colorName,
+        quantity: p.quantity,
+        unitKurus: p.unitKurus,
+        lineKurus: p.lineKurus,
+      })),
+    quoteAddons: (quoteRows[0]?.addons ?? []).map((a) => ({ name: a.name, kurus: a.kurus })),
     items: items.map((it) => ({
       title: it.title,
       quantity: it.quantity,

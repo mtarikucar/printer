@@ -6,6 +6,7 @@ import {
   MAX_QC_PHOTOS_PER_ROUND,
   qcPhotosWouldExceed,
 } from "../src/lib/services/qc";
+import { QC_MAX_PHOTOS, QC_MAX_PHOTOS_HARD, qcPhotoCap } from "../src/lib/config/qc";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -114,6 +115,49 @@ test("0 existing + 6 new fits exactly", () => {
 
 test("0 existing + 7 new exceeds", () => {
   assert.equal(qcPhotosWouldExceed(0, 7), true);
+});
+
+// ─── Parça sayısına göre üst sınır ──────────────────────────────
+// Altı fotoğraf yirmi parçalık bir teklif siparişini ANLATAMAZ: tek figürün
+// turu için doğru olan sayı, her parçanın kendi kanıtını isteyen bir işte
+// üreticiyi eksik kanıt göndermeye zorlardı.
+test("tek parçalı iş taban sınırda kalır (1 → 6)", () => {
+  assert.equal(qcPhotoCap(1), QC_MAX_PHOTOS);
+  assert.equal(qcPhotoCap(1), 6);
+});
+
+test("parça sayısı tabanı aşınca sınır parça+2 olur (10 → 12)", () => {
+  assert.equal(qcPhotoCap(10), 12);
+});
+
+test("çok parçalı işte mutlak tavan uygulanır (30 → 24)", () => {
+  assert.equal(qcPhotoCap(30), QC_MAX_PHOTOS_HARD);
+  assert.equal(qcPhotoCap(30), 24);
+});
+
+test("parçasız (teklif olmayan) sipariş de taban sınırı alır", () => {
+  assert.equal(qcPhotoCap(0), 6);
+});
+
+test("sınır tabandan aşağı düşmez ve tavanı aşmaz (0…100)", () => {
+  for (let n = 0; n <= 100; n++) {
+    const cap = qcPhotoCap(n);
+    assert.ok(cap >= QC_MAX_PHOTOS && cap <= QC_MAX_PHOTOS_HARD, `n=${n} cap=${cap}`);
+  }
+});
+
+// Okunamayan bir parça sayısı kapıyı AÇMAMALI: `existing + adding > NaN` her
+// zaman false'tur, yani NaN bir sınır sınırsızlık demek olurdu.
+test("sayı olmayan parça sayısı tabana düşer (kapı açılmaz)", () => {
+  assert.equal(qcPhotoCap(Number.NaN), QC_MAX_PHOTOS);
+  assert.equal(qcPhotoCap(Number.POSITIVE_INFINITY), QC_MAX_PHOTOS_HARD);
+});
+
+test("qcPhotosWouldExceed verilen sınırı uygular (varsayılan taban)", () => {
+  assert.equal(qcPhotosWouldExceed(6, 1, qcPhotoCap(10)), false);
+  assert.equal(qcPhotosWouldExceed(11, 2, qcPhotoCap(10)), true);
+  assert.equal(qcPhotosWouldExceed(23, 1, qcPhotoCap(30)), false);
+  assert.equal(qcPhotosWouldExceed(24, 1, qcPhotoCap(30)), true);
 });
 
 for (const [name, fn] of cases) {

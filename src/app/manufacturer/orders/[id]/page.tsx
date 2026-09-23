@@ -30,6 +30,9 @@ import { loadEarningReversalRecord } from "@/lib/services/order-money";
 import { latestModelFiles } from "@/lib/services/order-model";
 import { readPartnerModelAck } from "@/lib/services/order-model-revision";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
+import { dedupeFileNames } from "@/lib/config/order-model";
+import { qcPhotoCap } from "@/lib/config/qc";
+import { loadOrderQuoteParts, quotePartFileName } from "@/lib/services/quote-order";
 import { ManufacturerOrderDetailClient } from "./client";
 
 /**
@@ -296,6 +299,17 @@ export default async function ManufacturerOrderDetailPage({
   const modelFilesUnreadable = latestFilesRead === null;
   const latestFiles = latestFilesRead ?? { revision: null, files: [] };
 
+  // ─── Teklif siparişinin ÖDENEN parça tanımı ──────────────────────────────
+  //
+  // Bu okuma yalnız GÖSTERİM değildir: teklif siparişinde basılacak tanımın
+  // TAMAMI buradadır (hangi parça hangi malzemeden, hangi renkte, kaç adet).
+  // Null "parça yok" DEĞİL "BİLİNMİYOR"dur — sessizce boş listeye
+  // çevrildiğinde ekran yirmi parçalık bir işi tarifsiz gösterir ve atölye
+  // yanlış malzemeyle basar. Bu yüzden aşağıdaki üretim kapısını da kapatır.
+  const quoteRead = await displayRead("teklif parçaları", id, loadOrderQuoteParts(order.id));
+  const quotePartsUnreadable = quoteRead === null;
+  const quote = quoteRead ?? null;
+
   // Yeni bir model sürümü bu atölyeye DUYURULDU mu ve atölye onu onayladı mı.
   // Eski ekran yalnız pasif bir rozet gösteriyordu ("Model güncellendi"), yani
   // üreticinin yeni dosyayı gördüğünü kimse bilmiyordu; eski sürümle basılan
@@ -548,13 +562,18 @@ export default async function ManufacturerOrderDetailPage({
   // üç arıza bayrağından türetilen bir KAPI kararıdır. Şeritte kendi satırı da
   // yoktur — üç kaynağı (kalem listesi, ürün kaydı, üretim künyesi) şeritte adı
   // adına zaten yazılıyor; dördüncü bir cümle aynı şeyi tekrar söylerdi.
+  //
+  // Teklif parçaları da bu kapıdadır ve sipariş TÜRÜNE bakılmadan: okuma
+  // fırladığında siparişin teklif siparişi OLUP OLMADIĞI da bilinmez, yani
+  // "teklif değilse önemli değil" demek yapılmamış bir okumanın iddiası olurdu.
   const productionGateClosed =
-    order.orderType === "marketplace" &&
-    (orderItemsUnreadable ||
-      productSpecUnreadable ||
-      // Tek ürünlü (hemen al) sipariş: ürün satırı okunamadığında da künye
-      // listesi boş kalır, yani aynı kapı aynı şekilde yanlış açılırdı.
-      (order.productId != null && productRead === null));
+    quotePartsUnreadable ||
+    (order.orderType === "marketplace" &&
+      (orderItemsUnreadable ||
+        productSpecUnreadable ||
+        // Tek ürünlü (hemen al) sipariş: ürün satırı okunamadığında da künye
+        // listesi boş kalır, yani aynı kapı aynı şekilde yanlış açılırdı.
+        (order.productId != null && productRead === null)));
 
   // Hangi GÖSTERİM alanı okunamadı: şerit sayfanın en üstünde basılır.
   const unreadableAreas = [
@@ -579,7 +598,55 @@ export default async function ManufacturerOrderDetailPage({
       "Siparişin ürün kalemleri (bu siparişte aşağıda görünenden DAHA FAZLA ürün olabilir; eksik üretim riskine karşı baskı başlatma, baskıyı bitirme ve kalite kontrole gönderme adımları geçici olarak KAPATILDI)",
     productSpecUnreadable &&
       `Üretim künyesi — dosyalar, malzeme listesi ve adımlar (${specUnknownTitles.join(", ")}): bu kalemlerin künyesi BOŞ değil, BİLİNMİYOR; künye okunana kadar baskı başlatma, baskıyı bitirme ve kalite kontrole gönderme adımları KAPATILDI`,
+    quotePartsUnreadable &&
+      "Teklif parça listesi (bu sipariş bir teklif siparişi OLABİLİR; parçaların malzemesi, rengi ve adedi bilinmediği için baskı başlatma, baskıyı bitirme ve kalite kontrole gönderme adımları KAPATILDI — liste okunana kadar baskıya başlamayın)",
   ].filter((x): x is string => typeof x === "string");
+
+  // Üreticinin göreceği parça satırları. FİYAT YOK: teklifin birim ve satır
+  // tutarları müşteriyle platform arasındadır, atölyenin kazancı kendi hakediş
+  // kartındadır. Dosya adı, worker'ın siparişe yazdığı adın AYNI türetimidir
+  // (aynı `quotePartFileName` + `dedupeFileNames`), böylece satır ile model
+  // dosyası birbirine bağlanabilir.
+  const quotePartFileNames = quote ? dedupeFileNames(quote.parts.map(quotePartFileName)) : [];
+  const quoteView = quote
+    ? {
+        number: quote.quoteNumber,
+        leadTier: quote.leadTier,
+        leadTierName: quote.leadTierName,
+        leadDays: quote.leadDays,
+        shipByDate: quote.shipByDate,
+        partCount: quote.parts.length,
+        unitCount: quote.parts.reduce((sum, p) => sum + p.quantity, 0),
+        parts: quote.parts.map((p, i) => ({
+          partId: p.partId,
+          position: p.position,
+          name: p.name,
+          fileName: p.fileName,
+          modelFileName: quotePartFileNames[i],
+          // Küçük resim de çizim de ORTAK kapıdan geçer (imzalı depo URL'i
+          // değil): iki dosya da yalnız bu siparişin atölyesine açıktır.
+          thumbnailUrl: p.thumbnailKey
+            ? `/api/manufacturer/orders/${order.id}/quote-files/${p.partId}?kind=thumbnail`
+            : null,
+          drawingUrl: p.drawingKey
+            ? `/api/manufacturer/orders/${order.id}/quote-files/${p.partId}`
+            : null,
+          drawingName: p.drawingName,
+          technologyName: p.technologyName,
+          materialName: p.materialName,
+          colorName: p.colorName,
+          colorHex: p.colorHex,
+          finishName: p.finishName,
+          layerUm: p.layerUm,
+          infillPct: p.infillPct,
+          quantity: p.quantity,
+          dimensionsMm: p.dimensionsMm,
+          volumeCm3: p.volumeCm3,
+          note: p.note,
+          dfmWarnings: p.dfmWarnings,
+        })),
+      }
+    : null;
 
   const serialized = {
     order: {
@@ -719,7 +786,12 @@ export default async function ManufacturerOrderDetailPage({
       })),
     ],
     qcPhotos: currentRoundPhotos,
+    // Tur başına fotoğraf sınırı, işin parça sayısına göre — ucun uyguladığı
+    // sayının AYNISI (qcPhotoCap). Ekranın ucun uygulamadığı bir sayıyı
+    // göstermesi, üreticiyi reddedilecek bir yüklemeye yollardı.
+    qcPhotoCap: qcPhotoCap(quote?.parts.length ?? 0),
     qcRejectReason,
+    quote: quoteView,
     marketplaceProduct,
     productSpecs,
     approvedImageUrl: normalizeFileUrl(previewRow?.selectedStyledImageUrl ?? null),

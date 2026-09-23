@@ -33,9 +33,16 @@ import {
   quoteCheckouts,
   quotes,
 } from "@/lib/db/schema";
+import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
 import { dedupeFileNames, MAX_MODEL_FILE_STEM, safeModelFileName } from "@/lib/config/order-model";
 import { formatAdminNoteLine } from "@/lib/config/order-status-policy";
-import type { FrozenQuotePart } from "@/lib/config/quote-types";
+import type {
+  FrozenQuoteAddon,
+  FrozenQuotePart,
+  InvoiceType,
+  LeadTierKey,
+  PricingSettings,
+} from "@/lib/config/quote-types";
 import { emitOrderChanged } from "@/lib/realtime/emit";
 import {
   attachOrderModelFilesTx,
@@ -308,7 +315,124 @@ export async function findQuoteOrdersMissingFiles(
     .map((r) => ({ orderId: r.orderId, quoteId: r.quoteId }));
 }
 
-// ─── 3. Dosya adları ve ölçekleme ───────────────────────────────────────────
+// ─── 3. Siparişin teklif tanımı (üretici / admin ekranları) ─────────────────
+
+export interface OrderQuoteInvoice {
+  type: InvoiceType;
+  companyName: string | null;
+  taxId: string | null;
+  taxIdType: "vkn" | "tckn" | null;
+  taxOffice: string | null;
+}
+
+export interface OrderQuoteParts {
+  quoteId: string;
+  quoteNumber: string;
+  leadTier: LeadTierKey;
+  /** Kademenin teklifte DONDURULMUŞ adı ("Ekspres"); çözülemezse null. */
+  leadTierName: string | null;
+  leadDays: number;
+  /**
+   * Kargoya teslim günü (İstanbul takvimi, `YYYY-MM-DD`). Ödeme anından
+   * itibaren `leadDays` İŞ GÜNÜ, teklifin donmuş tatil listesi ve cutoff'uyla.
+   * Sipariş henüz ödenmemişse null: söz verilecek bir tarih yok.
+   */
+  shipByDate: string | null;
+  parts: FrozenQuotePart[];
+  addons: FrozenQuoteAddon[];
+  invoice: OrderQuoteInvoice | null;
+  poNumber: string | null;
+}
+
+/**
+ * Bir siparişin ÖDENEN teklif tanımı: parçalar, ek hizmetler, teslim kademesi,
+ * fatura bilgisi.
+ *
+ * Kaynak canlı `quote_parts` DEĞİL, `quote_checkouts.parts_snapshot`tır.
+ * Müşteri ödemeden sonra teklifin canlı kopyasını değiştirebilir (yeni sürüm,
+ * yeniden fiyatlama); üreticinin basacağı ve adminin denetleyeceği tanım
+ * ÖDENEN tanımdır — ikisini ayırmayan bir ekran, tezgâhtaki işin tarifini
+ * sonradan değiştirirdi.
+ *
+ * Köprü `order_drafts`tır (`orders`/`order_drafts` tanımlarına teklif kolonu
+ * eklenmedi, bkz. dosya başlığı). Teklifi olmayan sipariş → null; bu bir hata
+ * değil, "bu bir teklif siparişi değil" cevabıdır.
+ */
+export async function loadOrderQuoteParts(
+  orderId: string
+): Promise<OrderQuoteParts | null> {
+  const [row] = await db
+    .select({
+      paidAt: orders.paidAt,
+      createdAt: orders.createdAt,
+      quoteId: quoteCheckouts.quoteId,
+      leadTier: quoteCheckouts.leadTier,
+      leadDays: quoteCheckouts.leadDays,
+      partsSnapshot: quoteCheckouts.partsSnapshot,
+      addonsSnapshot: quoteCheckouts.addonsSnapshot,
+      quoteNumber: quotes.number,
+      poNumber: quotes.poNumber,
+      invoiceType: quotes.invoiceType,
+      companyName: quotes.companyName,
+      taxId: quotes.taxId,
+      taxIdType: quotes.taxIdType,
+      taxOffice: quotes.taxOffice,
+      // Anlık görüntünün TAMAMI değil yalnız ayarları: katalog gövdesi
+      // (teknoloji/malzeme listeleri) her sayfa açılışında taşınacak kadar
+      // büyük ve burada okunan tek şey tatil takvimi + teslim kademesi adı.
+      settings: sql<PricingSettings>`${quotes.pricingSnapshot} -> 'settings'`,
+    })
+    .from(orders)
+    .innerJoin(quoteCheckouts, eq(quoteCheckouts.draftId, orders.draftId))
+    .innerJoin(quotes, eq(quotes.id, quoteCheckouts.quoteId))
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  if (!row) return null;
+
+  const settings = row.settings ?? null;
+  const shipByDate = row.paidAt
+    ? istanbulDateKey(
+        addBusinessDays(
+          row.paidAt,
+          row.leadDays,
+          settings?.holidays ?? [],
+          settings?.cutoffHour ?? 24
+        )
+      )
+    : null;
+
+  // Kurumsal fatura ya da girilmiş şirket/vergi bilgisi varsa kart basılır;
+  // bilgisiz bireysel faturada gösterilecek bir şey yok (null = "söylenecek
+  // bir şey yok", boş bir kart değil).
+  const invoice: OrderQuoteInvoice | null =
+    row.invoiceType === "corporate" || row.companyName || row.taxId || row.taxOffice
+      ? {
+          type: row.invoiceType,
+          companyName: row.companyName,
+          taxId: row.taxId,
+          taxIdType: row.taxIdType,
+          taxOffice: row.taxOffice,
+        }
+      : null;
+
+  return {
+    quoteId: row.quoteId,
+    quoteNumber: row.quoteNumber,
+    leadTier: row.leadTier,
+    leadTierName:
+      settings?.leadTiers?.find((t) => t.key === row.leadTier)?.name ?? null,
+    leadDays: row.leadDays,
+    shipByDate,
+    // Sıra teklif belgesindeki sıradır: üretici dosya adlarındaki P01…P20 ile
+    // ekrandaki listeyi yan yana okuyor.
+    parts: [...row.partsSnapshot].sort((a, b) => a.position - b.position),
+    addons: row.addonsSnapshot,
+    invoice,
+    poNumber: row.poNumber,
+  };
+}
+
+// ─── 4. Dosya adları ve ölçekleme ───────────────────────────────────────────
 
 /**
  * Üreticinin göreceği dosya adı: `P01_<parça adı>_x<adet>.stl`.

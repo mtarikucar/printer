@@ -33,6 +33,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
+import type { MoneyLine } from "../src/lib/config/order-money";
 import type { PartGeometry, QuoteUnits } from "../src/lib/config/quote-types";
 
 const connectionString = process.env.QA_QUOTE_DB_URL;
@@ -461,6 +462,54 @@ async function main() {
         seeded.reduce((sum, p) => sum + p.quantity, 0),
         "kapasite sayacı Σ adet okur"
       );
+    });
+
+    // Üretici ve admin ekranlarının TEK kaynağı + o kaynaktan kurulan para
+    // dökümü. Saf test (scripts/test-order-money.ts) satırların matematiğini
+    // kanıtlıyor; burada kanıtlanan, o satırları besleyen SORGULARIN gerçek
+    // şemada çalıştığı: köprü `order_drafts` üzerinden kuruluyor mu, donmuş
+    // anlık görüntü geri okunabiliyor mu, ayarlar jsonb'den çıkıyor mu.
+    await test("teklif tanımı siparişten okunur ve döküm parça satırlarına ayrılır", async () => {
+      const { loadOrderQuoteParts } = await import("../src/lib/services/quote-order");
+      const { buildOrderMoneyBreakdown } = await import("../src/lib/services/order-money");
+
+      const view = await loadOrderQuoteParts(orderId);
+      if (!view) throw new Error("teklif siparişinin tanımı okunamadı");
+      assert.equal(view.quoteId, quote.id);
+      assert.equal(view.quoteNumber, quoteRow.number);
+      assert.equal(view.leadTier, quoteRow.leadTier);
+      assert.equal(view.leadDays, computed.totals.leadDays);
+      assert.ok(view.leadTierName, "teslim kademesinin donmuş adı çözülemedi");
+      assert.deepEqual(
+        view.parts.map((p) => p.position),
+        seeded.map((_, i) => i),
+        "parçalar teklif belgesindeki sırada"
+      );
+      const [paid] = await db
+        .select({ paidAt: orders.paidAt })
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1);
+      if (paid.paidAt) {
+        assert.match(view.shipByDate ?? "", /^\d{4}-\d{2}-\d{2}$/, "kargoya teslim günü kurulamadı");
+      } else {
+        assert.equal(view.shipByDate, null, "ödenmemiş siparişte tarih sözü verilmez");
+      }
+
+      const money = await buildOrderMoneyBreakdown(orderId);
+      if (!money) throw new Error("para dökümü kurulamadı");
+      assert.equal(
+        money.lines.reduce((sum, l) => sum + l.amountKurus, 0),
+        total,
+        "Σ satır ≠ sipariş tutarı"
+      );
+      for (const part of view.parts) {
+        const partRows: MoneyLine[] = money.lines.filter((l) => l.label === part.name);
+        assert.equal(partRows.length, 1, `parçanın kendi satırı yok: ${part.name}`);
+        assert.equal(partRows[0].amountKurus, part.lineKurus);
+        assert.equal(partRows[0].qty, part.quantity);
+      }
+      assert.deepEqual(money.warnings, [], "teklif dökümünde uyarı beklenmiyor");
     });
 
     await test("kickOffOrderProcessing teklifi BİR KEZ bağlar, sipariş review'a geçer", async () => {

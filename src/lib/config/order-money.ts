@@ -577,6 +577,27 @@ export const EARNING_REVERSAL_PARTNER_SENTENCES: Record<EarningReversalCause, st
     "Bu siparişin hak edişi geri alındı; ödenmeyecek. Sebep kaydı şu anda okunamadı — ayrıntı için bize yazın.",
 };
 
+/**
+ * Ödenen teklifin DONDURULMUŞ bir parçası (`quote_checkouts.parts_snapshot`).
+ * Canlı `quote_parts` değil: müşteri ödemeden sonra teklifini değiştirebilir,
+ * dökümü değiştiremez.
+ */
+export interface QuotePartMoneySnapshot {
+  name: string;
+  technologyName: string;
+  materialName: string;
+  colorName: string;
+  quantity: number;
+  unitKurus: number;
+  lineKurus: number;
+}
+
+/** Teklif düzeyindeki ek hizmet (`quote_checkouts.addons_snapshot`). */
+export interface QuoteAddonMoneySnapshot {
+  name: string;
+  kurus: number;
+}
+
 export interface OrderMoneySnapshot {
   /** Optional for old pure fixtures; the live loader always supplies this. */
   status?: string;
@@ -631,6 +652,13 @@ export interface OrderMoneySnapshot {
    * gelir, yani "shippedAt null" bir sebep kanıtı değildir.
    */
   earningReversal?: MoneyReversalRecord | null;
+  /**
+   * Ödenen teklifin parçaları. Dolu olması siparişi "quote" türü yapar
+   * (classifyMoneyOrder); teklif siparişi OLMAYAN her siparişte boş/undefined.
+   */
+  quoteParts?: QuotePartMoneySnapshot[];
+  /** Teklif düzeyindeki ek hizmetler; parçalarla aynı anlık görüntüden. */
+  quoteAddons?: QuoteAddonMoneySnapshot[];
   /** order_items (sepet alt siparişi). Diğer sipariş türlerinde boş. */
   items: OrderItemMoneySnapshot[];
   /** Aynı sepetten doğan kardeş alt siparişler (bu sipariş hariç). */
@@ -645,17 +673,33 @@ export interface OrderMoneySnapshot {
 
 // ─── Sipariş türü ───────────────────────────────────────────────────────────
 
-export type MoneyOrderKind = "workshop" | "cart" | "manual" | "product" | "upload" | "custom";
+export type MoneyOrderKind =
+  | "workshop"
+  | "cart"
+  | "manual"
+  | "product"
+  | "quote"
+  | "upload"
+  | "custom";
 
 /**
  * Satırların nereden kurulacağını söyler. Manuel admin siparişi bir
  * "marketplace" taslağıdır (AI üretimine girmesin diye) ama ürün satırı yoktur;
  * içeriği `selectedAddons` kalemleridir. Sepet alt siparişi order_items taşır.
+ *
+ * Teklif siparişi YÜKLEMENİN ÖNÜNDE sorulur: taslağı `orderType: "upload"`
+ * olarak açılıyor (quote-checkout) ama tutarı tek bir baskı hacminden değil,
+ * dondurulmuş parça listesinden geliyor. Sıra ters olsaydı yirmi parçalık bir
+ * iş "Yüklenen model baskısı" diye tek satırda görünürdü.
  */
 export function classifyMoneyOrder(
-  s: Pick<OrderMoneySnapshot, "orderType" | "workshopSessionId" | "items" | "parentReference" | "productId">
+  s: Pick<
+    OrderMoneySnapshot,
+    "orderType" | "workshopSessionId" | "items" | "parentReference" | "productId" | "quoteParts"
+  >
 ): MoneyOrderKind {
   if (s.workshopSessionId) return "workshop";
+  if ((s.quoteParts?.length ?? 0) > 0) return "quote";
   if (s.orderType === "upload") return "upload";
   if (s.orderType === "marketplace") {
     if (s.items.length > 0 || s.parentReference) return "cart";
@@ -1281,6 +1325,57 @@ function cartItemLines(it: OrderItemMoneySnapshot): MoneyLine[] {
   ];
 }
 
+/**
+ * Teklif siparişinin satırları: ödeme anında dondurulmuş parça listesi.
+ *
+ * Her parça KENDİ satırıdır (adet × birim), çünkü teklifin tamamı için tek bir
+ * "baskı" satırı adminin cevaplaması gereken soruyu — hangi parça ne tutuyor —
+ * cevapsız bırakırdı. Ek hizmetler (kalite raporu, hızlı kargo…) `addon`
+ * türündedir: bugünkü kurala göre ek hizmet üretim tabanının içindedir.
+ *
+ * KALAN, asgari sipariş tamamlamasıdır: fiyat motoru toplamı `minOrderKurus`
+ * altında kalan teklifi aradaki farkla tamamlıyor (quote-pricing
+ * `minOrderTopUpKurus`) ve bu fark parçaların hiçbirine ait değil. Kalan EKSİ
+ * ise uydurma bir satırla kapatılmaz: anlık görüntü ile kayıtlı tutar
+ * çelişiyordur ve döküm bunu uyarı olarak söyler (deriveOrderMoneyBreakdown).
+ */
+function quoteLines(s: OrderMoneySnapshot): {
+  lines: MoneyLine[];
+  todayUpsellKurus: number;
+  upsellDriftKurus: number;
+} {
+  const parts = s.quoteParts ?? [];
+  const addons = s.quoteAddons ?? [];
+  // Teklif ödemesi ek hizmet (upsell) yazmaz, ama sipariş sonradan elle
+  // düzenlenmiş olabilir: kalan farkı "asgari tamamlama" diye adlandırmadan
+  // önce ek hizmetler kendi adlarıyla ayrılır.
+  const ups = upsellLines(s);
+  const lines: MoneyLine[] = parts.map((p) =>
+    line(
+      { label: p.name, kind: "production", amountKurus: p.lineKurus },
+      {
+        qty: p.quantity,
+        unitKurus: p.unitKurus,
+        note: [p.technologyName, p.materialName, p.colorName].filter(Boolean).join(" · "),
+      }
+    )
+  );
+  for (const a of addons) {
+    lines.push(line({ label: a.name, kind: "addon", amountKurus: a.kurus }, { note: "Teklif ek hizmeti" }));
+  }
+  lines.push(...ups.lines);
+  const topUpKurus = s.amountKurus - sum(lines.map((l) => l.amountKurus));
+  if (topUpKurus > 0) {
+    lines.push(
+      line(
+        { label: "Asgari sipariş tamamlama", kind: "production", amountKurus: topUpKurus },
+        { note: "Teklif toplamı asgari sipariş tutarının altında kaldı" }
+      )
+    );
+  }
+  return { lines, todayUpsellKurus: ups.todayKurus, upsellDriftKurus: ups.driftKurus };
+}
+
 /** Manuel admin siparişi: selectedAddons satırları, siparişin kalemleridir. */
 function manualLines(s: OrderMoneySnapshot): MoneyLine[] {
   return (s.selectedAddons ?? []).map((a) =>
@@ -1435,6 +1530,14 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
     lines = reconcileKinds([...s.items.flatMap(cartItemLines), ...cartServices], split);
   } else if (kind === "manual") {
     lines = reconcileKinds(manualLines(s), split);
+  } else if (kind === "quote") {
+    // Donmuş kaynaktan kurulan satırlar, sonradan yapılan bölüşüm
+    // değişikliğini bilmez (admin "Boyama ekle"): reconcileKinds satırları
+    // kayıtlı bölüşüme eşitler, toplam değişmez.
+    const r = quoteLines(s);
+    lines = reconcileKinds(r.lines, split);
+    upsellDriftKurus = r.upsellDriftKurus;
+    todayUpsellKurus = r.todayUpsellKurus;
   } else {
     const r = storedSplitLines(s, kind, split);
     lines = r.lines;
@@ -1463,7 +1566,15 @@ export function deriveOrderMoneyBreakdown(s: OrderMoneySnapshot): OrderMoneyBrea
       `Ek hizmetler bugünkü fiyatlardan yeniden hesaplandı: kayıtlı toplam ${formatTry(s.upsellAmountKurus)}, bugünkü toplam ${formatTry(todayUpsellKurus)}.`
     );
   }
-  if (kind !== "cart" && kind !== "manual" && split.productionBaseKurus < s.upsellAmountKurus) {
+  // Teklif siparişi de dışarıda: orada ek hizmetler ana satırdan DÜŞÜLMÜYOR,
+  // kendi satırlarında duruyor (quoteLines), yani uyarının anlattığı olay
+  // ("ana ürün satırı eksiye düştü") orada olamaz.
+  if (
+    kind !== "cart" &&
+    kind !== "manual" &&
+    kind !== "quote" &&
+    split.productionBaseKurus < s.upsellAmountKurus
+  ) {
     warnings.push("Üretim tabanı ek hizmet toplamından küçük — ana ürün satırı eksiye düştü.");
   }
 

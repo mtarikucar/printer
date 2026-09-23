@@ -10,8 +10,11 @@ import { validateImageMagicBytes } from "@/lib/services/file-validation";
 import {
   canUploadQcPhotos,
   qcPhotosWouldExceed,
+  MAX_QC_PHOTOS_PER_ROUND,
   type ManufacturerOrderStatus,
 } from "@/lib/services/qc";
+import { qcPhotoCap } from "@/lib/config/qc";
+import { loadOrderQuoteParts } from "@/lib/services/quote-order";
 import { REFUNDED_ORDER_ERROR, isRefunded } from "@/lib/config/order-status-policy";
 import { currentOrderModelRevision } from "@/lib/services/order-model-revision";
 import { handleRouteFailure, PARTNER_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
@@ -58,7 +61,7 @@ const MODEL_REVISION_UNAVAILABLE_ERROR =
  * düşüyordu. Ekranın sunduğu kontrolün, arızada da CEVAP veren bir ucu olmalı.
  */
 const QC_PHOTO_COUNT_UNAVAILABLE_ERROR =
-  "Bu turda kaç QC fotoğrafı olduğu şu anda okunamadı (geçici sistem arızası). Tur başına 6 fotoğraf sınırı bilinmeyen bir sayıya uygulanamayacağı için yükleme yapılmadı. Daha önce yüklediğiniz fotoğraflar SİLİNMEDİ; birkaç dakika sonra tekrar deneyin.";
+  "Bu turda kaç QC fotoğrafı olduğu şu anda okunamadı (geçici sistem arızası). Tur başına fotoğraf sınırı bilinmeyen bir sayıya uygulanamayacağı için yükleme yapılmadı. Daha önce yüklediğiniz fotoğraflar SİLİNMEDİ; birkaç dakika sonra tekrar deneyin.";
 
 // Active-manufacturer gate, mirrors finish-printing/ship route.ts.
 async function requireActiveManufacturer() {
@@ -133,9 +136,24 @@ export async function POST(
         { status: 503 }
       );
     }
-    if (qcPhotosWouldExceed(existing, files.length)) {
+    // TUR BAŞINA SINIR, İŞİN PARÇA SAYISINA GÖRE. Altı fotoğraf tek bir figürün
+    // turu için doğru sayıdır; yirmi parçalık bir teklif siparişinde aynı sınır
+    // üreticiyi eksik kanıt göndermeye zorlardı (qcPhotoCap).
+    //
+    // Okuma ARIZASINDA taban sınırda kalınır (503 dönülmez): bu okuma kapıyı
+    // yalnız GENİŞLETİR, yani arıza hâlinde uygulanan sınır her zaman daha
+    // dardır — fail-closed. Yüklemeyi büsbütün reddetmek, tek parçalı işlerin
+    // QC'sini de teklif tablosunun arızasına bağlamak olurdu.
+    let cap = MAX_QC_PHOTOS_PER_ROUND;
+    try {
+      const quote = await loadOrderQuoteParts(id);
+      if (quote) cap = qcPhotoCap(quote.parts.length);
+    } catch (e) {
+      console.error("qc-photos: teklif parça sayısı okunamadı, taban sınır uygulanıyor", e);
+    }
+    if (qcPhotosWouldExceed(existing, files.length, cap)) {
       return NextResponse.json(
-        { error: "Çok fazla fotoğraf (tur başına en fazla 6)" },
+        { error: `Çok fazla fotoğraf (tur başına en fazla ${cap})` },
         { status: 400 }
       );
     }

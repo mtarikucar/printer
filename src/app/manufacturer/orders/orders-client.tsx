@@ -36,6 +36,8 @@ interface ManufacturerOrdersClientProps {
     rushShipping: boolean;
     /** Atölye partisine ait — tek tek kargolanamaz, parti admin panelinden gider. */
     isWorkshop: boolean;
+    /** Teklif siparişinin parça sayısı; teklif siparişi değilse (ya da sayı okunamadıysa) null. */
+    quotePartCount: number | null;
   }>;
   total: number;
   page: number;
@@ -175,6 +177,15 @@ export function ManufacturerOrdersClient({
                       >
                         {order.productTitleSnapshot}
                       </span>
+                    </span>
+                  ) : order.quotePartCount !== null ? (
+                    /* Teklif siparişinin "boyu" yok: işin büyüklüğü parça
+                       sayısıdır ve satır bunu söylemeden "—" gösteriyordu. */
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700">
+                        Teklif
+                      </span>
+                      <span className="text-gray-700">{order.quotePartCount} parça</span>
                     </span>
                   ) : (
                     sizeDisplay(order.figurineSize, d, { short: true }) || "—"

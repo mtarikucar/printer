@@ -9,7 +9,7 @@ import { ProductionPanel } from "@/components/products/production-panel";
 import { OrderChat } from "@/components/order-chat";
 import { SendToPainterPanel } from "@/components/manufacturer/send-to-painter-panel";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { formatDateTime } from "@/lib/i18n/format";
+import { formatDate, formatDateTime } from "@/lib/i18n/format";
 import type { Locale } from "@/lib/i18n/types";
 import { formatPhoneDisplay } from "@/lib/phone";
 import { QC_MIN_PHOTOS } from "@/lib/config/qc";
@@ -121,7 +121,47 @@ interface Props {
     order: OrderData;
     photos: { id: string; originalUrl: string }[];
     qcPhotos: { id: string; url: string }[];
+    /** Tur başına fotoğraf sınırı (parça sayısına göre; sunucu hesaplar). */
+    qcPhotoCap: number;
     qcRejectReason: string | null;
+    /**
+     * Teklif siparişinin ÖDENEN parça tanımı. Müşteri fiyatı YOKTUR: birim ve
+     * satır tutarları müşteriyle platform arasındadır, atölyenin kazancı
+     * hakediş kartındadır.
+     */
+    quote: {
+      number: string;
+      leadTier: string;
+      leadTierName: string | null;
+      leadDays: number;
+      /** Kargoya teslim günü (YYYY-MM-DD); sipariş ödenmemişse null. */
+      shipByDate: string | null;
+      partCount: number;
+      unitCount: number;
+      parts: {
+        partId: string;
+        position: number;
+        name: string;
+        fileName: string;
+        /** Bu parçanın siparişe yazılan model dosyası adı (eşleştirme anahtarı). */
+        modelFileName: string;
+        thumbnailUrl: string | null;
+        drawingUrl: string | null;
+        drawingName: string | null;
+        technologyName: string;
+        materialName: string;
+        colorName: string;
+        colorHex: string;
+        finishName: string;
+        layerUm: number | null;
+        infillPct: number | null;
+        quantity: number;
+        dimensionsMm: { x: number; y: number; z: number };
+        volumeCm3: number | null;
+        note: string | null;
+        dfmWarnings: string[];
+      }[];
+    } | null;
     marketplaceProduct: {
       title: string;
       description: string;
@@ -253,7 +293,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcRejectReason, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, productionGateClosed, modelAck, actions } = data;
+  const { order, photos, qcPhotos, qcPhotoCap, qcRejectReason, quote, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, productionGateClosed, modelAck, actions } = data;
   // Çok parçalı iş: tek "STL indir" düğmesi yalnız İLK parçayı verirdi ve
   // üretici 13 parçanın 12'sini hiç görmeden baskıya başlardı.
   const stlParts = modelFiles.filter((f) => f.kind === "stl");
@@ -351,6 +391,21 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
     too_small: "Çok küçük — detay kaybı",
     high_poly: "Çok yüksek poligon",
     open_edges: "Açık kenarlar",
+  };
+
+  // Teklif motorunun üretilebilirlik (DfM) uyarıları. Müşteri tarafındaki uzun
+  // cümleler sözlükte ve PARAMETRELİ; donmuş parça yalnız KODU taşıyor, o
+  // yüzden tezgâhta işe yarayan kısa karşılığı burada durur (üretici paneli
+  // Türkçe ve sabit kodlu — PRINT_RISK_LABELS ile aynı kural).
+  const DFM_LABELS: Record<string, string> = {
+    thin_walls: "İnce duvar — kırılma riski",
+    not_watertight: "Su sızdıran (watertight değil) model",
+    multiple_bodies: "Birden çok ayrık gövde",
+    too_large: "Baskı hacmi sınırında",
+    too_small: "Çok küçük — detay kaybı",
+    no_volume: "Kapalı hacim ölçülemedi",
+    tolerance_manual: "Kritik tolerans — ölçü kontrolü isteniyor",
+    finish_manual: "Yüzey işlemi elle değerlendirildi",
   };
 
   // Paid add-ons that change what leaves the workshop.
@@ -679,6 +734,24 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
           {order.upsells.includes("rush_shipping") && (
             <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
               ⚡ HIZLI KARGO
+            </span>
+          )}
+          {/* Teslim sözü: teklifte hangi kademe seçildiyse o. `orders`ta bir
+              termin kolonu YOK — tarih teklifin donmuş iş günü sayısından
+              geliyor, yani atölyenin gördüğü gün müşteriye verilen sözün
+              aynısı. */}
+          {quote && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${
+                quote.leadTier === "express"
+                  ? "bg-red-100 text-red-700"
+                  : "bg-indigo-100 text-indigo-800"
+              }`}
+            >
+              {quote.leadTierName ?? quote.leadTier} · {quote.leadDays} iş günü
+              {quote.shipByDate
+                ? ` · kargoya ${formatDate(quote.shipByDate, loc)}`
+                : ""}
             </span>
           )}
           {order.isWorkshop && (
@@ -1127,6 +1200,158 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                 Bu hizmetlerin bedeli müşteriden tahsil edildi; pakete eklemeniz
                 gerekir.
               </p>
+            </div>
+          )}
+
+          {/* ─── Teklif parça listesi (anlık teklif siparişi) ─────────
+              Basılacak tanımın TAMAMI: her parçanın teknolojisi, malzemesi,
+              rengi, yüzeyi, katmanı, doluluğu, mm ölçüsü ve adedi. Müşteri
+              fiyatı YOK — atölyenin kazancı kendi hakediş kartındadır. */}
+          {quote && (
+            <div className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  Parça listesi
+                </h3>
+                <span className="text-xs font-semibold text-gray-700">
+                  {quote.partCount} parça · {quote.unitCount} adet
+                  <span className="ml-2 font-mono font-normal text-gray-400">
+                    Teklif {quote.number}
+                  </span>
+                </span>
+              </div>
+              <div className="-mx-5 overflow-x-auto px-5">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                      <th className="py-2 pr-3">Parça</th>
+                      <th className="py-2 pr-3">Teknoloji / Malzeme</th>
+                      <th className="py-2 pr-3">Renk / Yüzey</th>
+                      <th className="py-2 pr-3">Katman / Doluluk</th>
+                      <th className="py-2 pr-3">Ölçü (mm)</th>
+                      <th className="py-2 pr-3 text-right">Adet</th>
+                      <th className="py-2">Dosyalar</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {quote.parts.map((p) => {
+                      const modelFile = modelFiles.find((f) => f.name === p.modelFileName);
+                      const mm = (n: number) =>
+                        n.toLocaleString("tr-TR", { maximumFractionDigits: 1 });
+                      return (
+                        <tr key={p.partId} className="align-top">
+                          <td className="py-2.5 pr-3">
+                            <div className="flex items-start gap-2">
+                              {p.thumbnailUrl ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img
+                                  src={p.thumbnailUrl}
+                                  alt=""
+                                  className="h-12 w-12 shrink-0 rounded-lg border border-gray-200 bg-gray-50 object-cover"
+                                />
+                              ) : (
+                                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-200 text-[10px] text-gray-400">
+                                  görsel yok
+                                </span>
+                              )}
+                              <span className="min-w-0">
+                                <span className="block font-medium text-gray-900">
+                                  P{String(p.position + 1).padStart(2, "0")} · {p.name}
+                                </span>
+                                <span
+                                  className="block truncate text-[11px] text-gray-400"
+                                  title={p.fileName}
+                                >
+                                  {p.fileName}
+                                </span>
+                                {p.note && (
+                                  <span className="mt-0.5 block text-[11px] text-gray-600">
+                                    {p.note}
+                                  </span>
+                                )}
+                                {p.dfmWarnings.length > 0 && (
+                                  <span className="mt-1 flex flex-wrap gap-1">
+                                    {p.dfmWarnings.map((w) => (
+                                      <span
+                                        key={w}
+                                        className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-red-200"
+                                      >
+                                        {DFM_LABELS[w] ?? w}
+                                      </span>
+                                    ))}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 pr-3 text-gray-900">
+                            <span className="block font-medium">{p.technologyName}</span>
+                            <span className="block text-[11px] text-gray-500">
+                              {p.materialName}
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3 text-gray-900">
+                            <span className="flex items-center gap-1.5">
+                              <span
+                                className="h-3 w-3 shrink-0 rounded-full border border-gray-300"
+                                style={{ backgroundColor: p.colorHex }}
+                              />
+                              {p.colorName}
+                            </span>
+                            <span className="block text-[11px] text-gray-500">
+                              {p.finishName}
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3 text-gray-700">
+                            {p.layerUm != null ? `${p.layerUm} µm` : "—"}
+                            <span className="block text-[11px] text-gray-500">
+                              {p.infillPct != null ? `%${p.infillPct} doluluk` : "katı"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3 text-gray-700">
+                            {mm(p.dimensionsMm.x)}×{mm(p.dimensionsMm.y)}×{mm(p.dimensionsMm.z)}
+                            {p.volumeCm3 != null && (
+                              <span className="block text-[11px] text-gray-500">
+                                {p.volumeCm3.toLocaleString("tr-TR", {
+                                  maximumFractionDigits: 1,
+                                })}{" "}
+                                cm³
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 pr-3 text-right font-semibold text-gray-900">
+                            × {p.quantity}
+                          </td>
+                          <td className="py-2.5">
+                            <span className="flex flex-col gap-1">
+                              {modelFile && (
+                                <a
+                                  href={`/api/manufacturer/orders/${order.id}/model-files/${modelFile.id}`}
+                                  className="text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+                                >
+                                  STL indir
+                                </a>
+                              )}
+                              {p.drawingUrl && (
+                                <a
+                                  href={p.drawingUrl}
+                                  className="truncate text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                                  title={p.drawingName ?? undefined}
+                                >
+                                  Teknik çizim
+                                </a>
+                              )}
+                              {!modelFile && !p.drawingUrl && (
+                                <span className="text-[11px] text-gray-400">—</span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -1601,6 +1826,7 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                   <QcPhotoUploader
                     orderId={order.id}
                     initialPhotos={qcPhotos}
+                    maxPhotos={qcPhotoCap}
                     onCountChange={setQcPhotoCount}
                   />
                   <button
@@ -1623,6 +1849,18 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
                       En az {QC_MIN_PHOTOS} fotoğraf gerekli (genel ön, arka/yan,
                       en detaylı bölgenin yakın çekimi ve cetvelli ölçü fotoğrafı).
                       Şu an {qcPhotoCount} fotoğraf yüklü.
+                    </p>
+                  )}
+                  {/* Teklif siparişinde kanıt figürün değil PARÇALARIN: tek
+                      figür için yazılmış dört kare yirmi parçalık bir işi
+                      göstermez, bu yüzden sınır da parça sayısına göre. */}
+                  {quote && (
+                    <p className="text-xs text-amber-700/60 mt-2 text-left">
+                      Bu bir teklif siparişi ({quote.partCount} parça ·{" "}
+                      {quote.unitCount} adet): tüm parçaları ve adetlerini bir
+                      arada gösteren toplu kare ile kritik ölçülerin kumpaslı
+                      yakın çekimlerini yükleyin. Bu turda en fazla {qcPhotoCap}{" "}
+                      fotoğraf kabul edilir.
                     </p>
                   )}
                 </div>

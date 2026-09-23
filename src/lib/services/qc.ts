@@ -1,6 +1,8 @@
 // Pure QC (quality-control) state machine for the manufacturer print → ship
-// flow. Dependency-free so it is the single source of truth for QC transitions,
-// reused by every QC route and unit-tested in isolation (scripts/test-qc.ts).
+// flow. Dependency-free (the one import is the pure constant module) so it is
+// the single source of truth for QC transitions, reused by every QC route and
+// unit-tested in isolation (scripts/test-qc.ts).
+import { QC_MAX_PHOTOS } from "@/lib/config/qc";
 
 export type ManufacturerOrderStatus =
   | "unassigned"
@@ -15,8 +17,13 @@ export type ManufacturerOrderStatus =
 
 export type QcAction = "submit" | "approve" | "reject";
 
-/** Max finished-product photos a manufacturer may upload per QC round. */
-export const MAX_QC_PHOTOS_PER_ROUND = 6;
+/**
+ * Max finished-product photos a manufacturer may upload per QC round, for a job
+ * with no part list of its own. A quote order raises it per part —
+ * `qcPhotoCap(partCount)` in config/qc.ts is the single formula; this is the
+ * value it returns for every other order.
+ */
+export const MAX_QC_PHOTOS_PER_ROUND = QC_MAX_PHOTOS;
 
 /**
  * Next manufacturerStatus for a QC action, or null if the action is not allowed
@@ -55,7 +62,17 @@ export function canShipAfterQc(current: ManufacturerOrderStatus): boolean {
   return current === "qc_approved";
 }
 
-/** True when adding `adding` photos to `existing` would exceed the per-round cap. */
-export function qcPhotosWouldExceed(existing: number, adding: number): boolean {
-  return existing + adding > MAX_QC_PHOTOS_PER_ROUND;
+/**
+ * True when adding `adding` photos to `existing` would exceed the round's cap.
+ *
+ * `cap` is a parameter because the cap is per ORDER (a twenty-part quote order
+ * needs more than six); it defaults to the single-figure cap so every existing
+ * caller keeps today's rule.
+ */
+export function qcPhotosWouldExceed(
+  existing: number,
+  adding: number,
+  cap: number = MAX_QC_PHOTOS_PER_ROUND
+): boolean {
+  return existing + adding > cap;
 }

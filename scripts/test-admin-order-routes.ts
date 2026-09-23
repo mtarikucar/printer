@@ -525,6 +525,9 @@ const TRANSITIVE_READERS = new Set([
   "latestModelFiles",
   "getProductSpec",
   "readPayoutPage",
+  // Teklif siparişinin dondurulmuş parça tanımı (quote_checkouts + quotes):
+  // hem admin hem üretici sipariş sayfası çağırıyor, çağrıda "db" geçmiyor.
+  "loadOrderQuoteParts",
 ]);
 
 /**
@@ -847,6 +850,41 @@ for (const rel of STRIP_PAGES) {
     /glbUrl: modelFilesUnreadable \? null/.test(flat) &&
       /stlUrl: modelFilesUnreadable \? null/.test(flat) &&
       /objUrl: modelFilesUnreadable \? null/.test(flat)
+  );
+}
+
+// Teklif siparişinde ÜRETİCİ MÜŞTERİ FİYATINI GÖRMEZ.
+//
+// Üreticinin ekranında yalnız kendi hakediş kartı vardır; teklifin birim ve
+// satır tutarları müşteriyle platform arasındadır. Parça listesi donmuş
+// tanımın TAMAMINI taşıyor (`FrozenQuotePart` fiyatları da içerir), yani
+// serileştirmede tek bir alan fazla yazmak fiyatı panele taşırdı — ve bunu
+// hiçbir tip hatası yakalamaz. `unitKurus`/`lineKurus` yalnız teklif
+// fiyatlarının adıdır; üreticinin kendi kazanç alanları (grossKurus,
+// netEarningKurus) başka adlar taşır ve bu kuralın dışındadır.
+{
+  for (const rel of [
+    "src/app/manufacturer/orders/[id]/page.tsx",
+    "src/app/manufacturer/orders/[id]/client.tsx",
+  ]) {
+    const src = read(rel);
+    ok(
+      `${rel}: teklifin müşteri fiyatı üretici ekranına girmiyor`,
+      !/\b(unitKurus|lineKurus)\b/.test(src)
+    );
+  }
+}
+
+// "Modeli indir (STL/OBJ)" bağlantısı, ucun ÖN KOŞULUNA bağlı olmalı.
+//
+// Uç `uploadedModelId` yoksa 404 döner. Teklif siparişi de `orderType:
+// "upload"` taşıdığı için yalnız türe bakan bir koşul, her teklif siparişinde
+// garantili 404 veren bir düğme gösteriyordu.
+{
+  const flat = read(PAGE).replace(/\s+/g, " ");
+  ok(
+    "admin: yüklenen model indirme bağlantısı uploadedModelId'ye bağlı",
+    /order\.uploadedModelId && \([^]{0,400}download-upload/.test(flat)
   );
 }
 

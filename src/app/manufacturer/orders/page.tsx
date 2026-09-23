@@ -1,9 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { eq, and, desc, count, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orders, manufacturers } from "@/lib/db/schema";
+import { orders, manufacturers, quoteCheckouts } from "@/lib/db/schema";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { ManufacturerOrdersClient } from "./orders-client";
@@ -92,6 +92,27 @@ export default async function ManufacturerOrdersPage({
 
   const totalCount = countResult[0]?.total ?? 0;
 
+  // Teklif siparişinin listedeki kimliği BOYU değil PARÇA SAYISIDIR: teklif
+  // siparişinde `figurineSize` yok (null), yani satır "—" görünüyordu. Sayı
+  // ödeme anındaki anlık görüntüden okunur (tek sorgu, sayfadaki satırlar
+  // kadar). Okuma arızası listeyi düşürmez: sayı bilinmezse satır eski
+  // gösterimine döner.
+  const quotePartCounts = orderRows.length
+    ? await db
+        .select({
+          orderId: orders.id,
+          partCount: sql<number>`jsonb_array_length(${quoteCheckouts.partsSnapshot})`,
+        })
+        .from(quoteCheckouts)
+        .innerJoin(orders, eq(orders.draftId, quoteCheckouts.draftId))
+        .where(inArray(orders.id, orderRows.map((o) => o.id)))
+        .catch((e) => {
+          console.error("manufacturer orders list: teklif parça sayıları okunamadı", e);
+          return [];
+        })
+    : [];
+  const partCountById = new Map(quotePartCounts.map((r) => [r.orderId, Number(r.partCount)]));
+
   return (
     <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900">
@@ -114,6 +135,8 @@ export default async function ManufacturerOrdersPage({
           needsPainting: o.needsPainting,
           rushShipping: ((o.upsells ?? []) as string[]).includes("rush_shipping"),
           isWorkshop: o.workshopSessionId != null,
+          /** Teklif siparişi: kaç parça basılacak. Teklif değilse null. */
+          quotePartCount: partCountById.get(o.id) ?? null,
         }))}
         total={totalCount}
         page={page}

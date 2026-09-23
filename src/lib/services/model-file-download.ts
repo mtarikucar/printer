@@ -2,7 +2,7 @@ import { createReadStream } from "fs";
 import { stat } from "fs/promises";
 import { Readable } from "stream";
 import { Zip, ZipPassThrough } from "fflate";
-import { absoluteFilePath } from "@/lib/services/storage";
+import { absoluteFilePath, getFileBuffer } from "@/lib/services/storage";
 import { zipSizeProblem } from "@/lib/config/order-model";
 
 /**
@@ -60,6 +60,40 @@ export async function fileDownloadResponse(
       "Content-Disposition": contentDisposition(file.name),
       "Content-Length": String(size),
       "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
+
+/**
+ * Küçük görseli SATIR İÇİ döner: bunu `<img>` etiketi gösteriyor, indirme
+ * penceresi açmıyor. `attachment` başlığı bazı tarayıcılarda resmi göstermek
+ * yerine indirmeye çevirirdi.
+ *
+ * Bellek: yalnız küçük görseller (parça küçük resmi, QC önizlemesi) için;
+ * model dosyaları `fileDownloadResponse` ile AKITILIR.
+ */
+export async function inlineImageResponse(key: string): Promise<Response> {
+  let buffer: Buffer;
+  try {
+    buffer = await getFileBuffer(key);
+  } catch {
+    return Response.json({ error: "Dosya bulunamadı" }, { status: 404 });
+  }
+  const ext = key.split(".").pop()?.toLowerCase() ?? "";
+  return new Response(new Uint8Array(buffer), {
+    headers: {
+      "Content-Type": IMAGE_TYPES[ext] ?? "application/octet-stream",
+      "Content-Length": String(buffer.length),
+      "Content-Disposition": "inline",
+      // Oturuma bağlı kaynak: ara önbelleklerde durmamalı.
+      "Cache-Control": "private, max-age=300",
     },
   });
 }

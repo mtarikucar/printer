@@ -1449,6 +1449,124 @@ test("yüklenen model: boyamasız tek üretim satırı + ek hizmetler", () => {
   assert.equal(b.shares.length, 1, "boyama payı yoksa boyacı payı listelenmez");
 });
 
+// ─── Teklif siparişi (anlık teklif motoru) ─────────────────────────────────
+//
+// Teklif siparişi taslakta `orderType: "upload"` olarak açılır (quote-checkout),
+// ama tutarı TEK bir baskı hacminden değil, ödeme anında DONDURULMUŞ parça
+// listesinden gelir. "Yüklenen model baskısı" tek satırı yirmi parçalık bir işi
+// anlatamaz: admin hangi parçanın ne kadar tuttuğunu göremez.
+
+/** İki parçalı, tek ek hizmetli teklif siparişi. Σ parça + ek = tutar. */
+function quoteSnap(over: Partial<OrderMoneySnapshot> = {}): OrderMoneySnapshot {
+  return snap({
+    orderType: "upload",
+    amountKurus: 95000,
+    productionBaseKurus: 95000,
+    paintingPriceKurus: 0,
+    quantity: 14,
+    quoteParts: [
+      {
+        name: "Gövde",
+        technologyName: "FDM",
+        materialName: "PLA",
+        colorName: "Siyah",
+        quantity: 4,
+        unitKurus: 12500,
+        lineKurus: 50000,
+      },
+      {
+        name: "Kapak",
+        technologyName: "SLA",
+        materialName: "Standart reçine",
+        colorName: "Gri",
+        quantity: 10,
+        unitKurus: 3000,
+        lineKurus: 30000,
+      },
+    ],
+    quoteAddons: [{ name: "Kalite raporu", kurus: 15000 }],
+    ...over,
+  });
+}
+
+test("teklif siparişi 'quote' türüne düşer (yükleme türünün ÖNÜNDE)", () => {
+  assert.equal(classifyMoneyOrder(quoteSnap()), "quote");
+  // Parça yoksa eski davranış aynen: teklif olmayan yükleme siparişi.
+  assert.equal(classifyMoneyOrder(quoteSnap({ quoteParts: [] })), "upload");
+  assert.equal(classifyMoneyOrder(quoteSnap({ quoteParts: undefined })), "upload");
+  // Atölye siparişi teklif parçası taşısa bile atölyedir (koltuk fiyatı).
+  assert.equal(classifyMoneyOrder(quoteSnap({ workshopSessionId: "w1" })), "workshop");
+});
+
+test("teklif siparişi: parça başına bir satır (adet × birim) + ek hizmet satırı", () => {
+  const b = derive(quoteSnap());
+  const parts = b.lines.filter((l) => l.kind === "production");
+  assert.equal(parts.length, 2);
+  assert.deepEqual(
+    parts.map((l) => [l.label, l.qty, l.unitKurus, l.amountKurus]),
+    [
+      ["Gövde", 4, 12500, 50000],
+      ["Kapak", 10, 3000, 30000],
+    ]
+  );
+  // Üretici ekranında olmayan şey burada VAR: parçanın teknolojisi/malzemesi.
+  assert.ok(parts[0].note?.includes("FDM"), parts[0].note);
+  assert.ok(parts[0].note?.includes("PLA"), parts[0].note);
+  const addons = b.lines.filter((l) => l.kind === "addon");
+  assert.deepEqual(
+    addons.map((l) => [l.label, l.amountKurus]),
+    [["Kalite raporu", 15000]]
+  );
+  assert.equal(total(b.lines), 95000);
+  assert.deepEqual(b.warnings, []);
+  assert.equal(b.shares.length, 1, "boyama payı yoksa boyacı payı listelenmez");
+});
+
+test("teklif siparişi: asgari sipariş tamamlama satırı farkı kapatır", () => {
+  const b = derive(quoteSnap({ amountKurus: 100000, productionBaseKurus: 100000 }));
+  const topUp = b.lines.find((l) => l.label === "Asgari sipariş tamamlama");
+  assert.ok(topUp, JSON.stringify(b.lines.map((l) => l.label)));
+  assert.equal(topUp.amountKurus, 5000);
+  assert.equal(topUp.kind, "production");
+  assert.equal(total(b.lines), 100000);
+  assert.deepEqual(b.warnings, []);
+});
+
+test("teklif siparişi: fark yokken tamamlama satırı YAZILMAZ", () => {
+  const b = derive(quoteSnap());
+  assert.equal(
+    b.lines.some((l) => l.label === "Asgari sipariş tamamlama"),
+    false
+  );
+});
+
+test("teklif siparişi: sonradan ayrılan boyama payıyla da Σ = tutar", () => {
+  // Admin "Boyama ekle" (carvePaintingShare): tutar aynı, üretim tabanı düşer.
+  const b = derive(
+    quoteSnap({ productionBaseKurus: 75000, paintingPriceKurus: 20000 })
+  );
+  assert.equal(total(b.lines), 95000);
+  assert.equal(
+    totalOf(b.lines, ["painting"]),
+    20000,
+    "boyama satırları kayıtlı boyama tabanını vermiyor"
+  );
+  assert.equal(totalOf(b.lines, ["production", "addon"]), 75000);
+  assert.ok(
+    b.lines.some((l) => l.label === "Sonradan ayrılan boyama payı"),
+    "reconcileKinds düzeltme çifti yazmadı"
+  );
+  assert.deepEqual(b.warnings, []);
+  assert.equal(b.shares.length, 2);
+});
+
+test("teklif siparişi: parça satırları kayıtlı tutarı aşarsa uyarı çıkar", () => {
+  // Bozuk anlık görüntü (yanlış dondurulmuş tutar): sessizce uydurulmuş bir
+  // satırla kapatmak yerine döküm UYARIR.
+  const b = deriveOrderMoneyBreakdown(quoteSnap({ amountKurus: 90000, productionBaseKurus: 90000 }));
+  assert.ok(hasWarning(b, "Kalemlerin toplamı"), JSON.stringify(b.warnings));
+});
+
 test("atölye koltuğu: tek üretim satırı, tahakkuk olayı toplu sevk", () => {
   const b = derive(
     snap({ workshopSessionId: "w1", amountKurus: 150000, productionBaseKurus: 150000, paintingPriceKurus: 0 })

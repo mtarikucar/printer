@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { QC_MAX_PHOTOS } from "@/lib/config/qc";
 import {
   uploadWithProgress,
   type UploadProgress,
@@ -14,8 +15,6 @@ interface QcPhoto {
   url: string;
 }
 
-const MAX_PHOTOS = 6;
-
 // Authenticated, multi-file QC photo uploader for the manufacturer order detail.
 // Posts to /api/manufacturer/orders/[id]/qc-photos (no Turnstile — the session
 // is the auth). Self-manages its photo list and reports the count up so the
@@ -24,13 +23,22 @@ export function QcPhotoUploader({
   orderId,
   initialPhotos,
   disabled = false,
+  maxPhotos = QC_MAX_PHOTOS,
   onCountChange,
 }: {
   orderId: string;
   initialPhotos: QcPhoto[];
   disabled?: boolean;
+  /**
+   * Tur başına fotoğraf sınırı — işin PARÇA SAYISINA göre (`qcPhotoCap`,
+   * sunucudan gelir). Varsayılan tek figürün sınırıdır; ucun uyguladığı
+   * sayının aynısı olmak zorunda, yoksa ekran üreticiye reddedilecek bir
+   * yükleme sunar.
+   */
+  maxPhotos?: number;
   onCountChange?: (count: number) => void;
 }) {
+  const MAX_PHOTOS = maxPhotos;
   const d = useDictionary();
   const [photos, setPhotos] = useState<QcPhoto[]>(initialPhotos);
   const [uploading, setUploading] = useState(false);
@@ -150,7 +158,12 @@ export function QcPhotoUploader({
               : `${d["manufacturer.orderDetail.qcUpload"]} (${photos.length}/${MAX_PHOTOS})`}
           </button>
           <p className="text-xs text-amber-700/50 mt-1 text-center">
-            {d["manufacturer.orderDetail.qcMaxPhotos"]}
+            {/* Sözlükteki cümle sayıyı İÇİNDE taşıyor ("En fazla 6 fotoğraf"),
+                yani yalnız sınır taban olduğunda doğru. Parça sayısına göre
+                yükselen sınırda cümle sayıyla birlikte kurulur. */}
+            {MAX_PHOTOS === QC_MAX_PHOTOS
+              ? d["manufacturer.orderDetail.qcMaxPhotos"]
+              : `En fazla ${MAX_PHOTOS} fotoğraf`}
           </p>
         </div>
       )}

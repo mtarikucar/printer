@@ -498,6 +498,7 @@ const MANUFACTURER_NON_FORWARD: Record<string, string> = {
   "download-stl": "dosya okuma",
   "download-upload": "müşterinin yüklediği dosyayı okuma",
   "model-files": "sürüm dosyalarını okuma",
+  "quote-files": "teklif parçasının çizimini/küçük resmini okuma — baskı tarifini görmek ileri adım değil",
   "product-files": "ürün dosyalarını okuma",
   messages: "yazışma",
   "qc-photos": "fotoğraf YÜKLEME: sürüm damgası burada basılır, karar submit-qc'de verilir",

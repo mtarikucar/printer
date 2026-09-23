@@ -40,6 +40,7 @@ import { partnerHoldingOrder } from "@/lib/services/on-behalf";
 import { modelApprovalUrl } from "@/lib/services/model-approval";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { buildOrderMoneyBreakdown } from "@/lib/services/order-money";
+import { loadOrderQuoteParts } from "@/lib/services/quote-order";
 import { moneySplitEditBlock } from "@/lib/config/order-money-edit";
 import {
   gateMode,
@@ -390,6 +391,16 @@ export default async function AdminOrderDetailPage({
   );
   const modelFilesUnreadable = modelFileLog === null;
   const modelFileRows = modelFileLog ?? [];
+
+  // ─── Teklif siparişinin ÖDENEN tanımı ────────────────────────────────────
+  //
+  // Bu siparişin parası bir teklif belgesinden geliyorsa (anlık teklif motoru),
+  // admin'in denetleyeceği tanım O BELGEDİR: hangi parça, hangi malzeme, hangi
+  // fiyat, hangi fatura bilgisi. `quote_parts` canlı kopya olduğu için değil,
+  // `quote_checkouts.parts_snapshot` dondurulmuş kopya olduğu için okunur.
+  const quoteRead = await displayRead("teklif tanımı", order.id, loadOrderQuoteParts(order.id));
+  const quoteUnreadable = quoteRead === null;
+  const orderQuote = quoteRead ?? null;
   const filesByRevision = new Map<number, typeof modelFileRows>();
   for (const f of modelFileRows) {
     const list = filesByRevision.get(f.revision) ?? [];
@@ -1090,6 +1101,8 @@ export default async function AdminOrderDetailPage({
       painterAssignmentDecisionsUnreadable &&
       "Değerlendirmedeki boyacı adları",
     journeyUnreadable && "Yolculuk karekodu",
+    quoteUnreadable &&
+      "Teklif tanımı (bu sipariş bir teklif siparişi OLABİLİR; parça listesi, fatura bilgisi ve teslim kademesi gösterilemiyor — para dökümündeki satırlar da bu tanımdan geliyor)",
   ].filter((x): x is string => typeof x === "string");
 
   // Serialize everything for client component
@@ -1153,6 +1166,11 @@ export default async function AdminOrderDetailPage({
       modelStlUrl: normalizeFileUrl(order.modelStlUrl),
       modelUploadedAt: order.modelUploadedAt?.toISOString() ?? null,
       modelSource: order.modelSource,
+      // "Modeli indir (STL/OBJ)" bağlantısının ÖN KOŞULU: uç `uploadedModelId`
+      // yoksa 404 döner. Teklif siparişi de `orderType: "upload"` olarak
+      // açılıyor ama yüklenen modeli yok — bağlantı yalnız türe bakarak
+      // gösterildiğinde her teklif siparişinde ölü bir düğme duruyordu.
+      uploadedModelId: order.uploadedModelId,
     },
     printGate,
     approvedImageUrl: previewRow
@@ -1438,7 +1456,51 @@ export default async function AdminOrderDetailPage({
       painterDeclined: painterDeclinedUnreadable,
       painterRanking: painterRankingUnreadable,
       painterAssignmentDecisions: painterAssignmentDecisionsUnreadable,
+      quote: quoteUnreadable,
     },
+    // Teklif kartı (Özet sekmesi). Admin FİYATLARI görür — üretici panelinin
+    // aynı listesi fiyatsızdır (bkz. manufacturer/orders/[id]/page.tsx).
+    quote: orderQuote
+      ? {
+          quoteId: orderQuote.quoteId,
+          number: orderQuote.quoteNumber,
+          leadTier: orderQuote.leadTier,
+          leadTierName: orderQuote.leadTierName,
+          leadDays: orderQuote.leadDays,
+          shipByDate: orderQuote.shipByDate,
+          poNumber: orderQuote.poNumber,
+          invoice: orderQuote.invoice,
+          partCount: orderQuote.parts.length,
+          unitCount: orderQuote.parts.reduce((sum, p) => sum + p.quantity, 0),
+          addons: orderQuote.addons,
+          parts: orderQuote.parts.map((p) => ({
+            partId: p.partId,
+            position: p.position,
+            name: p.name,
+            fileName: p.fileName,
+            thumbnailUrl: p.thumbnailKey
+              ? `/api/admin/orders/${order.id}/quote-files/${p.partId}?kind=thumbnail`
+              : null,
+            drawingUrl: p.drawingKey
+              ? `/api/admin/orders/${order.id}/quote-files/${p.partId}`
+              : null,
+            drawingName: p.drawingName,
+            technologyName: p.technologyName,
+            materialName: p.materialName,
+            colorName: p.colorName,
+            colorHex: p.colorHex,
+            finishName: p.finishName,
+            layerUm: p.layerUm,
+            infillPct: p.infillPct,
+            quantity: p.quantity,
+            dimensionsMm: p.dimensionsMm,
+            volumeCm3: p.volumeCm3,
+            unitKurus: p.unitKurus,
+            lineKurus: p.lineKurus,
+            note: p.note,
+          })),
+        }
+      : null,
     // Already serialisable by contract (dates as ISO strings); null = loader failed.
     money,
   };

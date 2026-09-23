@@ -649,6 +649,49 @@ async function main() {
       );
     });
 
+    // `quote-checkout.ts`e dokunan iki DB paketi `server-only`i TAKLİT ederek
+    // (module stub) çalışıyor, yani asıl tuzağı artık yakalayamazlar. Bu
+    // yüzden graf STATİK yürünür: hiçbir modül import EDİLMEZ, kaynak okunur.
+    syncTest("workers/start.ts grafındaki hiçbir modül `server-only` çekmez", () => {
+      const resolveSpec = (from: string, spec: string): string | null => {
+        const base = spec.startsWith("@/")
+          ? path.join(root, "src", spec.slice(2))
+          : spec.startsWith(".")
+            ? path.resolve(path.dirname(from), spec)
+            : null; // paket adı → node_modules, grafın dışı
+        if (base === null) return null;
+        for (const c of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) {
+          if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
+        }
+        return null;
+      };
+      const seen = new Set<string>();
+      const offenders: string[] = [];
+      const walk = (file: string) => {
+        if (seen.has(file)) return;
+        seen.add(file);
+        const src = stripComments(fs.readFileSync(file, "utf8"));
+        if (/(?:^|\n)\s*import\s+"server-only"|from\s+"server-only"/.test(src)) {
+          offenders.push(path.relative(root, file));
+        }
+        // `import x from "y"`, `export … from "y"`, `await import("y")`.
+        for (const m of src.matchAll(/(?:from|import)\s*\(?\s*"([^"]+)"/g)) {
+          const next = resolveSpec(file, m[1]);
+          if (next) walk(next);
+        }
+      };
+      walk(path.join(root, "workers/start.ts"));
+      // Yürüyüş sessizce kırılırsa (çözümleyici bozulur) dosya sayısı çöker ve
+      // test hiçbir şey kanıtlamadan yeşil kalırdı.
+      assert.ok(seen.size > 100, `graf çok küçük (${seen.size} modül) — yürüyüş kırık`);
+      assert.deepEqual(
+        offenders,
+        [],
+        `worker grafında \`server-only\`: ${offenders.join(", ")} — standalone ` +
+          "Node worker'ı açılışta crash-loop'a sokar"
+      );
+    });
+
     syncTest("bakım modülü ödeme köprüsünü import ETMEZ (server-only tuzağı)", () => {
       const src = stripComments(
         fs.readFileSync(path.join(root, "src/lib/services/quote-maintenance.ts"), "utf8")

@@ -154,7 +154,7 @@ COPY --chown=nextjs:nodejs scripts ./scripts
 # Import guard: process_upload_model.py once imported helpers that a
 # process_mesh.py refactor had deleted, and every upload/product-file preview
 # failed silently at runtime. A broken import now fails the image build.
-RUN /opt/venv/bin/python3 -c "import sys; sys.path.insert(0,'scripts'); import process_upload_model, process_mesh, render_turntable"
+RUN /opt/venv/bin/python3 -c "import sys; sys.path.insert(0,'scripts'); import process_upload_model, process_mesh, render_turntable, analyze_quote_part"
 COPY --chown=nextjs:nodejs src ./src
 COPY --chown=nextjs:nodejs drizzle.config.ts ./
 # Migration SQL files — so `docker exec printer_worker npx drizzle-kit migrate`

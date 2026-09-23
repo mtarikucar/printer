@@ -7,3 +7,4 @@ uploads
 *.log
 *.sql
 .claude
+.superpowers

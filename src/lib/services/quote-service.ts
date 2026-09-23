@@ -344,9 +344,19 @@ export async function addPartFromUpload(
 
     const newId = randomUUID();
     // Taşıma (rename) işlemin İÇİNDE: kimlik önce üretilir ki dosya kendi
-    // parçasının klasörüne gitsin. İşlem geri alınırsa dosya sahipsiz kalır —
-    // saklama süpürmesi onu toplar; ters sıra (önce satır, sonra taşıma) ise
+    // parçasının klasörüne gitsin. Ters sıra (önce satır, sonra taşıma)
     // dosyasız bir parça bırakırdı ve o müşteriye "fiyat hesaplanamadı" olurdu.
+    //
+    // BEDELİ: işlem geri alınırsa dosya `quote-parts/<id>/` altında SAHİPSİZ
+    // kalır ve HİÇBİR SÜPÜRME onu toplamaz — `purgeExpiredQuoteFiles` yalnız
+    // `quote_parts` SATIRLARINDAN okuduğu anahtarları siler, `sweepStagedUploads`
+    // ise yalnız `uploads/staging/` dizinini tarar. Sızıntı küçüktür (yalnız
+    // başarısız işlemler) ama gerçektir.
+    // TODO(quote-files): iki aday çözümden biri — (a) satırı olmayan
+    // `quote-parts/*` anahtarlarını toplayan bir yetim süpürmesi
+    // (`quote-maintenance.ts`), ya da (b) promote'u COMMIT SONRASINA almak
+    // (o zaman da kısa bir "satır var, dosya yok" penceresi doğar ve
+    // `attachQuoteFilesToOrder`'daki gibi bir onarım turu gerekir).
     const sourceKey = await promoteStagedUpload(
       args.uploadId,
       `quote-parts/${newId}`,

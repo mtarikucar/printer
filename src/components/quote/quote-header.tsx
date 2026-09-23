@@ -20,10 +20,13 @@ export function QuoteHeader({
   quote,
   onPatch,
   actions,
+  shareToken,
 }: {
   quote: PresentedQuote;
   onPatch: (patch: QuotePatch) => void;
   actions?: ReactNode;
+  /** Paylaşım izleyicisinin belge bağlantısı da token'ı taşımak zorunda. */
+  shareToken?: string | null;
 }): JSX.Element {
   const d = useDictionary();
   const [editing, setEditing] = useState(false);
@@ -88,7 +91,9 @@ export function QuoteHeader({
           {actions}
           {showDocument && (
             <Link
-              href={`/teklif/${quote.number}/belge`}
+              href={`/teklif/${quote.number}/belge${
+                shareToken ? `?t=${encodeURIComponent(shareToken)}` : ""
+              }`}
               className="btn-secondary !px-4 !py-2 text-xs"
             >
               {d["instantQuote.workspace.document"]}

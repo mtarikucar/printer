@@ -415,10 +415,8 @@ function inLocale(node: ReturnType<typeof createElement>): string {
   );
 }
 
-function renderWorkspace(quote: PresentedQuote): string {
-  return inLocale(
-    createElement(QuoteWorkspaceClient, { initialQuote: quote, shareToken: null })
-  );
+function renderWorkspace(quote: PresentedQuote, shareToken: string | null = null): string {
+  return inLocale(createElement(QuoteWorkspaceClient, { initialQuote: quote, shareToken }));
 }
 
 function renderPartCard(part: PresentedPart, quote: PresentedQuote): string {
@@ -480,6 +478,26 @@ test("giriş yapmış sahibe biçimlenmiş fiyat gösterilir", () => {
   assert.match(html, /74,00/, "birim fiyat biçimlenmemiş");
   assert.match(html, /148,00/, "satır toplamı yok");
   assert.doesNotMatch(html, /–₺–,––/, "fiyat görünürken yer tutucu basılmış");
+});
+
+test("paylaşım görünümü salt okunur ve bağlantıları token'ı taşır", () => {
+  const html = renderWorkspace(
+    quoteFixture({
+      viewer: {
+        canSeePrices: true,
+        canEdit: false,
+        isOwner: false,
+        isShare: true,
+        isAdmin: false,
+      },
+    }),
+    "tok123"
+  );
+  // Belge bağlantısı token'sız verilirse paylaşım izleyicisi kendi açtığı
+  // teklifin belgesinde 404 görür.
+  assert.match(html, /href="\/teklif\/T-000123\/belge\?t=tok123"/);
+  assert.ok(!html.includes("Teklife parça ekle"), "salt okunur görünümde yükleme alanı var");
+  assert.ok(!html.includes("Hepsini seç"), "salt okunur görünümde toplu seçim var");
 });
 
 test("uyarısı olan parça kartı onay kutusu gösterir", () => {

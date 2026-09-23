@@ -332,10 +332,18 @@ export function QuoteWorkspaceClient({
    * gövde yeniden çekilir. Sahiplenme başarısızsa (teklif başka bir hesaba
    * bağlı) ekran salt okunur uyarısına düşer — sessizce eski, fiyatsız
    * görünümde kalmak müşteriye "giriş işe yaramadı" dedirtirdi.
+   *
+   * PAYLAŞIM görünümünde sahiplenme DENENMEZ: bağlantıyı almak devralma hakkı
+   * vermez (uç zaten 404 verir) ve gerek de yoktur — giriş yapmış paylaşım
+   * izleyicisi fiyatı görür, teklif sahibinde kalır.
    */
   const afterAuth = () => {
     setGateOpen(false);
     void (async () => {
+      if (viewer.isShare) {
+        await refresh();
+        return;
+      }
       try {
         const fresh = await claimQuote(quoteId, { shareToken });
         apply(fresh);
@@ -355,6 +363,7 @@ export function QuoteWorkspaceClient({
       <QuoteHeader
         quote={quote}
         onPatch={patchQuote}
+        shareToken={shareToken}
         actions={<QuoteHeaderActionsSlot quote={quote} onQuoteChanged={apply} />}
       />
 
@@ -491,7 +500,12 @@ export function QuoteWorkspaceClient({
         open={gateOpen}
         onClose={() => setGateOpen(false)}
         onAuthenticated={afterAuth}
-        redirectPath={`/teklif/${quote.number}`}
+        // Google ile giriş TAM SAYFA gider ve buraya geri gelir: paylaşım
+        // token'ı adreste kalmazsa dönen ziyaretçi kendi açtığı teklifte
+        // 404 görürdü.
+        redirectPath={`/teklif/${quote.number}${
+          shareToken ? `?t=${encodeURIComponent(shareToken)}` : ""
+        }`}
       />
 
       {dragging && (

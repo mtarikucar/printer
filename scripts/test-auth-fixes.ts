@@ -30,13 +30,18 @@ import ts from "typescript";
  * `rel` dosyasını CommonJS'e çevirip verilen taklitlerle çalıştırır.
  * `stubs` içinde olmayan `@/...` içe aktarımları GERÇEK dosyadan gelir.
  */
-function loadModule<T>(rel: string, stubs: Record<string, unknown>): T {
+function loadModule<T>(
+  rel: string,
+  stubs: Record<string, unknown>,
+  globals: Record<string, unknown> = {}
+): T {
   const file = path.resolve(rel);
   const js = ts.transpileModule(fs.readFileSync(file, "utf8"), {
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.CommonJS,
       esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
     },
   }).outputText;
   const req = createRequire(file);
@@ -52,7 +57,8 @@ function loadModule<T>(rel: string, stubs: Record<string, unknown>): T {
     if (Object.hasOwn(stubs, name)) return stubs[name];
     return req(name.startsWith("@/") ? resolveAlias(name) : name);
   };
-  new Function("exports", "require", "module", js)(exports, localRequire, { exports });
+  const bindings = { exports, require: localRequire, module: { exports }, ...globals };
+  new Function(...Object.keys(bindings), js)(...Object.values(bindings));
   return exports as T;
 }
 
@@ -286,6 +292,76 @@ test("kayıt, küçük harfli kopyası olan e-postayı ikinci kez açtırmaz", a
   });
   assert.equal(res.status, 409);
   assert.equal(h.inserted.length, 0);
+});
+
+// ─── Üst menünün oturum tazelemesi ──────────────────────────────────────────
+
+test("üst menü figurunica:auth-changed olayında oturumu yeniden okur", async () => {
+  // Modal tam sayfa yönlendirme YAPMAZ; menü `/api/auth/me`'yi bir kez okuyup
+  // bıraksaydı, kullanıcı giriş yaptıktan sonra da "Giriş yap" düğmesini
+  // görmeye devam ederdi.
+  const calls: string[] = [];
+  const listeners = new Map<string, Array<() => void>>();
+  const effects: Array<() => void> = [];
+  let slots: unknown[] = [];
+  let cursor = 0;
+  const react = await import("react");
+  const hooks = {
+    ...react,
+    useState(initial: unknown) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
+      return [slots[i], (next: unknown) => { slots[i] = next; }];
+    },
+    useEffect(effect: () => void) {
+      const i = cursor++;
+      if (!(i in slots)) {
+        slots[i] = true;
+        effects.push(effect);
+      }
+    },
+  };
+  const fakeWindow = {
+    addEventListener: (name: string, fn: () => void) => {
+      listeners.set(name, [...(listeners.get(name) ?? []), fn]);
+    },
+    removeEventListener: () => undefined,
+  };
+  const mod = loadModule<{ SiteHeader: () => unknown }>(
+    "src/components/site-header.tsx",
+    {
+      react: hooks,
+      "next/navigation": {
+        usePathname: () => "/",
+        useRouter: () => ({ push: () => undefined }),
+      },
+      "@/lib/i18n/locale-context": {
+        useDictionary: () => new Proxy({}, { get: (_t, key) => String(key) }),
+      },
+    },
+    {
+      window: fakeWindow,
+      fetch: async (url: string) => {
+        calls.push(url);
+        return { ok: true, json: async () => ({ user: null }) };
+      },
+    }
+  );
+
+  slots = [];
+  cursor = 0;
+  mod.SiteHeader();
+  effects.splice(0).forEach((effect) => effect());
+  await new Promise((r) => setImmediate(r));
+
+  assert.ok(calls.includes("/api/auth/me"), `ilk okuma yok: ${calls.join(", ")}`);
+  const refresh = listeners.get("figurunica:auth-changed");
+  assert.ok(refresh?.length, "auth-changed dinleyicisi kurulmamış");
+  const before = calls.length;
+  refresh![0]();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(calls.length, before + 1, "olay oturumu yeniden okutmadı");
+  assert.equal(calls[calls.length - 1], "/api/auth/me");
 });
 
 test("giriş e-postayı küçük harfe indirerek arar ve oran limitini aynı kovaya yazar", async () => {

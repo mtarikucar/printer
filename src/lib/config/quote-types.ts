@@ -581,3 +581,41 @@ export interface LibraryPart {
   /** Bu dosyanın müşterinin tekliflerinde kaç kez kullanıldığı. */
   useCount: number;
 }
+
+// ─── Admin teklif kuyruğu ───────────────────────────────────────────────────
+
+/**
+ * `/admin/teklifler` satırı.
+ *
+ * Admin fiyatı HER ZAMAN görür (fiyat kapısı müşteri tarafının kuralıdır), bu
+ * yüzden tutar alanları koşulsuzdur; `null` "fiyatlanamadı" demektir.
+ */
+export interface AdminQuoteListItem {
+  id: string;
+  number: string;
+  status: QuoteStatus;
+  /**
+   * Müşterinin NE istediği. `status !== "needs_review"` iken BAYAT olabilir:
+   * `repriceQuote` durumu `draft`a çeker ama bu kolonu temizlemez, bu yüzden
+   * kuyruk sekmeleri DURUMA bakar, bu alana değil.
+   */
+  reviewKind: ReviewKind | null;
+  /** Yukarıdaki bayatlık ekranda da görünsün diye hesaplanır. */
+  staleReviewKind: boolean;
+  title: string | null;
+  customerName: string | null;
+  customerEmail: string | null;
+  /** Girişsiz ziyaretçinin teklifi: e-postası yok, bildirim gönderilemez. */
+  anonymous: boolean;
+  partCount: number;
+  unitCount: number;
+  totalKurus: number | null;
+  leadDays: number | null;
+  reviewRequestedAt: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  expired: boolean;
+  orderNumber: string | null;
+}

@@ -14,6 +14,7 @@ import {
   AWAITING_MANUFACTURER,
   NOT_REFUNDED,
 } from "@/lib/services/admin-order-sql";
+import { needsReviewCountQuery } from "@/lib/services/quote-admin";
 
 /**
  * GÖSTERİM amaçlı rozet okuması: sonuç yalnızca kenar çubuğunda GÖSTERİLİR, bir
@@ -119,6 +120,7 @@ export default async function AdminLayout({
     pendingPainterRead,
     painterQcPendingRead,
     waAwaitingRead,
+    quoteReviewRead,
   ] = await Promise.all([
     // The Orders badge counts work waiting on the admin, in two disjoint parts.
     // Refunded orders are left out of both, because every forward action on a
@@ -221,6 +223,15 @@ export default async function AdminLayout({
                  OR ${waConversations.lastInboundAt} > ${waConversations.lastOutboundAt})`
         )
     ),
+    // Anlık teklif motoru: fiyatı BİZİM vermemiz beklenen teklifler (manuel
+    // fiyat / RFQ / hedef fiyat, üçü de `needs_review`). Rozet ile
+    // /admin/teklifler kuyruğunun üç inceleme sekmesi AYNI kümeden gelir.
+    // Migration 0064 uygulanmamış bir ortamda bu okuma düşer ve rozet "?"
+    // gösterir — sıfır değil, BİLİNMİYOR.
+    displayRead(
+      "inceleme bekleyen teklifler",
+      needsReviewCountQuery()
+    ),
   ]);
 
   // null = okunamadı (BİLİNMİYOR); sayı = gerçek sayım.
@@ -239,6 +250,7 @@ export default async function AdminLayout({
   const pendingPainterCount = countOf(pendingPainterRead);
   const painterQcPendingCount = countOf(painterQcPendingRead);
   const waAwaitingCount = countOf(waAwaitingRead);
+  const needsReviewCount = countOf(quoteReviewRead);
 
   // Hangi sayı BİLİNMİYOR: şerit her admin sayfasının en üstünde basılır.
   const unreadableAreas = [
@@ -253,6 +265,7 @@ export default async function AdminLayout({
     pendingPainterRead === null && "Onay bekleyen boyacılar",
     painterQcPendingRead === null && "Boyacı QC bekleyen işler",
     waAwaitingRead === null && "Yanıt bekleyen WhatsApp konuşmaları",
+    quoteReviewRead === null && "İnceleme bekleyen teklifler",
   ].filter((x): x is string => typeof x === "string");
 
   // Kenar çubuğunun metinleri burada, SUNUCUDA çözülür ve prop olarak iner:
@@ -296,6 +309,7 @@ export default async function AdminLayout({
             pendingPainterCount={pendingPainterCount}
             painterQcPendingCount={painterQcPendingCount}
             waAwaitingReplyCount={waAwaitingCount}
+            needsReviewCount={needsReviewCount}
           />
         }
       >

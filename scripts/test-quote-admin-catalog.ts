@@ -22,7 +22,9 @@
  * Çalıştırma: npx tsx scripts/test-quote-admin-catalog.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import Module from "node:module";
+import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
 import { computeQuote } from "../src/lib/config/quote-compute";
@@ -30,6 +32,8 @@ import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import type { PartGeometry, PricingPartInput } from "../src/lib/config/quote-types";
 import {
   addonCreateSchema,
+  finishCreateSchema,
+  firstIssueMessage,
   materialCreateSchema,
   materialPatchSchema,
   pricingSettingsUpdateSchema,
@@ -37,6 +41,18 @@ import {
   technologyCreateSchema,
   technologyPatchSchema,
 } from "../src/lib/validators/print-catalog";
+import {
+  ADDON_FIELDS,
+  FINISH_FIELDS,
+  KEY_FIELD,
+  MATERIAL_FIELDS,
+  TECHNOLOGY_FIELDS,
+  toDraft,
+  toPayload,
+  type ColorDraft,
+  type Field,
+  type PropertiesDraft,
+} from "../src/app/admin/baski-katalogu/form-values";
 import {
   simulateQuotePrice,
   type QuoteSimulationInput,
@@ -62,6 +78,35 @@ function rejects(schema: { safeParse: (v: unknown) => { success: boolean } }, va
 function accepts(schema: { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, value: unknown, why: string) {
   const parsed = schema.safeParse(value);
   assert.equal(parsed.success, true, `reddedilmemeliydi: ${why} — ${JSON.stringify(parsed.error)}`);
+}
+
+/**
+ * Reddin EKRANA çıkacak cümlesi. Panel Türkçe ve tek kullanıcısı sahibi:
+ * zod'un kendi İngilizce cümlesi ("Too small: expected string to have >=1
+ * characters") bir alandan bile sızarsa, yanlış bir fiyatı düzeltmeye çalışan
+ * yönetici anlamadığı bir dilde tip hatası görür.
+ */
+type ParsableSchema = {
+  safeParse: (v: unknown) => { success: boolean; error?: unknown };
+};
+
+function messageOf(schema: ParsableSchema, value: unknown, why: string): string {
+  const parsed = schema.safeParse(value) as {
+    success: boolean;
+    error?: Parameters<typeof firstIssueMessage>[0];
+  };
+  assert.equal(parsed.success, false, `kabul edilmemeliydi: ${why}`);
+  return firstIssueMessage(parsed.error!);
+}
+
+/** Zod'un İngilizce kalıpları — biri bile geçerse mesaj çevrilmemiş demektir. */
+const ENGLISH_ZOD =
+  /too (small|big)|invalid input|invalid uuid|expected|received|characters|elements|at least|at most|greater than|less than/i;
+
+/** Bir metnin gövdesi: `firstIssueMessage` alan adını başa ekler (alan: cümle). */
+function sentenceOf(message: string): string {
+  const colon = message.indexOf(": ");
+  return colon === -1 ? message : message.slice(colon + 2);
 }
 
 // ─── Geçerli gövde şablonları ───────────────────────────────────────────────
@@ -361,6 +406,46 @@ async function main() {
     );
   });
 
+  await test("her ret cümlesi TÜRKÇE (zod'un İngilizcesi hiçbir alandan sızmaz)", () => {
+    const longText = (n: number) => "a".repeat(n);
+    const colors = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...COLOR, key: `renk_${i}` }));
+    const settingsWith = (patch: Record<string, unknown>) => ({
+      ...SETTINGS,
+      settings: { ...SETTINGS.settings, ...patch },
+    });
+
+    const cases: Array<[string, ParsableSchema, unknown, string]> = [
+      // İnceleme tam da bu yolu ölçtü: "+ Teknoloji ekle" formunda boş bırakılan
+      // tolerans metni İngilizce bir tip hatası döndürüyordu.
+      ["boş tolerans metni", technologyCreateSchema, { ...TECHNOLOGY, toleranceText: "" }, "Tolerans metni yazılmalı (örn. ±0,5 mm)."],
+      ["metin olmayan tolerans", technologyCreateSchema, { ...TECHNOLOGY, toleranceText: 42 }, "Tolerans metni yazılmalı (örn. ±0,5 mm)."],
+      ["çok uzun tolerans metni", technologyCreateSchema, { ...TECHNOLOGY, toleranceText: longText(121) }, "Tolerans metni en çok 120 karakter olabilir."],
+      ["çok uzun ad", technologyCreateSchema, { ...TECHNOLOGY, name: longText(121) }, "Ad en çok 120 karakter olabilir."],
+      ["çok uzun açıklama", technologyCreateSchema, { ...TECHNOLOGY, description: longText(601) }, "Açıklama en çok 600 karakter olabilir."],
+      ["13 katman seçeneği", technologyCreateSchema, { ...TECHNOLOGY, layerOptionsUm: Array.from({ length: 13 }, (_, i) => 100 + i) }, "En çok 12 katman seçeneği olabilir."],
+      ["boş doluluk listesi", technologyCreateSchema, { ...TECHNOLOGY, infillOptionsPct: [], defaultInfillPct: 20 }, "Doluluk listesi boş olamaz; katı baskı için alanı tamamen boş bırakın."],
+      ["evet/hayır olmayan aktiflik", technologyCreateSchema, { ...TECHNOLOGY, active: "evet" }, "Evet/hayır (true/false) değeri girilmeli."],
+      ["nesne olmayan gövde", technologyCreateSchema, "teknoloji", "Geçerli bir istek gövdesi (JSON nesnesi) gönderilmeli."],
+      ["çok uzun renk adı", materialCreateSchema, { ...MATERIAL, colors: [{ ...COLOR, name: longText(61) }] }, "Renk adı en çok 60 karakter olabilir."],
+      ["41 renk", materialCreateSchema, { ...MATERIAL, colors: colors(41) }, "En çok 40 renk tanımlanabilir."],
+      ["11 kullanım alanı", materialCreateSchema, { ...MATERIAL, properties: { uses: Array.from({ length: 11 }, (_, i) => `alan ${i}`) } }, "En çok 10 kullanım alanı yazılabilir."],
+      ["uuid olmayan teknoloji", materialCreateSchema, { ...MATERIAL, technologyId: "fdm" }, "Teknoloji geçersiz; listeden seçin."],
+      ["uuid olmayan yüzey teknolojisi", finishCreateSchema, { technologyId: "fdm", key: "zimpara", name: "Zımpara", description: "", fixedKurus: 0, perCm2Kurus: 0, leadDaysExtra: 0, requiresManual: false, costLineKind: "production", sortOrder: 0 }, "Teknoloji geçersiz; listeden seçin ya da boş bırakın (tüm teknolojiler)."],
+      ["13 adet kademesi", pricingSettingsUpdateSchema, settingsWith({ qtyBreaks: Array.from({ length: 13 }, (_, i) => ({ minQty: i + 1, discountBps: 0 })) }), "En çok 12 adet kademesi tanımlanabilir."],
+      ["11 fiyat kademesi", pricingSettingsUpdateSchema, settingsWith({ priceBreakQuantities: Array.from({ length: 11 }, (_, i) => i + 1) }), "En çok 10 fiyat kademesi gösterilebilir."],
+      ["401 tatil", pricingSettingsUpdateSchema, settingsWith({ holidays: Array.from({ length: 401 }, (_, i) => new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString().slice(0, 10)) }), "En çok 400 tatil tarihi tanımlanabilir."],
+      ["çok uzun kademe adı", pricingSettingsUpdateSchema, settingsWith({ leadTiers: [SETTINGS.settings.leadTiers[0], SETTINGS.settings.leadTiers[1], { ...SETTINGS.settings.leadTiers[2], name: longText(61) }] }), "Kademe adı en çok 60 karakter olabilir."],
+      ["geometri nesnesi değil", simulateSchema, { technologyKey: "fdm", materialKey: "pla", colorKey: "beyaz", finishKey: "ham", quantity: 1, leadTier: "standard", geometry: "20x20x20" }, "Geometri ölçüleri eksik ya da hatalı."],
+    ];
+
+    for (const [why, schema, value, expected] of cases) {
+      const message = messageOf(schema, value, why);
+      assert.equal(sentenceOf(message), expected, `${why} → beklenmeyen cümle: ${message}`);
+      assert.ok(!ENGLISH_ZOD.test(message), `${why} → İngilizce mesaj sızdı: ${message}`);
+    }
+  });
+
   // ─── 2) Simülatör: G1 paritesi ve mutabakat ─────────────────────────────────
 
   console.log("\n2) Fiyat simülatörü");
@@ -454,6 +539,17 @@ async function main() {
     }
   });
 
+  /**
+   * Toplamın birim fiyata eşit olması TEK BAŞINA bir şey kanıtlamaz: son satır
+   * (`rounding = unitKurus − (preTier + tierKurus)`) farkı tanımı gereği emer,
+   * yani kalemlerin sırası, işareti ya da formülü bozulsa bile toplam tutar.
+   * Asıl kapı ARTIĞIN KENDİSİDİR: `priceUnitAuto` ile aynı sırayı izleyen bir
+   * model yalnız yuvarlama kadar (≤ 2 kuruş) sapabilir; daha büyük bir artık,
+   * "Yuvarlama ve kuruş farkı" satırının ekranda uydurma bir dökümü
+   * kapattığı anlamına gelir.
+   */
+  const ROUNDING_TOLERANCE_KURUS = 2;
+
   await test("mutabakat: kalemlerin toplamı KURUŞU KURUŞUNA birim fiyat", () => {
     for (const input of [
       G1_INPUT,
@@ -471,6 +567,13 @@ async function main() {
         sumLines(result.unitLines),
         result.unitKurus,
         `mutabakat tutmadı: ${JSON.stringify(result.unitLines)} ≠ ${result.unitKurus}`
+      );
+
+      const rounding = result.unitLines.find((l) => l.key === "rounding")?.kurus ?? 0;
+      assert.ok(
+        Math.abs(rounding) <= ROUNDING_TOLERANCE_KURUS,
+        `mutabakat modeli priceUnitAuto'dan ayrıştı: artık ${rounding} kuruş — ` +
+          `döküm ${JSON.stringify(result.unitLines)}`
       );
     }
   });
@@ -614,6 +717,165 @@ async function main() {
   } finally {
     loader._load = originalLoad;
   }
+
+  // ─── 4) Formun değer katmanı: taslak ⇄ gövde ────────────────────────────────
+
+  console.log("\n4) Formun değer katmanı");
+
+  /**
+   * Ekranın gövdeyi nasıl kurduğu bir görünüm ayrıntısı DEĞİL, para yoludur:
+   * boş bırakılan "Malzeme fiyatı (₺/gram)" alanı `Number("")` yüzünden sessizce
+   * 0 kuruş kaydediliyordu ve şema bunu yakalayamaz (0 meşru bir fiyattır).
+   * Bu yüzden dönüşüm saf bir modülde (`form-values.ts`) durur ve burada
+   * GERÇEK alan tanımlarıyla GERÇEK şemaya karşı koşar.
+   */
+  const MATERIAL_ROW: Record<string, unknown> = {
+    name: "PLA",
+    description: "Sert, kolay basılan",
+    densityGCm3: 1.24,
+    priceKurusPerGram: 90,
+    supportFactor: 1.15,
+    capabilityTag: null,
+    properties: { tensileMpa: 48, uses: ["prototip", "maket"] },
+    colors: [{ key: "beyaz", name: "Beyaz", hex: "#F5F5F5", surchargeKurus: 0 }],
+    leadDaysExtra: 0,
+    sortOrder: 1,
+    active: true,
+  };
+
+  /** Gövdenin TELDEN geçmiş hâli: `NaN` → `null`, `undefined` → alan yok. */
+  const wire = (payload: Record<string, unknown>) =>
+    JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+
+  const STAMP = { expectedUpdatedAt: "2026-09-22T00:00:00.000Z" };
+
+  await test("yeni teknoloji formu, başlangıç değerleriyle geçerli bir gövde üretir", () => {
+    const fields = [KEY_FIELD("teknoloji"), ...TECHNOLOGY_FIELDS];
+    const draft = toDraft(fields, null);
+    // Sahibinin elle yazacağı üç alan; gerisi formun başlangıç değerleri.
+    draft.key = "sls";
+    draft.name = "SLS (Toz)";
+    draft.capabilityTag = "material_resin";
+    accepts(technologyCreateSchema, wire(toPayload(fields, draft)), "açılışta dolu gelen form");
+  });
+
+  await test("boş bırakılan sayı alanı 0 DEĞİL, reddedilen bir boşluktur", () => {
+    const lists: Array<[string, Field[]]> = [
+      ["teknoloji", TECHNOLOGY_FIELDS],
+      ["malzeme", MATERIAL_FIELDS],
+      ["yüzey işlemi", FINISH_FIELDS],
+      ["ek hizmet", ADDON_FIELDS],
+    ];
+    let checked = 0;
+    for (const [label, fields] of lists) {
+      for (const field of fields) {
+        if (field.kind !== "money" && field.kind !== "int" && field.kind !== "float") continue;
+        if (field.nullable) continue; // boşluğu MEŞRU: açıkça null gider
+        const draft = toDraft(fields, null);
+        draft[field.name] = "";
+        assert.equal(
+          wire(toPayload(fields, draft))[field.name],
+          null,
+          `${label}.${field.name} boşken 0'a değil null'a dönmeli`
+        );
+        checked++;
+      }
+    }
+    assert.ok(checked >= 15, `beklenenden az sayı alanı tarandı: ${checked}`);
+  });
+
+  await test("boş malzeme fiyatı Türkçe cümleyle reddedilir (sessiz 'bedava' yok)", () => {
+    const draft = toDraft(MATERIAL_FIELDS, MATERIAL_ROW);
+    assert.equal(draft.priceKurusPerGram, "0.90", "kuruş ekrana ₺ olarak gelmeli");
+    draft.priceKurusPerGram = "";
+    const body: Record<string, unknown> = { ...wire(toPayload(MATERIAL_FIELDS, draft)), ...STAMP };
+    assert.equal(body.priceKurusPerGram, null);
+    const message = messageOf(materialPatchSchema, body, "boş gram fiyatı");
+    assert.equal(message, "priceKurusPerGram: Sayı girilmeli (boş bırakılamaz).");
+    assert.ok(!ENGLISH_ZOD.test(message), message);
+
+    // 0 hâlâ MEŞRU: kural "boş" ile "sıfır"ı ayırmak, sıfırı yasaklamak değil.
+    draft.priceKurusPerGram = "0";
+    accepts(
+      materialPatchSchema,
+      { ...wire(toPayload(MATERIAL_FIELDS, draft)), ...STAMP },
+      "bilerek sıfırlanan gram fiyatı"
+    );
+  });
+
+  await test("renk ek ücreti ondalık girilebilir; ham metin kaydederken çevrilir", () => {
+    const draft = toDraft(MATERIAL_FIELDS, MATERIAL_ROW);
+    const colors = draft.colors as ColorDraft[];
+    assert.equal(colors[0]!.surcharge, "0.00", "ek ücret taslakta METİN olmalı");
+
+    const withSurcharge = (typed: string) => {
+      const next = { ...draft, colors: [{ ...colors[0]!, surcharge: typed }] };
+      const body = wire(toPayload(MATERIAL_FIELDS, next)) as {
+        colors: Array<{ surchargeKurus: number | null }>;
+      };
+      return body.colors[0]!.surchargeKurus;
+    };
+
+    // Yazım sırası: "7" → "7." → "7.5" → "7.50". Hiçbir ara adım NaN üretmez.
+    assert.equal(withSurcharge("7"), 700);
+    assert.equal(withSurcharge("7."), 700);
+    assert.equal(withSurcharge("7.5"), 750);
+    assert.equal(withSurcharge("7.50"), 750);
+    assert.equal(withSurcharge("7,50"), 750, "virgüllü giriş de kabul edilmeli");
+    assert.equal(withSurcharge("0"), 0);
+    assert.equal(withSurcharge(""), null, "boş ek ücret sessizce 0 olmamalı");
+
+    const cleared = {
+      ...draft,
+      colors: [{ ...colors[0]!, surcharge: "" }],
+    };
+    const message = messageOf(
+      materialPatchSchema,
+      { ...wire(toPayload(MATERIAL_FIELDS, cleared)), ...STAMP },
+      "boş renk ek ücreti"
+    );
+    assert.ok(!ENGLISH_ZOD.test(message), message);
+  });
+
+  await test("teknik özellikler taslakta metin, gövdede sayıdır", () => {
+    const draft = toDraft(MATERIAL_FIELDS, MATERIAL_ROW);
+    const properties = draft.properties as PropertiesDraft;
+    assert.equal(properties.tensileMpa, "48");
+    assert.equal(properties.uses, "prototip, maket");
+    assert.equal(properties.flexible, false);
+
+    // Nokta yazılırken yutulmamalı: "48." geçerli bir ARA durumdur.
+    const typing = { ...draft, properties: { ...properties, tensileMpa: "48." } };
+    const midBody = wire(toPayload(MATERIAL_FIELDS, typing)) as {
+      properties: { tensileMpa: number };
+    };
+    assert.equal(midBody.properties.tensileMpa, 48);
+
+    const done = { ...draft, properties: { ...properties, tensileMpa: "48,5", uses: "" } };
+    const body = wire(toPayload(MATERIAL_FIELDS, done)) as {
+      properties: Record<string, unknown>;
+    };
+    assert.equal(body.properties.tensileMpa, 48.5);
+    assert.equal("uses" in body.properties, false, "boş kullanım alanı hiç gönderilmemeli");
+    accepts(materialPatchSchema, { ...body, ...STAMP }, "ondalıklı teknik özellik");
+  });
+
+  await test("ekran para/sayı alanını her tuşta çevirmiyor (ham taslak korunur)", () => {
+    const client = readFileSync(
+      path.join(import.meta.dirname, "..", "src/app/admin/baski-katalogu/catalog-client.tsx"),
+      "utf8"
+    );
+    for (const pattern of [/toKurus\(e\.target\.value\)/, /numberOf\(e\.target\.value\)/]) {
+      assert.ok(
+        !pattern.test(client),
+        `girdi her tuşta sayıya çevriliyor (${pattern}); ondalık yazılamaz, alan NaN'da takılır`
+      );
+    }
+    assert.ok(
+      /value=\{color\.surcharge\}/.test(client),
+      "renk ek ücreti ham metin taslağına bağlı olmalı"
+    );
+  });
 
   console.log(
     failures === 0

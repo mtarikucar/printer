@@ -5,12 +5,7 @@ import { useRouter } from "next/navigation";
 import { dfmMessage } from "@/components/quote/dfm-list";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { LEAD_TIER_KEYS } from "@/lib/config/quote-types";
-import type {
-  DfmIssue,
-  LeadTierKey,
-  MaterialProperties,
-  SnapshotColor,
-} from "@/lib/config/quote-types";
+import type { DfmIssue, LeadTierKey } from "@/lib/config/quote-types";
 import type {
   AdminAddon,
   AdminCatalogChange,
@@ -21,6 +16,21 @@ import type {
   QuoteSimulationResult,
 } from "@/lib/services/quote-catalog-admin";
 import { CATALOG_LIMITS } from "@/lib/validators/print-catalog";
+import {
+  ADDON_FIELDS,
+  EMPTY_PROPERTIES_DRAFT,
+  FINISH_FIELDS,
+  KEY_FIELD,
+  MATERIAL_FIELDS,
+  TECHNOLOGY_FIELDS,
+  numberOf,
+  tl,
+  toDraft,
+  toIntList,
+  toKurus,
+  toPayload,
+} from "./form-values";
+import type { ColorDraft, Draft, DraftValue, Field, PropertiesDraft } from "./form-values";
 
 /**
  * Baskı kataloğunun düzenleyicisi.
@@ -34,6 +44,11 @@ import { CATALOG_LIMITS } from "@/lib/validators/print-catalog";
  * Para alanları ekranda ₺ (iki ondalık), sunucuya KURUŞ gider; oran alanları
  * ekranda yüzde/çarpan, sunucuya BAZ PUAN. Yönetici baz puan düşünmek zorunda
  * kalmamalı — ama tabloda duran şey baz puandır.
+ *
+ * Alan tanımları ve taslak ⇄ gövde dönüşümü `./form-values.ts`te, SAF hâlde
+ * durur: o üç satır doğrudan para yazıyor ve bir ekranın içinde regresyon ağı
+ * kurulamıyordu (`scripts/test-quote-admin-catalog.ts` §4 artık oradan okuyor).
+ * Girdiler HAM METİN taşır; sayıya çevrim yalnız kaydetme anındadır.
  */
 
 type Iso<T> = Omit<T, "createdAt" | "updatedAt"> & { createdAt: string; updatedAt: string };
@@ -47,43 +62,6 @@ export type ChangeRow = Omit<AdminCatalogChange, "createdAt"> & { createdAt: str
 
 type EntityName = "technology" | "material" | "finish" | "addon";
 
-type FieldKind =
-  | "text"
-  | "textarea"
-  | "int"
-  | "float"
-  | "money"
-  | "bool"
-  | "intList"
-  | "select"
-  | "colors"
-  | "properties";
-
-interface Field {
-  name: string;
-  label: string;
-  kind: FieldKind;
-  hint?: string;
-  options?: Array<{ value: string; label: string }>;
-  /** Boş bırakılabilir: metin/seçim için `null`, liste için `null`. */
-  nullable?: boolean;
-  wide?: boolean;
-  /**
-   * YENİ satırın başlangıç değeri. Boş bir form, ilk kaydetmede doğrulayıcıdan
-   * "sayı girilmeli" cevabı almak demektir; sahibi sıfırdan bir teknoloji
-   * eklerken yirmi alanı tek tek dolduracağını bilmeli, ama hiçbirini boş
-   * bırakamayacağını kaydettikten SONRA öğrenmemeli.
-   */
-  initial?: string;
-  /** Yalnız `bool` alanlar için; yazılmazsa yeni satırda KAPALI doğar. */
-  defaultBool?: boolean;
-}
-
-type DraftValue = string | boolean | SnapshotColor[] | MaterialProperties;
-type Draft = Record<string, DraftValue>;
-
-// ─── Dönüşümler ─────────────────────────────────────────────────────────────
-
 /**
  * Baz puan paydası. Sayı değil ADI kullanılır: depo genelinde `/ 10000`
  * taranıyor (komisyon matematiğinin elle kopyalanmasına karşı,
@@ -92,84 +70,10 @@ type Draft = Record<string, DraftValue>;
  */
 const BPS_SCALE = 10_000;
 
-const tl = (kurus: number) => (kurus / 100).toFixed(2);
-const toKurus = (v: string) => Math.round(numberOf(v) * 100);
-const numberOf = (v: string) => Number(String(v).replace(",", ".").trim());
-const toIntList = (v: string) =>
-  String(v)
-    .split(/[^0-9]+/)
-    .filter(Boolean)
-    .map(Number);
 const trField = (n: number, digits = 2) =>
   n.toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: digits });
 const kurusTr = (kurus: number) =>
   `${(kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺`;
-
-function toDraft(fields: Field[], row: Record<string, unknown> | null): Draft {
-  const draft: Draft = {};
-  for (const field of fields) {
-    const raw = row ? row[field.name] : undefined;
-    switch (field.kind) {
-      case "bool":
-        draft[field.name] = typeof raw === "boolean" ? raw : (field.defaultBool ?? false);
-        break;
-      case "money":
-        draft[field.name] = typeof raw === "number" ? tl(raw) : (field.initial ?? "");
-        break;
-      case "intList":
-        draft[field.name] = Array.isArray(raw)
-          ? (raw as number[]).join(", ")
-          : (field.initial ?? "");
-        break;
-      case "colors":
-        draft[field.name] = Array.isArray(raw) ? (raw as SnapshotColor[]) : [];
-        break;
-      case "properties":
-        draft[field.name] =
-          raw && typeof raw === "object" ? (raw as MaterialProperties) : ({} as MaterialProperties);
-        break;
-      default:
-        draft[field.name] =
-          raw === null || raw === undefined ? (field.initial ?? "") : String(raw);
-    }
-  }
-  return draft;
-}
-
-function toPayload(fields: Field[], draft: Draft): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const field of fields) {
-    const value = draft[field.name];
-    const text = typeof value === "string" ? value : "";
-    switch (field.kind) {
-      case "bool":
-        out[field.name] = Boolean(value);
-        break;
-      case "money":
-        out[field.name] = toKurus(text);
-        break;
-      case "int":
-        out[field.name] = field.nullable && text.trim() === "" ? null : Math.round(numberOf(text));
-        break;
-      case "float":
-        out[field.name] = numberOf(text);
-        break;
-      case "intList":
-        out[field.name] = field.nullable && text.trim() === "" ? null : toIntList(text);
-        break;
-      case "colors":
-      case "properties":
-        out[field.name] = value;
-        break;
-      case "select":
-        out[field.name] = field.nullable && text === "" ? null : text;
-        break;
-      default:
-        out[field.name] = field.nullable && text.trim() === "" ? null : text.trim();
-    }
-  }
-  return out;
-}
 
 // ─── Uçlar (sözleşme testi için birebir yazılı adresler) ────────────────────
 
@@ -307,14 +211,20 @@ function FieldInput({
   );
 }
 
+/**
+ * Renk satırları. Ek ücret HAM METİN olarak tutulur: her tuşta kuruşa çevirip
+ * iki ondalıkla geri yazmak, "7" + "." yazan yöneticiye "7..00" → `NaN`
+ * gösteriyor ve imleci kaydırıyordu. Kuruşa çevrim yalnız kaydetme anında
+ * (`toPayload`) yapılır.
+ */
 function ColorsEditor({
   value,
   onChange,
 }: {
-  value: SnapshotColor[];
-  onChange: (next: SnapshotColor[]) => void;
+  value: ColorDraft[];
+  onChange: (next: ColorDraft[]) => void;
 }) {
-  const set = (i: number, patch: Partial<SnapshotColor>) =>
+  const set = (i: number, patch: Partial<ColorDraft>) =>
     onChange(value.map((c, j) => (j === i ? { ...c, ...patch } : c)));
 
   return (
@@ -354,8 +264,8 @@ function ColorsEditor({
             <input
               type="text"
               inputMode="decimal"
-              value={tl(color.surchargeKurus)}
-              onChange={(e) => set(i, { surchargeKurus: toKurus(e.target.value) })}
+              value={color.surcharge}
+              onChange={(e) => set(i, { surcharge: e.target.value })}
               className={`${INPUT_CLASS} w-24`}
             />
             <span className="text-xs text-gray-500">₺ ek ücret</span>
@@ -371,7 +281,7 @@ function ColorsEditor({
         <button
           type="button"
           onClick={() =>
-            onChange([...value, { key: "", name: "", hex: "#000000", surchargeKurus: 0 }])
+            onChange([...value, { key: "", name: "", hex: "#000000", surcharge: "0" }])
           }
           className="text-sm font-medium text-green-700 hover:text-green-800"
         >
@@ -382,16 +292,17 @@ function ColorsEditor({
   );
 }
 
+/**
+ * Teknik özellikler. Sayılar da ham metin: `value={value.tensileMpa ?? ""}` +
+ * anında sayıya çevirme, yazılan noktayı yutuyordu (48 → "48." → 48 → "48").
+ */
 function PropertiesEditor({
   value,
   onChange,
 }: {
-  value: MaterialProperties;
-  onChange: (next: MaterialProperties) => void;
+  value: PropertiesDraft;
+  onChange: (next: PropertiesDraft) => void;
 }) {
-  const numeric = (raw: string): number | undefined =>
-    raw.trim() === "" ? undefined : numberOf(raw);
-
   return (
     <div className="sm:col-span-2">
       <p className="text-xs font-medium text-gray-600">
@@ -403,8 +314,8 @@ function PropertiesEditor({
           <input
             type="text"
             inputMode="decimal"
-            value={value.tensileMpa ?? ""}
-            onChange={(e) => onChange({ ...value, tensileMpa: numeric(e.target.value) })}
+            value={value.tensileMpa}
+            onChange={(e) => onChange({ ...value, tensileMpa: e.target.value })}
             className={INPUT_CLASS}
           />
         </label>
@@ -413,8 +324,8 @@ function PropertiesEditor({
           <input
             type="text"
             inputMode="decimal"
-            value={value.elongationPct ?? ""}
-            onChange={(e) => onChange({ ...value, elongationPct: numeric(e.target.value) })}
+            value={value.elongationPct}
+            onChange={(e) => onChange({ ...value, elongationPct: e.target.value })}
             className={INPUT_CLASS}
           />
         </label>
@@ -423,8 +334,8 @@ function PropertiesEditor({
           <input
             type="text"
             inputMode="decimal"
-            value={value.heatDeflectionC ?? ""}
-            onChange={(e) => onChange({ ...value, heatDeflectionC: numeric(e.target.value) })}
+            value={value.heatDeflectionC}
+            onChange={(e) => onChange({ ...value, heatDeflectionC: e.target.value })}
             className={INPUT_CLASS}
           />
         </label>
@@ -433,8 +344,8 @@ function PropertiesEditor({
         <label className="flex items-center gap-2 text-sm text-gray-800">
           <input
             type="checkbox"
-            checked={value.flexible ?? false}
-            onChange={(e) => onChange({ ...value, flexible: e.target.checked || undefined })}
+            checked={value.flexible}
+            onChange={(e) => onChange({ ...value, flexible: e.target.checked })}
             className="h-4 w-4"
           />
           Esnek
@@ -442,8 +353,8 @@ function PropertiesEditor({
         <label className="flex items-center gap-2 text-sm text-gray-800">
           <input
             type="checkbox"
-            checked={value.transparent ?? false}
-            onChange={(e) => onChange({ ...value, transparent: e.target.checked || undefined })}
+            checked={value.transparent}
+            onChange={(e) => onChange({ ...value, transparent: e.target.checked })}
             className="h-4 w-4"
           />
           Şeffaf
@@ -452,14 +363,8 @@ function PropertiesEditor({
           <span className="text-[11px] text-gray-500">Kullanım alanları (virgülle)</span>
           <input
             type="text"
-            value={(value.uses ?? []).join(", ")}
-            onChange={(e) => {
-              const uses = e.target.value
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean);
-              onChange({ ...value, uses: uses.length > 0 ? uses : undefined });
-            }}
+            value={value.uses}
+            onChange={(e) => onChange({ ...value, uses: e.target.value })}
             className={INPUT_CLASS}
           />
         </label>
@@ -509,13 +414,13 @@ function RowForm({
           field.kind === "colors" ? (
             <ColorsEditor
               key={field.name}
-              value={(draft[field.name] as SnapshotColor[]) ?? []}
+              value={(draft[field.name] as ColorDraft[] | undefined) ?? []}
               onChange={(next) => set(field.name, next)}
             />
           ) : field.kind === "properties" ? (
             <PropertiesEditor
               key={field.name}
-              value={(draft[field.name] as MaterialProperties) ?? {}}
+              value={(draft[field.name] as PropertiesDraft | undefined) ?? EMPTY_PROPERTIES_DRAFT}
               onChange={(next) => set(field.name, next)}
             />
           ) : (
@@ -668,146 +573,6 @@ function EntityEditor<T extends CatalogRowLike>({
     </div>
   );
 }
-
-// ─── Alan tanımları ─────────────────────────────────────────────────────────
-
-const KEY_FIELD = (what: string): Field => ({
-  name: "key",
-  label: "Anahtar (sonradan değiştirilemez)",
-  kind: "text",
-  hint: `Küçük harf, rakam ve alt çizgi. Açık tekliflerin parçaları bu anahtara bakar; ${what} sonradan yeniden adlandırılamaz — yanlışsa satırı pasifleştirip yenisini açın.`,
-});
-
-const TECHNOLOGY_FIELDS: Field[] = [
-  { name: "name", label: "Ad", kind: "text" },
-  { name: "description", label: "Açıklama", kind: "textarea", wide: true },
-  {
-    name: "orderMaterial",
-    label: "Sipariş malzemesi",
-    kind: "select",
-    initial: "filament",
-    options: [
-      { value: "filament", label: "Filament" },
-      { value: "resin", label: "Reçine" },
-    ],
-    hint: "Atama motoru üreticiyi bu değere göre filtreler.",
-  },
-  { name: "capabilityTag", label: "Yetenek etiketi", kind: "text" },
-  { name: "buildXMm", label: "Baskı hacmi X (mm)", kind: "int", initial: "200" },
-  { name: "buildYMm", label: "Baskı hacmi Y (mm)", kind: "int", initial: "200" },
-  { name: "buildZMm", label: "Baskı hacmi Z (mm)", kind: "int", initial: "200" },
-  { name: "minWallMm", label: "En ince duvar (mm)", kind: "float", initial: "0,8" },
-  { name: "minFeatureMm", label: "En küçük detay (mm)", kind: "float", initial: "0,4" },
-  { name: "toleranceText", label: "Tolerans metni", kind: "text", wide: true },
-  {
-    name: "layerOptionsUm",
-    label: "Katman seçenekleri (µm)",
-    kind: "intList",
-    initial: "100",
-    hint: "Virgülle ayırın. Varsayılan katman bu listede olmalı.",
-  },
-  { name: "defaultLayerUm", label: "Varsayılan katman (µm)", kind: "int", initial: "100" },
-  {
-    name: "infillOptionsPct",
-    label: "Doluluk seçenekleri (%)",
-    kind: "intList",
-    nullable: true,
-    hint: "Boş bırakın = katı baskı (SLA). Doluysa varsayılan doluluk zorunlu.",
-  },
-  { name: "defaultInfillPct", label: "Varsayılan doluluk (%)", kind: "int", nullable: true },
-  {
-    name: "shellMm",
-    label: "Kabuk kalınlığı (mm)",
-    kind: "float",
-    initial: "0",
-    hint: "İçi boş baskıda efektif hacmi belirler.",
-  },
-  { name: "setupFeeKurus", label: "Kurulum ücreti (₺ / parça satırı)", kind: "money", initial: "0" },
-  { name: "machineRateKurusPerHour", label: "Makine saat ücreti (₺/saat)", kind: "money", initial: "0" },
-  { name: "throughputCm3PerHour", label: "Hacimsel debi (cm³/saat)", kind: "float", initial: "10" },
-  {
-    name: "heightHoursPerMm",
-    label: "Yükseklik süresi (saat/mm)",
-    kind: "float",
-    initial: "0",
-    hint: "Z yüksekliğinin baskı süresine katkısı.",
-  },
-  { name: "minUnitPriceKurus", label: "Birim taban fiyatı (₺)", kind: "money", initial: "0" },
-  { name: "baseLeadDays", label: "Temel iş günü", kind: "int", initial: "3" },
-  { name: "sortOrder", label: "Sıra", kind: "int", initial: "0" },
-  { name: "active", label: "Aktif (müşteriye açık)", kind: "bool", defaultBool: true },
-];
-
-const MATERIAL_FIELDS: Field[] = [
-  { name: "name", label: "Ad", kind: "text" },
-  { name: "description", label: "Açıklama", kind: "textarea", wide: true },
-  { name: "densityGCm3", label: "Yoğunluk (g/cm³)", kind: "float", initial: "1,2" },
-  { name: "priceKurusPerGram", label: "Malzeme fiyatı (₺/gram)", kind: "money", initial: "0" },
-  {
-    name: "supportFactor",
-    label: "Destek katsayısı",
-    kind: "float",
-    initial: "1",
-    hint: `Destek yapılarının yediği fazladan malzeme. ${CATALOG_LIMITS.supportFactor.min}–${CATALOG_LIMITS.supportFactor.max}.`,
-  },
-  {
-    name: "capabilityTag",
-    label: "Yetenek etiketi",
-    kind: "text",
-    nullable: true,
-    hint: "Boş = her üretici basabilir.",
-  },
-  { name: "properties", label: "Teknik özellikler", kind: "properties" },
-  { name: "colors", label: "Renkler", kind: "colors" },
-  { name: "leadDaysExtra", label: "Ek iş günü", kind: "int", initial: "0" },
-  { name: "sortOrder", label: "Sıra", kind: "int", initial: "0" },
-  { name: "active", label: "Aktif (müşteriye açık)", kind: "bool", defaultBool: true },
-];
-
-const FINISH_FIELDS: Field[] = [
-  { name: "name", label: "Ad", kind: "text" },
-  { name: "description", label: "Açıklama", kind: "textarea", wide: true },
-  { name: "fixedKurus", label: "Sabit ücret (₺ / adet)", kind: "money", initial: "0" },
-  { name: "perCm2Kurus", label: "Alan ücreti (₺ / cm²)", kind: "money", initial: "0" },
-  { name: "leadDaysExtra", label: "Ek iş günü", kind: "int", initial: "0" },
-  {
-    name: "requiresManual",
-    label: "Elle fiyatlanır (anlık fiyat verilmez)",
-    kind: "bool",
-  },
-  {
-    name: "costLineKind",
-    label: "Maliyet kalemi",
-    kind: "select",
-    initial: "production",
-    options: [
-      { value: "production", label: "Üretim (üretici payı)" },
-      { value: "painting", label: "Boyama (boyacı payı)" },
-    ],
-  },
-  { name: "sortOrder", label: "Sıra", kind: "int", initial: "0" },
-  { name: "active", label: "Aktif (müşteriye açık)", kind: "bool", defaultBool: true },
-];
-
-const ADDON_FIELDS: Field[] = [
-  { name: "name", label: "Ad", kind: "text" },
-  { name: "description", label: "Açıklama", kind: "textarea", wide: true },
-  {
-    name: "priceType",
-    label: "Fiyat türü",
-    kind: "select",
-    initial: "fixed",
-    options: [
-      { value: "fixed", label: "Sabit (teklif başına)" },
-      { value: "per_part", label: "Parça başına" },
-      { value: "per_unit", label: "Adet başına" },
-    ],
-  },
-  { name: "priceKurus", label: "Fiyat (₺)", kind: "money", initial: "0" },
-  { name: "leadDaysExtra", label: "Ek iş günü", kind: "int", initial: "0" },
-  { name: "sortOrder", label: "Sıra", kind: "int", initial: "0" },
-  { name: "active", label: "Aktif (müşteriye açık)", kind: "bool", defaultBool: true },
-];
 
 // ─── Fiyat ayarları ─────────────────────────────────────────────────────────
 

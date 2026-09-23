@@ -51,26 +51,54 @@ export const CATALOG_LIMITS = {
   sortOrder: { min: 0, max: 999 },
 } as const;
 
+/**
+ * Ekrana çıkacak CÜMLELER. Tek kullanıcısı sahibidir ve paneli Türkçedir:
+ * zod'un kendi İngilizce cümlesinin ("Too small: expected string to have >=1
+ * characters") sızdığı TEK bir kısıt bile, yanlış bir fiyatı düzeltmeye çalışan
+ * yöneticiye anlamadığı bir dilde tip hatası göstermek demektir. Bu yüzden
+ * DOSYADAKİ HER kısıtın mesajı buradan gelir — üst sınırlar dahil.
+ */
 const TR = {
   key: "Anahtar yalnız küçük harf, rakam ve alt çizgi içerebilir (2–32 karakter).",
+  capability: "Yetenek etiketi yalnız küçük harf, rakam ve alt çizgi içerebilir (2–40 karakter).",
   name: "Ad en az 2 karakter olmalı.",
+  nameLong: "Ad en çok 120 karakter olabilir.",
+  descriptionLong: "Açıklama en çok 600 karakter olabilir.",
+  tolerance: "Tolerans metni yazılmalı (örn. ±0,5 mm).",
+  toleranceLong: "Tolerans metni en çok 120 karakter olabilir.",
   money: `Tutar 0 ile ${CATALOG_LIMITS.maxPriceKurus} kuruş arasında bir tam sayı olmalı.`,
   positive: "Değer 0'dan büyük olmalı.",
   hex: "Renk kodu #RRGGBB biçiminde olmalı (örn. #1A1A1A).",
   colors: "En az bir renk tanımlanmalı.",
+  colorsMax: "En çok 40 renk tanımlanabilir.",
+  colorName: "Renk adı boş olamaz.",
+  colorNameLong: "Renk adı en çok 60 karakter olabilir.",
   colorKeys: "Renk anahtarları benzersiz olmalı.",
+  tierName: "Kademe adı en az 2 karakter olmalı.",
+  tierNameLong: "Kademe adı en çok 60 karakter olabilir.",
   holiday: "Tatil tarihleri YYYY-AA-GG biçiminde gerçek bir tarih olmalı.",
   holidaysUnique: "Aynı tatil tarihi iki kez yazılamaz.",
+  holidaysMax: "En çok 400 tatil tarihi tanımlanabilir.",
   qtyBreaksStart: "İlk adet kademesi 1 adetten başlamalı.",
   qtyBreaksIncreasing: "Adet kademeleri kesin artan sırada olmalı.",
   qtyBreaksEmpty: "En az bir adet kademesi olmalı.",
+  qtyBreaksMax: "En çok 12 adet kademesi tanımlanabilir.",
   leadTiers: "Teslim kademeleri ekonomik, standart ve ekspresin üçünü de içermeli.",
   priceBreaks: "Fiyat kademesi adetleri kesin artan olmalı ve 1'den başlamalı.",
+  priceBreaksMax: "En çok 10 fiyat kademesi gösterilebilir.",
   stamp: "Kaydın son güncellenme damgası (expectedUpdatedAt) gerekli.",
   layerDefault: "Varsayılan katman, katman seçenekleri arasında olmalı.",
   infillDefault: "Varsayılan doluluk, doluluk seçenekleri arasında olmalı.",
   infillSolid: "Katı basan teknolojide doluluk seçeneği ve varsayılanı boş olmalı.",
   layerOptions: "En az bir katman seçeneği olmalı.",
+  layerOptionsMax: "En çok 12 katman seçeneği olabilir.",
+  infillOptions: "Doluluk listesi boş olamaz; katı baskı için alanı tamamen boş bırakın.",
+  infillOptionsMax: "En çok 12 doluluk seçeneği olabilir.",
+  useItem: "Kullanım alanı boş olamaz.",
+  useItemLong: "Her kullanım alanı en çok 60 karakter olabilir.",
+  usesMax: "En çok 10 kullanım alanı yazılabilir.",
+  technologyPick: "Teknoloji geçersiz; listeden seçin.",
+  technologyPickOrAll: "Teknoloji geçersiz; listeden seçin ya da boş bırakın (tüm teknolojiler).",
 } as const;
 
 // ─── Ortak parçalar ─────────────────────────────────────────────────────────
@@ -85,6 +113,16 @@ const TR = {
  */
 const numberField = () => z.number({ error: "Sayı girilmeli (boş bırakılamaz)." });
 
+/**
+ * Metin / evet-hayır / liste / nesne alanlarının TİP cümlesi de Türkçe olmalı:
+ * panelden gelmeyen bir gövde (curl, ileride bir betik) yanlış türde bir değer
+ * yollarsa cevap yine okunabilir kalsın.
+ */
+const textField = (error = "Metin girilmeli.") => z.string({ error });
+const boolField = () => z.boolean({ error: "Evet/hayır (true/false) değeri girilmeli." });
+/** Gövdenin kendisi nesne değilse. */
+const BODY_OBJECT = { error: "Geçerli bir istek gövdesi (JSON nesnesi) gönderilmeli." } as const;
+
 const intBetween = (min: number, max: number) =>
   numberField()
     .int("Tam sayı girilmeli.")
@@ -98,9 +136,9 @@ const floatBetween = (min: number, max: number) =>
 const positiveUpTo = (max: number) =>
   numberField().gt(0, TR.positive).max(max, `En çok ${max} olabilir.`);
 
-const catalogKey = z.string().trim().regex(/^[a-z0-9_]{2,32}$/, TR.key);
-const displayName = z.string().trim().min(2, TR.name).max(120);
-const description = z.string().trim().max(600).default("");
+const catalogKey = textField(TR.key).trim().regex(/^[a-z0-9_]{2,32}$/, TR.key);
+const displayName = textField(TR.name).trim().min(2, TR.name).max(120, TR.nameLong);
+const description = textField(TR.descriptionLong).trim().max(600, TR.descriptionLong).default("");
 const moneyKurus = numberField()
   .int(TR.money)
   .min(0, TR.money)
@@ -110,14 +148,13 @@ const leadDaysExtra = intBetween(
   CATALOG_LIMITS.leadDaysExtra.min,
   CATALOG_LIMITS.leadDaysExtra.max
 );
-const capabilityTag = z.string().trim().regex(/^[a-z0-9_]{2,40}$/, TR.key);
+const capabilityTag = textField(TR.capability).trim().regex(/^[a-z0-9_]{2,40}$/, TR.capability);
 
 /**
  * Yamanın taşıdığı iyimser kilit damgası. Sunucu bunu satırın kendi
  * `updated_at` değeriyle karşılaştırır; tutmazsa 409.
  */
-export const expectedUpdatedAtSchema = z
-  .string()
+export const expectedUpdatedAtSchema = textField(TR.stamp)
   .trim()
   .min(1, TR.stamp)
   .refine((v) => !Number.isNaN(Date.parse(v)), TR.stamp);
@@ -135,29 +172,40 @@ function isRealIsoDate(value: string): boolean {
   );
 }
 
-const isoDate = z.string().trim().refine(isRealIsoDate, TR.holiday);
+const isoDate = textField(TR.holiday).trim().refine(isRealIsoDate, TR.holiday);
 
-export const colorSchema = z.object({
-  key: catalogKey,
-  name: z.string().trim().min(1, TR.name).max(60),
-  hex: z.string().trim().regex(/^#[0-9A-Fa-f]{6}$/, TR.hex),
-  surchargeKurus: moneyKurus,
-});
+export const colorSchema = z.object(
+  {
+    key: catalogKey,
+    name: textField(TR.colorName).trim().min(1, TR.colorName).max(60, TR.colorNameLong),
+    hex: textField(TR.hex).trim().regex(/^#[0-9A-Fa-f]{6}$/, TR.hex),
+    surchargeKurus: moneyKurus,
+  },
+  { error: "Renk satırı eksik ya da hatalı." }
+);
 
 const colorsSchema = z
-  .array(colorSchema)
+  .array(colorSchema, { error: TR.colors })
   .min(1, TR.colors)
-  .max(40)
+  .max(40, TR.colorsMax)
   .refine((rows) => new Set(rows.map((c) => c.key)).size === rows.length, TR.colorKeys);
 
-export const materialPropertiesSchema = z.object({
-  tensileMpa: floatBetween(0, 10_000).optional(),
-  elongationPct: floatBetween(0, 2000).optional(),
-  heatDeflectionC: floatBetween(-100, 1000).optional(),
-  flexible: z.boolean().optional(),
-  transparent: z.boolean().optional(),
-  uses: z.array(z.string().trim().min(1).max(60)).max(10).optional(),
-});
+export const materialPropertiesSchema = z.object(
+  {
+    tensileMpa: floatBetween(0, 10_000).optional(),
+    elongationPct: floatBetween(0, 2000).optional(),
+    heatDeflectionC: floatBetween(-100, 1000).optional(),
+    flexible: boolField().optional(),
+    transparent: boolField().optional(),
+    uses: z
+      .array(textField(TR.useItem).trim().min(1, TR.useItem).max(60, TR.useItemLong), {
+        error: TR.usesMax,
+      })
+      .max(10, TR.usesMax)
+      .optional(),
+  },
+  { error: "Teknik özellikler hatalı." }
+);
 
 // ─── Teknoloji ──────────────────────────────────────────────────────────────
 
@@ -178,16 +226,20 @@ const technologyBody = {
   buildZMm: intBetween(CATALOG_LIMITS.buildMm.min, CATALOG_LIMITS.buildMm.max),
   minWallMm: positiveUpTo(50),
   minFeatureMm: positiveUpTo(50),
-  toleranceText: z.string().trim().min(1).max(120),
+  toleranceText: textField(TR.tolerance).trim().min(1, TR.tolerance).max(120, TR.toleranceLong),
   layerOptionsUm: z
-    .array(intBetween(CATALOG_LIMITS.layerUm.min, CATALOG_LIMITS.layerUm.max))
+    .array(intBetween(CATALOG_LIMITS.layerUm.min, CATALOG_LIMITS.layerUm.max), {
+      error: TR.layerOptions,
+    })
     .min(1, TR.layerOptions)
-    .max(12),
+    .max(12, TR.layerOptionsMax),
   defaultLayerUm: intBetween(CATALOG_LIMITS.layerUm.min, CATALOG_LIMITS.layerUm.max),
   infillOptionsPct: z
-    .array(intBetween(CATALOG_LIMITS.infillPct.min, CATALOG_LIMITS.infillPct.max))
-    .min(1)
-    .max(12)
+    .array(intBetween(CATALOG_LIMITS.infillPct.min, CATALOG_LIMITS.infillPct.max), {
+      error: TR.infillOptions,
+    })
+    .min(1, TR.infillOptions)
+    .max(12, TR.infillOptionsMax)
     .nullable(),
   defaultInfillPct: intBetween(
     CATALOG_LIMITS.infillPct.min,
@@ -232,14 +284,14 @@ export function technologyConsistencyError(row: {
 }
 
 export const technologyCreateSchema = z
-  .object({ key: catalogKey, ...technologyBody, active: z.boolean().default(true) })
+  .object({ key: catalogKey, ...technologyBody, active: boolField().default(true) }, BODY_OBJECT)
   .superRefine((value, ctx) => {
     const message = technologyConsistencyError(value);
     if (message) ctx.addIssue({ code: "custom", message, path: ["defaultLayerUm"] });
   });
 
 export const technologyPatchSchema = z
-  .object({ ...technologyBody, active: z.boolean() })
+  .object({ ...technologyBody, active: boolField() }, BODY_OBJECT)
   .partial()
   .extend({ expectedUpdatedAt: expectedUpdatedAtSchema });
 
@@ -261,15 +313,18 @@ const materialBody = {
   sortOrder,
 };
 
-export const materialCreateSchema = z.object({
-  technologyId: z.uuid("Teknoloji seçilmeli."),
-  key: catalogKey,
-  ...materialBody,
-  active: z.boolean().default(true),
-});
+export const materialCreateSchema = z.object(
+  {
+    technologyId: z.uuid(TR.technologyPick),
+    key: catalogKey,
+    ...materialBody,
+    active: boolField().default(true),
+  },
+  BODY_OBJECT
+);
 
 export const materialPatchSchema = z
-  .object({ ...materialBody, active: z.boolean() })
+  .object({ ...materialBody, active: boolField() }, BODY_OBJECT)
   .partial()
   .extend({ expectedUpdatedAt: expectedUpdatedAtSchema });
 
@@ -281,23 +336,26 @@ const finishBody = {
   fixedKurus: moneyKurus,
   perCm2Kurus: moneyKurus,
   leadDaysExtra,
-  requiresManual: z.boolean(),
+  requiresManual: boolField(),
   costLineKind: z.enum(COST_LINE_KINDS, {
     error: "Maliyet kalemi üretim ya da boyama olmalı.",
   }),
   sortOrder,
 };
 
-export const finishCreateSchema = z.object({
-  /** null = her teknolojiye uygun. */
-  technologyId: z.uuid().nullable().default(null),
-  key: catalogKey,
-  ...finishBody,
-  active: z.boolean().default(true),
-});
+export const finishCreateSchema = z.object(
+  {
+    /** null = her teknolojiye uygun. */
+    technologyId: z.uuid(TR.technologyPickOrAll).nullable().default(null),
+    key: catalogKey,
+    ...finishBody,
+    active: boolField().default(true),
+  },
+  BODY_OBJECT
+);
 
 export const finishPatchSchema = z
-  .object({ ...finishBody, active: z.boolean() })
+  .object({ ...finishBody, active: boolField() }, BODY_OBJECT)
   .partial()
   .extend({ expectedUpdatedAt: expectedUpdatedAtSchema });
 
@@ -314,47 +372,56 @@ const addonBody = {
   sortOrder,
 };
 
-export const addonCreateSchema = z.object({
-  key: catalogKey,
-  ...addonBody,
-  active: z.boolean().default(true),
-});
+export const addonCreateSchema = z.object(
+  {
+    key: catalogKey,
+    ...addonBody,
+    active: boolField().default(true),
+  },
+  BODY_OBJECT
+);
 
 export const addonPatchSchema = z
-  .object({ ...addonBody, active: z.boolean() })
+  .object({ ...addonBody, active: boolField() }, BODY_OBJECT)
   .partial()
   .extend({ expectedUpdatedAt: expectedUpdatedAtSchema });
 
 // ─── Fiyat ayarları (tek satır) ─────────────────────────────────────────────
 
-const qtyBreakSchema = z.object({
-  minQty: intBetween(1, 100_000),
-  discountBps: intBetween(CATALOG_LIMITS.discountBps.min, CATALOG_LIMITS.discountBps.max),
-});
+const qtyBreakSchema = z.object(
+  {
+    minQty: intBetween(1, 100_000),
+    discountBps: intBetween(CATALOG_LIMITS.discountBps.min, CATALOG_LIMITS.discountBps.max),
+  },
+  { error: "Adet kademesi satırı eksik ya da hatalı." }
+);
 
-const leadTierSchema = z.object({
-  key: z.enum(LEAD_TIER_KEYS, { error: TR.leadTiers }),
-  name: z.string().trim().min(2, TR.name).max(60),
-  multiplierBps: intBetween(
-    CATALOG_LIMITS.multiplierBps.min,
-    CATALOG_LIMITS.multiplierBps.max
-  ),
-  daysDelta: intBetween(-30, 30),
-  minDays: intBetween(CATALOG_LIMITS.minDays.min, CATALOG_LIMITS.minDays.max),
-});
+const leadTierSchema = z.object(
+  {
+    key: z.enum(LEAD_TIER_KEYS, { error: TR.leadTiers }),
+    name: textField(TR.tierName).trim().min(2, TR.tierName).max(60, TR.tierNameLong),
+    multiplierBps: intBetween(
+      CATALOG_LIMITS.multiplierBps.min,
+      CATALOG_LIMITS.multiplierBps.max
+    ),
+    daysDelta: intBetween(-30, 30),
+    minDays: intBetween(CATALOG_LIMITS.minDays.min, CATALOG_LIMITS.minDays.max),
+  },
+  { error: TR.leadTiers }
+);
 
 export const pricingSettingsSchema = z.object({
   qtyBreaks: z
-    .array(qtyBreakSchema)
+    .array(qtyBreakSchema, { error: TR.qtyBreaksEmpty })
     .min(1, TR.qtyBreaksEmpty)
-    .max(12)
+    .max(12, TR.qtyBreaksMax)
     .refine((rows) => rows[0]?.minQty === 1, TR.qtyBreaksStart)
     .refine(
       (rows) => rows.every((row, i) => i === 0 || row.minQty > (rows[i - 1] as { minQty: number }).minQty),
       TR.qtyBreaksIncreasing
     ),
   leadTiers: z
-    .array(leadTierSchema)
+    .array(leadTierSchema, { error: TR.leadTiers })
     .length(LEAD_TIER_KEYS.length, TR.leadTiers)
     .refine(
       (rows) => new Set(rows.map((t) => t.key)).size === LEAD_TIER_KEYS.length,
@@ -369,26 +436,29 @@ export const pricingSettingsSchema = z.object({
   quoteValidDays: intBetween(1, 365),
   retentionDaysAfterExpiry: intBetween(1, 3650),
   priceBreakQuantities: z
-    .array(intBetween(1, 100_000))
+    .array(intBetween(1, 100_000), { error: TR.priceBreaks })
     .min(1, TR.priceBreaks)
-    .max(10)
+    .max(10, TR.priceBreaksMax)
     .refine((rows) => rows[0] === 1, TR.priceBreaks)
     .refine(
       (rows) => rows.every((qty, i) => i === 0 || qty > (rows[i - 1] as number)),
       TR.priceBreaks
     ),
   holidays: z
-    .array(isoDate)
-    .max(400)
+    .array(isoDate, { error: TR.holiday })
+    .max(400, TR.holidaysMax)
     .refine((rows) => new Set(rows).size === rows.length, TR.holidaysUnique),
   cutoffHour: intBetween(0, 23),
-  havaleDiscountApplies: z.boolean(),
-});
+  havaleDiscountApplies: boolField(),
+}, BODY_OBJECT);
 
-export const pricingSettingsUpdateSchema = z.object({
-  expectedUpdatedAt: expectedUpdatedAtSchema,
-  settings: pricingSettingsSchema,
-});
+export const pricingSettingsUpdateSchema = z.object(
+  {
+    expectedUpdatedAt: expectedUpdatedAtSchema,
+    settings: pricingSettingsSchema,
+  },
+  BODY_OBJECT
+);
 
 // ─── Simülatör ──────────────────────────────────────────────────────────────
 
@@ -411,14 +481,17 @@ export const simulateSchema = z.object({
     .default(null),
   quantity: intBetween(1, 100_000),
   leadTier: z.enum(LEAD_TIER_KEYS, { error: "Teslim kademesi geçersiz." }),
-  geometry: z.object({
-    volumeCm3: positiveUpTo(1_000_000),
-    areaCm2: positiveUpTo(1_000_000),
-    x: positiveUpTo(5000),
-    y: positiveUpTo(5000),
-    z: positiveUpTo(5000),
-  }),
-});
+  geometry: z.object(
+    {
+      volumeCm3: positiveUpTo(1_000_000),
+      areaCm2: positiveUpTo(1_000_000),
+      x: positiveUpTo(5000),
+      y: positiveUpTo(5000),
+      z: positiveUpTo(5000),
+    },
+    { error: "Geometri ölçüleri eksik ya da hatalı." }
+  ),
+}, BODY_OBJECT);
 
 export type TechnologyCreateInput = z.infer<typeof technologyCreateSchema>;
 export type TechnologyPatchInput = z.infer<typeof technologyPatchSchema>;

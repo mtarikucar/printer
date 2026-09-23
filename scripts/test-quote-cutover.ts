@@ -15,7 +15,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import Module from "node:module";
+import Module, { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createElement, type FunctionComponent, type ReactNode } from "react";
@@ -394,4 +394,55 @@ test("sahiplik anahtarları TEK gövdeden çıkar", () => {
   );
   assert.doesNotMatch(access, /uploadOwnerKey\(\{ role:/, "erişim çözümü kendi kopyasını taşıyor");
   assert.match(access, /uploadOwnerKeys: keys/, "aday kümesi erişime taşınmıyor");
+});
+
+// ─── Uç: bayrak kapalıyken katalog OKUNMAZ ──────────────────────────────────
+
+/**
+ * `SiteHeader` her sayfada mount olur, yani bu uç bayrak kapalıyken de HER
+ * genel sayfa açılışında çağrılır. Cevabın yalnız `enabled` alanı okunur; o
+ * hâlde katalog sorgulanmamalıdır — beş `select` ve (max 5 olan) havuzdan beş
+ * bağlantı, gövdesi atılacak bir cevap için. Üstelik son aktif teknoloji
+ * pasifleştirilirse okuma FIRLATIR ve her genel sayfa açılışı 500 günlüğü
+ * üretirdi.
+ */
+test("bayrak kapalıyken uç kataloğu hiç okumaz ve cevabı yalnız tarayıcıya önbelletir", async () => {
+  const requireModule = createRequire(import.meta.url);
+  const saved = new Map<string, NodeJS.Module | undefined>();
+  const stub = (request: string, exports: unknown): void => {
+    const id = requireModule.resolve(request);
+    saved.set(id, requireModule.cache[id]);
+    requireModule.cache[id] = { id, filename: id, loaded: true, exports } as NodeJS.Module;
+  };
+
+  let catalogReads = 0;
+  try {
+    stub("../src/lib/services/quote-access", { quoteApiEnabled: async () => false });
+    stub("../src/lib/services/quote-catalog", {
+      loadActiveSnapshot: async () => {
+        catalogReads++;
+        throw new Error("katalog okundu");
+      },
+    });
+
+    const route = await import("../src/app/api/quotes/catalog/route");
+    const response = await route.GET();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { enabled: false, catalog: null });
+    assert.equal(catalogReads, 0, "bayrak kapalıyken katalog sorgulandı");
+
+    // `private`: cevap ÇEREZE göre değişir (admin oturumunda bayrak kapalıyken
+    // de `enabled: true` gelir). Paylaşılan bir vekil `public` bir
+    // "enabled:false" gövdesini saklarsa bayrak açıldığında müşteriyi eski
+    // akışta tutar, admine de yanlış cevabı verir.
+    const cacheControl = response.headers.get("cache-control") ?? "";
+    assert.match(cacheControl, /private/, "cevap paylaşılan vekile açık bırakılmış");
+    assert.doesNotMatch(cacheControl, /public/);
+  } finally {
+    for (const [id, module] of saved) {
+      if (module) requireModule.cache[id] = module;
+      else delete requireModule.cache[id];
+    }
+  }
 });

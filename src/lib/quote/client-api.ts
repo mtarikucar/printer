@@ -114,10 +114,13 @@ function json(method: string, payload?: unknown): RequestInit {
  * `GET /api/quotes/catalog` — fiyatsız katalog + bayrak durumu.
  * Bayrak kapalıyken 404 değil `enabled: false` döner (açılış sayfası
  * "Yakında" diyebilsin).
+ *
+ * `catalog` o hâlde `null`'dır ve tip bunu SÖYLER: uç kapalıyken kataloğu hiç
+ * okumaz, yani gövdeyi `enabled`e bakmadan kullanan bir çağıran `tsc`de düşsün.
  */
 export function fetchQuoteCatalog(
   opts: QuoteRequestOptions = {}
-): Promise<{ enabled: boolean; catalog: PresentedCatalog }> {
+): Promise<{ enabled: boolean; catalog: PresentedCatalog | null }> {
   return request("/api/quotes/catalog", { method: "GET" }, opts);
 }
 

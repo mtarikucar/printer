@@ -3,8 +3,10 @@ import { SiteHeader } from "@/components/site-header";
 import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { listAddresses } from "@/lib/services/address-book";
 import { quoteApiEnabled, resolveQuoteAccess } from "@/lib/services/quote-access";
+import { pendingQuoteCheckout } from "@/lib/services/quote-checkout";
 import { loadPresentedQuote } from "@/lib/services/quote-service";
 import { QuoteCheckoutClient } from "./checkout-client";
+import { QuotePendingPaymentClient } from "./pending-payment-client";
 
 /**
  * Teklif ödemesi — `/teklif/T-000123/odeme`.
@@ -15,9 +17,12 @@ import { QuoteCheckoutClient } from "./checkout-client";
  *   - Bayrak kapalı → sayfa YOK (uçlarla aynı kapı).
  *   - Sahibi olmayan / fiyat kapısını geçmemiş izleyici → çalışma alanına
  *     geri; orada kapıyı açan modal var, burada yalnız kapalı bir form olurdu.
- *   - Bekleyen ödeme varsa → `/pay/<ref>`. Teklif o sırada salt okunurdur ve
- *     ikinci bir taslak açmak ikinci bir tahsilat riskidir (uç da aynı
- *     referansı döndürür; bu yalnız müşteriyi doğru sayfaya götürür).
+ *   - Bekleyen ödeme varsa → o taslağın KENDİ sayfası (`/pay/<ref>` ya da
+ *     `/havale/<ref>`). Teklif o sırada salt okunurdur ve ikinci bir taslak
+ *     açmak ikinci bir tahsilat riskidir. Taslak hiç başlamamış bir kart
+ *     ödemesiyse yönlendirme YERİNE seçenek ekranı çizilir: devam et ya da
+ *     iptal edip yöntemi değiştir (uç farklı yöntemi reddeder, kapı olmasa
+ *     müşteri 72 saat karta kilitli kalırdı).
  *   - Ödemeye engel varsa → çalışma alanı; engellerin Türkçe listesi orada.
  *
  * Tutarlar `PresentedQuote.totals`tan gelir (fiyat kapısı uygulanmış) ve
@@ -50,7 +55,18 @@ export default async function QuoteCheckoutPage({
   const presented = await loadPresentedQuote(access);
   // `liveDraftReference` yalnız sahibe gönderilir; kapıyı yukarıda geçtik.
   if (presented.liveDraftReference) {
-    redirect(`/pay/${encodeURIComponent(presented.liveDraftReference)}`);
+    const pending = await pendingQuoteCheckout(quote.id);
+    // Vazgeçilebilir bir kart taslağı varsa müşteri SEÇEBİLMELİ: koşulsuz
+    // yönlendirme, yöntemini değiştirmek isteyeni 72 saat karta kilitliyordu
+    // (uç farklı yöntemi `pending_other_method` ile reddediyor).
+    if (!pending) redirect(`/pay/${encodeURIComponent(presented.liveDraftReference)}`);
+    if (!pending.cancellable) redirect(pending.paymentUrl);
+    return (
+      <>
+        <SiteHeader />
+        <QuotePendingPaymentClient quoteNumber={presented.number} pending={pending} />
+      </>
+    );
   }
   if (!presented.totals || !presented.readiness.canCheckout) redirect(workspace);
 

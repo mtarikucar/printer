@@ -17,7 +17,10 @@ import {
   handleRouteFailure,
 } from "@/lib/api/route-error";
 import { getSessionUser } from "@/lib/services/customer-auth";
-import { createQuoteCheckout } from "@/lib/services/quote-checkout";
+import {
+  cancelPendingQuoteCheckout,
+  createQuoteCheckout,
+} from "@/lib/services/quote-checkout";
 import { quoteCheckoutSchema } from "@/lib/validators/quote-checkout";
 import { accessOr404, jsonBody, quoteRouteBody } from "../../_shared";
 
@@ -85,6 +88,55 @@ export async function POST(request: NextRequest, ctx: Ctx) {
     return handleRouteFailure(
       e,
       "POST /api/quotes/[id]/checkout",
+      CUSTOMER_PAYMENT_FAILED_ERROR
+    );
+  }
+}
+
+/**
+ * `DELETE /api/quotes/[id]/checkout` — hiç başlamamış kart ödemesini iptal
+ * eder.
+ *
+ * Yöntem değiştirmenin tek kapısı: bekleyen taslak dururken teklif salt
+ * okunurdur ve POST farklı yöntemli isteği 409 ile reddeder. Kapıları POST ile
+ * AYNI (oturum + sahiplik + bayrak); neyin iptal edilebileceğine servis karar
+ * verir, burada ikinci bir politika yoktur.
+ */
+async function handleDELETE(request: NextRequest, ctx: Ctx): Promise<NextResponse> {
+  const { id } = await ctx.params;
+  const session = await getSessionUser();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Ödeme için giriş yapmanız gerekiyor.", code: "auth_required" },
+      { status: 401 }
+    );
+  }
+
+  const found = await accessOr404(request, id, { forEdit: true });
+  if ("response" in found) return found.response;
+  const { quote, viewer } = found.access;
+
+  if (!viewer.isOwner || quote.userId === null || quote.userId !== session.userId) {
+    return NextResponse.json(
+      { error: "Bu teklifi yalnız sahibi değiştirebilir.", code: "not_owner" },
+      { status: 403 }
+    );
+  }
+
+  const result = await cancelPendingQuoteCheckout({
+    quoteId: quote.id,
+    userId: session.userId,
+  });
+  return NextResponse.json({ ok: true, reference: result.reference });
+}
+
+export async function DELETE(request: NextRequest, ctx: Ctx) {
+  try {
+    return await quoteRouteBody(() => handleDELETE(request, ctx));
+  } catch (e) {
+    return handleRouteFailure(
+      e,
+      "DELETE /api/quotes/[id]/checkout",
       CUSTOMER_PAYMENT_FAILED_ERROR
     );
   }

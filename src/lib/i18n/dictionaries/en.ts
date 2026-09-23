@@ -1204,6 +1204,18 @@ const en = {
   "instantQuote.part.viewModel": "View in 3D",
   "instantQuote.part.volume": "{cm3} cm³",
 
+  // instantQuote — pending payment (the way out of a locked method)
+  "instantQuote.pendingPayment.cancel": "Cancel the pending payment",
+  "instantQuote.pendingPayment.cancelHint":
+    "Cancelling unlocks the quote for editing and lets you pay with another method, including bank transfer.",
+  "instantQuote.pendingPayment.cancelling": "Cancelling…",
+  "instantQuote.pendingPayment.card":
+    "A card payment is already pending for this quote. You can continue with it, or cancel it and switch payment method.",
+  "instantQuote.pendingPayment.continue": "Continue the pending payment",
+  "instantQuote.pendingPayment.havale":
+    "A bank transfer payment is already pending for this quote. The transfer details and deadline are on the payment page.",
+  "instantQuote.pendingPayment.title": "This quote already has a pending payment",
+
   // instantQuote — price fields
   "instantQuote.price.breaks": "Quantity breaks",
   "instantQuote.price.breaks.quantity": "Qty",

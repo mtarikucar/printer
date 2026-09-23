@@ -1205,6 +1205,18 @@ const tr: Dictionary = {
   "instantQuote.part.viewModel": "3B görüntüle",
   "instantQuote.part.volume": "{cm3} cm³",
 
+  // instantQuote — bekleyen ödeme (yöntem değiştirmenin çıkış kapısı)
+  "instantQuote.pendingPayment.cancel": "Bekleyen ödemeyi iptal et",
+  "instantQuote.pendingPayment.cancelHint":
+    "İptal ettiğinizde teklif yeniden düzenlenebilir olur ve havale dâhil başka bir yöntemle ödeyebilirsiniz.",
+  "instantQuote.pendingPayment.cancelling": "İptal ediliyor…",
+  "instantQuote.pendingPayment.card":
+    "Bu teklif için kart ile başlatılmış bir ödeme bekliyor. Ödemeye devam edebilir ya da iptal edip ödeme yöntemini değiştirebilirsiniz.",
+  "instantQuote.pendingPayment.continue": "Bekleyen ödemeye devam et",
+  "instantQuote.pendingPayment.havale":
+    "Bu teklif için havale/EFT ile başlatılmış bir ödeme bekliyor. Ödeme bilgileri ve son tarih ödeme sayfasında.",
+  "instantQuote.pendingPayment.title": "Bu teklif için bekleyen bir ödeme var",
+
   // instantQuote — fiyat alanları
   "instantQuote.price.breaks": "Adet kademeleri",
   "instantQuote.price.breaks.quantity": "Adet",

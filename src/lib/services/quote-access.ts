@@ -10,7 +10,7 @@
  * edilebilir. Numara yalnız satırı BULUR; hakkı oturum, anonim çerez ya da
  * paylaşım token'ı verir.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { quotes, type Quote } from "@/lib/db/schema";
 import { formatQuoteNumber, parseQuoteNumber } from "@/lib/config/quote-number";
@@ -67,6 +67,25 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  * (spec §Müşteri arayüzü, "fiyat kapısı modalı") — herkes kayıt olup fiyatı
  * görebilir, ama kim olduğunu söyleyerek.
  */
+/**
+ * Girişli müşteri, kendi anonim çerezine bağlı teklifi açtı mı?
+ *
+ * Saf koşul: yazma `resolveQuoteAccess` içinde, koşul burada — testten
+ * doğrulanabilsin diye. Sahipli teklif (`userId` dolu) asla devredilmez:
+ * başka bir hesaba geçmesi teklifin çalınması olurdu.
+ */
+export function shouldClaimQuote(
+  quote: Pick<Quote, "userId" | "anonymousId">,
+  identity: { sessionUserId: string | null; anonymousId: string | null }
+): boolean {
+  return (
+    quote.userId === null &&
+    quote.anonymousId !== null &&
+    identity.sessionUserId !== null &&
+    identity.anonymousId === quote.anonymousId
+  );
+}
+
 export function resolveQuoteViewer(
   quote: Pick<Quote, "userId" | "anonymousId" | "shareToken">,
   ctx: QuoteViewerContext
@@ -74,16 +93,23 @@ export function resolveQuoteViewer(
   if (quote.userId !== null && ctx.sessionUserId === quote.userId) {
     return { canSeePrices: true, canEdit: true, isOwner: true, isShare: false, isAdmin: false };
   }
+  // Admin, anonim çerez dalından ÖNCE gelir: panelde girişli olan sahip, teklifi
+  // bir kez de tarayıcısında anonim açmışsa, aşağıdaki dal eşleşip onu fiyatsız
+  // bırakıyordu.
+  if (ctx.isAdmin) {
+    return { canSeePrices: true, canEdit: true, isOwner: false, isShare: false, isAdmin: true };
+  }
   if (
     quote.userId === null &&
     quote.anonymousId !== null &&
     ctx.anonymousId !== null &&
     ctx.anonymousId === quote.anonymousId
   ) {
-    return { canSeePrices: false, canEdit: true, isOwner: true, isShare: false, isAdmin: false };
-  }
-  if (ctx.isAdmin) {
-    return { canSeePrices: true, canEdit: true, isOwner: false, isShare: false, isAdmin: true };
+    // Oturum varsa bu çerez sahibi TANINAN müşteridir; fiyat kapısının amacı
+    // (müşteri kazanımı) sağlanmıştır, fiyat açılır. `resolveQuoteAccess` aynı
+    // istekte teklifi hesaba devreder, yoksa teklif "Tekliflerim"de hiç görünmez.
+    const known = ctx.sessionUserId !== null;
+    return { canSeePrices: known, canEdit: true, isOwner: true, isShare: false, isAdmin: false };
   }
   if (
     quote.shareToken !== null &&
@@ -201,6 +227,28 @@ export async function resolveQuoteAccess(
   });
   if (!viewer) return null;
   if (opts.forEdit && !viewer.canEdit) return null;
+
+  // Girişli müşteri kendi anonim teklifini açtı: devri BURADA yap. Modal'ın
+  // `claim` çağrısı yalnız o an giriş yapanı kapsıyordu; sayfayı zaten girişken
+  // açan müşterinin teklifi sahipsiz kalıyor, "Tekliflerim"de görünmüyor ve
+  // çerez silindiğinde tamamen erişilemez hale geliyordu. Koşullu UPDATE, iki
+  // eşzamanlı isteğin ikisinin de aynı sonuca varmasını sağlar.
+  const claimAnonymousId = quote.anonymousId;
+  const claimUserId = identity.sessionUserId;
+  if (claimAnonymousId !== null && claimUserId !== null && shouldClaimQuote(quote, identity)) {
+    const [claimed] = await db
+      .update(quotes)
+      .set({ userId: claimUserId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(quotes.id, quote.id),
+          isNull(quotes.userId),
+          eq(quotes.anonymousId, claimAnonymousId)
+        )
+      )
+      .returning();
+    if (claimed) Object.assign(quote, claimed);
+  }
 
   // Sahiplik anahtarları sahnelemeyi KAYDEDEN uçla aynı gövdeden çıkar
   // (`resolveAuthenticatedUploadOwner`); burada yalnız zaten okunmuş iki oturum

@@ -18,7 +18,7 @@ import { partPricingKey } from "../src/lib/config/quote-keys";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import type { PartGeometry, QuoteViewer } from "../src/lib/config/quote-types";
 import type { Quote, QuotePart } from "../src/lib/db/schema";
-import { resolveQuoteAccess, resolveQuoteViewer } from "../src/lib/services/quote-access";
+import { resolveQuoteAccess, resolveQuoteViewer, shouldClaimQuote } from "../src/lib/services/quote-access";
 import { toPricingPartInput } from "../src/lib/services/quote-cache";
 import { presentQuote, toPricingInputs } from "../src/lib/services/quote-present";
 
@@ -215,6 +215,49 @@ test("anonim çerez teklif devralındıktan sonra geçersizdir", () => {
     isAdmin: false,
   });
   assert.equal(viewer, null);
+});
+
+// Girişli müşteri, ÖNCEDEN anonim açtığı kendi teklifini açıyor. Devir (claim)
+// yalnız fiyat kapısı modalı O AN giriş yaptırdığında çalışıyordu; sayfayı
+// zaten girişliyken açan müşteri sonsuza dek fiyatsız kalıyor ve kendisine
+// gereksiz bir giriş formu gösteriliyordu. Oturum varsa anonim çerez sahibi de
+// tanınan müşteridir: fiyat kapısının amacı (müşteri kazanımı) zaten sağlanmış.
+test("girişli müşteri kendi anonim teklifini açınca FİYAT GÖRÜR", () => {
+  const viewer = resolveQuoteViewer(makeQuote({ userId: null, anonymousId: "anon-1" }), {
+    sessionUserId: OWNER_ID,
+    anonymousId: "anon-1",
+    shareToken: null,
+    isAdmin: false,
+  });
+  assert.deepEqual(viewer, OWNER_VIEW);
+});
+
+test("devir koşulu: yalnız girişli müşterinin kendi anonim teklifi devredilir", () => {
+  const anon = { userId: null, anonymousId: "anon-1" };
+  // Devredilir: oturum var, çerez eşleşiyor.
+  assert.equal(shouldClaimQuote(anon, { sessionUserId: OWNER_ID, anonymousId: "anon-1" }), true);
+  // Devredilmez: oturum yok.
+  assert.equal(shouldClaimQuote(anon, { sessionUserId: null, anonymousId: "anon-1" }), false);
+  // Devredilmez: başka birinin çerezi.
+  assert.equal(shouldClaimQuote(anon, { sessionUserId: OWNER_ID, anonymousId: "anon-2" }), false);
+  // Devredilmez: teklifin zaten sahibi var (başka hesaba geçmesi hırsızlık olurdu).
+  assert.equal(
+    shouldClaimQuote({ userId: STRANGER_ID, anonymousId: "anon-1" }, { sessionUserId: OWNER_ID, anonymousId: "anon-1" }),
+    false
+  );
+});
+
+// Admin oturumu da aynı dala takılıyordu: anonim çerez eşleştiği an admin
+// dalına hiç gelinmiyor, panelde girişli sahip fiyatı göremiyordu.
+test("admin, anonim çerezi de eşleşse fiyatı görür", () => {
+  const viewer = resolveQuoteViewer(makeQuote({ userId: null, anonymousId: "anon-1" }), {
+    sessionUserId: null,
+    anonymousId: "anon-1",
+    shareToken: null,
+    isAdmin: true,
+  });
+  assert.equal(viewer?.canSeePrices, true);
+  assert.equal(viewer?.isAdmin, true);
 });
 
 test("paylaşım token'ı: salt okunur, girişsizken fiyatsız", () => {

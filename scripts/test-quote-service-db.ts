@@ -97,13 +97,34 @@ async function main() {
       await admin.query(statement);
     }
 
-    // GERÇEK migration'ın tohumu — şema `schema.ts`'ten, veri 0064'ten gelir.
+    // GERÇEK migration'ların tohumu — şema `schema.ts`'ten, veri 0064'ten ve
+    // ondan SONRAKİ veri migration'larından gelir. Sonrakileri de uygulamak
+    // şart: yeni kurulumun gerçekte aldığı değer bu zincirin sonucudur, tek
+    // başına 0064 değil (ör. 0065 dosya sınırını 32 MB'tan 100 MB'a taşır).
+    // Zinciri atlayan bir test, tohum kaymasını kaçırır ki bu testin tek
+    // varlık sebebi odur.
     const migration = fs.readFileSync(path.join(root, "drizzle/0064_instant_quotes.sql"), "utf8");
     const seedStatements = migration
       .split("--> statement-breakpoint")
       .filter((s) => /\bINSERT INTO\b/.test(s));
     assert.equal(seedStatements.length, 5, "0064 beş tohum ifadesi taşır");
     for (const statement of seedStatements) {
+      await admin.query(statement.replace(/"public"\./g, ""));
+    }
+
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(root, "drizzle/meta/_journal.json"), "utf8")
+    ) as { entries: Array<{ idx: number; tag: string }> };
+    const laterDataStatements = journal.entries
+      .filter((e) => e.idx > 64)
+      .sort((a, b) => a.idx - b.idx)
+      .flatMap((e) =>
+        fs
+          .readFileSync(path.join(root, `drizzle/${e.tag}.sql`), "utf8")
+          .split("--> statement-breakpoint")
+          .filter((s) => /\b(INSERT INTO|UPDATE)\s+"?(print_|quote_pricing_settings)/.test(s))
+      );
+    for (const statement of laterDataStatements) {
       await admin.query(statement.replace(/"public"\./g, ""));
     }
 

@@ -39,7 +39,7 @@ export const QUOTE_ANALYSIS_MEM_LIMIT_GB = 2;
  * düzenlenebilir olduğu için migration gerekmez, ama açılış sayfasının
  * cümlesi de aynı sayıdan beslenir.
  */
-export const SEED_MAX_FILE_BYTES = 104_857_600; // 100 MB
+export const SEED_MAX_FILE_BYTES = 33_554_432;
 
 export const SEED_SNAPSHOT: PricingSnapshot = {
   version: 1,

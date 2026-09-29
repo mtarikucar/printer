@@ -37,6 +37,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import {
+  giftCards,
   orderDrafts,
   quoteCheckouts,
   quoteParts,
@@ -56,6 +57,7 @@ import {
   PRELIMINARY_INFO_VERSION,
   DISTANCE_CONTRACT_VERSION,
 } from "@/lib/config/distance-contract";
+import { giftCardReservationDecision } from "@/lib/config/gift-card-reservation";
 import {
   CARD_DEADLINE_HOURS,
   HAVALE_DEADLINE_HOURS,
@@ -93,6 +95,7 @@ import {
 import { emitQuoteChanged } from "@/lib/realtime/emit";
 import { isFlagEnabled } from "@/lib/services/flags";
 import { validateGiftCard } from "@/lib/services/gift-card";
+import { countLiveGiftCardUses } from "@/lib/services/gift-card-usage";
 import {
   GiftCardReservationError,
   insertGiftRedemptionTx,
@@ -445,6 +448,20 @@ async function resolveGiftCard(
   locale: Locale
 ): Promise<{ id: string } | null> {
   if (code === undefined) return null;
+  return resolveGiftCardCode(code, locale);
+}
+
+/**
+ * Kodu kart KİMLİĞİNE çevirir (kod VERİLMİŞ hâl).
+ *
+ * Ayrı durmasının sebebi ön izleme ucu: orada kod zorunludur ve `null` dönüşü
+ * olmayan bir imza gerekiyor — çağıranın var olmayan bir dalı elemek için `!`
+ * yazması, bir gün gerçekten null dönen bir değişiklikte sessizce çökerdi.
+ */
+async function resolveGiftCardCode(
+  code: string,
+  locale: Locale
+): Promise<{ id: string }> {
   if (!(await isFlagEnabled("quote_gift_card_enabled"))) {
     throw new QuoteServiceError(
       "Hediye kartı bu ödemede kullanılamıyor.",
@@ -460,6 +477,156 @@ async function resolveGiftCard(
     throw giftCardRefusal(result.error ?? "not_found", locale);
   }
   return { id: result.card.id };
+}
+
+/** Bir ödeme yönteminin ön izlemedeki iki rakamı. */
+export interface QuoteGiftCardMethodPreview {
+  havaleDiscountKurus: number;
+  payableKurus: number;
+}
+
+/**
+ * Ödeme ÖNCESİ hediye kartı ön izlemesi. Rezervasyon YOK, kilit YOK, yazım YOK.
+ *
+ * Neden sunucuda: ekranda para aritmetiği yoktur (dosya başı, kural 1'in
+ * kardeşi). Müşterinin "ödeyeceğim tutar" olarak gördüğü rakam MSY m.6/2-a'nın
+ * konusudur ve tahsil edilen tutarla birebir aynı olmak zorundadır — ekranda
+ * yapılan bir çıkarma, zincire yeni bir indirim girdiği gün sessizce bayatlardı.
+ *
+ * İKİ YÖNTEM BİRDEN döner: müşteri kart ile havale arasında geçerken ikinci bir
+ * istek atmak (ve o istekle ikinci bir kod denemesi harcamak) gerekmesin.
+ * Hediye kartı adımı yöntem dalından ÖNCE geldiği için (`TENDER_STEP_ORDER`)
+ * karşılanan tutar ile tam karşılama iki yöntemde de aynıdır; bu yüzden tek
+ * kez, üst seviyede durur.
+ */
+export interface QuoteGiftCardPreview {
+  /** Ekranın tek ayırt edicisi: red yolu 400 ile döner, bu gövde hiç gelmez. */
+  valid: true;
+  /** Kartın normalleştirilmiş (büyük harfli) kodu. */
+  code: string;
+  balanceKurus: number;
+  /** Hediye kartından karşılanacak tutar; iki yöntemde de aynı. */
+  giftCardAmountKurus: number;
+  fullyCovered: boolean;
+  card: QuoteGiftCardMethodPreview;
+  bankTransfer: QuoteGiftCardMethodPreview;
+}
+
+/**
+ * Ön izleme ucunun kendi oran limiti.
+ *
+ * Kart kodları kısa ve tahmin edilebilir; uç oturum + sahiplik arkasında olsa
+ * bile jetonsuz bir ön izleme, kendi teklifini açan bir hesabın elinde kod
+ * tarayıcısına dönerdi. Ödeme limitinden (`RATE_LIMIT`) ayrı bir kova: ön
+ * izleme denemeleri müşterinin gerçek ödeme hakkını yemez.
+ */
+export const GIFT_PREVIEW_RATE_LIMIT = 20;
+
+export async function previewQuoteGiftCard(args: {
+  quoteId: string;
+  userId: string;
+  code: string;
+  req: NextRequest;
+}): Promise<QuoteGiftCardPreview> {
+  const limited = await rateLimitAsync(
+    `quote-gift-preview:user:${args.userId}`,
+    GIFT_PREVIEW_RATE_LIMIT,
+    RATE_WINDOW_MS
+  );
+  if (!limited.success) {
+    throw new QuoteServiceError(
+      "Çok fazla hediye kartı denemesi yapıldı. Lütfen bir süre sonra tekrar deneyin.",
+      429,
+      "rate_limited"
+    );
+  }
+
+  const locale = getRequestLocale(args.req);
+  const resolved = await resolveGiftCardCode(args.code, locale);
+
+  const [quote] = await db.select().from(quotes).where(eq(quotes.id, args.quoteId)).limit(1);
+  if (!quote) throw new QuoteServiceError("Teklif bulunamadı.", 404, "quote_not_found");
+  // Sahiplik ucun kapısıdır; burada İKİNCİ kez sorulur çünkü fiyat sunucudan
+  // çıkıyor ve bu servis (test, ileride başka bir uç) ucun dışından da çağrılabilir.
+  if (quote.userId !== args.userId) {
+    throw new QuoteServiceError("Bu teklif hesabınıza bağlı değil.", 403, "not_owner");
+  }
+
+  const parts = await db
+    .select()
+    .from(quoteParts)
+    .where(and(eq(quoteParts.quoteId, quote.id), isNull(quoteParts.deletedAt)))
+    .orderBy(asc(quoteParts.sortOrder), asc(quoteParts.createdAt));
+  const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
+    leadTier: quote.leadTier,
+    addonKeys: quote.addonKeys,
+  });
+  const totals = computed.totals;
+  // Cümleler ödeme yoluyla BİREBİR aynı: aynı hâli iki ekranda iki türlü
+  // anlatmanın müşteriye faydası yok.
+  if (!totals.allPriced || totals.leadDays === null) {
+    throw new QuoteServiceError(
+      "Teklifin fiyatı hesaplanamadı — sayfayı yenileyip tekrar deneyin.",
+      409,
+      "price_unavailable"
+    );
+  }
+  const amountKurus = totals.totalKurus;
+  if (amountKurus <= 0 || amountKurus > MAX_AMOUNT_KURUS) {
+    throw new QuoteServiceError(
+      "Sipariş tutarı geçersiz (0 ile ₺2.000.000 arasında olmalı).",
+      400,
+      "amount_out_of_range"
+    );
+  }
+
+  // Kartın satırı KİLİTSİZ okunur: ön izleme bir söz değil, bir gösterimdir ve
+  // gerçek kapı ödeme anındaki kilitli rezervasyondur. Satır yine de okunmak
+  // zorunda, çünkü reddin tek yetkilisi karar modülüdür ve ona kartın kendi
+  // hâli (bakiye, durum, süre, limit) girdi olarak verilir. Burada ikinci bir
+  // bakiye kapısı yazmak, "aynı kart ön izlemede geçer, ödemede reddedilir"
+  // hâlini açardı.
+  const [card] = await db.select().from(giftCards).where(eq(giftCards.id, resolved.id)).limit(1);
+  if (!card) throw giftCardRefusal("not_found", locale);
+
+  const havaleDiscountApplies = quote.pricingSnapshot.settings.havaleDiscountApplies;
+  const asCard = computeTender({
+    amountKurus,
+    paymentMethod: "card",
+    giftCardBalanceKurus: card.balanceKurus,
+    havaleDiscountApplies,
+  });
+  const asBankTransfer = computeTender({
+    amountKurus,
+    paymentMethod: "bank_transfer",
+    giftCardBalanceKurus: card.balanceKurus,
+    havaleDiscountApplies,
+  });
+  const decision = giftCardReservationDecision({
+    card,
+    // Limit sayımı yalnız limitli kartta okunur (`validateGiftCard` ile aynı
+    // ölçü); limitsiz kartta sorgu hiç açılmaz.
+    liveUses: card.maxRedemptions === null ? 0 : await countLiveGiftCardUses(db, card.id),
+    reserveKurus: asCard.giftCardAmountKurus,
+    now: new Date(),
+  });
+  if (!decision.ok) throw giftCardRefusal(decision.code, locale);
+
+  return {
+    valid: true,
+    code: card.code,
+    balanceKurus: card.balanceKurus,
+    giftCardAmountKurus: asCard.giftCardAmountKurus,
+    fullyCovered: asCard.fullyCoveredByGiftCard,
+    card: {
+      havaleDiscountKurus: asCard.havaleDiscountKurus,
+      payableKurus: asCard.payableKurus,
+    },
+    bankTransfer: {
+      havaleDiscountKurus: asBankTransfer.havaleDiscountKurus,
+      payableKurus: asBankTransfer.payableKurus,
+    },
+  };
 }
 
 /**

@@ -26,6 +26,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { NextRequest } from "next/server";
 import pg from "pg";
 import type { PartGeometry } from "../src/lib/config/quote-types";
 
@@ -112,6 +113,29 @@ const require_ = createRequire(import.meta.url);
   } as NodeJS.Module;
 }
 
+/**
+ * Müşteri oturumu: ucun kendi kapılarını sınamanın tek yolu.
+ *
+ * `getSessionUser` çerezleri `next/headers` üzerinden okur ve bir istek
+ * kapsamı olmadan çağrılamaz; taklit YALNIZ oturum okumasıdır — bayrak,
+ * erişim çözümü, gövde doğrulaması ve para hesabı gerçek koddan geçer.
+ * `getAnonymousId` HER ZAMAN null: anonim çerez sahibinin ödeme yüzeyine
+ * girememesi ucun değil erişim matrisinin konusu (`test-quote-api.ts`).
+ */
+let session: { userId: string; email: string } | null = null;
+{
+  const filename = require_.resolve("../src/lib/services/customer-auth");
+  require_.cache[filename] = {
+    id: filename,
+    filename,
+    loaded: true,
+    exports: {
+      getSessionUser: async () => session,
+      getAnonymousId: async () => null,
+    },
+  } as NodeJS.Module;
+}
+
 /** PayTR token ucu: ağ yok, ama imza/sepet gerçekten üretilir. */
 const paytrCalls: Array<Record<string, string>> = [];
 let paytrFails = false;
@@ -192,6 +216,15 @@ function fakeRequest(headers: Record<string, string> = {}): import("next/server"
   } as unknown as import("next/server").NextRequest;
 }
 
+/** Rota gövdesini sınayan istek: GERÇEK `NextRequest` (gövde + `nextUrl`). */
+function jsonRequest(url: string, payload: unknown): NextRequest {
+  return new NextRequest(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "user-agent": "qa-agent" },
+    body: JSON.stringify(payload),
+  });
+}
+
 async function main() {
   await admin.connect();
   try {
@@ -242,8 +275,13 @@ async function main() {
     const { toPricingInputs } = await import("../src/lib/services/quote-present");
     const { QuoteServiceError } = await import("../src/lib/services/quote-service");
     const { deriveIdempotencyKey } = await import("../src/lib/services/idempotency");
-    const { cancelPendingQuoteCheckout, createQuoteCheckout, pendingQuoteCheckout } =
-      await import("../src/lib/services/quote-checkout");
+    const {
+      GIFT_PREVIEW_RATE_LIMIT,
+      cancelPendingQuoteCheckout,
+      createQuoteCheckout,
+      pendingQuoteCheckout,
+      previewQuoteGiftCard,
+    } = await import("../src/lib/services/quote-checkout");
     const { expireDraft } = await import("../src/lib/services/order-draft");
     const { GiftCardReservationError, reserveGiftCardTx } = await import(
       "../src/lib/services/gift-card-reservation"
@@ -1875,6 +1913,251 @@ async function main() {
           err instanceof GiftCardReservationError && err.code === "not_found",
         "kilit altında kaybolan kart → not_found"
       );
+    });
+
+    // ─── Ön izleme ucu (rezervasyon YOK) ──────────────────────────────────
+    //
+    // Ön izlemenin tek işi, müşteriye ödeme yükümlülüğünden ÖNCE ödeyeceği
+    // tutarı göstermek (MSY m.6/2-a). Bu yüzden iki şey birden sınanır: aynı
+    // kartla yapılan GERÇEK ödemenin yazdığı rakamlarla birebir aynı olması ve
+    // hiçbir şey YAZMAMASI — ön izlemede düşen bir bakiye, müşterinin ödeme
+    // yapmadan parasını kilitlemek demek olurdu.
+
+    await test("ön izleme ödeme anındaki tutarları REZERVASYONSUZ gösterir", async () => {
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 4 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const gift = Math.floor(total / 3);
+      assert.ok(gift > 0 && gift < total, "kart tutarın bir kısmını karşılar");
+      assert.equal(
+        quote.pricingSnapshot.settings.havaleDiscountApplies,
+        true,
+        "vakanın anlamı havale indiriminin AÇIK olmasına bağlı"
+      );
+      const card = await makeGiftCard(gift);
+
+      const preview = await previewQuoteGiftCard({
+        quoteId: quote.id,
+        userId: payer.id,
+        // Küçük harfle girilen kod da çalışır (`validateGiftCard` büyütür).
+        code: card.code.toLowerCase(),
+        req: fakeRequest(),
+      });
+      assert.equal(preview.valid, true);
+      assert.equal(preview.code, card.code, "kod normalleştirilmiş hâliyle döner");
+      assert.equal(preview.balanceKurus, gift);
+      assert.equal(preview.giftCardAmountKurus, gift);
+      assert.equal(preview.fullyCovered, false);
+      assert.equal(preview.card.havaleDiscountKurus, 0, "kartta havale indirimi yok");
+      assert.equal(preview.card.payableKurus, total - gift);
+      const discount = calculateHavaleDiscount(total - gift);
+      assert.ok(discount > 0, "havale indirimi gerçekten hesaplanıyor");
+      assert.equal(
+        preview.bankTransfer.havaleDiscountKurus,
+        discount,
+        "havale indirimi kartın düştüğü NAKİT üzerinden"
+      );
+      assert.equal(preview.bankTransfer.payableKurus, total - gift - discount);
+
+      // REZERVASYON YOK: bakiye, kullanım kaydı, taslak ve köprü satırı el
+      // değmemiş. Ön izleme kilit de almaz, yazım da yapmaz.
+      const [untouched] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(untouched.balanceKurus, gift, "ön izleme bakiyeye DOKUNMAZ");
+      assert.equal(untouched.status, "active");
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(giftCardRedemptions)
+            .where(eq(giftCardRedemptions.giftCardId, card.id))
+        ).length,
+        0,
+        "ön izleme kullanım kaydı yazmaz"
+      );
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "taslak açılmadı");
+
+      // …ve ödeme AYNI rakamları yazar: ekranda gösterilen tutar ile tahsil
+      // edilen tutarın ayrışması bu özelliğin en pahalı hatası olurdu.
+      const paid = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            paymentMethod: "bank_transfer",
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest(),
+      });
+      assert.equal(paid.finalAmountKurus, preview.bankTransfer.payableKurus);
+      assert.equal(paid.giftCardAmountKurus, preview.giftCardAmountKurus);
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, paid.reference));
+      assert.equal(draft.giftCardAmountKurus, preview.giftCardAmountKurus);
+      assert.equal(draft.havaleDiscountKurus, preview.bankTransfer.havaleDiscountKurus);
+      assertRefundable(draft, preview.bankTransfer.payableKurus, "ön izlemeli havale taslağı");
+    });
+
+    await test("ön izleme: tam karşılamada ödenecek tutar 0, havale indirimi yok", async () => {
+      // Sıfır nakde %3 indirim vermek, hediye kartına prim vermek olurdu.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const card = await makeGiftCard(total + 50_000);
+
+      const preview = await previewQuoteGiftCard({
+        quoteId: quote.id,
+        userId: payer.id,
+        code: card.code,
+        req: fakeRequest(),
+      });
+      assert.equal(preview.fullyCovered, true);
+      assert.equal(preview.giftCardAmountKurus, total, "kart tutarın ötesine geçmez");
+      assert.equal(preview.balanceKurus, total + 50_000);
+      assert.equal(preview.card.payableKurus, 0);
+      assert.equal(preview.bankTransfer.payableKurus, 0);
+      assert.equal(preview.bankTransfer.havaleDiscountKurus, 0);
+    });
+
+    await test("ön izleme harcanamaz kartı ödeme ile AYNI kodla reddeder", async () => {
+      // Ön izleme "₺0 karşılanan" diyip ödemeyi 400'e bırakırsa müşteri kartını
+      // uygulanmış sanar. Reddin tek yetkilisi karar modülüdür ve ön izleme de
+      // ONU okur, yani iki yüzey aynı cümleyi söyler.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const { quote } = await expected(q.id);
+      const drained = await makeGiftCard(0);
+      const expiredCard = await makeGiftCard(500_000, {
+        expiresAt: new Date(Date.now() - 86_400_000),
+      });
+      const limited = await makeGiftCard(500_000, { maxRedemptions: 1 });
+      await db.insert(giftCardRedemptions).values({
+        giftCardId: limited.id,
+        amountKurus: 1_000,
+        redeemedByUserId: payer.id,
+      });
+
+      const cases: Array<[string, string]> = [
+        [drained.code, "gift_card_insufficient"],
+        [expiredCard.code, "gift_card_expired"],
+        [limited.code, "gift_card_limit_reached"],
+        ["GC-YOK-YOK", "gift_card_not_found"],
+      ];
+      for (const [code, expectedCode] of cases) {
+        await assert.rejects(
+          previewQuoteGiftCard({
+            quoteId: quote.id,
+            userId: payer.id,
+            code,
+            req: fakeRequest(),
+          }),
+          (err: unknown) =>
+            err instanceof QuoteServiceError &&
+            err.status === 400 &&
+            err.code === expectedCode &&
+            /[çğıöşüÇĞİÖŞÜ ]/.test(err.message),
+          `ön izleme → ${expectedCode}`
+        );
+      }
+      const [stillZero] = await db.select().from(giftCards).where(eq(giftCards.id, drained.id));
+      assert.equal(stillZero.balanceKurus, 0, "reddedilen ön izleme de yazmaz");
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "teklif ÖDENEBİLİR kaldı");
+    });
+
+    await test("ön izleme oran limiti kod taramasını kapatır", async () => {
+      // Kart kodları kısa ve tahmin edilebilir; ön izleme oturum + sahiplik
+      // arkasında olsa bile kendi jetonu olmadan bir kod tarayıcısına dönerdi.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const { quote } = await expected(q.id);
+      const card = await makeGiftCard(10_000);
+
+      for (let attempt = 0; attempt < GIFT_PREVIEW_RATE_LIMIT; attempt++) {
+        const preview = await previewQuoteGiftCard({
+          quoteId: quote.id,
+          userId: payer.id,
+          code: card.code,
+          req: fakeRequest(),
+        });
+        assert.equal(preview.giftCardAmountKurus, 10_000, `${attempt + 1}. deneme geçti`);
+      }
+      await assert.rejects(
+        previewQuoteGiftCard({
+          quoteId: quote.id,
+          userId: payer.id,
+          code: card.code,
+          req: fakeRequest(),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 429 &&
+          err.code === "rate_limited",
+        "limitin üstündeki deneme 429"
+      );
+    });
+
+    await test("ön izleme ucu: bayrak, oturum, erişim ve gövde kapıları", async () => {
+      // Gerçek rota gövdesi koşar (`quoteRouteBody` + `accessOr404`), yalnız
+      // oturum okuması taklit edilir: kapıların sırası ucun kendi dosyasında.
+      const route = await import("../src/app/api/quotes/[id]/gift-card/route");
+      // Teklif uçlarının ortak bayrağı: kapalıyken `quoteRouteBody` her şeye
+      // 404 der ve vaka hiçbir şey kanıtlamazdı.
+      await setFlag("instant_quote_enabled", true, "qa");
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const card = await makeGiftCard(Math.floor(total / 2));
+      const post = (payload: unknown) =>
+        route.POST(
+          jsonRequest(`https://qa.example.test/api/quotes/${quote.id}/gift-card`, payload),
+          { params: Promise.resolve({ id: quote.id }) }
+        );
+
+      session = null;
+      let response = await post({ code: card.code });
+      assert.equal(response.status, 401, "oturumsuz ön izleme yok");
+      assert.equal((await response.json()).code, "auth_required");
+
+      session = { userId: (await makeUser()).id, email: "yabanci@example.test" };
+      response = await post({ code: card.code });
+      assert.equal(response.status, 404, "başkasının teklifi YOK gibi davranır");
+
+      session = { userId: payer.id, email: payer.email };
+      await setFlag("quote_gift_card_enabled", false, "qa");
+      try {
+        response = await post({ code: card.code });
+        assert.equal(response.status, 404, "bayrak kapalıyken uç YOKTUR");
+      } finally {
+        await setFlag("quote_gift_card_enabled", true, "qa");
+      }
+
+      response = await post({ code: "AB" });
+      assert.equal(response.status, 400, "üç karakterden kısa kod reddedilir");
+      assert.equal((await response.json()).code, "invalid_body");
+
+      response = await post({ code: card.code });
+      assert.equal(response.status, 200);
+      const payload = await response.json();
+      assert.deepEqual(Object.keys(payload).sort(), [
+        "balanceKurus",
+        "bankTransfer",
+        "card",
+        "code",
+        "fullyCovered",
+        "giftCardAmountKurus",
+        "valid",
+      ]);
+      assert.equal(payload.giftCardAmountKurus, Math.floor(total / 2));
+      assert.equal(payload.card.payableKurus, total - Math.floor(total / 2));
+      session = null;
     });
 
     console.log(`${checks} quote checkout DB checks passed`);

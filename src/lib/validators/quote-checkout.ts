@@ -28,6 +28,13 @@ import { createTurkishAddressSchema } from "@/lib/validators/order";
  * tam tutarı ödemesi demek olurdu.
  */
 
+/**
+ * Kart kodunun ŞEKLİ. Ödeme gövdesi ile ön izleme ucu AYNI sınırı okur: iki
+ * ayrı sınır, ön izlemede kabul edilip ödemede reddedilen (ya da tersi) bir kod
+ * demek olurdu.
+ */
+const giftCardCodeSchema = z.string().trim().min(3).max(30);
+
 export interface QuoteCheckoutInvoice {
   type: InvoiceType;
   /** Kurumsal faturada ZORUNLU (servis doğrular). */
@@ -85,6 +92,21 @@ export const quoteCheckoutSchema: z.ZodType<QuoteCheckoutInput> = z.object({
   preliminaryInfoConsent: z.literal(true).optional(),
   invoice: invoiceSchema,
   poNumber: z.string().trim().max(64).optional(),
-  giftCardCode: z.string().trim().min(3).max(30).optional(),
+  giftCardCode: giftCardCodeSchema.optional(),
   analyticsEventId: z.string().max(120).optional(),
+});
+
+/**
+ * `POST /api/quotes/[id]/gift-card` gövdesi — ödeme ÖNCESİ ön izleme.
+ *
+ * Tek alan: kod. Tutarı ekran GÖNDERMEZ, sunucu teklifin kendi snapshot'ından
+ * hesaplar; ön izlemeye bir tutar girdisi eklemek, ekranın söylediği rakamı
+ * cevaba geri yazdırmak olurdu.
+ */
+export interface QuoteGiftCardPreviewInput {
+  code: string;
+}
+
+export const quoteGiftCardPreviewSchema: z.ZodType<QuoteGiftCardPreviewInput> = z.object({
+  code: giftCardCodeSchema,
 });

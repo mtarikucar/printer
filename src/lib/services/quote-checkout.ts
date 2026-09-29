@@ -26,8 +26,11 @@
  *
  * REZERVASYON COMMIT OLDUKTAN SONRAKİ hiçbir arıza isteği düşürmez: o noktadan
  * itibaren kuyruk eklemelerinin hepsi `enqueueAfterCommit` üzerinden geçer
- * (bakiye düşmüşken müşteriye hata göstermek en kötü sonuçtur) ve kaybolan işin
- * ağı bakım turunun `expireStrandedQuoteDrafts` aşamasıdır.
+ * (bakiye düşmüşken müşteriye hata göstermek en kötü sonuçtur) ve kaybolan son
+ * tarih işinin ağı bakım turunun `expireStrandedQuoteDrafts` aşamasıdır. Tek
+ * istisna havale talimat MEKTUBUDUR: o ayrı bir kuyruğa (`email`) gider, bakım
+ * turu onu yeniden göndermez; yerine geçen şey müşteriye dönen
+ * `/havale/<ref>` yolu ve referanslı günlük satırıdır (çağrı yerinde yazılı).
  *
  * TAHSİLAT ARİTMETİĞİ BU DOSYADA YOKTUR: brüt tutardan tahsil edilen nakde
  * giden yolun tek uygulaması `quote-tender.ts`tir (`computeTender`). PayTR'a
@@ -1037,9 +1040,11 @@ export async function createQuoteCheckout(args: {
  * bakiye göstermek olurdu — elimizdeki en kötü sonuç. Ödemenin kendisi bu
  * işlerin hiçbirine bağlı değil: `/pay` ve `/havale` sayfaları taslaktan okur.
  *
- * KAYBOLAN İŞİN AĞI, bakım turunun `expireStrandedQuoteDrafts` aşamasıdır:
- * son tarih işi hiç kuyruğa girmemiş bir taslağı süresi geçtiğinde kapatır ve
- * rezervasyonu karta geri verir (`quote-maintenance.ts`).
+ * KAYBOLAN SON TARİH İŞİNİN AĞI, bakım turunun `expireStrandedQuoteDrafts`
+ * aşamasıdır: son tarih işi hiç kuyruğa girmemiş bir taslağı süresi geçtiğinde
+ * kapatır ve rezervasyonu karta geri verir (`quote-maintenance.ts`). Havale
+ * talimat mektubunun ağı BAŞKADIR (o aşama mektup göndermez) — çağrı yerinde
+ * yazılı.
  *
  * YUTMA DEĞİL: satır taslağın REFERANSINI taşır, yoksa kuyruğu düşmüş bir
  * ortamda hangi taslakların ağa kaldığı hiçbir yerde görünmezdi.
@@ -1145,10 +1150,21 @@ async function runCheckout(args: {
         { jobId: havaleExpireJobId(draft.id), delay: HAVALE_DEADLINE_HOURS * 3600 * 1000 }
       )
     );
-    // Talimat mektubu da EN İYİ ÇABADIR ve aynı kuyruğa bağlıdır: müşteri
-    // `/havale/<ref>` sayfasında aynı IBAN'ı, tutarı ve son tarihi zaten
-    // görüyor, ama kaybolan bir mektup için isteği patlatmak yukarıdaki
-    // gerekçenin (bakiye düşmüş) tam olarak aynısına çarpar.
+    // Talimat mektubu da EN İYİ ÇABADIR: müşteri `/havale/<ref>` sayfasında
+    // aynı IBAN'ı, tutarı ve son tarihi zaten görüyor, ama kaybolan bir mektup
+    // için isteği patlatmak yukarıdaki gerekçenin (bakiye düşmüş) tam olarak
+    // aynısına çarpar. Üstündeki iki eklemeden AYRI bir kuyruk (`email`) ve
+    // ayrı bir arıza: son tarih işleri girmişken mektup tek başına
+    // patlayabilir, o hâlde telafi edilecek eksik iş bile yoktur — sarılmamış
+    // hâli yalnız 500 + düşmüş bakiye üretirdi (`test-quote-checkout-db.ts`,
+    // "YALNIZ e-posta kuyruğu düşse de havale ödemesi BAŞARILI döner").
+    //
+    // TELAFİSİ ÖTEKİLERDEN FARKLI: bakım turu (`expireStrandedQuoteDrafts`)
+    // mektubu YENİDEN GÖNDERMEZ, taslağı süresinde kapatır. Mektubun yerine
+    // geçen şey müşteri için dönen `redirectUrl` (`/havale/<ref>`), operatör
+    // için de aşağıdaki referanslı günlük satırıdır. Gerçek bir yeniden
+    // gönderim "mektup gitti mi" durumunu bilmek ister; o kolon bu sevkiyatta
+    // yok (migration yok), borç kayıt defterine yazıldı.
     await enqueueAfterCommit("bank_transfer_instructions", draft.reference, () =>
       getEmailQueue().add("send-email", {
         type: "bank_transfer_instructions",

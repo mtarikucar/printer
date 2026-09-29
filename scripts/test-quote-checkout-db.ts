@@ -76,8 +76,14 @@ const removedJobIds: string[] = [];
  * Rezervasyon commit olduktan SONRA koşan eklemelerin isteği düşürmediğini
  * ölçmenin tek yolu: `bullmq`nun kendi hatası taklit edilir, çağıran kod
  * gerçek koduyla karşılar.
+ *
+ * `true` = her kuyruk düşer; bir DİZGİ = yalnız o adlı kuyruk düşer
+ * (`"email"` / `"payment-deadline"`). Kuyruk başına arıza gerekiyor çünkü
+ * havale yolunda iki AYRI kuyruk var: son tarih işleri girerken talimat
+ * mektubunun eklemesi tek başına patlayabilir ve o hâlde isteği düşürmek,
+ * bakiyesi çoktan düşmüş müşteriye hata göstermek olurdu.
  */
-let queueAddFails = false;
+let queueAddFails: boolean | string = false;
 
 const require_ = createRequire(import.meta.url);
 {
@@ -106,7 +112,9 @@ const require_ = createRequire(import.meta.url);
       Queue: class {
         constructor(readonly name: string) {}
         async add(name: string, data: Record<string, unknown>, opts: QueuedJob["opts"] = {}) {
-          if (queueAddFails) throw new Error(`qa: kuyruk erişilemez (${name})`);
+          if (queueAddFails === true || queueAddFails === this.name) {
+            throw new Error(`qa: kuyruk erişilemez (${this.name}/${name})`);
+          }
           jobs.push({ queue: this.name, name, data, opts });
           return { id: opts.jobId ?? randomUUID() };
         }
@@ -2134,12 +2142,16 @@ async function main() {
     });
 
     await test("commit SONRASI kuyruk arızası bakiyeyi ulaşılamaz BIRAKMAZ", async () => {
-      // Kuyruk eklemelerinin üçü de (kartta `card-expire`, havalede
-      // `havale-reminder` + `havale-expire`) taslak işlemi COMMIT olduktan
-      // sonra koşuyor: hediye kartı bakiyesi o commit'te ÇOKTAN düştü. Redis o
-      // pencerede erişilemezse fırlatmak, müşteriye hem 500 hem de gitmiş bir
-      // bakiye göstermek olurdu — mümkün olan en kötü sonuç. Eksik işi bakım
-      // turunun `expireStrandedQuoteDrafts` aşaması telafi eder.
+      // Kuyruk eklemelerinin hepsi (kartta `card-expire`, havalede
+      // `havale-reminder` + `havale-expire` + talimat mektubu) taslak işlemi
+      // COMMIT olduktan sonra koşuyor: hediye kartı bakiyesi o commit'te
+      // ÇOKTAN düştü. Redis o pencerede erişilemezse fırlatmak, müşteriye hem
+      // 500 hem de gitmiş bir bakiye göstermek olurdu — mümkün olan en kötü
+      // sonuç. Son tarih işlerinin eksiğini bakım turunun
+      // `expireStrandedQuoteDrafts` aşaması telafi eder; mektubun telafisi
+      // müşteri için `/havale/<ref>` sayfası, operatör için referanslı günlük
+      // satırıdır (aşağıdaki iddia) — bkz. yalnız e-posta kuyruğunun düştüğü
+      // bir sonraki vaka.
       const payer = await makeUser();
       const cardQ = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
       const cardExpect = await expected(cardQ.id);
@@ -2245,6 +2257,106 @@ async function main() {
           `arıza günlüğü ${reference} referansını taşımalı`
         );
       }
+    });
+
+    await test("YALNIZ e-posta kuyruğu düşse de havale ödemesi BAŞARILI döner", async () => {
+      // Havale yolu İKİ ayrı kuyruğa dokunuyor: son tarih işleri
+      // `payment-deadline`a, talimat mektubu `email`e. Bu vaka mektup
+      // eklemesinin TEK BAŞINA patladığı hâli ölçüyor — son tarih işleri
+      // girmişken, yani bakım turunun telafi edeceği bir eksik YOKken.
+      //
+      // Sarılmamış bir mektup eklemesi burada isteği 500'e çevirirdi: taslak
+      // `pending`, hediye kartı bakiyesi commit'te ÇOKTAN düşmüş, müşteri hem
+      // hatayı hem kaybı görüyor. Para değişmezi ("rezervasyon commit
+      // olduktan SONRA hiçbir hata müşterinin bakiyesini ulaşılamaz
+      // bırakmaz") bu yüzden mektubu da EN İYİ ÇABA olmaya zorluyor.
+      //
+      // Mektubun kaybı sessiz DEĞİL ve müşterisiz de değil: cevaptaki
+      // `redirectUrl` müşteriyi IBAN'ı/tutarı/son tarihi gösteren
+      // `/havale/<ref>` sayfasına götürüyor, günlük satırı da hangi taslağın
+      // mektubunun gitmediğini ADIYLA taşıyor (operatör elle yollayabilir).
+      // Gerçek bir yeniden gönderim "mektup gitti" kolonu ister; bu sevkiyatta
+      // migration yok, borç kayıt defterinde.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const exp = await expected(q.id);
+      const total = exp.computed.totals.totalKurus;
+      const gift = Math.floor(total / 4);
+      const card = await makeGiftCard(gift);
+
+      const logged: unknown[][] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(args);
+      const jobsBefore = jobs.length;
+      let result: Awaited<ReturnType<typeof createQuoteCheckout>>;
+      queueAddFails = "email";
+      try {
+        result = await createQuoteCheckout({
+          quoteId: q.id,
+          userId: payer.id,
+          email: payer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: exp.quote.version,
+              expectedTotalKurus: total,
+              paymentMethod: "bank_transfer",
+              giftCardCode: card.code,
+            })
+          ),
+          req: fakeRequest(),
+        });
+      } finally {
+        queueAddFails = false;
+        console.error = realError;
+      }
+
+      // İstek BAŞARILI ve müşteri talimat sayfasına gidiyor.
+      assert.equal(result.paymentMethod, "bank_transfer");
+      assert.equal(result.redirectUrl, `/havale/${result.reference}`);
+      assert.equal(result.giftCardAmountKurus, gift);
+
+      // Arıza gerçekten YALNIZ mektupta: son tarih işlerinin ikisi de girdi,
+      // `email` kuyruğuna hiçbir şey girmedi.
+      const added = jobs.slice(jobsBefore);
+      assert.deepEqual(
+        added.map((j) => j.name).sort(),
+        ["havale-expire", "havale-reminder"],
+        "son tarih işleri GİRDİ, arıza yalnız mektupta"
+      );
+      assert.equal(
+        added.filter((j) => j.queue === "email").length,
+        0,
+        "e-posta kuyruğuna hiçbir iş girmedi (arıza gerçek)"
+      );
+
+      // Taslak yerinde: son tarih yazılı, rezervasyon duruyor.
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(draft.status, "pending");
+      assert.ok(draft.bankTransferDeadline, "havale son tarihi yazıldı");
+      const [balance] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(balance.balanceKurus, 0, "rezervasyon yerinde");
+      const redemptions = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.draftId, draft.id));
+      assert.equal(redemptions.length, 1);
+      assert.equal(redemptions[0].refundedAt, null, "bakiye ulaşılabilir (taslakta rezerve)");
+
+      // Günlük satırı KAYBOLAN İŞİ ADIYLA ve taslağın referansıyla taşıyor:
+      // yutma değil, operatörün elle yollayabilmesi için.
+      assert.ok(
+        logged.some((args) =>
+          args.some(
+            (arg) =>
+              String(arg).includes("bank_transfer_instructions") &&
+              String(arg).includes(result.reference)
+          )
+        ),
+        "günlük satırı mektubun adını ve taslağın referansını taşımalı"
+      );
     });
 
     // ─── Ön izleme ucu (rezervasyon YOK) ──────────────────────────────────

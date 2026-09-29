@@ -78,6 +78,7 @@ function makeQuote(overrides: Partial<Quote> = {}): Quote {
     termsAcceptedAt: new Date("2026-09-20T00:00:00.000Z"),
     termsVersion: "2026-08-31",
     orderId: null,
+    filesAttachedAt: null,
     sourceQuoteId: null,
     expiryReminderSentAt: null,
     abandonedReminderSentAt: null,

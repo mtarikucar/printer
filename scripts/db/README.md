@@ -127,6 +127,10 @@ after exporting it:
 ```bash
 psql "$DATABASE_URL" -c "\copy print_catalog_changes TO 'print_catalog_changes-$(date +%F).csv' CSV HEADER"
 psql "$DATABASE_URL" -c "DELETE FROM print_catalog_changes;"   # audit trail only; the seed lives in the catalogue tables
+# Newer migrations first, each deleting its OWN ledger row. Skipping 0065 here would leave its
+# row (created_at 1790686312063) behind as the watermark, and a re-applied 0064 would be skipped
+# silently forever.
+psql "$DATABASE_URL" -f drizzle/0065_quote_files_attached_at.down.sql
 psql "$DATABASE_URL" -f drizzle/0064_instant_quotes.down.sql
 ```
 

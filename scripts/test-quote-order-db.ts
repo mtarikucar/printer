@@ -712,6 +712,96 @@ async function main() {
       );
     });
 
+    await test("damgasız ama dosyalı satır: tarama bulur, pişirici DAMGALAR", async () => {
+      // 0065'in geri dolgusunu kaçıran satır — kolon eklendikten sonra ama yeni
+      // kod dağıtılmadan önce pişmiş bir sipariş — taramaya bir kez düşer.
+      // Pişirici dosyaları YENİDEN YAZMAZ: damgayı vurup çekilir, satır yakınsar.
+      // Damga vurulmasaydı tarama o satırı her beş dakikada yeniden seçerdi.
+      await db.update(quotes).set({ filesAttachedAt: null }).where(eq(quotes.id, quote.id));
+      assert.ok(
+        (await findQuoteOrdersMissingFiles(20)).some((row) => row.orderId === orderId),
+        "damgasız satır taramaya düşer"
+      );
+      const revisionsOf = async () =>
+        db
+          .select({ revision: orderModelRevisions.revision })
+          .from(orderModelRevisions)
+          .where(eq(orderModelRevisions.orderId, orderId));
+      const before = await revisionsOf();
+      assert.equal(await attachQuoteFilesToOrder(orderId), "already");
+      assert.deepEqual(await revisionsOf(), before, "ikinci sürüm açılmadı");
+
+      const [stamped] = await db
+        .select({ at: quotes.filesAttachedAt })
+        .from(quotes)
+        .where(eq(quotes.id, quote.id))
+        .limit(1);
+      assert.ok(stamped.at instanceof Date, "pişirici damgayı vurdu");
+      assert.equal(
+        (await findQuoteOrdersMissingFiles(20)).some((row) => row.orderId === orderId),
+        false,
+        "satır yakınsadı: tarama onu bir daha almaz"
+      );
+    });
+
+    // Kurtarmanın hedefi "dosya satırı yok" OLAMAZ: admin bir revizyonu
+    // silerken dosya satırlarını VE sürüm başlığını birlikte kaldırıyor, yani
+    // bilerek silinmiş bir sipariş "hiç pişmemiş" siparişten ayırt edilemez
+    // hâle geliyordu. Beş dakikalık tarama, adminin sildiği müşteri dosyalarını
+    // geri getiriyordu. Hedef artık DAMGADIR: dosyalar bir kez eklendiyse
+    // (`quotes.files_attached_at`) o sipariş bir daha pişirilmez.
+    await test("admin'in sildiği revizyon kurtarma taramasında DİRİLMEZ", async () => {
+      const { deleteModelRevision } = await import("../src/lib/services/order-model");
+
+      const stampOf = async () =>
+        (
+          await db
+            .select({ at: quotes.filesAttachedAt })
+            .from(quotes)
+            .where(eq(quotes.id, quote.id))
+            .limit(1)
+        )[0].at;
+      const stampBefore = await stampOf();
+      assert.ok(stampBefore instanceof Date, "dosyalar eklendiyse damga vurulmuş olmalı");
+
+      await deleteModelRevision(orderId, 1);
+      assert.deepEqual(await stampOf(), stampBefore, "silme damgayı KALDIRMAZ");
+      const left = await db
+        .select({ id: orderModelFiles.id })
+        .from(orderModelFiles)
+        .where(eq(orderModelFiles.orderId, orderId));
+      assert.equal(left.length, 0, "silme dosya satırlarını kaldırdı");
+      const headers = await db
+        .select({ revision: orderModelRevisions.revision })
+        .from(orderModelRevisions)
+        .where(eq(orderModelRevisions.orderId, orderId));
+      assert.equal(headers.length, 0, "silme sürüm BAŞLIĞINI da kaldırdı");
+
+      const pending = await findQuoteOrdersMissingFiles(20);
+      assert.equal(
+        pending.some((row) => row.orderId === orderId),
+        false,
+        "bilerek silinmiş sipariş taramada GÖRÜNMEMELİ"
+      );
+      // Elde kalmış bir `bake` işi doğrudan çağırsa da sonuç aynı olmalı:
+      // kapı taramanın değil, pişiricinin kendisinin içindedir.
+      assert.equal(
+        await attachQuoteFilesToOrder(orderId),
+        "already",
+        "doğrudan çağrı da müşteri dosyalarını geri koymamalı"
+      );
+      assert.equal(
+        (
+          await db
+            .select({ id: orderModelFiles.id })
+            .from(orderModelFiles)
+            .where(eq(orderModelFiles.orderId, orderId))
+        ).length,
+        0,
+        "silinen dosyalar geri yazılmadı"
+      );
+    });
+
     await test("iki eşzamanlı dosya pişirme TEK sürüm bırakır", async () => {
       // İş kuyruğu ile beş dakikalık kurtarma taraması aynı siparişte
       // buluşabilir: "sürüm var mı" kapısı işlem DIŞINDA okunuyor ve dosya

@@ -2,8 +2,11 @@
  * Ödenen teklifin parça dosyalarını siparişe pişiren worker.
  *
  * İki iş adı taşır: `bake` tek bir siparişin dosyalarını bağlar, `recover`
- * (5 dakikalık zamanlayıcı) siparişe bağlı ama HİÇ dosyası olmayan teklif
- * siparişlerini tarayıp aynı işi yapar.
+ * (5 dakikalık zamanlayıcı) dosyaları HİÇ eklenmemiş teklif siparişlerini
+ * (`quotes.files_attached_at IS NULL`) tarayıp aynı işi yapar. Ölçü DAMGADIR,
+ * "dosya satırı yok" DEĞİL: admin bir revizyonu silerken dosya satırlarını ve
+ * sürüm başlığını birlikte kaldırıyor, o yüzden eski ölçü adminin bilerek
+ * sildiği müşteri dosyalarını geri getiriyordu.
  *
  * KURTARMA NEDEN YENİDEN KUYRUĞA ALMAZ: `bake` işinin kimliği sipariş başına
  * tekildir (`quote-order-files-<orderId>`) ve bullmq, SAKLANAN (tamamlanmış ya

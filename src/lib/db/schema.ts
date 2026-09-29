@@ -3870,6 +3870,16 @@ export const quotes = pgTable("quotes", {
   termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
   termsVersion: text("terms_version"),
   orderId: uuid("order_id").references(() => orders.id, { onDelete: "restrict" }),
+  /**
+   * Teklifin parça dosyaları siparişe BİR KEZ eklendi (0065).
+   *
+   * Kurtarma taramasının tek hedefi bu kolondur. "Siparişin dosya satırı yok"
+   * ölçüsü yanlıştı: admin bir revizyonu silerken dosya satırlarını VE sürüm
+   * başlığını birlikte kaldırıyor, yani bilerek silinmiş bir sipariş hiç
+   * pişmemiş bir siparişten ayırt edilemiyor ve tarama müşterinin ham
+   * dosyalarını geri getiriyordu. Damga bir kez vurulduktan sonra silinmez.
+   */
+  filesAttachedAt: timestamp("files_attached_at", { withTimezone: true }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceQuoteId: uuid("source_quote_id").references((): any => quotes.id, { onDelete: "restrict" }),
   expiryReminderSentAt: timestamp("expiry_reminder_sent_at", { withTimezone: true }),

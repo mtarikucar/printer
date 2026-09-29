@@ -55,6 +55,9 @@
 -- yeniden uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN
 -- YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri
 -- alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0065_quote_files_attached_at.down.sql
+--   -- 0065'in down'ı KENDİ kaydını (created_at = 1790686312063) siler.
+--   -- Geri türetilemeyen dosya damgası varsa veri düşürmeden durur.
 --   \i drizzle/0064_instant_quotes.down.sql
 --   -- 0064'ün down'ı KENDİ kaydını (created_at = 1789657000000) siler.
 --   -- Teklif, ödeme kaydı veya katalog düzenlemesi varsa veri silmeden durur.

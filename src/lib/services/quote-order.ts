@@ -20,7 +20,7 @@
  *
  * `import "server-only"` YOK: bu modülü BullMQ worker süreci yükler.
  */
-import { and, asc, eq, isNotNull, isNull, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
@@ -148,7 +148,10 @@ export async function linkQuoteToOrderTx(
 export type AttachQuoteFilesOutcome =
   /** Sürüm 1 yazıldı: sipariş artık basılabilir. */
   | "attached"
-  /** Siparişte zaten bir sürüm var — iş ikinci kez çalıştı. */
+  /**
+   * İş ikinci kez çalıştı: siparişte zaten bir sürüm var YA DA bu teklifin
+   * dosyaları bir kez eklenip revizyonu sonradan elle silindi (damga duruyor).
+   */
   | "already"
   /** Bu sipariş bir teklif siparişi değil (ya da teklifi başka siparişe bağlı). */
   | "not_quote"
@@ -164,7 +167,8 @@ export type AttachQuoteFilesOutcome =
  * akış hâlinde çarpılır — üretici dilimleyicide birebir basılacak mm dosyasını
  * görmeli, "ölçeği 25.4 yapmayı unutma" notunu değil.
  *
- * Tekrar çalıştırılabilir: siparişte sürüm varsa hiçbir şey yapmaz.
+ * Tekrar çalıştırılabilir: siparişte sürüm varsa ya da bu teklifin dosyaları
+ * bir kez eklenmişse (`quotes.files_attached_at`) hiçbir şey yapmaz.
  * ASLA `autoAssignIfEligible` çağırmaz — sipariş `review`'dadır, atama admin
  * onayından sonra açılır; `notifyOrderModelRevision` de çağrılmaz, çünkü bu
  * İLK sürümdür (kimsenin elinde geçersiz kılınacak bir baskı yok).
@@ -187,17 +191,30 @@ export async function attachQuoteFilesToOrder(
   if (!order) return "not_quote";
 
   const [quote] = await db
-    .select({ id: quotes.id, number: quotes.number })
+    .select({ id: quotes.id, number: quotes.number, filesAttachedAt: quotes.filesAttachedAt })
     .from(quotes)
     .where(eq(quotes.orderId, orderId))
     .limit(1);
   if (!quote) return "not_quote";
 
+  // DAMGA KAPISI: bu teklifin dosyaları bir kez eklendiyse bir daha eklenmez —
+  // sipariş şu an dosyasız görünse bile. Dosyasız görünmesinin tek yolu adminin
+  // revizyonu ELLE silmesidir ve o silme bilinçli bir karardır; müşterinin ham
+  // dosyalarını geri koymak onu sessizce geri almak olurdu.
+  if (quote.filesAttachedAt) return "already";
+
   // Tekrarlanabilirlik KAPISI: sürüm varsa ikinci bir sürüm açmayız. Admin
   // düzeltme yüklemişse de buraya düşer — geç gelen bir kurtarma taraması
   // admin'in düzeltmesinin ÜSTÜNE müşterinin ham dosyasını koymamalı.
   const current = await latestModelFiles(orderId);
-  if (current.files.length > 0) return "already";
+  if (current.files.length > 0) {
+    // Damgasız ama dosyalı satır: 0065 öncesinde pişmiş bir sipariş (ya da
+    // migration ile yeni kod arasındaki dağıtım penceresinde pişmiş biri).
+    // Damga BURADA vurulur, yoksa kurtarma taraması o satırı her turda yeniden
+    // seçer ve hiç yakınsamaz.
+    await stampFilesAttached(db, quote.id);
+    return "already";
+  }
 
   // Basılacak tanım ÖDENEN tanımdır: canlı `quote_parts` değil, taslağın
   // dondurulmuş anlık görüntüsü.
@@ -254,7 +271,15 @@ export async function attachQuoteFilesToOrder(
       .from(orderModelFiles)
       .where(eq(orderModelFiles.orderId, orderId))
       .limit(1);
-    if (existing) {
+    // Damga da yarışın kaybedenini geri çeker: kazanan işlem dosyaları yazıp
+    // damgayı vurmuş, sonra admin revizyonu silmiş olabilir. Yalnız dosya
+    // satırına bakan bir kapı o hâlde ikinci kez yazardı.
+    const [stamped] = await tx
+      .select({ at: quotes.filesAttachedAt })
+      .from(quotes)
+      .where(eq(quotes.id, quote.id))
+      .limit(1);
+    if (existing || stamped?.at) {
       raced = true;
       return;
     }
@@ -267,6 +292,9 @@ export async function attachQuoteFilesToOrder(
       // kaydını yalanlamak olurdu.
       uploadedByEmail: null,
     });
+    // Damga dosyalarla AYNI commit'te vurulur: yarıda kesilen bir pişirme
+    // (çökme, kilit) damgasız kalır ve bir sonraki tur onu yeniden dener.
+    await stampFilesAttached(tx, quote.id);
   });
   if (raced) return "already";
 
@@ -281,12 +309,35 @@ export async function attachQuoteFilesToOrder(
 }
 
 /**
- * Siparişe bağlı ama HİÇ dosyası olmayan teklif siparişleri.
+ * "Bu teklifin dosyaları siparişe eklendi" damgası — bir kez vurulur, silinmez.
+ *
+ * Koşul `IS NULL`dır: ikinci bir çağrı ilk damganın zamanını ileri kaydırmaz,
+ * yani damga gerçekten dosyaların EKLENDİĞİ anı gösterir.
+ *
+ * `updated_at`e DOKUNULMAZ: damga bir müşteri değişikliği değil, işin kendi
+ * kapısıdır (`quote-maintenance`in "dokunulmadı" ölçüleriyle aynı duruş).
+ */
+async function stampFilesAttached(conn: Tx | typeof db, quoteId: string): Promise<void> {
+  await conn
+    .update(quotes)
+    .set({ filesAttachedAt: new Date() })
+    .where(and(eq(quotes.id, quoteId), isNull(quotes.filesAttachedAt)));
+}
+
+/**
+ * Dosyaları HİÇ eklenmemiş teklif siparişleri.
  *
  * Neden gerekli: dosya işi işlem SONRASINDA kuyruğa giriyor. Redis o an
  * erişilemezse (yeniden başlatma, ağ) iş hiç doğmaz ve ödenmiş sipariş dosyasız
  * kalırdı — üretici "dosya yok" ekranı görür, admin onay rotasından geçemez.
  * Beş dakikalık süpürme bu deliği kapatır.
+ *
+ * ÖLÇÜ DOSYA SATIRI DEĞİL, DAMGADIR (`files_attached_at`). Eskiden "siparişin
+ * hiç `order_model_files` satırı yok" aranıyordu ve o ölçü adminin BİLEREK
+ * sildiği revizyonu geri getiriyordu: silme, dosya satırlarını VE sürüm
+ * başlığını birlikte kaldırıyor (`deleteModelRevision`), yani silinmiş sipariş
+ * hiç pişmemiş siparişten ayırt edilemiyordu. Damga tek yönlüdür; bir kez
+ * vurulduktan sonra o sipariş bu taramaya bir daha düşmez.
  *
  * En ESKİ güncellenenden başlar: takılmış bir sipariş, taze olanların arkasında
  * kalmamalı.
@@ -297,17 +348,7 @@ export async function findQuoteOrdersMissingFiles(
   const rows = await db
     .select({ orderId: quotes.orderId, quoteId: quotes.id })
     .from(quotes)
-    .where(
-      and(
-        isNotNull(quotes.orderId),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(orderModelFiles)
-            .where(eq(orderModelFiles.orderId, quotes.orderId))
-        )
-      )
-    )
+    .where(and(isNotNull(quotes.orderId), isNull(quotes.filesAttachedAt)))
     .orderBy(asc(quotes.updatedAt))
     .limit(limit);
   return rows

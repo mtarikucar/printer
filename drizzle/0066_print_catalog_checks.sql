@@ -33,9 +33,14 @@
 --       kapanır. Doğrulama ayrı bir adımdır ve düşerse yalnız KENDİSİ düşer.
 --
 -- (b) seçildi ve doğrulama adımı `check_violation`u YAKALAR: uyumsuz satır
--- varsa kısıt `NOT VALID` kalır, migration YEŞİL biter ve operatöre kısıdın adı
--- WARNING olarak yazılır. Böylece üç şey birden sağlanır: dağıtım düşmez, yeni
--- yazımlar yine de reddedilir ve eski satır sessizce meşrulaşmaz.
+-- varsa kısıt `NOT VALID` kalır, migration YEŞİL biter ve kısıdın adı WARNING
+-- olarak yazılır. Böylece üç şey birden sağlanır: dağıtım düşmez, yeni yazımlar
+-- yine de reddedilir ve eski satır sessizce meşrulaşmaz.
+--
+-- WARNING'e GÜVENİLMEZ: `drizzle-kit migrate` sunucu bildirimlerini basmaz, yani
+-- uyarı dağıtım günlüğünde görünmeyebilir (psql ile elle uygulandığında görünür).
+-- Tek güvenilir işaret aşağıdaki sorgudur ve dağıtım kontrol listesinde adım
+-- olarak durur (scripts/db/README.md · "Deploying 0064: operator checklist").
 --
 -- Doğrulanmamış kalan kısıt görünürdür — dağıtımdan sonra bakılacak yer:
 --   SELECT t.relname, c.conname FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid

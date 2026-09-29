@@ -169,10 +169,12 @@ audit rows. The rollback window closes on the first internal test, not on the fi
 
 - [ ] **Check for CHECK constraints 0066 could not validate.** `0066_print_catalog_checks` adds
       the catalogue's range constraints `NOT VALID` and then validates them; a row outside the
-      range (a hand-edited catalogue value) leaves *that* constraint unvalidated and logs a
+      range (a hand-edited catalogue value) leaves *that* constraint unvalidated and raises a
       `WARNING` instead of failing the deploy — deliberately, so a hygiene migration can never
-      block a release. An unvalidated constraint still rejects every new write, and it also
-      blocks edits to the offending row itself, so fix the value and validate by hand:
+      block a release. **`drizzle-kit migrate` does not print server notices, so that WARNING is
+      probably not in the deploy log — this query is the only reliable signal.** An unvalidated
+      constraint still rejects every new write, and it also blocks edits to the offending row
+      itself, so fix the value and validate by hand:
 
       ```bash
       psql "$DATABASE_URL" -c "SELECT t.relname, c.conname FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE c.contype = 'c' AND NOT c.convalidated ORDER BY 1,2;"

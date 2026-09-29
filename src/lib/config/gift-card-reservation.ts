@@ -84,7 +84,14 @@ function reservationInteger(value: number, label: string, min: number): number {
  *
  * Red SIRASI kuralın parçasıdır: bakiye → durum → süre → limit. Müşterinin
  * göreceği cümle bu sıraya bağlı olduğu için iki yolda aynı olmak zorunda
- * (hem süresi geçmiş hem limiti dolmuş kart `insufficient` der).
+ * (hem süresi geçmiş hem limiti dolmuş kart `insufficient` der). Bu yüzden
+ * çağıran kendi kapısını kurmaz: limit sayımı bile buraya GİRDİ olarak gelir
+ * (`liveUses`), yoksa sıra çağıranın kodunda sessizce kayardı.
+ *
+ * KAPSAM: bu sıra VAR OLAN kilitli bir kartın kapılarıdır. Kartın hiç
+ * bulunmaması kuralın bir dalı değil, konusunun yokluğudur; onu `not_found`
+ * olarak çağıran döner (`src/lib/services/gift-card-reservation.ts`) ve
+ * `/api/orders` ayrı bir kodu olmadığı için `INSUFFICIENT_BALANCE`a katıyor.
  *
  * Geçersiz bir `reserveKurus` (0, negatif, kesirli ya da bakiyeden büyük)
  * `RangeError` atar: bu bir SON SAVUNMA hattıdır, müşteriye dönen cevap değil.

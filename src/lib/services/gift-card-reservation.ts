@@ -19,7 +19,10 @@
  *
  * Kuralın kendisi burada DEĞİL: `src/lib/config/gift-card-reservation.ts` (saf
  * karar) ve `src/lib/config/quote-tender.ts` (tahsilat zinciri). Bu dosya
- * yalnız kilit sırasını ve yazımları taşır.
+ * yalnız kilit sırasını ve yazımları taşır. Bunun bir sonucu var: REDDİN TEK
+ * YETKİLİSİ karar modülüdür — bu dosya kilit altında okuduğu sayıyı ona GİRDİ
+ * olarak verir, kendi kapısını kurmaz. Tek istisna, kartın hiç bulunmaması
+ * (`not_found`): karar modülünün konusu olmayan bir hâl (aşağıda gerekçesiyle).
  *
  * `import "server-only"` YOK: rezervasyonu geri veren zincir (`order-draft.ts`
  * → `expireDraft`) BullMQ worker'ından da geçiyor.
@@ -82,17 +85,34 @@ export async function reserveGiftCardTx(
     .from(giftCards)
     .where(eq(giftCards.id, args.giftCardId))
     .for("update");
+  // Kart satırı YOKSA `not_found`; `/api/orders:668-670` aynı hâli
+  // `INSUFFICIENT_BALANCE` sayıyor ve bu sapma BİLİNÇLİ. Saf kararın taşıdığı
+  // red sırası VAR OLAN kilitli bir kartın kapılarıdır (bakiye → durum → süre →
+  // limit); kaybolmuş bir satır o kuralın bir dalı değil, kuralın KONUSUNUN
+  // yokluğudur — karar modülü çağrılamaz bile. `/api/orders` ikisini
+  // birleştiriyor çünkü orada ayrı bir kod yok; bu yolda `not_found` zaten
+  // müşteriye dönen bir koddur (ön kontrol `validateGiftCard` aynı kodu veriyor,
+  // `giftCard.error.not_found` cümlesi mevcut), yani "bakiyeniz yetersiz" demek
+  // müşteriye YANLIŞ sebebi söylemek olurdu. Ulaşılabilirlik: yalnız kart ön
+  // kontrolden sonra silinirse.
   if (!card) throw new GiftCardReservationError("not_found");
 
   // Kullanım limiti kartın KİLİDİ altında sayılır: kilitsiz bir sayım, iki
-  // eşzamanlı ödemenin limiti birlikte aşmasına izin verirdi. Aynı kural saf
-  // kararda da yazılıdır (tek kaynak) ve ikisinin aynı girdide aynı cevabı
-  // verdiği `scripts/test-gift-card-reservation.ts` ile sınanır; buradaki
-  // satır AST nöbetinin gördüğü şeydir — bir yorum kilit taklidi yapamaz.
+  // eşzamanlı ödemenin limiti birlikte aşmasına izin verirdi. Buradaki satır
+  // AST nöbetinin gördüğü şeydir — bir yorum kilit taklidi yapamaz.
+  //
+  // Ama sayım bir RED YETKİSİ DEĞİL, karara taşınan bir GİRDİ: reddi tek
+  // başına `giftCardReservationDecision` verir. Sebebi müşterinin göreceği
+  // cümle: red SIRASI kuralın parçasıdır (bakiye → durum → süre → limit) ve
+  // `/api/orders:660-695` ile birebir aynı kalmak zorundadır. Burada bir
+  // `throw` olsaydı limit o sırayı atlardı ve hem bakiyesi 0 (ya da süresi
+  // geçmiş) hem limiti dolmuş bir kart bu yolda "kullanım limiti doldu",
+  // `/api/orders`ta "bakiye yetersiz" derdi — aynı kart, iki yolda iki cevap.
   let liveUses = 0;
+  let limitReachedAtLock = false;
   if (card.maxRedemptions !== null) {
     const uses = await countLiveGiftCardUses(tx, card.id);
-    if (uses >= card.maxRedemptions) throw new GiftCardReservationError("limit_reached");
+    limitReachedAtLock = uses >= card.maxRedemptions;
     liveUses = uses;
   }
 
@@ -109,6 +129,12 @@ export async function reserveGiftCardTx(
     now,
   });
   if (!decision.ok) throw new GiftCardReservationError(decision.code);
+  // Kayma nöbeti (son savunma): kilit altındaki sayım limiti DOLU diyorsa karar
+  // kabul EDEMEZ. Doğru işleyişte ulaşılamaz — aynı sayı, aynı karşılaştırma —
+  // ama saf modülün limit kapısı bir gün kaybolursa bakiye DÜŞMEDEN burada
+  // durur. Red sırasını bozmaz: bakiye/durum/süre kapıları yukarıda, kararın
+  // kendi sırasıyla konuştu.
+  if (limitReachedAtLock) throw new GiftCardReservationError("limit_reached");
 
   await tx
     .update(giftCards)

@@ -245,6 +245,9 @@ async function main() {
     const { cancelPendingQuoteCheckout, createQuoteCheckout, pendingQuoteCheckout } =
       await import("../src/lib/services/quote-checkout");
     const { expireDraft } = await import("../src/lib/services/order-draft");
+    const { GiftCardReservationError, reserveGiftCardTx } = await import(
+      "../src/lib/services/gift-card-reservation"
+    );
     const { quoteCheckoutSchema } = await import("../src/lib/validators/quote-checkout");
 
     const snapshot = await loadActiveSnapshot();
@@ -1808,6 +1811,70 @@ async function main() {
       assert.equal(stillZero.balanceKurus, 0);
       const [stillFull] = await db.select().from(giftCards).where(eq(giftCards.id, limited.id));
       assert.equal(stillFull.balanceKurus, 500_000, "reddedilen kartın bakiyesi dokunulmadı");
+    });
+
+    await test("rezervasyon reddinin SIRASI /api/orders ile aynı (SERVİS üzerinden)", async () => {
+      // Kilitli bloktaki kapılar ancak YARIŞTA konuşur: ön kontrol
+      // (`validateGiftCard`) süresi geçmiş / limiti dolmuş kartı zaten yakalar.
+      // Bu yüzden vaka `createQuoteCheckout` yerine rezervasyon servisini
+      // DOĞRUDAN çağırıyor — üretimde koşan yol o.
+      //
+      // Sınavın konusu müşterinin göreceği CÜMLE: `/api/orders:660-695` sırası
+      // bakiye → durum → süre → limit. Servis limiti karardan önce kapatırsa,
+      // hem bakiyesi 0 hem limiti dolmuş kart burada "limit doldu",
+      // `/api/orders`ta "bakiye yetersiz" der.
+      const filler = await makeUser();
+      const drainedAndLimited = await makeGiftCard(0, { maxRedemptions: 1 });
+      const expiredAndLimited = await makeGiftCard(500_000, {
+        maxRedemptions: 1,
+        expiresAt: new Date(Date.now() - 86_400_000),
+      });
+      const onlyLimited = await makeGiftCard(500_000, { maxRedemptions: 1 });
+      const cards: Array<[{ id: string }, number, string]> = [
+        [drainedAndLimited, 0, "insufficient"],
+        [expiredAndLimited, 500_000, "insufficient"],
+        // Limit YALNIZ öteki kapılar geçtiğinde konuşur — kapı hâlâ işliyor.
+        [onlyLimited, 500_000, "limit_reached"],
+      ];
+      for (const [card] of cards) {
+        await db.insert(giftCardRedemptions).values({
+          giftCardId: card.id,
+          amountKurus: 1_000,
+          redeemedByUserId: filler.id,
+        });
+      }
+
+      const reserve = (giftCardId: string) =>
+        db.transaction((tx) =>
+          reserveGiftCardTx(tx, {
+            giftCardId,
+            amountKurus: 20_000,
+            paymentMethod: "card",
+            havaleDiscountApplies: false,
+          })
+        );
+
+      for (const [card, balanceKurus, code] of cards) {
+        await assert.rejects(
+          reserve(card.id),
+          (err: unknown) =>
+            err instanceof GiftCardReservationError && err.code === code,
+          `kilitli kart → ${code}`
+        );
+        const [row] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+        assert.equal(row.balanceKurus, balanceKurus, `${code}: bakiye dokunulmadı`);
+        assert.equal(row.status, "active", `${code}: kartın durumu da dokunulmadı`);
+      }
+
+      // Kaybolmuş satır: `/api/orders` bunu `INSUFFICIENT_BALANCE` sayıyor, bu
+      // yol ayrı bir kodu OLDUĞU için `not_found` diyor (servis başlığındaki
+      // gerekçe). Bilinçli sapma, çivilenmiş hâli.
+      await assert.rejects(
+        reserve(randomUUID()),
+        (err: unknown) =>
+          err instanceof GiftCardReservationError && err.code === "not_found",
+        "kilit altında kaybolan kart → not_found"
+      );
     });
 
     console.log(`${checks} quote checkout DB checks passed`);

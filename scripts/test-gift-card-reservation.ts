@@ -15,6 +15,10 @@
  *    satır içi yazılı ve bu dosya onu kaynaktan çıkarıp karşılaştırır. İki
  *    kopya bir süre yan yana yaşayacak (route.ts bu programda DEĞİŞTİRİLMİYOR)
  *    ve kaymaları "aynı kart iki yolda farklı davranır" demek olurdu.
+ * 3. Sıranın ÜRETİMDE koşan yolda da geçerli olduğu: rezervasyon servisi
+ *    (`src/lib/services/gift-card-reservation.ts`) karardan önce kendi red
+ *    kapısını KURMUYOR. Kursa, yukarıdaki sıra vakaları yalnız saf modülü
+ *    kapsadığı için yanlış güven verirdi.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -218,6 +222,40 @@ test("route.ts'in limit kapısı da AYNI karşılaştırma", () => {
     routeSource,
     /redemptionCount >= card\.maxRedemptions/,
     "limit kapısı route.ts'te bu biçimde duruyor olmalı"
+  );
+});
+
+console.log("hediye kartı rezervasyon kararı — reddin TEK yetkilisi");
+
+// Sıra ancak ÜRETİMDE koşan yolda (servis) da geçerliyse bir şey ifade eder:
+// servis kendi kapısını kurarsa yukarıdaki sıra vakaları yanlış güven verir.
+// Davranış çivisi QA veritabanı isteyen `scripts/test-quote-checkout-db.ts`te
+// (`rezervasyon reddinin SIRASI …`, servis doğrudan çağrılıyor); buradaki
+// KAYNAK pini her `test:unit` turunda koşar ve kapının geri gelmesini yakalar.
+const SERVICE_PATH = "src/lib/services/gift-card-reservation.ts";
+const serviceSource = fs.readFileSync(SERVICE_PATH, "utf8");
+
+test("servis, karardan ÖNCE hiçbir red kapısı kurmaz (not_found dışında)", () => {
+  const decisionAt = serviceSource.indexOf("giftCardReservationDecision({");
+  assert.ok(decisionAt > 0, `${SERVICE_PATH} kararı çağırmıyor`);
+  const early = [
+    ...serviceSource.matchAll(/throw new GiftCardReservationError\("([a-z_]+)"\)/g),
+  ]
+    .filter((m) => m.index! < decisionAt)
+    .map((m) => m[1]);
+  assert.deepEqual(
+    early,
+    ["not_found"],
+    "karardan önce atılan tek red `not_found` olabilir — başka bir kapı red " +
+      "SIRASINI atlar (ör. limit) ve müşteri `/api/orders` ile farklı cümle görür"
+  );
+});
+
+test("servisin reddi kararın kodundan geliyor", () => {
+  assert.match(
+    serviceSource,
+    /if \(!decision\.ok\) throw new GiftCardReservationError\(decision\.code\);/,
+    "red kodu kararın kendisinden okunmalı (ikinci bir eşleme kayabilir)"
   );
 });
 

@@ -74,12 +74,15 @@ So, at merge time:
   `0065_quote_files_attached_at` with `when = 1790686312063` — *above* 0063's `1789657536377`.
   Once 0065 is applied the watermark is **`1790686312063`**, so a 0063 journal entry landing
   afterwards would be skipped **silently and forever**. Before the other session's 0063 is
-  merged it must be **regenerated**: `npx drizzle-kit generate` for a fresh number (0066, …) and
+  merged it must be **regenerated**: `npx drizzle-kit generate` for a fresh number (0067, …) and
   a fresh `when` from the clock, then move its hand-written SQL into that new file. Do not merge
   its existing journal entry, and do not lower 0065's `when` to make room — production may
   already have recorded it.
+- `0066_print_catalog_checks` (catalogue range CHECKs) carries `when = 1790689912063`, above
+  0065 — so the branch's numbers stay strictly increasing in array order and the watermark moves
+  to 0066's `when`.
 - **Any migration that lands after this branch has been applied to production must carry a
-  `when` larger than the highest already-applied one — today `1790686312063` (0065).** Same
+  `when` larger than the highest already-applied one — today `1790689912063` (0066).** Same
   recipe: never hand-merge an old journal entry, always re-generate.
 - Never lower a `when` that production has already recorded.
 
@@ -133,9 +136,10 @@ after exporting it:
 ```bash
 psql "$DATABASE_URL" -c "\copy print_catalog_changes TO 'print_catalog_changes-$(date +%F).csv' CSV HEADER"
 psql "$DATABASE_URL" -c "DELETE FROM print_catalog_changes;"   # audit trail only; the seed lives in the catalogue tables
-# Newer migrations first, each deleting its OWN ledger row. Skipping 0065 here would leave its
-# row (created_at 1790686312063) behind as the watermark, and a re-applied 0064 would be skipped
-# silently forever.
+# Newer migrations first, each deleting its OWN ledger row. Skipping 0066/0065 here would leave
+# their rows (created_at 1790689912063 / 1790686312063) behind as the watermark, and a re-applied
+# 0064 would be skipped silently forever.
+psql "$DATABASE_URL" -f drizzle/0066_print_catalog_checks.down.sql
 psql "$DATABASE_URL" -f drizzle/0065_quote_files_attached_at.down.sql
 psql "$DATABASE_URL" -f drizzle/0064_instant_quotes.down.sql
 ```
@@ -157,9 +161,24 @@ audit rows. The rollback window closes on the first internal test, not on the fi
       live `users`, `orders` and `order_drafts` tables. A busy moment aborts the migration with
       `canceling statement due to lock timeout` and fails the deploy. The up is fully idempotent:
       re-run the deploy workflow and it completes.
-- [ ] Confirm no migration with a `when` below **`1790686312063`** — this branch's highest, 0065's
+- [ ] Confirm no migration with a `when` below **`1790689912063`** — this branch's highest, 0066's
       — is waiting to land. The other session's uncommitted `0063` (`1789657536377`) is exactly
       such a migration: it must be regenerated, not merged as-is (see "Migration ordering" above).
+
+**After the deploy**
+
+- [ ] **Check for CHECK constraints 0066 could not validate.** `0066_print_catalog_checks` adds
+      the catalogue's range constraints `NOT VALID` and then validates them; a row outside the
+      range (a hand-edited catalogue value) leaves *that* constraint unvalidated and logs a
+      `WARNING` instead of failing the deploy — deliberately, so a hygiene migration can never
+      block a release. An unvalidated constraint still rejects every new write, and it also
+      blocks edits to the offending row itself, so fix the value and validate by hand:
+
+      ```bash
+      psql "$DATABASE_URL" -c "SELECT t.relname, c.conname FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE c.contype = 'c' AND NOT c.convalidated ORDER BY 1,2;"
+      # then, per row named above: correct the value in /admin/baski-katalogu and
+      psql "$DATABASE_URL" -c "ALTER TABLE <table> VALIDATE CONSTRAINT <name>;"
+      ```
 
 **After the deploy, before turning `instant_quote_enabled` on**
 

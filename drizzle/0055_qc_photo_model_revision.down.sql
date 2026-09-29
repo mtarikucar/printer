@@ -34,8 +34,8 @@
 -- dosyadan sonra 0055'in yeniden uygulanabilmesi için KAYDININ da silinmesi
 -- gerekir. 0050-0054'ten kopyalanan tarif "en son eklenen satırı sil" diyordu
 -- (ORDER BY created_at DESC LIMIT 1) ve o tarif BURADA YANLIŞTIR: 0055 artık
--- en yeni migration değil, ÜSTÜNDE 0056, 0057, 0058, 0059, 0060 ve 0061 var. O tarif en yeninin
--- (bugün 0061'in) satırını siler, 0055'in kaydı yerinde kalır ve 0055 BİR DAHA
+-- en yeni migration değil, ÜSTÜNDE 0056–0062 ile 0064, 0065 ve 0066 var. O tarif en yeninin
+-- (bugün 0066'nın) satırını siler, 0055'in kaydı yerinde kalır ve 0055 BİR DAHA
 -- ASLA uygulanmaz — migrate "başarılı" der, kolon düşük kalır ve üreticinin
 -- her QC fotoğrafı yüklemesi
 -- 42703 ile boş gövdeli 500 döner (qc-photos rotası INSERT'te `model_revision`
@@ -51,10 +51,13 @@
 -- SIRA ÖNEMLİ — TEK BAŞINA BU SİLME YETMEZ. Migrator yalnız EN YENİ kaydın
 -- `created_at`ine bakar (drizzle-orm/pg-core/dialect.js: "order by created_at
 -- desc limit 1" + `lastDbMigration.created_at < migration.folderMillis`), yani
--- 0055'ten SONRA kaydedilmiş bir satır (0056, 0057, 0058, 0059, 0060, 0061, …) dururken 0055
+-- 0055'ten SONRA kaydedilmiş bir satır (0056, …, 0062, 0064, 0065, 0066) dururken 0055
 -- yeniden uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN
 -- YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri
 -- alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0066_print_catalog_checks.down.sql
+--   -- 0066'nın down'ı KENDİ kaydını (created_at = 1790689912063) siler.
+--   -- Yalnız katalog CHECK kısıtlarını düşürür; kayıpsızdır, veri beklemez.
 --   \i drizzle/0065_quote_files_attached_at.down.sql
 --   -- 0065'in down'ı KENDİ kaydını (created_at = 1790686312063) siler.
 --   -- Geri türetilemeyen dosya damgası varsa veri düşürmeden durur.

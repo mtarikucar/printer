@@ -3731,6 +3731,27 @@ export const printTechnologies = pgTable("print_technologies", {
 }, (t) => [
   check("print_technologies_key_chk", sql`${t.key} ~ '^[a-z0-9_]{2,32}$'`),
   check("print_technologies_order_material_chk", sql`${t.orderMaterial} IN ('resin', 'filament')`),
+  // Aralık kısıtları (migration 0066) SAVUNMA DERİNLİĞİDİR: tek yazan hâlâ
+  // zod'lu admin rotası, ama para bu kolonlardan çıkıyor ve ikinci bir yazan
+  // (elle bir UPDATE, bir betik, yeni bir uç) şemayı atlayabilir. Sayılar
+  // `CATALOG_LIMITS` (src/lib/validators/print-catalog.ts) ile AYNI olmalı —
+  // DB zod'dan daha dar olursa panel kabul ettiği değeri kaydedemez.
+  // `test-quote-admin-catalog.ts` bu eşitliği kaynak üzerinden sınar.
+  check(
+    "print_technologies_build_mm_chk",
+    sql`${t.buildXMm} BETWEEN 10 AND 2000 AND ${t.buildYMm} BETWEEN 10 AND 2000 AND ${t.buildZMm} BETWEEN 10 AND 2000`
+  ),
+  check(
+    "print_technologies_money_chk",
+    sql`${t.setupFeeKurus} BETWEEN 0 AND 10000000 AND ${t.machineRateKurusPerHour} BETWEEN 0 AND 10000000 AND ${t.minUnitPriceKurus} BETWEEN 0 AND 10000000`
+  ),
+  // Debi SIFIR OLAMAZ: makine süresi hacmi ona böler, sıfır bir fiyatı sonsuza
+  // götürür (`priceUnitAuto`).
+  check(
+    "print_technologies_rate_chk",
+    sql`${t.throughputCm3PerHour} > 0 AND ${t.throughputCm3PerHour} <= 100000 AND ${t.heightHoursPerMm} BETWEEN 0 AND 10 AND ${t.minWallMm} > 0 AND ${t.minWallMm} <= 50 AND ${t.minFeatureMm} > 0 AND ${t.minFeatureMm} <= 50 AND ${t.shellMm} BETWEEN 0 AND 50`
+  ),
+  check("print_technologies_lead_days_chk", sql`${t.baseLeadDays} BETWEEN 1 AND 60`),
 ]);
 
 export const printMaterials = pgTable("print_materials", {
@@ -3755,6 +3776,13 @@ export const printMaterials = pgTable("print_materials", {
   uniqueIndex("print_materials_tech_key_uq").on(t.technologyId, t.key),
   check("print_materials_support_factor_chk", sql`${t.supportFactor} >= 1`),
   check("print_materials_colors_chk", sql`jsonb_typeof(${t.colors}) = 'array' AND jsonb_array_length(${t.colors}) >= 1`),
+  // Aralık kısıtları (0066) — bkz. `print_technologies` notu. Alt sınır 0064'ten
+  // (`support_factor >= 1`) geliyor; üst sınır ayrı adla eklenir, çünkü 0064'ün
+  // gövdesi üretimde uygulandı ve değiştirilemez.
+  check("print_materials_support_factor_max_chk", sql`${t.supportFactor} <= 3`),
+  check("print_materials_density_chk", sql`${t.densityGCm3} BETWEEN 0.5 AND 3`),
+  check("print_materials_money_chk", sql`${t.priceKurusPerGram} BETWEEN 0 AND 10000000`),
+  check("print_materials_lead_days_chk", sql`${t.leadDaysExtra} BETWEEN 0 AND 60`),
 ]);
 
 export const printFinishes = pgTable("print_finishes", {
@@ -3775,6 +3803,12 @@ export const printFinishes = pgTable("print_finishes", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   check("print_finishes_cost_line_kind_chk", sql`${t.costLineKind} IN (${quoteInList(COST_LINE_KINDS)})`),
+  // Aralık kısıtları (0066) — bkz. `print_technologies` notu.
+  check(
+    "print_finishes_money_chk",
+    sql`${t.fixedKurus} BETWEEN 0 AND 10000000 AND ${t.perCm2Kurus} BETWEEN 0 AND 10000000`
+  ),
+  check("print_finishes_lead_days_chk", sql`${t.leadDaysExtra} BETWEEN 0 AND 60`),
 ]);
 
 export const printAddons = pgTable("print_addons", {
@@ -3791,6 +3825,9 @@ export const printAddons = pgTable("print_addons", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   check("print_addons_price_type_chk", sql`${t.priceType} IN (${quoteInList(ADDON_PRICE_TYPES)})`),
+  // Aralık kısıtları (0066) — bkz. `print_technologies` notu.
+  check("print_addons_money_chk", sql`${t.priceKurus} BETWEEN 0 AND 10000000`),
+  check("print_addons_lead_days_chk", sql`${t.leadDaysExtra} BETWEEN 0 AND 60`),
 ]);
 
 /** Tek satır (id = 1): fiyat/teslim politikası ve anlık teklif limitleri. */
@@ -3814,6 +3851,22 @@ export const quotePricingSettings = pgTable("quote_pricing_settings", {
   updatedBy: text("updated_by"),
 }, (t) => [
   check("quote_pricing_settings_singleton_chk", sql`${t.id} = 1`),
+  // Aralık kısıtları (0066) — bkz. `print_technologies` notu.
+  check(
+    "quote_pricing_settings_money_chk",
+    sql`${t.minOrderKurus} BETWEEN 0 AND 10000000 AND ${t.maxAutoTotalKurus} BETWEEN 0 AND 10000000`
+  ),
+  check(
+    "quote_pricing_settings_days_chk",
+    sql`${t.quoteValidDays} BETWEEN 1 AND 365 AND ${t.retentionDaysAfterExpiry} BETWEEN 1 AND 3650`
+  ),
+  // Baz puanlar jsonb'nin İÇİNDE durur; `jsonb_path_exists` değişmez (immutable)
+  // olduğu için CHECK'te kullanılabilir. Tek bir aralık (0–30000) iki listeyi de
+  // kapsar: indirim baz puanı ve teslim kademesi çarpanı.
+  check(
+    "quote_pricing_settings_bps_chk",
+    sql`NOT jsonb_path_exists(${t.qtyBreaks}, '$[*].discountBps ? (@ < 0 || @ > 30000)') AND NOT jsonb_path_exists(${t.leadTiers}, '$[*].multiplierBps ? (@ < 0 || @ > 30000)')`
+  ),
 ]);
 
 /** Katalog denetimi: her katalog yazımı ile AYNI işlemde bir satır. */

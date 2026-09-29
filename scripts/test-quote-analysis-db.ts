@@ -10,9 +10,13 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
+// Küçük resim yazımı sınavı GERÇEK bir PNG ister: sharp dönüştürmeyi başarmazsa
+// test yazım yolunu hiç denemeden "geçer".
+import sharp from "sharp";
 
 const connectionString = process.env.QA_QUOTE_DB_URL;
 if (!connectionString) throw new Error("QA_QUOTE_DB_URL required");
@@ -32,6 +36,29 @@ const namespace = `quote_analysis_${Date.now()}_${process.pid}`;
 const ddlOut = fs.mkdtempSync(path.join(os.tmpdir(), "quote-analysis-ddl-"));
 const uploads = fs.mkdtempSync(path.join(os.tmpdir(), "quote-analysis-uploads-"));
 process.env.UPLOAD_DIR = uploads;
+
+/**
+ * Depolama katmanının GERÇEKTEN çağırdığı `fs/promises` nesnesi.
+ *
+ * `src/lib/services/storage.ts` tsx altında CJS'e çevrilir, yani `copyFile` /
+ * `writeFile` her çağrıda bu modül nesnesinden OKUNUR. Tek bir yazımı yarıda
+ * öldürmek için gereken tutamak bu: ENOSPC/EIO'yu (hedefi açıp yarım bırakıp
+ * düşmek) başka hiçbir yolla diskte üretemeyiz — kaynak tarafı hataları
+ * (okunamayan dosya, dizin olan kaynak) hedefi HİÇ oluşturmaz, yani tam da
+ * sızdıran artığı üretmezler. Her taklit kendi `finally`sinde geri alınır.
+ */
+const fsPromises = createRequire(import.meta.url)("fs/promises") as {
+  copyFile: typeof import("fs/promises").copyFile;
+  writeFile: typeof import("fs/promises").writeFile;
+};
+
+/** Yazımın ORTASINDA ölen depolama çağrısı: hedefi YARIM bırakıp fırlatır. */
+async function dyingWrite(dst: fs.PathLike): Promise<never> {
+  fs.writeFileSync(dst, Buffer.alloc(64, 7));
+  const err = new Error("ENOSPC: no space left on device, write") as Error & { code: string };
+  err.code = "ENOSPC";
+  throw err;
+}
 
 const admin = new pg.Client({ connectionString });
 let pool: pg.Pool | undefined;
@@ -279,29 +306,77 @@ async function main() {
       assert.equal((await rowOf(twin)).preview_glb_key, first.preview_glb_key);
     });
 
-    await test("yarıda kalan çıktı yazımı diskte artık bırakmaz", async () => {
+    await test("yarıda kalan GLB kopyası diskte artık bırakmaz", async () => {
       // `storeAnalysisOutputs` üç dosyayı SIRAYLA yazar. Kanonik STL yazıldıktan
-      // sonra gelen bir depolama hatası (ENOSPC/EIO) yukarı fırlar ve parça
-      // `failed` olur — ama yazılmış kanonik kopya hiçbir satırda görünmez.
-      // Hata BURADA gerçek: `preview.glb` bir DİZİN, yani `copyFile` EISDIR verir.
+      // SONRA gelen bir depolama hatası (ENOSPC/EIO) yukarı fırlar ve parça
+      // `failed` olur. İKİ dosya öksüz kalır: yazılan kanonik kopya hiçbir
+      // satırda görünmez, YARIM KALAN GLB ise hiç görünmez — ve parçanın satırı
+      // DURDUĞU için yetim dizin süpürmesi o dizine hiç dokunmaz. Anahtar
+      // yazımdan ÖNCE deftere girmezse, yarım GLB sonsuza dek diskte kalır.
+      // Hata HEDEF tarafında: `copyFile` dosyayı açıp yarım bırakıp düşer.
       const orphanPartId = randomUUID();
       const work = fs.mkdtempSync(path.join(os.tmpdir(), "quote-store-outputs-"));
+      const realCopyFile = fsPromises.copyFile;
+      let copies = 0;
       try {
         fs.writeFileSync(path.join(work, "canonical.stl"), stlBox(10, 10, 10));
-        fs.mkdirSync(path.join(work, "preview.glb"));
-        await assert.rejects(
-          () => storeAnalysisOutputs(orphanPartId, work),
-          /EISDIR|illegal operation/i
-        );
-        const dir = path.join(uploads, "quote-parts", orphanPartId);
-        assert.deepEqual(
-          fs.existsSync(dir) ? fs.readdirSync(dir) : [],
-          [],
-          "yarım kalan yazımın dosyaları silinmeli"
-        );
+        fs.writeFileSync(path.join(work, "preview.glb"), Buffer.alloc(2048, 3));
+        fsPromises.copyFile = (async (src: fs.PathLike, dst: fs.PathLike) => {
+          copies++;
+          // Kanonik kopya GERÇEKTEN yazılır: ikinci yazım, diskin yazılabilir
+          // olduğu kanıtlandıktan sonra ölen yazımdır.
+          if (copies === 1) return realCopyFile(src, dst);
+          return dyingWrite(dst);
+        }) as typeof realCopyFile;
+        await assert.rejects(() => storeAnalysisOutputs(orphanPartId, work), /ENOSPC/);
       } finally {
+        fsPromises.copyFile = realCopyFile;
         fs.rmSync(work, { recursive: true, force: true });
       }
+      assert.equal(copies, 2, "kanonik yazıldı, GLB kopyası yarıda öldü");
+      const dir = path.join(uploads, "quote-parts", orphanPartId);
+      assert.deepEqual(
+        fs.existsSync(dir) ? fs.readdirSync(dir) : [],
+        [],
+        "kanonik VE yarım kalan GLB silinmeli"
+      );
+    });
+
+    await test("yarıda kalan küçük resim yazımı yutulmaz, o da toplanır", async () => {
+      // Küçük resimde KOZMETİK olan yalnız DÖNÜŞTÜRMEDİR (sharp). Yazım hatası
+      // içteki `try`a alınırsa yutulur: parça `ready` olur, yarım webp'yi ise
+      // hiçbir satır göstermez ve hiç kimse silmez. Bu yüzden `saveFile` içteki
+      // `try`ın DIŞINDA durur ve hatası dıştaki toplayıcıya ulaşır.
+      const orphanPartId = randomUUID();
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), "quote-store-thumb-"));
+      const realWriteFile = fsPromises.writeFile;
+      let writes = 0;
+      try {
+        fs.writeFileSync(path.join(work, "canonical.stl"), stlBox(10, 10, 10));
+        // Gerçek PNG: sharp dönüştürmeyi BAŞARMALI, yoksa yazıma hiç gelinmez.
+        fs.writeFileSync(
+          path.join(work, "thumb.png"),
+          await sharp({ create: { width: 4, height: 4, channels: 3, background: "#ff0000" } })
+            .png()
+            .toBuffer()
+        );
+        // `preview.glb` yok: kanonik kopya gerçek `copyFile` ile yazılır.
+        fsPromises.writeFile = (async (dst: fs.PathLike) => {
+          writes++;
+          return dyingWrite(dst);
+        }) as typeof realWriteFile;
+        await assert.rejects(() => storeAnalysisOutputs(orphanPartId, work), /ENOSPC/);
+      } finally {
+        fsPromises.writeFile = realWriteFile;
+        fs.rmSync(work, { recursive: true, force: true });
+      }
+      assert.equal(writes, 1, "sharp dönüştürdü, webp yazımı yarıda öldü");
+      const dir = path.join(uploads, "quote-parts", orphanPartId);
+      assert.deepEqual(
+        fs.existsSync(dir) ? fs.readdirSync(dir) : [],
+        [],
+        "kanonik VE yarım kalan webp silinmeli"
+      );
     });
 
     await test("bozuk dosya: hata koduyla 'failed'", async () => {

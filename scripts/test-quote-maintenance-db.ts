@@ -817,13 +817,22 @@ async function main() {
         expiresAt: new Date(now.getTime() + 2 * DAY),
         updatedAt: new Date(now.getTime() - 40 * HOUR),
       });
+      // Turun BEŞİNCİ işi için toplanacak gerçek bir yetim: satırı olmayan,
+      // bekleme süresini geçmiş bir kimlik-biçimli dizin. Sıfır beklemek
+      // sayaçın BAŞLANGIÇ değerini doğrulardı, yani aşama bloğu silinse bile
+      // test yeşil kalırdı — süpürmeyi tura bağlayan tek iddia bu.
+      const tickOrphan = randomUUID();
+      const tickOrphanKey = writeKey(tickOrphan, "source.stl");
+      ageDir(tickOrphan, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
 
       const outcome = await runQuoteMaintenance(now);
       assert.equal(outcome.expired, 1);
       assert.equal(outcome.expiryReminders, 1);
       assert.equal(outcome.abandonedReminders, 1);
       assert.equal(outcome.purgedParts, 0);
-      assert.equal(outcome.orphanDirs, 0, "toplanacak yetim dizin kalmadı");
+      assert.equal(outcome.orphanDirs, 1, "yetim dizin süpürmesi turda GERÇEKTEN koştu");
+      assert.equal(onDisk(tickOrphanKey), false, "sahipsiz dosya tur içinde silindi");
+      assert.equal(dirOnDisk(tickOrphan), false);
       // Süresi biten teklif ÖNCE kapanır: kapanan teklife "birkaç gün içinde
       // bitiyor" yazılmaz.
       assert.equal(mailsTo(user.email).length, 2);

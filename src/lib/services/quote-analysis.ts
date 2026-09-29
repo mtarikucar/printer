@@ -123,13 +123,23 @@ interface StoredOutputs {
  *
  * Depolama hatası buna dahil DEĞİLDİR ve bilerek yukarı fırlar: kanonik kopya
  * hemen yukarıda başarılı olmuştur, yani disk yazılabilir; ondan sonra gelen
- * bir yazım hatası gerçek bir arızadır ve `failed` olarak görünmelidir.
+ * bir yazım hatası gerçek bir arızadır ve `failed` olarak görünmelidir. Bu
+ * yüzden küçük resmin `try`ı yalnız DÖNÜŞTÜRMEYİ (sharp) sarar; `saveFile`
+ * dışarıda durur ve hatası aşağıdaki toplayıcıya ulaşır. İçeriye alınsaydı
+ * yarım yazılmış webp'yi kimse silmezdi — yutulan hata, sızdıran hatadır.
  *
- * YARIDA KALAN YAZIM KENDİNİ TOPLAR: fırlamadan önce O ÇAĞRIDA yazılmış ne
- * varsa silinir. Silinmezse (ENOSPC/EIO kanonik kopyadan SONRA gelirse) dosya
- * diskte kalır ama hiçbir satır onu göstermez — yani saklama süpürmesi de onu
- * hiçbir zaman bulamaz. Burada silmek güvenlidir: anahtarlar bu çağrıda
- * üretilmiştir (`nanoid`), henüz hiçbir satıra yazılmamıştır.
+ * YARIDA KALAN YAZIM KENDİNİ TOPLAR: fırlamadan önce O ÇAĞRIDA ayrılmış ne
+ * varsa silinir. Anahtar YAZIMDAN ÖNCE deftere girer (`reserve`), çünkü
+ * yazımın ortasında ölen çağrı (ENOSPC/EIO) hedef dosyayı AÇMIŞ ve YARIM
+ * bırakmış olur: `saveFileFromPath` = mkdir + copyFile, `saveFile` =
+ * mkdir + writeFile. Anahtar yazımdan SONRA kaydedilse, kaydedilmeyen tek
+ * anahtar tam da sızdıran yazımın anahtarı olurdu; dosya diskte kalır, hiçbir
+ * satır onu göstermez — yani ne saklama süpürmesi (satırdan okur) ne de yetim
+ * dizin süpürmesi (parçanın satırı DURUYOR) onu bir daha bulabilir.
+ *
+ * Önden kaydetmek bedelsizdir: anahtarlar bu çağrıda üretilmiştir (`nanoid`),
+ * henüz hiçbir satıra yazılmamıştır ve `deleteFile` olmayan dosyaya sessizdir
+ * (`rm --force`), yani hiç açılmamış bir anahtarı silmek de zararsızdır.
  *
  * `export` sözleşmenin parçasıdır: bu yarım-yazım yolu yalnız buradan
  * kurulabildiği için `scripts/test-quote-analysis-db.ts` işlevi doğrudan çağırır.
@@ -141,21 +151,23 @@ export async function storeAnalysisOutputs(
 ): Promise<StoredOutputs> {
   const subdir = `${QUOTE_PART_KEY_PREFIX}/${partId}`;
   const written: string[] = [];
-  const remember = (key: string): string => {
+  /** Anahtarı yazımdan ÖNCE deftere yazar ve tam anahtarı döner. */
+  const reserve = (filename: string): string => {
+    const key = `${subdir}/${filename}`;
     written.push(key);
     return key;
   };
   try {
-    const canonicalStlKey = remember(
-      await saveFileFromPath(join(work, "canonical.stl"), subdir, `canonical-${nanoid(8)}.stl`)
-    );
+    const canonicalName = `canonical-${nanoid(8)}.stl`;
+    const canonicalStlKey = reserve(canonicalName);
+    await saveFileFromPath(join(work, "canonical.stl"), subdir, canonicalName);
 
     let previewGlbKey: string | null = null;
     const glbPath = join(work, "preview.glb");
     if (await exists(glbPath)) {
-      previewGlbKey = remember(
-        await saveFileFromPath(glbPath, subdir, `preview-${nanoid(8)}.glb`)
-      );
+      const previewName = `preview-${nanoid(8)}.glb`;
+      previewGlbKey = reserve(previewName);
+      await saveFileFromPath(glbPath, subdir, previewName);
     } else {
       onLog?.("preview.glb yok — önizleme atlandı");
     }
@@ -163,13 +175,19 @@ export async function storeAnalysisOutputs(
     let thumbnailKey: string | null = null;
     const pngPath = join(work, "thumb.png");
     if (await exists(pngPath)) {
+      let webp: Buffer | null = null;
       try {
-        const webp = await sharp(await readFile(pngPath)).webp({ quality: THUMBNAIL_QUALITY }).toBuffer();
-        thumbnailKey = remember(
-          await saveFile(Buffer.from(webp), subdir, `thumb-${nanoid(8)}.webp`)
+        // KOZMETİK olan yalnız bu: PNG okunamaz/çevrilemezse küçük resim yok.
+        webp = Buffer.from(
+          await sharp(await readFile(pngPath)).webp({ quality: THUMBNAIL_QUALITY }).toBuffer()
         );
       } catch (err) {
         onLog?.(`küçük resim atlandı: ${(err as Error).message}`);
+      }
+      if (webp) {
+        const thumbName = `thumb-${nanoid(8)}.webp`;
+        thumbnailKey = reserve(thumbName);
+        await saveFile(webp, subdir, thumbName);
       }
     } else {
       onLog?.("thumb.png yok — küçük resim atlandı");

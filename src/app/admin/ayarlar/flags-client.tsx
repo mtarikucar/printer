@@ -19,7 +19,9 @@ import {
  * gösterir. Kopyalanmış bir liste, yeni bir anahtarın ekranda hiç görünmemesi
  * demekti — ve görünmeyen bir anahtar, kimsenin açamadığı bir özelliktir.
  */
-const GROUP_LABELS: Record<keyof typeof FLAG_KEY_GROUPS, { title: string; note: string }> = {
+type FlagGroupName = keyof typeof FLAG_KEY_GROUPS;
+
+const GROUP_LABELS: Record<FlagGroupName, { title: string; note: string }> = {
   feature: {
     title: "Ürün yüzeyleri",
     note: "Müşteriye hangi özelliğin açık olduğunu belirler. Kapalıyken yüzey yalnız admin oturumuna görünür (iç test).",
@@ -34,7 +36,29 @@ const GROUP_LABELS: Record<keyof typeof FLAG_KEY_GROUPS, { title: string; note: 
   },
 };
 
-const GROUP_ORDER = ["feature", "spend", "routing"] as const;
+/**
+ * Ekrandaki sıra bir TERCİHTİR, kapı değildir.
+ *
+ * Gösterilecek grupların listesi `FLAG_KEY_GROUPS`tan TÜRETİLİR: elle yazılmış
+ * bir liste, dördüncü bir grup eklendiği gün o grubun ekranda hiç görünmemesi
+ * demekti — ve görünmeyen bir anahtar, kimsenin açamadığı bir özelliktir.
+ * Aşağıdaki liste yalnız bugünkü üç grubun okuma sırasını korur (önce müşteriye
+ * açık yüzeyler); listede olmayan her grup peşine kendiliğinden eklenir.
+ * `satisfies` sayesinde buradaki bir ad `flags.ts`ten kalkarsa derleme düşer,
+ * yani liste asla var olmayan bir gruba işaret edemez.
+ */
+const PREFERRED_GROUP_ORDER = [
+  "feature",
+  "spend",
+  "routing",
+] as const satisfies readonly FlagGroupName[];
+
+const GROUP_ORDER: FlagGroupName[] = [
+  ...PREFERRED_GROUP_ORDER,
+  ...(Object.keys(FLAG_KEY_GROUPS) as FlagGroupName[]).filter(
+    (group) => !(PREFERRED_GROUP_ORDER as readonly string[]).includes(group)
+  ),
+];
 
 /**
  * Hiçbir gruba girmemiş anahtarlar.

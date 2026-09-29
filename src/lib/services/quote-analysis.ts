@@ -9,7 +9,8 @@
  *
  * NOT: `import "server-only"` YOK — BullMQ worker süreci bu modülü yükler.
  */
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import type { SQLWrapper } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { mkdtemp, copyFile, readFile, rm, access } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -18,6 +19,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { db } from "@/lib/db";
 import { quoteParts, quotes } from "@/lib/db/schema";
+import { ANALYSIS_GIVE_UP_ERROR } from "@/lib/config/quote-types";
 import type { AnalysisStatus, PartGeometry, QuoteUnits } from "@/lib/config/quote-types";
 import { MeshProcessError, runAnalyzeQuotePart } from "@/lib/services/mesh-runner";
 import {
@@ -41,6 +43,43 @@ const ANALYZING_GRACE_FACTOR = 2;
 
 /** Kurtarma yeniden kuyruğa alırken taze müşteri yüklemesinin arkasına geçer. */
 const RECOVERY_PRIORITY = 10;
+
+/**
+ * Bir süpürmede en çok kaç parça ele alınır.
+ *
+ * LIMIT'siz bir süpürme, biriken bir artıkta (Redis silindi, worker günlerce
+ * kapalı kaldı) tek turda binlerce satırı güncelleyip binlerce iş eklerdi —
+ * uzun bir işlem, uzun bir iş kilidi ve concurrency 1'de saatlerce sürecek bir
+ * kuyruk. Tavan, bir turda kurtarılanın tek çekirdeğin makul ölçüde
+ * öğütebileceği kadar olmasını sağlar; artanı bir sonraki tur alır (en eski
+ * önce, yani kimse sıranın sonunda unutulmaz).
+ */
+export const STUCK_SWEEP_BATCH = 50;
+
+/**
+ * Kaçıncı denemeden sonra parçadan VAZGEÇİLİR.
+ *
+ * Sayaç (`analysis_attempt`) iki yerde artar: iş parçayı üstlendiğinde ve
+ * süpürme onu geri kuyruğa aldığında. Yani sürekli çöken bir parça her turda
+ * iki adım ilerler; hiç başlamayan (Redis'in unuttuğu) bir parça bir adım.
+ *
+ * Tavan olmasaydı python'u her seferinde öldüren bir dosya sonsuza dek yeniden
+ * denenirdi: tek çekirdek boşa dönerdi ve müşteri "inceleniyor" ekranında
+ * sonsuza dek beklerdi. `failed` demek, hiç cevap vermemekten iyidir — müşteri
+ * yeni bir dosya yükleyebilir, admin manuel fiyat girebilir.
+ *
+ * Değer `STUCK_QUEUED_MS` ile birlikte okunur (bkz. o sabitin gerekçesi):
+ * vazgeçme ufku ≈ tavan × eşik ve bu ufuk, concurrency 1'de MEŞRU en kötü
+ * bekleme süresinden (yirmi parçalık bir yüklemenin son parçası) uzun olmalı.
+ * 10 × 30 dk = 5 saat > 19 × 10 dk ≈ 3,2 saat.
+ */
+export const MAX_ANALYSIS_ATTEMPTS = 10;
+
+/** Süpürmenin bir turda ne yaptığı: kaç parça geri kuyruğa girdi, kaçından vazgeçildi. */
+export interface StuckSweepResult {
+  requeued: number;
+  gaveUp: number;
+}
 
 async function exists(filePath: string): Promise<boolean> {
   try {
@@ -251,7 +290,7 @@ export async function analyzeQuotePart(
 }
 
 /**
- * Takılan parçaları yeniden kuyruğa alır ve kaç parçanın kurtarıldığını döner.
+ * Takılan parçaları yeniden kuyruğa alır; tavanı aşanlardan vazgeçer.
  *
  * İki takılma biçimi vardır ve ikisi de Redis'in unutkanlığındandır: iş hiç
  * eklenememiş (`queued`, kimse almadı) ya da worker işi aldıktan sonra ölmüş
@@ -265,12 +304,72 @@ export async function analyzeQuotePart(
  * Sayaç artmasaydı `queued`'da takılan bir parça her turda aynı kimliğe
  * eklenir, hiç çalışmaz, ama süpürme "kurtarıldı" diye sayardı: müşteri
  * fiyatını sonsuza dek beklerdi. Artan sayaç her tura yeni bir kimlik verir.
+ *
+ * VAZGEÇME aynı sayacın öteki yüzüdür: `MAX_ANALYSIS_ATTEMPTS`e ulaşmış parça
+ * yeniden denenmez, `failed` yazılır (`analysis_error = stuck_retry_limit`).
+ * Yoksa python'u her çalıştırmada öldüren bir dosya tek çekirdeği sonsuza dek
+ * meşgul eder ve müşteri hiç cevap alamazdı. Vazgeçilen parça müşteriye
+ * "dosya okunamadı, yeniden yükleyin" olarak görünür (DfM `analysis_failed`).
+ *
+ * `limit` bir turda ele alınan parça sayısını sınırlar ve en ESKİ dokunulandan
+ * başlar: sınırın dışında kalan bir sonraki turun başına geçer. İki dal sınırı
+ * AYRI uygular — bir tur en çok `limit` parçayı kurtarır ve en çok `limit`
+ * parçadan vazgeçer.
  */
-export async function requeueStuckQuoteParts(olderThanMs: number): Promise<number> {
+export async function requeueStuckQuoteParts(
+  olderThanMs: number,
+  limit: number = STUCK_SWEEP_BATCH
+): Promise<StuckSweepResult> {
   const now = Date.now();
   const queuedCutoff = new Date(now - olderThanMs);
   const analyzingCutoff = new Date(now - olderThanMs * ANALYZING_GRACE_FACTOR);
+  const isStuck = and(
+    isNull(quoteParts.deletedAt),
+    or(
+      and(eq(quoteParts.analysisStatus, "queued"), lt(quoteParts.updatedAt, queuedCutoff)),
+      and(eq(quoteParts.analysisStatus, "analyzing"), lt(quoteParts.updatedAt, analyzingCutoff))
+    )
+  );
+  /**
+   * Tur başına sınır: UPDATE'in kendisi LIMIT almaz, sınır en ESKİ dokunulandan
+   * başlayan bir alt sorgudan gelir (depodaki `claimReminders` deseni).
+   *
+   * Koşul UPDATE'in kendi WHERE'inde İKİNCİ kez kurulur ve bu bilinçlidir:
+   * postgres satırı kilitledikten sonra WHERE'i satırın YENİ hâline karşı
+   * yeniden değerlendirir, yani aynı anda koşan iki süpürme aynı parçayı iki kez
+   * saymaz (ikincisi tazelenmiş `updated_at`i görüp satırı atlar). Yalnız
+   * `id IN (…)` yazılsaydı sayaç iki kez artar ve iki iş eklenirdi.
+   */
+  const claim = (attemptBudget: SQLWrapper) =>
+    and(
+      isStuck,
+      attemptBudget,
+      inArray(
+        quoteParts.id,
+        db
+          .select({ id: quoteParts.id })
+          .from(quoteParts)
+          .where(and(isStuck, attemptBudget))
+          .orderBy(asc(quoteParts.updatedAt))
+          .limit(limit)
+      )
+    );
+  const exhausted = gte(quoteParts.analysisAttempt, MAX_ANALYSIS_ATTEMPTS);
+  const budgetLeft = lt(quoteParts.analysisAttempt, MAX_ANALYSIS_ATTEMPTS);
 
+  // 1. VAZGEÇ: sayacı tavana vurmuş takılı parçalar nihai olarak `failed`.
+  //    Sayaç ARTMAZ: artan sayaç "bir kez daha denedik" demek olurdu.
+  const givenUp = await db
+    .update(quoteParts)
+    .set({
+      analysisStatus: "failed",
+      analysisError: ANALYSIS_GIVE_UP_ERROR,
+      updatedAt: new Date(),
+    })
+    .where(claim(exhausted))
+    .returning({ id: quoteParts.id, quoteId: quoteParts.quoteId });
+
+  // 2. KURTAR: tavanın altındakiler `queued`'a döner ve işleri yeniden eklenir.
   const stuck = await db
     .update(quoteParts)
     .set({
@@ -278,21 +377,7 @@ export async function requeueStuckQuoteParts(olderThanMs: number): Promise<numbe
       analysisAttempt: sql`${quoteParts.analysisAttempt} + 1`,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        isNull(quoteParts.deletedAt),
-        or(
-          and(
-            eq(quoteParts.analysisStatus, "queued"),
-            lt(quoteParts.updatedAt, queuedCutoff)
-          ),
-          and(
-            eq(quoteParts.analysisStatus, "analyzing"),
-            lt(quoteParts.updatedAt, analyzingCutoff)
-          )
-        )
-      )
-    )
+    .where(claim(budgetLeft))
     // `RETURNING` güncellenmiş satırı verir: `attempt` zaten artmış değerdir.
     .returning({ id: quoteParts.id, attempt: quoteParts.analysisAttempt });
 
@@ -305,5 +390,44 @@ export async function requeueStuckQuoteParts(olderThanMs: number): Promise<numbe
       console.error(`[quote-analysis] ${part.id} yeniden kuyruğa alınamadı`, err);
     }
   }
-  return stuck.length;
+
+  // Analiz worker'ının kendi `failed` yolunda yaptığının aynısı: önbellek
+  // yenilenir, sonra ekranlara haber verilir. Atlanırsa müşterinin açık sayfası
+  // "inceleniyor" iskeletinde donar — parça artık asla ilerlemeyecekken.
+  await announceGiveUps(givenUp);
+
+  return { requeued: stuck.length, gaveUp: givenUp.length };
+}
+
+/** Vazgeçilen parçaların tekliflerini yeniden hesaplar ve ekranlara haber verir. */
+async function announceGiveUps(
+  parts: Array<{ id: string; quoteId: string }>
+): Promise<void> {
+  if (parts.length === 0) return;
+  const quoteIds = [...new Set(parts.map((p) => p.quoteId))];
+  const owners = new Map(
+    (
+      await db
+        .select({ id: quotes.id, userId: quotes.userId })
+        .from(quotes)
+        .where(inArray(quotes.id, quoteIds))
+    ).map((row) => [row.id, row.userId])
+  );
+  for (const quoteId of quoteIds) {
+    // Tek teklifin düşmesi kalanları düşürmesin: süpürme bir bakım turudur.
+    await recomputeQuoteCache(quoteId).catch((err) =>
+      console.error(`[quote-analysis] ${quoteId} önbelleği yenilenemedi`, err)
+    );
+  }
+  for (const part of parts) {
+    console.error(
+      `[quote-analysis] ${part.id} deneme tavanını aştı (${MAX_ANALYSIS_ATTEMPTS}) — failed`
+    );
+    emitQuotePartChanged({
+      quoteId: part.quoteId,
+      partId: part.id,
+      status: "failed",
+      userId: owners.get(part.quoteId) ?? null,
+    });
+  }
 }

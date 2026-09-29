@@ -41,6 +41,7 @@ import {
 import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
 import { computeQuote } from "@/lib/config/quote-compute";
 import { partPricingKey } from "@/lib/config/quote-keys";
+import { ANALYSIS_GIVE_UP_ERROR } from "@/lib/config/quote-types";
 import type {
   AdminQuoteListItem,
   AdminQuoteOutcome,
@@ -655,6 +656,11 @@ const ANALYSIS_ERROR_TEXT: Record<string, string> = {
   too_heavy:
     "Model bu makine için fazla ağır (yüz sayısı tavanın üstünde) — sadeleştirilmiş " +
     "bir dosya isteyin ya da manuel fiyat girin.",
+  // Bu kodu python değil KURTARMA SÜPÜRMESİ yazar: parça deneme tavanına vurdu
+  // (`quote-analysis.ts` MAX_ANALYSIS_ATTEMPTS) ve bir daha denenmeyecek.
+  [ANALYSIS_GIVE_UP_ERROR]:
+    "Analiz üst üste denendi ama hiç tamamlanamadı; deneme tavanına takıldı — " +
+    "müşteriden sadeleştirilmiş bir dosya isteyin ya da manuel fiyat girin.",
   unknown: "Analiz beklenmeyen bir hatayla düştü.",
 };
 

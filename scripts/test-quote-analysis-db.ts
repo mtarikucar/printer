@@ -112,8 +112,12 @@ async function main() {
 
     const { db } = await import("../src/lib/db");
     pool = (db as typeof db & { $client: pg.Pool }).$client;
-    const { analyzeQuotePart, requeueStuckQuoteParts } = await import(
+    const { analyzeQuotePart, requeueStuckQuoteParts, MAX_ANALYSIS_ATTEMPTS } = await import(
       "../src/lib/services/quote-analysis"
+    );
+    const { ANALYSIS_GIVE_UP_ERROR } = await import("../src/lib/config/quote-types");
+    const { STUCK_QUEUED_MS } = await import(
+      "../src/lib/queue/workers/quote-part-analysis.worker"
     );
     const { recomputeQuoteCache } = await import("../src/lib/services/quote-cache");
     const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
@@ -265,7 +269,7 @@ async function main() {
             updated_at = now() - interval '30 minutes' WHERE id = $1`,
         [stuck]
       );
-      assert.equal(await requeueStuckQuoteParts(10 * 60_000), 1);
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000), { requeued: 1, gaveUp: 0 });
       assert.equal((await rowOf(stuck)).analysis_status, "queued");
       assert.equal((await rowOf(stuck)).analysis_attempt, 2, "süpürme deneme sayacını artırdı");
       assert.equal((await rowOf(fresh)).analysis_status, "queued", "taze parça zaten sırada");
@@ -282,7 +286,7 @@ async function main() {
             updated_at = now() - interval '90 minutes' WHERE id = $1`,
         [ghost]
       );
-      assert.equal(await requeueStuckQuoteParts(10 * 60_000), 0);
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000), { requeued: 0, gaveUp: 0 });
       assert.equal((await rowOf(ghost)).analysis_status, "analyzing");
     });
 
@@ -295,7 +299,7 @@ async function main() {
         );
 
       await age();
-      assert.equal(await requeueStuckQuoteParts(10 * 60_000), 1);
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000), { requeued: 1, gaveUp: 0 });
       assert.equal((await rowOf(idle)).analysis_attempt, 1);
       assert.equal(
         (await queue.getJob(`quote-part-analysis-${idle}-r1`))?.data.partId,
@@ -308,13 +312,82 @@ async function main() {
       // ikinci tur yine `-r1` derdi, hiçbir iş eklenmezdi, ama süpürme yine
       // "1 kurtarıldı" derdi — parça sonsuza dek 'queued' kalırdı.
       await age();
-      assert.equal(await requeueStuckQuoteParts(10 * 60_000), 1);
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000), { requeued: 1, gaveUp: 0 });
       assert.equal((await rowOf(idle)).analysis_attempt, 2);
       assert.equal(
         (await queue.getJob(`quote-part-analysis-${idle}-r2`))?.data.partId,
         idle,
         "ikinci tur YENİ kimlikle iş ekledi"
       );
+    });
+
+    await test("deneme tavanını aşan parça failed olur, sonsuza dek denenmez", async () => {
+      // Sürekli çöken parçanın döngüsü: worker işi alır, python'un altında ölür,
+      // kilit düşer, süpürme `queued`a geri alır, yeniden çöker… Tavan olmasaydı
+      // bu döngü sonsuza kadar sürer, müşteri de fiyatını sonsuza dek beklerdi.
+      const doomed = await makePart("scripts/fixtures/quote/cube20.stl");
+      await admin.query(
+        `UPDATE quote_parts SET analysis_status='analyzing', analysis_attempt=$2,
+            updated_at = now() - interval '600 minutes' WHERE id = $1`,
+        [doomed, MAX_ANALYSIS_ATTEMPTS]
+      );
+
+      const swept = await requeueStuckQuoteParts(10 * 60_000);
+      assert.deepEqual(swept, { requeued: 0, gaveUp: 1 }, "tavanı aşan parça kurtarılmaz");
+      const row = await rowOf(doomed);
+      assert.equal(row.analysis_status, "failed", "vazgeçilen parça NİHAİ durumda");
+      assert.equal(row.analysis_error, ANALYSIS_GIVE_UP_ERROR);
+      assert.equal(row.analysis_attempt, MAX_ANALYSIS_ATTEMPTS, "vazgeçince sayaç artmaz");
+      assert.equal(
+        await queue.getJob(`quote-part-analysis-${doomed}-r${MAX_ANALYSIS_ATTEMPTS + 1}`),
+        undefined,
+        "tavanı aşan parça için YENİ iş eklenmedi"
+      );
+      // İkinci tur onu bir daha almaz: `failed` süpürmenin hedefi değil.
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000), { requeued: 0, gaveUp: 0 });
+
+      // Müşteri ne yapacağını bilmeli. `failed` parçanın DfM kodu
+      // `analysis_failed` (scripts/test-quote-core.ts kanıtlıyor), cümlesi de
+      // sözlükte duruyor — kod müşteriye hiç gitmez.
+      const { default: tr } = await import("../src/lib/i18n/dictionaries/tr");
+      assert.match(tr["instantQuote.dfm.analysis_failed"], /yeniden yükle/i);
+    });
+
+    await test("vazgeçme ufku, concurrency 1'deki en kötü MEŞRU kuyruktan uzun", async () => {
+      // Süpürme her kurtarmada `updated_at`i tazeliyor: bir parça tavanı ancak
+      // ≈ tavan × eşik kadar süre HİÇ ilerlemedikten sonra tüketebilir. Bu ufuk
+      // meşru en kötü beklemenin ÜSTÜNDE olmalı, yoksa yirmi parçalık bir
+      // yüklemenin son parçası yalnızca sırası gelmediği için `failed` yazılırdı.
+      // En kötü meşru bekleme: 19 parça × (5 dk python tavanı × 2 kuyruk denemesi).
+      const worstPartMs = 2 * 5 * 60_000;
+      const worstLegitimateWaitMs = 19 * worstPartMs;
+      assert.ok(
+        MAX_ANALYSIS_ATTEMPTS * STUCK_QUEUED_MS > worstLegitimateWaitMs,
+        `ufuk ${MAX_ANALYSIS_ATTEMPTS * STUCK_QUEUED_MS} ms, meşru bekleme ${worstLegitimateWaitMs} ms`
+      );
+      // Eşiğin kendisi tek bir meşru analizden uzun olmalı: aksi hâlde süpürme
+      // meşgul bir kuyrukta çalışan işin üstüne ikinci bir iş eklerdi.
+      assert.ok(STUCK_QUEUED_MS > worstPartMs, `eşik ${STUCK_QUEUED_MS} ms`);
+    });
+
+    await test("bir süpürme en çok verilen kadar parça alır: en eskiler önce", async () => {
+      // LIMIT'siz süpürme, biriken bir artıkta tek turda binlerce iş eklerdi.
+      const older = await makePart("scripts/fixtures/quote/cube20.stl");
+      const newer = await makePart("scripts/fixtures/quote/cube20.stl");
+      await admin.query(
+        `UPDATE quote_parts SET updated_at = now() - interval '90 minutes' WHERE id = $1`,
+        [older]
+      );
+      await admin.query(
+        `UPDATE quote_parts SET updated_at = now() - interval '30 minutes' WHERE id = $1`,
+        [newer]
+      );
+
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000, 1), { requeued: 1, gaveUp: 0 });
+      assert.equal((await rowOf(older)).analysis_attempt, 1, "en eski parça önce alınır");
+      assert.equal((await rowOf(newer)).analysis_attempt, 0, "sınırın dışında kalan beklemede");
+      assert.deepEqual(await requeueStuckQuoteParts(10 * 60_000, 1), { requeued: 1, gaveUp: 0 });
+      assert.equal((await rowOf(newer)).analysis_attempt, 1, "kalanı bir sonraki tur alır");
     });
 
     // Kayıp güncelleme tuzağı: yeniden hesap PARÇALARI kilidi ALDIKTAN SONRA

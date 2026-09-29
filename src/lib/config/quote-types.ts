@@ -35,6 +35,17 @@ export type ReviewKind = (typeof REVIEW_KINDS)[number];
 export const ANALYSIS_STATUSES = ["queued", "analyzing", "ready", "failed"] as const;
 export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
 
+/**
+ * `quote_parts.analysis_error` kodu: kurtarma süpürmesi deneme tavanına vurduğu
+ * için VAZGEÇTİ (parçanın işi hiç tamamlanamadı).
+ *
+ * Öteki kodlar python'un/çalıştırıcının hatalarıdır (`MeshProcessError.code`);
+ * bu tek kodu süpürmenin kendisi yazar. Kolon müşteriye GİTMEZ — müşteri
+ * `failed` parçanın DfM cümlesini (`instantQuote.dfm.analysis_failed`) görür,
+ * admin ise bu kodun Türkçe karşılığını (`quote-admin.ts`).
+ */
+export const ANALYSIS_GIVE_UP_ERROR = "stuck_retry_limit";
+
 export const QUOTE_SOURCE_FORMATS = ["stl", "obj", "3mf"] as const;
 export type QuoteSourceFormat = (typeof QUOTE_SOURCE_FORMATS)[number];
 

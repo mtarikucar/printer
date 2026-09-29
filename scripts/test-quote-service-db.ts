@@ -100,9 +100,9 @@ async function main() {
     // GERÇEK migration'ların tohumu — şema `schema.ts`'ten, veri 0064'ten ve
     // ondan SONRAKİ veri migration'larından gelir. Sonrakileri de uygulamak
     // şart: yeni kurulumun gerçekte aldığı değer bu zincirin sonucudur, tek
-    // başına 0064 değil (ör. 0065 dosya sınırını 32 MB'tan 100 MB'a taşır).
-    // Zinciri atlayan bir test, tohum kaymasını kaçırır ki bu testin tek
-    // varlık sebebi odur.
+    // başına 0064 değil (ör. 0064'ün tohumladığı bir ayarı sonraki bir veri
+    // migration'ı değiştirirse gerçek değer onunkidir). Zinciri atlayan bir
+    // test, tohum kaymasını kaçırır ki bu testin tek varlık sebebi odur.
     const migration = fs.readFileSync(path.join(root, "drizzle/0064_instant_quotes.sql"), "utf8");
     const seedStatements = migration
       .split("--> statement-breakpoint")

@@ -69,12 +69,18 @@ So, at merge time:
 
 - `0064_instant_quotes` carries `when = 1789657000000`, deliberately placed **between** `0062`
   (`1789654507721`) and the other session's still-uncommitted `0063` (`1789657536377`), because
-  the instant-quote branch deploys **first**. Both orders then work: 0064 applies against the
-  0062 watermark, and a 0063 landing later still has a larger `when`.
-- **Any migration that lands after 0064 has been applied to production must carry a larger
-  `when`.** Do not hand-merge an old journal entry: re-run `npx drizzle-kit generate` so the
-  migration gets a fresh number (0065, 0066, …) and a fresh `when` from the clock, then move the
-  hand-written SQL into that file.
+  the instant-quote branch deploys **first**. 0064 therefore applies against the 0062 watermark.
+- **That placement no longer rescues the pending 0063.** The same branch now also carries
+  `0065_quote_files_attached_at` with `when = 1790686312063` — *above* 0063's `1789657536377`.
+  Once 0065 is applied the watermark is **`1790686312063`**, so a 0063 journal entry landing
+  afterwards would be skipped **silently and forever**. Before the other session's 0063 is
+  merged it must be **regenerated**: `npx drizzle-kit generate` for a fresh number (0066, …) and
+  a fresh `when` from the clock, then move its hand-written SQL into that new file. Do not merge
+  its existing journal entry, and do not lower 0065's `when` to make room — production may
+  already have recorded it.
+- **Any migration that lands after this branch has been applied to production must carry a
+  `when` larger than the highest already-applied one — today `1790686312063` (0065).** Same
+  recipe: never hand-merge an old journal entry, always re-generate.
 - Never lower a `when` that production has already recorded.
 
 ## Rolling back 0064 (instant quote engine)
@@ -151,8 +157,9 @@ audit rows. The rollback window closes on the first internal test, not on the fi
       live `users`, `orders` and `order_drafts` tables. A busy moment aborts the migration with
       `canceling statement due to lock timeout` and fails the deploy. The up is fully idempotent:
       re-run the deploy workflow and it completes.
-- [ ] Confirm no migration with a `when` below `1789657000000` is waiting to land (see
-      "Migration ordering" above).
+- [ ] Confirm no migration with a `when` below **`1790686312063`** — this branch's highest, 0065's
+      — is waiting to land. The other session's uncommitted `0063` (`1789657536377`) is exactly
+      such a migration: it must be regenerated, not merged as-is (see "Migration ordering" above).
 
 **After the deploy, before turning `instant_quote_enabled` on**
 
@@ -169,6 +176,13 @@ audit rows. The rollback window closes on the first internal test, not on the fi
 
 **Day-to-day**
 
-- [ ] **Do not use "Yanlış yüklemeyi sil" on a quote-backed order.** The quote file recovery
-      sweep re-bakes the order's files within 5 minutes, so the deletion silently undoes itself.
-      Ask the customer for a replacement revision (upload a new model revision) instead.
+- [ ] **"Yanlış yüklemeyi sil" on a quote-backed order is safe from 0065 on.** The recovery sweep
+      keys on `quotes.files_attached_at` (the one-way stamp 0065 adds), not on "the order has no
+      model files", so a deliberate deletion is no longer re-baked. **One-time exception:** an
+      order whose revision was deleted *before* 0065 was applied carries no stamp, so the first
+      sweep after the deploy re-bakes its files **once** and then stamps it. If such an order
+      exists, either re-delete the revision after the first sweep, or stamp it by hand before the
+      deploy (the deletion leaves an `admin_actions` note, so the candidates are findable):
+      `UPDATE quotes q SET files_attached_at = now() WHERE q.order_id IS NOT NULL AND q.files_attached_at IS NULL AND EXISTS (SELECT 1 FROM admin_actions a WHERE a.order_id = q.order_id AND a.notes LIKE '%sürüm silindi%');`
+      That query is deliberately **not** inside 0065: a backfill that reads a free-text audit note
+      would go silently wrong the day the note's wording changes.

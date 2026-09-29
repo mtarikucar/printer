@@ -10,7 +10,7 @@
  * NOT: `import "server-only"` YOK — BullMQ worker süreci bu modülü yükler.
  */
 import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import type { SQLWrapper } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { mkdtemp, copyFile, readFile, rm, access } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -38,8 +38,12 @@ const THUMBNAIL_QUALITY = 82;
  * Kurtarma süpürmesinde `analyzing` için tanınan süre, `queued` süresinin iki
  * katıdır: sırada bekleyen iş hiç başlamamıştır, çalışan iş python'un altında
  * olabilir ve onu boşuna iki kez çalıştırmak tek çekirdeği israf eder.
+ *
+ * Bu pencere aynı zamanda VAZGEÇMENİN kapısıdır (bkz. `requeueStuckQuoteParts`):
+ * meşru bir analiz python'un 5 dakikalık sert tavanını aşamaz, yani iki katlık
+ * pencere dolduğu hâlde hâlâ `analyzing` görünen satır, altında ölmüş bir iştir.
  */
-const ANALYZING_GRACE_FACTOR = 2;
+export const ANALYZING_GRACE_FACTOR = 2;
 
 /** Kurtarma yeniden kuyruğa alırken taze müşteri yüklemesinin arkasına geçer. */
 const RECOVERY_PRIORITY = 10;
@@ -59,19 +63,28 @@ export const STUCK_SWEEP_BATCH = 50;
 /**
  * Kaçıncı denemeden sonra parçadan VAZGEÇİLİR.
  *
+ * TAVAN YALNIZ `analyzing`DE TAKILAN PARÇAYA UYGULANIR (bkz.
+ * `requeueStuckQuoteParts`): orada bir worker parçayı gerçekten açmış ve altında
+ * ölmüştür, yani delil parçanın kendisindedir. Sırada (`queued`) bekleyen parça
+ * sayaç ne olursa olsun yeniden kuyruğa alınır — orada ölçülen şey parçanın
+ * sağlığı değil KUYRUĞUN UZUNLUĞUDUR ve onu hiçbir şey sınırlamaz.
+ *
  * Sayaç (`analysis_attempt`) iki yerde artar: iş parçayı üstlendiğinde ve
- * süpürme onu geri kuyruğa aldığında. Yani sürekli çöken bir parça her turda
- * iki adım ilerler; hiç başlamayan (Redis'in unuttuğu) bir parça bir adım.
+ * süpürme onu geri kuyruğa aldığında. Sürekli çöken bir parça her çökme turunda
+ * iki adım ilerler (worker açar + süpürme kurtarır), yani tavana ~6 turda, yani
+ * ≈ 6 × `ANALYZING_GRACE_FACTOR` × `STUCK_QUEUED_MS` = 6 saatte varır.
  *
  * Tavan olmasaydı python'u her seferinde öldüren bir dosya sonsuza dek yeniden
  * denenirdi: tek çekirdek boşa dönerdi ve müşteri "inceleniyor" ekranında
  * sonsuza dek beklerdi. `failed` demek, hiç cevap vermemekten iyidir — müşteri
  * yeni bir dosya yükleyebilir, admin manuel fiyat girebilir.
  *
- * Değer `STUCK_QUEUED_MS` ile birlikte okunur (bkz. o sabitin gerekçesi):
- * vazgeçme ufku ≈ tavan × eşik ve bu ufuk, concurrency 1'de MEŞRU en kötü
- * bekleme süresinden (yirmi parçalık bir yüklemenin son parçası) uzun olmalı.
- * 10 × 30 dk = 5 saat > 19 × 10 dk ≈ 3,2 saat.
+ * BİLİNEN ARTIK: sayaç TEKTİR ve monoton artar, çünkü iş kimliği sözleşmesi
+ * (`…-r<deneme>`) ona bağlıdır ve sıfırlanamaz. Bu yüzden uzun bir kuyrukta
+ * beklemek de bütçeyi tüketir: saatlerce bekleyip SONRA bir kez çöken parça, tek
+ * gerçek çökmeden sonra vazgeçilebilir. Artığı tamamen kaldırmak ikinci bir
+ * sayaç kolonu (yeni migration) ister; kapı `analyzing`e daraltıldığı için
+ * kalan durum "worker gerçekten açtı ve öldü"dür, "hiç açılmadı" değil.
  */
 export const MAX_ANALYSIS_ATTEMPTS = 10;
 
@@ -290,12 +303,30 @@ export async function analyzeQuotePart(
 }
 
 /**
- * Takılan parçaları yeniden kuyruğa alır; tavanı aşanlardan vazgeçer.
+ * Takılan parçaları yeniden kuyruğa alır; İŞİNİ ALTINDA ÖLDÜREN parçadan vazgeçer.
  *
- * İki takılma biçimi vardır ve ikisi de Redis'in unutkanlığındandır: iş hiç
- * eklenememiş (`queued`, kimse almadı) ya da worker işi aldıktan sonra ölmüş
- * (`analyzing`, kilit düştü). Süpürme durumu `queued`'a geri alır ve İŞİ
- * YENİDEN EKLER.
+ * İki takılma biçimi vardır ve AYRI ele alınırlar, çünkü taşıdıkları delil
+ * farklıdır:
+ *
+ * 1. **`queued` + eskimiş** — iş hiç başlamadı. Bunun İKİ sebebi olabilir ve
+ *    veritabanından ayırt EDİLEMEZ: Redis işi düşürdü, ya da kuyruk uzun ve
+ *    parçanın sırası gelmedi. Kuyruğun KÜRESEL uzunluğunu hiçbir şey
+ *    sınırlamaz — `maxPartsPerQuote` tek bir yüklemeyi sınırlar, aynı anda kaç
+ *    müşterinin yüklediğini değil; bir kesinti sonrası artık da buraya birikir —
+ *    yani "uzun süredir sırada" tek başına parça hakkında HİÇBİR ŞEY söylemez.
+ *    Bu dalda bu yüzden VAZGEÇME YOKTUR: parça sayacı ne olursa olsun yeniden
+ *    kuyruğa alınır. Yanılmanın bedeli ucuzdur (fazladan iş parçayı `queued`
+ *    bulamayıp `"skipped"` döner); vazgeçmenin bedeli onarılamaz: okunabilir bir
+ *    dosyaya "Dosya okunamadı" yazılır, teklif fiyatlanamaz ve
+ *    `analysis_attempt`i sıfırlayan tek bir yol bile yoktur.
+ * 2. **`analyzing` + eskimiş** (`ANALYZING_GRACE_FACTOR` katı pencere) — iş
+ *    BAŞLADI ve worker altında öldü. Meşru bir analiz bu kadar süremez
+ *    (python'un sert tavanı 5 dk, sonra SIGKILL), yani burada delil parçanın
+ *    kendisindedir. W5'in hedeflediği "işini her seferinde öldüren dosya" YALNIZ
+ *    bu dalda görünür, bu yüzden `MAX_ANALYSIS_ATTEMPTS` tavanı YALNIZ buraya
+ *    uygulanır.
+ *
+ * Her iki dalda da süpürme durumu `queued`'a geri alır ve İŞİ YENİDEN EKLER.
  *
  * DENEME SAYACI BURADA DA ARTAR, ve bu süpürmenin işe yaramasının tek
  * koşuludur: iş kimliği `…-r<deneme>`dir, bullmq aynı özel kimlikle ikinci bir
@@ -303,13 +334,15 @@ export async function analyzeQuotePart(
  * `removeOnFail: {count:500}` yüzünden eski kimlik haftalarca Redis'te durur.
  * Sayaç artmasaydı `queued`'da takılan bir parça her turda aynı kimliğe
  * eklenir, hiç çalışmaz, ama süpürme "kurtarıldı" diye sayardı: müşteri
- * fiyatını sonsuza dek beklerdi. Artan sayaç her tura yeni bir kimlik verir.
+ * fiyatını sonsuza dek beklerdi. Artan sayaç her tura yeni bir kimlik verir —
+ * sayaç tavanın ÜSTÜNDE olsa bile (bekleyen parça için tavan diye bir şey yok).
  *
- * VAZGEÇME aynı sayacın öteki yüzüdür: `MAX_ANALYSIS_ATTEMPTS`e ulaşmış parça
- * yeniden denenmez, `failed` yazılır (`analysis_error = stuck_retry_limit`).
- * Yoksa python'u her çalıştırmada öldüren bir dosya tek çekirdeği sonsuza dek
- * meşgul eder ve müşteri hiç cevap alamazdı. Vazgeçilen parça müşteriye
- * "dosya okunamadı, yeniden yükleyin" olarak görünür (DfM `analysis_failed`).
+ * VAZGEÇME aynı sayacın öteki yüzüdür: `analyzing`de takılmış ve
+ * `MAX_ANALYSIS_ATTEMPTS`e ulaşmış parça yeniden denenmez, `failed` yazılır
+ * (`analysis_error = stuck_retry_limit`). Yoksa python'u her çalıştırmada
+ * öldüren bir dosya tek çekirdeği sonsuza dek meşgul eder ve müşteri hiç cevap
+ * alamazdı. Vazgeçilen parça müşteriye "dosya okunamadı, yeniden yükleyin"
+ * olarak görünür (DfM `analysis_failed`).
  *
  * `limit` bir turda ele alınan parça sayısını sınırlar ve en ESKİ dokunulandan
  * başlar: sınırın dışında kalan bir sonraki turun başına geçer. İki dal sınırı
@@ -323,12 +356,18 @@ export async function requeueStuckQuoteParts(
   const now = Date.now();
   const queuedCutoff = new Date(now - olderThanMs);
   const analyzingCutoff = new Date(now - olderThanMs * ANALYZING_GRACE_FACTOR);
-  const isStuck = and(
-    isNull(quoteParts.deletedAt),
-    or(
-      and(eq(quoteParts.analysisStatus, "queued"), lt(quoteParts.updatedAt, queuedCutoff)),
-      and(eq(quoteParts.analysisStatus, "analyzing"), lt(quoteParts.updatedAt, analyzingCutoff))
-    )
+  const alive = isNull(quoteParts.deletedAt);
+  /** Sırada unutulmuş VEYA sırası gelmemiş: ikisi ayırt edilemez (§1). */
+  const stuckQueued = and(
+    alive,
+    eq(quoteParts.analysisStatus, "queued"),
+    lt(quoteParts.updatedAt, queuedCutoff)
+  );
+  /** İş başladı ve worker öldü: parçanın kendisi delil (§2). */
+  const stuckAnalyzing = and(
+    alive,
+    eq(quoteParts.analysisStatus, "analyzing"),
+    lt(quoteParts.updatedAt, analyzingCutoff)
   );
   /**
    * Tur başına sınır: UPDATE'in kendisi LIMIT almaz, sınır en ESKİ dokunulandan
@@ -340,24 +379,32 @@ export async function requeueStuckQuoteParts(
    * saymaz (ikincisi tazelenmiş `updated_at`i görüp satırı atlar). Yalnız
    * `id IN (…)` yazılsaydı sayaç iki kez artar ve iki iş eklenirdi.
    */
-  const claim = (attemptBudget: SQLWrapper) =>
+  const claim = (target: SQL | undefined) =>
     and(
-      isStuck,
-      attemptBudget,
+      target,
       inArray(
         quoteParts.id,
         db
           .select({ id: quoteParts.id })
           .from(quoteParts)
-          .where(and(isStuck, attemptBudget))
+          .where(target)
           .orderBy(asc(quoteParts.updatedAt))
           .limit(limit)
       )
     );
-  const exhausted = gte(quoteParts.analysisAttempt, MAX_ANALYSIS_ATTEMPTS);
-  const budgetLeft = lt(quoteParts.analysisAttempt, MAX_ANALYSIS_ATTEMPTS);
+  // Vazgeçme kapısı: YALNIZ `analyzing` dalı + tükenmiş bütçe. Kurtarma kapısı:
+  // bekleyen her parça (bütçesizdir) + bütçesi kalan çökmüş parça. İkisi
+  // kesişmez, yani sıralama bir yarış yaratmaz.
+  const giveUpTarget = and(
+    stuckAnalyzing,
+    gte(quoteParts.analysisAttempt, MAX_ANALYSIS_ATTEMPTS)
+  );
+  const rescueTarget = or(
+    stuckQueued,
+    and(stuckAnalyzing, lt(quoteParts.analysisAttempt, MAX_ANALYSIS_ATTEMPTS))
+  );
 
-  // 1. VAZGEÇ: sayacı tavana vurmuş takılı parçalar nihai olarak `failed`.
+  // 1. VAZGEÇ: işi altında ölmüş ve sayacı tavana vurmuş parçalar nihai `failed`.
   //    Sayaç ARTMAZ: artan sayaç "bir kez daha denedik" demek olurdu.
   const givenUp = await db
     .update(quoteParts)
@@ -366,10 +413,10 @@ export async function requeueStuckQuoteParts(
       analysisError: ANALYSIS_GIVE_UP_ERROR,
       updatedAt: new Date(),
     })
-    .where(claim(exhausted))
+    .where(claim(giveUpTarget))
     .returning({ id: quoteParts.id, quoteId: quoteParts.quoteId });
 
-  // 2. KURTAR: tavanın altındakiler `queued`'a döner ve işleri yeniden eklenir.
+  // 2. KURTAR: kalanlar `queued`'a döner ve işleri yeniden eklenir.
   const stuck = await db
     .update(quoteParts)
     .set({
@@ -377,7 +424,7 @@ export async function requeueStuckQuoteParts(
       analysisAttempt: sql`${quoteParts.analysisAttempt} + 1`,
       updatedAt: new Date(),
     })
-    .where(claim(budgetLeft))
+    .where(claim(rescueTarget))
     // `RETURNING` güncellenmiş satırı verir: `attempt` zaten artmış değerdir.
     .returning({ id: quoteParts.id, attempt: quoteParts.analysisAttempt });
 

@@ -15,22 +15,31 @@ import { QUOTE_ANALYSIS_QUEUE, type QuotePartAnalysisJob } from "../quote-queues
 import { analyzeQuotePart, requeueStuckQuoteParts } from "../../services/quote-analysis";
 
 /**
- * `queued` bu süreyi aşarsa takılmış sayılır (`analyzing` iki katında).
+ * `queued` bu süreyi aşarsa süpürme işi YENİDEN EKLER (`analyzing` iki katında).
  *
- * ÖLÇÜ, CONCURRENCY 1'DEKİ EN KÖTÜ MEŞRU BEKLEME SÜRESİDİR. Tek bir parça bu
- * worker'ı en çok ~10 dakika meşgul edebilir: python'un sert tavanı 5 dakika
- * (`mesh-runner` ANALYZE_TIMEOUT_MS, sonra SIGKILL) ve kuyruk varsayılanı işi
- * bir kez daha deniyor (`quote-queues` `attempts: 2`). Bir müşterinin tek
- * yüklemesi en çok `maxPartsPerQuote` (tohum: 20) parça açabildiği için, o
- * yüklemenin SON parçası önündeki 19 parçayı beklerken 3 saati aşabilir —
- * hepsi meşrudur, hiçbiri takılmış değildir.
+ * EŞİK BİR CEZA DEĞİL, BİR TAHMİNDİR: "bu işi Redis düşürmüş olabilir". Yanlış
+ * tahminin bedeli ucuzdur — parça gerçekten sırada bekliyorsa eklenen kopya iş
+ * onu `queued` bulamaz ve `"skipped"` döner. Sırada bekleyen parçadan ASLA
+ * vazgeçilmez (`requeueStuckQuoteParts`, 1. dal), yani eşik kuyruğun KÜRESEL
+ * uzunluğuyla ilgili hiçbir varsayım yapmak zorunda değildir: iki müşteri aynı
+ * anda yirmişer parça yüklese ya da bir kesinti sonrası yüzlerce parça birikse
+ * de sonuç yalnız "bir tur fazladan kopya iş"tir, veri kaybı değil.
  *
- * Eşik bu yüzden İKİ yönlü seçildi: tek bir uzun analizi "takılmış" saymayacak
- * kadar büyük (10 dakikanın 3 katı; eski 10 dakikalık değer, sırada bekleyen
- * her parçayı meşgul bir kuyrukta boşuna yeniden kuyruğa alıyordu), ama
- * Redis'in gerçekten düşürdüğü bir işi müşteri sayfayı kapatmadan kurtaracak
- * kadar küçük. Meşru uzun kuyruğu vazgeçmeden korumak eşiğin değil TAVANIN işi:
- * vazgeçme ufku ≈ `MAX_ANALYSIS_ATTEMPTS` × bu değer = 5 saat > 3,2 saat.
+ * Değer bu yüzden tek bir ölçüye göre seçilir: ÇALIŞAN MEŞRU BİR İŞİN ÜSTÜNE
+ * KOPYA EKLEMEMEK. Tek bir parça bu worker'ı en çok ~10 dakika meşgul edebilir —
+ * python'un sert tavanı 5 dakika (`mesh-runner` ANALYZE_TIMEOUT_MS, sonra
+ * SIGKILL) × kuyruğun `attempts: 2` varsayılanı (`quote-queues`). 30 dakika
+ * bunun üç katıdır. Eski 10 dakikalık değer bu tek ölçüyü bile karşılamıyordu:
+ * meşgul bir kuyrukta sıradaki HER parçaya her turda bir kopya iş üretiyordu.
+ * Üst sınırı ise "kaybolan işi müşteri sayfayı kapatmadan kurtar" koyar; kabul
+ * edilen takas, gerçekten düşmüş bir işin kurtarılmasının ≤15 dk yerine ≤35 dk
+ * sürmesidir.
+ *
+ * `analyzing` için tanınan süre bunun İKİ katıdır (`ANALYZING_GRACE_FACTOR`,
+ * 60 dk) ve VAZGEÇMENİN kapısı odur: meşru bir analiz 5 dakikayı aşamadığı için
+ * 60 dakikadır `analyzing` görünen satır, altında ölmüş bir iştir. Vazgeçme ufku
+ * (`MAX_ANALYSIS_ATTEMPTS` × bu pencere ≈ 6 saat) böylece yalnız ÇÖKME turlarını
+ * sayar, kuyrukta geçen süreyi değil.
  */
 export const STUCK_QUEUED_MS = 30 * 60_000;
 

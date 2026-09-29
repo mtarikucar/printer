@@ -112,9 +112,12 @@ async function main() {
 
     const { db } = await import("../src/lib/db");
     pool = (db as typeof db & { $client: pg.Pool }).$client;
-    const { analyzeQuotePart, requeueStuckQuoteParts, MAX_ANALYSIS_ATTEMPTS } = await import(
-      "../src/lib/services/quote-analysis"
-    );
+    const {
+      analyzeQuotePart,
+      requeueStuckQuoteParts,
+      MAX_ANALYSIS_ATTEMPTS,
+      ANALYZING_GRACE_FACTOR,
+    } = await import("../src/lib/services/quote-analysis");
     const { ANALYSIS_GIVE_UP_ERROR } = await import("../src/lib/config/quote-types");
     const { STUCK_QUEUED_MS } = await import(
       "../src/lib/queue/workers/quote-part-analysis.worker"
@@ -326,12 +329,24 @@ async function main() {
       // kilit düşer, süpürme `queued`a geri alır, yeniden çöker… Tavan olmasaydı
       // bu döngü sonsuza kadar sürer, müşteri de fiyatını sonsuza dek beklerdi.
       const doomed = await makePart("scripts/fixtures/quote/cube20.stl");
+      // ÖNCE: `analyzing` penceresi (eşiğin iki katı = 20 dk) DOLMADAN tavan
+      // tek başına vazgeçirmez — worker hâlâ python'un altında olabilir.
       await admin.query(
         `UPDATE quote_parts SET analysis_status='analyzing', analysis_attempt=$2,
-            updated_at = now() - interval '600 minutes' WHERE id = $1`,
+            updated_at = now() - interval '15 minutes' WHERE id = $1`,
         [doomed, MAX_ANALYSIS_ATTEMPTS]
       );
+      assert.deepEqual(
+        await requeueStuckQuoteParts(10 * 60_000),
+        { requeued: 0, gaveUp: 0 },
+        "pencere dolmadan vazgeçilmez"
+      );
+      assert.equal((await rowOf(doomed)).analysis_status, "analyzing");
 
+      await admin.query(
+        `UPDATE quote_parts SET updated_at = now() - interval '600 minutes' WHERE id = $1`,
+        [doomed]
+      );
       const swept = await requeueStuckQuoteParts(10 * 60_000);
       assert.deepEqual(swept, { requeued: 0, gaveUp: 1 }, "tavanı aşan parça kurtarılmaz");
       const row = await rowOf(doomed);
@@ -353,21 +368,62 @@ async function main() {
       assert.match(tr["instantQuote.dfm.analysis_failed"], /yeniden yükle/i);
     });
 
-    await test("vazgeçme ufku, concurrency 1'deki en kötü MEŞRU kuyruktan uzun", async () => {
-      // Süpürme her kurtarmada `updated_at`i tazeliyor: bir parça tavanı ancak
-      // ≈ tavan × eşik kadar süre HİÇ ilerlemedikten sonra tüketebilir. Bu ufuk
-      // meşru en kötü beklemenin ÜSTÜNDE olmalı, yoksa yirmi parçalık bir
-      // yüklemenin son parçası yalnızca sırası gelmediği için `failed` yazılırdı.
-      // En kötü meşru bekleme: 19 parça × (5 dk python tavanı × 2 kuyruk denemesi).
-      const worstPartMs = 2 * 5 * 60_000;
-      const worstLegitimateWaitMs = 19 * worstPartMs;
-      assert.ok(
-        MAX_ANALYSIS_ATTEMPTS * STUCK_QUEUED_MS > worstLegitimateWaitMs,
-        `ufuk ${MAX_ANALYSIS_ATTEMPTS * STUCK_QUEUED_MS} ms, meşru bekleme ${worstLegitimateWaitMs} ms`
+    await test("kuyrukta bekleyen parça, sayacı ne olursa olsun VAZGEÇİLMEZ", async () => {
+      // İncelemenin bulduğu hata buydu: tavan, hiç açılmamış — yalnızca sırası
+      // gelmemiş — parçayı da sayıyordu. Kuyruğun KÜRESEL uzunluğunu hiçbir şey
+      // sınırlamaz (`maxPartsPerQuote` tek yüklemeyi sınırlar, aynı anda kaç
+      // müşterinin yüklediğini değil), yani bu senaryo tek bir yüklemenin
+      // ÖTESİNDEDİR: burada bir yüklemenin taşıyabileceğinden fazla parça,
+      // tavanın çok üstünde sayaçlarla ve 10 saat beklemiş olarak sırada duruyor.
+      // Eski davranış hepsine `failed` + "Dosya okunamadı" yazardı.
+      const backlog: string[] = [];
+      for (let i = 0; i < 25; i++) backlog.push(await makePart(stlBox(20, 20, 20)));
+      await admin.query(
+        `UPDATE quote_parts SET analysis_status='queued', analysis_attempt=$2,
+            updated_at = now() - interval '600 minutes' WHERE id = ANY($1)`,
+        [backlog, MAX_ANALYSIS_ATTEMPTS + 5]
       );
-      // Eşiğin kendisi tek bir meşru analizden uzun olmalı: aksi hâlde süpürme
-      // meşgul bir kuyrukta çalışan işin üstüne ikinci bir iş eklerdi.
+
+      const swept = await requeueStuckQuoteParts(10 * 60_000, backlog.length);
+      assert.deepEqual(
+        swept,
+        { requeued: backlog.length, gaveUp: 0 },
+        "bekleyen parçaların HEPSİ kurtarılır, hiçbirinden vazgeçilmez"
+      );
+      for (const id of backlog) {
+        const row = await rowOf(id);
+        assert.equal(row.analysis_status, "queued", "parça sırada kaldı");
+        assert.equal(row.analysis_error, null, "okunabilir dosyaya hata yazılmadı");
+        assert.equal(
+          row.analysis_attempt,
+          MAX_ANALYSIS_ATTEMPTS + 6,
+          "sayaç tavanın üstünde olsa da artar: her turda TAZE iş kimliği"
+        );
+      }
+      // Tavanın üstündeki sayaçla GERÇEKTEN iş eklendi: kurtarma bir sayma
+      // egzersizi değil.
+      assert.equal(
+        (await queue.getJob(`quote-part-analysis-${backlog[0]}-r${MAX_ANALYSIS_ATTEMPTS + 6}`))
+          ?.data.partId,
+        backlog[0]
+      );
+    });
+
+    await test("eşikler tek bir MEŞRU analizi 'takılmış' saymaz", async () => {
+      // Eşiğin tek ölçüsü: concurrency 1'de tek bir parçanın worker'ı meşgul
+      // edebileceği en uzun MEŞRU süre — python'un 5 dk'lık sert tavanı
+      // (`mesh-runner` ANALYZE_TIMEOUT_MS) × kuyruğun `attempts: 2` varsayılanı.
+      // Kuyruğun uzunluğu artık bu karara GİRMEZ: bekleyen parçadan vazgeçilmiyor
+      // (bir üstteki test), yani ufuk kuyruk derinliğine karşı savunulmak zorunda
+      // değil.
+      const worstPartMs = 2 * 5 * 60_000;
       assert.ok(STUCK_QUEUED_MS > worstPartMs, `eşik ${STUCK_QUEUED_MS} ms`);
+      // Vazgeçme kapısı `analyzing` penceresidir; o pencere de aynı süreden
+      // uzun olmalı, yoksa çalışan meşru bir analiz `failed` yazılabilirdi.
+      assert.ok(
+        STUCK_QUEUED_MS * ANALYZING_GRACE_FACTOR > worstPartMs,
+        `analyzing penceresi ${STUCK_QUEUED_MS * ANALYZING_GRACE_FACTOR} ms`
+      );
     });
 
     await test("bir süpürme en çok verilen kadar parça alır: en eskiler önce", async () => {

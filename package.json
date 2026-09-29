@@ -137,6 +137,7 @@
     "test:quote-maintenance:db": "npx tsx scripts/test-quote-maintenance-db.ts",
     "test:quote-ui": "npx tsx scripts/test-quote-ui.ts",
     "test:quote-admin-catalog": "npx tsx scripts/test-quote-admin-catalog.ts",
+    "test:quote-admin-catalog:db": "npx tsx scripts/test-quote-admin-catalog-db.ts",
     "test:quote-admin": "npx tsx scripts/test-quote-admin.ts",
     "test:auth-fixes": "npx tsx scripts/test-auth-fixes.ts",
     "test:quote-cutover": "npx tsx scripts/test-quote-cutover.ts"

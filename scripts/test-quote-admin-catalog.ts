@@ -32,6 +32,7 @@ import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import type { PartGeometry, PricingPartInput } from "../src/lib/config/quote-types";
 import {
   addonCreateSchema,
+  CATALOG_LIMITS,
   finishCreateSchema,
   firstIssueMessage,
   materialCreateSchema,
@@ -875,6 +876,110 @@ async function main() {
       /value=\{color\.surcharge\}/.test(client),
       "renk ek ücreti ham metin taslağına bağlı olmalı"
     );
+  });
+
+  /**
+   * Katalog ekranı okuma arızasını GÜNLÜĞE yazmalı ve HAM mesajı basmamalı.
+   *
+   * Panel kabuğundaki `displayRead` deseni: arıza yutulmaz (etiketiyle günlüğe
+   * geçer) ama ekrana çıkan cümle yalnız BEKLENEN retlerin kendi Türkçe
+   * cümlesidir. Ham `message` (bağlantı dizgisi, SQL parçası) yöneticinin
+   * ekranına ait değildir ve hiç loglanmayan bir arıza sunucuda iz bırakmaz.
+   */
+  await test("katalog ekranı okuma arızasını loglar, ham mesajı basmaz", () => {
+    const page = readFileSync(
+      path.join(import.meta.dirname, "..", "src/app/admin/baski-katalogu/page.tsx"),
+      "utf8"
+    );
+    assert.match(page, /console\.error\(/, "okuma arızası günlüğe yazılmıyor");
+    assert.match(page, /ADMIN_READ_FAILED_ERROR/, "beklenmeyen arıza için ev cümlesi yok");
+    assert.ok(
+      !/e instanceof Error \? e\.message/.test(page),
+      "her hatanın ham mesajı ekrana basılıyor"
+    );
+  });
+
+  /**
+   * Bayrak ekranı grupları `FLAG_KEY_GROUPS`tan TÜRETMELİ.
+   *
+   * Elle yazılmış bir grup listesi, dördüncü bir grup eklendiği gün o grubun
+   * ekranda hiç görünmemesi demekti; görünmeyen bir anahtar ise kimsenin
+   * açamadığı bir özelliktir. Sıra tercihi kalabilir, KAYNAK kalamaz.
+   */
+  await test("bayrak ekranı grup listesini FLAG_KEY_GROUPS'tan türetiyor", () => {
+    const client = readFileSync(
+      path.join(import.meta.dirname, "..", "src/app/admin/ayarlar/flags-client.tsx"),
+      "utf8"
+    );
+    assert.match(
+      client,
+      /Object\.keys\(FLAG_KEY_GROUPS\)/,
+      "grup listesi FLAG_KEY_GROUPS'tan türetilmiyor"
+    );
+    const order = /const GROUP_ORDER[^=]*=\s*\[([\s\S]*?)\];/.exec(client);
+    assert.ok(order, "GROUP_ORDER bulunamadı");
+    assert.match(
+      order[1]!,
+      /Object\.keys\(FLAG_KEY_GROUPS\)/,
+      "GROUP_ORDER elle yazılmış bir listeyle sınırlı"
+    );
+  });
+
+  /**
+   * Veritabanı kısıtları (migration 0066) ile `CATALOG_LIMITS` AYNI sayıları
+   * söylemeli.
+   *
+   * Kısıtlar savunma derinliğidir, zod'un yerine geçmez; ama veritabanı zod'dan
+   * DAHA DAR olursa panelin kabul ettiği bir değer kaydedilemez ve yönetici
+   * beklenmeyen bir 500 görür. Sayılar iki dosyada ayrı durduğu için (şema
+   * dosyası zod'u içe aktaramaz: drizzle-kit `@/` takma adını çözemez) eşitlik
+   * burada KAYNAK üzerinden sınanır. Davranışın kendisi
+   * `scripts/test-quote-admin-catalog-db.ts`te gerçek satırlarla koşar.
+   */
+  await test("şemadaki aralık kısıtları CATALOG_LIMITS ile aynı sayıları taşıyor", () => {
+    const schema = readFileSync(
+      path.join(import.meta.dirname, "..", "src/lib/db/schema.ts"),
+      "utf8"
+    );
+    const L = CATALOG_LIMITS;
+    const expected: Array<[string, string]> = [
+      ["print_technologies_build_mm_chk", `BETWEEN ${L.buildMm.min} AND ${L.buildMm.max}`],
+      ["print_technologies_money_chk", `BETWEEN 0 AND ${L.maxPriceKurus}`],
+      ["print_technologies_lead_days_chk", "BETWEEN 1 AND 60"],
+      ["print_materials_density_chk", `BETWEEN ${L.densityGCm3.min} AND ${L.densityGCm3.max}`],
+      ["print_materials_support_factor_max_chk", `<= ${L.supportFactor.max}`],
+      ["print_materials_money_chk", `BETWEEN 0 AND ${L.maxPriceKurus}`],
+      ["print_materials_lead_days_chk", `BETWEEN ${L.leadDaysExtra.min} AND ${L.leadDaysExtra.max}`],
+      ["print_finishes_money_chk", `BETWEEN 0 AND ${L.maxPriceKurus}`],
+      ["print_finishes_lead_days_chk", `BETWEEN ${L.leadDaysExtra.min} AND ${L.leadDaysExtra.max}`],
+      ["print_addons_money_chk", `BETWEEN 0 AND ${L.maxPriceKurus}`],
+      ["print_addons_lead_days_chk", `BETWEEN ${L.leadDaysExtra.min} AND ${L.leadDaysExtra.max}`],
+      ["quote_pricing_settings_money_chk", `BETWEEN 0 AND ${L.maxPriceKurus}`],
+      ["quote_pricing_settings_days_chk", "BETWEEN 1 AND 365"],
+      ["quote_pricing_settings_bps_chk", `@ > ${L.multiplierBps.max}`],
+    ];
+    /** Kısıdın YALNIZ kendi gövdesi: adından bir sonraki kısıt/tablo sonuna kadar. */
+    const constraintBody = (name: string): string => {
+      const at = schema.indexOf(`"${name}"`);
+      assert.notEqual(at, -1, `${name} kısıdı schema.ts'te yok`);
+      const rest = schema.slice(at);
+      const stops = ['check("', "]);"]
+        .map((stop) => rest.indexOf(stop, name.length + 2))
+        .filter((i) => i !== -1);
+      return stops.length > 0 ? rest.slice(0, Math.min(...stops)) : rest;
+    };
+    for (const [name, fragment] of expected) {
+      assert.ok(
+        constraintBody(name).includes(fragment),
+        `${name} kısıdı "${fragment}" sınırını taşımıyor (CATALOG_LIMITS ile kaymış)`
+      );
+    }
+    // Baz puan kısıdı İKİ listeyi de kapsamalı: yalnız biri kapatılırsa öteki
+    // sessizce sınırsız kalır.
+    const bps = constraintBody("quote_pricing_settings_bps_chk");
+    for (const field of ["qtyBreaks", "leadTiers"]) {
+      assert.ok(bps.includes(field), `baz puan kısıdı ${field} listesini denetlemiyor`);
+    }
   });
 
   console.log(

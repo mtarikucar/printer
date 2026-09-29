@@ -35,7 +35,7 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("twelve flags, closed set", () => {
+test("thirteen flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
     "auto_assign_cart_platform",
     "auto_assign_custom",
@@ -50,6 +50,9 @@ test("twelve flags, closed set", () => {
     // Faz 1'in anlık teklif motoru: üçüncü kümenin (FEATURE) ilk anahtarı.
     "instant_quote_enabled",
     "meshy_enabled",
+    // Teklif ödemesinde hediye kartı (G): yeni bir satış yüzeyi değil, mevcut
+    // yüzeye eklenen bir ödeme aracı — ama müşteriye açılması ayrı bir karar.
+    "quote_gift_card_enabled",
     "wa_agent_enabled",
     "wa_bot_enabled",
   ]);
@@ -92,7 +95,10 @@ test("everything that spends NEW money defaults off", () => {
   }
 });
 test("a new customer surface ships behind a closed flag", () => {
-  assert.deepEqual([...FEATURE_FLAG_KEYS], ["instant_quote_enabled"]);
+  assert.deepEqual([...FEATURE_FLAG_KEYS], [
+    "instant_quote_enabled",
+    "quote_gift_card_enabled",
+  ]);
   for (const key of FEATURE_FLAG_KEYS) {
     assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);
     assert.ok(FLAG_LABELS_TR[key], `${key} needs a Turkish admin label`);

@@ -42,6 +42,11 @@ export const FLAG_KEYS = [
   // yönlendirir: yalnız yeni müşteri yüzeylerini (yükle → fiyat → öde) açar.
   // Kapalıyken bu yüzeyler yalnız admin oturumuna görünür (iç test).
   "instant_quote_enabled",
+  // Teklif ödemesinde hediye kartı. Kapsamı DAR: yalnız ödeme ekranındaki kart
+  // alanı ve sunucunun kartı kabul etmesi. Devam eden rezervasyonların iadesi
+  // (`expireDraft` → `refundGiftCardForDraft`) bu anahtarı OKUMAZ — kapatmak
+  // yarı yolda kalmış bir bakiyeyi kartta kilitli bırakmamalı.
+  "quote_gift_card_enabled",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -70,6 +75,9 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   // Yeni bir satış yüzeyi KAPALI doğar: kodu yayına almak ile müşteriye açmak
   // aynı olay olmamalı.
   instant_quote_enabled: false,
+  // Aynı kural PARA yüzeyleri için daha da sıkıdır: hediye kartı kabulü
+  // müşterinin bakiyesini harcar, o yüzden açılması ayrı bir karardır.
+  quote_gift_card_enabled: false,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -85,6 +93,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   auto_assign_cart_platform: "Otomatik atama — platform kataloğu / sepet siparişleri",
   auto_assign_painter: "Otomatik boyacı ataması (üretici QC onayında)",
   instant_quote_enabled: "Anlık teklif motoru",
+  quote_gift_card_enabled: "Teklif ödemesinde hediye kartı",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -129,6 +138,10 @@ export const AUTO_ASSIGN_FLAG_KEYS = [
  */
 export const FEATURE_FLAG_KEYS = [
   "instant_quote_enabled",
+  // Hediye kartı dışarıya YENİ para harcamaz (müşterinin çoktan ödediği bakiyeyi
+  // tahsilata sayar), bu yüzden kill switch kapsamında DEĞİL: acil durumda onu
+  // kapatmak kaybı azaltmaz, yalnız ödemeyi zorlaştırır.
+  "quote_gift_card_enabled",
 ] as const satisfies readonly FlagKey[];
 
 /**

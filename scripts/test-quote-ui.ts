@@ -32,6 +32,13 @@ import {
   writeKdvExcludedPref,
 } from "../src/components/quote/quote-summary";
 import { QuoteReviewDialog, parseMoneyInput } from "../src/components/quote/review-request-dialog";
+import {
+  commitField,
+  editField,
+  syncFromServer,
+  syncedFieldState,
+  syncedFieldValue,
+} from "../src/components/quote/synced-field";
 import { QuoteShareDialog } from "../src/components/quote/share-dialog";
 import { QuoteCheckoutClient } from "../src/app/teklif/[number]/odeme/checkout-client";
 import { QuoteDocument } from "../src/app/teklif/[number]/belge/quote-document";
@@ -1778,4 +1785,62 @@ test("silme onayı ve ödeme fişi Türkçeyi doğru yazar", () => {
   );
   assert.ok(html.includes("2 Kasım 2026 tarihinde kargoda"), "tarih okunur yazılmamış");
   assert.ok(!html.includes("2026-11-02"), "ham ISO gün anahtarı basılmış");
+});
+
+// ─── Kontrollü alanlar, sözlük ve telefon yüksekliği (ertelenen borç D) ──────
+
+test("dokunulmamış alan sunucudan gelen yeni değeri ALIR", () => {
+  // React 19'un `defaultValue` davranışının kasıtlı eşdeğeri: alana hiç
+  // dokunulmadıysa sunucunun yeni değeri ekrana geçer.
+  const clean = syncedFieldState("eski not");
+  assert.equal(syncedFieldValue(syncFromServer(clean, "yeni not")), "yeni not");
+});
+
+test("kullanıcı yazarken sunucudan gelen değer ÜZERİNE YAZMAZ", () => {
+  // IQ-05'in gerçek zararı bu: iki sekmede açık bir teklifte diğer sekmenin
+  // yazdığı değer, bu sekmede yazmakta olan müşterinin metnini siliyordu.
+  const typing = editField(syncedFieldState("eski not"), "müşterinin yazd");
+  assert.equal(
+    syncedFieldValue(syncFromServer(typing, "diğer sekmenin notu")),
+    "müşterinin yazd"
+  );
+});
+
+test("gönderilen değer geri SEKMEZ, sonra gelen sunucu değişimi yine yansır", () => {
+  // Yama uçtayken prop hâlâ ESKİ değeri taşır; alan o an "temiz" sayılsaydı
+  // ekran bir an eski metne dönerdi (görünür bir geri sekme).
+  const sent = commitField(editField(syncedFieldState("1"), "2"), "2");
+  assert.equal(syncedFieldValue(syncFromServer(sent, "1")), "2", "yama uçarken geri sekti");
+
+  // Yama indi: alan artık temiz, yani BAŞKA bir sekmenin değişimi yansır.
+  const landed = syncFromServer(sent, "2");
+  assert.equal(syncedFieldValue(landed), "2");
+  assert.equal(syncedFieldValue(syncFromServer(landed, "3")), "3", "yamadan sonra eşitlenmiyor");
+});
+
+test("değişmeyen değeri göndermek alanı kirli BIRAKMAZ", () => {
+  // Blur'da değer aynıysa yama hiç çıkmaz; alan yine de temize dönmeli, yoksa
+  // bir daha hiçbir sunucu değişimini almaz.
+  const same = commitField(editField(syncedFieldState("PO-1"), "PO-1"), "PO-1");
+  assert.equal(syncedFieldValue(syncFromServer(same, "PO-2")), "PO-2");
+});
+
+test("teklif ekranındaki metin alanları kontrolsüz defaultValue kullanmıyor", () => {
+  // Altı alan (parça adı, ölçek, parça notu, teklif başlığı, müşteri notu, PO)
+  // kontrollü hâle getirildi; yeni bir `defaultValue` aynı tuzağı geri getirir.
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(path.resolve(dir), { withFileTypes: true })) {
+      const full = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".tsx")) files.push(full);
+    }
+  };
+  walk("src/components/quote");
+  walk("src/app/teklif");
+  assert.ok(files.length > 15, `taranan dosya sayısı şüpheli: ${files.length}`);
+  for (const file of files) {
+    const source = fs.readFileSync(path.resolve(file), "utf8");
+    assert.ok(!source.includes("defaultValue"), `${file} kontrolsüz defaultValue taşıyor`);
+  }
 });

@@ -14,6 +14,7 @@ import type { PartPatch } from "@/lib/quote/client-api";
 import { QuoteDfmList } from "./dfm-list";
 import { fill, decimal2, mm } from "./format";
 import { QuotePriceBreakTable } from "./price-break-table";
+import { useSyncedField } from "./synced-field";
 
 /**
  * Teklifteki tek bir parça.
@@ -71,6 +72,10 @@ export function QuotePartCard({
   const [renaming, setRenaming] = useState(false);
   const config = part.config;
   const disabled = !viewer.canEdit || busy;
+  // Kontrollü alanlar: sunucunun yeni değeri gelince eşitlenir, müşteri
+  // yazarken ÜZERİNE YAZILMAZ (bkz. `synced-field.ts`).
+  const name = useSyncedField(part.name);
+  const scale = useSyncedField(String(config.scale));
 
   const analyzing = part.analysisStatus === "queued" || part.analysisStatus === "analyzing";
   const failed = part.analysisStatus === "failed";
@@ -137,17 +142,27 @@ export function QuotePartCard({
               {renaming ? (
                 <input
                   autoFocus
-                  defaultValue={part.name}
+                  value={name.value}
                   aria-label={d["instantQuote.part.nameLabel"]}
                   className="input-base !py-1.5 text-sm"
-                  onBlur={(e) => {
-                    const value = e.target.value.trim();
+                  onChange={(e) => name.edit(e.target.value)}
+                  onBlur={() => {
+                    const value = name.value.trim();
                     setRenaming(false);
-                    if (value && value !== part.name) patch({ name: value });
+                    // Boş ad kabul edilmez: alan sunucudaki ada döner.
+                    if (!value) {
+                      name.discard();
+                      return;
+                    }
+                    name.commit(value);
+                    if (value !== part.name) patch({ name: value });
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") e.currentTarget.blur();
-                    if (e.key === "Escape") setRenaming(false);
+                    if (e.key === "Escape") {
+                      name.discard();
+                      setRenaming(false);
+                    }
                   }}
                 />
               ) : (
@@ -245,15 +260,21 @@ export function QuotePartCard({
                   min={0.01}
                   max={100}
                   step={0.01}
-                  defaultValue={config.scale}
+                  value={scale.value}
                   disabled={disabled}
                   className="input-base !w-24 !py-1.5 text-xs tabular-nums"
-                  onBlur={(e) => {
-                    const next = Number(e.target.value);
+                  onChange={(e) => scale.edit(e.target.value)}
+                  onBlur={() => {
+                    const next = Number(scale.value);
+                    // Aralık dışı ya da okunamayan giriş sunucuya GİTMEZ; alan
+                    // geçerli değere döner.
                     if (!Number.isFinite(next) || next < 0.01 || next > 100) {
-                      e.target.value = String(config.scale);
+                      scale.discard();
                       return;
                     }
+                    // `String(next)` yazımı normalleştirir ("1,50" değil "1.5"),
+                    // yani inen prop ile karşılaştırma tutar.
+                    scale.commit(String(next));
                     if (next !== config.scale) patch({ scale: next });
                   }}
                 />

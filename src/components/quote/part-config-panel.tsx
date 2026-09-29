@@ -19,6 +19,7 @@ import {
 import type { PartPatch } from "@/lib/quote/client-api";
 import { fill } from "./format";
 import { QuoteModal } from "./modal-shell";
+import { useSyncedField } from "./synced-field";
 
 /**
  * "Özellikleri düzenle" paneli: parçanın teknoloji / malzeme / renk / yüzey /
@@ -350,21 +351,14 @@ export function QuotePartConfigPanel({
 
         {/* Not, çizim, kritik tolerans */}
         <div className="space-y-4 border-t border-border-default pt-5">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-text-secondary">
-              {d["instantQuote.part.config.note"]}
-            </span>
-            <Textarea
-              rows={2}
-              defaultValue={part.note ?? ""}
-              disabled={disabled}
-              placeholder={d["instantQuote.part.config.notePlaceholder"]}
-              onBlur={(e) => {
-                const value = e.target.value.trim();
-                if (value !== (part.note ?? "")) patch({ note: value || null });
-              }}
-            />
-          </label>
+          {/* `key`: panel her parça için AYNI bileşeni yeniden kullanır; anahtar
+              olmadan bir parçada yazılıp gönderilmemiş taslak diğerine taşınır. */}
+          <PartNoteField
+            key={part.id}
+            note={part.note}
+            disabled={disabled}
+            onCommit={(note) => patch({ note })}
+          />
 
           <div>
             <span className="mb-1 block text-xs font-medium text-text-secondary">
@@ -438,6 +432,43 @@ export function QuotePartConfigPanel({
         </div>
       </div>
     </QuoteModal>
+  );
+}
+
+/**
+ * Parça notu. Kontrollü alan: sunucudaki not değişirse (diğer sekme, admin)
+ * ekrana gelir, müşteri yazarken üzerine YAZILMAZ (bkz. `synced-field.ts`).
+ */
+function PartNoteField({
+  note,
+  disabled,
+  onCommit,
+}: {
+  note: string | null;
+  disabled?: boolean;
+  onCommit: (next: string | null) => void;
+}): JSX.Element {
+  const d = useDictionary();
+  const field = useSyncedField(note ?? "");
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-text-secondary">
+        {d["instantQuote.part.config.note"]}
+      </span>
+      <Textarea
+        rows={2}
+        value={field.value}
+        disabled={disabled}
+        placeholder={d["instantQuote.part.config.notePlaceholder"]}
+        onChange={(e) => field.edit(e.target.value)}
+        onBlur={() => {
+          const value = field.value.trim();
+          field.commit(value);
+          if (value !== (note ?? "")) onCommit(value || null);
+        }}
+      />
+    </label>
   );
 }
 

@@ -6,6 +6,7 @@ import type { PresentedQuote } from "@/lib/config/quote-types";
 import { formatDateLong } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { QuotePatch } from "@/lib/quote/client-api";
+import { useSyncedField } from "./synced-field";
 
 /**
  * Çalışma alanının başlığı: teklif numarası, proje adı, durum ve tarihler.
@@ -30,6 +31,9 @@ export function QuoteHeader({
 }): JSX.Element {
   const d = useDictionary();
   const [editing, setEditing] = useState(false);
+  // Kontrollü alan: teklif başka bir sekmede yeniden adlandırılırsa yeni ad
+  // buraya da gelir, ama müşteri yazarken üzerine yazılmaz.
+  const title = useSyncedField(quote.title ?? "");
   const canEdit = quote.viewer.canEdit;
   const showDocument =
     quote.viewer.isOwner || (quote.viewer.isShare && quote.viewer.canSeePrices);
@@ -48,18 +52,23 @@ export function QuoteHeader({
           {editing ? (
             <input
               autoFocus
-              defaultValue={quote.title ?? ""}
+              value={title.value}
               aria-label={d["instantQuote.workspace.titlePlaceholder"]}
               placeholder={d["instantQuote.workspace.titlePlaceholder"]}
               className="input-base mt-1 max-w-md !py-2 text-lg"
-              onBlur={(e) => {
-                const value = e.target.value.trim();
+              onChange={(e) => title.edit(e.target.value)}
+              onBlur={() => {
+                const value = title.value.trim();
                 setEditing(false);
+                title.commit(value);
                 if (value !== (quote.title ?? "")) onPatch({ title: value || null });
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();
-                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Escape") {
+                  title.discard();
+                  setEditing(false);
+                }
               }}
             />
           ) : (

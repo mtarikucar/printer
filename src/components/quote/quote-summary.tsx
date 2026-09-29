@@ -11,6 +11,7 @@ import type { QuotePatch } from "@/lib/quote/client-api";
 import { AddonsPicker } from "./addons-picker";
 import { fill } from "./format";
 import { LeadTierPicker } from "./lead-tier-picker";
+import { useSyncedField } from "./synced-field";
 
 /**
  * Teklif özeti — sağ sütunun yapışkan paneli.
@@ -138,6 +139,10 @@ export function QuoteSummary({
   // Sunucu anlık görüntüsü her zaman "KDV dahil": tercih yalnız tarayıcıda
   // yaşar ve sunucu onu bilemez.
   const kdvExcluded = useSyncExternalStore(subscribeKdvPref, getKdvPref, () => false);
+  // Kontrollü alanlar: not ve satın alma emri numarası teklif başına tektir ve
+  // iki sekmede açıkken birbirini geri alıyordu (bkz. `synced-field.ts`).
+  const customerNote = useSyncedField(quote.customerNote ?? "");
+  const poNumber = useSyncedField(quote.poNumber ?? "");
 
   const { viewer, totals, readiness } = quote;
   // `viewer.canEdit` ERİŞİM hakkıdır (sahip mi, paylaşım mı); `locked` ise
@@ -352,11 +357,13 @@ export function QuoteSummary({
               </span>
               <Textarea
                 rows={3}
-                defaultValue={quote.customerNote ?? ""}
+                value={customerNote.value}
                 placeholder={d["instantQuote.summary.notePlaceholder"]}
                 disabled={busy}
-                onBlur={(e) => {
-                  const value = e.target.value.trim();
+                onChange={(e) => customerNote.edit(e.target.value)}
+                onBlur={() => {
+                  const value = customerNote.value.trim();
+                  customerNote.commit(value);
                   if (value !== (quote.customerNote ?? "")) {
                     onPatch({ customerNote: value || null });
                   }
@@ -370,11 +377,13 @@ export function QuoteSummary({
               </span>
               <input
                 type="text"
-                defaultValue={quote.poNumber ?? ""}
+                value={poNumber.value}
                 disabled={busy}
                 className="input-base !py-2 !text-sm"
-                onBlur={(e) => {
-                  const value = e.target.value.trim();
+                onChange={(e) => poNumber.edit(e.target.value)}
+                onBlur={() => {
+                  const value = poNumber.value.trim();
+                  poNumber.commit(value);
                   if (value !== (quote.poNumber ?? "")) onPatch({ poNumber: value || null });
                 }}
               />

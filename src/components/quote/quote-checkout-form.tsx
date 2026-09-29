@@ -20,8 +20,9 @@ import { fill } from "./format";
  *
  * `CheckoutForm`un ÇATALIDIR, sarmalayıcısı değil. Ortak görünen alanların
  * altında üç ayrı sözleşme var: burada misafir alışverişi YOKTUR (fiyat kapısı
- * zaten oturum ister), hediye kartı YOKTUR (rezervasyon yalnız `/api/orders`
- * içinde satır içi yazılmış) ve gövde teklife özgü üç alan taşır
+ * zaten oturum ister), hediye kartı alanı bu EKRANDA henüz yoktur (sunucu
+ * `giftCardCode`u kabul ediyor — `quote-checkout.ts` — ve alan bayrak arkasında
+ * ayrı bir görevde eklenir) ve gövde teklife özgü üç alan taşır
  * (`expectedVersion`, `expectedTotalKurus`, `invoice`). Tek bir bileşeni
  * bayraklarla bu üç hâle birden esnetmek, ödeme gibi tek bir hata payı olan
  * yerde en pahalı kısayoldu.

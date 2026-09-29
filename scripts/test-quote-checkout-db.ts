@@ -225,6 +225,7 @@ async function main() {
       analyticsEvents,
       giftCardRedemptions,
       giftCards,
+      giftCreditReturns,
       orderDrafts,
       orders,
       quoteCheckouts,
@@ -243,6 +244,7 @@ async function main() {
     const { deriveIdempotencyKey } = await import("../src/lib/services/idempotency");
     const { cancelPendingQuoteCheckout, createQuoteCheckout, pendingQuoteCheckout } =
       await import("../src/lib/services/quote-checkout");
+    const { expireDraft } = await import("../src/lib/services/order-draft");
     const { quoteCheckoutSchema } = await import("../src/lib/validators/quote-checkout");
 
     const snapshot = await loadActiveSnapshot();
@@ -1622,6 +1624,59 @@ async function main() {
         removedJobIds.includes(`card-expire-${draft.id}`),
         "terfi son tarih işini kuyruktan kaldırır"
       );
+    });
+
+    await test("süre dolumu rezervasyonu KARTA geri yükler (teklif taslağı)", async () => {
+      // Rezervasyonun serbest bırakılması TÜR-BAĞIMSIZ olmalı: bugüne kadar bu
+      // yol yalnız figür taslağıyla koşmuştu. Teklif taslağı da aynı şekli
+      // taşımak zorunda, yoksa müşterinin bakiyesi kartta KİLİTLİ kalır ve
+      // teklifi de ödenmiş sayılmadığı için kilitli kalırdı.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const gift = Math.floor(total / 5);
+      const card = await makeGiftCard(gift);
+
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest(),
+      });
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+
+      await expireDraft(draft.id);
+
+      const [restored] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(restored.balanceKurus, gift, "bakiye karta geri yüklendi");
+      assert.equal(restored.status, "active", "tamamı geri dönen kart yeniden aktif");
+      const [redemption] = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.draftId, draft.id));
+      assert.ok(redemption.refundedAt, "kullanım kaydı iade damgası aldı");
+      const returns = await db
+        .select()
+        .from(giftCreditReturns)
+        .where(eq(giftCreditReturns.expiredDraftId, draft.id));
+      assert.equal(returns.length, 1, "tek denetim satırı");
+      assert.equal(returns[0].amountKurus, gift);
+      assert.equal(returns[0].balanceEffect, "restore");
+      const [expired] = await db.select().from(orderDrafts).where(eq(orderDrafts.id, draft.id));
+      assert.equal(expired.status, "expired");
+      // Teklifin kilidi açıldı: müşteri yeniden düzenleyebilir/ödeyebilir.
+      assert.equal(await pendingQuoteCheckout(quote.id), null);
     });
 
     await test("terfi edemeyen gift_card_full taslağı 0 TL'lik KART sayfasına düşmez", async () => {

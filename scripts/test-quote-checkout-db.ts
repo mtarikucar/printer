@@ -1414,6 +1414,14 @@ async function main() {
       );
     }
 
+    // Bayrağın KAPALI hâli AÇIKÇA yazılır, derlenmiş varsayılana bırakılmaz:
+    // `isFlagEnabled` cevabı 10 saniyelik bir REDİS önbelleğinde tutuyor ve QA
+    // Redis'i turlar arasında PAYLAŞILIYOR — bir önceki tur bayrağı açık
+    // bırakınca (bu dosyanın sonundaki vakalar açıyor) bu vaka ödemenin
+    // reddedilmediğini görüp rastgele kırmızıya dönüyordu. `setFlag` önbelleği
+    // sildiği için açık yazım turu deterministik yapar.
+    await setFlag("quote_gift_card_enabled", false, "qa");
+
     await test("bayrak KAPALIYKEN kart kodu 400 alır ve taslak YAZILMAZ", async () => {
       // Sessizce yok saymak, müşterinin kartı uygulandı sanarak tam tutarı
       // ödemesi demek olurdu.

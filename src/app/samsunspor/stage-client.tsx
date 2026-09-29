@@ -577,6 +577,14 @@ export function StageClient({
         </span>
       </header>
 
+      {/* ---- İthaf kurdelesi ---- */}
+      <p className={s.ribbon}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 20.5 4.6 13.4a4.6 4.6 0 0 1 6.5-6.5l.9.9.9-.9a4.6 4.6 0 0 1 6.5 6.5z" />
+        </svg>
+        <span>DÜNYA KIZ ÇOCUKLARI İÇİN ÖZEL ÜRETİLMİŞTİR</span>
+      </p>
+
       {/* ---- Alt şerit ---- */}
       <footer className={s.bottom}>
         <div className={s.pitch}>

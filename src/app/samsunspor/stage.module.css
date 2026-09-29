@@ -324,8 +324,9 @@
 /* Kayan yazı boşluğun tamamını değil, arayüzden artan kulvarı kullanır:
    üstte başlığın altı, altta düğmelerin üstü. */
 .marqueeTop {
-  --lane: calc(var(--gy) - var(--pad-y) - 2.8rem);
-  top: calc(var(--pad-y) + 2.8rem);
+  /* Başlık + ithaf kurdelesi iki satır tutar. */
+  --lane: calc(var(--gy) - var(--pad-y) - 5.2rem);
+  top: calc(var(--pad-y) + 5.2rem);
   height: var(--lane);
 }
 
@@ -549,6 +550,63 @@
 
 @keyframes pulse {
   to { box-shadow: 0 0 0 0.8em rgba(255, 67, 80, 0); }
+}
+
+/* -- ithaf kurdelesi --
+   Dar ekranda başlığın altında ikinci satır, geniş ekranda başlıkla aynı
+   hizada ortada. Uçları çentikli: flama gibi. */
+.ribbon {
+  --ribbon-row: 2.9rem;
+  position: absolute;
+  z-index: 6;
+  top: calc(var(--pad-y) + env(safe-area-inset-top, 0px) + var(--ribbon-row));
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: 0;
+  padding: 0.52em 1.5em 0.46em;
+  max-width: calc(100% - 2 * var(--pad-x));
+  transform: translateX(-50%);
+  font-family: var(--font-tribune), "Arial Narrow", "Helvetica Neue", sans-serif;
+  font-weight: 700;
+  font-size: clamp(0.62rem, 3.05vw, 1.02rem);
+  line-height: 1;
+  letter-spacing: 0.085em;
+  white-space: nowrap;
+  color: var(--red-dark);
+  background: var(--cream);
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    calc(100% - 0.7em) 50%,
+    100% 100%,
+    0 100%,
+    0.7em 50%
+  );
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.55));
+  animation: ribbonIn 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 1.3s both;
+}
+
+.ribbon svg {
+  width: 1.05em;
+  height: 1.05em;
+  flex-shrink: 0;
+  fill: var(--red);
+}
+
+@keyframes ribbonIn {
+  from {
+    opacity: 0;
+    clip-path: polygon(50% 0, 50% 0, 50% 50%, 50% 100%, 50% 100%, 50% 50%);
+  }
+}
+
+@media (min-width: 760px) {
+  .ribbon {
+    --ribbon-row: 0rem;
+    font-size: clamp(0.8rem, 0.5rem + 0.7vw, 1.15rem);
+  }
 }
 
 .pitch {
@@ -805,6 +863,7 @@
   .chipDot,
   .ctlHot,
   .bigPlay,
+  .ribbon,
   .posterFloat {
     animation: none;
   }

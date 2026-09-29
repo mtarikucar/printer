@@ -115,6 +115,7 @@ async function main() {
     const {
       analyzeQuotePart,
       requeueStuckQuoteParts,
+      storeAnalysisOutputs,
       MAX_ANALYSIS_ATTEMPTS,
       ANALYZING_GRACE_FACTOR,
     } = await import("../src/lib/services/quote-analysis");
@@ -233,6 +234,74 @@ async function main() {
       assert.equal(row.geometry, null);
       const dir = path.join(uploads, "quote-parts", raced);
       assert.deepEqual(fs.existsSync(dir) ? fs.readdirSync(dir) : [], [], "öksüz dosya kalmadı");
+    });
+
+    await test("yeniden analiz ESKİ çıktı dosyalarını siler, paylaşılanı korur", async () => {
+      // Kurtarma süpürmesi `analyzing`de takılan bir parçayı `queued`a geri alır
+      // ve iş yeniden koşar: ikinci tur üç anahtarı da YENİ adlarla yazar
+      // (`nanoid`). Eski dosyalar silinmezse diskte sonsuza dek kalırlar —
+      // hiçbir satır onları göstermediği için saklama süpürmesi de bulamaz.
+      const again = await makePart("scripts/fixtures/quote/cube20.stl");
+      assert.equal(await analyzeQuotePart(again), "ready");
+      const first = await rowOf(again);
+      assert.ok(first.canonical_stl_key && first.preview_glb_key && first.thumbnail_key);
+
+      // `duplicatePart` kopyaya AYNI anahtarları verir: paylaşılan bir dosyayı
+      // silmek ÖTEKİ satırı dosyasız bırakırdı.
+      const twin = await makePart("scripts/fixtures/quote/cube20.stl", {
+        preview_glb_key: first.preview_glb_key,
+      });
+
+      await admin.query("UPDATE quote_parts SET analysis_status='queued' WHERE id = $1", [again]);
+      assert.equal(await analyzeQuotePart(again), "ready");
+      const second = await rowOf(again);
+
+      assert.notEqual(second.canonical_stl_key, first.canonical_stl_key, "yeni anahtar yazıldı");
+      for (const key of [second.canonical_stl_key, second.preview_glb_key, second.thumbnail_key]) {
+        assert.ok(fs.existsSync(path.join(uploads, key!)), `yeni dosya diskte: ${key}`);
+      }
+      assert.equal(
+        fs.existsSync(path.join(uploads, first.canonical_stl_key!)),
+        false,
+        "üzerine yazılan kanonik STL diskten silinmeli"
+      );
+      assert.equal(
+        fs.existsSync(path.join(uploads, first.thumbnail_key!)),
+        false,
+        "üzerine yazılan küçük resim diskten silinmeli"
+      );
+      assert.equal(
+        fs.existsSync(path.join(uploads, first.preview_glb_key!)),
+        true,
+        "BAŞKA bir parçanın gösterdiği önizleme KORUNUR"
+      );
+      // Paylaşan satırın anahtarı da olduğu yerde: silici satıra dokunmaz.
+      assert.equal((await rowOf(twin)).preview_glb_key, first.preview_glb_key);
+    });
+
+    await test("yarıda kalan çıktı yazımı diskte artık bırakmaz", async () => {
+      // `storeAnalysisOutputs` üç dosyayı SIRAYLA yazar. Kanonik STL yazıldıktan
+      // sonra gelen bir depolama hatası (ENOSPC/EIO) yukarı fırlar ve parça
+      // `failed` olur — ama yazılmış kanonik kopya hiçbir satırda görünmez.
+      // Hata BURADA gerçek: `preview.glb` bir DİZİN, yani `copyFile` EISDIR verir.
+      const orphanPartId = randomUUID();
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), "quote-store-outputs-"));
+      try {
+        fs.writeFileSync(path.join(work, "canonical.stl"), stlBox(10, 10, 10));
+        fs.mkdirSync(path.join(work, "preview.glb"));
+        await assert.rejects(
+          () => storeAnalysisOutputs(orphanPartId, work),
+          /EISDIR|illegal operation/i
+        );
+        const dir = path.join(uploads, "quote-parts", orphanPartId);
+        assert.deepEqual(
+          fs.existsSync(dir) ? fs.readdirSync(dir) : [],
+          [],
+          "yarım kalan yazımın dosyaları silinmeli"
+        );
+      } finally {
+        fs.rmSync(work, { recursive: true, force: true });
+      }
     });
 
     await test("bozuk dosya: hata koduyla 'failed'", async () => {

@@ -28,6 +28,10 @@ import {
   saveFile,
   saveFileFromPath,
 } from "@/lib/services/storage";
+import {
+  QUOTE_PART_KEY_PREFIX,
+  quotePartKeyReferenced,
+} from "@/lib/services/quote-part-files";
 import { recomputeQuoteCache } from "@/lib/services/quote-cache";
 import { emitQuotePartChanged } from "@/lib/realtime/emit";
 import { enqueuePartAnalysis } from "@/lib/queue/quote-queues";
@@ -120,41 +124,66 @@ interface StoredOutputs {
  * Depolama hatası buna dahil DEĞİLDİR ve bilerek yukarı fırlar: kanonik kopya
  * hemen yukarıda başarılı olmuştur, yani disk yazılabilir; ondan sonra gelen
  * bir yazım hatası gerçek bir arızadır ve `failed` olarak görünmelidir.
+ *
+ * YARIDA KALAN YAZIM KENDİNİ TOPLAR: fırlamadan önce O ÇAĞRIDA yazılmış ne
+ * varsa silinir. Silinmezse (ENOSPC/EIO kanonik kopyadan SONRA gelirse) dosya
+ * diskte kalır ama hiçbir satır onu göstermez — yani saklama süpürmesi de onu
+ * hiçbir zaman bulamaz. Burada silmek güvenlidir: anahtarlar bu çağrıda
+ * üretilmiştir (`nanoid`), henüz hiçbir satıra yazılmamıştır.
+ *
+ * `export` sözleşmenin parçasıdır: bu yarım-yazım yolu yalnız buradan
+ * kurulabildiği için `scripts/test-quote-analysis-db.ts` işlevi doğrudan çağırır.
  */
-async function storeOutputs(
+export async function storeAnalysisOutputs(
   partId: string,
   work: string,
   onLog?: (line: string) => void
 ): Promise<StoredOutputs> {
-  const subdir = `quote-parts/${partId}`;
-  const canonicalStlKey = await saveFileFromPath(
-    join(work, "canonical.stl"),
-    subdir,
-    `canonical-${nanoid(8)}.stl`
-  );
+  const subdir = `${QUOTE_PART_KEY_PREFIX}/${partId}`;
+  const written: string[] = [];
+  const remember = (key: string): string => {
+    written.push(key);
+    return key;
+  };
+  try {
+    const canonicalStlKey = remember(
+      await saveFileFromPath(join(work, "canonical.stl"), subdir, `canonical-${nanoid(8)}.stl`)
+    );
 
-  let previewGlbKey: string | null = null;
-  const glbPath = join(work, "preview.glb");
-  if (await exists(glbPath)) {
-    previewGlbKey = await saveFileFromPath(glbPath, subdir, `preview-${nanoid(8)}.glb`);
-  } else {
-    onLog?.("preview.glb yok — önizleme atlandı");
-  }
-
-  let thumbnailKey: string | null = null;
-  const pngPath = join(work, "thumb.png");
-  if (await exists(pngPath)) {
-    try {
-      const webp = await sharp(await readFile(pngPath)).webp({ quality: THUMBNAIL_QUALITY }).toBuffer();
-      thumbnailKey = await saveFile(Buffer.from(webp), subdir, `thumb-${nanoid(8)}.webp`);
-    } catch (err) {
-      onLog?.(`küçük resim atlandı: ${(err as Error).message}`);
+    let previewGlbKey: string | null = null;
+    const glbPath = join(work, "preview.glb");
+    if (await exists(glbPath)) {
+      previewGlbKey = remember(
+        await saveFileFromPath(glbPath, subdir, `preview-${nanoid(8)}.glb`)
+      );
+    } else {
+      onLog?.("preview.glb yok — önizleme atlandı");
     }
-  } else {
-    onLog?.("thumb.png yok — küçük resim atlandı");
-  }
 
-  return { canonicalStlKey, previewGlbKey, thumbnailKey };
+    let thumbnailKey: string | null = null;
+    const pngPath = join(work, "thumb.png");
+    if (await exists(pngPath)) {
+      try {
+        const webp = await sharp(await readFile(pngPath)).webp({ quality: THUMBNAIL_QUALITY }).toBuffer();
+        thumbnailKey = remember(
+          await saveFile(Buffer.from(webp), subdir, `thumb-${nanoid(8)}.webp`)
+        );
+      } catch (err) {
+        onLog?.(`küçük resim atlandı: ${(err as Error).message}`);
+      }
+    } else {
+      onLog?.("thumb.png yok — küçük resim atlandı");
+    }
+
+    return { canonicalStlKey, previewGlbKey, thumbnailKey };
+  } catch (err) {
+    for (const key of written) {
+      await deleteFile(key).catch((cleanupErr) =>
+        console.error(`[quote-analysis] yarım çıktı ${key} silinemedi`, cleanupErr)
+      );
+    }
+    throw err;
+  }
 }
 
 /**
@@ -167,6 +196,52 @@ async function discardOutputs(stored: StoredOutputs): Promise<void> {
   const keys = [stored.canonicalStlKey, stored.previewGlbKey, stored.thumbnailKey];
   for (const key of keys) {
     if (key) await deleteFile(key).catch(() => {});
+  }
+}
+
+/**
+ * ÜZERİNE YAZILAN eski çıktıları siler.
+ *
+ * Kurtarma süpürmesi takılan bir parçayı `queued`a geri alır ve iş yeniden
+ * koşar; ikinci tur üç anahtarı da YENİ adlarla yazar (`nanoid`). Eski adlar o
+ * anda hiçbir satırda kalmaz: saklama süpürmesi yalnız satırlardan okuduğu
+ * anahtarları sildiği için o dosyalar diskte sonsuza dek kalırdı.
+ *
+ * `previous` KAPI ALTINDAKİ satırdan gelir (üstlenme `UPDATE … RETURNING`'i),
+ * yani silinen anahtarlar bu işin gerçekten üzerine yazdığı anahtarlardır.
+ *
+ * İki kapı var ve ikisi de gerekli: yeni anahtarlardan biriyle aynı olan bir
+ * anahtar silinmez (aynı dosya), ve BAŞKA bir satırın gösterdiği anahtar
+ * silinmez (`duplicatePart` kopyaya aynı anahtarları verir — silmek ötekini
+ * dosyasız bırakırdı). Referans sayımı okunamazsa dosya KORUNUR: silme geri
+ * alınamaz, artık ise bir sonraki yeniden analizde yine adaydır.
+ */
+async function deleteSupersededOutputs(
+  previous: { canonicalStlKey: string | null; previewGlbKey: string | null; thumbnailKey: string | null },
+  stored: StoredOutputs
+): Promise<void> {
+  const fresh = new Set(
+    [stored.canonicalStlKey, stored.previewGlbKey, stored.thumbnailKey].filter(
+      (key): key is string => key !== null
+    )
+  );
+  const superseded = new Set(
+    [previous.canonicalStlKey, previous.previewGlbKey, previous.thumbnailKey].filter(
+      (key): key is string => key !== null && key !== "" && !fresh.has(key)
+    )
+  );
+  for (const key of superseded) {
+    let referenced: boolean;
+    try {
+      referenced = await quotePartKeyReferenced(key);
+    } catch (err) {
+      console.error(`[quote-analysis] ${key} referans sayımı okunamadı, dosya korundu`, err);
+      continue;
+    }
+    if (referenced) continue;
+    await deleteFile(key).catch((err) =>
+      console.error(`[quote-analysis] eski çıktı ${key} silinemedi`, err)
+    );
   }
 }
 
@@ -245,7 +320,7 @@ export async function analyzeQuotePart(
       outDir: work,
       onLog,
     });
-    const stored = await storeOutputs(partId, work, onLog);
+    const stored = await storeAnalysisOutputs(partId, work, onLog);
 
     const [ready] = await db
       .update(quoteParts)
@@ -273,6 +348,9 @@ export async function analyzeQuotePart(
       await discardOutputs(stored);
       return "skipped";
     }
+
+    // Satır artık YENİ anahtarları taşıyor: üzerine yazılan eskiler burada gider.
+    await deleteSupersededOutputs(part, stored);
 
     await recomputeQuoteCache(part.quoteId);
     announce("ready");

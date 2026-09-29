@@ -1,6 +1,6 @@
 /**
  * Anlık teklifin saatlik bakım işçisi: süre dolumu, iki hatırlatma, saklama
- * süpürmesi.
+ * süpürmesi, yetim dizin süpürmesi.
  *
  * Tek iş adı (`tick`) taşır ve işin kendisi `quote-maintenance.ts`
  * içindedir — burada yalnız eşzamanlılık, kilit süresi ve kayıt vardır.
@@ -20,7 +20,8 @@ async function runJob(job: Job) {
   const outcome = await runQuoteMaintenance(new Date());
   job.log(
     `süresi dolan: ${outcome.expired} · süre hatırlatması: ${outcome.expiryReminders} · ` +
-      `terk hatırlatması: ${outcome.abandonedReminders} · süpürülen parça: ${outcome.purgedParts}`
+      `terk hatırlatması: ${outcome.abandonedReminders} · süpürülen parça: ${outcome.purgedParts} · ` +
+      `yetim dizin: ${outcome.orphanDirs}`
   );
 }
 

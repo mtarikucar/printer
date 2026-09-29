@@ -9,7 +9,9 @@
  *  - işlemsel hatırlatma BİR KEZ gider (iki eşzamanlı tur tek mektup üretir),
  *  - terk hatırlatması ticari ileti iznine BAĞLIDIR (ETK 6563),
  *  - saklama süpürmesi süresi dolan teklifin dosyasını siler ama BAŞKA bir
- *    canlı parçanın gösterdiği anahtara ve siparişe dönmüş teklife dokunmaz.
+ *    canlı parçanın gösterdiği anahtara ve siparişe dönmüş teklife dokunmaz,
+ *  - yetim dizin süpürmesi yalnız SATIRI OLMAYAN, beklemesi dolmuş dizini
+ *    toplar (canlı parçanın dizinine ve paylaşılan dosyaya dokunmaz).
  *
  * `server-only` TAKOZU BİLEREK KURULMADI: bu dosya `quote-maintenance.ts`'i
  * düz Node altında import eder. Zincire `server-only` sızarsa (örn.
@@ -136,11 +138,14 @@ async function main() {
     const {
       ABANDONED_AFTER_HOURS,
       EXPIRY_REMINDER_DAYS,
+      ORPHAN_DIR_BATCH,
+      ORPHAN_DIR_GRACE_HOURS,
       expireQuotes,
       purgeExpiredQuoteFiles,
       runQuoteMaintenance,
       sendAbandonedReminders,
       sendExpiryReminders,
+      sweepOrphanQuotePartDirs,
     } = await import("../src/lib/services/quote-maintenance");
 
     const snapshot: PricingSnapshot = await loadActiveSnapshot();
@@ -200,9 +205,19 @@ async function main() {
 
     const onDisk = (key: string) => fs.existsSync(path.join(uploads, key));
 
+    /** Dizinin son değişme zamanını geriye alır (yetim bekleme süresi sınavı). */
+    function ageDir(dir: string, ms: number): void {
+      const when = new Date(Date.now() - ms);
+      fs.utimesSync(path.join(uploads, "quote-parts", dir), when, when);
+    }
+
+    const dirOnDisk = (dir: string) => fs.existsSync(path.join(uploads, "quote-parts", dir));
+
     async function makePart(
       quoteId: string,
       keys: {
+        /** Dizin adı parçanın kimliğidir: yetim süpürmesi tam olarak buna bakar. */
+        id?: string;
         sourceKey: string;
         canonicalStlKey?: string | null;
         previewGlbKey?: string | null;
@@ -601,9 +616,104 @@ async function main() {
       assert.equal(onDisk(sharedKey), false, "son referans gidince dosya silinir");
     });
 
+    // ─── 4b) Yetim dizin süpürmesi ──────────────────────────────────────────
+
+    await test("yetim süpürmesi: satırı olmayan ESKİ dizin gider, ötekiler kalır", async () => {
+      const now = new Date();
+      const user = await makeUser({ tag: "orphan" });
+      const quote = await makeQuote({
+        userId: user.id,
+        status: "draft",
+        expiresAt: new Date(now.getTime() + 20 * DAY),
+      });
+
+      // (a) İŞLEMİ GERİ ALINAN yükleme: `addPart` dosyayı işlem içinde taşır,
+      //     satır yazılamazsa dosya `quote-parts/<id>/` altında sahipsiz kalır.
+      //     Saklama süpürmesi onu asla bulamaz (satırdan okur).
+      const rolledBack = randomUUID();
+      const rolledBackKey = writeKey(rolledBack, "source.stl");
+      ageDir(rolledBack, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
+
+      // (b) CANLI parçanın dizini: satır var → yaşı ne olursa olsun dokunulmaz.
+      const liveId = randomUUID();
+      const liveKey = writeKey(liveId, "source.stl");
+      await makePart(quote, { id: liveId, sourceKey: liveKey });
+      ageDir(liveId, 400 * DAY);
+
+      // (c) TAZE yetim: açık bir işlem tam şu an dosyayı taşımış olabilir.
+      //     Bekleme süresi dolmadan silmek, commit edilmek üzere olan bir
+      //     parçayı dosyasız bırakırdı.
+      const fresh = randomUUID();
+      const freshKey = writeKey(fresh, "source.stl");
+
+      // (d) Dizin adı hiçbir parçanın kimliği DEĞİL, ama içindeki dosyayı BAŞKA
+      //     bir satır gösteriyor (`duplicatePart` anahtarı paylaşır).
+      const sharedDir = randomUUID();
+      const sharedKey = writeKey(sharedDir, "canonical.stl");
+      const holderId = randomUUID();
+      const holderKey = writeKey(holderId, "source.stl");
+      await makePart(quote, {
+        id: holderId,
+        sourceKey: holderKey,
+        canonicalStlKey: sharedKey,
+      });
+      ageDir(sharedDir, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
+      ageDir(holderId, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
+
+      // (e) Kimlik biçiminde OLMAYAN dizin: bizim yazdığımız bir dizin değil,
+      //     ne olduğu bilinmiyor → silinmez.
+      const strangeKey = writeKey("elle-birakilmis", "not.txt");
+      ageDir("elle-birakilmis", 400 * DAY);
+
+      assert.equal(await sweepOrphanQuotePartDirs(now), 1, "yalnız (a) toplanır");
+      assert.equal(onDisk(rolledBackKey), false, "sahipsiz dosya silinmeli");
+      assert.equal(dirOnDisk(rolledBack), false, "boş kalan dizin de silinmeli");
+      assert.equal(onDisk(liveKey), true, "CANLI parçanın dosyasına dokunulmaz");
+      assert.equal(onDisk(freshKey), true, "bekleme süresi dolmadan silinmez");
+      assert.equal(onDisk(sharedKey), true, "başka satırın gösterdiği dosya korunur");
+      assert.equal(onDisk(holderKey), true);
+      assert.equal(onDisk(strangeKey), true, "tanımadığımız dizin korunur");
+
+      // İkinci tur: toplanacak bir şey kalmadı.
+      assert.equal(await sweepOrphanQuotePartDirs(now), 0);
+
+      // Bekleme süresi dolunca taze yetim de toplanır.
+      ageDir(fresh, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
+      assert.equal(await sweepOrphanQuotePartDirs(now), 1);
+      assert.equal(onDisk(freshKey), false);
+      assert.equal(dirOnDisk(fresh), false);
+    });
+
+    await test("yetim süpürmesi tavanı SİLMEYE konur, incelemeye değil", async () => {
+      // Tavan incelemeye konsaydı (en eski N dizine bak) süpürme bir süre sonra
+      // hiçbir yetimi bulamazdı: en eski dizinler neredeyse her zaman CANLI
+      // parçaların dizinidir, yani tur her seferinde aynı satırları doğrular ve
+      // arkalarındaki yetim sonsuza dek beklerdi.
+      const now = new Date();
+      const user = await makeUser({ tag: "orphan-cap" });
+      const quote = await makeQuote({
+        userId: user.id,
+        status: "draft",
+        expiresAt: new Date(now.getTime() + 20 * DAY),
+      });
+
+      for (let i = 0; i < ORPHAN_DIR_BATCH; i++) {
+        const id = randomUUID();
+        await makePart(quote, { id, sourceKey: writeKey(id, "source.stl") });
+        ageDir(id, 30 * DAY);
+      }
+      // Yetim, canlıların HEPSİNDEN taze: "en eski N" penceresinin dışında.
+      const late = randomUUID();
+      const lateKey = writeKey(late, "source.stl");
+      ageDir(late, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
+
+      assert.equal(await sweepOrphanQuotePartDirs(now), 1, "sıranın sonundaki yetim de bulunur");
+      assert.equal(onDisk(lateKey), false);
+    });
+
     // ─── 5) Saatlik turun kendisi ───────────────────────────────────────────
 
-    await test("saatlik tur dört işi de koşar ve sayıları döner", async () => {
+    await test("saatlik tur beş işi de koşar ve sayıları döner", async () => {
       const now = new Date();
       const user = await makeUser({ marketingConsent: true, tag: "tick" });
       await makeQuote({
@@ -623,6 +733,7 @@ async function main() {
       assert.equal(outcome.expiryReminders, 1);
       assert.equal(outcome.abandonedReminders, 1);
       assert.equal(outcome.purgedParts, 0);
+      assert.equal(outcome.orphanDirs, 0, "toplanacak yetim dizin kalmadı");
       // Süresi biten teklif ÖNCE kapanır: kapanan teklife "birkaç gün içinde
       // bitiyor" yazılmaz.
       assert.equal(mailsTo(user.email).length, 2);

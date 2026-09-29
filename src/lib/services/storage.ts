@@ -1,4 +1,14 @@
-import { writeFile, readFile, mkdir, rm, access, copyFile, link } from "fs/promises";
+import {
+  writeFile,
+  readFile,
+  mkdir,
+  readdir,
+  rm,
+  access,
+  copyFile,
+  link,
+  stat,
+} from "fs/promises";
 import { constants as fsConstants } from "fs";
 import { join, resolve, relative, sep, isAbsolute, posix } from "path";
 import crypto from "node:crypto";
@@ -187,6 +197,58 @@ export async function deleteFile(relativePath: string): Promise<void> {
   const fullPath = resolve(UPLOAD_DIR, relativePath);
   assertSafePath(fullPath);
   await rm(fullPath, { force: true });
+}
+
+/** Bir depolama dizini: adı ve son değişme zamanı (ms). */
+export interface StoredDir {
+  name: string;
+  modifiedMs: number;
+}
+
+/**
+ * `prefix` altındaki ALT DİZİNLERİ listeler (dosyaları değil).
+ *
+ * Yetim süpürmeleri için: bir önek altında hangi klasörler var ve en son ne
+ * zaman dokunuldular. Önek hiç yoksa boş liste döner — süpürmenin, hiç dosya
+ * yüklenmemiş bir kurulumda patlaması anlamsız olurdu.
+ *
+ * `modifiedMs` dizinin KENDİ mtime'ıdır: dosya eklendiğinde/silindiğinde
+ * güncellenir, yani "bu klasörde bir süredir hiçbir şey olmadı" ölçüsü tam
+ * olarak budur.
+ */
+export async function listStoredDirs(prefix: string): Promise<StoredDir[]> {
+  const dir = join(UPLOAD_DIR, prefix);
+  assertSafePath(dir);
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  const dirs: StoredDir[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    // Tam bu anda silinmiş olabilir: listelenemeyen dizin yoktur sayılır.
+    const stats = await stat(join(dir, entry.name)).catch(() => null);
+    if (!stats) continue;
+    dirs.push({ name: entry.name, modifiedMs: stats.mtimeMs });
+  }
+  return dirs;
+}
+
+/**
+ * Bir depolama dizinini İÇERİĞİYLE siler.
+ *
+ * `deleteFile` bunu yapamaz: `rm` özyinelemesiz çağrıldığı için bir dizinde
+ * `ERR_FS_EISDIR` verir. Ayrı bir işlev olması bilinçli — özyinelemeli silme
+ * tek bir yanlış anahtarla bir ağacı götürebilir, o yüzden çağıranı görünür
+ * olsun.
+ */
+export async function deleteStoredDir(relativePath: string): Promise<void> {
+  const fullPath = resolve(UPLOAD_DIR, relativePath);
+  assertSafePath(fullPath);
+  await rm(fullPath, { recursive: true, force: true });
 }
 
 /**

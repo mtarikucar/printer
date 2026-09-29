@@ -1,6 +1,6 @@
 /**
- * Anlık teklifin GÖZETİMSİZ yarısı: süre dolumu, iki hatırlatma ve dosya
- * saklama süresi. Saatte bir `quote-maintenance` işi çağırır.
+ * Anlık teklifin GÖZETİMSİZ yarısı: süre dolumu, iki hatırlatma, dosya saklama
+ * süresi ve yetim dizinler. Saatte bir `quote-maintenance` işi çağırır.
  *
  * Üç kural bütün dosyayı biçimlendirir:
  *
@@ -19,7 +19,9 @@
  * 3. **Silme geri alınamaz.** Saklama süpürmesi yalnız siparişe DÖNMEMİŞ,
  *    süresi dolmuş/iptal edilmiş tekliflerin parçalarına bakar ve bir dosyayı
  *    ancak onu gösteren başka bir (henüz süpürülmemiş) parça kalmadığında
- *    siler. Ayar satırı okunamazsa hiçbir şey silinmez.
+ *    siler. Ayar satırı okunamazsa hiçbir şey silinmez. Yetim dizin süpürmesi
+ *    aynı duruşun disk tarafıdır: SATIRI OLMAYAN dizine bakar, satırı olana ve
+ *    beklemesi dolmayana asla dokunmaz.
  *
  * NOT: `import "server-only"` YOK ve zincirine de sızmamalı — bu modülü
  * standalone BullMQ worker süreci yükler. Özellikle `quote-checkout.ts`
@@ -36,9 +38,7 @@ import {
   isNull,
   lt,
   lte,
-  ne,
   notExists,
-  or,
   sql,
 } from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
@@ -52,7 +52,12 @@ import {
 } from "@/lib/db/schema";
 import type { QuoteStatus } from "@/lib/config/quote-types";
 import { notifyQuoteAbandoned, notifyQuoteExpiring } from "@/lib/services/quote-notify";
-import { deleteFile } from "@/lib/services/storage";
+import { deleteFile, deleteStoredDir, listStoredDirs } from "@/lib/services/storage";
+import {
+  QUOTE_PART_KEY_PREFIX,
+  quotePartKeyReferenced,
+  quotePartKeysExistUnder,
+} from "@/lib/services/quote-part-files";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -90,14 +95,42 @@ const REMINDABLE: QuoteStatus[] = ["draft", "quoted"];
 /** Dosyaları saklama süresi dolunca silinebilen durumlar. */
 const PURGEABLE: QuoteStatus[] = ["expired", "cancelled"];
 
-/** Parçanın diskte yer tutan bütün anahtar kolonları. */
-const PART_KEY_COLUMNS = [
-  quoteParts.sourceKey,
-  quoteParts.canonicalStlKey,
-  quoteParts.previewGlbKey,
-  quoteParts.thumbnailKey,
-  quoteParts.drawingKey,
-];
+/**
+ * Yetim dizin süpürmesi bir dizine dokunmadan önce ne kadar beklemek zorunda.
+ *
+ * Ölçü tek bir pencereye dayanıyor: `addPart`/`copyPartInto` dosyayı AÇIK bir
+ * işlemin içinde taşır, yani "dizin var ama satırı henüz görünmüyor" hâli
+ * meşru olarak saniyeler sürer. Altı saat, o pencerenin dört büyüklük
+ * mertebesi üstünde; buna karşılık sızıntı en kötü hâlde yarım iş günü diskte
+ * kalır (tur saatte bir koşuyor). Kısaltmanın kazancı yok, uzatmanın bedeli
+ * yok — güvenli tarafta duruyor.
+ */
+export const ORPHAN_DIR_GRACE_HOURS = 6;
+
+/**
+ * Bir turda en çok kaç yetim dizin SİLİNİR.
+ *
+ * Tavan silmeye konur, İNCELEMEYE değil: tur her seferinde beklemesi dolmuş
+ * BÜTÜN dizinlere bakar ve yalnız sildiklerini sayar. Ters kurgu (en eski 200
+ * dizini incele) bir süre sonra hiçbir yetimi bulamaz hâle gelirdi — en eski
+ * 200 dizin neredeyse her zaman CANLI parçaların dizinidir, yani süpürme her
+ * turda aynı 200 satırı doğrular ve arkalarındaki yetim sonsuza dek beklerdi.
+ */
+export const ORPHAN_DIR_BATCH = 200;
+
+/**
+ * Satır kapısının tek sorgusunda en çok kaç dizin adı sorulur.
+ *
+ * `IN (…)` listesinin uzunluğuna bir tavan gerekiyor: yıllar içinde on binlerce
+ * parça dizini birikir ve hepsini tek sorguya koymak hem planlayıcıyı hem de
+ * protokol tamponunu zorlardı. Dizinler öbek öbek sorulur, öbek sayısı da
+ * doğrudan dizin sayısıyla artar (saatte bir koşan bir iş için kabul edilebilir
+ * bir bedel; alternatifi kalıcı bir tarama imleci, yani yeni bir tablo).
+ */
+const ORPHAN_DIR_QUERY_CHUNK = 200;
+
+/** Kimlik biçimi: dizin adı bir parça kimliği (uuid) olmalı, yoksa dokunulmaz. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Süresi geçen teklifleri kapatır ve kaç tanesinin kapandığını döner.
@@ -243,33 +276,6 @@ async function retentionDays(): Promise<number | null> {
 }
 
 /**
- * Bu anahtarı gösteren BAŞKA bir (henüz süpürülmemiş) parça var mı?
- *
- * Aynı depolama anahtarı meşru olarak iki satıra bağlanabilir: `duplicatePart`
- * kopyaya AYNI anahtarı verir ve `splitByTechnology` satırı başka bir teklife
- * taşır — yani paylaşan satırlar ayrı tekliflerde de olabilir. Yalnız kendi
- * satırına bakan bir silici, ötekinin parçasını dosyasız bırakırdı.
- *
- * Süpürülmüş satır referans SAYILMAZ: dosyası zaten silinmiş bir parçanın
- * anahtarı, hayatta kalan bir dosyayı sonsuza dek korumamalı. Böylece
- * paylaşan satırların sonuncusu süpürüldüğünde dosya gerçekten gider.
- */
-async function keyReferencedElsewhere(key: string, partId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: quoteParts.id })
-    .from(quoteParts)
-    .where(
-      and(
-        ne(quoteParts.id, partId),
-        isNull(quoteParts.filesPurgedAt),
-        or(...PART_KEY_COLUMNS.map((column) => eq(column, key)))
-      )
-    )
-    .limit(1);
-  return row !== undefined;
-}
-
-/**
  * Saklama süresi dolan tekliflerin dosyalarını siler; süpürülen parça sayısını
  * döner.
  *
@@ -331,7 +337,7 @@ export async function purgeExpiredQuoteFiles(now: Date): Promise<number> {
     for (const key of keys) {
       let shared: boolean;
       try {
-        shared = await keyReferencedElsewhere(key, part.id);
+        shared = await quotePartKeyReferenced(key, { excludePartId: part.id });
       } catch (err) {
         console.error("[quote-maintenance] referans sayımı okunamadı, dosya korundu", err);
         unreadable = true;
@@ -356,11 +362,87 @@ export async function purgeExpiredQuoteFiles(now: Date): Promise<number> {
   return purged;
 }
 
+/**
+ * SATIRI OLMAYAN parça dizinlerini toplar; silinen dizin sayısını döner.
+ *
+ * Neden var: `addPart` sahnelenen dosyayı, parça satırını yazan İŞLEMİN İÇİNDE
+ * `quote-parts/<yeni kimlik>/` altına taşır (ters sıra dosyasız bir parça
+ * bırakırdı). İşlem geri alınırsa dosya orada kalır ve hiçbir satır onu
+ * göstermez — yani `purgeExpiredQuoteFiles` onu ASLA bulamaz, çünkü o yalnız
+ * satırlardan okuduğu anahtarları siler. `copyPartInto` da (kütüphane/yeniden
+ * teklif) aynı deseni izler. Bu süpürme o sızıntının tek toplayıcısıdır.
+ *
+ * ÜÇ KAPI, hepsi "canlı bir dosyaya asla dokunma" için:
+ *
+ * 1. **Kimlik biçimi.** Dizin adı bir uuid değilse dokunulmaz: bizim
+ *    yazmadığımız (operatörün elle bıraktığı, bir yedeğin açıldığı) bir klasörü
+ *    silmek, bu işin işi değil.
+ * 2. **Satır kapısı.** Adı bir parça kimliği OLAN dizin, o satır silinmiş
+ *    (`deleted_at`) ya da dosyaları süpürülmüş (`files_purged_at`) olsa bile
+ *    dokunulmaz. Satır duruyorsa dizin hâlâ o parçanın dizinidir.
+ * 3. **Anahtar kapısı.** Satırı olmayan bir dizinin içindeki dosyayı BAŞKA bir
+ *    satır gösteriyor olabilir (`duplicatePart` anahtarı paylaşır): o hâlde de
+ *    dokunulmaz. Sorgu okunamazsa dizin korunur ve bir sonraki tur yeniden
+ *    dener — silme geri alınamaz.
+ *
+ * Bekleme süresi (`ORPHAN_DIR_GRACE_HOURS`) dördüncü kapıdır: açık bir işlem
+ * dosyayı tam şu an taşımış olabilir, satırı henüz kimse göremez.
+ *
+ * Siparişe kopyalanmış dosyalar bu süpürmenin DIŞINDADIR: onlar
+ * `models/<orderId>/` altında İKİNCİ bir ada bağlıdır, bu süpürme ise yalnız
+ * `quote-parts/` önekine bakar.
+ */
+export async function sweepOrphanQuotePartDirs(now: Date): Promise<number> {
+  const cutoff = now.getTime() - ORPHAN_DIR_GRACE_HOURS * HOUR_MS;
+  const candidates = (await listStoredDirs(QUOTE_PART_KEY_PREFIX))
+    .filter((dir) => dir.modifiedMs < cutoff && UUID_RE.test(dir.name))
+    // En eski önce: en uzun süredir yerde duran artık ilk sırada gider.
+    .sort((a, b) => a.modifiedMs - b.modifiedMs)
+    .map((dir) => dir.name);
+
+  let swept = 0;
+  for (let at = 0; at < candidates.length; at += ORPHAN_DIR_QUERY_CHUNK) {
+    const chunk = candidates.slice(at, at + ORPHAN_DIR_QUERY_CHUNK);
+    // 1. SATIR KAPISI: adı bir parça kimliği olan dizine dokunulmaz.
+    const withRow = new Set(
+      (
+        await db
+          .select({ id: quoteParts.id })
+          .from(quoteParts)
+          .where(inArray(quoteParts.id, chunk))
+      ).map((row) => row.id)
+    );
+
+    for (const name of chunk) {
+      if (swept >= ORPHAN_DIR_BATCH) return swept;
+      if (withRow.has(name)) continue;
+      // 2. ANAHTAR KAPISI: dizindeki bir dosyayı başka bir satır gösteriyor mu?
+      let referenced: boolean;
+      try {
+        referenced = await quotePartKeysExistUnder(name);
+      } catch (err) {
+        console.error(`[quote-maintenance] ${name} anahtar sayımı okunamadı, dizin korundu`, err);
+        continue;
+      }
+      if (referenced) continue;
+      try {
+        await deleteStoredDir(`${QUOTE_PART_KEY_PREFIX}/${name}`);
+      } catch (err) {
+        console.error(`[quote-maintenance] yetim dizin ${name} silinemedi`, err);
+        continue;
+      }
+      swept++;
+    }
+  }
+  return swept;
+}
+
 export interface QuoteMaintenanceOutcome {
   expired: number;
   expiryReminders: number;
   abandonedReminders: number;
   purgedParts: number;
+  orphanDirs: number;
 }
 
 /**
@@ -381,6 +463,7 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
     expiryReminders: 0,
     abandonedReminders: 0,
     purgedParts: 0,
+    orphanDirs: 0,
   };
   const failures: string[] = [];
 
@@ -404,6 +487,13 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
   });
   await phase("purgeExpiredQuoteFiles", async () => {
     outcome.purgedParts = await purgeExpiredQuoteFiles(now);
+  });
+  // SIRA: saklama süpürmesinden SONRA. O tur bir dizini boşaltabilir ama satırı
+  // bırakır, yani yetim süpürmesi ona dokunmaz; ters sırada da sonuç aynı olurdu
+  // — bu sıra yalnız okurken hikâyeyi düzgün anlatıyor (satırlar önce, artık
+  // dizinler sonra).
+  await phase("sweepOrphanQuotePartDirs", async () => {
+    outcome.orphanDirs = await sweepOrphanQuotePartDirs(now);
   });
 
   if (failures.length > 0) throw new Error(`bakım turu eksik kaldı — ${failures.join(" | ")}`);

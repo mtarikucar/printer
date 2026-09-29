@@ -348,15 +348,13 @@ export async function addPartFromUpload(
     // dosyasız bir parça bırakırdı ve o müşteriye "fiyat hesaplanamadı" olurdu.
     //
     // BEDELİ: işlem geri alınırsa dosya `quote-parts/<id>/` altında SAHİPSİZ
-    // kalır ve HİÇBİR SÜPÜRME onu toplamaz — `purgeExpiredQuoteFiles` yalnız
-    // `quote_parts` SATIRLARINDAN okuduğu anahtarları siler, `sweepStagedUploads`
-    // ise yalnız `uploads/staging/` dizinini tarar. Sızıntı küçüktür (yalnız
-    // başarısız işlemler) ama gerçektir.
-    // TODO(quote-files): iki aday çözümden biri — (a) satırı olmayan
-    // `quote-parts/*` anahtarlarını toplayan bir yetim süpürmesi
-    // (`quote-maintenance.ts`), ya da (b) promote'u COMMIT SONRASINA almak
-    // (o zaman da kısa bir "satır var, dosya yok" penceresi doğar ve
-    // `attachQuoteFilesToOrder`'daki gibi bir onarım turu gerekir).
+    // kalır — `purgeExpiredQuoteFiles` onu bulamaz (o yalnız `quote_parts`
+    // SATIRLARINDAN okuduğu anahtarları siler), `sweepStagedUploads` de bulamaz
+    // (o yalnız `uploads/staging/` dizinini tarar).
+    // TOPLAYICISI VAR: `sweepOrphanQuotePartDirs` (`quote-maintenance.ts`,
+    // saatlik tur) satırı olmayan `quote-parts/<uuid>/` dizinlerini siler —
+    // `ORPHAN_DIR_GRACE_HOURS` bekleme süresiyle, yani BU işlem hâlâ açıkken
+    // dosyaya dokunmaz. Sızıntının ömrü en kötü hâlde yarım gündür.
     const sourceKey = await promoteStagedUpload(
       args.uploadId,
       `quote-parts/${newId}`,

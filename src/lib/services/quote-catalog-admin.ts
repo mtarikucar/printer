@@ -199,57 +199,68 @@ export interface AdminCatalog {
 const RECENT_CHANGE_LIMIT = 30;
 
 /**
- * Yöneticinin gördüğü katalog: PASİF satırlar dahil.
+ * Katalog DİLİMLERİ ayrı ayrı okunur.
  *
- * Teklif tarafı yalnız aktifleri okur; yönetici pasifleştirdiği satırı
- * göremezse onu geri açamaz.
+ * Her dilim kendi fonksiyonudur, çünkü katalog uçları (`GET
+ * /api/admin/print-catalog/technologies` ve kardeşleri) cevapta TEK bir dilim
+ * döndürüyor: hepsi `listCatalogForAdmin` çağırdığında bir teknoloji listesi
+ * için altı sorgu açılıyor ve otuz satırlık denetim listesi boşa okunuyordu.
+ * Tam katalog (ekranın ihtiyacı) aynı dilimlerden kurulur — iki ayrı sorgu
+ * metni yok, yani sıralama ve `technologyKey` eşlemesi tek yerde kalır.
+ *
+ * Hepsi PASİF satırları da verir: yönetici pasifleştirdiği satırı göremezse onu
+ * geri açamaz (teklif tarafı yalnız aktifleri okur).
  */
+export async function listTechnologiesForAdmin(): Promise<AdminTechnology[]> {
+  return db
+    .select()
+    .from(printTechnologies)
+    .orderBy(asc(printTechnologies.sortOrder), asc(printTechnologies.key));
+}
+
+export async function listMaterialsForAdmin(): Promise<AdminMaterial[]> {
+  const rows = await db
+    .select({ material: printMaterials, technologyKey: printTechnologies.key })
+    .from(printMaterials)
+    .innerJoin(printTechnologies, eq(printMaterials.technologyId, printTechnologies.id))
+    .orderBy(asc(printMaterials.sortOrder), asc(printMaterials.key));
+  return rows.map(({ material, technologyKey }) => ({ ...material, technologyKey }));
+}
+
+export async function listFinishesForAdmin(): Promise<AdminFinish[]> {
+  const rows = await db
+    .select({ finish: printFinishes, technologyKey: printTechnologies.key })
+    .from(printFinishes)
+    .leftJoin(printTechnologies, eq(printFinishes.technologyId, printTechnologies.id))
+    .orderBy(asc(printFinishes.sortOrder), asc(printFinishes.key));
+  return rows.map(({ finish, technologyKey }) => ({ ...finish, technologyKey: technologyKey ?? null }));
+}
+
+export async function listAddonsForAdmin(): Promise<AdminAddon[]> {
+  return db.select().from(printAddons).orderBy(asc(printAddons.sortOrder), asc(printAddons.key));
+}
+
+/** Son katalog düzenlemeleri — "her şey görünür" kuralının katalog karşılığı. */
+async function listRecentCatalogChanges(): Promise<AdminCatalogChange[]> {
+  return db
+    .select()
+    .from(printCatalogChanges)
+    .orderBy(desc(printCatalogChanges.createdAt))
+    .limit(RECENT_CHANGE_LIMIT);
+}
+
+/** Yöneticinin EKRANINDA gördüğü katalog: dört dilim + ayar + denetim izi. */
 export async function listCatalogForAdmin(): Promise<AdminCatalog> {
-  const [technologies, materialRows, finishRows, addons, settingsRows, changes] =
-    await Promise.all([
-      db
-        .select()
-        .from(printTechnologies)
-        .orderBy(asc(printTechnologies.sortOrder), asc(printTechnologies.key)),
-      db
-        .select({ material: printMaterials, technologyKey: printTechnologies.key })
-        .from(printMaterials)
-        .innerJoin(printTechnologies, eq(printMaterials.technologyId, printTechnologies.id))
-        .orderBy(asc(printMaterials.sortOrder), asc(printMaterials.key)),
-      db
-        .select({ finish: printFinishes, technologyKey: printTechnologies.key })
-        .from(printFinishes)
-        .leftJoin(printTechnologies, eq(printFinishes.technologyId, printTechnologies.id))
-        .orderBy(asc(printFinishes.sortOrder), asc(printFinishes.key)),
-      db.select().from(printAddons).orderBy(asc(printAddons.sortOrder), asc(printAddons.key)),
-      db.select().from(quotePricingSettings).where(eq(quotePricingSettings.id, 1)).limit(1),
-      db
-        .select()
-        .from(printCatalogChanges)
-        .orderBy(desc(printCatalogChanges.createdAt))
-        .limit(RECENT_CHANGE_LIMIT),
-    ]);
+  const [technologies, materials, finishes, addons, settings, changes] = await Promise.all([
+    listTechnologiesForAdmin(),
+    listMaterialsForAdmin(),
+    listFinishesForAdmin(),
+    listAddonsForAdmin(),
+    readPricingSettings(),
+    listRecentCatalogChanges(),
+  ]);
 
-  const settings = settingsRows[0];
-  if (!settings) {
-    throw new PrintCatalogError(
-      "settings_missing",
-      "Teklif fiyat ayarları satırı yok (quote_pricing_settings). Migration 0064 uygulanmamış olabilir.",
-      500
-    );
-  }
-
-  return {
-    technologies,
-    materials: materialRows.map(({ material, technologyKey }) => ({ ...material, technologyKey })),
-    finishes: finishRows.map(({ finish, technologyKey }) => ({
-      ...finish,
-      technologyKey: technologyKey ?? null,
-    })),
-    addons,
-    settings,
-    changes,
-  };
+  return { technologies, materials, finishes, addons, settings, changes };
 }
 
 export async function readPricingSettings(): Promise<AdminPricingSettings> {

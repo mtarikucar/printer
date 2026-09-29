@@ -8,7 +8,7 @@ import {
 import {
   catalogOutcome,
   createTechnology,
-  listCatalogForAdmin,
+  listTechnologiesForAdmin,
 } from "@/lib/services/quote-catalog-admin";
 import { technologyCreateSchema } from "@/lib/validators/print-catalog";
 import { catalogRefusal, invalidBody, revalidateCatalogSurfaces } from "../_shared";
@@ -26,9 +26,11 @@ export async function GET() {
     const a = await requireAdmin();
     if ("response" in a) return a.response;
 
-    const outcome = await catalogOutcome(() => listCatalogForAdmin());
+    // YALNIZ kendi dilimi: bu uç bir teknoloji listesi döndürüyor, tüm katalog
+    // (altı sorgu + otuz satırlık denetim listesi) okumasının karşılığı yok.
+    const outcome = await catalogOutcome(() => listTechnologiesForAdmin());
     if (!outcome.ok) return catalogRefusal(outcome);
-    return NextResponse.json({ technologies: outcome.value.technologies });
+    return NextResponse.json({ technologies: outcome.value });
   } catch (e) {
     return handleRouteFailure(
       e,

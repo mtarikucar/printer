@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import { listCatalogForAdmin } from "@/lib/services/quote-catalog-admin";
+import { ADMIN_READ_FAILED_ERROR } from "@/lib/api/route-error";
+import { listCatalogForAdmin, PrintCatalogError } from "@/lib/services/quote-catalog-admin";
 import { CatalogClient } from "./catalog-client";
 
 /**
@@ -14,6 +15,14 @@ import { CatalogClient } from "./catalog-client";
  * Okuma başarısız olursa sayfa ÇÖKMEZ, sebebini yazar: katalog okunamıyorsa
  * (migration uygulanmamış, ayar satırı yok) yöneticinin görmesi gereken şey
  * boş bir ekran değil, o cümledir.
+ *
+ * Arıza YUTULMAZ ve HAM HÂLİYLE DE YAZILMAZ — panel kabuğundaki `displayRead`
+ * deseni (src/app/admin/layout.tsx): hata her hâlükârda etiketiyle günlüğe
+ * geçer; ekrana çıkan cümle ise yalnız BEKLENEN retlerin metnidir (kataloğun
+ * kendi `PrintCatalogError` cümlesi, örn. "ayar satırı yok — migration
+ * uygulanmamış olabilir"). Beklenmeyen bir arızanın ham `message`ı (bağlantı
+ * dizgisi, SQL parçası, İngilizce sürücü metni) yöneticinin ekranına ait
+ * değildir; onun yerine evin tek cümlesi yazılır.
  */
 export default async function AdminPrintCatalogPage() {
   let catalog: Awaited<ReturnType<typeof listCatalogForAdmin>> | null = null;
@@ -21,8 +30,8 @@ export default async function AdminPrintCatalogPage() {
   try {
     catalog = await listCatalogForAdmin();
   } catch (e) {
-    readError =
-      e instanceof Error ? e.message : "Katalog okunamadı; sunucu günlüklerine bakın.";
+    console.error("[admin panel] baskı kataloğu okunamadı", e);
+    readError = e instanceof PrintCatalogError ? e.message : ADMIN_READ_FAILED_ERROR;
   }
 
   return (

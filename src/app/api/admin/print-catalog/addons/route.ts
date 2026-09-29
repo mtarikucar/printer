@@ -8,7 +8,7 @@ import {
 import {
   catalogOutcome,
   createAddon,
-  listCatalogForAdmin,
+  listAddonsForAdmin,
 } from "@/lib/services/quote-catalog-admin";
 import { addonCreateSchema } from "@/lib/validators/print-catalog";
 import { catalogRefusal, invalidBody, revalidateCatalogSurfaces } from "../_shared";
@@ -22,9 +22,10 @@ export async function GET() {
     const a = await requireAdmin();
     if ("response" in a) return a.response;
 
-    const outcome = await catalogOutcome(() => listCatalogForAdmin());
+    // YALNIZ kendi dilimi (bkz. `technologies/route.ts` notu).
+    const outcome = await catalogOutcome(() => listAddonsForAdmin());
     if (!outcome.ok) return catalogRefusal(outcome);
-    return NextResponse.json({ addons: outcome.value.addons });
+    return NextResponse.json({ addons: outcome.value });
   } catch (e) {
     return handleRouteFailure(e, "GET /api/admin/print-catalog/addons", ADMIN_READ_FAILED_ERROR);
   }

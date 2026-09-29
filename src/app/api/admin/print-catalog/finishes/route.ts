@@ -8,7 +8,7 @@ import {
 import {
   catalogOutcome,
   createFinish,
-  listCatalogForAdmin,
+  listFinishesForAdmin,
 } from "@/lib/services/quote-catalog-admin";
 import { finishCreateSchema } from "@/lib/validators/print-catalog";
 import { catalogRefusal, invalidBody, revalidateCatalogSurfaces } from "../_shared";
@@ -26,9 +26,10 @@ export async function GET() {
     const a = await requireAdmin();
     if ("response" in a) return a.response;
 
-    const outcome = await catalogOutcome(() => listCatalogForAdmin());
+    // YALNIZ kendi dilimi (bkz. `technologies/route.ts` notu).
+    const outcome = await catalogOutcome(() => listFinishesForAdmin());
     if (!outcome.ok) return catalogRefusal(outcome);
-    return NextResponse.json({ finishes: outcome.value.finishes });
+    return NextResponse.json({ finishes: outcome.value });
   } catch (e) {
     return handleRouteFailure(
       e,

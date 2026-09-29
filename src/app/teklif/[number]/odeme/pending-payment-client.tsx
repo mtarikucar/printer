@@ -17,6 +17,12 @@ import { useDictionary } from "@/lib/i18n/locale-context";
  * farklı yöntemle gelen isteği reddediyordu (`pending_other_method`).
  * İptal yalnız PayTR ekranı HİÇ açılmamış kart taslağında görünür; kararı
  * sunucu verir (`cancellable`), ekran yalnız çizer.
+ *
+ * TAMAMI HEDİYE KARTIYLA karşılanmış taslak (`paymentMethod === "gift_card_full"`,
+ * yani terfi ilk denemede patlamış) burada ÜÇÜNCÜ bir hâldir: tahsil edilecek
+ * nakit olmadığı için ödeme bağlantısı YOKTUR (`paymentUrl === null`) ve müşteri
+ * "kart ile ödeme bekliyor" cümlesini görmez — gördüğü şey bakiyesinin
+ * kullanıldığı, siparişin oluşturulmakta olduğu ve tek çıkışın iptal olduğudur.
  */
 export function QuotePendingPaymentClient({
   quoteNumber,
@@ -49,6 +55,8 @@ export function QuotePendingPaymentClient({
     }
   }
 
+  const giftCovered = pending.paymentMethod === "gift_card_full";
+
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6">
       <h1 className="mb-6 text-xl font-semibold text-text-primary">
@@ -57,12 +65,16 @@ export function QuotePendingPaymentClient({
 
       <Card padding="md">
         <h2 className="text-sm font-semibold text-text-primary">
-          {d["instantQuote.pendingPayment.title"]}
+          {giftCovered
+            ? d["instantQuote.checkout.giftCard.fullyCoveredPending"]
+            : d["instantQuote.pendingPayment.title"]}
         </h2>
         <p className="mt-2 text-sm text-text-secondary">
-          {pending.paymentMethod === "bank_transfer"
-            ? d["instantQuote.pendingPayment.havale"]
-            : d["instantQuote.pendingPayment.card"]}
+          {giftCovered
+            ? d["instantQuote.checkout.giftCard.fullyCoveredRetry"]
+            : pending.paymentMethod === "bank_transfer"
+              ? d["instantQuote.pendingPayment.havale"]
+              : d["instantQuote.pendingPayment.card"]}
         </p>
 
         {/* Rezerve edilmiş hediye kartı bakiyesi müşterinin PARASIDIR: iptalin
@@ -79,12 +91,18 @@ export function QuotePendingPaymentClient({
         )}
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <Link
-            href={pending.paymentUrl}
-            className="rounded-lg bg-text-primary px-4 py-2 text-center text-sm font-medium text-white"
-          >
-            {d["instantQuote.pendingPayment.continue"]}
-          </Link>
+          {/* Ödenecek nakit yoksa bağlantı HİÇ çizilmez: `/pay/<ref>` ₺0 için
+              PayTR token'ı deneyip patlıyor, yani "devam et" düğmesi müşteriyi
+              çalışmayan bir sayfaya yollamak olurdu. Kararı sunucu verdi
+              (`paymentUrl === null`), ekran koşulu kendi kurmuyor. */}
+          {pending.paymentUrl !== null && (
+            <Link
+              href={pending.paymentUrl}
+              className="rounded-lg bg-text-primary px-4 py-2 text-center text-sm font-medium text-white"
+            >
+              {d["instantQuote.pendingPayment.continue"]}
+            </Link>
+          )}
           {pending.cancellable && (
             <button
               type="button"

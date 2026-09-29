@@ -45,6 +45,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import {
+  giftCardRedemptions,
   giftCards,
   orderDrafts,
   quoteCheckouts,
@@ -362,6 +363,20 @@ function draftMethod(draft: Draft): "card" | "bank_transfer" {
   return draft.paymentMethod === "bank_transfer" ? "bank_transfer" : "card";
 }
 
+/**
+ * Bekleyen ödemenin SUNUM yöntemi — `draftMethod` ile aynı şey DEĞİL.
+ *
+ * `draftMethod` 409 yöntem karşılaştırmasının ölçüsüdür ve `gift_card_full`ü
+ * kart sayması DOĞRUdur: o taslak dururken müşteri ne kartla ne havaleyle yeni
+ * bir ödeme başlatabilir. Ama EKRANDA aynı taslak "kart ile ödeme bekliyor"
+ * değildir — tahsil edilecek nakit yok, `/pay/<ref>` ₺0 için PayTR token'ı
+ * deneyip patlar. O yüzden üçüncü değer yalnız burada, sunum katmanında türer;
+ * kolon da karşılaştırma da yerinde kalır.
+ */
+function pendingMethod(draft: Draft): RecordedPaymentMethod {
+  return draft.paymentMethod === "gift_card_full" ? "gift_card_full" : draftMethod(draft);
+}
+
 /** Bekleyen ödemenin müşteriye gösterilecek sayfası. */
 function draftPaymentPath(draft: Draft): string {
   return draftMethod(draft) === "bank_transfer"
@@ -482,6 +497,9 @@ async function resolveGiftCardCode(
 ): Promise<{ id: string }> {
   if (!(await isFlagEnabled("quote_gift_card_enabled"))) {
     throw new QuoteServiceError(
+      // Sözlükteki `instantQuote.checkout.giftCard.disabled` ile BİREBİR aynı
+      // (form alanı kapalı bayrakta aynı cümleyi kendi yazar); `test-quote-ui.ts`
+      // ikisini çiviliyor — birini değiştiren ötekini de değiştirmek zorunda.
       "Hediye kartı bu ödemede kullanılamıyor.",
       400,
       "gift_card_disabled"
@@ -734,6 +752,45 @@ async function freezeCheckout(args: {
             409,
             "pending_other_method"
           );
+        }
+        // …ve GÖNDERİLEN KART KODU bu taslağa çoktan uygulanmış olmalı.
+        //
+        // Ön doğrulama işlem DIŞINDA koştuğu için (gerekçe çağrı yerinde) kod
+        // buraya kadar geçerli gelir, ama bekleyen taslağın tahsilat dökümü
+        // ödeme anında DONDURULDU: karta sonradan yer açmak havale indirimini,
+        // son tarihi ve rezervasyonu yeniden kurmak demek. Dalı sessizce
+        // sürdürmek müşteriye kartı uygulanmış GÖSTERİRDİ (cevapta taslağın
+        // kendi tutarları döner) — bayrak kapalıyken aynı istek 400 alırken
+        // (§5.1: sessiz yok sayma yasak) açıkken sessiz kalmak tutarsızdı.
+        //
+        // AYNI kart istisnadır ve gerçek dünyanın hâlidir: form anahtarının
+        // idempotency penceresi kapandıktan sonra gelen dürüst tekrar, kodu
+        // uygulanmış ön izlemeden yine gönderir. O kod düşmüyor — taslakta
+        // duruyor — ve müşteriyi rezervasyonu doğru kurulmuş bir ödemeyi iptal
+        // etmeye zorlamanın hiçbir faydası yok.
+        if (giftCard) {
+          const [reserved] = await tx
+            .select({ id: giftCardRedemptions.id })
+            .from(giftCardRedemptions)
+            .where(
+              and(
+                eq(giftCardRedemptions.draftId, existing.id),
+                eq(giftCardRedemptions.giftCardId, giftCard.id),
+                isNull(giftCardRedemptions.refundedAt)
+              )
+            )
+            .limit(1);
+          if (!reserved) {
+            const way = pendingDraftCancellable(existing)
+              ? " Kartı kullanmak için bekleyen ödemeyi iptal edip ödemeyi yeniden başlatın."
+              : "";
+            throw new QuoteServiceError(
+              "Bu teklif için bekleyen bir ödeme var; hediye kartı o ödemeye sonradan eklenemez." +
+                way,
+              409,
+              "pending_gift_card"
+            );
+          }
         }
         return { reused: existing };
       }
@@ -1347,6 +1404,11 @@ async function promoteGiftCoveredDraft(
     return {
       ...base,
       autoConfirmed: false,
+      // AYNI CÜMLE sözlükte de var (`instantQuote.checkout.giftCard.fullyCoveredRetry`):
+      // bekleyen ödeme ekranı bu hâli kendi başına da anlatabilmeli, servisler ise
+      // bu depoda sözlük OKUMUYOR (worker grafı + `server-only` tuzağı). İkisi
+      // `test-quote-ui.ts`te birbirine çivili — birini değiştiren ÖTEKİNİ de
+      // değiştirmek zorunda.
       error:
         "Hediye kartınız kullanıldı ama sipariş kaydı tamamlanamadı. " +
         "Sipariş birkaç dakika içinde otomatik oluşturulacak; olmazsa bakiye " +
@@ -1358,9 +1420,20 @@ async function promoteGiftCoveredDraft(
 /** Teklifin bekleyen ödemesi — ödeme sayfasının "ne yapabilirim"i. */
 export interface PendingQuoteCheckout {
   reference: string;
-  paymentMethod: "card" | "bank_transfer";
-  /** Müşterinin ödemeye devam edeceği sayfa (`/pay/…` ya da `/havale/…`). */
-  paymentUrl: string;
+  /**
+   * SUNUM yöntemi (`pendingMethod`): `gift_card_full` = tahsil edilecek nakit
+   * yok, taslak yalnız siparişe dönmeyi bekliyor. 409 karşılaştırması bunu
+   * kullanmaz (orada `gift_card_full` KARTtır, gerekçe `pendingMethod`).
+   */
+  paymentMethod: RecordedPaymentMethod;
+  /**
+   * Müşterinin ödemeye devam edeceği sayfa (`/pay/…` ya da `/havale/…`).
+   *
+   * `gift_card_full` iken **null**: ödenecek nakit olmadığı için gidilecek bir
+   * ödeme sayfası da yoktur. Tipin null kabul etmesi ŞART — `string` kalsa boş
+   * bir dizgi yazmak ekranda sessizce çalışmayan bir bağlantı üretirdi.
+   */
+  paymentUrl: string | null;
   /** Taslak iptal edilip başka bir yöntemle yeniden başlanabilir mi? */
   cancellable: boolean;
   /**
@@ -1390,10 +1463,13 @@ export async function pendingQuoteCheckout(
     .where(eq(orderDrafts.id, live.draftId))
     .limit(1);
   if (!draft) return null;
+  const method = pendingMethod(draft);
   return {
     reference: draft.reference,
-    paymentMethod: draftMethod(draft),
-    paymentUrl: draftPaymentPath(draft),
+    paymentMethod: method,
+    paymentUrl: method === "gift_card_full" ? null : draftPaymentPath(draft),
+    // `gift_card_full` taslağında da TRUE kalır: rezervasyon duruyor, sipariş
+    // doğmadı ve müşterinin tek çıkışı iptal (gerekçe `pendingDraftCancellable`).
     cancellable: pendingDraftCancellable(draft),
     giftCardAmountKurus: draft.giftCardAmountKurus,
   };

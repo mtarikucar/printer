@@ -1053,6 +1053,10 @@ const en = {
   "instantQuote.checkout.giftCard.disabled": "Gift cards cannot be used for this payment.",
   "instantQuote.checkout.giftCard.fullyCovered":
     "Your gift card covers the whole amount; no card details will be requested.",
+  "instantQuote.checkout.giftCard.fullyCoveredPending":
+    "Your gift card covered the whole amount; your order is being created.",
+  "instantQuote.checkout.giftCard.fullyCoveredRetry":
+    "Your gift card was used but the order record could not be completed. The order will be created automatically within a few minutes; otherwise the balance is restored to your card.",
   "instantQuote.checkout.giftCard.hint":
     "If the balance is not enough, you pay the remainder by card or bank transfer.",
   "instantQuote.checkout.giftCard.remaining": "Amount to pay: {amount}",

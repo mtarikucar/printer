@@ -1057,6 +1057,15 @@ const tr: Dictionary = {
   "instantQuote.checkout.giftCard.disabled": "Hediye kartı bu ödemede kullanılamıyor.",
   "instantQuote.checkout.giftCard.fullyCovered":
     "Tutarın tamamı hediye kartınızdan karşılanıyor; kart bilgisi istenmeyecek.",
+  // Tamamı karşılanmış ama SİPARİŞE DÖNEMEMİŞ taslağın ekranı: ödenecek nakit
+  // olmadığı için ödeme bağlantısı çizilmez (`pending-payment-client.tsx`).
+  "instantQuote.checkout.giftCard.fullyCoveredPending":
+    "Tutarın tamamı hediye kartınızdan karşılandı; siparişiniz oluşturuluyor.",
+  // AYNI cümle `quote-checkout.ts`in `{autoConfirmed: false}` cevabında da
+  // yazılı (servisler bu depoda sözlük okumuyor); ikisi `test-quote-ui.ts`te
+  // birbirine çivilendi — birini değiştiren ÖTEKİNİ de değiştirmek zorunda.
+  "instantQuote.checkout.giftCard.fullyCoveredRetry":
+    "Hediye kartınız kullanıldı ama sipariş kaydı tamamlanamadı. Sipariş birkaç dakika içinde otomatik oluşturulacak; olmazsa bakiye kartınıza geri yüklenir.",
   "instantQuote.checkout.giftCard.hint":
     "Bakiye yeterli değilse kalan tutarı kart veya havale ile ödersiniz.",
   "instantQuote.checkout.giftCard.remaining": "Ödenecek tutar: {amount}",

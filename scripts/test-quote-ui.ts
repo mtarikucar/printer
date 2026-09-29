@@ -80,7 +80,10 @@ import { PartLibraryGrid } from "../src/app/account/parcalar/parts-client";
 import { fill } from "../src/components/quote/format";
 import { formatCurrency } from "../src/lib/i18n/format";
 import type { TenderViews } from "../src/lib/config/quote-tender";
-import type { QuoteGiftCardPreview } from "../src/lib/services/quote-checkout";
+import type {
+  PendingQuoteCheckout,
+  QuoteGiftCardPreview,
+} from "../src/lib/services/quote-checkout";
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
@@ -2031,6 +2034,107 @@ test("bekleyen ödemedeki rezervasyon müşteriye TUTARIYLA anlatılır", () => 
     )
   );
   assert.ok(!none.includes(RESERVED_TAIL), "rezervasyon yokken de rezervasyon cümlesi çizildi");
+});
+
+test("tamamı hediye kartıyla karşılanmış bekleyen taslak ÖDEME BAĞLANTISI göstermez", () => {
+  // Terfi ilk denemede patlamışsa taslak `pending` kalır ve kolonu
+  // `gift_card_full`dür. Sunucunun 409 karşılaştırması onu KART sayar (doğru:
+  // müşteri o taslak dururken ne kartla ne havaleyle yeni ödeme başlatamaz) ama
+  // EKRANDA "kart ile ödeme bekliyor" + `/pay/<ref>` yalan: tahsil edilecek
+  // nakit yok ve o sayfa ₺0 için PayTR token'ı deneyip patlar.
+  const covered = {
+    reference: "QT-000124",
+    paymentMethod: "gift_card_full",
+    // Tipin null kabul etmesi ŞART: `string` kalsa boş dizgi yazmak sessizce
+    // çalışmayan bir bağlantı üretirdi.
+    paymentUrl: null,
+    cancellable: true,
+    giftCardAmountKurus: 14_800,
+  } satisfies PendingQuoteCheckout;
+  const html = plain(
+    inLocale(
+      createElement(QuotePendingPaymentClient, { quoteNumber: "T-000124", pending: covered })
+    )
+  );
+  assert.ok(
+    !html.includes("/pay/QT-000124") && !html.includes("/havale/QT-000124"),
+    "ödenecek nakdi olmayan taslak için ödeme sayfası bağlantısı çizildi"
+  );
+  assert.ok(
+    !html.includes(tr["instantQuote.pendingPayment.continue"]),
+    "ödemeye devam düğmesi çizildi"
+  );
+  assert.ok(
+    !html.includes(tr["instantQuote.pendingPayment.card"]),
+    "müşteriye kart ile ödeme beklediği söylendi"
+  );
+  assert.ok(
+    html.includes(tr["instantQuote.checkout.giftCard.fullyCoveredPending"]),
+    "tutarın tamamının karşılandığı söylenmiyor"
+  );
+  assert.ok(
+    html.includes(tr["instantQuote.checkout.giftCard.fullyCoveredRetry"]),
+    "siparişin oluşturulmakta olduğu söylenmiyor"
+  );
+  // Müşterinin TEK çıkışı iptaldir: rezervasyon duruyor, sipariş doğmadı.
+  assert.ok(html.includes(tr["instantQuote.pendingPayment.cancel"]), "iptal kapısı kapandı");
+  assert.ok(
+    html.includes(
+      fill(tr["instantQuote.checkout.giftCard.reservedPending"], { amount: money(14_800) })
+    ),
+    "rezerve edilen tutar yazılmıyor"
+  );
+
+  // Kart taslağı BUGÜNKÜ hâlinde kalır (değişiklik yalnız yeni dala ait).
+  const card = plain(
+    inLocale(
+      createElement(QuotePendingPaymentClient, {
+        quoteNumber: "T-000125",
+        pending: {
+          reference: "QT-000125",
+          paymentMethod: "card",
+          paymentUrl: "/pay/QT-000125",
+          cancellable: true,
+          giftCardAmountKurus: 0,
+        } satisfies PendingQuoteCheckout,
+      })
+    )
+  );
+  assert.ok(card.includes("/pay/QT-000125"), "kart taslağının bağlantısı kayboldu");
+  assert.ok(card.includes(tr["instantQuote.pendingPayment.continue"]));
+  assert.ok(card.includes(tr["instantQuote.pendingPayment.card"]));
+  assert.ok(
+    !card.includes(tr["instantQuote.checkout.giftCard.fullyCoveredPending"]),
+    "kart taslağına tam karşılama cümlesi sızdı"
+  );
+});
+
+test("servisin iki müşteri cümlesi sözlükle BİREBİR aynı", () => {
+  // Bu depoda hiçbir servis sözlük OKUMUYOR ve `quote-checkout.ts`in grafına
+  // sözlük sokmak `server-only` tuzağına komşu (worker'lar aynı modülleri
+  // import ediyor). Yani kopya KALIYOR; kayması ise imkânsız olmalı: kaynak,
+  // sözlükteki cümleyi birebir taşımak zorunda.
+  const source = fs
+    .readFileSync(path.resolve("src/lib/services/quote-checkout.ts"), "utf8")
+    // `"…" +\n      "…"` → tek literal: satıra sığmayan cümleler kaynakta
+    // bölünmüş yazılıyor, sözlükte ise tek parça duruyor.
+    .replace(/"\s*\+\s*"/g, "");
+  for (const key of [
+    // `resolveGiftCardCode` bayrak kapısı (400 `gift_card_disabled`).
+    "instantQuote.checkout.giftCard.disabled",
+    // `promoteGiftCoveredDraft`ın `{autoConfirmed: false}` cümlesi.
+    "instantQuote.checkout.giftCard.fullyCoveredRetry",
+  ] as const) {
+    // Anahtarın VARLIĞI ayrı iddia: eksik anahtarda `JSON.stringify(undefined)`
+    // aramayı `"undefined"`a çevirirdi ve kaynakta o dizgi zaten var — iddia
+    // sessizce hiçbir şeyi sınamaz hâle gelirdi.
+    assert.ok(trKeys.includes(key), `${key} sözlükte yok`);
+    assert.ok(
+      source.includes(JSON.stringify(tr[key])),
+      `quote-checkout.ts ile sözlük ayrıştı (${key}): aynı cümle iki yerde yazılı, ` +
+        "İKİSİNİ BİRLİKTE değiştir"
+    );
+  }
 });
 
 test("tamamı karşılanan ödeme SİPARİŞE gider; dönemeyen taslak ekranda DURUR", () => {

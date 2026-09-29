@@ -64,7 +64,10 @@ export default async function QuoteCheckoutPage({
     // yönlendirme, yöntemini değiştirmek isteyeni 72 saat karta kilitliyordu
     // (uç farklı yöntemi `pending_other_method` ile reddediyor).
     if (!pending) redirect(`/pay/${encodeURIComponent(presented.liveDraftReference)}`);
-    if (!pending.cancellable) redirect(pending.paymentUrl);
+    // Tamamı hediye kartıyla karşılanmış taslağın gideceği bir ödeme sayfası
+    // YOKTUR (`paymentUrl === null`): yönlendirme müşteriyi ₺0 için PayTR
+    // token'ı deneyen `/pay/<ref>`e düşürürdü. O hâlde ekran KALIR.
+    if (pending.paymentUrl !== null && !pending.cancellable) redirect(pending.paymentUrl);
     return (
       <>
         <SiteHeader />

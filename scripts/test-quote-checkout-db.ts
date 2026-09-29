@@ -1819,6 +1819,241 @@ async function main() {
       assert.ok(healed.promotedOrderId, "taslak siparişe bağlandı");
     });
 
+    await test("terfi edemeyen gift_card_full taslağı EKRANA kart ödemesi göstermez", async () => {
+      // Üsttekinin sunum yüzü: aynı taslak için `pendingQuoteCheckout` müşteriye
+      // "kart ile ödeme bekliyor" + `/pay/<ref>` döndürüyordu; o bağlantı ₺0
+      // tutarlı bir PayTR token'ı denemesi olduğu için ÇALIŞMIYOR. Sunum yöntemi
+      // ayrılır, 409 karşılaştırması AYNI kalır (aşağıda).
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const card = await makeGiftCard(Math.floor(total / 3));
+
+      const first = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-covered-view-${randomUUID()}` }),
+      });
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, first.reference));
+      await db
+        .update(orderDrafts)
+        .set({
+          paymentMethod: "gift_card_full",
+          giftCardAmountKurus: draft.amountKurus,
+          paytrMerchantOid: null,
+          paytrTestMode: null,
+        })
+        .where(eq(orderDrafts.id, draft.id));
+
+      const pending = await pendingQuoteCheckout(quote.id);
+      assert.ok(pending, "bekleyen ödeme özeti okunur");
+      assert.equal(pending!.paymentMethod, "gift_card_full", "ekranda kart yazıyor");
+      assert.equal(pending!.paymentUrl, null, "ödenecek nakit yokken ödeme bağlantısı verildi");
+      assert.equal(pending!.cancellable, true, "müşterinin tek çıkışı kapandı");
+      assert.equal(pending!.giftCardAmountKurus, draft.amountKurus);
+
+      // 409 YÖNTEM karşılaştırması DEĞİŞMEDİ: taslak dururken müşteri havaleyle
+      // yeni bir ödeme başlatamaz ve cevabın etiketi "kart"tır — sunum katmanı
+      // bu ölçüyü taşımıyor.
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: payer.id,
+          email: payer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: quote.version,
+              expectedTotalKurus: total,
+              paymentMethod: "bank_transfer",
+            })
+          ),
+          req: fakeRequest({ "idempotency-key": `qa-covered-view-2-${randomUUID()}` }),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "pending_other_method" &&
+          /kart/i.test(err.message)
+      );
+    });
+
+    await test("bekleyen taslak dururken YENİ kart kodu sessizce DÜŞMEZ", async () => {
+      // Ön doğrulama (`resolveGiftCard`) canlı-taslak tespitinden ÖNCE koşuyor:
+      // kod doğrulanıp `{ reused: existing }` dalı devreye girdiğinde kart
+      // sessizce düşüyor ve müşteri uygulandığını sanıyordu. Bayrak KAPALIYKEN
+      // aynı istek 400 alıyor (sessiz yok sayma yasak, §5.1), yani açıkken
+      // sessiz kalmak tutarsızdı.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const applied = await makeGiftCard(Math.floor(total / 4));
+      const fresh = await makeGiftCard(Math.floor(total / 4));
+
+      const first = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: applied.code,
+          })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-second-card-1-${randomUUID()}` }),
+      });
+      assert.equal(first.reused, false, "ilk istek taslağı açtı");
+
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: payer.id,
+          email: payer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: quote.version,
+              expectedTotalKurus: total,
+              giftCardCode: fresh.code,
+            })
+          ),
+          req: fakeRequest({ "idempotency-key": `qa-second-card-2-${randomUUID()}` }),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "pending_gift_card" &&
+          /[çğıöşüÇĞİÖŞÜ]/.test(err.message) &&
+          // Yöntem 409'unun iptal ipucu TEKRARLANMAZ (ayrı cümle, ayrı kapı).
+          !err.message.includes("Yöntemi değiştirmek için"),
+        "ikinci kart kodu sessizce düştü"
+      );
+
+      const [untouched] = await db.select().from(giftCards).where(eq(giftCards.id, fresh.id));
+      assert.equal(
+        untouched.balanceKurus,
+        Math.floor(total / 4),
+        "reddedilen kodun bakiyesi dokunulmadı"
+      );
+      assert.equal(
+        (
+          await db
+            .select()
+            .from(giftCardRedemptions)
+            .where(eq(giftCardRedemptions.giftCardId, fresh.id))
+        ).length,
+        0,
+        "reddedilen kod için kullanım satırı yazıldı"
+      );
+      assert.equal(
+        (await db.select().from(orderDrafts).where(eq(orderDrafts.userId, payer.id))).length,
+        1,
+        "ikinci taslak açıldı"
+      );
+
+      // Kod HİÇ gönderilmediğinde bugünkü davranış AYNEN kalır (regresyon):
+      // 409 yalnız gönderilen ve düşecek olan koda aittir.
+      const silent = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({ expectedVersion: quote.version, expectedTotalKurus: total })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-second-card-3-${randomUUID()}` }),
+      });
+      assert.equal(silent.reused, true);
+      assert.equal(silent.reference, first.reference);
+      assert.equal(silent.paymentMethod, "card");
+      assert.equal(silent.redirectUrl, `/pay/${first.reference}`);
+      assert.equal(silent.giftCardAmountKurus, Math.floor(total / 4));
+    });
+
+    await test("taslağa ÇOKTAN uygulanmış kartın kodu tekrar gelirse 409 YOK", async () => {
+      // Üstteki 409'un sınırı: gönderilen kod o taslakta DURUYORSA düşen bir şey
+      // yoktur ve müşteriyi rezervasyonu doğru kurulmuş bir ödemeyi iptal etmeye
+      // zorlamak kurtarma yolunu kapatırdı. Gerçek hâl: tamamı karşılanmış ama
+      // terfi edememiş taslakta müşteri formu (kod uygulanmış hâlde) yeniden
+      // gönderir — doğru cevap terfiyi YENİDEN denemektir.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const card = await makeGiftCard(Math.floor(total / 3));
+
+      const first = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-same-card-1-${randomUUID()}` }),
+      });
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, first.reference));
+      // Terfi edememiş tam karşılama ELLE kurulur (terfiyi patlatmanın kancası
+      // yok) — üstteki "0 TL'lik KART sayfasına düşmez" vakasıyla aynı tarif,
+      // artı kartta BAKİYE bırakmak: ön doğrulama drenmiş kartı 400'le
+      // reddeder ve vaka asıl dala hiç gelemezdi.
+      await db
+        .update(orderDrafts)
+        .set({
+          paymentMethod: "gift_card_full",
+          giftCardAmountKurus: draft.amountKurus,
+          paytrMerchantOid: null,
+          paytrTestMode: null,
+        })
+        .where(eq(orderDrafts.id, draft.id));
+      await db
+        .update(giftCardRedemptions)
+        .set({ amountKurus: draft.amountKurus })
+        .where(eq(giftCardRedemptions.draftId, draft.id));
+      await db
+        .update(giftCards)
+        .set({ balanceKurus: 5_000, status: "partially_used" })
+        .where(eq(giftCards.id, card.id));
+
+      const again = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-same-card-2-${randomUUID()}` }),
+      });
+      assert.equal(again.reused, true, "aynı kartla gelen dürüst tekrar 409 aldı");
+      assert.equal(again.reference, first.reference, "yeni taslak açıldı");
+      assert.equal(again.paymentMethod, "gift_card_full");
+      assert.equal(again.finalAmountKurus, 0, "tahsil edilecek nakit yok");
+      assert.equal(again.autoConfirmed, true, "terfi yeniden denenmedi");
+      assert.ok(again.orderNumber, "sipariş numarası döndü");
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "taslak bekliyor kaldı");
+    });
+
     await test("harcanamaz kart 400 alır ve teklif ÖDENEBİLİR kalır", async () => {
       const payer = await makeUser();
       const filler = await makeUser();

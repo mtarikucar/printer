@@ -18,9 +18,14 @@ import { createTurkishAddressSchema } from "@/lib/validators/order";
  * E.164'e çevrilir — ikinci bir telefon normalleştirmesi, sipariş
  * tablolarında iki ayrı biçim demek olurdu.
  *
- * Hediye kartı ve ek satışlar (`upsells`) BİLEREK YOKTUR: teklif ödemesi
- * kalemleri teklifin kendisinden alır, ve hediye kartı rezervasyonu yalnız
- * `/api/orders` içinde satır içi yazılmıştır (v1 kapsam dışı).
+ * Ek satışlar (`upsells`) BİLEREK YOKTUR: teklif ödemesi kalemleri teklifin
+ * kendisinden alır.
+ *
+ * `giftCardCode` yalnız bir KODDUR; kartın harcanabilirliğine ve rezerve
+ * edilecek tutara sunucu karar verir (`gift-card-reservation.ts` +
+ * `quote-tender.ts`). Bayrak (`quote_gift_card_enabled`) kapalıyken kod gelirse
+ * istek 400 ile döner — sessizce yok saymak, müşterinin kartı uygulandı sanarak
+ * tam tutarı ödemesi demek olurdu.
  */
 
 export interface QuoteCheckoutInvoice {
@@ -53,6 +58,8 @@ export interface QuoteCheckoutInput {
   invoice: QuoteCheckoutInvoice;
   /** Müşterinin satın alma emri numarası; teklife yazılır. */
   poNumber?: string;
+  /** Hediye kartı kodu (`GC-XXXX-XXXX`); bayrak kapalıysa 400. */
+  giftCardCode?: string;
   /**
    * Tarayıcı pikselinin ürettiği olay kimliği. Sunucudaki `add_payment_info`
    * olayı AYNI kimlikle kaydedilir ki Meta/TikTok iki kaydı tekilleştirsin
@@ -78,5 +85,6 @@ export const quoteCheckoutSchema: z.ZodType<QuoteCheckoutInput> = z.object({
   preliminaryInfoConsent: z.literal(true).optional(),
   invoice: invoiceSchema,
   poNumber: z.string().trim().max(64).optional(),
+  giftCardCode: z.string().trim().min(3).max(30).optional(),
   analyticsEventId: z.string().max(120).optional(),
 });

@@ -37,6 +37,7 @@ import {
   TENDER_STEP_FIELD,
   TENDER_STEP_ORDER,
   computeTender,
+  recordedPayableKurus,
   recordedPaymentMethod,
   type TenderInput,
   type TenderPaymentMethod,
@@ -314,6 +315,44 @@ test("iade motoru zincirin yazdığı tutarı okuyabilir (cash === payable)", ()
     });
     assert.equal(basis.cashKurus, tender.payableKurus, JSON.stringify(args));
   }
+});
+
+test("DONMUŞ satırdan okunan tahsilat, zincirin yazdığı tutarın AYNISI", () => {
+  // Ödeme anında yazılan kolonları sonradan okuyan yerler (bekleyen ödeme
+  // cevabı, `/pay` ve `/havale` sayfaları) aynı sayıyı görmek zorunda; elle
+  // yazılmış bir `amount − gift − discount` üçlüsü, zincire üçüncü bir indirim
+  // girdiği gün bayatlar ve tahsil edilenden FAZLA bir "ödenecek tutar" gösterir.
+  for (const args of matrix()) {
+    const tender = computeTender(args);
+    assert.equal(
+      recordedPayableKurus({
+        amountKurus: args.amountKurus,
+        giftCardAmountKurus: tender.giftCardAmountKurus,
+        havaleDiscountKurus: tender.havaleDiscountKurus,
+      }),
+      tender.payableKurus,
+      JSON.stringify(args)
+    );
+  }
+});
+
+test("donmuş satır brütü aşıyorsa okuma PATLAR (negatif tutar göstermez)", () => {
+  // Böyle bir satır zaten iade EDİLEMEZ hâldedir (`refundTenderBasis` →
+  // `lineage_unknown`); onu sessizce negatif bir "ödenecek tutar"a çevirmek
+  // hatayı müşterinin ekranına taşımak olurdu.
+  assert.throws(
+    () =>
+      recordedPayableKurus({
+        amountKurus: 10_000,
+        giftCardAmountKurus: 9_000,
+        havaleDiscountKurus: 2_000,
+      }),
+    /aşıyor/
+  );
+  assert.throws(
+    () => refundTenderBasis({ amountKurus: 10_000, havaleDiscountKurus: 2_000, giftCardAmountKurus: 9_000 }),
+    /tutarsız/
+  );
 });
 
 test("tam karşılama yalnız bakiye brüte yetince olur", () => {

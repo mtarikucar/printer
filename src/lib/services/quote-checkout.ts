@@ -20,7 +20,15 @@
  * Kart taslağı için `card-expire` işi HER ZAMAN kuyruğa girer (hediye kartı
  * rezervasyonuna bağlı değildir): teklif canlı taslağı varken salt okunur
  * olduğu için, terk edilmiş bir PayTR iframe'i aksi hâlde teklifi sonsuza
- * dek kilitlerdi.
+ * dek kilitlerdi. Tamamı hediye kartıyla karşılanan taslak için de girer —
+ * `/api/orders`ın aksine: terfi patlarsa teklifin kilidini açacak ve rezerve
+ * bakiyeyi karta geri verecek tek şey o iştir (`expireDraft`).
+ *
+ * TAHSİLAT ARİTMETİĞİ BU DOSYADA YOKTUR: brüt tutardan tahsil edilen nakde
+ * giden yolun tek uygulaması `quote-tender.ts`tir (`computeTender`). PayTR'a
+ * giden tutar, havale talimatındaki tutar, analitik olayın değeri ve cevaptaki
+ * `finalAmountKurus` hepsi o TEK sonuçtan okunur; ikinci bir çıkarma zinciri,
+ * birinin brüt kalması (sessiz çifte tahsilat) demekti.
  *
  * `import "server-only"` YOK: teklif zinciri (sipariş köprüsü, bakım işi) bu
  * dosyanın import ettiği modülleri worker sürecinden de görebilmeli.
@@ -52,12 +60,18 @@ import {
   CARD_DEADLINE_HOURS,
   HAVALE_DEADLINE_HOURS,
   HAVALE_REMINDER_HOURS,
-  calculateHavaleDiscount,
   getBankDetails,
 } from "@/lib/config/payment";
 import { MAX_AMOUNT_KURUS, allocatePaytrBasket } from "@/lib/config/prices";
 import { computeQuote } from "@/lib/config/quote-compute";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
+import {
+  computeTender,
+  recordedPayableKurus,
+  recordedPaymentMethod,
+  type RecordedPaymentMethod,
+  type Tender,
+} from "@/lib/config/quote-tender";
 import type {
   ComputedQuote,
   DfmCode,
@@ -66,7 +80,9 @@ import type {
   PricingSnapshot,
 } from "@/lib/config/quote-types";
 import { DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
+import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getRequestLocale } from "@/lib/i18n/get-request-locale";
+import type { Locale } from "@/lib/i18n/types";
 import {
   cardExpireJobId,
   getEmailQueue,
@@ -75,11 +91,18 @@ import {
   havaleReminderJobId,
 } from "@/lib/queue/queues";
 import { emitQuoteChanged } from "@/lib/realtime/emit";
+import { isFlagEnabled } from "@/lib/services/flags";
+import { validateGiftCard } from "@/lib/services/gift-card";
+import {
+  GiftCardReservationError,
+  insertGiftRedemptionTx,
+  reserveGiftCardTx,
+} from "@/lib/services/gift-card-reservation";
 import {
   deriveIdempotencyKey,
   withIdempotency,
 } from "@/lib/services/idempotency";
-import { buildDraftReference } from "@/lib/services/order-draft";
+import { buildDraftReference, promoteDraftToOrder } from "@/lib/services/order-draft";
 import { buildMerchantOid, createPaytrToken } from "@/lib/services/paytr";
 import { toPricingInputs } from "@/lib/services/quote-present";
 import { QuoteServiceError, liveDraftForQuote } from "@/lib/services/quote-service";
@@ -91,12 +114,26 @@ import type { QuoteCheckoutInput } from "@/lib/validators/quote-checkout";
 /** `/api/orders` ile AYNI cevap şekli: ekran tek bir dalı bilir. */
 export interface QuoteCheckoutResult {
   reference: string;
-  paymentMethod: "card" | "bank_transfer";
+  /** `gift_card_full` müşterinin SEÇİMİ değil, zincirin SONUCUDUR. */
+  paymentMethod: RecordedPaymentMethod;
   iframeUrl?: string;
   paytrToken?: string;
   redirectUrl?: string;
-  /** Müşterinin gerçekten ödeyeceği tutar (havale indirimi düşülmüş). */
+  /** Tahsil edilen tutar: hediye kartı ve havale indirimi düşülmüş (`payableKurus`). */
   finalAmountKurus: number;
+  /** Hediye kartından karşılanan tutar; kart yoksa 0. Ekran fişi bunu yazar. */
+  giftCardAmountKurus: number;
+  /** true = tutarın tamamı karttan karşılandı ve taslak siparişe döndü. */
+  autoConfirmed?: boolean;
+  /** `autoConfirmed` ise doğan siparişin numarası. */
+  orderNumber?: string;
+  /**
+   * Tamamı karşılanan taslak siparişe DÖNEMEDİ (`/api/orders:874–880` ile aynı
+   * şekil): istek yine başarılı, taslak `pending` ve rezervasyon DURUYOR —
+   * sipariş birkaç saniye sonra ya bakım turunda doğar, ya süre dolumunda
+   * bakiye karta geri döner.
+   */
+  error?: string;
   /** true = yeni taslak açılmadı, bekleyen ödeme geri verildi. */
   reused: boolean;
 }
@@ -357,8 +394,12 @@ function reusedResult(draft: Draft): QuoteCheckoutResult {
     // aynı oid ile ikinci token vermez, bu yüzden burada token üretmek
     // müşteriyi çalışmayan bir iframe'e göndermek olurdu.
     redirectUrl: draftPaymentPath(draft),
-    finalAmountKurus:
-      draft.amountKurus - draft.giftCardAmountKurus - draft.havaleDiscountKurus,
+    // Zincirin DONMUŞ sonucu okunur (yeniden hesaplanmaz): bu taslağın tutarları
+    // ödeme anında yazıldı ve `/pay` ile `/havale` sayfaları da aynı kolonları
+    // okuyor. Çıkarma zincirin kendi ters yönünden geçer — elle yazılmış bir
+    // üçlü, zincire yeni bir indirim girdiği gün bayatlardı.
+    finalAmountKurus: recordedPayableKurus(draft),
+    giftCardAmountKurus: draft.giftCardAmountKurus,
     reused: true,
   };
 }
@@ -366,11 +407,59 @@ function reusedResult(draft: Draft): QuoteCheckoutResult {
 interface FrozenCheckout {
   draft: Draft;
   quote: Quote;
-  amountKurus: number;
-  havaleDiscountKurus: number;
+  /** Taslağa YAZILAN tahsilat dökümü; tahsil edilen tutar buradan okunur. */
+  tender: Tender;
   bankTransferDeadline: Date | null;
   /** Çerezlerden bir kez okunan pazarlama izi; olay kaydı da bunu kullanır. */
   attribution: Attribution;
+}
+
+/** Kartın reddi. Cümle `giftCard.error.*` sözlüğünden — `/api/orders` ile AYNI. */
+type GiftCardRefusalCode =
+  | "not_found"
+  | "not_active"
+  | "fully_used"
+  | "expired"
+  | "insufficient"
+  | "limit_reached";
+
+function giftCardRefusal(code: GiftCardRefusalCode, locale: Locale): QuoteServiceError {
+  // İkinci bir cümle YAZILMAZ: müşteri aynı kartı `/api/orders` ödemesinde de
+  // deneyebilir ve iki yolda farklı bir açıklama görmesi için hiçbir sebep yok.
+  const d = getDictionary(locale);
+  return new QuoteServiceError(d[`giftCard.error.${code}`], 400, `gift_card_${code}`);
+}
+
+/**
+ * Kart kodunu ödeme İŞLEMİNE GİRMEDEN çözer: bayrak kapısı + `validateGiftCard`.
+ *
+ * Rezervasyon yapmaz, kilit almaz — kartın gerçek kapısı işlem içindeki
+ * `reserveGiftCardTx`tir (kilitli bakiye). Buradaki ön kontrolün işi, kodu
+ * yanlış yazan müşteriye taslak açılmadan DOĞRU cümleyi söylemek.
+ *
+ * Bayrak kapalıyken kod gelirse istek 400 ile döner: sessizce yok saymak,
+ * müşterinin kartı uygulandı sanarak TAM tutarı ödemesi demek olurdu.
+ */
+async function resolveGiftCard(
+  code: string | undefined,
+  locale: Locale
+): Promise<{ id: string } | null> {
+  if (code === undefined) return null;
+  if (!(await isFlagEnabled("quote_gift_card_enabled"))) {
+    throw new QuoteServiceError(
+      "Hediye kartı bu ödemede kullanılamıyor.",
+      400,
+      "gift_card_disabled"
+    );
+  }
+  const result = await validateGiftCard(code);
+  // Kart kimliği YOKSA da reddedilir: `validateGiftCard`ın dönüşü ayırt edici
+  // değil (`valid: boolean`), ve kimliksiz bir "geçerli" cevapla devam etmek
+  // rezervasyonu bambaşka bir karta yazma riski demek olurdu.
+  if (!result.valid || !result.card) {
+    throw giftCardRefusal(result.error ?? "not_found", locale);
+  }
+  return { id: result.card.id };
 }
 
 /**
@@ -397,6 +486,9 @@ async function freezeCheckout(args: {
     args.req.headers.get("x-real-ip") ||
     null;
   const consentUserAgent = args.req.headers.get("user-agent")?.slice(0, 500) ?? null;
+  // Kod İŞLEM DIŞINDA çözülür (`/api/orders:615–622` ile aynı sıra): geçersiz
+  // bir kod yüzünden teklif satırını kilitlemenin ve geri almanın anlamı yok.
+  const giftCard = await resolveGiftCard(input.giftCardCode, locale);
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
@@ -534,14 +626,42 @@ async function freezeCheckout(args: {
       .where(eq(quotes.id, quote.id));
 
     const reference = buildDraftReference();
-    const paymentMethod = input.paymentMethod;
-    // İndirim AYARA bağlı: B2B tutarlarında %3, ortak payından değil
-    // platformun payından çıkar, bu yüzden açık/kapalı kararı katalog
-    // ayarındadır (`havaleDiscountApplies`) ve teklifin snapshot'ında donar.
-    const havaleDiscountKurus =
-      paymentMethod === "bank_transfer" && quote.pricingSnapshot.settings.havaleDiscountApplies
-        ? calculateHavaleDiscount(amountKurus)
-        : 0;
+    // TAHSİLAT ZİNCİRİ: hediye kartı → havale indirimi → tahsil edilen tutar.
+    // İndirim AYARA bağlı (B2B tutarlarında %3, ortak payından değil platformun
+    // payından çıkar; karar katalog ayarında ve teklifin snapshot'ında donmuş)
+    // ve kartın düştüğü NAKİT üzerinden hesaplanır — brütten hesaplamak
+    // `hediye + indirim > brüt` hâlini mümkün kılar ve o siparişin iadesi
+    // `refundTenderBasis` tarafından KALICI olarak reddedilir.
+    const havaleDiscountApplies = quote.pricingSnapshot.settings.havaleDiscountApplies;
+    let tender: Tender;
+    if (giftCard) {
+      // Kart kilidi taslak insert'inden ÖNCE, kullanım kaydı SONRA
+      // (`/api/orders` sırası): ters sıra, yarış hâlinde limiti aşmaya izin
+      // verirdi. Rezervasyon ile taslak AYNI işlemde, yani bakiye ancak taslak
+      // gerçekten yazıldıysa düşer.
+      try {
+        tender = await reserveGiftCardTx(tx, {
+          giftCardId: giftCard.id,
+          amountKurus,
+          paymentMethod: input.paymentMethod,
+          havaleDiscountApplies,
+          now,
+        });
+      } catch (err) {
+        if (err instanceof GiftCardReservationError) throw giftCardRefusal(err.code, locale);
+        throw err;
+      }
+    } else {
+      tender = computeTender({
+        amountKurus,
+        paymentMethod: input.paymentMethod,
+        giftCardBalanceKurus: 0,
+        havaleDiscountApplies,
+      });
+    }
+    // Tamamı karttan karşılandıysa taslağa yazılan yöntem `gift_card_full`
+    // olur: PayTR de havale de hiç açılmaz, taslak doğrudan siparişe terfi eder.
+    const paymentMethod = recordedPaymentMethod(input.paymentMethod, tender);
     const bankTransferDeadline =
       paymentMethod === "bank_transfer"
         ? new Date(now.getTime() + HAVALE_DEADLINE_HOURS * 3600 * 1000)
@@ -571,9 +691,12 @@ async function freezeCheckout(args: {
         quantity: parts.reduce((sum, part) => sum + part.quantity, 0),
         shippingAddress: input.shippingAddress,
         locale,
+        // BRÜT tutar: hediye kartı ve havale indirimi onu düşürmez, tahsil
+        // edilen nakdi düşürür. Kalem/hakediş tabanı da brütten türer.
         amountKurus,
-        giftCardAmountKurus: 0,
-        havaleDiscountKurus,
+        giftCardId: giftCard?.id ?? null,
+        giftCardAmountKurus: tender.giftCardAmountKurus,
+        havaleDiscountKurus: tender.havaleDiscountKurus,
         upsells: null,
         upsellAmountKurus: 0,
         // Teklif siparişinde boyama YOKTUR: boyalı yüzey manuel fiyata gider
@@ -599,6 +722,20 @@ async function freezeCheckout(args: {
       })
       .returning();
 
+    // Rezervasyonun KANIT satırı taslaktan SONRA: `draft_id`ye ihtiyaç duyar ve
+    // kısmi tekil indeks taslak başına tek CANLI kullanıma izin verir. İade
+    // yolları (`expireDraft` → `refundGiftCardForDraft`, `gift-credit-return`)
+    // bakiyeyi bu satır üzerinden geri veriyor, yani satır yazılmazsa
+    // rezervasyon kartta KİLİTLİ kalırdı.
+    if (giftCard && tender.giftCardAmountKurus > 0) {
+      await insertGiftRedemptionTx(tx, {
+        giftCardId: giftCard.id,
+        draftId: draft.id,
+        amountKurus: tender.giftCardAmountKurus,
+        userId: args.userId,
+      });
+    }
+
     const addonsSnapshot: FrozenQuoteAddon[] = totals.addonLines.map((line) => ({
       key: line.key,
       name: line.name,
@@ -615,7 +752,7 @@ async function freezeCheckout(args: {
       leadDays: totals.leadDays,
     });
 
-    return { draft, quote, amountKurus, havaleDiscountKurus, bankTransferDeadline, attribution };
+    return { draft, quote, tender, bankTransferDeadline, attribution };
   });
 }
 
@@ -711,23 +848,40 @@ async function runCheckout(args: {
   }
 
   const frozen = await freezeCheckout({ ...args, customerName: user.fullName });
-  if ("reused" in frozen) return reusedResult(frozen.reused);
+  if ("reused" in frozen) {
+    // Tamamı karttan karşılanmış ama siparişe DÖNEMEMİŞ taslak: tahsil edilecek
+    // nakit yok, yani müşteriyi 0 TL'lik bir "kart ile öde" sayfasına yollamak
+    // (`draftMethod` `gift_card_full`ü kart sayar) hem anlamsız hem PayTR'da
+    // sıfır tutarlı bir token denemesi olurdu. Doğru davranış terfiyi YENİDEN
+    // denemek: `promoteDraftToOrder` idempotenttir, bakım turu da aynı işi
+    // yapar ve müşteri onu beklemek zorunda değil.
+    if (frozen.reused.paymentMethod === "gift_card_full") {
+      return promoteGiftCoveredDraft(frozen.reused, { reused: true });
+    }
+    return reusedResult(frozen.reused);
+  }
 
-  const { draft, quote, amountKurus, havaleDiscountKurus, bankTransferDeadline, attribution } =
-    frozen;
+  const { draft, quote, tender, bankTransferDeadline, attribution } = frozen;
 
   // Teklif artık kilitli (canlı taslak): açık duran sekmeler bunu görmeli.
   emitQuoteChanged({ quoteId: quote.id, userId: quote.userId });
 
+  // Tutarın TAMAMI hediye kartından karşılandı: ne PayTR ne havale: taslak
+  // doğrudan siparişe döner (`/api/orders:866–880` ile aynı şekil). Ödeme
+  // başlatılmadığı için `add_payment_info` da YAZILMAZ — satın alma olayını
+  // terfi kaydeder (`promoteDraftToOrder` → `recordPurchase`).
+  if (tender.fullyCoveredByGiftCard) {
+    return promoteGiftCoveredDraft(draft, { reused: false });
+  }
+
   // Sunucu gerçeği "ödeme başlatıldı". Tarayıcının verdiği kimlik varsa aynı
   // kimlikle kaydedilir ki piksel ile bu kayıt Meta/TikTok'ta tekilleşsin.
   //
-  // Tutar müşterinin GERÇEKTEN ödeyeceği tutardır (havalede %3 düşülmüş):
-  // tarayıcı `add_payment_info`'yu zaten bu değerle yolluyor ve platformlar
-  // aynı kimlikli iki kayıttan birini atıyor — brüt yazmak, havale
-  // dönüşümlerinin rastgele %3 sapmasına yol açıyordu.
-  // Kartta indirim 0'dır, yani bu her iki yolda da tahsil edilen tutardır.
-  const finalAmountKurus = amountKurus - havaleDiscountKurus;
+  // Tutar müşterinin GERÇEKTEN ödeyeceği tutardır (hediye kartı ve havale
+  // indirimi düşülmüş): tarayıcı `add_payment_info`'yu zaten bu değerle
+  // yolluyor ve platformlar aynı kimlikli iki kayıttan birini atıyor — brüt
+  // yazmak, havale dönüşümlerinin rastgele %3 sapmasına yol açıyordu.
+  const finalAmountKurus = tender.payableKurus;
   void recordEvent({
     name: "add_payment_info",
     eventId: args.input.analyticsEventId ?? `payinit:${draft.reference}`,
@@ -773,6 +927,7 @@ async function runCheckout(args: {
       paymentMethod: "bank_transfer",
       redirectUrl: `/havale/${draft.reference}`,
       finalAmountKurus,
+      giftCardAmountKurus: tender.giftCardAmountKurus,
       reused: false,
     };
   }
@@ -800,7 +955,9 @@ async function runCheckout(args: {
     paytr = await createPaytrToken({
       orderNumber: draft.reference,
       email: args.email,
-      amountKurus,
+      // TAHSİL EDİLEN tutar: brüt geçmek sessiz çifte tahsilattır — webhook
+      // tutar farkını yalnız LOGLAR, reddetmez.
+      amountKurus: finalAmountKurus,
       userName: draft.customerName,
       userAddress: `${address.mahalle ? address.mahalle + ", " : ""}${address.adres}, ${address.ilce}/${address.il}`,
       userPhone: address.telefon,
@@ -809,7 +966,7 @@ async function runCheckout(args: {
       // PayTR ekranında yirmi satırlık bir döküm göstermenin müşteriye
       // faydası yok (spec §Ödeme → sipariş, adım 5).
       basket: allocatePaytrBasket({
-        paymentAmountKurus: amountKurus,
+        paymentAmountKurus: finalAmountKurus,
         figurineName: `Teklif ${quote.number}`,
         upsellAmountKurus: 0,
         upsellKeys: [],
@@ -867,9 +1024,70 @@ async function runCheckout(args: {
     paymentMethod: "card",
     iframeUrl: paytr.iframeUrl,
     paytrToken: paytr.token,
-    finalAmountKurus: amountKurus,
+    finalAmountKurus,
+    giftCardAmountKurus: tender.giftCardAmountKurus,
     reused: false,
   };
+}
+
+/**
+ * Tamamı hediye kartıyla karşılanan taslağı ANINDA siparişe çevirir.
+ *
+ * Tahsil edilecek nakit yok, yani bekleyecek bir ödeme de yok: taslağı `pending`
+ * bırakmak, müşteriyi bakiyesi düşmüş ama siparişi olmayan bir teklifle baş başa
+ * bırakmak olurdu.
+ *
+ * ÜÇ KAT KORUMA (tasarım §5.4), çünkü bu tek yerde para taslağa yazıldıktan
+ * SONRA sipariş doğuyor:
+ *  1. Terfi hemen denenir; patlarsa cevap `{autoConfirmed: false, error}` olur
+ *     (istek yine başarılı). Taslak `pending` KALIR ve rezervasyon DURUR —
+ *     serbest bırakmak yanlış olurdu, sipariş birkaç saniye sonra doğabilir.
+ *  2. `card-expire` işi bu taslak için de kuyruğa girer (`/api/orders` ALMAZ):
+ *     `CARD_DEADLINE_HOURS` sonunda `expireDraft` bakiyeyi karta geri yükler ve
+ *     teklifin kilidini açar. İş, terfi denemesinden ÖNCE kuyruğa alınır — tam
+ *     da kurtarmayı en çok gereken hâlde (terfi patladı) atlanmasın diye.
+ *  3. Bakım turu terfi edemeyen `gift_card_full` taslağı yeniden dener
+ *     (`quote-maintenance.ts`); `promoteDraftToOrder` idempotenttir.
+ */
+async function promoteGiftCoveredDraft(
+  draft: Draft,
+  opts: { reused: boolean }
+): Promise<QuoteCheckoutResult> {
+  // Aynı `jobId` ile ikinci bir ekleme BullMQ'da sessiz bir no-op'tur, yani
+  // terfiyi yeniden denerken son tarih işi ikizlenmez.
+  await getPaymentDeadlineQueue().add(
+    "card-expire",
+    { draftId: draft.id, reference: draft.reference, type: "card_expire" },
+    { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
+  );
+
+  const base = {
+    reference: draft.reference,
+    paymentMethod: "gift_card_full" as const,
+    // Taslağa YAZILAN dökümden okunur: hem taze rezervasyonda hem de terfiyi
+    // yeniden denerken tek kaynak o satırdır.
+    finalAmountKurus: recordedPayableKurus(draft),
+    giftCardAmountKurus: draft.giftCardAmountKurus,
+    reused: opts.reused,
+  };
+  try {
+    const promoted = await promoteDraftToOrder(draft.id);
+    return { ...base, autoConfirmed: true, orderNumber: promoted.orderNumber };
+  } catch (err) {
+    console.error(
+      "Hediye kartıyla karşılanan teklif taslağı siparişe dönemedi",
+      draft.reference,
+      err
+    );
+    return {
+      ...base,
+      autoConfirmed: false,
+      error:
+        "Hediye kartınız kullanıldı ama sipariş kaydı tamamlanamadı. " +
+        "Sipariş birkaç dakika içinde otomatik oluşturulacak; olmazsa bakiye " +
+        "kartınıza geri yüklenir.",
+    };
+  }
 }
 
 /** Teklifin bekleyen ödemesi — ödeme sayfasının "ne yapabilirim"i. */

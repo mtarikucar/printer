@@ -67,6 +67,8 @@ interface QueuedJob {
   opts: { jobId?: string; delay?: number };
 }
 const jobs: QueuedJob[] = [];
+/** Silinen iş kimlikleri: terfi, planlanmış son tarih işlerini iptal eder. */
+const removedJobIds: string[] = [];
 
 const require_ = createRequire(import.meta.url);
 {
@@ -97,6 +99,11 @@ const require_ = createRequire(import.meta.url);
         async add(name: string, data: Record<string, unknown>, opts: QueuedJob["opts"] = {}) {
           jobs.push({ queue: this.name, name, data, opts });
           return { id: opts.jobId ?? randomUUID() };
+        }
+        /** Terfi/süre dolumu planlanmış işleri SİLER (`cancelHavaleJobs`). */
+        async remove(jobId: string) {
+          removedJobIds.push(jobId);
+          return 1;
         }
         async obliterate() {}
         async close() {}
@@ -214,8 +221,20 @@ async function main() {
     const { db } = await import("../src/lib/db");
     pool = (db as typeof db & { $client: pg.Pool }).$client;
     const { and, eq, isNull } = await import("drizzle-orm");
-    const { analyticsEvents, orderDrafts, quoteCheckouts, quoteParts, quotes, users } =
-      await import("../src/lib/db/schema");
+    const {
+      analyticsEvents,
+      giftCardRedemptions,
+      giftCards,
+      orderDrafts,
+      orders,
+      quoteCheckouts,
+      quoteParts,
+      quotes,
+      users,
+    } = await import("../src/lib/db/schema");
+    const { calculateHavaleDiscount } = await import("../src/lib/config/payment");
+    const { refundTenderBasis } = await import("../src/lib/config/order-refund");
+    const { setFlag } = await import("../src/lib/services/flags");
     const { computeQuote } = await import("../src/lib/config/quote-compute");
     const { defaultPartConfig } = await import("../src/lib/config/quote-compute");
     const { loadActiveSnapshot } = await import("../src/lib/services/quote-catalog");
@@ -1293,6 +1312,447 @@ async function main() {
         result.finalAmountKurus,
         "sunucu kaydı ile pikselin tutarı AYNI olmalı"
       );
+    });
+
+    // ─── Hediye kartı (bayrak arkasında) ──────────────────────────────────
+    //
+    // Buradaki sınavın konusu TAHSİLAT ZİNCİRİDİR: brüt tutar hiç değişmez,
+    // hediye kartı ve havale indirimi yalnız TAHSİL EDİLEN nakdi düşürür ve
+    // PayTR'a giden tutar ile havale talimatındaki tutar AYNI zincirden çıkar.
+    // İki sessiz felaket nöbet altında: PayTR'a brüt gitmesi (webhook farkı
+    // yalnız loglar → çifte tahsilat) ve indirimin brütten hesaplanması
+    // (`hediye + indirim > brüt` → o siparişin iadesi KALICI olarak reddedilir).
+
+    /** Kart üretir. Vakalar yalnız ilgilendikleri alanı değiştirir. */
+    async function makeGiftCard(
+      balanceKurus: number,
+      over: {
+        status?: "active" | "partially_used" | "fully_used" | "expired" | "pending_payment";
+        expiresAt?: Date;
+        maxRedemptions?: number;
+      } = {}
+    ): Promise<{ id: string; code: string }> {
+      const [card] = await db
+        .insert(giftCards)
+        .values({
+          code: `GC-QA-${randomUUID().slice(0, 8).toUpperCase()}`,
+          amountKurus: Math.max(balanceKurus, 1),
+          balanceKurus,
+          status: over.status ?? "active",
+          paidAt: new Date(),
+          expiresAt: over.expiresAt ?? new Date(Date.now() + 365 * 86_400_000),
+          maxRedemptions: over.maxRedemptions ?? null,
+        })
+        .returning({ id: giftCards.id, code: giftCards.code });
+      return card;
+    }
+
+    /**
+     * İade motoru bu satırı OKUYABİLİR mi?
+     *
+     * `refundTenderBasis` `hediye + indirim > brüt` gördüğü an iadeyi
+     * `lineage_unknown` ile KALICI olarak reddediyor (`order-refund.ts`), yani
+     * hatalı bir zincir müşterinin iadesini imkânsız kılar. Bu yardımcı hem o
+     * hatanın atılmadığını hem de motorun saydığı NAKDİN tahsil edilen tutarla
+     * aynı olduğunu çiviler.
+     */
+    function assertRefundable(
+      row: { amountKurus: number; havaleDiscountKurus: number; giftCardAmountKurus: number },
+      payableKurus: number,
+      where: string
+    ) {
+      const basis = refundTenderBasis(row);
+      assert.equal(basis.cashKurus, payableKurus, `${where}: iade nakdi tahsilattan ayrıştı`);
+      assert.equal(basis.giftKurus, row.giftCardAmountKurus, `${where}: iade hediye payı`);
+      assert.equal(
+        basis.invoiceKurus,
+        row.amountKurus - row.havaleDiscountKurus,
+        `${where}: hediye kartı fatura matrahını DÜŞÜRMEZ`
+      );
+    }
+
+    await test("bayrak KAPALIYKEN kart kodu 400 alır ve taslak YAZILMAZ", async () => {
+      // Sessizce yok saymak, müşterinin kartı uygulandı sanarak tam tutarı
+      // ödemesi demek olurdu.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const card = await makeGiftCard(500_000);
+      const { quote, computed } = await expected(q.id);
+      const paytrBefore = paytrCalls.length;
+
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: payer.id,
+          email: payer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: quote.version,
+              expectedTotalKurus: computed.totals.totalKurus,
+              giftCardCode: card.code,
+            })
+          ),
+          req: fakeRequest(),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 400 &&
+          err.code === "gift_card_disabled"
+      );
+
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "taslak açılmadı");
+      assert.equal(
+        (await db.select().from(quoteCheckouts).where(eq(quoteCheckouts.quoteId, quote.id)))
+          .length,
+        0,
+        "köprü satırı yazılmadı"
+      );
+      const [after] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(after.balanceKurus, 500_000, "bakiye dokunulmadı");
+      assert.equal(paytrCalls.length, paytrBefore, "PayTR çağrılmadı");
+    });
+
+    await setFlag("quote_gift_card_enabled", true, "qa");
+
+    await test("kısmi kart: brüt DEĞİŞMEZ, PayTR'a NET tutar gider", async () => {
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 3 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const gift = Math.floor(total / 4);
+      assert.ok(gift > 0 && gift < total, "kart tutarın bir kısmını karşılar");
+      const card = await makeGiftCard(gift);
+      const before = jobs.length;
+
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest(),
+      });
+
+      assert.equal(result.paymentMethod, "card");
+      assert.equal(result.giftCardAmountKurus, gift);
+      assert.equal(result.finalAmountKurus, total - gift, "tahsil edilen = brüt − kart");
+      assert.equal(result.autoConfirmed, undefined, "kısmi kart siparişi doğurmaz");
+
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(draft.amountKurus, total, "BRÜT tutar kart yüzünden düşmez");
+      assert.equal(draft.productionBaseKurus, total, "ortak payı kart yemez");
+      assert.equal(draft.paintingPriceKurus, 0);
+      assert.equal(draft.giftCardId, card.id);
+      assert.equal(draft.giftCardAmountKurus, gift);
+      assert.equal(draft.havaleDiscountKurus, 0, "kartta havale indirimi yok");
+      assert.equal(draft.paymentMethod, "card");
+      assert.ok(draft.paytrMerchantOid, "kart taslağı merchant oid taşır");
+      assertRefundable(draft, total - gift, "kısmi kart taslağı");
+
+      const [after] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(after.balanceKurus, 0, "bakiye düştü");
+      assert.equal(after.status, "fully_used");
+
+      const redemptions = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.draftId, draft.id));
+      assert.equal(redemptions.length, 1, "tek kullanım kaydı");
+      assert.equal(redemptions[0].giftCardId, card.id);
+      assert.equal(redemptions[0].amountKurus, gift);
+      assert.equal(redemptions[0].redeemedByUserId, payer.id);
+      assert.equal(redemptions[0].orderId, null, "terfiye kadar taslak kapsamında");
+      assert.equal(redemptions[0].refundedAt, null);
+
+      // ASIL NÖBET: PayTR'a brüt gitmesi sessiz çifte tahsilattır — webhook
+      // tutar farkını yalnız loglar, reddetmez.
+      const call = paytrCalls.at(-1)!;
+      assert.equal(call.payment_amount, String(total - gift), "PayTR NET tutarı ister");
+      const basket = JSON.parse(Buffer.from(call.user_basket, "base64").toString()) as Array<
+        [string, string, number]
+      >;
+      assert.equal(basket[0][1], ((total - gift) / 100).toFixed(2), "sepet de NET");
+
+      const queued = jobs.slice(before);
+      assert.ok(
+        queued.find((j) => j.opts.jobId === `card-expire-${draft.id}`),
+        "rezervasyonlu kart taslağı için son tarih işi kuyruğa girer"
+      );
+    });
+
+    await test("havale + kart: indirim NAKİT üzerinden hesaplanır", async () => {
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 5 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const gift = Math.floor(total / 2);
+      const card = await makeGiftCard(gift);
+      const before = jobs.length;
+
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            paymentMethod: "bank_transfer",
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest(),
+      });
+
+      const cashDiscount = calculateHavaleDiscount(total - gift);
+      const grossDiscount = calculateHavaleDiscount(total);
+      assert.ok(cashDiscount < grossDiscount, "vaka iki tabanı gerçekten ayırıyor");
+
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(
+        draft.havaleDiscountKurus,
+        cashDiscount,
+        "indirim brütten DEĞİL kalan nakitten hesaplanır"
+      );
+      assert.equal(draft.giftCardAmountKurus, gift);
+      assert.equal(draft.amountKurus, total);
+      assert.equal(result.finalAmountKurus, total - gift - cashDiscount);
+      assertRefundable(draft, total - gift - cashDiscount, "havale + kart taslağı");
+
+      const mail = jobs.slice(before).find((j) => j.queue === "email");
+      assert.ok(mail, "havale talimatı gitti");
+      assert.equal(
+        mail!.data.paymentAmountKurus,
+        result.finalAmountKurus,
+        "talimattaki tutar ile cevaptaki tutar AYNI zincirden çıkar"
+      );
+    });
+
+    await test("tam karşılama: PayTR yok, taslak ANINDA siparişe döner", async () => {
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const card = await makeGiftCard(total + 10_000);
+      const before = jobs.length;
+      const paytrBefore = paytrCalls.length;
+
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest(),
+      });
+
+      assert.equal(result.autoConfirmed, true, "sipariş anında doğdu");
+      assert.equal(result.paymentMethod, "gift_card_full");
+      assert.equal(result.finalAmountKurus, 0, "tahsil edilecek nakit yok");
+      assert.equal(result.giftCardAmountKurus, total);
+      assert.equal(result.iframeUrl, undefined);
+      assert.equal(paytrCalls.length, paytrBefore, "PayTR HİÇ çağrılmadı");
+
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(draft.paymentMethod, "gift_card_full");
+      assert.equal(draft.paytrMerchantOid, null);
+      assert.equal(draft.bankTransferDeadline, null);
+      assert.equal(draft.amountKurus, total, "brüt tutar korunur");
+      assert.equal(draft.giftCardAmountKurus, total);
+      assert.equal(draft.havaleDiscountKurus, 0, "nakit yoksa indirim de yok");
+      assert.equal(draft.status, "confirmed");
+      assertRefundable(draft, 0, "tam karşılanan taslak");
+
+      assert.ok(result.orderNumber, "sipariş numarası döndü");
+      const [order] = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.orderNumber, result.orderNumber!));
+      assert.ok(order, "sipariş satırı yazıldı");
+      assert.equal(order.giftCardAmountKurus, total);
+      assert.equal(order.amountKurus, total);
+      assert.equal(order.paymentMethod, "gift_card_full");
+      assert.equal(order.paymentStatus, "succeeded");
+      assertRefundable(order, 0, "tam karşılanan sipariş");
+
+      const [linked] = await db.select().from(quotes).where(eq(quotes.id, quote.id));
+      assert.equal(linked.status, "ordered");
+      assert.equal(linked.orderId, order.id);
+
+      const [spent] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(spent.balanceKurus, 10_000, "kalan bakiye kartta kalır");
+      assert.equal(spent.status, "partially_used");
+
+      const redemptions = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.giftCardId, card.id));
+      assert.equal(redemptions.length, 1);
+      assert.equal(redemptions[0].orderId, order.id, "terfi kullanımı siparişe taşıdı");
+
+      // §5.4 ikinci koruma: `/api/orders` bu işi tam karşılanan taslak için
+      // kuyruğa ALMAZ, teklif yolu ALIR — terfi patlarsa `expireDraft`
+      // rezervasyonu geri verir ve teklifin kilidini açar.
+      assert.ok(
+        jobs.slice(before).find((j) => j.opts.jobId === `card-expire-${draft.id}`),
+        "tam karşılanan taslak için de son tarih işi kuyruğa girer"
+      );
+      // …ve terfi onu SİLER: sipariş doğduktan sonra süre dolumu işi, ödenmiş
+      // bir siparişin altından taslağı süresi dolmuşa çeviremez.
+      assert.ok(
+        removedJobIds.includes(`card-expire-${draft.id}`),
+        "terfi son tarih işini kuyruktan kaldırır"
+      );
+    });
+
+    await test("terfi edemeyen gift_card_full taslağı 0 TL'lik KART sayfasına düşmez", async () => {
+      // Terfi patlarsa taslak `pending` kalır ve teklif kilitlidir; bekleyen
+      // ödemeyi geri vermek müşteriyi `/pay/<ref>`e, yani tahsil edilecek nakit
+      // OLMAYAN bir "kart ile öde" sayfasına yollardı (`draftMethod`
+      // `gift_card_full`ü kart sayar). Doğru davranış terfiyi yeniden denemek.
+      //
+      // O hâl burada ELLE kurulur: taslak gerçek yolla açılır (kısmi kart),
+      // sonra tamamı karşılanmış ama terfi edememiş bir taslağın şekline
+      // çevrilir. Terfinin kendisini testte patlatmanın kancası yok.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const card = await makeGiftCard(Math.floor(total / 3));
+
+      const first = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: total,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-stuck-1-${randomUUID()}` }),
+      });
+      const [pending] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, first.reference));
+      await db
+        .update(orderDrafts)
+        .set({
+          paymentMethod: "gift_card_full",
+          giftCardAmountKurus: pending.amountKurus,
+          paytrMerchantOid: null,
+          paytrTestMode: null,
+        })
+        .where(eq(orderDrafts.id, pending.id));
+      // Kullanım kaydı da aynı tutarı taşımalı: iade motorunun kapsam kontrolü
+      // `Σ redemption.amount_kurus === draft.gift_card_amount_kurus` istiyor.
+      await db
+        .update(giftCardRedemptions)
+        .set({ amountKurus: pending.amountKurus })
+        .where(eq(giftCardRedemptions.draftId, pending.id));
+
+      const retry = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({ expectedVersion: quote.version, expectedTotalKurus: total })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-stuck-2-${randomUUID()}` }),
+      });
+
+      assert.equal(retry.reference, first.reference, "yeni taslak açılmadı");
+      assert.equal(retry.reused, true, "bekleyen taslak yeniden kullanıldı");
+      assert.equal(retry.paymentMethod, "gift_card_full");
+      assert.equal(retry.redirectUrl, undefined, "kart ödeme sayfasına yollanmaz");
+      assert.equal(retry.finalAmountKurus, 0, "tahsil edilecek nakit yok");
+      assert.equal(retry.autoConfirmed, true, "terfi yeniden denendi ve tuttu");
+      assert.ok(retry.orderNumber, "sipariş numarası döndü");
+
+      const [healed] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, pending.id));
+      assert.equal(healed.status, "confirmed");
+      assert.ok(healed.promotedOrderId, "taslak siparişe bağlandı");
+    });
+
+    await test("harcanamaz kart 400 alır ve teklif ÖDENEBİLİR kalır", async () => {
+      const payer = await makeUser();
+      const filler = await makeUser();
+      const expired = await makeGiftCard(500_000, {
+        expiresAt: new Date(Date.now() - 86_400_000),
+      });
+      const drained = await makeGiftCard(0);
+      const limited = await makeGiftCard(500_000, { maxRedemptions: 1 });
+      // Limiti dolduran CANLI kullanım: sayım paylaşılan sayaçtan geçiyor.
+      await db.insert(giftCardRedemptions).values({
+        giftCardId: limited.id,
+        amountKurus: 1_000,
+        redeemedByUserId: filler.id,
+      });
+
+      const cases: Array<[string, string]> = [
+        [expired.code, "gift_card_expired"],
+        // Bakiyesi 0 ama durumu `active`: ön kontrol GEÇER, kartı reddeden
+        // şey işlem içindeki KİLİTLİ bakiye kapısıdır.
+        [drained.code, "gift_card_insufficient"],
+        [limited.code, "gift_card_limit_reached"],
+        ["GC-QA-YOKBOYLE", "gift_card_not_found"],
+      ];
+      for (const [code, expectedCode] of cases) {
+        const q = await makeQuote(payer.id, [{ geometry: CUBE }]);
+        const { quote, computed } = await expected(q.id);
+        await assert.rejects(
+          createQuoteCheckout({
+            quoteId: quote.id,
+            userId: payer.id,
+            email: payer.email,
+            input: quoteCheckoutSchema.parse(
+              body({
+                expectedVersion: quote.version,
+                expectedTotalKurus: computed.totals.totalKurus,
+                giftCardCode: code,
+              })
+            ),
+            req: fakeRequest(),
+          }),
+          (err: unknown) =>
+            err instanceof QuoteServiceError &&
+            err.status === 400 &&
+            err.code === expectedCode &&
+            /[çğıöşüÇĞİÖŞÜ ]/.test(err.message),
+          `${code} → ${expectedCode}`
+        );
+        // Teklif hâlâ düzenlenebilir/ödenebilir: yarım taslak bırakmadık.
+        assert.equal(await pendingQuoteCheckout(quote.id), null, `${code}: taslak yok`);
+      }
+
+      const [stillZero] = await db.select().from(giftCards).where(eq(giftCards.id, drained.id));
+      assert.equal(stillZero.balanceKurus, 0);
+      const [stillFull] = await db.select().from(giftCards).where(eq(giftCards.id, limited.id));
+      assert.equal(stillFull.balanceKurus, 500_000, "reddedilen kartın bakiyesi dokunulmadı");
     });
 
     console.log(`${checks} quote checkout DB checks passed`);

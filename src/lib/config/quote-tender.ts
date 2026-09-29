@@ -212,6 +212,38 @@ export function computeTender(input: TenderInput): Tender {
 }
 
 /**
+ * DONMUŞ bir tahsilatın tahsil edilen tutarı: taslak/sipariş satırından okunur.
+ *
+ * Zincir ileri yönde ödeme anında koşar ve sonucunu kolonlara yazar; o satırı
+ * sonradan okuyan yerler (bekleyen ödeme cevabı, `/pay` ve `/havale` sayfaları,
+ * iade motoru) aynı çıkarmayı ELLE yapmak zorunda kalmasın diye ters yön de
+ * burada durur. Elle yazılmış bir `amount − gift − discount` üçlüsü, zincire
+ * üçüncü bir indirim (promosyon, sadakat puanı) eklendiği gün BAYATLAR: yeni
+ * kolon toplamdan düşmez ve satır, tahsil edilenden FAZLA bir "ödenecek tutar"
+ * gösterir. Toplam bu yüzden `TENDER_STEP_ORDER` üzerinden yürür.
+ *
+ * Girdi `TenderDeductions`ın TAMAMINI ister, yani yeni bir indirim kolonu
+ * eklendiğinde bu fonksiyonu çağıran her yer DERLEME hatası verir.
+ */
+export function recordedPayableKurus(
+  row: { amountKurus: number } & TenderDeductions
+): number {
+  const amountKurus = grossKurus(row.amountKurus);
+  const deductedKurus = TENDER_STEP_ORDER.reduce(
+    (sum, step) => sum + tenderKurus(row[TENDER_STEP_FIELD[step]], "Kayıtlı indirim"),
+    0
+  );
+  // Bozuk satırda SESSİZ kalmak yanlış: `hediye + indirim > brüt` olan bir
+  // sipariş zaten iade EDİLEMEZ hâldedir (`order-refund.ts` · refundTenderBasis
+  // `lineage_unknown`), ve negatif bir "ödenecek tutar" göstermek o hatayı
+  // müşterinin ekranına taşımak olurdu.
+  if (deductedKurus > amountKurus) {
+    throw new RangeError("Kayıtlı tahsilat dökümü brüt tutarı aşıyor");
+  }
+  return amountKurus - deductedKurus;
+}
+
+/**
  * Taslağa/siparişe YAZILACAK ödeme yöntemi.
  *
  * Zincirin parçasıdır ve bu yüzden burada durur: tam karşılanan bir ödemede

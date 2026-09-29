@@ -1055,11 +1055,24 @@ async function promoteGiftCoveredDraft(
 ): Promise<QuoteCheckoutResult> {
   // Aynı `jobId` ile ikinci bir ekleme BullMQ'da sessiz bir no-op'tur, yani
   // terfiyi yeniden denerken son tarih işi ikizlenmez.
-  await getPaymentDeadlineQueue().add(
-    "card-expire",
-    { draftId: draft.id, reference: draft.reference, type: "card_expire" },
-    { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
-  );
+  //
+  // EN İYİ ÇABA: bakiye bu noktada ÇOKTAN düşmüş (rezervasyon commit oldu).
+  // Kuyruk erişilemezken isteği patlatmak, müşteriye hem hata gösterip hem
+  // siparişini yazmamak olurdu; oysa terfi buradan bağımsız çalışabilir.
+  // Kalan ağ üçüncü korumadır (bakım turu terfi edemeyen taslağı bulur).
+  try {
+    await getPaymentDeadlineQueue().add(
+      "card-expire",
+      { draftId: draft.id, reference: draft.reference, type: "card_expire" },
+      { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
+    );
+  } catch (err) {
+    console.error(
+      "Hediye kartıyla karşılanan taslak için son tarih işi kuyruğa alınamadı",
+      draft.reference,
+      err
+    );
+  }
 
   const base = {
     reference: draft.reference,

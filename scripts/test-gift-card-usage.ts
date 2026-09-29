@@ -91,4 +91,73 @@ test("reservation service opening its own transaction does not fool pin", () => 
   const split = `${reservation}\nasync function rogue() { await db.transaction(async (tx) => { void tx; }); }\n`;
   assert.throws(() => verify(split, "tx", "caller-tx"), /no transaction of its own/);
 });
+// ── Drift pin: the draft reservation refund has TWO bodies today ─────────────
+// `order-draft.ts` · `refundGiftCardForDraft` (draft expiry / failed payment)
+// and `gift-credit-return.ts` · `releaseDraftGiftReservationTx` (customer
+// cancels a quote checkout) are the SAME money routine, line for line. The
+// duplication is deliberate — the design mandates it because `order-draft.ts`
+// belongs to another session (DO-NOT-EDIT), and collapsing the two is a
+// follow-up PR. This pin keeps that debt from growing silently: touch one copy
+// (the half-returned history gate, the `refundedAt` filter, the lock call) and
+// `test:unit` turns red, because otherwise the two paths would start behaving
+// differently on the SAME draft. Comments are stripped before comparing, so
+// re-wording a comment on either side is free — and a comment can neither
+// equalise a drifted copy nor impersonate the delegation below.
+// When the follow-up PR lands (private copy deleted, or delegating to the
+// shared body) the pin stays green on its own.
+type PinnedBody = { node: ts.Node; text: string };
+function declaredBody(source: string, name: string): PinnedBody | null {
+  const sf = ts.createSourceFile(`${name}.ts`, source, ts.ScriptTarget.Latest, true);
+  let body: ts.Node | undefined;
+  for (const n of nodes(sf)) {
+    if (ts.isFunctionDeclaration(n) && identifier(n.name, name) && n.body) body = n.body;
+    else if (ts.isVariableDeclaration(n) && identifier(n.name, name) && n.initializer
+      && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))) body = n.initializer.body;
+  }
+  if (!body) return null;
+  return { node: body, text: ts.createPrinter({ removeComments: true }).printNode(ts.EmitHint.Unspecified, body, sf).replace(/\s+/g, " ").trim() };
+}
+function refundBodiesAgree(draftSource: string, returnSource: string) {
+  const shared = declaredBody(returnSource, "releaseDraftGiftReservationTx");
+  assert.ok(shared, "gift-credit-return.ts still declares releaseDraftGiftReservationTx");
+  const copy = declaredBody(draftSource, "refundGiftCardForDraft");
+  if (!copy) {
+    // Follow-up PR's target state: the private copy is gone, so the expiry path
+    // MUST reach the shared body — otherwise the reservation never returns.
+    assert.ok(nodes(ts.createSourceFile("draft.ts", draftSource, ts.ScriptTarget.Latest, true)).some(n => isCall(n, "releaseDraftGiftReservationTx")),
+      "private refund copy removed: order-draft.ts must delegate to releaseDraftGiftReservationTx");
+    return;
+  }
+  if (nodes(copy.node).some(n => isCall(n, "releaseDraftGiftReservationTx"))) return; // delegated; no second body left
+  assert.equal(copy.text, shared.text,
+    "order-draft.ts · refundGiftCardForDraft drifted from gift-credit-return.ts · releaseDraftGiftReservationTx — same money routine, two bodies: change BOTH, or delete the copy and delegate to releaseDraftGiftReservationTx");
+}
+const draftRefund = fs.readFileSync("src/lib/services/order-draft.ts", "utf8");
+const creditReturn = fs.readFileSync("src/lib/services/gift-credit-return.ts", "utf8");
+test("draft reservation refund: both bodies still identical", () => refundBodiesAgree(draftRefund, creditReturn));
+test("drift on either side breaks the pin", () => {
+  const draftDrift = draftRefund.replace("restored >= r.amountKurus", "restored > r.amountKurus");
+  assert.notEqual(draftDrift, draftRefund);
+  assert.throws(() => refundBodiesAgree(draftDrift, creditReturn), /two bodies/);
+  const returnDrift = creditReturn.replace("if (!candidates.length) return;", "if (!candidates.length) return; void 0;");
+  assert.notEqual(returnDrift, creditReturn);
+  assert.throws(() => refundBodiesAgree(draftRefund, returnDrift), /two bodies/);
+});
+test("commented delegation does not excuse a drifted copy", () => {
+  const faked = draftRefund
+    .replace("restored >= r.amountKurus", "restored > r.amountKurus")
+    .replace("  const candidates = await tx.select", "  // releaseDraftGiftReservationTx(tx, draftId)\n  const candidates = await tx.select");
+  assert.throws(() => refundBodiesAgree(faked, creditReturn), /two bodies/);
+});
+test("comment-only edits on either side keep the pin green", () => {
+  refundBodiesAgree(draftRefund.replace("  if (!candidates.length) return;", "  // promoted usage is the refund engine's business\n  if (!candidates.length) return;"), creditReturn);
+});
+test("deleting the copy in favour of the shared body keeps the pin green", () => {
+  refundBodiesAgree("async function refundGiftCardForDraft(tx: GiftTx, draftId: string): Promise<void> { await releaseDraftGiftReservationTx(tx, draftId); }\n", creditReturn);
+  refundBodiesAgree("async function expireDraft(tx: GiftTx, id: string) { await releaseDraftGiftReservationTx(tx, id); }\n", creditReturn);
+});
+test("losing the refund body altogether breaks the pin", () => {
+  assert.throws(() => refundBodiesAgree("export const nothing = 1;\n", creditReturn), /must delegate/);
+  assert.throws(() => refundBodiesAgree(draftRefund, "export const nothing = 1;\n"), /still declares/);
+});
 console.log(`${checks} gift usage integration checks passed; no DB`);

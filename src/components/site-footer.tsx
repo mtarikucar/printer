@@ -23,7 +23,10 @@ export function SiteFooter({ dict }: { dict: FigurunicaDict }) {
     pathname?.startsWith("/admin") ||
     pathname?.startsWith("/manufacturer") ||
     pathname?.startsWith("/painter") ||
-    pathname?.startsWith("/yolculuk")
+    pathname?.startsWith("/yolculuk") ||
+    // Tek ekranlık, kaydırılmayan video sahnesi: footer altına düşerse sayfa
+    // kaydırılır olur. İç linkleri sahnenin kendi üst/alt şeridi taşır.
+    pathname?.startsWith("/samsunspor")
   ) {
     return null;
   }

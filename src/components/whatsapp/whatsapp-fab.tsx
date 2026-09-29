@@ -20,7 +20,9 @@ export function WhatsAppFab() {
     // The journey page is a keepsake someone opens after unwrapping a gift.
     // A sales button floating over it breaks that, and they are already a
     // customer — there is nothing to sell here but the page's own CTA.
-    pathname?.startsWith("/yolculuk")
+    pathname?.startsWith("/yolculuk") ||
+    // Tam ekran video sahnesi: düğme videonun ve ses kontrollerinin üstüne biner.
+    pathname?.startsWith("/samsunspor")
   ) {
     return null;
   }

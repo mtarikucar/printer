@@ -133,7 +133,7 @@ export async function restoreGiftCreditTx(tx: MoneyTx, input: GiftCreditReturnIn
 }
 
 /**
- * Taslağın CANLI rezervasyonunu karta geri verir (müşteri iptali / süre dolumu).
+ * Taslağın CANLI rezervasyonunu karta geri verir (bugün: müşteri iptali).
  *
  * ÇAĞIRANIN SÖZLEŞMESİ: taslağın satır kilidi elde olmalı ve taslak HÂLÂ
  * `pending`/`awaiting_review`, `promoted_order_id IS NULL` olmalı —

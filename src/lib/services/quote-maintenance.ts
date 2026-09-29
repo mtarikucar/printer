@@ -40,6 +40,9 @@
  * standalone BullMQ worker süreci yükler. Özellikle `quote-checkout.ts`
  * import EDİLMEZ: o `attribution-server`i çeker, o da `server-only`dir ve
  * worker'ı crash-loop'a sokar (depo tarihindeki worker-server-only tuzağı).
+ * `order-draft.ts` (terfi) bu kısıtı zaten taşıyor — ödeme son tarihi işçisi de
+ * onu yüklüyor — ve graf `scripts/test-quote-maintenance-db.ts`te statik olarak
+ * yürünerek çivilenmiş durumda.
  */
 import {
   and,
@@ -588,8 +591,9 @@ export interface QuoteMaintenanceOutcome {
 /**
  * Saatlik turun kendisi.
  *
- * SIRA ÖNEMLİ: süre dolumu en başta koşar, böylece bu saat içinde kapanan bir
- * teklife "birkaç gün içinde bitiyor" yazılmaz.
+ * SIRA ÖNEMLİ: sahipsiz rezervasyon aşaması ilk (tahsilatı alınmış teklif aynı
+ * turda "süresi doldu" sayılmasın), süre dolumu hemen ardından koşar — böylece
+ * bu saat içinde kapanan bir teklife "birkaç gün içinde bitiyor" yazılmaz.
  *
  * Her aşama kendi try/catch'indedir ve sonunda toplu bir hata fırlatılır.
  * Tek bir `try` olsaydı diskteki bir arıza (süpürme) yasal olarak gitmesi

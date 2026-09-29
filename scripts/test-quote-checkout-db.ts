@@ -1431,6 +1431,116 @@ async function main() {
       );
     }
 
+    /**
+     * Terfi EDEMEMİŞ, tamamı hediye kartıyla karşılanmış bekleyen taslak kurar.
+     *
+     * Terfiyi testte patlatmanın kancası yok, o yüzden hâl ELLE kurulur: taslak
+     * gerçek yolla (kısmi kart) açılır, sonra tam karşılama şekline çevrilir.
+     * Tarif üç vakada paylaşıldığı için DEĞİŞMEZİ burada taşıyoruz: kullanım
+     * kaydı taslakla AYNI tutarı göstermeli — iade motorunun kapsam kontrolü
+     * `Σ redemption.amount_kurus === draft.gift_card_amount_kurus` istiyor
+     * (`refundTenderBasis`, `order-refund.ts`). Kopyalanan bir kurulumda bu
+     * güncelleme düştüğü an taslak üretimde DOĞAMAYACAK bir hâle giriyor
+     * (taslak "tamamı kartla" derken kullanım satırı 1/3 der) ve vakayı bir gün
+     * iptal/iade ile genişleten kişi anlamsız bir kırmızıyla karşılaşıyor.
+     */
+    async function makeStuckGiftCoveredDraft(opts: {
+      /** Idempotency anahtarı ön eki — vakalar birbirinin anahtarını görmesin. */
+      keyPrefix: string;
+      /**
+       * Kurulumdan SONRA kartta bırakılacak bakiye (verilmezse kart kurulumun
+       * bıraktığı hâlde kalır). AYNI kodu tekrar gönderen vaka bunu vermek
+       * ZORUNDA: ön doğrulama kuru kartı 400 (`gift_card_insufficient`) ile
+       * reddeder ve vaka sınadığı dala hiç gelemez.
+       */
+      cardBalanceKurus?: number;
+    }) {
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const totalKurus = computed.totals.totalKurus;
+      const card = await makeGiftCard(Math.floor(totalKurus / 3));
+
+      const first = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({
+            expectedVersion: quote.version,
+            expectedTotalKurus: totalKurus,
+            giftCardCode: card.code,
+          })
+        ),
+        req: fakeRequest({ "idempotency-key": `${opts.keyPrefix}-1-${randomUUID()}` }),
+      });
+      // Taslağın terfiden ÖNCEKİ hâli: vakalar tutarı ve id'yi buradan okur.
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, first.reference));
+      await db
+        .update(orderDrafts)
+        .set({
+          paymentMethod: "gift_card_full",
+          giftCardAmountKurus: draft.amountKurus,
+          paytrMerchantOid: null,
+          paytrTestMode: null,
+        })
+        .where(eq(orderDrafts.id, draft.id));
+      await db
+        .update(giftCardRedemptions)
+        .set({ amountKurus: draft.amountKurus })
+        .where(eq(giftCardRedemptions.draftId, draft.id));
+      if (opts.cardBalanceKurus !== undefined) {
+        await db
+          .update(giftCards)
+          .set({ balanceKurus: opts.cardBalanceKurus, status: "partially_used" })
+          .where(eq(giftCards.id, card.id));
+      }
+
+      // Değişmez YAZILMAKLA kalmıyor, kurulumun sonunda OKUNUYOR: yardımcıyı bir
+      // gün kopyalayan ya da budayan kişi kaymış çifti burada kırmızıyla görür,
+      // aylar sonra iptal/iade iddiası eklerken anlamsız bir hatayla değil.
+      const [setup] = await db.select().from(orderDrafts).where(eq(orderDrafts.id, draft.id));
+      const redeemedKurus = (
+        await db
+          .select()
+          .from(giftCardRedemptions)
+          .where(eq(giftCardRedemptions.draftId, draft.id))
+      ).reduce((sum, row) => sum + row.amountKurus, 0);
+      assert.equal(
+        redeemedKurus,
+        setup.giftCardAmountKurus,
+        "kurulum: Σ redemption.amount_kurus taslağın hediye payından AYRIŞTI (iade motoru bu taslağı `lineage_unknown` ile reddeder)"
+      );
+      assert.equal(
+        setup.paymentMethod,
+        "gift_card_full",
+        "kurulum: taslak tam karşılama hâline geçmedi"
+      );
+
+      return { payer, quote, totalKurus, card, draft, first };
+    }
+
+    /**
+     * Terfinin YENİDEN denenip tuttuğu cevabın şekli. Üç vakadan ikisi aynı
+     * altı iddiayı yazıyordu; ayrışan kısımlar (taslak satırı, `redirectUrl`,
+     * `pendingQuoteCheckout`) vakalarda kalır.
+     */
+    function assertPromotionRetried(
+      result: Awaited<ReturnType<typeof createQuoteCheckout>>,
+      reference: string,
+      where: string
+    ) {
+      assert.equal(result.reference, reference, `${where}: yeni taslak açılmadı`);
+      assert.equal(result.reused, true, `${where}: bekleyen taslak yeniden kullanıldı`);
+      assert.equal(result.paymentMethod, "gift_card_full", `${where}: sunum yöntemi`);
+      assert.equal(result.finalAmountKurus, 0, `${where}: tahsil edilecek nakit yok`);
+      assert.equal(result.autoConfirmed, true, `${where}: terfi yeniden denendi ve tuttu`);
+      assert.ok(result.orderNumber, `${where}: sipariş numarası döndü`);
+    }
+
     // Bayrağın KAPALI hâli AÇIKÇA yazılır, derlenmiş varsayılana bırakılmaz:
     // `isFlagEnabled` cevabı 10 saniyelik bir REDİS önbelleğinde tutuyor ve QA
     // Redis'i turlar arasında PAYLAŞILIYOR — bir önceki tur bayrağı açık
@@ -1751,47 +1861,15 @@ async function main() {
       // OLMAYAN bir "kart ile öde" sayfasına yollardı (`draftMethod`
       // `gift_card_full`ü kart sayar). Doğru davranış terfiyi yeniden denemek.
       //
-      // O hâl burada ELLE kurulur: taslak gerçek yolla açılır (kısmi kart),
-      // sonra tamamı karşılanmış ama terfi edememiş bir taslağın şekline
-      // çevrilir. Terfinin kendisini testte patlatmanın kancası yok.
-      const payer = await makeUser();
-      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
-      const { quote, computed } = await expected(q.id);
-      const total = computed.totals.totalKurus;
-      const card = await makeGiftCard(Math.floor(total / 3));
-
-      const first = await createQuoteCheckout({
-        quoteId: quote.id,
-        userId: payer.id,
-        email: payer.email,
-        input: quoteCheckoutSchema.parse(
-          body({
-            expectedVersion: quote.version,
-            expectedTotalKurus: total,
-            giftCardCode: card.code,
-          })
-        ),
-        req: fakeRequest({ "idempotency-key": `qa-stuck-1-${randomUUID()}` }),
-      });
-      const [pending] = await db
-        .select()
-        .from(orderDrafts)
-        .where(eq(orderDrafts.reference, first.reference));
-      await db
-        .update(orderDrafts)
-        .set({
-          paymentMethod: "gift_card_full",
-          giftCardAmountKurus: pending.amountKurus,
-          paytrMerchantOid: null,
-          paytrTestMode: null,
-        })
-        .where(eq(orderDrafts.id, pending.id));
-      // Kullanım kaydı da aynı tutarı taşımalı: iade motorunun kapsam kontrolü
-      // `Σ redemption.amount_kurus === draft.gift_card_amount_kurus` istiyor.
-      await db
-        .update(giftCardRedemptions)
-        .set({ amountKurus: pending.amountKurus })
-        .where(eq(giftCardRedemptions.draftId, pending.id));
+      // O hâl `makeStuckGiftCoveredDraft` içinde ELLE kurulur (terfinin kendisini
+      // testte patlatmanın kancası yok); kurulumun değişmezi orada yazılı.
+      const {
+        payer,
+        quote,
+        totalKurus: total,
+        draft: pending,
+        first,
+      } = await makeStuckGiftCoveredDraft({ keyPrefix: "qa-stuck" });
 
       const retry = await createQuoteCheckout({
         quoteId: quote.id,
@@ -1803,13 +1881,8 @@ async function main() {
         req: fakeRequest({ "idempotency-key": `qa-stuck-2-${randomUUID()}` }),
       });
 
-      assert.equal(retry.reference, first.reference, "yeni taslak açılmadı");
-      assert.equal(retry.reused, true, "bekleyen taslak yeniden kullanıldı");
-      assert.equal(retry.paymentMethod, "gift_card_full");
+      assertPromotionRetried(retry, first.reference, "kodsuz tekrar");
       assert.equal(retry.redirectUrl, undefined, "kart ödeme sayfasına yollanmaz");
-      assert.equal(retry.finalAmountKurus, 0, "tahsil edilecek nakit yok");
-      assert.equal(retry.autoConfirmed, true, "terfi yeniden denendi ve tuttu");
-      assert.ok(retry.orderNumber, "sipariş numarası döndü");
 
       const [healed] = await db
         .select()
@@ -1824,38 +1897,12 @@ async function main() {
       // "kart ile ödeme bekliyor" + `/pay/<ref>` döndürüyordu; o bağlantı ₺0
       // tutarlı bir PayTR token'ı denemesi olduğu için ÇALIŞMIYOR. Sunum yöntemi
       // ayrılır, 409 karşılaştırması AYNI kalır (aşağıda).
-      const payer = await makeUser();
-      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
-      const { quote, computed } = await expected(q.id);
-      const total = computed.totals.totalKurus;
-      const card = await makeGiftCard(Math.floor(total / 3));
-
-      const first = await createQuoteCheckout({
-        quoteId: quote.id,
-        userId: payer.id,
-        email: payer.email,
-        input: quoteCheckoutSchema.parse(
-          body({
-            expectedVersion: quote.version,
-            expectedTotalKurus: total,
-            giftCardCode: card.code,
-          })
-        ),
-        req: fakeRequest({ "idempotency-key": `qa-covered-view-${randomUUID()}` }),
-      });
-      const [draft] = await db
-        .select()
-        .from(orderDrafts)
-        .where(eq(orderDrafts.reference, first.reference));
-      await db
-        .update(orderDrafts)
-        .set({
-          paymentMethod: "gift_card_full",
-          giftCardAmountKurus: draft.amountKurus,
-          paytrMerchantOid: null,
-          paytrTestMode: null,
-        })
-        .where(eq(orderDrafts.id, draft.id));
+      const {
+        payer,
+        quote,
+        totalKurus: total,
+        draft,
+      } = await makeStuckGiftCoveredDraft({ keyPrefix: "qa-covered-view" });
 
       const pending = await pendingQuoteCheckout(quote.id);
       assert.ok(pending, "bekleyen ödeme özeti okunur");
@@ -1986,51 +2033,13 @@ async function main() {
       // yoktur ve müşteriyi rezervasyonu doğru kurulmuş bir ödemeyi iptal etmeye
       // zorlamak kurtarma yolunu kapatırdı. Gerçek hâl: tamamı karşılanmış ama
       // terfi edememiş taslakta müşteri formu (kod uygulanmış hâlde) yeniden
-      // gönderir — doğru cevap terfiyi YENİDEN denemektir.
-      const payer = await makeUser();
-      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
-      const { quote, computed } = await expected(q.id);
-      const total = computed.totals.totalKurus;
-      const card = await makeGiftCard(Math.floor(total / 3));
-
-      const first = await createQuoteCheckout({
-        quoteId: quote.id,
-        userId: payer.id,
-        email: payer.email,
-        input: quoteCheckoutSchema.parse(
-          body({
-            expectedVersion: quote.version,
-            expectedTotalKurus: total,
-            giftCardCode: card.code,
-          })
-        ),
-        req: fakeRequest({ "idempotency-key": `qa-same-card-1-${randomUUID()}` }),
+      // gönderir — doğru cevap terfiyi YENİDEN denemektir. Aynı kurulum,
+      // ARTI kartta bakiye bırakmak: ön doğrulama kuru kartı 400'le reddeder ve
+      // vaka sınadığı dala hiç gelemezdi.
+      const { payer, quote, totalKurus: total, card, first } = await makeStuckGiftCoveredDraft({
+        keyPrefix: "qa-same-card",
+        cardBalanceKurus: 5_000,
       });
-      const [draft] = await db
-        .select()
-        .from(orderDrafts)
-        .where(eq(orderDrafts.reference, first.reference));
-      // Terfi edememiş tam karşılama ELLE kurulur (terfiyi patlatmanın kancası
-      // yok) — üstteki "0 TL'lik KART sayfasına düşmez" vakasıyla aynı tarif,
-      // artı kartta BAKİYE bırakmak: ön doğrulama drenmiş kartı 400'le
-      // reddeder ve vaka asıl dala hiç gelemezdi.
-      await db
-        .update(orderDrafts)
-        .set({
-          paymentMethod: "gift_card_full",
-          giftCardAmountKurus: draft.amountKurus,
-          paytrMerchantOid: null,
-          paytrTestMode: null,
-        })
-        .where(eq(orderDrafts.id, draft.id));
-      await db
-        .update(giftCardRedemptions)
-        .set({ amountKurus: draft.amountKurus })
-        .where(eq(giftCardRedemptions.draftId, draft.id));
-      await db
-        .update(giftCards)
-        .set({ balanceKurus: 5_000, status: "partially_used" })
-        .where(eq(giftCards.id, card.id));
 
       const again = await createQuoteCheckout({
         quoteId: quote.id,
@@ -2045,12 +2054,7 @@ async function main() {
         ),
         req: fakeRequest({ "idempotency-key": `qa-same-card-2-${randomUUID()}` }),
       });
-      assert.equal(again.reused, true, "aynı kartla gelen dürüst tekrar 409 aldı");
-      assert.equal(again.reference, first.reference, "yeni taslak açıldı");
-      assert.equal(again.paymentMethod, "gift_card_full");
-      assert.equal(again.finalAmountKurus, 0, "tahsil edilecek nakit yok");
-      assert.equal(again.autoConfirmed, true, "terfi yeniden denenmedi");
-      assert.ok(again.orderNumber, "sipariş numarası döndü");
+      assertPromotionRetried(again, first.reference, "aynı kartla dürüst tekrar");
       assert.equal(await pendingQuoteCheckout(quote.id), null, "taslak bekliyor kaldı");
     });
 

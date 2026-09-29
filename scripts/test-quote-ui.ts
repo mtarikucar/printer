@@ -1884,3 +1884,35 @@ test("parça kütüphanesi ve mesafeli satış özeti metinlerini SÖZLÜKTEN al
     assert.doesNotMatch(code, /[çğışöüÇĞİŞÖÜ]/, `${file} sözlük dışında Türkçe metin taşıyor`);
   }
 });
+
+test("toplu işlem çubuğu telefonda tek satırlık eylem şeridi taşır", () => {
+  // IQ-14: çubuk 390×844 görünümde ekranın %40'ına yakınını kaplıyordu (gerçek
+  // ölçüm raporda). Yüksekliği üreten mekanizma tekti: sayaç, beş alan ve üç
+  // düğme AYNI `flex-wrap` sırasında sarmalanıyordu. Artık eylemler tek satır,
+  // alan dizisi sarmalamaz — yatay kayar.
+  const source = fs
+    .readFileSync(path.resolve("src/components/quote/bulk-bar.tsx"), "utf8")
+    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
+  assert.doesNotMatch(source, /flex-wrap/, "çubuk hâlâ sarmalıyor");
+  assert.match(source, /overflow-x-auto/, "alan dizisi kaymıyor, sarmalıyor");
+
+  // Telefonda simgeye inen düğmeler adlarını KAYBETMEZ.
+  const html = inLocale(
+    createElement(QuoteBulkBar, {
+      selectedIds: ["p1", "p2"],
+      catalog: catalogFixture,
+      onApply: noop,
+      onDelete: noop,
+      onClear: noop,
+    })
+  );
+  for (const key of [
+    "instantQuote.bulk.apply",
+    "instantQuote.bulk.delete",
+    "instantQuote.bulk.clear",
+  ] as const) {
+    assert.ok(html.includes(tr[key]), `${tr[key]} düğmesinin adı kayboldu`);
+  }
+});

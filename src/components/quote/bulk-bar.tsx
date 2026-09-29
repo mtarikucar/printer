@@ -17,6 +17,15 @@ import { fill } from "./format";
  * girer. Malzeme seçilince renk de zorunlu olarak yamaya girer: renk yeni
  * malzemede yoksa uç isteği tümden reddeder (`resolveConfig`), yani sessiz
  * bir yarım uygulama olmaz.
+ *
+ * **Telefonda yükseklik bir bütçedir.** Çubuk yapışkandır: kapladığı her piksel
+ * parça listesinden kalıcı olarak düşer. Sayaç, beş alan ve üç düğme TEK bir
+ * `flex-wrap` sırasındayken 390×844 görünümde 261,5 px (ekranın %31'i)
+ * ölçüldü. Bu yüzden düzen ikiye ayrıldı: üstte sarmalamayan TEK satırlık
+ * eylem şeridi (sayaç + uygula + iki simge düğme), altında yatay KAYAN alan
+ * dizisi. Alan sayısı artsa bile yükseklik sabit kalır — sarmalama yok.
+ * Simgeye inen düğmeler adlarını `aria-label` ile korur ve `sm:`den itibaren
+ * yazıyı da gösterir.
  */
 
 interface BulkDraft {
@@ -80,19 +89,66 @@ export function QuoteBulkBar({
   const hasPatch = Object.keys(patch).length > 0;
 
   const field = (label: string, node: JSX.Element) => (
-    <label className="block min-w-0">
-      <span className="mb-1 block text-[11px] text-white/60">{label}</span>
+    <label className="block shrink-0">
+      <span className="mb-1 block text-[11px] leading-4 text-white/60">{label}</span>
       {node}
     </label>
   );
 
   return (
     <div className="sticky bottom-3 z-30 rounded-2xl bg-ink p-3 text-white shadow-elevated">
-      <div className="flex flex-wrap items-end gap-3">
-        <p className="mr-auto text-sm font-medium">
+      {/* Eylem şeridi: sayaç ve üç düğme TEK satırda; sayaç `truncate` ile
+          büzülür, düğmeler `shrink-0` ile bozulmaz. */}
+      <div className="flex items-center gap-2">
+        <p className="mr-auto min-w-0 truncate text-xs font-medium sm:text-sm">
           {fill(d["instantQuote.bulk.selected"], { count: selectedIds.length })}
         </p>
 
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy || !hasPatch}
+          onClick={() => {
+            onApply(patch);
+            setDraft(EMPTY);
+          }}
+          className="shrink-0 !bg-white !px-3 !text-ink"
+        >
+          {d["instantQuote.bulk.apply"]}
+        </Button>
+
+        {/* Yıkıcı düğme, yanındaki "Seçimi temizle" ile aynı ağırlıkta
+            olamaz: ikisi de aynı satırda, aynı ölçüde ve yalnız metin
+            saydamlığıyla ayrılıyordu — mobilde ~28 px'lik iki komşu hedef,
+            Türkçe adları da birbirine yakın. Renk ve çerçeve, onay
+            diyaloğundan ÖNCE gelen ilk uyarıdır. */}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onDelete}
+          aria-label={d["instantQuote.bulk.delete"]}
+          title={d["instantQuote.bulk.delete"]}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-300/50 px-2.5 py-2 text-xs font-medium text-rose-200 hover:bg-rose-500/25 hover:text-white disabled:opacity-40"
+        >
+          <TrashIcon />
+          <span className="hidden sm:inline">{d["instantQuote.bulk.delete"]}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label={d["instantQuote.bulk.clear"]}
+          title={d["instantQuote.bulk.clear"]}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs text-white/60 hover:text-white"
+        >
+          <CloseIcon />
+          <span className="hidden sm:inline">{d["instantQuote.bulk.clear"]}</span>
+        </button>
+      </div>
+
+      {/* Alan dizisi: sarmalamaz, KAYAR. Yükseklik alan sayısından bağımsız
+          kalır; telefonda tek alan sırası yüksekliğindedir. */}
+      <div className="mt-2 flex items-end gap-2 overflow-x-auto pb-1">
         {field(
           d["instantQuote.bulk.technology"],
           <Select
@@ -183,42 +239,41 @@ export function QuoteBulkBar({
             className="input-base !w-20 !py-1.5 !text-xs !text-text-primary"
           />
         )}
-
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || !hasPatch}
-            onClick={() => {
-              onApply(patch);
-              setDraft(EMPTY);
-            }}
-            className="!bg-white !text-ink"
-          >
-            {d["instantQuote.bulk.apply"]}
-          </Button>
-          {/* Yıkıcı düğme, yanındaki "Seçimi temizle" ile aynı ağırlıkta
-              olamaz: ikisi de aynı satırda, aynı ölçüde ve yalnız metin
-              saydamlığıyla ayrılıyordu — mobilde ~28 px'lik iki komşu hedef,
-              Türkçe adları da birbirine yakın. Renk ve çerçeve, onay
-              diyaloğundan ÖNCE gelen ilk uyarıdır. */}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onDelete}
-            className="rounded-lg border border-rose-300/50 px-3 py-2 text-xs font-medium text-rose-200 hover:bg-rose-500/25 hover:text-white disabled:opacity-40"
-          >
-            {d["instantQuote.bulk.delete"]}
-          </button>
-          <button
-            type="button"
-            onClick={onClear}
-            className="rounded-lg px-3 py-2 text-xs text-white/60 hover:text-white"
-          >
-            {d["instantQuote.bulk.clear"]}
-          </button>
-        </div>
       </div>
     </div>
+  );
+}
+
+function TrashIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
+function CloseIcon(): JSX.Element {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
   );
 }

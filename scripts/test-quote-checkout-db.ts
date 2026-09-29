@@ -1915,6 +1915,119 @@ async function main() {
       );
     });
 
+    await test("iptal rezervasyonu KARTA geri verir; ikinci iptal bakiyeyi iki kez artırmaz", async () => {
+      // Bu vakanın konusu müşterinin PARASI: rezervasyonlu taslak dururken
+      // teklif salt okunurdur, yani iptal kapısı kapalı olsaydı müşteri ne
+      // ödeyebilir ne düzenleyebilir hâlde kalır ve bakiyesi
+      // `CARD_DEADLINE_HOURS` boyunca kartta kilitli durur.
+      //
+      // İptal edilebilir kart taslağının tek gerçekçi yolu token'ın
+      // reddedilmesidir: rezervasyon commit oldu (`freezeCheckout`), ama
+      // `paytr_test_mode` NULL kaldı, yani müşteri PayTR ekranını hiç görmedi.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const gift = Math.floor(total / 4);
+      const card = await makeGiftCard(gift);
+      const input = quoteCheckoutSchema.parse(
+        body({
+          expectedVersion: quote.version,
+          expectedTotalKurus: total,
+          giftCardCode: card.code,
+        })
+      );
+
+      paytrFails = true;
+      const realError = console.error;
+      console.error = () => {};
+      try {
+        await assert.rejects(
+          createQuoteCheckout({
+            quoteId: quote.id,
+            userId: payer.id,
+            email: payer.email,
+            input,
+            req: fakeRequest({ "idempotency-key": `qa-gift-cancel-${randomUUID()}` }),
+          }),
+          (err: unknown) => err instanceof QuoteServiceError && err.status === 502
+        );
+      } finally {
+        paytrFails = false;
+        console.error = realError;
+      }
+
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.userId, payer.id));
+      assert.equal(draft.status, "pending");
+      assert.equal(draft.paytrTestMode, null, "PayTR ekranı hiç açılmadı");
+      assert.equal(draft.giftCardAmountKurus, gift);
+      const [reserved] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(reserved.balanceKurus, 0, "rezervasyon kartta duruyor");
+
+      const pending = await pendingQuoteCheckout(quote.id);
+      assert.ok(pending, "bekleyen ödeme özeti okunur");
+      assert.equal(pending!.cancellable, true, "rezervasyonlu taslak da iptal EDİLEBİLİR");
+      assert.equal(
+        pending!.giftCardAmountKurus,
+        gift,
+        "ekran 'iptal ederseniz ₺X geri yüklenir' diyebilsin"
+      );
+
+      const cancelled = await cancelPendingQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+      });
+      assert.equal(cancelled.reference, draft.reference);
+
+      const [restored] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(restored.balanceKurus, gift, "bakiye KARTA geri döndü");
+      assert.equal(restored.status, "active", "tamamı geri dönen kart yeniden aktif");
+      const [redemption] = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.draftId, draft.id));
+      assert.ok(redemption.refundedAt, "kullanım kaydı iade damgası aldı");
+      const returns = await db
+        .select()
+        .from(giftCreditReturns)
+        .where(eq(giftCreditReturns.expiredDraftId, draft.id));
+      assert.equal(returns.length, 1, "tek denetim satırı");
+      assert.equal(returns[0].amountKurus, gift);
+      assert.equal(returns[0].balanceEffect, "restore");
+      const [after] = await db.select().from(orderDrafts).where(eq(orderDrafts.id, draft.id));
+      assert.equal(after.status, "cancelled");
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "teklifin kilidi açıldı");
+
+      // İkinci iptal: bekleyen ödeme YOK. `(expired_draft_id, redemption_id)`
+      // tekil indeksi olmasa bile buraya gelinmez, ama bakiyenin iki kez
+      // artmadığı ÖLÇÜLÜR — iki kez artan bir bakiye, kartın bedava para
+      // basması demektir.
+      await assert.rejects(
+        cancelPendingQuoteCheckout({ quoteId: quote.id, userId: payer.id }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "no_pending_draft"
+      );
+      const [once] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(once.balanceKurus, gift, "bakiye İKİ KEZ artmadı");
+
+      // …ve teklif AYNI kartla yeniden ödenebilir: kilit gerçekten açıldı.
+      const retry = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input,
+        req: fakeRequest({ "idempotency-key": `qa-gift-cancel-2-${randomUUID()}` }),
+      });
+      assert.equal(retry.reused, false, "iptalden sonra YENİ taslak açıldı");
+      assert.equal(retry.giftCardAmountKurus, gift, "kart yeniden rezerve edildi");
+      assert.equal(retry.finalAmountKurus, total - gift);
+    });
+
     // ─── Ön izleme ucu (rezervasyon YOK) ──────────────────────────────────
     //
     // Ön izlemenin tek işi, müşteriye ödeme yükümlülüğünden ÖNCE ödeyeceği

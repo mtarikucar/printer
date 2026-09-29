@@ -101,6 +101,7 @@ import {
   insertGiftRedemptionTx,
   reserveGiftCardTx,
 } from "@/lib/services/gift-card-reservation";
+import { releaseDraftGiftReservationTx } from "@/lib/services/gift-credit-return";
 import {
   deriveIdempotencyKey,
   withIdempotency,
@@ -374,17 +375,23 @@ const METHOD_LABELS: Record<"card" | "bank_transfer", string> = {
  * token'ı müşteriye HİÇ ulaşmaz (aksi hâlde ödenen ama siparişe dönmeyen
  * bir taslak kalırdı). Havale
  * taslağı iptal edilmez: IBAN talimatı gönderilmiş, hatırlatma/süre işleri
- * kuyruğa girmiştir ve müşteri parayı yollamış olabilir. Hediye kartı ve
- * terfi etmiş taslak da dışarıda: rezerve fonu serbest bırakmak ikinci bir
- * algoritma ister (admin yolu `_actions.ts` bunu politikayla reddediyor).
+ * kuyruğa girmiştir ve müşteri parayı yollamış olabilir. Terfi etmiş taslak da
+ * dışarıda: siparişi olan bir ödemeyi iptal etmek iade motorunun işidir.
+ *
+ * HEDİYE KARTI REZERVASYONU KAPIYI KAPATMAZ (ve kapatmamalı): rezerve edilmiş
+ * bakiye tam da kapının en çok gerektiği hâldir — taslak dururken teklif salt
+ * okunur olduğu için müşteri ne ödeyebilir ne düzenleyebilir, üstelik parası
+ * kartta kilitlidir. İptal, `releaseDraftGiftReservationTx` ile bakiyeyi AYNI
+ * işlemde karta geri verir. `gift_card_full` taslağı da bu kapıdan geçer
+ * (`draftMethod` onu kart sayar): tahsil edilecek nakdi olmayan ama siparişe de
+ * dönememiş bir taslakta müşterinin tek çıkışı budur.
  */
 function pendingDraftCancellable(draft: Draft): boolean {
   return (
     draft.status === "pending" &&
     draftMethod(draft) === "card" &&
     draft.paytrTestMode === null &&
-    draft.promotedOrderId === null &&
-    draft.giftCardId === null
+    draft.promotedOrderId === null
   );
 }
 
@@ -1278,6 +1285,13 @@ export interface PendingQuoteCheckout {
   paymentUrl: string;
   /** Taslak iptal edilip başka bir yöntemle yeniden başlanabilir mi? */
   cancellable: boolean;
+  /**
+   * Bu bekleyen ödemede REZERVE edilmiş hediye kartı tutarı; kart yoksa 0.
+   *
+   * Ekran bunu "iptal ederseniz ₺X bakiyeniz kartınıza geri yüklenir" demek
+   * için okur. Rakam taslağın DONMUŞ satırından gelir, ekranda hesaplanmaz.
+   */
+  giftCardAmountKurus: number;
 }
 
 /**
@@ -1303,6 +1317,7 @@ export async function pendingQuoteCheckout(
     paymentMethod: draftMethod(draft),
     paymentUrl: draftPaymentPath(draft),
     cancellable: pendingDraftCancellable(draft),
+    giftCardAmountKurus: draft.giftCardAmountKurus,
   };
 }
 
@@ -1353,6 +1368,16 @@ export async function cancelPendingQuoteCheckout(args: {
         "draft_not_cancellable"
       );
     }
+
+    // Rezervasyon taslak HÂLÂ `pending` iken geri verilir (tasarım §5.3, adım 4):
+    // `restoreGiftCreditTx` taslak kapsamında `status ∈ (pending,
+    // awaiting_review)` ve `promoted_order_id IS NULL` arar, yani aşağıdaki
+    // iptal yazımından SONRA çağırmak bakiyeyi kartta KİLİTLİ bırakırdı — ve
+    // müşteri hem ödeyemez hem düzenleyemez hâlde, parası tutulmuş olurdu.
+    // Kilit sırası da korunur: teklif → taslak → kart (`lockGiftRedemptionsTx`
+    // kartları id sırasıyla kilitler), `freezeCheckout` ile aynı yön.
+    // Rezervasyonu olmayan taslakta hiçbir şey yapmaz.
+    await releaseDraftGiftReservationTx(tx, draft.id);
 
     // Koşullu yazım: son tarih işçisi ya da webhook araya girdiyse satır
     // tutmaz ve iptal SESSİZCE başarılı görünmez.

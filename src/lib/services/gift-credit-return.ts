@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { giftCards, giftCardRedemptions, giftCreditReturns, orderDrafts, orders, orderRefundAllocations, orderRefundRecords } from "@/lib/db/schema";
 import type { MoneyTx } from "./money-partner-lock";
 
@@ -130,4 +130,47 @@ export async function restoreGiftCreditTx(tx: MoneyTx, input: GiftCreditReturnIn
     if (e.remaining === 0) await tx.update(giftCardRedemptions).set({ refundedAt: new Date() }).where(eq(giftCardRedemptions.id, e.r.id));
   }
   return { restoredKurus: total, allocations: effects.map(e => ({ redemptionId: e.r.id, restoredKurus: e.amount, remainingKurus: e.remaining })) };
+}
+
+/**
+ * Taslağın CANLI rezervasyonunu karta geri verir (müşteri iptali / süre dolumu).
+ *
+ * ÇAĞIRANIN SÖZLEŞMESİ: taslağın satır kilidi elde olmalı ve taslak HÂLÂ
+ * `pending`/`awaiting_review`, `promoted_order_id IS NULL` olmalı —
+ * `restoreGiftCreditTx` taslak kapsamında tam bunu arar, yani iptali/süre
+ * dolumunu YAZDIKTAN sonra çağırmak bakiyeyi kartta kilitli bırakırdı.
+ * Rezervasyonu olmayan taslakta hiçbir şey yapmaz (kart kullanmamış taslağın
+ * iptali de bu yoldan geçiyor).
+ *
+ * Burada duruyor çünkü konusu bu modülün konusu: kilit sınırı
+ * (`lockGiftRedemptionsTx`) ve iade yazımları (`restoreGiftCreditTx`) hemen
+ * yukarıda. `gift-card-reservation.ts` olamazdı — `scripts/test-gift-card-usage.ts`
+ * AST nöbeti o dosyada HİÇBİR özel `giftCardRedemptions` okumasına izin vermiyor
+ * (paylaşılan kullanım sayımının ikinci bir kopyası doğmasın diye) ve bir para
+ * nöbetini yerleşim tercihi için gevşetmek yanlış takas olurdu.
+ *
+ * `order-draft.ts`teki `refundGiftCardForDraft` bugün aynı işi kendi özel
+ * kopyasıyla yapıyor; o dosya başka bir oturumun elinde olduğu için kopya
+ * yerinde bırakıldı ve takip PR'ında buna delege edilecek.
+ */
+export async function releaseDraftGiftReservationTx(tx: MoneyTx, draftId: string): Promise<void> {
+  // Terfi etmiş kullanım (artık siparişin; iade motorunun konusu) ve iadesi
+  // yapılmış kullanım dışarıda.
+  const candidates = await tx.select({ id: giftCardRedemptions.id }).from(giftCardRedemptions).where(and(
+    eq(giftCardRedemptions.draftId, draftId), isNull(giftCardRedemptions.orderId), isNull(giftCardRedemptions.refundedAt),
+  ));
+  if (!candidates.length) return;
+  const { redemptions } = await lockGiftRedemptionsTx(tx, candidates.map(r => r.id));
+  const history = await tx.select().from(giftCreditReturns).where(inArray(giftCreditReturns.redemptionId, redemptions.map(r => r.id)));
+  const allocations = redemptions.filter(r => !r.refundedAt).map(r => {
+    const returns = history.filter(h => h.redemptionId === r.id);
+    const restored = returns.reduce((sum, h) => sum + h.amountKurus, 0);
+    // Yarım ya da tümü dönmüş bir geçmişte sessizce devam etmek, bakiyeyi
+    // İKİNCİ kez artırmak olurdu.
+    if (returns.some(h => h.balanceEffect !== "restore") || !Number.isSafeInteger(restored) || restored < 0 || restored >= r.amountKurus) {
+      throw new GiftCreditReturnError("gift_history_unknown", "Taslak hediye kartı iade geçmişi tutarsız.");
+    }
+    return { redemptionId: r.id, amountKurus: r.amountKurus - restored };
+  });
+  if (allocations.length) await restoreGiftCreditTx(tx, { scope: { kind: "draft", id: draftId }, parent: { expiredDraftId: draftId }, allocations });
 }

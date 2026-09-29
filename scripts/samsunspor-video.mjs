@@ -157,6 +157,20 @@ function main() {
       "-movflags", "+faststart",
       tmp,
     ]);
+
+    // ffmpeg, kaynak okunurken bozulursa (örn. dosya o sırada yeniden
+    // indiriliyorsa) elindeki kadarını yazıp BAŞARIYLA çıkar. Çıkış koduna
+    // güvenilmez; üretilen dosyanın süresi kaynağınkiyle karşılaştırılır.
+    const made = probe(tmp);
+    if (Math.abs(made.duration - info.duration) > 0.25) {
+      for (const b of built) unlinkSync(b.tmp);
+      unlinkSync(tmp);
+      throw new Error(
+        `${w}x${h} eksik üretildi: ${made.duration.toFixed(2)} sn, ` +
+          `beklenen ${info.duration.toFixed(2)} sn. Kaynak dosya kodlama ` +
+          `sırasında değişmiş olabilir. Eski dosyalara dokunulmadı.`
+      );
+    }
     built.push({ edge, width: w, height: h, tmp });
   }
 

@@ -1,6 +1,7 @@
 /**
- * Anlık teklifin GÖZETİMSİZ yarısı: süre dolumu, iki hatırlatma, dosya saklama
- * süresi ve yetim dizinler. Saatte bir `quote-maintenance` işi çağırır.
+ * Anlık teklifin GÖZETİMSİZ yarısı: sahipsiz kalmış hediye kartı
+ * rezervasyonları, süre dolumu, iki hatırlatma, dosya saklama süresi ve yetim
+ * dizinler. Saatte bir `quote-maintenance` işi çağırır.
  *
  * Üç kural bütün dosyayı biçimlendirir:
  *
@@ -57,6 +58,7 @@ import {
 import type { SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  orderDrafts,
   quoteCheckouts,
   quoteParts,
   quotePricingSettings,
@@ -64,6 +66,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import type { QuoteStatus } from "@/lib/config/quote-types";
+import { promoteDraftToOrder } from "@/lib/services/order-draft";
 import { notifyQuoteAbandoned, notifyQuoteExpiring } from "@/lib/services/quote-notify";
 import { deleteFile, deleteStoredDir, listStoredDirs } from "@/lib/services/storage";
 import {
@@ -74,6 +77,7 @@ import {
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
+const MINUTE_MS = 60_000;
 
 /** Süresi dolmadan kaç gün önce işlemsel hatırlatma gider. */
 export const EXPIRY_REMINDER_DAYS = 3;
@@ -461,12 +465,124 @@ export async function sweepOrphanQuotePartDirs(now: Date): Promise<number> {
   return swept;
 }
 
+/**
+ * Tamamı hediye kartıyla karşılanan taslağa, kendi isteği terfiyi denemesi için
+ * bırakılan süre.
+ *
+ * Ödeme isteği rezervasyonu yazdıktan HEMEN sonra `promoteDraftToOrder`u çağırır
+ * (tasarım §5.4, birinci koruma). Bu tur o denemenin rakibi değil, ağıdır: on
+ * dakika, en yavaş terfinin (sipariş yazımı + e-posta + kuyruk) iki büyüklük
+ * mertebesi üstünde, ama müşterinin bakiyesi harcanmışken siparişini beklediği
+ * süre olarak da kısa. Kısaltmak iki tarafın aynı taslağı aynı anda terfi
+ * ettirmeye çalışmasından başka bir şey kazandırmaz (`promoteDraftToOrder`
+ * idempotent olduğu için zararsız ama faydasız); uzatmak müşteriyi bekletir.
+ */
+export const STUCK_GIFT_DRAFT_GRACE_MINUTES = 10;
+
+/**
+ * Bir turda en çok kaç sahipsiz rezervasyon terfi ettirilir.
+ *
+ * Tavan hatırlatmalardan düşük: her terfi bir sipariş yazımı, e-posta ve kuyruk
+ * işidir (hatırlatma yalnız bir mektup). Bu aşamanın normal yükü SIFIRDIR —
+ * sıraya girmiş elli taslak, ödeme yolunda sistemik bir arıza demektir ve o
+ * hâlde de biriken iş turdan tura eritilir.
+ */
+export const STUCK_GIFT_DRAFT_BATCH = 50;
+
+/**
+ * SAHİPSİZ KALMIŞ hediye kartı rezervasyonlarını siparişe çevirir; kaç taslağın
+ * siparişi doğduğunu döner.
+ *
+ * NEDEN VAR (tasarım §5.4, ÜÇÜNCÜ koruma): tutarın tamamı hediye kartından
+ * karşılandığında bakiye ödeme İŞLEMİNDE düşer ve sipariş o işlemden SONRA
+ * yazılır (`promoteDraftToOrder`). Arada süreç ölürse müşterinin kartı
+ * harcanmıştır ama siparişi yoktur — parası tutulmuş demektir. Birinci koruma
+ * isteğin kendi terfi denemesi, ikincisi `card-expire` işi (süre sonunda bakiyeyi
+ * KARTA geri verir), bu da üçüncüsü: sipariş birkaç dakika içinde doğsun, müşteri
+ * süre dolumunu beklemek zorunda kalmasın.
+ *
+ * KAPSAM teklif taslaklarıdır (`quote_checkouts` köprüsü): bu tur teklif
+ * motorunun bakımı ve `/api/orders` yolunun kendi kuralları var (orası
+ * `gift_card_full` taslağı için `card-expire` işini de kuyruğa almıyor). Oranın
+ * sahipsiz taslağını buradan terfi ettirmek, sahibi bu iş olmayan bir davranış
+ * değişikliği olurdu.
+ *
+ * KOŞULLU YAZIM `promoteDraftToOrder`ın KENDİSİDİR: taslağı satır kilidi altında
+ * okur ve yalnız `pending`/`awaiting_review` iken `confirmed`a çevirir, yani iki
+ * eşzamanlı tur (ya da tur + müşterinin isteği) ikinci bir sipariş yazamaz.
+ * Hatırlatmaların "damgala-sonra-gönder" deseni buraya TAŞINAMAZ, çünkü
+ * sahiplenilecek bir damga kolonu yok (bu iş migration açmıyor) ve terfinin
+ * kendi atomik durum geçişi zaten o işi yapıyor.
+ *
+ * SESSİZ YUTMA YOK: her başarısız terfi toplanır ve aşama SONUNDA fırlatır, yani
+ * tur kırmızıya döner ve hangi taslağın takıldığı günlüğe geçer. TEK istisna,
+ * taslağın aday seçildikten sonra uygunluğunu KAYBETMESİ
+ * (`DRAFT_NOT_PROMOTABLE`): süre dolumu işi, webhook ya da müşterinin iptali
+ * araya girmiştir — ağın işi kalmamıştır, arıza yoktur.
+ */
+export async function promoteStuckGiftCoveredDrafts(now: Date): Promise<number> {
+  const cutoff = new Date(now.getTime() - STUCK_GIFT_DRAFT_GRACE_MINUTES * MINUTE_MS);
+  const candidates = await db
+    .select({ id: orderDrafts.id, reference: orderDrafts.reference })
+    .from(orderDrafts)
+    .where(
+      and(
+        eq(orderDrafts.paymentMethod, "gift_card_full"),
+        eq(orderDrafts.status, "pending"),
+        isNull(orderDrafts.promotedOrderId),
+        lt(orderDrafts.createdAt, cutoff),
+        // Köprü `exists` ile sorulur (join ile değil): tur yalnız KİMLİKLERİ
+        // okuyor ve köprü satırı teklif başına tekil değil de olsa aynı taslak
+        // iki kez listelenmemeli.
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(quoteCheckouts)
+            .where(eq(quoteCheckouts.draftId, orderDrafts.id))
+        )
+      )
+    )
+    // En uzun süredir bekleyen önce: parası en uzun süre tutulmuş müşteri.
+    .orderBy(asc(orderDrafts.createdAt))
+    .limit(STUCK_GIFT_DRAFT_BATCH);
+
+  let promoted = 0;
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await promoteDraftToOrder(candidate.id);
+      promoted++;
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err);
+      if (message.startsWith("DRAFT_NOT_PROMOTABLE")) {
+        // Aday seçildikten sonra taslak uygunluğunu kaybetti (süre dolumu,
+        // webhook, müşteri iptali). `api/webhooks/paytr/route.ts` de bu hâli
+        // aynı şekilde ayırt ediyor.
+        console.warn(
+          `[quote-maintenance] ${candidate.reference} artık terfi edilebilir değil: ${message}`
+        );
+        continue;
+      }
+      console.error(`[quote-maintenance] ${candidate.reference} terfi edemedi`, err);
+      failures.push(`${candidate.reference}: ${message}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `sahipsiz hediye kartı rezervasyonu siparişe çevrilemedi — ${failures.join(" | ")}`
+    );
+  }
+  return promoted;
+}
+
 export interface QuoteMaintenanceOutcome {
   expired: number;
   expiryReminders: number;
   abandonedReminders: number;
   purgedParts: number;
   orphanDirs: number;
+  /** Sahipsiz kalmış hediye kartı rezervasyonundan doğan sipariş sayısı. */
+  promotedGiftDrafts: number;
 }
 
 /**
@@ -488,6 +604,7 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
     abandonedReminders: 0,
     purgedParts: 0,
     orphanDirs: 0,
+    promotedGiftDrafts: 0,
   };
   const failures: string[] = [];
 
@@ -500,6 +617,13 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
     }
   };
 
+  // SIRA: sahipsiz rezervasyon EN BAŞTA. Tahsilatı çoktan alınmış bir teklifin
+  // aynı turda "süresi doldu" sayılması, müşteriye bir saat boyunca yanlış
+  // hikâyeyi anlatmak olurdu; terfi önce koşunca teklif `ordered` olur ve süre
+  // dolumunun `order_id IS NULL` kapısı onu zaten dışarıda bırakır.
+  await phase("promoteStuckGiftCoveredDrafts", async () => {
+    outcome.promotedGiftDrafts = await promoteStuckGiftCoveredDrafts(now);
+  });
   await phase("expireQuotes", async () => {
     outcome.expired = await expireQuotes(now);
   });

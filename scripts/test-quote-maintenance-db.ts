@@ -11,7 +11,10 @@
  *  - saklama süpürmesi süresi dolan teklifin dosyasını siler ama BAŞKA bir
  *    canlı parçanın gösterdiği anahtara ve siparişe dönmüş teklife dokunmaz,
  *  - yetim dizin süpürmesi yalnız SATIRI OLMAYAN, beklemesi dolmuş dizini
- *    toplar (canlı parçanın dizinine ve paylaşılan dosyaya dokunmaz).
+ *    toplar (canlı parçanın dizinine ve paylaşılan dosyaya dokunmaz),
+ *  - sahipsiz kalmış hediye kartı rezervasyonu (bakiye düştü, sipariş doğmadı)
+ *    siparişe çevrilir; çevrilemiyorsa tur KIRMIZI olur ama öteki aşamalar
+ *    yine koşar.
  *
  * `server-only` TAKOZU BİLEREK KURULMADI: bu dosya `quote-maintenance.ts`'i
  * düz Node altında import eder. Zincire `server-only` sızarsa (örn.
@@ -145,16 +148,25 @@ async function main() {
     const { db } = await import("../src/lib/db");
     pool = (db as typeof db & { $client: pg.Pool }).$client;
     const { eq } = await import("drizzle-orm");
-    const { orderDrafts, orders, quoteCheckouts, quoteParts, quotes, users } = await import(
-      "../src/lib/db/schema"
-    );
+    const {
+      giftCardRedemptions,
+      giftCards,
+      orderDrafts,
+      orders,
+      quoteCheckouts,
+      quoteParts,
+      quotes,
+      users,
+    } = await import("../src/lib/db/schema");
     const { loadActiveSnapshot } = await import("../src/lib/services/quote-catalog");
     const {
       ABANDONED_AFTER_HOURS,
       EXPIRY_REMINDER_DAYS,
       ORPHAN_DIR_BATCH,
       ORPHAN_DIR_GRACE_HOURS,
+      STUCK_GIFT_DRAFT_GRACE_MINUTES,
       expireQuotes,
+      promoteStuckGiftCoveredDrafts,
       purgeExpiredQuoteFiles,
       runQuoteMaintenance,
       sendAbandonedReminders,
@@ -311,6 +323,84 @@ async function main() {
         partsSnapshot: [],
         leadDays: 7,
       });
+    }
+
+    /**
+     * Tamamı hediye kartıyla karşılanmış ama SİPARİŞE DÖNEMEMİŞ teklif taslağı.
+     *
+     * Üretimde bu hâl, tam karşılanan ödemede `promoteDraftToOrder`ın patlaması
+     * (ya da sürecin tam o anda ölmesi) ile doğar: bakiye düşmüş, kullanım kaydı
+     * yazılmış, ama sipariş yok. `bridged: false` teklif köprüsü olmayan
+     * (`/api/orders` yolundan gelen) taslağı, `returned: true` rezervasyonu
+     * çoktan iade edilmiş — yani terfi EDEMEYECEK — taslağı kurar.
+     */
+    async function makeStuckGiftDraft(opts: {
+      userId: string;
+      email: string;
+      ageMs: number;
+      bridged?: boolean;
+      returned?: boolean;
+    }): Promise<{
+      draftId: string;
+      reference: string;
+      quoteId: string;
+      cardId: string;
+      amountKurus: number;
+    }> {
+      const amountKurus = 199_00;
+      const quoteId = await makeQuote({
+        userId: opts.userId,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 30 * DAY),
+      });
+      const [card] = await db
+        .insert(giftCards)
+        .values({
+          code: `GC-MAINT-${randomUUID().slice(0, 8).toUpperCase()}`,
+          amountKurus,
+          // Rezervasyon zaten yapılmış: bakiye düştü, kart kapandı.
+          balanceKurus: 0,
+          status: "fully_used",
+          paidAt: new Date(),
+          expiresAt: new Date(Date.now() + 365 * DAY),
+        })
+        .returning({ id: giftCards.id });
+      const [draft] = await db
+        .insert(orderDrafts)
+        .values({
+          reference: `FIG-QA${randomUUID().slice(0, 6).toUpperCase()}`,
+          userId: opts.userId,
+          email: opts.email,
+          customerName: "Teklif Müşterisi",
+          shippingAddress: address,
+          orderType: "upload",
+          paymentMethod: "gift_card_full",
+          status: "pending",
+          amountKurus,
+          productionBaseKurus: amountKurus,
+          giftCardId: card.id,
+          giftCardAmountKurus: amountKurus,
+          createdAt: new Date(Date.now() - opts.ageMs),
+        })
+        .returning({ id: orderDrafts.id, reference: orderDrafts.reference });
+      await db.insert(giftCardRedemptions).values({
+        giftCardId: card.id,
+        draftId: draft.id,
+        amountKurus,
+        redeemedByUserId: opts.userId,
+        ...(opts.returned ? { refundedAt: new Date() } : {}),
+      });
+      if (opts.bridged !== false) {
+        await db.insert(quoteCheckouts).values({
+          quoteId,
+          draftId: draft.id,
+          quoteVersion: 1,
+          amountKurus,
+          partsSnapshot: [],
+          leadDays: 7,
+        });
+      }
+      return { draftId: draft.id, reference: draft.reference, quoteId, cardId: card.id, amountKurus };
     }
 
     async function makeOrder(userId: string, email: string): Promise<string> {
@@ -803,7 +893,142 @@ async function main() {
 
     // ─── 5) Saatlik turun kendisi ───────────────────────────────────────────
 
-    await test("saatlik tur beş işi de koşar ve sayıları döner", async () => {
+    // ─── 6) Sahipsiz rezervasyon: terfi edemeyen gift_card_full taslağı ─────
+
+    await test("sahipsiz rezervasyon: beklemesi dolmuş gift_card_full taslağı siparişe döner", async () => {
+      // Bu aşama para güvenlik ağıdır: bakiye düşmüş ama sipariş doğmamışsa
+      // müşterinin hediye kartı harcanmış ve karşılığında hiçbir şey yoktur.
+      const user = await makeUser({ tag: "gift-stuck" });
+      const stuck = await makeStuckGiftDraft({
+        userId: user.id,
+        email: user.email,
+        ageMs: (STUCK_GIFT_DRAFT_GRACE_MINUTES + 1) * 60_000,
+      });
+      const fresh = await makeStuckGiftDraft({
+        userId: user.id,
+        email: user.email,
+        ageMs: 60_000,
+      });
+      const figurine = await makeStuckGiftDraft({
+        userId: user.id,
+        email: user.email,
+        ageMs: (STUCK_GIFT_DRAFT_GRACE_MINUTES + 1) * 60_000,
+        bridged: false,
+      });
+
+      assert.equal(
+        await promoteStuckGiftCoveredDrafts(new Date()),
+        1,
+        "yalnız beklemesi dolmuş TEKLİF taslağı terfi etti"
+      );
+
+      const [confirmed] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, stuck.draftId));
+      assert.equal(confirmed.status, "confirmed");
+      assert.ok(confirmed.promotedOrderId, "sipariş kimliği taslağa yazıldı");
+      const [order] = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.id, confirmed.promotedOrderId!));
+      assert.equal(order.orderNumber, stuck.reference);
+      assert.equal(order.paymentStatus, "succeeded");
+      assert.equal(order.amountKurus, stuck.amountKurus, "BRÜT tutar siparişe taşındı");
+      assert.equal(
+        order.giftCardAmountKurus,
+        stuck.amountKurus,
+        "hediye kartı payı siparişe taşındı (iade motoru onu okuyor)"
+      );
+      // Teklif de bağlandı: müşteri artık siparişini görüyor.
+      const [quote] = await db
+        .select({ orderId: quotes.orderId, status: quotes.status })
+        .from(quotes)
+        .where(eq(quotes.id, stuck.quoteId));
+      assert.equal(quote.orderId, order.id);
+      assert.equal(quote.status, "ordered");
+      // Kullanım kaydı taslaktan SİPARİŞE geçti ve iade damgası almadı.
+      const [redemption] = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.draftId, stuck.draftId));
+      assert.equal(redemption.orderId, order.id);
+      assert.equal(redemption.refundedAt, null);
+
+      // Beklemesi DOLMAYAN taslağa dokunulmaz: isteğin kendi terfi denemesi
+      // (tasarım §5.4, birinci koruma) hâlâ sürüyor olabilir ve iki tarafın aynı
+      // saniyede aynı taslağı terfi ettirmesinin bir faydası yok.
+      const [young] = await db
+        .select({ status: orderDrafts.status })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, fresh.draftId));
+      assert.equal(young.status, "pending");
+      // Teklif KÖPRÜSÜ olmayan taslak bu turun konusu değil: `/api/orders`
+      // yolunun kendi kuralları var (o yol `card-expire` işini de kuyruğa
+      // almıyor) ve bu tur teklif motorunun bakımıdır.
+      const [other] = await db
+        .select({ status: orderDrafts.status })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, figurine.draftId));
+      assert.equal(other.status, "pending");
+    });
+
+    await test("terfi edemeyen taslak turu KIRMIZI yapar, öteki aşamaları durdurmaz", async () => {
+      // Rezervasyonu geri dönmüş taslak terfi EDEMEZ (`order-draft.ts`
+      // rezervasyon kapısı). Sessizce yutulursa sahipsiz taslak hiç görünmez:
+      // aşama kendi hatasını FIRLATIR, `phase(...)` onu tura taşır ve kuyruk
+      // işi kırmızıya döner.
+      const user = await makeUser({ tag: "gift-fail" });
+      const broken = await makeStuckGiftDraft({
+        userId: user.id,
+        email: user.email,
+        ageMs: (STUCK_GIFT_DRAFT_GRACE_MINUTES + 1) * 60_000,
+        returned: true,
+      });
+      const expiring = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() - HOUR),
+      });
+
+      // Günlük yakalanır: hem çıktı temiz kalır hem de arızanın GERÇEKTEN
+      // yazıldığı ölçülür (sessiz yutma yok).
+      const logged: unknown[][] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(args);
+      try {
+        await assert.rejects(
+          runQuoteMaintenance(new Date()),
+          (err: unknown) =>
+            err instanceof Error &&
+            /promoteStuckGiftCoveredDrafts/.test(err.message) &&
+            err.message.includes(broken.reference),
+          "tur hangi taslağın terfi edemediğini SÖYLER"
+        );
+      } finally {
+        console.error = realError;
+      }
+      assert.ok(
+        logged.some((args) => args.some((arg) => String(arg).includes(broken.reference))),
+        "takılan taslak günlüğe referansıyla yazıldı"
+      );
+      // Öteki aşamalar KOŞTU: süresi geçen teklif yine de kapandı.
+      assert.equal(await statusOf(expiring), "expired");
+      const [stillPending] = await db
+        .select({ status: orderDrafts.status })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, broken.draftId));
+      assert.equal(stillPending.status, "pending", "terfi edemeyen taslak yerinde kaldı");
+
+      // Temizlik: bu taslak her turu kırmızı yapardı; kalan vakalar tur
+      // koşmuyor ama şemayı kırmızı bırakmak sonraki okuyucuyu yanıltır.
+      await db
+        .update(orderDrafts)
+        .set({ status: "cancelled" })
+        .where(eq(orderDrafts.id, broken.draftId));
+    });
+
+    await test("saatlik tur altı işi de koşar ve sayıları döner", async () => {
       const now = new Date();
       const user = await makeUser({ marketingConsent: true, tag: "tick" });
       await makeQuote({
@@ -824,6 +1049,15 @@ async function main() {
       const tickOrphan = randomUUID();
       const tickOrphanKey = writeKey(tickOrphan, "source.stl");
       ageDir(tickOrphan, (ORPHAN_DIR_GRACE_HOURS + 1) * HOUR);
+      // Turun ALTINCI işi için sahipsiz kalmış gerçek bir rezervasyon. Kendi
+      // kullanıcısı: terfi kendi e-postalarını gönderiyor ve aşağıdaki mektup
+      // sayımı yalnız hatırlatmaları ölçmeli.
+      const stuckUser = await makeUser({ tag: "tick-gift" });
+      const tickStuck = await makeStuckGiftDraft({
+        userId: stuckUser.id,
+        email: stuckUser.email,
+        ageMs: (STUCK_GIFT_DRAFT_GRACE_MINUTES + 1) * 60_000,
+      });
 
       const outcome = await runQuoteMaintenance(now);
       assert.equal(outcome.expired, 1);
@@ -831,6 +1065,16 @@ async function main() {
       assert.equal(outcome.abandonedReminders, 1);
       assert.equal(outcome.purgedParts, 0);
       assert.equal(outcome.orphanDirs, 1, "yetim dizin süpürmesi turda GERÇEKTEN koştu");
+      assert.equal(
+        outcome.promotedGiftDrafts,
+        1,
+        "sahipsiz rezervasyon aşaması turda GERÇEKTEN koştu"
+      );
+      const [tickPromoted] = await db
+        .select({ status: orderDrafts.status })
+        .from(orderDrafts)
+        .where(eq(orderDrafts.id, tickStuck.draftId));
+      assert.equal(tickPromoted.status, "confirmed", "tur içinde siparişe döndü");
       assert.equal(onDisk(tickOrphanKey), false, "sahipsiz dosya tur içinde silindi");
       assert.equal(dirOnDisk(tickOrphan), false);
       // Süresi biten teklif ÖNCE kapanır: kapanan teklife "birkaç gün içinde
@@ -838,7 +1082,7 @@ async function main() {
       assert.equal(mailsTo(user.email).length, 2);
     });
 
-    // ─── 6) Kaynak denetimi: iş süreçte gerçekten kayıtlı mı ────────────────
+    // ─── 7) Kaynak denetimi: iş süreçte gerçekten kayıtlı mı ────────────────
 
     syncTest("workers/start.ts bakım işçisini ve SAATLİK zamanlayıcıyı kurar", () => {
       const src = stripComments(fs.readFileSync(path.join(root, "workers/start.ts"), "utf8"));

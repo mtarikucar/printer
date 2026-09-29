@@ -73,6 +73,9 @@ import {
   recordedPaymentMethod,
   type RecordedPaymentMethod,
   type Tender,
+  type TenderInput,
+  type TenderView,
+  type TenderViews,
 } from "@/lib/config/quote-tender";
 import type {
   ComputedQuote,
@@ -486,10 +489,44 @@ async function resolveGiftCardCode(
   return { id: result.card.id };
 }
 
-/** Bir ödeme yönteminin ön izlemedeki iki rakamı. */
-export interface QuoteGiftCardMethodPreview {
-  havaleDiscountKurus: number;
-  payableKurus: number;
+/**
+ * Bir ödeme yönteminin ön izlemedeki iki rakamı — zincirin kendi tipi.
+ *
+ * Ayrı bir şekil DEĞİL, `TenderView`ın adı: ön izleme cevabı, ödeme sayfasının
+ * kartsız TABAN prop'u ve ekranın gösterdiği rakam aynı sözleşmeyi taşımak
+ * zorunda; ikinci bir arayüz tanımı ikisinin ayrışabileceği bir yer açardı.
+ */
+export type QuoteGiftCardMethodPreview = TenderView;
+
+/**
+ * İki yöntemin görünümünü SUNUCUDA kurar; ödeme sayfası ve ön izleme ucu aynı
+ * çağrıyı yapar.
+ *
+ * `giftCardBalanceKurus: 0` ile çağrıldığında sonuç kartsız TABANDIR — ödeme
+ * sayfası bunu prop olarak indirir ve ekran "ödenecek tutar"ı kendi çıkarmasıyla
+ * bulmak zorunda kalmaz (MSY m.6/2-a'nın konusu olan rakam, tahsil edilenle
+ * birebir aynı zincirden çıkar).
+ */
+export function quoteTenderViews(args: TenderChainArgs): TenderViews {
+  return toTenderViews(quoteTenderPair(args));
+}
+
+/** Zincirin YÖNTEMSİZ girdisi: iki dal aynı tutar ve aynı bakiyeyle koşar. */
+type TenderChainArgs = Omit<TenderInput, "paymentMethod">;
+
+function quoteTenderPair(args: TenderChainArgs): { card: Tender; bankTransfer: Tender } {
+  return {
+    card: computeTender({ ...args, paymentMethod: "card" }),
+    bankTransfer: computeTender({ ...args, paymentMethod: "bank_transfer" }),
+  };
+}
+
+function toTenderViews(pair: { card: Tender; bankTransfer: Tender }): TenderViews {
+  const view = (tender: Tender): TenderView => ({
+    havaleDiscountKurus: tender.havaleDiscountKurus,
+    payableKurus: tender.payableKurus,
+  });
+  return { card: view(pair.card), bankTransfer: view(pair.bankTransfer) };
 }
 
 /**
@@ -506,7 +543,7 @@ export interface QuoteGiftCardMethodPreview {
  * karşılanan tutar ile tam karşılama iki yöntemde de aynıdır; bu yüzden tek
  * kez, üst seviyede durur.
  */
-export interface QuoteGiftCardPreview {
+export interface QuoteGiftCardPreview extends TenderViews {
   /** Ekranın tek ayırt edicisi: red yolu 400 ile döner, bu gövde hiç gelmez. */
   valid: true;
   /** Kartın normalleştirilmiş (büyük harfli) kodu. */
@@ -515,8 +552,6 @@ export interface QuoteGiftCardPreview {
   /** Hediye kartından karşılanacak tutar; iki yöntemde de aynı. */
   giftCardAmountKurus: number;
   fullyCovered: boolean;
-  card: QuoteGiftCardMethodPreview;
-  bankTransfer: QuoteGiftCardMethodPreview;
 }
 
 /**
@@ -596,25 +631,17 @@ export async function previewQuoteGiftCard(args: {
   const [card] = await db.select().from(giftCards).where(eq(giftCards.id, resolved.id)).limit(1);
   if (!card) throw giftCardRefusal("not_found", locale);
 
-  const havaleDiscountApplies = quote.pricingSnapshot.settings.havaleDiscountApplies;
-  const asCard = computeTender({
+  const pair = quoteTenderPair({
     amountKurus,
-    paymentMethod: "card",
     giftCardBalanceKurus: card.balanceKurus,
-    havaleDiscountApplies,
-  });
-  const asBankTransfer = computeTender({
-    amountKurus,
-    paymentMethod: "bank_transfer",
-    giftCardBalanceKurus: card.balanceKurus,
-    havaleDiscountApplies,
+    havaleDiscountApplies: quote.pricingSnapshot.settings.havaleDiscountApplies,
   });
   const decision = giftCardReservationDecision({
     card,
     // Limit sayımı yalnız limitli kartta okunur (`validateGiftCard` ile aynı
     // ölçü); limitsiz kartta sorgu hiç açılmaz.
     liveUses: card.maxRedemptions === null ? 0 : await countLiveGiftCardUses(db, card.id),
-    reserveKurus: asCard.giftCardAmountKurus,
+    reserveKurus: pair.card.giftCardAmountKurus,
     now: new Date(),
   });
   if (!decision.ok) throw giftCardRefusal(decision.code, locale);
@@ -623,16 +650,11 @@ export async function previewQuoteGiftCard(args: {
     valid: true,
     code: card.code,
     balanceKurus: card.balanceKurus,
-    giftCardAmountKurus: asCard.giftCardAmountKurus,
-    fullyCovered: asCard.fullyCoveredByGiftCard,
-    card: {
-      havaleDiscountKurus: asCard.havaleDiscountKurus,
-      payableKurus: asCard.payableKurus,
-    },
-    bankTransfer: {
-      havaleDiscountKurus: asBankTransfer.havaleDiscountKurus,
-      payableKurus: asBankTransfer.payableKurus,
-    },
+    // Karşılanan tutar ve tam karşılama yöntemden BAĞIMSIZ (hediye kartı adımı
+    // yöntem dalından önce gelir), o yüzden kart dalından okunur.
+    giftCardAmountKurus: pair.card.giftCardAmountKurus,
+    fullyCovered: pair.card.fullyCoveredByGiftCard,
+    ...toTenderViews(pair),
   };
 }
 

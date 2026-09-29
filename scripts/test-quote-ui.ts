@@ -40,7 +40,18 @@ import {
   syncedFieldValue,
 } from "../src/components/quote/synced-field";
 import { QuoteShareDialog } from "../src/components/quote/share-dialog";
-import { QuoteCheckoutClient } from "../src/app/teklif/[number]/odeme/checkout-client";
+import {
+  QuoteCheckoutForm,
+  checkoutNavigation,
+  isGiftCardRefusal,
+  type QuoteCheckoutFormProps,
+} from "../src/components/quote/quote-checkout-form";
+import {
+  QuoteCheckoutClient,
+  QuoteCheckoutReceipt,
+  type QuoteCheckoutClientProps,
+} from "../src/app/teklif/[number]/odeme/checkout-client";
+import { QuotePendingPaymentClient } from "../src/app/teklif/[number]/odeme/pending-payment-client";
 import { QuoteDocument } from "../src/app/teklif/[number]/belge/quote-document";
 import { QuoteDocumentPrintButton } from "../src/app/teklif/[number]/belge/print-button";
 import {
@@ -66,6 +77,10 @@ import {
 } from "../src/app/3d-baski/pricing-anchors";
 import { QuoteListTable } from "../src/app/account/teklifler/quotes-client";
 import { PartLibraryGrid } from "../src/app/account/parcalar/parts-client";
+import { fill } from "../src/components/quote/format";
+import { formatCurrency } from "../src/lib/i18n/format";
+import type { TenderViews } from "../src/lib/config/quote-tender";
+import type { QuoteGiftCardPreview } from "../src/lib/services/quote-checkout";
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
@@ -1773,18 +1788,310 @@ test("silme onayı ve ödeme fişi Türkçeyi doğru yazar", () => {
 
   // (c) Fişteki tarih ISO gün anahtarı değil, okunur tarihtir — kademe seçici
   // ve teklif belgesi zaten öyle yazıyor.
-  const html = plain(
+  const html = renderCheckout();
+  assert.ok(html.includes("2 Kasım 2026 tarihinde kargoda"), "tarih okunur yazılmamış");
+  assert.ok(!html.includes("2026-11-02"), "ham ISO gün anahtarı basılmış");
+});
+
+// ─── Ödeme ekranında hediye kartı (Faz 1a · T7) ──────────────────────────────
+
+/** Kartsız TABAN: ikisi de sunucu hesabı, ekran bunları yalnız yazar. */
+const NO_GIFT_TENDER: TenderViews = {
+  card: { havaleDiscountKurus: 0, payableKurus: 14800 },
+  bankTransfer: { havaleDiscountKurus: 444, payableKurus: 14356 },
+};
+
+/**
+ * Uygulanmış kartın ÖN İZLEMESİ — uçtan geldiği gibi.
+ *
+ * Rakamlar birbirinden bağımsız seçildi (14800 − 4000 = 10800 tutuyor ama
+ * havale satırı %3'ün tam karşılığı DEĞİL): ekran herhangi bir çıkarma ya da
+ * oran hesabı yaparsa test kırmızıya döner.
+ */
+const GIFT_PREVIEW: QuoteGiftCardPreview = {
+  valid: true,
+  code: "GC-QA-TEST",
+  balanceKurus: 4000,
+  giftCardAmountKurus: 4000,
+  fullyCovered: false,
+  card: { havaleDiscountKurus: 0, payableKurus: 10800 },
+  bankTransfer: { havaleDiscountKurus: 311, payableKurus: 10489 },
+};
+
+const money = (kurus: number) => formatCurrency(kurus, "tr");
+
+function renderCheckout(over: Partial<QuoteCheckoutClientProps> = {}): string {
+  return plain(
     inLocale(
       createElement(QuoteCheckoutClient, {
         quote: pricedQuote({ shipByDate: "2026-11-02" }),
         totalKurus: 14800,
-        havaleDiscountKurus: 0,
+        tender: NO_GIFT_TENDER,
+        giftCardEnabled: false,
         savedAddress: null,
+        ...over,
       })
     )
   );
-  assert.ok(html.includes("2 Kasım 2026 tarihinde kargoda"), "tarih okunur yazılmamış");
-  assert.ok(!html.includes("2026-11-02"), "ham ISO gün anahtarı basılmış");
+}
+
+function renderCheckoutForm(over: Partial<QuoteCheckoutFormProps> = {}): string {
+  return plain(
+    inLocale(
+      createElement(QuoteCheckoutForm, {
+        quote: pricedQuote(),
+        totalKurus: 14800,
+        tender: NO_GIFT_TENDER,
+        paymentMethod: "card",
+        onPaymentMethodChange: noop,
+        giftCardEnabled: true,
+        giftPreview: null,
+        onGiftPreviewChange: noop,
+        savedAddress: null,
+        ...over,
+      })
+    )
+  );
+}
+
+test("hediye kartı sözlüğü iki dilde de TAM ve yer tutucuları yerinde", () => {
+  for (const suffix of [
+    "title",
+    "codeLabel",
+    "apply",
+    "applying",
+    "remove",
+    "applied",
+    "remaining",
+    "fullyCovered",
+    "reservedPending",
+    "disabled",
+    "hint",
+  ]) {
+    const key = `instantQuote.checkout.giftCard.${suffix}`;
+    assert.ok(trKeys.includes(key), `${key} Türkçe sözlükte yok`);
+    assert.ok(enKeys.includes(key), `${key} İngilizce sözlükte yok`);
+  }
+  // Tutar taşıyan üç cümle yer tutucusunu KAYBETMEMELİ: kaybolursa ekran
+  // rakamsız bir cümle basar ve kimse fark etmez.
+  for (const suffix of ["applied", "remaining", "reservedPending"]) {
+    const key = `instantQuote.checkout.giftCard.${suffix}` as keyof typeof tr;
+    assert.match(tr[key], /\{amount\}/, `${key} {amount} yer tutucusunu taşımıyor`);
+    assert.match(en[key], /\{amount\}/, `${key} (en) {amount} yer tutucusunu taşımıyor`);
+  }
+  // Hediye kartı bir ÖDEME ARACIDIR, iskonto değil (tasarım §3.3): fatura
+  // matrahını düşürmediği için ekranda "indirim" diye ETİKETLENMEZ.
+  assert.doesNotMatch(tr["instantQuote.checkout.giftCard.applied"], /ndirim/);
+});
+
+test("hediye kartı alanı bayrak KAPALIYKEN hiç ÇİZİLMEZ", () => {
+  // Gizlemek yetmez: markup'a giren bir alan, bayrağı kapalı bir özelliğin
+  // kodunu deneyen (ve sunucudan 400 alan) müşteri demek olurdu.
+  const off = renderCheckout({ giftCardEnabled: false });
+  assert.ok(!off.includes('name="giftCardCode"'), "kapalı bayrakta kod alanı markup'a girdi");
+  assert.ok(
+    !off.includes(tr["instantQuote.checkout.giftCard.title"]),
+    "kapalı bayrakta hediye kartı başlığı çizildi"
+  );
+
+  // …ve açık bayrakta alan GERÇEKTEN var: yukarıdaki iddia "hiç çizilmedi"
+  // anlamına gelsin.
+  const on = renderCheckout({ giftCardEnabled: true });
+  assert.ok(on.includes('name="giftCardCode"'), "açık bayrakta kod alanı yok");
+  assert.ok(on.includes(tr["instantQuote.checkout.giftCard.codeLabel"]), "kod etiketi yok");
+  assert.ok(on.includes(tr["instantQuote.checkout.giftCard.hint"]), "ipucu cümlesi yok");
+  assert.ok(on.includes(tr["instantQuote.checkout.giftCard.apply"]), "uygula düğmesi yok");
+});
+
+test("uygulanan kart ödeme düğmesinde ve sözleşme kutusunda NET tutarı yazar", () => {
+  const html = renderCheckoutForm({ giftPreview: GIFT_PREVIEW });
+  assert.ok(
+    html.includes(fill(tr["instantQuote.checkout.giftCard.applied"], { amount: money(4000) })),
+    "karşılanan tutar satırı yok"
+  );
+  assert.ok(
+    html.includes(fill(tr["instantQuote.checkout.giftCard.remaining"], { amount: money(10800) })),
+    "ödenecek tutar satırı yok"
+  );
+  assert.ok(html.includes(tr["instantQuote.checkout.giftCard.remove"]), "kaldır düğmesi yok");
+
+  // MSY m.6/2-a: ödeme yükümlülüğünden ÖNCE gösterilen "ödenecek toplam tutar"
+  // NET tutardır. Formda brüt tutarın hiç geçmemesi bunu hem sözleşme kutusu
+  // hem ödeme düğmesi için birden çiviler.
+  assert.ok(html.includes(money(10800)), "net tutar formda yok");
+  assert.ok(!html.includes(money(14800)), "brüt tutar sözleşme kutusunda/düğmede kaldı");
+
+  // Havale seçilince rakam ÖN İZLEMEDEN gelir; ekran kendi çıkarmasını yapmaz.
+  const havale = renderCheckoutForm({
+    giftPreview: GIFT_PREVIEW,
+    paymentMethod: "bank_transfer",
+  });
+  assert.ok(havale.includes(money(10489)), "havale dalında net tutar ön izlemeden gelmiyor");
+  assert.ok(havale.includes(money(311)), "havale indirimi ön izlemeden gelmiyor");
+  assert.ok(!havale.includes(money(444)), "kartsız tabanın havale indirimi ekranda kaldı");
+});
+
+test("kart tutarın tamamını karşılarsa müşteriye kart bilgisi İSTENMEYECEĞİ söylenir", () => {
+  const html = renderCheckoutForm({
+    giftPreview: {
+      ...GIFT_PREVIEW,
+      balanceKurus: 20_000,
+      giftCardAmountKurus: 14_800,
+      fullyCovered: true,
+      card: { havaleDiscountKurus: 0, payableKurus: 0 },
+      bankTransfer: { havaleDiscountKurus: 0, payableKurus: 0 },
+    },
+  });
+  assert.ok(
+    html.includes(tr["instantQuote.checkout.giftCard.fullyCovered"]),
+    "tam karşılama cümlesi yok"
+  );
+  assert.ok(html.includes(money(0)), "ödenecek tutar sıfır olarak yazılmamış");
+});
+
+test("fiş hediye kartını İNDİRİM değil ÖDEME olarak yazar", () => {
+  const html = plain(
+    inLocale(
+      createElement(QuoteCheckoutReceipt, {
+        quote: pricedQuote(),
+        totalKurus: 14800,
+        giftCardAmountKurus: 4000,
+        havaleDiscountKurus: 0,
+        payableKurus: 10800,
+      })
+    )
+  );
+  // Brüt toplam fişte KALIR: hediye kartı siparişin büyüklüğünü değiştirmez,
+  // yalnız tahsil edilen tutarı düşürür (tasarım §3.2).
+  assert.ok(html.includes(money(14800)), "brüt toplam fişten kalkmış");
+  assert.ok(
+    html.includes(fill(tr["instantQuote.checkout.giftCard.applied"], { amount: money(4000) })),
+    "fişte hediye kartı satırı yok"
+  );
+  assert.ok(
+    html.includes(fill(tr["instantQuote.checkout.giftCard.remaining"], { amount: money(10800) })),
+    "fişte ödenecek tutar yok"
+  );
+  assert.ok(
+    !html.includes(tr["giftCard.discount"]),
+    "hediye kartı fişte İSKONTO olarak etiketlenmiş (fatura matrahı §3.3)"
+  );
+
+  // Kart yoksa fiş bugünkü hâlinde kalır: ne hediye satırı ne ikinci bir toplam.
+  const plainReceipt = plain(
+    inLocale(
+      createElement(QuoteCheckoutReceipt, {
+        quote: pricedQuote(),
+        totalKurus: 14800,
+        giftCardAmountKurus: 0,
+        havaleDiscountKurus: 0,
+        payableKurus: 14800,
+      })
+    )
+  );
+  assert.ok(!plainReceipt.includes(tr["instantQuote.checkout.giftCard.title"]));
+  assert.ok(
+    !plainReceipt.includes(
+      fill(tr["instantQuote.checkout.giftCard.remaining"], { amount: money(14800) })
+    ),
+    "kartsız fişte gereksiz bir ödenecek tutar satırı var"
+  );
+});
+
+test("bekleyen ödemedeki rezervasyon müşteriye TUTARIYLA anlatılır", () => {
+  const RESERVED_TAIL = "hediye kartı bakiyesi rezerve edildi";
+  assert.ok(
+    tr["instantQuote.checkout.giftCard.reservedPending"].includes(RESERVED_TAIL),
+    "cümle değişti: aşağıdaki olumsuz iddia artık hiçbir şeyi sınamıyor"
+  );
+  const pending = {
+    reference: "QT-000123",
+    paymentMethod: "card" as const,
+    paymentUrl: "/pay/QT-000123",
+    cancellable: true,
+    giftCardAmountKurus: 4000,
+  };
+  const html = plain(
+    inLocale(createElement(QuotePendingPaymentClient, { quoteNumber: "T-000123", pending }))
+  );
+  assert.ok(
+    html.includes(
+      fill(tr["instantQuote.checkout.giftCard.reservedPending"], { amount: money(4000) })
+    ),
+    "rezerve edilen tutar bekleyen ödeme ekranında yazmıyor"
+  );
+
+  // Rezervasyonsuz bekleyen ödemede cümle HİÇ görünmez.
+  const none = plain(
+    inLocale(
+      createElement(QuotePendingPaymentClient, {
+        quoteNumber: "T-000123",
+        pending: { ...pending, giftCardAmountKurus: 0 },
+      })
+    )
+  );
+  assert.ok(!none.includes(RESERVED_TAIL), "rezervasyon yokken de rezervasyon cümlesi çizildi");
+});
+
+test("tamamı karşılanan ödeme SİPARİŞE gider; dönemeyen taslak ekranda DURUR", () => {
+  // Cevabın nereye götürdüğü saf bir karardır (tarayıcı yok): tam karşılanan
+  // ödemede PayTR iframe'i de havale sayfası da YOKTUR ve tek doğru varış
+  // siparişin kendisidir.
+  assert.deepEqual(checkoutNavigation({ reference: "QT-1", iframeUrl: "https://paytr/x" }, "hata"), {
+    kind: "external",
+    url: "https://paytr/x",
+  });
+  assert.deepEqual(checkoutNavigation({ reference: "QT-1", redirectUrl: "/havale/QT-1" }, "hata"), {
+    kind: "push",
+    url: "/havale/QT-1",
+  });
+  assert.deepEqual(
+    checkoutNavigation(
+      { reference: "QT-1", paymentMethod: "gift_card_full", autoConfirmed: true, orderNumber: "QT-1" },
+      "hata"
+    ),
+    { kind: "push", url: "/track/QT-1" }
+  );
+
+  // Bakiye düştü ama sipariş DOĞMADI: istek 200'dür (rezervasyon duruyor, bakım
+  // turu yeniden deneyecek) ama müşteriyi olmayan bir siparişin takip sayfasına
+  // yollamak, ona "siparişiniz yok" diyen bir 404 göstermek olurdu.
+  assert.deepEqual(
+    checkoutNavigation(
+      { reference: "QT-1", autoConfirmed: false, error: "Sipariş kaydı tamamlanamadı." },
+      "hata"
+    ),
+    { kind: "error", message: "Sipariş kaydı tamamlanamadı." }
+  );
+  // Gövde hiçbir dalı doldurmazsa taslak referansı son çaredir.
+  assert.deepEqual(checkoutNavigation({ reference: "QT-1" }, "hata"), {
+    kind: "push",
+    url: "/track/QT-1",
+  });
+  assert.deepEqual(checkoutNavigation({}, "hata"), { kind: "error", message: "hata" });
+});
+
+test("kart yüzünden reddedilen ödeme ekrandaki ÖN İZLEMEYİ de düşürür", () => {
+  // Kodun öneki sunucu sözleşmesidir (`quote-checkout.ts` · `giftCardRefusal`
+  // → `gift_card_<sebep>`, bayrak kapalıyken `gift_card_disabled`). Önek
+  // tutmazsa ekran "₺X karşılandı" yazmaya devam eder ve müşterinin gördüğü
+  // rakam tahsil edilenden ayrışır.
+  for (const code of [
+    "gift_card_not_found",
+    "gift_card_not_active",
+    "gift_card_fully_used",
+    "gift_card_expired",
+    "gift_card_insufficient",
+    "gift_card_limit_reached",
+    "gift_card_disabled",
+  ]) {
+    assert.ok(isGiftCardRefusal(code), `${code} kart reddi sayılmadı`);
+  }
+  // Kartla ilgisi olmayan redler ön izlemeye DOKUNMAZ: müşteri tutarı
+  // düzeltip aynı kartla tekrar denemeli.
+  for (const code of ["version_mismatch", "paytr_failed", "pending_other_method", undefined]) {
+    assert.equal(isGiftCardRefusal(code), false, `${code} yanlışlıkla kart reddi sayıldı`);
+  }
 });
 
 // ─── Kontrollü alanlar, sözlük ve telefon yüksekliği (ertelenen borç D) ──────

@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type JSX } from "react";
+import { fill } from "@/components/quote/format";
 import { Card } from "@/components/ui";
 import type { PendingQuoteCheckout } from "@/lib/services/quote-checkout";
+import { formatCurrency } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 /**
@@ -62,6 +64,19 @@ export function QuotePendingPaymentClient({
             ? d["instantQuote.pendingPayment.havale"]
             : d["instantQuote.pendingPayment.card"]}
         </p>
+
+        {/* Rezerve edilmiş hediye kartı bakiyesi müşterinin PARASIDIR: iptalin
+            onu geri yüklediğini söylemeden, "iptal et" düğmesi bakiyesini
+            kaybetme riski gibi görünür. Rakam taslağın DONMUŞ satırından gelir
+            (`PendingQuoteCheckout`), ekranda hesaplanmaz. Bayrak kapatılsa bile
+            yazılır: süren bir rezervasyon bayraktan bağımsız olarak DURUR. */}
+        {pending.giftCardAmountKurus > 0 && (
+          <p className="mt-2 text-sm tabular-nums text-text-secondary">
+            {fill(d["instantQuote.checkout.giftCard.reservedPending"], {
+              amount: formatCurrency(pending.giftCardAmountKurus, "tr"),
+            })}
+          </p>
+        )}
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
           <Link

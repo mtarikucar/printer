@@ -133,6 +133,42 @@ export interface Tender extends TenderDeductions {
   fullyCoveredByGiftCard: boolean;
 }
 
+/**
+ * Bir yöntemin EKRANDA gösterilen iki rakamı. İkisi de sunucu hesabıdır; ekran
+ * onları yalnız YAZAR (ödeme sayfasının "bu dosyada çarpma, bölme, oran yoktur"
+ * kuralı).
+ */
+export interface TenderView {
+  havaleDiscountKurus: number;
+  payableKurus: number;
+}
+
+/**
+ * İKİ yöntemin birden görünümü.
+ *
+ * Neden ikisi birden: müşteri kart ile havale arasında geçerken ekranın ikinci
+ * bir istek atması (ve o istekle ikinci bir hediye kartı kodu denemesi
+ * harcaması) gerekmesin. Hediye kartı adımı yöntem dalından ÖNCE geldiği için
+ * (`TENDER_STEP_ORDER`) karşılanan tutar iki yöntemde de aynıdır; yöntemden
+ * yöntemde değişen yalnız havale indirimi ve ondan türeyen nakittir.
+ *
+ * Anahtarlar JSON uç sözleşmesidir (`POST /api/quotes/[id]/gift-card`), bu
+ * yüzden `bank_transfer` değil `bankTransfer`.
+ */
+export interface TenderViews {
+  card: TenderView;
+  bankTransfer: TenderView;
+}
+
+/**
+ * Seçili yöntemin rakamları. SEÇİMDİR, hesap DEĞİL — ve tek bir yerde durması
+ * bilinçli: hem form hem ödeme fişi aynı rakamı göstermek zorunda, iki ayrı
+ * ternary bir gün ayrışırdı.
+ */
+export function tenderViewFor(views: TenderViews, paymentMethod: TenderPaymentMethod): TenderView {
+  return paymentMethod === "bank_transfer" ? views.bankTransfer : views.card;
+}
+
 function tenderKurus(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${label} negatif olmayan bir tam kuruş tutarı olmalı`);

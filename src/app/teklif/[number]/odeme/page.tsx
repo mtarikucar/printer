@@ -1,9 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
-import { calculateHavaleDiscount } from "@/lib/config/payment";
 import { listAddresses } from "@/lib/services/address-book";
+import { isFlagEnabled } from "@/lib/services/flags";
 import { quoteApiEnabled, resolveQuoteAccess } from "@/lib/services/quote-access";
-import { pendingQuoteCheckout } from "@/lib/services/quote-checkout";
+import { pendingQuoteCheckout, quoteTenderViews } from "@/lib/services/quote-checkout";
 import { loadPresentedQuote } from "@/lib/services/quote-service";
 import { QuoteCheckoutClient } from "./checkout-client";
 import { QuotePendingPaymentClient } from "./pending-payment-client";
@@ -25,9 +25,13 @@ import { QuotePendingPaymentClient } from "./pending-payment-client";
  *     müşteri 72 saat karta kilitli kalırdı).
  *   - Ödemeye engel varsa → çalışma alanı; engellerin Türkçe listesi orada.
  *
- * Tutarlar `PresentedQuote.totals`tan gelir (fiyat kapısı uygulanmış) ve
- * havale indirimi burada, teklifin KENDİ snapshot ayarından hesaplanır —
- * tarayıcı hiçbir para aritmetiği yapmaz.
+ * Tutarlar `PresentedQuote.totals`tan gelir (fiyat kapısı uygulanmış) ve iki
+ * yöntemin tahsilat görünümü burada, teklifin KENDİ snapshot ayarından ve
+ * ödemenin kullandığı TEK zincirden (`quoteTenderViews` → `computeTender`)
+ * hesaplanır — tarayıcı hiçbir para aritmetiği yapmaz.
+ *
+ * Hediye kartı bayrağı da burada okunur: kapalıyken alan çizilmez (sunucu da
+ * kod kabul etmez, `quote-checkout.ts`).
  *
  * `noindex` kök düzenden gelir (`isNoindexPath("/teklif")`).
  */
@@ -71,9 +75,14 @@ export default async function QuoteCheckoutPage({
   if (!presented.totals || !presented.readiness.canCheckout) redirect(workspace);
 
   const totalKurus = presented.totals.totalKurus;
-  const havaleDiscountKurus = quote.pricingSnapshot.settings.havaleDiscountApplies
-    ? calculateHavaleDiscount(totalKurus)
-    : 0;
+  // Kartsız TABAN: hediye kartı uygulanınca ekran aynı şekli ön izleme
+  // ucundan alır, yani iki hâlde de rakam AYNI zincirden çıkar.
+  const tender = quoteTenderViews({
+    amountKurus: totalKurus,
+    giftCardBalanceKurus: 0,
+    havaleDiscountApplies: quote.pricingSnapshot.settings.havaleDiscountApplies,
+  });
+  const giftCardEnabled = await isFlagEnabled("quote_gift_card_enabled");
   // Adres defteri varsayılanı formu doldurur; müşteri her hâlde düzenleyebilir.
   const saved = (await listAddresses(quote.userId!).catch(() => []))[0] ?? null;
 
@@ -83,7 +92,8 @@ export default async function QuoteCheckoutPage({
       <QuoteCheckoutClient
         quote={presented}
         totalKurus={totalKurus}
-        havaleDiscountKurus={havaleDiscountKurus}
+        tender={tender}
+        giftCardEnabled={giftCardEnabled}
         savedAddress={
           saved
             ? {

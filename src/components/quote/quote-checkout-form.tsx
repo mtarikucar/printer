@@ -7,7 +7,14 @@ import { DistanceContractConsent } from "@/components/distance-contract-consent"
 import { FormField, Input, Select, Textarea } from "@/components/ui";
 import { track } from "@/lib/analytics/client";
 import { consentVariantForOrderType } from "@/lib/config/distance-contract";
+import {
+  tenderViewFor,
+  type RecordedPaymentMethod,
+  type TenderPaymentMethod,
+  type TenderViews,
+} from "@/lib/config/quote-tender";
 import type { PresentedQuote } from "@/lib/config/quote-types";
+import type { QuoteGiftCardPreview } from "@/lib/services/quote-checkout";
 import type { CountryCode } from "@/lib/phone";
 import { DISTRICTS, PROVINCES } from "@/lib/data/turkey-address";
 import { formatCurrency } from "@/lib/i18n/format";
@@ -20,43 +27,110 @@ import { fill } from "./format";
  *
  * `CheckoutForm`un ÇATALIDIR, sarmalayıcısı değil. Ortak görünen alanların
  * altında üç ayrı sözleşme var: burada misafir alışverişi YOKTUR (fiyat kapısı
- * zaten oturum ister), hediye kartı alanı bu EKRANDA henüz yoktur (sunucu
- * `giftCardCode`u kabul ediyor — `quote-checkout.ts` — ve alan bayrak arkasında
- * ayrı bir görevde eklenir) ve gövde teklife özgü üç alan taşır
+ * zaten oturum ister), hediye kartı alanı BAYRAK arkasındadır
+ * (`quote_gift_card_enabled` kapalıyken hiç çizilmez — gizlenmez, ÇİZİLMEZ; kod
+ * gelirse sunucu da 400 der) ve gövde teklife özgü üç alan taşır
  * (`expectedVersion`, `expectedTotalKurus`, `invoice`). Tek bir bileşeni
  * bayraklarla bu üç hâle birden esnetmek, ödeme gibi tek bir hata payı olan
  * yerde en pahalı kısayoldu.
  *
- * **Hiçbir tutar burada hesaplanmaz**: gösterilen toplam da havale indirimi de
- * sunucudan gelir (`totalKurus`, `havaleDiscountKurus`). Ekranın kendi
- * çarpması, bir gün ayar değiştiğinde tahsil edilen tutardan ayrışırdı.
+ * **Hiçbir tutar burada hesaplanmaz**: brüt toplam, havale indirimi ve ödenecek
+ * tutar sunucudan gelir (`totalKurus`, `tender`, `giftPreview`) ve ekran yalnız
+ * SEÇER (`tenderViewFor`). Ekranın kendi çıkarması, zincire yeni bir indirim
+ * girdiği gün tahsil edilen tutardan sessizce ayrışırdı — ve müşteriye ödeme
+ * yükümlülüğünden önce gösterilen tutar MSY m.6/2-a'nın konusudur.
+ *
+ * Hediye kartı DURUMU yukarıda (`checkout-client`) tutulur: fiş ile bu formun
+ * aynı rakamı göstermesi şart, iki ayrı kopya bir gün ayrışırdı.
  */
 
 export interface QuoteCheckoutFormProps {
   quote: PresentedQuote;
-  /** KDV dâhil toplam (kuruş) — sunucu hesabı. */
+  /** KDV dâhil BRÜT toplam (kuruş) — sunucu hesabı, hediye kartı bunu düşürmez. */
   totalKurus: number;
-  /** Havale seçilirse düşülecek indirim; ayar kapalıysa 0. */
-  havaleDiscountKurus: number;
+  /** Kartsız TABAN: iki yöntemin havale indirimi ve ödenecek tutarı. */
+  tender: TenderViews;
+  paymentMethod: TenderPaymentMethod;
+  onPaymentMethodChange: (paymentMethod: TenderPaymentMethod) => void;
+  /** `quote_gift_card_enabled`; kapalıyken hediye kartı alanı HİÇ çizilmez. */
+  giftCardEnabled: boolean;
+  /** Uygulanmış kartın sunucu ön izlemesi; yoksa null. */
+  giftPreview: QuoteGiftCardPreview | null;
+  onGiftPreviewChange: (preview: QuoteGiftCardPreview | null) => void;
   /** Müşterinin adres defterindeki varsayılan adresi; yoksa null. */
   savedAddress: TurkishAddress | null;
 }
 
-type PaymentMethod = "card" | "bank_transfer";
-
 /** Ödeme gövdesinin yanıtı — `/api/orders` ile aynı şekil. */
-interface CheckoutResponse {
+export interface CheckoutResponse {
   reference?: string;
-  paymentMethod?: PaymentMethod;
+  paymentMethod?: RecordedPaymentMethod;
   iframeUrl?: string;
   redirectUrl?: string;
+  /** Tamamı hediye kartından karşılandı ve taslak siparişe döndü. */
+  autoConfirmed?: boolean;
+  /** `autoConfirmed` ise doğan siparişin numarası. */
+  orderNumber?: string;
   error?: string;
+  /** Reddin makine kodu (`{error, code}` sözleşmesi). */
+  code?: string;
+}
+
+/**
+ * Reddin konusu KART mı?
+ *
+ * Kodun öneki sunucu sözleşmesidir: `quote-checkout.ts` kart redlerini
+ * `gift_card_<sebep>` olarak (ve bayrak kapalıyken `gift_card_disabled` olarak)
+ * döner. Önemi para: ön izleme uygulanmışken ödeme kart yüzünden reddedilirse
+ * ekran "₺X hediye kartından karşılandı" yazmaya DEVAM ederdi, oysa o tutar
+ * tahsilattan düşmeyecek — müşterinin gördüğü rakam ile ödeyeceği rakam
+ * ayrışırdı.
+ */
+export function isGiftCardRefusal(code: string | undefined): boolean {
+  return typeof code === "string" && code.startsWith("gift_card_");
+}
+
+/** Başarılı bir cevabın müşteriyi GÖTÜRDÜĞÜ yer. */
+export type CheckoutNavigation =
+  /** PayTR iframe'i: SPA gezinmesi değil, TAM sayfa. */
+  | { kind: "external"; url: string }
+  | { kind: "push"; url: string }
+  /** Gidilecek yer YOK: ekran hatayı yazar ve formda kalır. */
+  | { kind: "error"; message: string };
+
+/**
+ * Cevabın nereye götürdüğü — SAF karar (tarayıcı yok, bu yüzden sınanabilir).
+ *
+ * Sıra kuralın kendisidir: `autoConfirmed: false` gövdesi 200'DÜR (bakiye düştü,
+ * rezervasyon duruyor, bakım turu terfiyi yeniden deneyecek) ama sipariş henüz
+ * YOKTUR — o hâlde takip sayfasına gitmek, müşteriye siparişinin olmadığını
+ * söyleyen bir 404 göstermek olurdu. Tam karşılanan ödemede ise PayTR de havale
+ * de hiç açılmaz ve tek doğru varış siparişin KENDİ numarasıdır (taslak
+ * referansı bugün aynı dizgi olsa da, çok siparişli bölünmede olmayacak).
+ */
+export function checkoutNavigation(
+  data: CheckoutResponse | null,
+  fallbackError: string
+): CheckoutNavigation {
+  if (data?.iframeUrl) return { kind: "external", url: data.iframeUrl };
+  if (data?.redirectUrl) return { kind: "push", url: data.redirectUrl };
+  if (data?.autoConfirmed === false) {
+    return { kind: "error", message: data.error || fallbackError };
+  }
+  const orderNumber = data?.orderNumber ?? data?.reference;
+  if (orderNumber) return { kind: "push", url: `/track/${orderNumber}` };
+  return { kind: "error", message: data?.error || fallbackError };
 }
 
 export function QuoteCheckoutForm({
   quote,
   totalKurus,
-  havaleDiscountKurus,
+  tender,
+  paymentMethod,
+  onPaymentMethodChange,
+  giftCardEnabled,
+  giftPreview,
+  onGiftPreviewChange,
   savedAddress,
 }: QuoteCheckoutFormProps): JSX.Element {
   const d = useDictionary();
@@ -71,7 +145,6 @@ export function QuoteCheckoutForm({
   const seededPhone = e164ToPhoneInput(savedAddress?.telefon);
   const [phoneCountry, setPhoneCountry] = useState<CountryCode>(seededPhone.country);
   const [phoneNational, setPhoneNational] = useState(seededPhone.nationalNumber);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
 
   const invoice = quote.invoice ?? null;
   const [invoiceType, setInvoiceType] = useState<"individual" | "corporate">(
@@ -85,6 +158,11 @@ export function QuoteCheckoutForm({
   const [contractConsentOk, setContractConsentOk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Hediye kartı: KOD alanı ve reddi burada, uygulanmış ÖN İZLEME yukarıda.
+  const [giftCode, setGiftCode] = useState("");
+  const [giftBusy, setGiftBusy] = useState(false);
+  const [giftError, setGiftError] = useState<string | null>(null);
 
   /**
    * İstek başına değil, FORM başına bir anahtar: çift tıklama iki taslak
@@ -105,8 +183,61 @@ export function QuoteCheckoutForm({
     track("begin_checkout", { valueKurus: totalKurus });
   }, [totalKurus]);
 
-  const payableKurus =
-    paymentMethod === "bank_transfer" ? totalKurus - havaleDiscountKurus : totalKurus;
+  // Uygulanmış kart varsa rakamlar ÖN İZLEMEDEN, yoksa kartsız tabandan gelir;
+  // her iki hâlde de sunucu hesabı, ekranın seçtiği tek şey YÖNTEM.
+  const view = tenderViewFor(giftPreview ?? tender, paymentMethod);
+  const payableKurus = view.payableKurus;
+  const havaleDiscountKurus = (giftPreview ?? tender).bankTransfer.havaleDiscountKurus;
+
+  /**
+   * Kodu SUNUCUYA sorar; rezervasyon YAPMAZ (`POST …/gift-card` salt okunur).
+   *
+   * Ön izleme bir söz değil bir gösterimdir: gerçek rezervasyon ödeme anında,
+   * kartın kilitli bakiyesinden yapılır. Bu yüzden kod uygulanmış olsa bile
+   * ödeme reddedilebilir (arada başka bir teklif aynı kartı harcamışsa) ve o
+   * reddin cümlesi de sunucudan gelir.
+   */
+  async function applyGiftCard() {
+    const code = giftCode.trim();
+    if (giftBusy || !code) return;
+    setGiftBusy(true);
+    setGiftError(null);
+    try {
+      const res = await fetch(`/api/quotes/${encodeURIComponent(quote.number)}/gift-card`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | (QuoteGiftCardPreview & { error?: string })
+        | null;
+      if (!res.ok || !data?.valid) {
+        // 404 = yüzeyin KENDİSİ yok (bayrak kapandı). Gövdedeki "teklif
+        // bulunamadı" cümlesi müşteriyi teklifinde bir sorun olduğuna
+        // inandırırdı; sorun kartın bu ödemede kullanılamamasıdır.
+        throw new Error(
+          res.status === 404
+            ? d["instantQuote.checkout.giftCard.disabled"]
+            : data?.error || d["common.error"]
+        );
+      }
+      onGiftPreviewChange(data);
+      // Sunucunun normalleştirdiği kod (büyük harf) gövdeye de o hâliyle gider.
+      setGiftCode(data.code);
+    } catch (err) {
+      onGiftPreviewChange(null);
+      setGiftError(err instanceof Error ? err.message : d["common.error"]);
+    } finally {
+      setGiftBusy(false);
+    }
+  }
+
+  function removeGiftCard() {
+    onGiftPreviewChange(null);
+    setGiftCode("");
+    setGiftError(null);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -164,24 +295,29 @@ export function QuoteCheckoutForm({
                     ...(taxId.trim() ? { taxId: taxId.trim() } : {}),
                   },
             ...(poNumber.trim() ? { poNumber: poNumber.trim() } : {}),
+            // Kod YALNIZ uygulanmış ön izlemeden gider: alana yazılıp
+            // uygulanmamış bir kod, müşterinin görmediği bir tutarla ödeme
+            // demek olurdu.
+            ...(giftCardEnabled && giftPreview ? { giftCardCode: giftPreview.code } : {}),
             analyticsEventId: payEventId,
           }),
         }
       );
       const data = (await res.json().catch(() => null)) as CheckoutResponse | null;
       if (!res.ok) {
+        // Kart reddedildiyse ekrandaki ön izleme de DÜŞER: aksi hâlde müşteri
+        // karşılanmayacak bir tutarı karşılanmış görmeye devam ederdi.
+        if (isGiftCardRefusal(data?.code)) onGiftPreviewChange(null);
         throw new Error(data?.error || d["instantQuote.checkout.failed"]);
       }
-      // Kart: PayTR iframe'i TAM SAYFA açılır (SPA gezinmesi değil).
-      if (data?.iframeUrl) {
-        window.location.href = data.iframeUrl;
+      const next = checkoutNavigation(data, d["instantQuote.checkout.failed"]);
+      if (next.kind === "error") throw new Error(next.message);
+      // PayTR iframe'i TAM SAYFA açılır (SPA gezinmesi değil).
+      if (next.kind === "external") {
+        window.location.href = next.url;
         return;
       }
-      if (data?.redirectUrl) {
-        router.push(data.redirectUrl);
-        return;
-      }
-      router.push(`/track/${data?.reference ?? ""}`);
+      router.push(next.url);
     } catch (err) {
       setError(err instanceof Error ? err.message : d["common.error"]);
       setSubmitting(false);
@@ -337,6 +473,80 @@ export function QuoteCheckoutForm({
         </FormField>
       </section>
 
+      {/* ── Hediye kartı (bayrak açıkken) ───────────────────────────────── */}
+      {giftCardEnabled && (
+        <section className="space-y-3 border-t border-border-default pt-5">
+          <h2 className="text-sm font-semibold text-text-primary">
+            {d["instantQuote.checkout.giftCard.title"]}
+          </h2>
+
+          {giftPreview ? (
+            <div className="space-y-1.5 rounded-xl border border-green-500 bg-green-500/5 px-3 py-2.5">
+              <p className="text-sm font-medium tabular-nums text-text-primary">
+                {giftPreview.code}
+              </p>
+              <p className="text-sm tabular-nums text-text-secondary">
+                {fill(d["instantQuote.checkout.giftCard.applied"], {
+                  amount: formatCurrency(giftPreview.giftCardAmountKurus, "tr"),
+                })}
+              </p>
+              <p className="text-sm tabular-nums text-text-primary">
+                {fill(d["instantQuote.checkout.giftCard.remaining"], {
+                  amount: formatCurrency(payableKurus, "tr"),
+                })}
+              </p>
+              {giftPreview.fullyCovered && (
+                <p className="text-xs text-text-secondary">
+                  {d["instantQuote.checkout.giftCard.fullyCovered"]}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={removeGiftCard}
+                className="text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary"
+              >
+                {d["instantQuote.checkout.giftCard.remove"]}
+              </button>
+            </div>
+          ) : (
+            <FormField
+              label={d["instantQuote.checkout.giftCard.codeLabel"]}
+              hint={d["instantQuote.checkout.giftCard.hint"]}
+            >
+              {/* Genişlik SARMALAYICIDA: `.input-base` %100'dür ve alandaki bir
+                  `flex-1`i yener. */}
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <Input
+                    name="giftCardCode"
+                    value={giftCode}
+                    onChange={(e) => setGiftCode(e.target.value)}
+                    maxLength={30}
+                    autoComplete="off"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={applyGiftCard}
+                  disabled={giftBusy || giftCode.trim().length < 3}
+                  className="shrink-0 rounded-lg border border-border-default px-3 py-2 text-sm text-text-secondary disabled:opacity-50"
+                >
+                  {giftBusy
+                    ? d["instantQuote.checkout.giftCard.applying"]
+                    : d["instantQuote.checkout.giftCard.apply"]}
+                </button>
+              </div>
+            </FormField>
+          )}
+
+          {giftError && (
+            <p role="alert" className="text-sm text-error">
+              {giftError}
+            </p>
+          )}
+        </section>
+      )}
+
       {/* ── Ödeme yöntemi ───────────────────────────────────────────────── */}
       <section className="space-y-3 border-t border-border-default pt-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -354,7 +564,7 @@ export function QuoteCheckoutForm({
                   type="radio"
                   name="paymentMethod"
                   checked={paymentMethod === method}
-                  onChange={() => setPaymentMethod(method)}
+                  onChange={() => onPaymentMethodChange(method)}
                 />
                 {method === "card" ? d["payment.card"] : d["payment.bankTransfer"]}
               </span>

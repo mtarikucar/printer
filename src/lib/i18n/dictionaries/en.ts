@@ -1046,6 +1046,20 @@ const en = {
   "instantQuote.checkout.backToQuote": "Back to quote",
   "instantQuote.checkout.contractProduct": "{number} · {parts} parts",
   "instantQuote.checkout.failed": "Payment could not be started. Please try again.",
+  "instantQuote.checkout.giftCard.applied": "Covered by gift card: {amount}",
+  "instantQuote.checkout.giftCard.applying": "Checking…",
+  "instantQuote.checkout.giftCard.apply": "Apply",
+  "instantQuote.checkout.giftCard.codeLabel": "Gift card code",
+  "instantQuote.checkout.giftCard.disabled": "Gift cards cannot be used for this payment.",
+  "instantQuote.checkout.giftCard.fullyCovered":
+    "Your gift card covers the whole amount; no card details will be requested.",
+  "instantQuote.checkout.giftCard.hint":
+    "If the balance is not enough, you pay the remainder by card or bank transfer.",
+  "instantQuote.checkout.giftCard.remaining": "Amount to pay: {amount}",
+  "instantQuote.checkout.giftCard.remove": "Remove",
+  "instantQuote.checkout.giftCard.reservedPending":
+    "{amount} of gift card balance is reserved for the pending payment. Cancelling the payment restores the balance to your card.",
+  "instantQuote.checkout.giftCard.title": "Gift card",
   "instantQuote.checkout.invoice.companyName": "Company name",
   "instantQuote.checkout.invoice.corporate": "Corporate",
   "instantQuote.checkout.invoice.individual": "Individual",

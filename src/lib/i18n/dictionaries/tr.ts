@@ -1047,6 +1047,23 @@ const tr: Dictionary = {
   "instantQuote.checkout.backToQuote": "Teklife dön",
   "instantQuote.checkout.contractProduct": "{number} · {parts} parça",
   "instantQuote.checkout.failed": "Ödeme başlatılamadı. Lütfen tekrar deneyin.",
+  // Hediye kartı bir ÖDEME ARACIDIR, iskonto değil: fatura matrahını düşürmez,
+  // bu yüzden "indirim" DEMEZ ("karşılanan"). Kartın reddi için yeni cümle
+  // yazılmaz — `giftCard.error.*` sözlüğü `/api/orders` ile paylaşılır.
+  "instantQuote.checkout.giftCard.applied": "Hediye kartından karşılanan: {amount}",
+  "instantQuote.checkout.giftCard.applying": "Kontrol ediliyor…",
+  "instantQuote.checkout.giftCard.apply": "Uygula",
+  "instantQuote.checkout.giftCard.codeLabel": "Hediye kartı kodu",
+  "instantQuote.checkout.giftCard.disabled": "Hediye kartı bu ödemede kullanılamıyor.",
+  "instantQuote.checkout.giftCard.fullyCovered":
+    "Tutarın tamamı hediye kartınızdan karşılanıyor; kart bilgisi istenmeyecek.",
+  "instantQuote.checkout.giftCard.hint":
+    "Bakiye yeterli değilse kalan tutarı kart veya havale ile ödersiniz.",
+  "instantQuote.checkout.giftCard.remaining": "Ödenecek tutar: {amount}",
+  "instantQuote.checkout.giftCard.remove": "Kaldır",
+  "instantQuote.checkout.giftCard.reservedPending":
+    "Bekleyen ödemede {amount} hediye kartı bakiyesi rezerve edildi. Ödemeyi iptal ederseniz bakiye kartınıza geri yüklenir.",
+  "instantQuote.checkout.giftCard.title": "Hediye kartı",
   "instantQuote.checkout.invoice.companyName": "Firma unvanı",
   "instantQuote.checkout.invoice.corporate": "Kurumsal",
   "instantQuote.checkout.invoice.individual": "Bireysel",

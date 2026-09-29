@@ -109,7 +109,8 @@
 /* Üst ve alt boş: yatay video, dikey ekran. */
 .stage[data-fit="letter"] .frame {
   width: 100%;
-  aspect-ratio: var(--ar);
+  /* En az --letter-min kadar yüksek: gerekirse video yanlardan kırpılır. */
+  height: max(calc(100vw / var(--ar)), calc(100dvh * var(--letter-min)));
   -webkit-mask-image: linear-gradient(180deg, transparent, #000 7%, #000 93%, transparent);
   mask-image: linear-gradient(180deg, transparent, #000 7%, #000 93%, transparent);
 }

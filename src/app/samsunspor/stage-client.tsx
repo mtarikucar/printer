@@ -32,7 +32,18 @@ const COVER_MIN_VISIBLE = 0.75;
 /** Yan/üst şeritte süs yazısı göstermek için gereken en küçük boşluk (px). */
 const MIN_RAIL_GUTTER = 96;
 /** Kayan yazı, başlık ve düğmelerden artan kulvara sığmalı; dar boşlukta çıkmaz. */
-const MIN_MARQUEE_GUTTER = 210;
+const MIN_MARQUEE_GUTTER = 180;
+
+/**
+ * Yatay video + dik telefon: kırpmadan sığdırınca video ekranın ortasında ince
+ * bir şerit kalır. Karekodu okutan herkes telefonu dik tutar, yani asıl durum
+ * budur. O yüzden çerçeve en az ekran yüksekliğinin bu oranı kadar tutulur ve
+ * video yanlardan kırpılarak büyütülür. Görüntünün ortası (figür, kalkan)
+ * korunur. Hiç kırpılmasın istenirse `0` yap.
+ *
+ * Değer CSS'e `--letter-min` olarak buradan aktarılır; tek kaynak burası.
+ */
+const LETTER_MIN_HEIGHT = 0.52;
 
 type Phase = "loading" | "playing" | "paused" | "ended" | "blocked" | "missing";
 type Fit = "cover" | "pillar" | "letter";
@@ -129,8 +140,13 @@ export function StageClient({
   // Boşta kalan şeritlerin genişliği: süslemeler buna göre ölçeklenir.
   const gutterX =
     fit === "pillar" && ar ? Math.max(0, (size.w - size.h * ar) / 2) : 0;
-  const gutterY =
-    fit === "letter" && ar ? Math.max(0, (size.h - size.w / ar) / 2) : 0;
+  const letterFrameH =
+    fit === "letter" && ar
+      ? Math.max(size.w / ar, size.h * LETTER_MIN_HEIGHT)
+      : 0;
+  const gutterY = fit === "letter" ? Math.max(0, (size.h - letterFrameH) / 2) : 0;
+  // Dik tutulan telefonda yatay video: çevirince ekranın tamamını kaplar.
+  const suggestRotate = fit === "letter" && size.h > size.w;
   const showRails = gutterX >= MIN_RAIL_GUTTER;
   const showMarquee = gutterY >= MIN_MARQUEE_GUTTER;
 
@@ -296,6 +312,7 @@ export function StageClient({
     "--ar": ar ?? 1,
     "--gx": `${gutterX}px`,
     "--gy": `${gutterY}px`,
+    "--letter-min": LETTER_MIN_HEIGHT,
   } as CSSProperties;
 
   const showBigPlay = phase === "blocked" || phase === "paused";
@@ -488,7 +505,11 @@ export function StageClient({
       {/* ---- Alt şerit ---- */}
       <footer className={s.bottom}>
         <div className={s.pitch}>
-          <p className={s.eyebrow}>FOTOĞRAFINDAN EL BOYAMASI FİGÜR</p>
+          <p className={s.eyebrow}>
+            {suggestRotate
+              ? "TAM EKRAN İÇİN TELEFONU YAN ÇEVİR"
+              : "FOTOĞRAFINDAN EL BOYAMASI FİGÜR"}
+          </p>
           <Link href="/create" className={s.cta}>
             <span>KENDİ FİGÜRÜNÜ YAPTIR</span>
             <svg viewBox="0 0 24 24" aria-hidden="true">

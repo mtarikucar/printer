@@ -1915,6 +1915,94 @@ async function main() {
       );
     });
 
+    await test("aynı kartı aynı anda kullanan iki teklifte bakiyeyi YALNIZ biri alır", async () => {
+      // `FOR UPDATE`in VAR OLMA sebebi bu vakadır: kilitsiz bir okumada iki
+      // işlem aynı bakiyeyi görür, ikisi de "yeter" der ve kartın bakiyesinin
+      // İKİ KATI kadar hediye kartı harcanmış olur — farkı platform öder ve
+      // kimse fark etmez, çünkü iki teklif de kendi içinde tutarlı görünür.
+      const first = await makeUser();
+      const second = await makeUser();
+      const qA = await makeQuote(first.id, [{ geometry: CUBE, quantity: 2 }]);
+      const qB = await makeQuote(second.id, [{ geometry: CUBE, quantity: 2 }]);
+      const a = await expected(qA.id);
+      const b = await expected(qB.id);
+      const total = a.computed.totals.totalKurus;
+      assert.equal(b.computed.totals.totalKurus, total, "iki teklif aynı tutarda olmalı");
+      // Bakiye BİR teklifin yarısını karşılar: ikisine birden yetmediği için
+      // "ikisi de kısmen aldı" hâli bakiyeyi eksiye düşürürdü.
+      const gift = Math.floor(total / 2);
+      const card = await makeGiftCard(gift);
+
+      const pay = (quote: { id: string; version: number }, user: { id: string; email: string }) =>
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: user.id,
+          email: user.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: quote.version,
+              expectedTotalKurus: total,
+              giftCardCode: card.code,
+            })
+          ),
+          req: fakeRequest(),
+        });
+
+      const settled = await Promise.allSettled([pay(a.quote, first), pay(b.quote, second)]);
+      const won = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      const lost = settled.flatMap((r) => (r.status === "rejected" ? [r.reason as unknown] : []));
+      assert.equal(won.length, 1, "kartı iki ödeme birden aldı");
+      assert.equal(lost.length, 1, "kartı hiçbir ödeme alamadı");
+
+      // Kaybedenin gördüğü cümle TÜRKÇE ve kartın gerçek hâlini anlatıyor:
+      // rezervasyon kilit altında reddedilirse `insufficient`, kazanan ödeme
+      // ÖNCE commit ettiyse işlem öncesi kontrol `fully_used` der. İkisi de
+      // doğru ve ikisi de `giftCard.error.*` sözlüğünden (`/api/orders` ile aynı).
+      const refusal = lost[0];
+      assert.ok(refusal instanceof QuoteServiceError, `beklenmeyen hata: ${String(refusal)}`);
+      assert.equal(refusal.status, 400);
+      assert.ok(
+        ["gift_card_insufficient", "gift_card_fully_used"].includes(refusal.code ?? ""),
+        `kaybeden yanlış kodu aldı: ${refusal.code}`
+      );
+      assert.match(refusal.message, /[çğıöşüÇĞİÖŞÜ]/, "red cümlesi Türkçe değil");
+
+      // Kartın defteri BİR kez düştü.
+      const [after] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(after.balanceKurus, 0, "bakiye iki kez harcandı ya da hiç düşmedi");
+      assert.equal(after.status, "fully_used");
+
+      const redemptions = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.giftCardId, card.id));
+      assert.equal(redemptions.length, 1, "kart iki kullanım kaydı aldı");
+      assert.equal(redemptions[0].amountKurus, gift);
+      assert.equal(redemptions[0].refundedAt, null);
+
+      const winner = won[0];
+      assert.equal(winner.giftCardAmountKurus, gift);
+      assert.equal(winner.finalAmountKurus, total - gift);
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, winner.reference));
+      assert.equal(draft.giftCardAmountKurus, gift);
+      assert.equal(redemptions[0].draftId, draft.id, "kullanım kaydı kazanan taslağa bağlı değil");
+
+      // Kaybeden teklif YARIM KALMADI: taslağı yok, yani kartsız (ya da başka
+      // bir kartla) hemen ödenebilir.
+      const pendings = await Promise.all([
+        pendingQuoteCheckout(a.quote.id),
+        pendingQuoteCheckout(b.quote.id),
+      ]);
+      assert.equal(
+        pendings.filter((p) => p !== null).length,
+        1,
+        "kaybeden teklifte de bekleyen bir taslak kaldı"
+      );
+    });
+
     await test("iptal rezervasyonu KARTA geri verir; ikinci iptal bakiyeyi iki kez artırmaz", async () => {
       // Bu vakanın konusu müşterinin PARASI: rezervasyonlu taslak dururken
       // teklif salt okunurdur, yani iptal kapısı kapalı olsaydı müşteri ne

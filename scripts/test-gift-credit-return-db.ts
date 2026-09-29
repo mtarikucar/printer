@@ -148,6 +148,30 @@ async function main() {
       const confirmed=await fixture();
       await assert.rejects(db.transaction(tx=>restoreGiftCreditTx(tx,{scope:{kind:'draft',id:confirmed.draftId},parent:{expiredDraftId:confirmed.draftId},allocations:[{redemptionId:confirmed.redemptionId,amountKurus:2000}]})));
     });
+    await test('quote order paid entirely by gift card returns the whole reservation and reactivates the card',async()=>{
+      // `gift_card_full` only exists on the quote path (quote-checkout.ts): the
+      // cash side is zero, so the gift amount IS the order total. The order
+      // scope check compares the redemption sum with orders.gift_card_amount_kurus,
+      // which promotion copies from the draft — if that copy were ever dropped
+      // for gift-covered quote orders, this refund would be refused forever.
+      const draftId=(await admin.query("INSERT INTO order_drafts(reference,user_id,email,customer_name,shipping_address,payment_method,amount_kurus,gift_card_amount_kurus,production_base_kurus,status) VALUES($1,$2,'gift-quote@test.invalid','Quote Buyer','{}','gift_card_full',10000,10000,10000,'confirmed') RETURNING id",[`QT-GIFT-${++seq}`,user])).rows[0].id;
+      const orderId=(await admin.query("INSERT INTO orders(order_number,user_id,email,customer_name,shipping_address,payment_method,amount_kurus,gift_card_amount_kurus,production_base_kurus,draft_id) VALUES($1,$2,'gift-quote@test.invalid','Quote Buyer','{}','gift_card_full',10000,10000,10000,$3) RETURNING id",[`QT-GIFT-${seq}`,user,draftId])).rows[0].id;
+      const cardId=(await admin.query("INSERT INTO gift_cards(code,amount_kurus,balance_kurus,status,buyer_user_id,expires_at) VALUES($1,10000,0,'fully_used',$2,'2099-01-01') RETURNING id",[`CARD-QT-${seq}`,buyer])).rows[0].id;
+      const redemptionId=(await admin.query("INSERT INTO gift_card_redemptions(gift_card_id,draft_id,order_id,amount_kurus,redeemed_by_user_id) VALUES($1,$2,$3,10000,$4) RETURNING id",[cardId,draftId,orderId,user])).rows[0].id;
+      const f={draftId,orderId,cardId,redemptionId};
+
+      // Wrong basis refuses BEFORE any write: a mismatched order column is the
+      // shape of a promotion that forgot to carry the tender breakdown.
+      await admin.query('UPDATE orders SET gift_card_amount_kurus=2000 WHERE id=$1',[orderId]);
+      await assert.rejects(restore(f,10000,await parent(f,10000)));
+      assert.equal(await balance(cardId),0);
+      await admin.query('UPDATE orders SET gift_card_amount_kurus=10000 WHERE id=$1',[orderId]);
+
+      assert.deepEqual(await restore(f,10000,await parent(f,10000)),{restoredKurus:10000,allocations:[{redemptionId,restoredKurus:10000,remainingKurus:0}]});
+      assert.equal(await balance(cardId),10000); assert.ok(await marker(redemptionId));
+      // Fully restored card is spendable again (balance back at its face value).
+      assert.equal((await admin.query('SELECT status FROM gift_cards WHERE id=$1',[cardId])).rows[0].status,'active');
+    });
     await test('no bare full-return export remains; recorded parent returns only partial residual',async()=>{
       assert.equal('refundGiftCardForOrder' in drafts,false);
       const f=await fixture(); await restore(f,500,await parent(f,500));

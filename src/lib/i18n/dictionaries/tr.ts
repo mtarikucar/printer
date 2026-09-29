@@ -987,13 +987,18 @@ const tr: Dictionary = {
   // instantQuote — hesap sayfaları (/account/teklifler, /account/parcalar)
   "instantQuote.account.parts.addToExisting": "Açık teklife ekle",
   "instantQuote.account.parts.addToQuote": "Yeni teklife ekle",
+  "instantQuote.account.parts.addedAt": "Eklenme",
+  "instantQuote.account.parts.dimensionsLabel": "Ölçü",
   "instantQuote.account.parts.empty": "Henüz model yüklemediniz.",
   "instantQuote.account.parts.emptyAction": "İlk teklifinizi oluşturun",
+  "instantQuote.account.parts.lastMaterial": "Son malzeme",
   "instantQuote.account.parts.loadFailed": "Parça kütüphanesi yüklenemedi.",
+  "instantQuote.account.parts.loadMore": "Daha fazla dosya",
   "instantQuote.account.parts.subtitle":
     "Yüklediğiniz modeller burada duruyor; aynı dosya bir kez listelenir.",
   "instantQuote.account.parts.title": "Parça kütüphanem",
   "instantQuote.account.parts.useCount": "{count} teklifte kullanıldı",
+  "instantQuote.account.parts.volumeLabel": "Hacim",
   "instantQuote.account.quotes.column.expiry": "Geçerlilik",
   "instantQuote.account.quotes.column.number": "Teklif",
   "instantQuote.account.quotes.column.parts": "Parça",
@@ -1040,6 +1045,7 @@ const tr: Dictionary = {
 
   // instantQuote — ödeme sayfası (/teklif/<no>/odeme)
   "instantQuote.checkout.backToQuote": "Teklife dön",
+  "instantQuote.checkout.contractProduct": "{number} · {parts} parça",
   "instantQuote.checkout.failed": "Ödeme başlatılamadı. Lütfen tekrar deneyin.",
   "instantQuote.checkout.invoice.companyName": "Firma unvanı",
   "instantQuote.checkout.invoice.corporate": "Kurumsal",

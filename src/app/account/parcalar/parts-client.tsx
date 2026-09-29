@@ -84,7 +84,9 @@ export function PartLibraryGrid({
             <dl className="mt-3 space-y-1 text-xs text-text-secondary">
               {part.dimensionsMm ? (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-text-muted">Ölçü</dt>
+                  <dt className="text-text-muted">
+                    {d["instantQuote.account.parts.dimensionsLabel"]}
+                  </dt>
                   <dd className="font-mono tabular-nums">
                     {fill(d["instantQuote.part.dimensions"], {
                       x: mm(part.dimensionsMm.x),
@@ -96,7 +98,9 @@ export function PartLibraryGrid({
               ) : null}
               {part.volumeCm3 !== null ? (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-text-muted">Hacim</dt>
+                  <dt className="text-text-muted">
+                    {d["instantQuote.account.parts.volumeLabel"]}
+                  </dt>
                   <dd className="font-mono tabular-nums">
                     {fill(d["instantQuote.part.volume"], { cm3: decimal2(part.volumeCm3) })}
                   </dd>
@@ -104,12 +108,16 @@ export function PartLibraryGrid({
               ) : null}
               {part.lastMaterialName ? (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-text-muted">Son malzeme</dt>
+                  <dt className="text-text-muted">
+                    {d["instantQuote.account.parts.lastMaterial"]}
+                  </dt>
                   <dd>{part.lastMaterialName}</dd>
                 </div>
               ) : null}
               <div className="flex justify-between gap-3">
-                <dt className="text-text-muted">Eklenme</dt>
+                <dt className="text-text-muted">
+                  {d["instantQuote.account.parts.addedAt"]}
+                </dt>
                 <dd className="font-mono tabular-nums">{formatDate(part.createdAt, "tr")}</dd>
               </div>
             </dl>
@@ -257,7 +265,7 @@ export function AccountPartsClient(): JSX.Element {
           onClick={() => void load(page + 1)}
           className="btn-secondary mt-6 !px-5 !py-2.5 text-sm"
         >
-          {loading ? d["common.loading"] : "Daha fazla dosya"}
+          {loading ? d["common.loading"] : d["instantQuote.account.parts.loadMore"]}
         </button>
       ) : null}
 

@@ -986,13 +986,18 @@ const en = {
   // instantQuote — account pages (/account/teklifler, /account/parcalar)
   "instantQuote.account.parts.addToExisting": "Add to an open quote",
   "instantQuote.account.parts.addToQuote": "Add to a new quote",
+  "instantQuote.account.parts.addedAt": "Added",
+  "instantQuote.account.parts.dimensionsLabel": "Size",
   "instantQuote.account.parts.empty": "You haven't uploaded a model yet.",
   "instantQuote.account.parts.emptyAction": "Create your first quote",
+  "instantQuote.account.parts.lastMaterial": "Last material",
   "instantQuote.account.parts.loadFailed": "The part library could not be loaded.",
+  "instantQuote.account.parts.loadMore": "More files",
   "instantQuote.account.parts.subtitle":
     "Every model you have uploaded; the same file is listed once.",
   "instantQuote.account.parts.title": "My part library",
   "instantQuote.account.parts.useCount": "Used in {count} quotes",
+  "instantQuote.account.parts.volumeLabel": "Volume",
   "instantQuote.account.quotes.column.expiry": "Valid until",
   "instantQuote.account.quotes.column.number": "Quote",
   "instantQuote.account.quotes.column.parts": "Parts",
@@ -1039,6 +1044,7 @@ const en = {
 
   // instantQuote — checkout page (/teklif/<no>/odeme)
   "instantQuote.checkout.backToQuote": "Back to quote",
+  "instantQuote.checkout.contractProduct": "{number} · {parts} parts",
   "instantQuote.checkout.failed": "Payment could not be started. Please try again.",
   "instantQuote.checkout.invoice.companyName": "Company name",
   "instantQuote.checkout.invoice.corporate": "Corporate",

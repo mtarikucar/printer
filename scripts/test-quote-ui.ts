@@ -1844,3 +1844,43 @@ test("teklif ekranındaki metin alanları kontrolsüz defaultValue kullanmıyor"
     assert.ok(!source.includes("defaultValue"), `${file} kontrolsüz defaultValue taşıyor`);
   }
 });
+
+test("parça kütüphanesi ve mesafeli satış özeti metinlerini SÖZLÜKTEN alır", () => {
+  const html = plain(
+    inLocale(
+      createElement(PartLibraryGrid, { items: [LIBRARY_ROW], selected: [], onToggle: noop })
+    )
+  );
+  for (const key of [
+    "instantQuote.account.parts.dimensionsLabel",
+    "instantQuote.account.parts.volumeLabel",
+    "instantQuote.account.parts.lastMaterial",
+    "instantQuote.account.parts.addedAt",
+    "instantQuote.account.parts.loadMore",
+  ] as const) {
+    assert.ok(trKeys.includes(key), `${key} sözlükte yok`);
+    assert.ok(enKeys.includes(key), `${key} İngilizce sözlükte yok`);
+  }
+  assert.ok(
+    html.includes(tr["instantQuote.account.parts.lastMaterial"]),
+    "son malzeme etiketi sözlükten gelmiyor"
+  );
+
+  // Mesafeli satış sözleşmesi özetindeki ürün adı da sözlükten gelir.
+  assert.ok(trKeys.includes("instantQuote.checkout.contractProduct"));
+  assert.match(tr["instantQuote.checkout.contractProduct"], /\{number\}/);
+  assert.match(tr["instantQuote.checkout.contractProduct"], /\{parts\}/);
+
+  // Bu iki dosyada sözlük dışında Türkçe metin KALMADI.
+  for (const file of [
+    "src/app/account/parcalar/parts-client.tsx",
+    "src/components/quote/quote-checkout-form.tsx",
+  ]) {
+    const code = fs
+      .readFileSync(path.resolve(file), "utf8")
+      .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.doesNotMatch(code, /[çğışöüÇĞİŞÖÜ]/, `${file} sözlük dışında Türkçe metin taşıyor`);
+  }
+});

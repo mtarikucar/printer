@@ -13,6 +13,7 @@ import { DISTRICTS, PROVINCES } from "@/lib/data/turkey-address";
 import { formatCurrency } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { TurkishAddress } from "@/lib/db/schema";
+import { fill } from "./format";
 
 /**
  * Teklif ödemesinin formu — `/api/quotes/<id>/checkout`.
@@ -371,7 +372,10 @@ export function QuoteCheckoutForm({
 
       <DistanceContractConsent
         variant={consentVariantForOrderType("upload")}
-        productName={`${quote.number} · ${quote.partCount} parça`}
+        productName={fill(d["instantQuote.checkout.contractProduct"], {
+          number: quote.number,
+          parts: quote.partCount,
+        })}
         priceKurus={payableKurus}
         onChange={setContractConsentOk}
       />

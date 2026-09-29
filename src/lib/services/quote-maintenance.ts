@@ -4,13 +4,25 @@
  *
  * Üç kural bütün dosyayı biçimlendirir:
  *
- * 1. **Hatırlatma ÖNCE damgalanır, SONRA gönderilir.** Her damga, kendi
- *    kolonunun boş olmasını arayan koşullu bir `UPDATE … RETURNING`tır; iki
+ * 1. **Hatırlatma SATIR SATIR damgalanır, damgadan hemen sonra gönderilir.**
+ *    Damga, kendi kolonunun boş olmasını arayan koşullu bir
+ *    `UPDATE … RETURNING`tır ve O SATIRIN mektubundan hemen önce yazılır; iki
  *    eşzamanlı tur (işçi yeniden başladı, zamanlayıcı iki kez tetikledi) aynı
  *    satırı sahiplenemez, çünkü ikinci `UPDATE` kilidi bekler ve satırın YENİ
- *    hâlini yeniden süzer. Sıralama bilinçlidir: gönderim çökerse hatırlatma
- *    KAYBOLUR, ama müşteri aynı mektubu iki kez almaz — tersi, bir SMTP
- *    arızasında aynı adrese tur tur mektup yağdırırdı.
+ *    hâlini yeniden süzer.
+ *
+ *    PARTİYİ önden damgalamak bunun yerine GEÇMEZ: turun ortasına düşen bir
+ *    SIGTERM (dağıtım) 200 satırın 195'ini "gönderildi" sayar, mektup hiç
+ *    yazılmaz ve damga kolonu dolduğu için bir daha da yazılmaz. Satır başına
+ *    damga ile kaybın tavanı, tam o an elde olan TEK mektuptur.
+ *
+ *    Gönderim başarısız olursa damga GERİ ALINMAZ. İki sebep: (a) `quote-notify`
+ *    sözleşme gereği fırlatmaz (kendi içinde `try/catch`lidir), yani
+ *    "başarısız" bilgisi buraya hiç ulaşmaz — ulaşsaydı da bir SMTP hatası
+ *    mektubun kabul EDİLMEDİĞİ anlamına gelmezdi; (b) geri alınan damga, bir
+ *    SMTP arızasında aynı adrese tur tur mektup yağdırır ve terk hatırlatması
+ *    izin gerektiren bir TİCARİ İLETİDİR (ETK 6563/İYS). Kaybolan hatırlatma
+ *    bir makbuz değil bir dürtmedir; iki kez gitmesi daha pahalıdır.
  * 2. **Terk hatırlatması TİCARİ İLETİDİR.** Sorgunun kendisi
  *    `users.marketing_consent = true` arar (ETK 6563 / İYS); `quote-notify`
  *    ayrıca kendi içinde de bakar. İki kapı bilerek üst üstedir: biri bir gün
@@ -32,6 +44,7 @@ import {
   and,
   asc,
   eq,
+  exists,
   gt,
   inArray,
   isNotNull,
@@ -41,7 +54,7 @@ import {
   notExists,
   sql,
 } from "drizzle-orm";
-import type { SQLWrapper } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   quoteCheckouts,
@@ -154,26 +167,55 @@ export async function expireQuotes(now: Date): Promise<number> {
 }
 
 /**
- * Hatırlatmayı SAHİPLENİR: damgayı yalnız boş kolona yazar ve yazabildiği
- * satırları döner. İki eşzamanlı tur aynı satırı sahiplenemez.
+ * Adayları SATIR SATIR sahiplenip gönderir; kaç satırın sahiplenildiğini döner.
  *
- * `updated_at`e DOKUNULMAZ. Dokunsaydı terk ölçüsü ("24 saattir
- * dokunulmadı") işin kendi yan etkisiyle sıfırlanır, terk hatırlatması hiçbir
- * zaman gitmezdi.
+ * Döngünün şekli sözleşmenin kendisi: her tur için tek bir koşullu
+ * `UPDATE … RETURNING`, hemen ardından O SATIRIN mektubu. Aday listesi
+ * (`due` + sıralama + `REMINDER_BATCH`) bir turun tavanını verir, ama hiçbir
+ * satır kendi mektubundan önce damgalanmaz — dağıtımın ortasında gelen bir
+ * SIGTERM en çok elde olan TEK mektubu kaybeder (bkz. dosya başı, kural 1).
+ *
+ * Koşul UPDATE'in kendi `WHERE`'inde İKİNCİ kez kurulur ve bu bilinçlidir:
+ * postgres satırı kilitledikten sonra `WHERE`i satırın YENİ hâline karşı
+ * yeniden değerlendirir. Böylece (a) aynı anda koşan ikinci bir tur aynı satırı
+ * sahiplenemez (damga kolonu artık dolu), (b) aday seçildikten sonra uygunluğu
+ * kaybeden satıra mektup yazılmaz (ödeme bağlandı, teklif kapandı).
+ *
+ * `updated_at`e DOKUNULMAZ. Dokunsaydı terk ölçüsü ("24 saattir dokunulmadı")
+ * işin kendi yan etkisiyle sıfırlanır, terk hatırlatması hiçbir zaman gitmezdi.
  */
-async function claimReminders(
+async function claimAndSendReminders(
   kind: "expiry" | "abandoned",
-  due: SQLWrapper,
+  due: SQL | undefined,
+  order: SQL,
   now: Date
-): Promise<string[]> {
-  const column =
-    kind === "expiry" ? quotes.expiryReminderSentAt : quotes.abandonedReminderSentAt;
-  const claimed = await db
-    .update(quotes)
-    .set(kind === "expiry" ? { expiryReminderSentAt: now } : { abandonedReminderSentAt: now })
-    .where(and(inArray(quotes.id, due), isNull(column)))
-    .returning({ id: quotes.id });
-  return claimed.map((row) => row.id);
+): Promise<number> {
+  const stamp =
+    kind === "expiry" ? { expiryReminderSentAt: now } : { abandonedReminderSentAt: now };
+  const notify = kind === "expiry" ? notifyQuoteExpiring : notifyQuoteAbandoned;
+
+  const candidates = await db
+    .select({ id: quotes.id })
+    .from(quotes)
+    .where(due)
+    .orderBy(order)
+    .limit(REMINDER_BATCH);
+
+  let sent = 0;
+  for (const candidate of candidates) {
+    const [claimed] = await db
+      .update(quotes)
+      .set(stamp)
+      .where(and(eq(quotes.id, candidate.id), due))
+      .returning({ id: quotes.id });
+    if (!claimed) continue;
+    // `notifyQuote*` kendi içinde try/catch'lidir ve FIRLATMAZ (quote-notify
+    // kural 1): bir adresin düşmesi kalan hatırlatmaları düşürmez. Damga da
+    // geri alınmaz — gerekçesi dosya başında.
+    await notify(claimed.id);
+    sent++;
+  }
+  return sent;
 }
 
 /**
@@ -185,32 +227,18 @@ async function claimReminders(
  */
 export async function sendExpiryReminders(now: Date): Promise<number> {
   const horizon = new Date(now.getTime() + EXPIRY_REMINDER_DAYS * DAY_MS);
-  const due = db
-    .select({ id: quotes.id })
-    .from(quotes)
-    .where(
-      and(
-        inArray(quotes.status, REMINDABLE),
-        isNull(quotes.orderId),
-        isNotNull(quotes.userId),
-        isNotNull(quotes.totalKurus),
-        isNull(quotes.expiryReminderSentAt),
-        gt(quotes.expiresAt, now),
-        lte(quotes.expiresAt, horizon)
-      )
-    )
-    // En yakın vade önce: sınıra takılan teklif, bir sonraki tura kalırken
-    // süresini doldurmuş olmasın.
-    .orderBy(asc(quotes.expiresAt))
-    .limit(REMINDER_BATCH);
-
-  const claimed = await claimReminders("expiry", due, now);
-  for (const id of claimed) {
-    // `notifyQuoteExpiring` kendi içinde try/catch'lidir: bir adresin
-    // düşmesi kalan hatırlatmaları düşürmez.
-    await notifyQuoteExpiring(id);
-  }
-  return claimed.length;
+  const due = and(
+    inArray(quotes.status, REMINDABLE),
+    isNull(quotes.orderId),
+    isNotNull(quotes.userId),
+    isNotNull(quotes.totalKurus),
+    isNull(quotes.expiryReminderSentAt),
+    gt(quotes.expiresAt, now),
+    lte(quotes.expiresAt, horizon)
+  );
+  // En yakın vade önce: sınıra takılan teklif, bir sonraki tura kalırken
+  // süresini doldurmuş olmasın.
+  return claimAndSendReminders("expiry", due, asc(quotes.expiresAt), now);
 }
 
 /**
@@ -223,36 +251,32 @@ export async function sendExpiryReminders(now: Date): Promise<number> {
  */
 export async function sendAbandonedReminders(now: Date): Promise<number> {
   const idleBefore = new Date(now.getTime() - ABANDONED_AFTER_HOURS * HOUR_MS);
-  const due = db
-    .select({ id: quotes.id })
-    .from(quotes)
-    .innerJoin(users, eq(users.id, quotes.userId))
-    .where(
-      and(
-        inArray(quotes.status, REMINDABLE),
-        isNull(quotes.orderId),
-        isNotNull(quotes.totalKurus),
-        isNull(quotes.abandonedReminderSentAt),
-        gt(quotes.expiresAt, now),
-        lt(quotes.updatedAt, idleBefore),
-        eq(users.marketingConsent, true),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(quoteCheckouts)
-            .where(eq(quoteCheckouts.quoteId, quotes.id))
-        )
-      )
+  // İzin kapısı `exists` ile kurulur, `innerJoin` ile değil: AYNI koşul hem aday
+  // sorgusunda hem de satır başına `UPDATE`te geçmek zorunda ve bir UPDATE'e
+  // join taşınamaz. Ölçü değişmiyor — `users.id` tekil, yani join'in seçtiği
+  // satır kümesiyle birebir aynı (ve `user_id IS NULL` iki hâlde de eşleşmez).
+  const due = and(
+    inArray(quotes.status, REMINDABLE),
+    isNull(quotes.orderId),
+    isNotNull(quotes.totalKurus),
+    isNull(quotes.abandonedReminderSentAt),
+    gt(quotes.expiresAt, now),
+    lt(quotes.updatedAt, idleBefore),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(users)
+        .where(and(eq(users.id, quotes.userId), eq(users.marketingConsent, true)))
+    ),
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(quoteCheckouts)
+        .where(eq(quoteCheckouts.quoteId, quotes.id))
     )
-    // En uzun süredir bekleyen önce.
-    .orderBy(asc(quotes.updatedAt))
-    .limit(REMINDER_BATCH);
-
-  const claimed = await claimReminders("abandoned", due, now);
-  for (const id of claimed) {
-    await notifyQuoteAbandoned(id);
-  }
-  return claimed.length;
+  );
+  // En uzun süredir bekleyen önce.
+  return claimAndSendReminders("abandoned", due, asc(quotes.updatedAt), now);
 }
 
 /**

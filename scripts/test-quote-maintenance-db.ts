@@ -62,6 +62,12 @@ let checks = 0;
 
 /** Giden mektuplar: SMTP sürücüsü kayda alınır, sokete çıkılmaz. */
 const sentMail: Array<{ to: string; subject: string; html: string }> = [];
+/**
+ * Mektup SOKETE ÇIKARKEN koşan kanca: "tam bu mektup gönderilirken veritabanı
+ * neye benziyordu" sorusunu sormanın tek yolu. Damganın parti olarak mı satır
+ * satır mı vurulduğu ancak buradan görülebilir.
+ */
+let onSend: ((to: string) => Promise<void>) | null = null;
 {
   const SMTP = createRequire(import.meta.url)("nodemailer/lib/smtp-transport") as {
     prototype: {
@@ -76,7 +82,15 @@ const sentMail: Array<{ to: string; subject: string; html: string }> = [];
   };
   SMTP.prototype.send = (mail, callback) => {
     sentMail.push({ to: mail.data.to, subject: mail.data.subject, html: mail.data.html });
-    callback(null, { accepted: [mail.data.to], rejected: [] });
+    const hook = onSend;
+    if (!hook) {
+      callback(null, { accepted: [mail.data.to], rejected: [] });
+      return;
+    }
+    hook(mail.data.to).then(
+      () => callback(null, { accepted: [mail.data.to], rejected: [] }),
+      (err: unknown) => callback(err as Error, { accepted: [], rejected: [mail.data.to] })
+    );
   };
 }
 
@@ -449,6 +463,48 @@ async function main() {
       }
     });
 
+    await test("süre hatırlatması SATIR SATIR damgalanır, parti önden damgalanmaz", async () => {
+      // Kırılan hâl: tur önce 200 satırın hepsini "gönderildi" damgalıyor, sonra
+      // mektupları yazıyordu. Dağıtımın ortasında gelen bir SIGTERM 195
+      // hatırlatmayı gönderilmemiş ama gönderilmiş SAYILMIŞ bırakır — ve damga
+      // kolonu dolduğu için bir daha hiç denenmez. Ölçü: mektup sokete çıkarken
+      // kaç satır damgalı?
+      const now = new Date();
+      const user = await makeUser({ tag: "row-claim" });
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        ids.push(
+          await makeQuote({
+            userId: user.id,
+            status: "quoted",
+            expiresAt: new Date(now.getTime() + (i + 1) * HOUR),
+          })
+        );
+      }
+      const stampedWhenSent: number[] = [];
+      onSend = async () => {
+        const res = await admin.query(
+          `SELECT count(*)::int AS n FROM quotes
+             WHERE id = ANY($1) AND expiry_reminder_sent_at IS NOT NULL`,
+          [ids]
+        );
+        stampedWhenSent.push(res.rows[0].n as number);
+      };
+      try {
+        assert.equal(await sendExpiryReminders(now), 3);
+      } finally {
+        onSend = null;
+      }
+
+      assert.deepEqual(
+        stampedWhenSent,
+        [1, 2, 3],
+        "her mektup, YALNIZ kendi satırı damgalıyken gitmeli (parti damgası 3,3,3 verirdi)"
+      );
+      assert.equal(mailsTo(user.email).length, 3);
+      for (const id of ids) assert.ok((await reminderStamps(id)).expiry, "üçü de damgalandı");
+    });
+
     // ─── 3) Terk hatırlatması (pazarlama) ───────────────────────────────────
 
     await test("terk hatırlatması YALNIZ ticari ileti izni olana gider", async () => {
@@ -505,6 +561,40 @@ async function main() {
       assert.equal(mailsTo(paying.email).length, 0, "ödeme yolundaki teklif pazarlama konusu değil");
       assert.equal((await reminderStamps(freshQuote)).abandoned, null);
       assert.equal((await reminderStamps(payingQuote)).abandoned, null);
+    });
+
+    await test("terk hatırlatması da satır satır damgalanır", async () => {
+      // Aynı kural pazarlama dalında DAHA çok önemli: yarıda kesilen bir tur,
+      // izni olan müşterinin hiç almadığı bir mektubu "gitti" sayar.
+      const now = new Date();
+      const idle = new Date(now.getTime() - (ABANDONED_AFTER_HOURS + 2) * HOUR);
+      const user = await makeUser({ marketingConsent: true, tag: "row-claim-abandon" });
+      const ids: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        ids.push(
+          await makeQuote({
+            userId: user.id,
+            expiresAt: new Date(now.getTime() + 20 * DAY),
+            updatedAt: new Date(idle.getTime() - i * HOUR),
+          })
+        );
+      }
+      const stampedWhenSent: number[] = [];
+      onSend = async () => {
+        const res = await admin.query(
+          `SELECT count(*)::int AS n FROM quotes
+             WHERE id = ANY($1) AND abandoned_reminder_sent_at IS NOT NULL`,
+          [ids]
+        );
+        stampedWhenSent.push(res.rows[0].n as number);
+      };
+      try {
+        assert.equal(await sendAbandonedReminders(now), 2);
+      } finally {
+        onSend = null;
+      }
+      assert.deepEqual(stampedWhenSent, [1, 2], "parti damgası 2,2 verirdi");
+      assert.equal(mailsTo(user.email).length, 2);
     });
 
     await test("hatırlatma damgası teklifin updated_at'ini OYNATMAZ", async () => {

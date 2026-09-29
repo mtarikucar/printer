@@ -70,6 +70,14 @@ interface QueuedJob {
 const jobs: QueuedJob[] = [];
 /** Silinen iş kimlikleri: terfi, planlanmış son tarih işlerini iptal eder. */
 const removedJobIds: string[] = [];
+/**
+ * Kuyruğu ERİŞİLEMEZ yapan kanca (Redis düştü / ağ bölündü).
+ *
+ * Rezervasyon commit olduktan SONRA koşan eklemelerin isteği düşürmediğini
+ * ölçmenin tek yolu: `bullmq`nun kendi hatası taklit edilir, çağıran kod
+ * gerçek koduyla karşılar.
+ */
+let queueAddFails = false;
 
 const require_ = createRequire(import.meta.url);
 {
@@ -98,6 +106,7 @@ const require_ = createRequire(import.meta.url);
       Queue: class {
         constructor(readonly name: string) {}
         async add(name: string, data: Record<string, unknown>, opts: QueuedJob["opts"] = {}) {
+          if (queueAddFails) throw new Error(`qa: kuyruk erişilemez (${name})`);
           jobs.push({ queue: this.name, name, data, opts });
           return { id: opts.jobId ?? randomUUID() };
         }
@@ -2122,6 +2131,120 @@ async function main() {
       assert.equal(retry.reused, false, "iptalden sonra YENİ taslak açıldı");
       assert.equal(retry.giftCardAmountKurus, gift, "kart yeniden rezerve edildi");
       assert.equal(retry.finalAmountKurus, total - gift);
+    });
+
+    await test("commit SONRASI kuyruk arızası bakiyeyi ulaşılamaz BIRAKMAZ", async () => {
+      // Kuyruk eklemelerinin üçü de (kartta `card-expire`, havalede
+      // `havale-reminder` + `havale-expire`) taslak işlemi COMMIT olduktan
+      // sonra koşuyor: hediye kartı bakiyesi o commit'te ÇOKTAN düştü. Redis o
+      // pencerede erişilemezse fırlatmak, müşteriye hem 500 hem de gitmiş bir
+      // bakiye göstermek olurdu — mümkün olan en kötü sonuç. Eksik işi bakım
+      // turunun `expireStrandedQuoteDrafts` aşaması telafi eder.
+      const payer = await makeUser();
+      const cardQ = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const cardExpect = await expected(cardQ.id);
+      const cardTotal = cardExpect.computed.totals.totalKurus;
+      const cardGift = Math.floor(cardTotal / 4);
+      const cardCard = await makeGiftCard(cardGift);
+
+      const havaleQ = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 3 }]);
+      const havaleExpect = await expected(havaleQ.id);
+      const havaleTotal = havaleExpect.computed.totals.totalKurus;
+      const havaleGift = Math.floor(havaleTotal / 4);
+      const havaleCard = await makeGiftCard(havaleGift);
+
+      // Günlük yakalanır: hem çıktı temiz kalır hem de arızanın GERÇEKTEN
+      // yazıldığı ölçülür (sessiz yutma yok — kaybolan son tarih işi aksi
+      // hâlde hiç görünmezdi).
+      const logged: unknown[][] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(args);
+      const jobsBefore = jobs.length;
+      let card: Awaited<ReturnType<typeof createQuoteCheckout>>;
+      let havale: Awaited<ReturnType<typeof createQuoteCheckout>>;
+      queueAddFails = true;
+      try {
+        card = await createQuoteCheckout({
+          quoteId: cardQ.id,
+          userId: payer.id,
+          email: payer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: cardExpect.quote.version,
+              expectedTotalKurus: cardTotal,
+              giftCardCode: cardCard.code,
+            })
+          ),
+          req: fakeRequest(),
+        });
+        havale = await createQuoteCheckout({
+          quoteId: havaleQ.id,
+          userId: payer.id,
+          email: payer.email,
+          input: quoteCheckoutSchema.parse(
+            body({
+              expectedVersion: havaleExpect.quote.version,
+              expectedTotalKurus: havaleTotal,
+              paymentMethod: "bank_transfer",
+              giftCardCode: havaleCard.code,
+            })
+          ),
+          req: fakeRequest(),
+        });
+      } finally {
+        queueAddFails = false;
+        console.error = realError;
+      }
+
+      assert.equal(jobs.length, jobsBefore, "hiçbir iş kuyruğa GİRMEDİ (arıza gerçek)");
+
+      // KART: ödeme yine başladı, müşteri iframe'ini aldı.
+      assert.equal(card.paymentMethod, "card");
+      assert.ok(card.iframeUrl, "PayTR iframe'i müşteriye ULAŞTI");
+      assert.equal(card.finalAmountKurus, cardTotal - cardGift);
+      const [cardDraft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, card.reference));
+      assert.equal(cardDraft.status, "pending");
+      assert.ok(cardDraft.paytrMerchantOid, "token yazıldı");
+      // Rezervasyon DURUYOR: serbest bırakmak, müşteri tam o an ödüyorken
+      // kartı ikinci bir teklife açmak olurdu.
+      const [cardBalance] = await db
+        .select()
+        .from(giftCards)
+        .where(eq(giftCards.id, cardCard.id));
+      assert.equal(cardBalance.balanceKurus, 0, "rezervasyon yerinde");
+      const cardRedemptions = await db
+        .select()
+        .from(giftCardRedemptions)
+        .where(eq(giftCardRedemptions.draftId, cardDraft.id));
+      assert.equal(cardRedemptions.length, 1);
+      assert.equal(cardRedemptions[0].refundedAt, null);
+
+      // HAVALE: talimat sayfası ve son tarih yerinde.
+      assert.equal(havale.paymentMethod, "bank_transfer");
+      assert.equal(havale.redirectUrl, `/havale/${havale.reference}`);
+      const [havaleDraft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, havale.reference));
+      assert.equal(havaleDraft.status, "pending");
+      assert.ok(havaleDraft.bankTransferDeadline, "havale son tarihi yazıldı");
+      const [havaleBalance] = await db
+        .select()
+        .from(giftCards)
+        .where(eq(giftCards.id, havaleCard.id));
+      assert.equal(havaleBalance.balanceKurus, 0, "rezervasyon yerinde");
+
+      // Her arıza satırı KENDİ taslağının referansını taşır: kuyruğu düşmüş bir
+      // ortamda hangi taslakların ağa kaldığı günlükten okunabilmeli.
+      for (const reference of [card.reference, havale.reference]) {
+        assert.ok(
+          logged.some((args) => args.some((arg) => String(arg).includes(reference))),
+          `arıza günlüğü ${reference} referansını taşımalı`
+        );
+      }
     });
 
     // ─── Ön izleme ucu (rezervasyon YOK) ──────────────────────────────────

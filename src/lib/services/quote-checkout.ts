@@ -24,6 +24,11 @@
  * `/api/orders`ın aksine: terfi patlarsa teklifin kilidini açacak ve rezerve
  * bakiyeyi karta geri verecek tek şey o iştir (`expireDraft`).
  *
+ * REZERVASYON COMMIT OLDUKTAN SONRAKİ hiçbir arıza isteği düşürmez: o noktadan
+ * itibaren kuyruk eklemelerinin hepsi `enqueueAfterCommit` üzerinden geçer
+ * (bakiye düşmüşken müşteriye hata göstermek en kötü sonuçtur) ve kaybolan işin
+ * ağı bakım turunun `expireStrandedQuoteDrafts` aşamasıdır.
+ *
  * TAHSİLAT ARİTMETİĞİ BU DOSYADA YOKTUR: brüt tutardan tahsil edilen nakde
  * giden yolun tek uygulaması `quote-tender.ts`tir (`computeTender`). PayTR'a
  * giden tutar, havale talimatındaki tutar, analitik olayın değeri ve cevaptaki
@@ -1023,6 +1028,38 @@ export async function createQuoteCheckout(args: {
   return outcome.value;
 }
 
+/**
+ * Taslak işlemi COMMIT olduktan SONRA kuyruğa atılan iş: hata isteği DÜŞÜRMEZ.
+ *
+ * Gerekçe tek cümlede: o commit'te hediye kartı bakiyesi ÇOKTAN düşmüştür
+ * (`freezeCheckout` rezervasyonu taslakla aynı işlemde yazar). Redis o
+ * pencerede erişilemezken fırlatmak, müşteriye hem bir hata hem de gitmiş bir
+ * bakiye göstermek olurdu — elimizdeki en kötü sonuç. Ödemenin kendisi bu
+ * işlerin hiçbirine bağlı değil: `/pay` ve `/havale` sayfaları taslaktan okur.
+ *
+ * KAYBOLAN İŞİN AĞI, bakım turunun `expireStrandedQuoteDrafts` aşamasıdır:
+ * son tarih işi hiç kuyruğa girmemiş bir taslağı süresi geçtiğinde kapatır ve
+ * rezervasyonu karta geri verir (`quote-maintenance.ts`).
+ *
+ * YUTMA DEĞİL: satır taslağın REFERANSINI taşır, yoksa kuyruğu düşmüş bir
+ * ortamda hangi taslakların ağa kaldığı hiçbir yerde görünmezdi.
+ */
+async function enqueueAfterCommit(
+  what: string,
+  reference: string,
+  add: () => Promise<unknown>
+): Promise<void> {
+  try {
+    await add();
+  } catch (err) {
+    console.error(
+      `[quote-checkout] ${what} işi kuyruğa alınamadı (taslak ${reference}); ` +
+        "rezervasyon duruyor, bakım turu telafi edecek",
+      err
+    );
+  }
+}
+
 async function runCheckout(args: {
   quoteId: string;
   userId: string;
@@ -1094,30 +1131,39 @@ async function runCheckout(args: {
 
   if (draft.paymentMethod === "bank_transfer") {
     const bank = getBankDetails();
-    const paymentQueue = getPaymentDeadlineQueue();
-    await paymentQueue.add(
-      "havale-reminder",
-      { draftId: draft.id, reference: draft.reference, type: "havale_reminder" },
-      { jobId: havaleReminderJobId(draft.id), delay: HAVALE_REMINDER_HOURS * 3600 * 1000 }
+    await enqueueAfterCommit("havale-reminder", draft.reference, () =>
+      getPaymentDeadlineQueue().add(
+        "havale-reminder",
+        { draftId: draft.id, reference: draft.reference, type: "havale_reminder" },
+        { jobId: havaleReminderJobId(draft.id), delay: HAVALE_REMINDER_HOURS * 3600 * 1000 }
+      )
     );
-    await paymentQueue.add(
-      "havale-expire",
-      { draftId: draft.id, reference: draft.reference, type: "havale_expire" },
-      { jobId: havaleExpireJobId(draft.id), delay: HAVALE_DEADLINE_HOURS * 3600 * 1000 }
+    await enqueueAfterCommit("havale-expire", draft.reference, () =>
+      getPaymentDeadlineQueue().add(
+        "havale-expire",
+        { draftId: draft.id, reference: draft.reference, type: "havale_expire" },
+        { jobId: havaleExpireJobId(draft.id), delay: HAVALE_DEADLINE_HOURS * 3600 * 1000 }
+      )
     );
-    await getEmailQueue().add("send-email", {
-      type: "bank_transfer_instructions",
-      to: args.email,
-      orderNumber: draft.reference,
-      customerName: draft.customerName,
-      bankName: bank.bankName,
-      bankAccountHolder: bank.accountHolder,
-      bankIban: bank.iban,
-      bankBranch: bank.branch,
-      paymentAmountKurus: finalAmountKurus,
-      paymentDeadline: bankTransferDeadline?.toISOString(),
-      locale: draft.locale,
-    });
+    // Talimat mektubu da EN İYİ ÇABADIR ve aynı kuyruğa bağlıdır: müşteri
+    // `/havale/<ref>` sayfasında aynı IBAN'ı, tutarı ve son tarihi zaten
+    // görüyor, ama kaybolan bir mektup için isteği patlatmak yukarıdaki
+    // gerekçenin (bakiye düşmüş) tam olarak aynısına çarpar.
+    await enqueueAfterCommit("bank_transfer_instructions", draft.reference, () =>
+      getEmailQueue().add("send-email", {
+        type: "bank_transfer_instructions",
+        to: args.email,
+        orderNumber: draft.reference,
+        customerName: draft.customerName,
+        bankName: bank.bankName,
+        bankAccountHolder: bank.accountHolder,
+        bankIban: bank.iban,
+        bankBranch: bank.branch,
+        paymentAmountKurus: finalAmountKurus,
+        paymentDeadline: bankTransferDeadline?.toISOString(),
+        locale: draft.locale,
+      })
+    );
     return {
       reference: draft.reference,
       paymentMethod: "bank_transfer",
@@ -1136,10 +1182,12 @@ async function runCheckout(args: {
   // Token'dan ÖNCE kuyruğa alınır: PayTR reddederse taslak `pending` kalıyor
   // ve kilidi açacak tek şey bu iş oluyor — token'dan sonra sıraya koymak,
   // tam da kurtarmayı en çok gereken hâlde onu atlardı.
-  await getPaymentDeadlineQueue().add(
-    "card-expire",
-    { draftId: draft.id, reference: draft.reference, type: "card_expire" },
-    { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
+  await enqueueAfterCommit("card-expire", draft.reference, () =>
+    getPaymentDeadlineQueue().add(
+      "card-expire",
+      { draftId: draft.id, reference: draft.reference, type: "card_expire" },
+      { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
+    )
   );
 
   const address = draft.shippingAddress;
@@ -1250,25 +1298,17 @@ async function promoteGiftCoveredDraft(
   opts: { reused: boolean }
 ): Promise<QuoteCheckoutResult> {
   // Aynı `jobId` ile ikinci bir ekleme BullMQ'da sessiz bir no-op'tur, yani
-  // terfiyi yeniden denerken son tarih işi ikizlenmez.
-  //
-  // EN İYİ ÇABA: bakiye bu noktada ÇOKTAN düşmüş (rezervasyon commit oldu).
-  // Kuyruk erişilemezken isteği patlatmak, müşteriye hem hata gösterip hem
-  // siparişini yazmamak olurdu; oysa terfi buradan bağımsız çalışabilir.
-  // Kalan ağ üçüncü korumadır (bakım turu terfi edemeyen taslağı bulur).
-  try {
-    await getPaymentDeadlineQueue().add(
+  // terfiyi yeniden denerken son tarih işi ikizlenmez. Ekleme EN İYİ ÇABADIR
+  // (gerekçe: `enqueueAfterCommit`) — kuyruk erişilemezken isteği patlatmak,
+  // müşteriye hem hata gösterip hem siparişini yazmamak olurdu; oysa terfi
+  // buradan bağımsız çalışabilir.
+  await enqueueAfterCommit("card-expire", draft.reference, () =>
+    getPaymentDeadlineQueue().add(
       "card-expire",
       { draftId: draft.id, reference: draft.reference, type: "card_expire" },
       { jobId: cardExpireJobId(draft.id), delay: CARD_DEADLINE_HOURS * 3600 * 1000 }
-    );
-  } catch (err) {
-    console.error(
-      "Hediye kartıyla karşılanan taslak için son tarih işi kuyruğa alınamadı",
-      draft.reference,
-      err
-    );
-  }
+    )
+  );
 
   const base = {
     reference: draft.reference,

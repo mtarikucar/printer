@@ -1838,7 +1838,7 @@ async function main() {
             err instanceof QuoteServiceError &&
             err.status === 400 &&
             err.code === expectedCode &&
-            /[çğıöşüÇĞİÖŞÜ ]/.test(err.message),
+            /[çğıöşüÇĞİÖŞÜ]/.test(err.message),
           `${code} → ${expectedCode}`
         );
         // Teklif hâlâ düzenlenebilir/ödenebilir: yarım taslak bırakmadık.
@@ -2175,7 +2175,7 @@ async function main() {
             err instanceof QuoteServiceError &&
             err.status === 400 &&
             err.code === expectedCode &&
-            /[çğıöşüÇĞİÖŞÜ ]/.test(err.message),
+            /[çğıöşüÇĞİÖŞÜ]/.test(err.message),
           `ön izleme → ${expectedCode}`
         );
       }

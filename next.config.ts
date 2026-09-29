@@ -61,6 +61,19 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      // /samsunspor videoları ve posteri: dosya adında içerik özeti var
+      // (bkz. scripts/samsunspor-video.mjs), yani ad değişmeden içerik
+      // değişmez. Bir yıl önbelleğe almak güvenli; 4K dosya her ziyarette
+      // yeniden inmez.
+      {
+        source: "/samsunspor/:file((?:kalkan|poster)[^/]*\\.(?:mp4|webp))",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
       {
         source: "/(.*)",
         headers: [

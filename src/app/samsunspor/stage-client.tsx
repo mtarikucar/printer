@@ -48,6 +48,25 @@ const LETTER_MIN_HEIGHT = 0.52;
 type Phase = "loading" | "playing" | "paused" | "ended" | "blocked" | "missing";
 type Fit = "cover" | "pillar" | "letter";
 
+export type StageRendition = { width: number; height: number; src: string };
+
+/** Yavaş bağlantıda ya da veri tasarrufu açıkken bundan büyüğü indirilmez. */
+const SLOW_NETWORK_MAX_HEIGHT = 720;
+/**
+ * Telefonda bundan büyüğü indirilmez. Avuç içi ekranda 1080p ile 4K gözle
+ * ayırt edilemez; 4K ise dört kat veri harcar ve eski telefonlarda takılır.
+ */
+const PHONE_MAX_HEIGHT = 1080;
+/** Kısa kenarı bundan dar olan ekran telefondur (CSS pikseli). */
+const PHONE_SHORT_EDGE = 500;
+/**
+ * Gereken piksel yüksekliğinin bu kadarını karşılayan dosya "yeter" sayılır:
+ * yüzde onluk büyütme fark edilmez, bir üst dosya ise iki kat veridir.
+ */
+const ENOUGH = 0.9;
+
+type NetworkHint = { saveData?: boolean; effectiveType?: string };
+
 /** Tarayıcıların ses izini ele veren, standart dışı alanları. */
 type AudioProbe = HTMLVideoElement & {
   mozHasAudio?: boolean;
@@ -66,6 +85,45 @@ function probeAudio(video: HTMLVideoElement): boolean | null {
     return v.webkitAudioDecodedByteCount > 0;
   }
   return null;
+}
+
+/**
+ * Ekranda videonun kaplayacağı gerçek piksel yüksekliğine yeten EN KÜÇÜK
+ * dosyayı seçer. Hiçbiri yetmiyorsa eldeki en büyüğü.
+ */
+function pickRendition(
+  renditions: ReadonlyArray<StageRendition>,
+  ar: number,
+  w: number,
+  h: number
+): StageRendition | null {
+  if (!renditions.length) return null;
+  const fit = pickFit(ar, w, h);
+  const shownHeight =
+    fit === "cover"
+      ? Math.max(h, w / ar)
+      : fit === "pillar"
+        ? h
+        : Math.max(w / ar, h * LETTER_MIN_HEIGHT);
+  // 3 üstü yoğunluğu göz seçmez; veri israfı olur.
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const need = shownHeight * dpr;
+
+  const net = (navigator as Navigator & { connection?: NetworkHint }).connection;
+  const slow =
+    Boolean(net?.saveData) || /(^|-)(2g|3g)$/.test(net?.effectiveType ?? "");
+  const phone =
+    Math.min(window.screen.width, window.screen.height) <= PHONE_SHORT_EDGE;
+  const cap = slow
+    ? SLOW_NETWORK_MAX_HEIGHT
+    : phone
+      ? PHONE_MAX_HEIGHT
+      : Infinity;
+  // "Yükseklik" burada kısa kenardır: 1080p dikey video 1080x1920 gelir.
+  const capped = renditions.filter((r) => Math.min(r.width, r.height) <= cap);
+  const pool = capped.length ? capped : [renditions[0]];
+
+  return pool.find((r) => r.height >= need * ENOUGH) ?? pool[pool.length - 1];
 }
 
 function pickFit(ar: number | null, w: number, h: number): Fit {
@@ -103,11 +161,15 @@ const MARQUEE_TOP = "KIRMIZI ŞİMŞEKLER";
 const MARQUEE_BOTTOM = "SAMSUN 1965";
 
 export function StageClient({
-  videoSrc,
+  renditions,
+  aspect,
   posterSrc,
   fontClassName,
 }: {
-  videoSrc: string;
+  /** Küçükten büyüğe sıralı video dosyaları. */
+  renditions: ReadonlyArray<StageRendition>;
+  /** Videonun genişlik / yükseklik oranı. */
+  aspect: number;
   posterSrc: string;
   fontClassName: string;
 }) {
@@ -116,6 +178,12 @@ export function StageClient({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** Video ilk karesini ışığa boyadıysa poster onu ezmesin. */
   const paintedByVideo = useRef(false);
+  /** Dosya bir kez seçilir; ekran döndü diye video baştan yüklenmez. */
+  const chosen = useRef(false);
+
+  // Hangi dosyanın oynayacağı ekranı ölçmeden bilinemez, o yüzden sunucuda
+  // boş başlar. O ana kadar poster görünür.
+  const [src, setSrc] = useState<string | null>(null);
 
   const [phase, setPhase] = useState<Phase>("loading");
   /**
@@ -128,7 +196,7 @@ export function StageClient({
   }, []);
   const [muted, setMuted] = useState(true);
   const [hasAudio, setHasAudio] = useState<boolean | null>(null);
-  const [videoAr, setVideoAr] = useState<number | null>(null);
+  const [videoAr, setVideoAr] = useState<number | null>(aspect);
   const [posterAr, setPosterAr] = useState<number | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -179,12 +247,22 @@ export function StageClient({
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
-    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      setSize({ w, h });
+      if (!chosen.current && w && h) {
+        chosen.current = true;
+        const pick = pickRendition(renditions, aspect, w, h);
+        if (pick) setSrc(pick.src);
+        else setPhase("missing");
+      }
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [renditions, aspect]);
 
   // --- Poster: oran + ışığın ilk boyası ------------------------------------
   useEffect(() => {
@@ -209,7 +287,7 @@ export function StageClient({
   // --- Otomatik oynatma ----------------------------------------------------
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !src) return;
 
     // React `muted`'ı özellik olarak yazar, nitelik olarak değil; tarayıcının
     // otomatik oynatma izni ise sessizliğe bakar. Burada kesinleştiriyoruz.
@@ -219,10 +297,7 @@ export function StageClient({
     // o yüzden dinleyicilere güvenmeden mevcut durumu da okuruz. Okuma bir
     // sonraki karede yapılır; effect gövdesinde doğrudan state yazılmaz.
     const boot = requestAnimationFrame(() => {
-      if (
-        video.error ||
-        video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE
-      ) {
+      if (video.error) {
         setPhase("missing");
         return;
       }
@@ -244,7 +319,7 @@ export function StageClient({
       video.play().catch(() => advance("blocked"));
     });
     return () => cancelAnimationFrame(boot);
-  }, [advance]);
+  }, [advance, src]);
 
   // --- Ortam ışığı: videonun renkleri arka plana yayılır --------------------
   useEffect(() => {
@@ -357,7 +432,7 @@ export function StageClient({
             <video
               ref={videoRef}
               className={s.media}
-              src={videoSrc}
+              src={src ?? undefined}
               poster={posterSrc}
               muted
               playsInline
@@ -557,7 +632,7 @@ export function StageClient({
 
       {missing && process.env.NODE_ENV !== "production" && (
         <p className={s.hint}>
-          Video bekleniyor: <code>public{videoSrc}</code>
+          Video yok. Çalıştır: <code>node scripts/samsunspor-video.mjs</code>
         </p>
       )}
     </main>

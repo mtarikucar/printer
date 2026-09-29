@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Big_Shoulders } from "next/font/google";
 import { StageClient } from "./stage-client";
+import { SAMSUNSPOR_VIDEO } from "./video-manifest";
 
 /**
  * /samsunspor — tek ekranlık kampanya sahnesi.
@@ -10,13 +11,10 @@ import { StageClient } from "./stage-client";
  * gizler (bkz. site-footer.tsx, whatsapp-fab.tsx). Aksi halde footer sahnenin
  * altına düşer ve sayfayı kaydırılabilir yapardı.
  *
- * Video dosyası repo dışından gelir; yolu aşağıdaki sabittedir.
+ * Videoyu değiştirmek için dosyalara elle dokunulmaz:
+ *   node scripts/samsunspor-video.mjs "kaynak.mp4"
+ * Komut çözünürlükleri, posteri ve `video-manifest.ts` listesini üretir.
  */
-
-/** Videoyu buraya koy: `public/samsunspor/kalkan.mp4`. */
-const VIDEO_SRC = "/samsunspor/kalkan.mp4";
-/** Video yüklenene kadar (ve video yoksa) gösterilen kare. */
-const POSTER_SRC = "/samsunspor/poster.webp";
 
 // latin-ext: "ŞİMŞEKLER" içindeki Ş ve İ aynı yazı yüzünden gelsin, kelimenin
 // ortasında yedek fonta düşmesin.
@@ -55,8 +53,9 @@ export const viewport: Viewport = {
 export default function SamsunsporPage() {
   return (
     <StageClient
-      videoSrc={VIDEO_SRC}
-      posterSrc={POSTER_SRC}
+      renditions={SAMSUNSPOR_VIDEO.renditions}
+      aspect={SAMSUNSPOR_VIDEO.aspect}
+      posterSrc={SAMSUNSPOR_VIDEO.poster}
       fontClassName={display.variable}
     />
   );

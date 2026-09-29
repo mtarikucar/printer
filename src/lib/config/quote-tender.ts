@@ -62,9 +62,9 @@ export type TenderStep = (typeof TENDER_STEP_ORDER)[number];
  *
  * Yeni bir indirim (promosyon, sadakat puanı) tam olarak buraya girer ve üç
  * şeyi birden zorunlu kılar: alanın adı, `TENDER_STEP_ORDER` içindeki yeri ve
- * `TENDER_STEP_FIELD` satırı. Alanı ekleyip tahsilata katmamak
- * `scripts/test-quote-tender.ts`teki "tahsil edilen = brüt − her adım" kuralını
- * kırar, yani yarım bırakılmış bir indirim sessizce yayına çıkamaz.
+ * `TENDER_STEP_FIELD` satırı. Üçünü birden yazmayı zorunlu kılan şey
+ * aşağıdaki İKİ YÖNLÜ tip kapısıdır (`TENDER_STEPS_COVER_ALL_DEDUCTIONS`), tek
+ * başına bir test değil: alanı ekleyip adımını yazmamak DERLEME hatasıdır.
  */
 export interface TenderDeductions {
   /** Hediye kartından karşılanan tutar; brütü DEĞİL tahsilatı düşürür. */
@@ -78,6 +78,29 @@ export const TENDER_STEP_FIELD = {
   gift_card: "giftCardAmountKurus",
   havale_discount: "havaleDiscountKurus",
 } as const satisfies Record<TenderStep, keyof TenderDeductions>;
+
+/**
+ * İKİ YÖNLÜ tükenmişlik kapısı — para güvenliğinin taşıyıcısı.
+ *
+ * `satisfies Record<TenderStep, keyof TenderDeductions>` (yukarıda) YALNIZ bir
+ * yönü kapatır: her ADIMIN bir alanı olmasını. Ters yön açıktı ve tam o yön
+ * paraya dokunuyor: `TenderDeductions`a üçüncü bir alan (`promoDiscountKurus`)
+ * eklemek, `TENDER_STEP_ORDER`a dokunmadan DERLENİRDİ — yani indirim kaydedilir
+ * ama `computeTender`ın topladığı adımlara girmediği için tahsilattan
+ * DÜŞMEZDİ. Sonuç: müşteriden fazla tahsilat, yeşil bir `test:unit` ile.
+ *
+ * Bu satır o yönü kapatır: alanı ekleyip adımını yazmayan bir değişiklik
+ * `Exclude<...>`i boş olmayan bir birleşim yapar ve atama
+ * `Type 'true' is not assignable to type 'never'` ile PATLAR (`npm run
+ * typecheck`). Çalışma zamanı değeri yalnız bu kapının varlığını görünür
+ * kılmak içindir (`scripts/test-quote-tender.ts` onu da okur).
+ */
+export const TENDER_STEPS_COVER_ALL_DEDUCTIONS: Exclude<
+  keyof TenderDeductions,
+  (typeof TENDER_STEP_FIELD)[TenderStep]
+> extends never
+  ? true
+  : never = true;
 
 /**
  * Zincirin girdisi. TÜM ALANLAR ZORUNLU ve bu bilinçlidir: yeni bir alan
@@ -162,6 +185,9 @@ export function computeTender(input: TenderInput): Tender {
   // `TenderDeductions`a ve `TENDER_STEP_ORDER`a girdiği anda tahsilattan da
   // düşer. Elle yazılmış bir çıkarma zinciri, alanı ekleyip tahsilattan
   // düşmeyi unutmanın (yani müşteriden fazla tahsil etmenin) açık kapısıydı.
+  // "Alanı ekleyip adımı yazmamak" kapısını kapatan şey bu toplam DEĞİL,
+  // `TENDER_STEPS_COVER_ALL_DEDUCTIONS` tip kapısıdır: bu toplam, listede
+  // OLMAYAN bir alanı tanımı gereği görmez.
   const deductedKurus = TENDER_STEP_ORDER.reduce(
     (sum, step) => sum + deductions[TENDER_STEP_FIELD[step]],
     0

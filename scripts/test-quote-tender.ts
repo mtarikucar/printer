@@ -20,11 +20,20 @@
  *    ifade bulunamazsa test patlar (sessizce atlamaz), ve bozulmuş kaynakla
  *    yapılan mutasyonlar gerçekten KIRMIZI verir — yani bu nöbetçi uyuyor
  *    olamaz.
+ *
+ *    route.ts'te tahsil edilen tutarın İKİ ifadesi var, her dalda bir tane:
+ *    havale talimatındaki `finalAmountKurus` (:903) ve PayTR'a giden
+ *    `paymentAmountKurus` (:953 → sepet :991, token :1003). İKİSİ de ölçülür ve
+ *    hangisinin geçerli olduğu route.ts'in kendi dallanma koşulundan çıkarılır.
+ *    Bugün eşitler (kart dalında havale indirimi daima 0), ama kart dalını
+ *    ölçmemek tasarımın birinci riskini — PayTR'a BRÜT gitmesini, yani sessiz
+ *    çifte tahsilatı — nöbetsiz bırakırdı.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import {
+  TENDER_STEPS_COVER_ALL_DEDUCTIONS,
   TENDER_STEP_FIELD,
   TENDER_STEP_ORDER,
   computeTender,
@@ -228,19 +237,56 @@ function matrix(): TenderInput[] {
 
 console.log("tahsilat zinciri — değişmezler");
 
-test("tahsil edilen = brüt − zincirin HER adımı", () => {
+test("tahsil edilen = brüt − hediye kartı − havale indirimi", () => {
+  // Beklenen değer ELLE yazılır; `TENDER_STEP_ORDER.reduce` ile TÜRETİLMEZ.
+  // Türetilmiş bir beklenti, implementasyonun (`quote-tender.ts` · `deductedKurus`)
+  // kullandığı AYNI listeyle hesaplanırdı: listeye girmemiş bir indirim alanı
+  // için test yapısal olarak KIRMIZI olamaz, kendi kendine eşitliğini ölçerdi.
   for (const args of matrix()) {
     const tender = computeTender(args);
-    const steps = TENDER_STEP_ORDER.reduce(
-      (sum, step) => sum + tender[TENDER_STEP_FIELD[step]],
-      0
-    );
     assert.equal(
       tender.payableKurus,
-      args.amountKurus - steps,
-      `zincirin bir adımı tahsilata girmiyor: ${JSON.stringify(args)}`
+      args.amountKurus - tender.giftCardAmountKurus - tender.havaleDiscountKurus,
+      `tahsilat brütten her indirimi düşmüyor: ${JSON.stringify(args)}`
     );
   }
+});
+
+/**
+ * Çıktının indirim OLMAYAN alanları. Geri kalan her alan `TenderDeductions`tan
+ * gelir (çıktı `{...deductions, payableKurus, fullyCoveredByGiftCard}`), yani bu
+ * liste indirim kümesini çalışma anında ters yönden okumayı mümkün kılar.
+ */
+const NON_DEDUCTION_OUTPUT_FIELDS: readonly string[] = [
+  "payableKurus",
+  "fullyCoveredByGiftCard",
+];
+
+test("her indirim alanı zincirde bir adıma bağlı (İKİ YÖNLÜ)", () => {
+  // Asıl nöbetçi DERLEME zamanındadır: `TENDER_STEPS_COVER_ALL_DEDUCTIONS`
+  // (`quote-tender.ts`) `TenderDeductions`ın adımsız bir alanını `tsc` hatasına
+  // çevirir. `satisfies Record<TenderStep, keyof TenderDeductions>` tek yönlüdür
+  // ve bu yönü KAPATMAZ: üçüncü bir alan, `TENDER_STEP_ORDER`a dokunmadan
+  // derlenirdi — indirim kaydedilir, tahsilattan düşmez, müşteriden FAZLA para
+  // çekilir.
+  assert.equal(TENDER_STEPS_COVER_ALL_DEDUCTIONS, true);
+
+  // Ters yönün çalışma anı kopyası: alan kümesi ÇIKTIDAN okunur, adım
+  // listesinden türetilmez. Bir alanı `deductions`a ekleyip adımını yazmamak bu
+  // iki kümeyi ayırır.
+  const tender = computeTender(input({ amountKurus: 100_000, giftCardBalanceKurus: 40_000 }));
+  const deductionFields = Object.keys(tender)
+    .filter((key) => !NON_DEDUCTION_OUTPUT_FIELDS.includes(key))
+    .sort();
+  const stepFields = TENDER_STEP_ORDER.map((step) => TENDER_STEP_FIELD[step]).slice().sort();
+  assert.deepEqual(
+    deductionFields,
+    stepFields,
+    "bir indirim alanının `TENDER_STEP_ORDER` karşılığı yok: tahsilattan düşmüyor"
+  );
+  // Bugünkü küme ELLE de pinli: yeniden adlandırma iki kümeyi birlikte
+  // kaydırabilirdi ve o hâlde yukarıdaki karşılaştırma sessiz kalırdı.
+  assert.deepEqual(deductionFields, ["giftCardAmountKurus", "havaleDiscountKurus"]);
 });
 
 test("hediye + indirim brütü AŞMAZ ve tahsilat negatif olamaz", () => {
@@ -313,7 +359,14 @@ interface InlineChainInput {
 interface InlineChainResult {
   giftCardAmountKurus: number;
   havaleDiscountKurus: number;
+  /** route.ts'in GİRDİĞİ dalın fiilen tahsil ettiği tutar. */
   payableKurus: number;
+  /** Havale dalının tutarı (`finalAmountKurus`, route.ts:903). */
+  bankBranchPayableKurus: number;
+  /** Kart dalının tutarı (`paymentAmountKurus`, route.ts:953) — PayTR'a giden. */
+  cardBranchPayableKurus: number;
+  /** route.ts'in hangi dala düştüğü. */
+  branch: "gift_card_full" | "bank_transfer" | "card";
   fullyCovered: boolean;
   paymentMethod: string;
 }
@@ -351,23 +404,60 @@ function extractInlineChain(source: string): (args: InlineChainInput) => InlineC
     return found[0];
   };
 
+  /** `node`u saran en yakın `if`in koşul metni. Koşul da zincirin parçasıdır. */
+  const enclosingIfCondition = (node: ts.Node, label: string): string => {
+    let current: ts.Node | undefined = node;
+    while (current && !ts.isIfStatement(current)) current = current.parent;
+    assert.ok(current && ts.isIfStatement(current), `${label} bir koşulun içinde olmalı`);
+    return (current as ts.IfStatement).expression.getText(sourceFile);
+  };
+
   const giftExpression = assignment("giftCardAmountKurus");
   const coveredExpression = assignment("isCovered");
   const havaleExpression = assignment("havaleDiscountKurus");
   const methodExpression = declaration("finalPaymentMethod").initializer!.getText(sourceFile);
-  const payableExpression = declaration("finalAmountKurus").initializer!.getText(sourceFile);
 
-  // Havale indirimi bir KOŞULUN içinde yazılıyor; koşul da zincirin parçasıdır.
-  let guard: ts.Node | undefined = nodes.find(
-    (node) =>
-      ts.isBinaryExpression(node) &&
-      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isIdentifier(node.left) &&
-      node.left.text === "havaleDiscountKurus"
+  // Havale dalının tahsil edilen tutarı (route.ts:903). Bu ifade YALNIZ havale
+  // dalında yaşar: kart dalı `finalAmountKurus`u hiç hesaplamaz.
+  const bankPayableDeclaration = declaration("finalAmountKurus");
+  const bankPayableExpression = bankPayableDeclaration.initializer!.getText(sourceFile);
+
+  // KART dalının tahsil edilen tutarı (route.ts:953). PayTR sepeti (:991) ve
+  // PayTR token'ı (:1003) TAM OLARAK bunu alır. Bu ifadeyi ölçmeden bırakmak
+  // tasarımın birinci riskini (§5.2) nöbetsiz bırakırdı: `amountKurus`a
+  // çevrilmesi müşteriden BRÜTÜ çeker (hediye kartı rezerve edilmiş olsa bile)
+  // ve webhook tutar farkını yalnız loglar, reddetmez.
+  const cardPayableDeclaration = declaration("paymentAmountKurus");
+  const cardPayableExpression = cardPayableDeclaration.initializer!.getText(sourceFile);
+
+  // Havale indirimi bir KOŞULUN içinde yazılıyor.
+  const havaleGuard = enclosingIfCondition(
+    assignmentNode("havaleDiscountKurus"),
+    "havale indirimi"
   );
-  while (guard && !ts.isIfStatement(guard)) guard = guard.parent;
-  assert.ok(guard && ts.isIfStatement(guard), "havale indirimi bir koşulun içinde olmalı");
-  const havaleGuard = guard.expression.getText(sourceFile);
+
+  // İki tutar ifadesi arasında hangisinin geçerli olduğunu route.ts'in DALLANMA
+  // koşulu belirler (`draft.paymentMethod === "bank_transfer"`, :902). Koşul da
+  // kaynaktan çıkarılır: elle varsayılırsa dallanma değiştiğinde test eski
+  // varsayımda kalırdı.
+  const bankBranchGuard = enclosingIfCondition(bankPayableDeclaration, "havale dalı");
+
+  // Dalın okuduğu `draft.paymentMethod`, taslağa YAZILAN `finalPaymentMethod`tur
+  // (:813). Emülasyon bunu varsayıyor, o yüzden kaynakta sınanır.
+  assert.match(
+    source,
+    /paymentMethod: finalPaymentMethod,/,
+    "route.ts taslağa `finalPaymentMethod`ı yazmalı"
+  );
+
+  // Tam karşılanan ödeme HİÇBİR tutar tahsil etmez: route.ts taslağı doğrudan
+  // siparişe terfi ettirip DÖNER (:862), yani ne havale talimatı ne PayTR açılır.
+  // Bu erken dönüş kalkarsa karşılanan sipariş bir ödeme dalına düşer.
+  assert.match(
+    source,
+    /if \(fullyCovered\) \{[\s\S]{0,600}?return NextResponse\.json\(/,
+    "route.ts tam karşılanan ödemeyi erken döndürmeli"
+  );
 
   // Enjekte edilen `calculateHavaleDiscount` GERÇEKTEN route.ts'in kullandığı
   // fonksiyon olmalı; başka bir yerden gelen aynı adlı bir fonksiyon denkliği
@@ -403,19 +493,56 @@ function extractInlineChain(source: string): (args: InlineChainInput) => InlineC
           giftCardAmountKurus,
         }) as number)
       : 0;
-    const payableKurus = evaluate(payableExpression, {
+    const bankBranchPayableKurus = evaluate(bankPayableExpression, {
       amountKurus,
       giftCardAmountKurus,
       havaleDiscountKurus,
     }) as number;
+    const cardBranchPayableKurus = evaluate(cardPayableExpression, {
+      amountKurus,
+      giftCardAmountKurus,
+    }) as number;
+
+    // route.ts'in sırası: tam karşılandı mı (erken dönüş) → havale dalı mı →
+    // yoksa kart dalı. Tahsil edilen tutar GİRİLEN dalın ifadesidir.
+    const bankBranch =
+      !isCovered &&
+      (evaluate(bankBranchGuard, {
+        draft: { paymentMethod: finalPaymentMethod },
+      }) as boolean);
+    const branch: InlineChainResult["branch"] = isCovered
+      ? "gift_card_full"
+      : bankBranch
+      ? "bank_transfer"
+      : "card";
+
     return {
       giftCardAmountKurus,
       havaleDiscountKurus,
-      payableKurus,
+      payableKurus:
+        branch === "gift_card_full"
+          ? 0
+          : branch === "bank_transfer"
+          ? bankBranchPayableKurus
+          : cardBranchPayableKurus,
+      bankBranchPayableKurus,
+      cardBranchPayableKurus,
+      branch,
       fullyCovered: isCovered,
       paymentMethod: finalPaymentMethod,
     };
   };
+}
+
+interface CompareCounts {
+  /** Karşılaştırılan toplam vaka. */
+  compared: number;
+  /** Havale dalına düşen vaka (route.ts:903 ifadesi ölçüldü). */
+  bank: number;
+  /** Kart dalına düşen vaka (route.ts:953 ifadesi = PayTR tutarı ölçüldü). */
+  card: number;
+  /** Hediye kartının tamamını kapattığı, hiçbir tahsilat açılmayan vaka. */
+  covered: number;
 }
 
 /**
@@ -423,16 +550,44 @@ function extractInlineChain(source: string): (args: InlineChainInput) => InlineC
  * ayar TANIMAZ (figür siparişinde indirim her zaman uygulanır), ayar yalnız
  * teklif katalogunda vardır. Kapalı ayar bu yüzden bir kayma değil, teklif
  * yolunun kendi kuralıdır ve yukarıdaki altın değerlerde sınanır.
+ *
+ * HER İKİ ödeme dalının tutarı ölçülür: havale talimatındaki `finalAmountKurus`
+ * ve PayTR'a giden `paymentAmountKurus`. İkincisini dışarıda bırakmak, kart
+ * yolunda brüt tahsil etmeyi (sessiz çifte tahsilat) nöbetsiz bırakırdı.
  */
-function compareWith(chain: (args: InlineChainInput) => InlineChainResult): number {
-  let compared = 0;
+function compareWith(chain: (args: InlineChainInput) => InlineChainResult): CompareCounts {
+  const counts: CompareCounts = { compared: 0, bank: 0, card: 0, covered: 0 };
   for (const args of matrix()) {
     if (!args.havaleDiscountApplies) continue;
-    compared++;
+    counts.compared++;
     const tender = computeTender(args);
     const inline = chain(args);
     const label = JSON.stringify(args);
     assert.equal(tender.payableKurus, inline.payableKurus, `tahsil edilen ayrıştı: ${label}`);
+
+    // Dal başına AYRI iddia: hangi ifadenin kaydığı hata mesajından okunsun ve
+    // dalların SAYISI sayılsın (boş kalan bir dal sessizce "geçti" demesin).
+    if (inline.branch === "bank_transfer") {
+      counts.bank++;
+      assert.equal(
+        tender.payableKurus,
+        inline.bankBranchPayableKurus,
+        `havale talimatındaki tutar ayrıştı: ${label}`
+      );
+    } else if (inline.branch === "card") {
+      counts.card++;
+      // PayTR'a giden tutar. Eşitlik bozulursa müşteriden zincirin söylediğinden
+      // FARKLI bir para çekilir — tasarım §5.2'nin birinci riski.
+      assert.equal(
+        tender.payableKurus,
+        inline.cardBranchPayableKurus,
+        `PayTR'a giden tutar ayrıştı: ${label}`
+      );
+    } else {
+      counts.covered++;
+      assert.equal(tender.payableKurus, 0, `karşılanan siparişte tahsilat ayrıştı: ${label}`);
+    }
+
     assert.equal(
       tender.giftCardAmountKurus,
       inline.giftCardAmountKurus,
@@ -454,20 +609,36 @@ function compareWith(chain: (args: InlineChainInput) => InlineChainResult): numb
       `kaydedilen ödeme yöntemi ayrıştı: ${label}`
     );
   }
-  return compared;
+  return counts;
 }
 
 console.log("tahsilat zinciri — /api/orders denkliği");
 
 const routeSource = fs.readFileSync(ROUTE_PATH, "utf8");
 
+/**
+ * Kart/havale dallarının BEKLENEN vaka sayısı: bakiyenin brütü kapatmadığı her
+ * (brüt, bakiye) çifti bir ödeme dalına düşer, yöntem başına bir kez. Matris
+ * sabitlerinden bağımsız sayılır — `compareWith`in kendi sayacından değil.
+ */
+const PAYING_PAIRS = AMOUNTS.reduce(
+  (total, amountKurus) =>
+    total + BALANCES.filter((balanceKurus) => balanceKurus < amountKurus).length,
+  0
+);
+
 test("tek modül ile satır içi zincir AYNI tutarı üretir", () => {
   // Karşılaştırılan vaka SAYISI da sınanır: matris bir gün daralırsa, boş
   // dönen bir döngü sessizce "geçti" demesin.
-  assert.equal(
-    compareWith(extractInlineChain(routeSource)),
-    AMOUNTS.length * BALANCES.length * METHODS.length
-  );
+  const counts = compareWith(extractInlineChain(routeSource));
+  assert.equal(counts.compared, AMOUNTS.length * BALANCES.length * METHODS.length);
+  // Dal başına sayı da pinli: matris bir gün yalnız karşılanan vakalar
+  // üretirse, iki tutar ifadesinden hiçbiri ölçülmemiş olurdu ve mutasyon
+  // testleri sessizce yeşile dönerdi.
+  assert.equal(PAYING_PAIRS, 31, "matris ödeme dallarını beklendiği kadar üretmiyor");
+  assert.equal(counts.card, PAYING_PAIRS, "kart dalı (PayTR tutarı) ölçülmedi");
+  assert.equal(counts.bank, PAYING_PAIRS, "havale dalı ölçülmedi");
+  assert.equal(counts.covered, counts.compared - 2 * PAYING_PAIRS);
 });
 
 test("indirim brüte kayarsa denklik kırılır", () => {
@@ -503,10 +674,35 @@ test("hediye kartı tahsilattan düşmezse denklik kırılır", () => {
   assert.throws(() => compareWith(extractInlineChain(drifted)), /ayrıştı: /);
 });
 
+test("PayTR'a BRÜT giderse denklik kırılır (kart dalı)", () => {
+  // Tasarımın birinci riski (§5.2): kart dalının tahsil edilen tutarı brüte
+  // kayarsa hediye kartı rezerve EDİLİR ama müşteriden tamamı çekilir — sessiz
+  // ÇİFTE TAHSİLAT. Webhook tutar farkını yalnız loglar, ödemeyi reddetmez
+  // (`api/webhooks/paytr/route.ts`), yani üretimde tek uyarı bu testtir.
+  // Mutasyon `const`lı TAM satırı hedefler: `amountKurus - giftCardAmountKurus`
+  // alt dizisi route.ts'te başka yerlerde de geçiyor (:891 analitik değeri).
+  const drifted = routeSource.replace(
+    "const paymentAmountKurus = amountKurus - giftCardAmountKurus;",
+    "const paymentAmountKurus = amountKurus;"
+  );
+  assert.notEqual(drifted, routeSource, "mutasyon kaynağı değiştirmedi");
+  // Hata mesajı da sınanır: testin bir ÇIKARIM hatasıyla değil, gerçek bir
+  // tutar ayrışmasıyla kırmızıya döndüğünden emin olmak için.
+  assert.throws(() => compareWith(extractInlineChain(drifted)), /ayrıştı: /);
+});
+
 test("zincir yeniden adlandırılırsa test SESSİZ kalmaz, patlar", () => {
   const renamed = routeSource.replaceAll("giftCardAmountKurus", "giftKurus");
   assert.notEqual(renamed, routeSource, "mutasyon kaynağı değiştirmedi");
   assert.throws(() => extractInlineChain(renamed), /tam bir atama bekleniyordu/);
+});
+
+test("kart dalının tutarı yeniden adlandırılırsa test SESSİZ kalmaz, patlar", () => {
+  // PayTR tutarının ÇIKARIMI da sınanır: ifade bulunamazsa test sessizce
+  // atlamak yerine patlamalı, yoksa kart dalı yine nöbetsiz kalır.
+  const renamed = routeSource.replaceAll("paymentAmountKurus", "payKurus");
+  assert.notEqual(renamed, routeSource, "mutasyon kaynağı değiştirmedi");
+  assert.throws(() => extractInlineChain(renamed), /tam bir tanım bekleniyordu/);
 });
 
 console.log(

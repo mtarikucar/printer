@@ -1,6 +1,7 @@
 /**
  * Anlık teklifin saatlik bakım işçisi: sahipsiz hediye kartı rezervasyonları,
- * süre dolumu, iki hatırlatma, saklama süpürmesi, yetim dizin süpürmesi.
+ * sahipsiz ödeme taslakları, süre dolumu, iki hatırlatma, saklama süpürmesi,
+ * yetim dizin süpürmesi.
  *
  * Tek iş adı (`tick`) taşır ve işin kendisi `quote-maintenance.ts`
  * içindedir — burada yalnız eşzamanlılık, kilit süresi ve kayıt vardır.
@@ -19,7 +20,8 @@ import { runQuoteMaintenance } from "../../services/quote-maintenance";
 async function runJob(job: Job) {
   const outcome = await runQuoteMaintenance(new Date());
   job.log(
-    `sahipsiz rezervasyon: ${outcome.promotedGiftDrafts} · süresi dolan: ${outcome.expired} · ` +
+    `sahipsiz rezervasyon: ${outcome.promotedGiftDrafts} · ` +
+      `sahipsiz taslak: ${outcome.expiredStrandedDrafts} · süresi dolan: ${outcome.expired} · ` +
       `süre hatırlatması: ${outcome.expiryReminders} · ` +
       `terk hatırlatması: ${outcome.abandonedReminders} · süpürülen parça: ${outcome.purgedParts} · ` +
       `yetim dizin: ${outcome.orphanDirs}`

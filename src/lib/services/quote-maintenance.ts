@@ -1,7 +1,8 @@
 /**
  * Anlık teklifin GÖZETİMSİZ yarısı: sahipsiz kalmış hediye kartı
- * rezervasyonları, süre dolumu, iki hatırlatma, dosya saklama süresi ve yetim
- * dizinler. Saatte bir `quote-maintenance` işi çağırır.
+ * rezervasyonları, son tarih işi kaybolmuş ödeme taslakları, süre dolumu, iki
+ * hatırlatma, dosya saklama süresi ve yetim dizinler. Saatte bir
+ * `quote-maintenance` işi çağırır.
  *
  * Üç kural bütün dosyayı biçimlendirir:
  *
@@ -55,7 +56,9 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   notExists,
+  or,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -68,8 +71,9 @@ import {
   quotes,
   users,
 } from "@/lib/db/schema";
+import { CARD_DEADLINE_HOURS } from "@/lib/config/payment";
 import type { QuoteStatus } from "@/lib/config/quote-types";
-import { promoteDraftToOrder } from "@/lib/services/order-draft";
+import { expireDraft, promoteDraftToOrder } from "@/lib/services/order-draft";
 import { notifyQuoteAbandoned, notifyQuoteExpiring } from "@/lib/services/quote-notify";
 import { deleteFile, deleteStoredDir, listStoredDirs } from "@/lib/services/storage";
 import {
@@ -578,6 +582,111 @@ export async function promoteStuckGiftCoveredDrafts(now: Date): Promise<number> 
   return promoted;
 }
 
+/**
+ * Bir turda en çok kaç sahipsiz taslak kapatılır.
+ *
+ * Tavan terfi aşamasıyla aynı: her kapanış bir iade işlemi, bir mektup ve bir
+ * kuyruk temizliğidir. Bu aşamanın normal yükü de SIFIRDIR — sıraya girmiş elli
+ * taslak, son tarih işlerinin sistemik olarak kuyruğa girmediği anlamına gelir
+ * ve o hâlde biriken iş turdan tura eritilir.
+ */
+export const STRANDED_DRAFT_BATCH = 50;
+
+/**
+ * SON TARİH İŞİ KAYBOLMUŞ teklif taslaklarını süresi geçtiğinde kapatır; kaç
+ * taslak için süre dolumunun çağrıldığını döner.
+ *
+ * NEDEN VAR: ödeme başlatmanın kuyruk eklemeleri taslak işlemi COMMIT olduktan
+ * sonra koşar ve EN İYİ ÇABADIR (`quote-checkout.ts` → `enqueueAfterCommit`) —
+ * bakiye o commit'te çoktan düşmüşken Redis erişilemez diye isteği patlatmak,
+ * müşteriye hem hata hem gitmiş bakiye göstermek olurdu. Bedeli şu: iş hiç
+ * kuyruğa girmemiş olabilir (ya da Redis temizlenmiş, işçi hiç koşmamış).
+ * O hâlde taslak sonsuza dek `pending` kalır, teklif canlı taslağı yüzünden
+ * SALT OKUNUR durur (müşteri havaleye de geçemez) ve hediye kartı bakiyesi
+ * rezervasyonda kilitli kalır. Bu aşama, eksik işin yapacağı şeyi yapar.
+ *
+ * KAPSAM YALNIZ TEKLİF TASLAKLARIDIR (`quote_checkouts` köprüsü). Atölye
+ * tutmalarının (`workshop-close` işçisi) ve `/api/orders` taslaklarının kendi
+ * süpürmeleri, kendi pencereleri ve kendi iptal metinleri var; onları buradan
+ * kapatmak kapsam dışı bir davranış değişikliği olurdu.
+ *
+ * SON TARİH ÖLÇÜSÜ ödeme yolunu izler: havalede kapı `bank_transfer_deadline`
+ * KOLONUDUR (admin uzatmış olabilir ve dekontu yolda olan bir ödemeyi kapatmak
+ * müşterinin parasını yolda yakalamak olurdu), kartta ve tam karşılamada
+ * `created_at + CARD_DEADLINE_HOURS` — `card-expire` işinin gecikmesiyle birebir
+ * aynı ölçü.
+ *
+ * KOŞULLU YAZIM `expireDraft`ın KENDİSİDİR: taslağı satır kilidi altında okur,
+ * yalnız `pending`/`awaiting_review` iken kapatır ve iadeyi aynı işlemde yapar
+ * (`refundGiftCardForDraft`), yani iki eşzamanlı tur bakiyeyi iki kez geri
+ * veremez ve tam o an gelen bir ödemeyi kilitleyemez.
+ *
+ * SESSİZ YUTMA YOK: her başarısız kapanış toplanır ve aşama SONUNDA fırlatır.
+ * Kapanamayan bir taslak, bakiyesi kilitli kalmış bir müşteri demektir; bunu
+ * bir gösterge söylemek zorunda.
+ */
+export async function expireStrandedQuoteDrafts(now: Date): Promise<number> {
+  const cardCutoff = new Date(now.getTime() - CARD_DEADLINE_HOURS * HOUR_MS);
+  const candidates = await db
+    .select({ id: orderDrafts.id, reference: orderDrafts.reference })
+    .from(orderDrafts)
+    .where(
+      and(
+        // `awaiting_review` DIŞARIDA (oysa `expireDraft` onu da kapatabilir):
+        // dekontu yüklenmiş bir taslak admin incelemesini bekliyor, yani
+        // müşteri ödemesini YAPMIŞ olabilir. Onu süresi geçmiş saymak, gelmiş
+        // bir havaleyi kapıda çevirmek olurdu.
+        eq(orderDrafts.status, "pending"),
+        // Köprü `exists` ile sorulur (join ile değil): tur yalnız KİMLİKLERİ
+        // okuyor ve köprü satırı taslak başına tekil değil de olsa aynı taslak
+        // iki kez listelenmemeli.
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(quoteCheckouts)
+            .where(eq(quoteCheckouts.draftId, orderDrafts.id))
+        ),
+        or(
+          and(
+            eq(orderDrafts.paymentMethod, "bank_transfer"),
+            // NULL kolon eşleşmez: son tarihi olmayan bir havale taslağı
+            // kapatılmaz (yazılmamış bir vadeyi geçmiş saymak olurdu).
+            lt(orderDrafts.bankTransferDeadline, now)
+          ),
+          and(
+            ne(orderDrafts.paymentMethod, "bank_transfer"),
+            lt(orderDrafts.createdAt, cardCutoff)
+          )
+        )
+      )
+    )
+    // En uzun süredir bekleyen önce: bakiyesi en uzun süre kilitli kalmış
+    // müşteri.
+    .orderBy(asc(orderDrafts.createdAt))
+    .limit(STRANDED_DRAFT_BATCH);
+
+  let expired = 0;
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await expireDraft(candidate.id);
+      // Sayı, süre dolumunun ÇAĞRILDIĞI taslak sayısıdır: `expireDraft` void
+      // döner ve idempotent olduğu için "zaten kapanmıştı" hâli buradan
+      // ayırt edilemez. Aday süzgeci `pending` aradığı için sapmanın tek
+      // kaynağı bu turla yarışan bir ödeme/iptaldir.
+      expired++;
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err);
+      console.error(`[quote-maintenance] ${candidate.reference} sonlandırılamadı`, err);
+      failures.push(`${candidate.reference}: ${message}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`sahipsiz teklif taslağı sonlandırılamadı — ${failures.join(" | ")}`);
+  }
+  return expired;
+}
+
 export interface QuoteMaintenanceOutcome {
   expired: number;
   expiryReminders: number;
@@ -586,14 +695,18 @@ export interface QuoteMaintenanceOutcome {
   orphanDirs: number;
   /** Sahipsiz kalmış hediye kartı rezervasyonundan doğan sipariş sayısı. */
   promotedGiftDrafts: number;
+  /** Son tarih işi kaybolmuş olduğu için bu turda kapatılan taslak sayısı. */
+  expiredStrandedDrafts: number;
 }
 
 /**
  * Saatlik turun kendisi.
  *
  * SIRA ÖNEMLİ: sahipsiz rezervasyon aşaması ilk (tahsilatı alınmış teklif aynı
- * turda "süresi doldu" sayılmasın), süre dolumu hemen ardından koşar — böylece
- * bu saat içinde kapanan bir teklife "birkaç gün içinde bitiyor" yazılmaz.
+ * turda "süresi doldu" sayılmasın), sahipsiz taslak aşaması hemen ardından
+ * (aynı taslak ikisinin de adayı olabilir; terfi kazanmalı), teklif süre dolumu
+ * onların ardından koşar — böylece bu saat içinde kapanan bir teklife "birkaç
+ * gün içinde bitiyor" yazılmaz.
  *
  * Her aşama kendi try/catch'indedir ve sonunda toplu bir hata fırlatılır.
  * Tek bir `try` olsaydı diskteki bir arıza (süpürme) yasal olarak gitmesi
@@ -609,6 +722,7 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
     purgedParts: 0,
     orphanDirs: 0,
     promotedGiftDrafts: 0,
+    expiredStrandedDrafts: 0,
   };
   const failures: string[] = [];
 
@@ -627,6 +741,14 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
   // dolumunun `order_id IS NULL` kapısı onu zaten dışarıda bırakır.
   await phase("promoteStuckGiftCoveredDrafts", async () => {
     outcome.promotedGiftDrafts = await promoteStuckGiftCoveredDrafts(now);
+  });
+  // SIRA: terfiden HEMEN SONRA, çünkü aynı `gift_card_full` taslağı iki
+  // aşamanın da adayı olabilir (bakiye düşmüş, sipariş doğmamış ve son tarih de
+  // geçmiş). Terfi önce koşarsa taslak `confirmed` olur ve bu aşamanın `pending`
+  // süzgecine düşmez — müşteri bedelini ödediği işi alır. Ters sırada bakiyesi
+  // karta geri döner, siparişi hiç doğmaz ve teklif yeniden ödenmeyi bekler.
+  await phase("expireStrandedQuoteDrafts", async () => {
+    outcome.expiredStrandedDrafts = await expireStrandedQuoteDrafts(now);
   });
   await phase("expireQuotes", async () => {
     outcome.expired = await expireQuotes(now);

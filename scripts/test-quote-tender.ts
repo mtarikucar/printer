@@ -196,6 +196,16 @@ test("tam karşılanan ödeme `gift_card_full` olarak kaydedilir", () => {
   assert.equal(recordedPaymentMethod("bank_transfer", partial), "bank_transfer");
 });
 
+test("zincir worker yolundadır — `server-only` İÇERMEZ", () => {
+  // BullMQ worker'ı taslak zinciri üzerinden buraya ulaşıyor; `server-only`
+  // import eden bir modül standalone Node worker'ını çalışma anında
+  // crash-loop'a sokar (2026-06-13'te ölçüldü).
+  // Desen satır başına bağlıdır: modülün başlık yorumu bu kuralı ANLATIYOR ve
+  // yorumdaki bir söz, gerçek bir import gibi sayılmamalı.
+  const source = fs.readFileSync("src/lib/config/quote-tender.ts", "utf8");
+  assert.doesNotMatch(source, /^\s*import\s+["']server-only["']/m);
+});
+
 // ─── Değişmezler: matris üzerinde ────────────────────────────────────────────
 
 const AMOUNTS = [1, 99, 100, 3_333, 12_345, 100_000, 199_999, MAX_AMOUNT_KURUS];

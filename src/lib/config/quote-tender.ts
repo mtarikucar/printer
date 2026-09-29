@@ -127,11 +127,11 @@ function tenderKurus(value: number, label: string): number {
  * olmalıdır — sessizce düzeltilmiş bir para değil.
  */
 function grossKurus(value: number): number {
-  tenderKurus(value, "Brüt tutar");
-  if (value <= 0 || value > MAX_AMOUNT_KURUS) {
+  const amountKurus = tenderKurus(value, "Brüt tutar");
+  if (amountKurus <= 0 || amountKurus > MAX_AMOUNT_KURUS) {
     throw new RangeError("Brüt tutar tavan dışında (0 < tutar <= MAX_AMOUNT_KURUS)");
   }
-  return value;
+  return amountKurus;
 }
 
 /**
@@ -143,33 +143,42 @@ export function computeTender(input: TenderInput): Tender {
   const amountKurus = grossKurus(input.amountKurus);
   const balanceKurus = tenderKurus(input.giftCardBalanceKurus, "Hediye kartı bakiyesi");
 
-  let remainingKurus = amountKurus;
-
   // 1) Hediye kartı: kartın bakiyesi kadar, ama tutarın ötesine geçmeden.
-  const giftCardAmountKurus = Math.min(balanceKurus, remainingKurus);
-  remainingKurus -= giftCardAmountKurus;
+  const giftCardAmountKurus = Math.min(balanceKurus, amountKurus);
 
-  // 2) Havale indirimi: tahsil edilecek NAKDE verilen teşvik. Nakit sıfırsa
-  //    (kart brütü tamamen kapattı) indirim de sıfırdır — indirim tahsilata
-  //    verilir, hediye kartına prim olarak değil.
+  // 2) Havale indirimi: tahsil edilecek NAKDE verilen teşvik, o yüzden kartın
+  //    düştüğü tutar üzerinden. Nakit sıfırsa (kart brütü tamamen kapattı)
+  //    indirim de sıfırdır — indirim tahsilata verilir, hediye kartına prim
+  //    olarak değil.
+  const cashAfterGiftCardKurus = amountKurus - giftCardAmountKurus;
   const havaleDiscountKurus =
     input.paymentMethod === "bank_transfer" && input.havaleDiscountApplies
-      ? calculateHavaleDiscount(remainingKurus)
+      ? calculateHavaleDiscount(cashAfterGiftCardKurus)
       : 0;
-  remainingKurus -= havaleDiscountKurus;
+
+  const deductions: TenderDeductions = { giftCardAmountKurus, havaleDiscountKurus };
+
+  // Tahsil edilen tutar, adım listesinden TÜRETİLİR: yeni bir indirim
+  // `TenderDeductions`a ve `TENDER_STEP_ORDER`a girdiği anda tahsilattan da
+  // düşer. Elle yazılmış bir çıkarma zinciri, alanı ekleyip tahsilattan
+  // düşmeyi unutmanın (yani müşteriden fazla tahsil etmenin) açık kapısıydı.
+  const deductedKurus = TENDER_STEP_ORDER.reduce(
+    (sum, step) => sum + deductions[TENDER_STEP_FIELD[step]],
+    0
+  );
 
   // Zincirin çıkış kapısı. Bugünkü iki adımla ULAŞILAMAZ (ikisi de kalan
   // nakitle sınırlı) ve tam bu yüzden yazılıdır: eklenecek üçüncü indirim
   // (promosyon, puan) tavanlanmayı unutursa burada PATLAR — sessizce iade
-  // edilemez bir sipariş yazmak yerine.
-  if (remainingKurus < 0 || giftCardAmountKurus + havaleDiscountKurus > amountKurus) {
+  // EDİLEMEZ bir sipariş yazmak yerine (iade motoru `indirim + hediye <= brüt`
+  // istiyor, `order-refund.ts` · refundTenderBasis).
+  if (deductedKurus < 0 || deductedKurus > amountKurus) {
     throw new RangeError("Tahsilat zinciri brüt tutarı aştı");
   }
 
   return {
-    giftCardAmountKurus,
-    havaleDiscountKurus,
-    payableKurus: remainingKurus,
+    ...deductions,
+    payableKurus: amountKurus - deductedKurus,
     // `/api/orders`ın `isCovered` ölçüsüyle birebir: kartın karşıladığı tutar
     // brütün tamamına yetti mi.
     fullyCoveredByGiftCard: giftCardAmountKurus >= amountKurus,

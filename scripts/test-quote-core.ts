@@ -201,7 +201,9 @@ test("politika satırı SQL ile birebir", () => {
       ["express", 14000, -2, 2],
     ]
   );
-  assert.equal(s.holidays.length, 27);
+  assert.equal(s.holidays.length, 41, "0064 (2026-2027) + 0067 (2028)");
+  assert.ok(s.holidays.includes("2028-02-26"), "2028 Ramazan Bayramı (Diyanet)");
+  assert.ok(s.holidays.includes("2028-05-05"), "2028 Kurban Bayramı (Diyanet)");
   assert.ok(s.holidays.includes("2026-10-29"));
 });
 test("arama yardımcıları anahtarları çözer", () => {

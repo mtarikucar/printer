@@ -55,6 +55,10 @@
 -- yeniden uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN
 -- YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri
 -- alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0067_holidays_2028.down.sql
+--   -- 0067'nin down'ı KENDİ kaydını (created_at = 1790693512063) siler.
+--   -- Yalnız 2028 tatillerini listeden çıkarır; operatörün eklediği tarihlere
+--   -- ve 2026-2027 tohumuna dokunmaz, veri beklemez.
 --   \i drizzle/0066_print_catalog_checks.down.sql
 --   -- 0066'nın down'ı KENDİ kaydını (created_at = 1790689912063) siler.
 --   -- Yalnız katalog CHECK kısıtlarını düşürür; kayıpsızdır, veri beklemez.

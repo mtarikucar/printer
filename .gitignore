@@ -70,3 +70,7 @@ __pycache__/
 
 # SDD çalışma alanı — plan ilerleme defteri ve inceleme paketleri (geçici)
 .superpowers/
+
+# Python bytecode: testler her kostugunda yeniden uretilir, surumlenmez.
+scripts/__pycache__/
+**/__pycache__/

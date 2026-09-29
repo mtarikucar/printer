@@ -463,6 +463,13 @@
       "when": 1790689912063,
       "tag": "0066_print_catalog_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790693512063,
+      "tag": "0067_holidays_2028",
+      "breakpoints": true
     }
   ]
 }

@@ -450,7 +450,24 @@ export function validateBatchPlan(args: {
 
 /** Kova matematiğinin okuduğu satır: defter satırı + partisinin siparişinin hâli. */
 export interface FrameworkProgressLine extends FrameworkLedgerLine {
-  orderStatus: string | null;
+  /**
+   * PARTİNİN SİPARİŞİ İPTAL EDİLDİ Mİ — GERÇEĞİ ÇAĞIRAN VERİR.
+   *
+   * `orders.status` İPTAL diye bir değer TAŞIMAZ (`orderStatusEnum`,
+   * `schema.ts:55`): iptali yazan tek yer `order-refund-record.ts`in
+   * `closeOrder`u ve o, `status`u **`'rejected'`** yapıp `payment_status`u
+   * **`'succeeded'` BIRAKIR** (iade ise tersi: `payment_status='refunded'`,
+   * durum korunur). Üstelik iptalin ikinci biçimi hiç `status`ta görünmez:
+   * `order_refunds.kind='cancellation'` tahsis satırı.
+   *
+   * Bu yüzden kova matematiği durum dizesini KENDİ ÖLÇMEZ; depodaki TEK iptal
+   * ölçüsünü (`actualReturnFacts(...).cancelled`, `order-money.ts:322` —
+   * `status === "rejected" || refunds.some(r => r.kind === "cancellation")`)
+   * yükleyiciden hazır alır. Alan ZORUNLU: unutulduğunda TypeScript kırılır,
+   * çünkü sessizce `false` varsayılması iptal edilmiş bir partiyi "Üretimde"
+   * göstermek demekti.
+   */
+  cancelled: boolean;
   paymentStatus: string | null;
   shippedAt: Date | null;
   deliveredAt: Date | null;
@@ -495,27 +512,42 @@ function emptyProgress(): Omit<FrameworkProgress, "committedUnits" | "unplannedU
 }
 
 /**
+ * Bu satır "üretimde" mi sayılır — PARA tarafı.
+ *
+ * `revenueKurus`un (`order-money.ts:299`) kapısının birebir aynısı:
+ * `countsAsRevenue(paymentStatus) && !cancelled`. İptal GERÇEĞİ ödeme durumuna
+ * BAKMAZ (iptal `payment_status`u `'succeeded'` bırakır), o yüzden ciro kapısı
+ * tek başına kullanılamaz; ikisi EŞLEŞTİRİLİR. Böylece kova sırası ileride
+ * değişse bile iptal edilmiş bir parti "Üretimde" görünemez.
+ */
+function earnsRevenue(line: FrameworkProgressLine): boolean {
+  return countsAsRevenue(line.paymentStatus) && !line.cancelled;
+}
+
+/**
  * Satırın kovası. SIRA KURALIN KENDİSİDİR:
  *
  *  1. İade/iptal her şeyi EZER. Aynı sipariş hem `refunded` hem
  *     `shipped_at IS NOT NULL` olabilir; ikisine de sayılsa çubuk taahhüdü
- *     aşardı (ölçülen çifte sayım tam buydu).
+ *     aşardı (ölçülen çifte sayım tam buydu). İptal, sevk edilmiş ve hatta
+ *     teslim edilmiş bir partide de olabilir (iade/iptal siparişi geriye
+ *     dönük kapatır) — o yüzden fiziksel gerçeğin ÜSTÜNDE durur.
  *  2. Sonra FİZİKSEL gerçek: teslim → sevk.
- *  3. Sonra PARA: siparişi olan ama tahsilatı tamamlanmamış bir parti (havale
- *     dekontu beklenen) "üretimde" DEĞİL, ödeme bekliyordur.
+ *  3. Sonra PARA: siparişi olan ama tahsilatı ciroya saymayan bir parti
+ *     "üretimde" DEĞİL, ödeme bekliyordur.
  *  4. En son planın kendi hâli.
  */
 function bucketOf(line: FrameworkProgressLine): keyof ReturnType<typeof emptyProgress> {
   if (
     line.paymentStatus === REFUNDED_PAYMENT_STATUS ||
-    line.orderStatus === "cancelled" ||
+    line.cancelled ||
     line.batchStatus === "cancelled"
   ) {
     return "cancelledOrRefundedUnits";
   }
   if (line.deliveredAt) return "deliveredUnits";
   if (line.shippedAt) return "shippedUnits";
-  if (line.orderId && countsAsRevenue(line.paymentStatus)) return "inProductionUnits";
+  if (line.orderId && earnsRevenue(line)) return "inProductionUnits";
   if (line.batchStatus === "released") return "awaitingPaymentUnits";
   return "plannedUnits";
 }

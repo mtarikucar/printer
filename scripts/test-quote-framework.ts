@@ -13,7 +13,9 @@
  *   3. PLAN KAPILARI: dört kural birbirini MASKELEMEZ; bozuk bir plan dört
  *      retle birden döner, admin neyi düzeltmesi gerektiğini görür.
  *   4. KOVA MATEMATİĞİ: kovalar DAİMA taahhüde toplanır ve aynı sipariş iki
- *      kovaya birden sayılmaz — aksi hâlde ekran yalan söyler.
+ *      kovaya birden sayılmaz — aksi hâlde ekran yalan söyler. İPTAL, şemanın
+ *      hiç üretmediği bir durum dizesiyle değil, depodaki tek iptal ölçüsünün
+ *      (`actualReturnFacts`, `order-money.ts`) GERÇEĞİYLE okunur.
  *
  * Ayrıca kaynak denetimi: bu modül `server-only`, `node:`, `@/lib/db` ya da
  * `services/manufacturer-capacity` IMPORT ETMEZ (worker grafı + istemci paketi
@@ -264,6 +266,23 @@ for (const [label, pattern] of [
     assert.doesNotMatch(moduleCode, pattern);
   });
 }
+test("kova matematiği sipariş DURUM dizesini KENDİ ölçmez (iptal GERÇEĞİ argüman)", () => {
+  // `orderStatusEnum` (`schema.ts:55`) `'cancelled'` diye bir değer TAŞIMAZ:
+  // iptal `status='rejected'` yazar, `payment_status`u `'succeeded'` bırakır ve
+  // ikinci biçimi (`order_refunds.kind='cancellation'`) `status`ta hiç
+  // görünmez. Bu modül şema enum'unu göremediği için durumu kendi ölçerse
+  // sessizce yanlış olur; ölçü `order-money.ts`in `actualReturnFacts`ında durur
+  // ve buraya hazır GERÇEK (`cancelled`) olarak gelir.
+  assert.ok(
+    !moduleCode.includes("orderStatus"),
+    "sipariş durum dizesi bu modüle geri kaçmış: enum'u göremeyen bir karşılaştırma"
+  );
+  assert.match(
+    moduleCode,
+    /countsAsRevenue\(line\.paymentStatus\)\s*&&\s*!line\.cancelled/,
+    "ciro kapısı iptal gerçeğiyle EŞLEŞTİRİLMEMİŞ (`revenueKurus`un deseni)"
+  );
+});
 test("tutar adları `…Kurus` ile BİTER (fiyat kapısı çerçeveyi de süzsün)", () => {
   // D'nin `…Kurus` YASAĞI çevrilmiş DÖVİZ değerlerine özeldi. Çerçeve tutarları
   // kuruş tamsayısıdır: adı `…Kurus` ile bitmezse `quote-present.ts`in
@@ -528,7 +547,7 @@ function line(over: Partial<FrameworkProgressLine> = {}): FrameworkProgressLine 
     quantity: 10,
     batchStatus: "planned",
     orderId: null,
-    orderStatus: null,
+    cancelled: false,
     paymentStatus: null,
     shippedAt: null,
     deliveredAt: null,
@@ -550,26 +569,28 @@ function sumBuckets(p: ReturnType<typeof frameworkProgressBuckets>["total"]): nu
 test("her durum kendi kovasına düşer", () => {
   const { total } = frameworkProgressBuckets(COMMITMENT, [
     line({ quantity: 10, batchStatus: "planned" }),
+    // "Ödeme bekleyen"in GERÇEK hâli: klon teklif var, ödenmediği için henüz
+    // `orders` satırı YOK (`orderId: null`).
     line({ quantity: 10, batchStatus: "released" }),
+    // SAVUNMA dalı (şema bu çifti üretmez: `paymentStatusEnum` yalnız
+    // `succeeded | refunded`). Ciro kapısı bir BEYAZ LİSTEdir: `succeeded`
+    // dışındaki hiçbir değer "Üretimde" göstermez.
     line({
       quantity: 10,
       batchStatus: "released",
       orderId: "o-havale",
-      orderStatus: "paid",
       paymentStatus: "pending",
     }),
     line({
       quantity: 10,
       batchStatus: "released",
       orderId: "o-uretim",
-      orderStatus: "in_production",
       paymentStatus: "succeeded",
     }),
     line({
       quantity: 10,
       batchStatus: "released",
       orderId: "o-sevk",
-      orderStatus: "shipped",
       paymentStatus: "succeeded",
       shippedAt: new Date("2026-11-01T10:00:00Z"),
     }),
@@ -577,7 +598,6 @@ test("her durum kendi kovasına düşer", () => {
       quantity: 10,
       batchStatus: "released",
       orderId: "o-teslim",
-      orderStatus: "delivered",
       paymentStatus: "succeeded",
       shippedAt: new Date("2026-11-01T10:00:00Z"),
       deliveredAt: new Date("2026-11-04T10:00:00Z"),
@@ -586,14 +606,13 @@ test("her durum kendi kovasına düşer", () => {
       quantity: 10,
       batchStatus: "released",
       orderId: "o-iade",
-      orderStatus: "delivered",
       paymentStatus: "refunded",
       shippedAt: new Date("2026-11-01T10:00:00Z"),
       deliveredAt: new Date("2026-11-04T10:00:00Z"),
     }),
   ]);
   assert.equal(total.plannedUnits, 10);
-  assert.equal(total.awaitingPaymentUnits, 20, "klonu var + havalesi bekleyen");
+  assert.equal(total.awaitingPaymentUnits, 20, "klonu var + ciroya saymayan ödeme");
   assert.equal(total.inProductionUnits, 10);
   assert.equal(total.shippedUnits, 10);
   assert.equal(total.deliveredUnits, 10);
@@ -608,7 +627,6 @@ test("iade edilmiş VE sevk edilmiş sipariş YALNIZ ayrık kovaya sayılır", (
       quantity: 10,
       batchStatus: "released",
       orderId: "o1",
-      orderStatus: "shipped",
       paymentStatus: "refunded",
       shippedAt: new Date("2026-11-01T10:00:00Z"),
     }),
@@ -618,18 +636,52 @@ test("iade edilmiş VE sevk edilmiş sipariş YALNIZ ayrık kovaya sayılır", (
   assert.equal(total.deliveredUnits, 0);
   assert.equal(sumBuckets(total), total.committedUnits);
 });
-test("iptal edilmiş sipariş de ayrık kovaya sayılır", () => {
+test("GERÇEK iptal (ödeme `succeeded` KALIR) ayrık kovaya sayılır, ÜRETİMDE görünmez", () => {
+  // Depodaki iptal yolu: `order-refund-record.ts` `closeOrder` `status`u
+  // `'rejected'` yapar ve `payment_status`u `'succeeded'` BIRAKIR (iade ise
+  // tersi). İkinci iptal biçimi (`order_refunds.kind='cancellation'`) `status`ta
+  // hiç görünmez. İkisi de `actualReturnFacts(...).cancelled` ile ölçülür ve
+  // yükleyici o GERÇEĞİ `cancelled` alanında verir — kova dizeyi ölçmez.
   const { total } = frameworkProgressBuckets(COMMITMENT, [
     line({
       quantity: 10,
       batchStatus: "released",
       orderId: "o1",
-      orderStatus: "cancelled",
+      cancelled: true,
       paymentStatus: "succeeded",
     }),
   ]);
   assert.equal(total.cancelledOrRefundedUnits, 10);
-  assert.equal(total.inProductionUnits, 0);
+  assert.equal(total.inProductionUnits, 0, "iptal edilmiş parti 'Üretimde' gösterilemez");
+  assert.equal(total.awaitingPaymentUnits, 0);
+  assert.equal(sumBuckets(total), total.committedUnits);
+});
+test("SEVK/TESLİM edilmiş bir parti sonradan iptal edilirse YALNIZ ayrık kovada", () => {
+  // İptal geriye dönük kapatır: sevk ve teslim damgaları yerinde kalır. Ayrık
+  // kova fiziksel gerçeğin ÜSTÜNDE durur, yoksa çubuk taahhüdü aşar.
+  const { total } = frameworkProgressBuckets(COMMITMENT, [
+    line({
+      quantity: 10,
+      batchStatus: "released",
+      orderId: "o-sevk",
+      cancelled: true,
+      paymentStatus: "succeeded",
+      shippedAt: new Date("2026-11-01T10:00:00Z"),
+    }),
+    line({
+      quantity: 10,
+      batchStatus: "released",
+      orderId: "o-teslim",
+      cancelled: true,
+      paymentStatus: "succeeded",
+      shippedAt: new Date("2026-11-01T10:00:00Z"),
+      deliveredAt: new Date("2026-11-04T10:00:00Z"),
+    }),
+  ]);
+  assert.equal(total.cancelledOrRefundedUnits, 20);
+  assert.equal(total.shippedUnits, 0, "çifte sayım");
+  assert.equal(total.deliveredUnits, 0, "çifte sayım");
+  assert.equal(sumBuckets(total), total.committedUnits);
 });
 test("serbest bırakılMAMIŞ iptal partisi planlanmamışa DÖNER", () => {
   const { total } = frameworkProgressBuckets(COMMITMENT, [
@@ -641,7 +693,7 @@ test("serbest bırakılMAMIŞ iptal partisi planlanmamışa DÖNER", () => {
 });
 test("parça kırılımı anlaşma toplamına toplanır", () => {
   const rows = [
-    line({ partId: "P1", quantity: 60, batchStatus: "released", orderId: "o1", paymentStatus: "succeeded", orderStatus: "in_production" }),
+    line({ partId: "P1", quantity: 60, batchStatus: "released", orderId: "o1", paymentStatus: "succeeded" }),
     line({ partId: "P2", quantity: 40, batchStatus: "planned" }),
   ];
   const { total, byPart } = frameworkProgressBuckets(COMMITMENT, rows);
@@ -674,7 +726,7 @@ test("1.000 rastgele satır kümesinde kovalar DAİMA taahhüde toplanır", () =
           quantity,
           batchStatus: cancelledPlan ? "cancelled" : released ? "released" : "planned",
           orderId: !cancelledPlan && hasOrder ? `o-${round}-${left}` : null,
-          orderStatus: roll > 0.9 ? "cancelled" : hasOrder ? "in_production" : null,
+          cancelled: roll > 0.9,
           paymentStatus: roll > 0.8 ? "refunded" : hasOrder ? "succeeded" : null,
           shippedAt: roll > 0.6 ? new Date("2026-11-01T10:00:00Z") : null,
           deliveredAt: roll > 0.7 ? new Date("2026-11-04T10:00:00Z") : null,

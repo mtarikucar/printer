@@ -22,7 +22,11 @@ import { PriceGateModal } from "../src/components/quote/price-gate-modal";
 import { QuotePartCard } from "../src/components/quote/part-card";
 import { QuoteBulkBar } from "../src/components/quote/bulk-bar";
 import { dfmMessage } from "../src/components/quote/dfm-list";
-import { acceptedAccept, validateQuoteFiles } from "../src/components/quote/dropzone";
+import {
+  acceptedAccept,
+  acceptedExtensions,
+  validateQuoteFiles,
+} from "../src/components/quote/dropzone";
 import { QuoteBanners } from "../src/components/quote/quote-banners";
 import { QuoteChatPanel } from "../src/components/quote/quote-chat-panel";
 import {
@@ -744,6 +748,9 @@ test("bayrak KAPALIYKEN dosya seçicisi .step'i HİÇ göstermez", () => {
   // dizesi bu yüzden kataloğun `acceptedFormats`ından türer, sabit değildir.
   assert.equal(acceptedAccept(MESH_FORMATS), ".stl,.obj,.3mf");
   assert.equal(acceptedAccept(ALL_FORMATS), ".stl,.obj,.3mf,.step,.stp");
+  // Tek biçim, İKİ uzantı: `.stp` de aynı ISO 10303 dosyasıdır ve uçtaki kapı
+  // da öyle okuyor (`quote-model-validation.ts`).
+  assert.deepEqual(acceptedExtensions(["step"]), ["step", "stp"]);
 
   const closed = renderWorkspace(quoteFixture());
   assert.match(tagOf(closed, /<input type="file"[^>]*>/), /accept="\.stl,\.obj,\.3mf"/);

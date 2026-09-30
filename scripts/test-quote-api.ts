@@ -704,6 +704,83 @@ test("`display` eklenmesi para gövdesini KİRLETMEDİ", () => {
   );
 });
 
+test("BOZULMUŞ YOLLARIN HİÇBİRİ bir fiyatı DEĞİŞTİRMEZ (para gövdesi bit bit aynı)", () => {
+  // "Kur bir fiyatı yanlış yapamaz" cümlesinin tek DOĞRUDAN kanıtı. Dört hâl
+  // yan yana dizilir; dördünde de para gövdesi AYNI olmak zorunda:
+  //
+  //   1. bayrak KAPALI + kur DOLU   → kapatma yolu (tek bir DB satırı)
+  //   2. bayrak AÇIK  + kur YOK     → `fx_rates` boş ya da bülten BAYAT
+  //   3. bayrak AÇIK  + DAR kur     → snapshot yalnız EUR taşıyor
+  //   4. bayrak AÇIK  + kur DOLU    → mutlu yol
+  //
+  // 3 numara `display` GÖNDERİR ve bu doğrudur: DAR bir snapshot bozuk değil,
+  // yalnız dardır — seçici listesi snapshot'ın KENDİ satırlarından türüyor
+  // (D3), yani müşteriye çevrilemeyen bir birim seçtirilmiyor. Bugünün
+  // `loadActiveFxSnapshot`ı YARIM bir bülteni hiç dondurmaz (o hâlde `null`
+  // döner, `test-fx-db.ts` "BOZULMUŞ YOL 3"); bu şekli taşıyabilecek tek şey
+  // katalog büyümeden ÖNCE dondurulmuş eski bir tekliftir ve onun kendi
+  // satırları pekâlâ çevrilebilir.
+  //
+  // "Bayrak kapalı" ile "bayrak açık ama kur yok" FARKLI iki hâldir ve ikisi
+  // de yalnız ₺ göstermek zorundadır; bu vaka ikisini de aynı ölçüye sokar.
+  const quote = makeQuote({ fxSnapshot: FX_SNAPSHOT });
+  const half: QuoteFxSnapshot = { ...FX_SNAPSHOT, rates: [FX_SNAPSHOT.rates[0]!] };
+  const states = [
+    ["bayrak KAPALI + kur dolu", present(OWNER_VIEW, quote, [makePart()])],
+    [
+      "bayrak açık + kur YOK",
+      present(OWNER_VIEW, makeQuote({ fxSnapshot: null }), [makePart()], {
+        fxDisplayEnabled: true,
+      }),
+    ],
+    [
+      "bayrak açık + DAR kur kümesi",
+      present(OWNER_VIEW, makeQuote({ fxSnapshot: half }), [makePart()], {
+        fxDisplayEnabled: true,
+      }),
+    ],
+    ["mutlu yol", present(OWNER_VIEW, quote, [makePart()], { fxDisplayEnabled: true })],
+  ] as const;
+
+  const baseline = states[0][1];
+  assert.ok(baseline.totals, "çıkış durumunda fiyat gövdesi hiç gelmedi");
+  // Para gövdesinin anahtar kümesi KAPALI yazılır: yarın `QuoteTotals`a bir
+  // kuruş alanı eklenirse bu satır kırılır ve yeni alanın da bu
+  // karşılaştırmaya girmesi gerektiği anlaşılır (sessizce kapsam dışı kalmaz).
+  assert.deepEqual(Object.keys(baseline.totals).sort(), [
+    "addonLines",
+    "addonsKurus",
+    "allPriced",
+    "kdvExcludedKurus",
+    "kdvKurus",
+    "leadDays",
+    "minOrderTopUpKurus",
+    "partsKurus",
+    "totalKurus",
+  ]);
+
+  for (const [label, view] of states) {
+    assert.deepEqual(view.totals, baseline.totals, `${label}: toplamlar oynadı`);
+    assert.deepEqual(view.leadOptions, baseline.leadOptions, `${label}: kademe fiyatları oynadı`);
+    assert.deepEqual(
+      view.parts.map((p) => p.price),
+      baseline.parts.map((p) => p.price),
+      `${label}: parça fiyatları oynadı`
+    );
+  }
+
+  // …ve yukarıdaki eşitlikler "hiçbir şey olmuyor" diye bedava yeşil DEĞİL:
+  // `display` anahtarı hâllere göre gerçekten farklı davranıyor. İlk İKİ hâl
+  // (bayrak kapalı / kur yok) anahtarı HİÇ göndermiyor, son ikisi gönderiyor.
+  assert.deepEqual(
+    states.map(([, view]) => "display" in view),
+    [false, false, true, true]
+  );
+  // DAR küme gerçekten dar geldi: yüzey çevirebildiği birimi sunuyor, ötekini
+  // sunmuyor.
+  assert.deepEqual(states[2][1].display?.currencies, ["TRY", "EUR"]);
+});
+
 test("teklif sayfaları adresteki numarayı İKİNCİ kez çözmez", () => {
   const root = join(import.meta.dirname, "..", "src/app/teklif/[number]");
   for (const file of ["page.tsx", "belge/page.tsx", "odeme/page.tsx"]) {

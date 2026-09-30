@@ -504,7 +504,21 @@ test("ADLANDIRMA KAPISI: yeni hiçbir ad `Kurus` ile bitmiyor", () => {
   const end = types.indexOf("\n// ─── ", start + 1);
   assert.ok(end > start, "döviz bloğunun bittiği yer bulunamadı");
   const fxBlock = types.slice(start, end);
-  assert.match(fxBlock, /PresentedFxDisplay/, "blok beklenen tipleri taşımıyor");
+  // NÖBETÇİ: kapı, taradığı tiplerden biri yeniden ADLANDIRILDIĞINDA sessizce
+  // boşalmasın. Dördü de kaynakta GERÇEKTEN duruyor; biri taşınırsa bu satır
+  // kırılır ve kapının yeni adrese götürülmesi gerektiği anlaşılır.
+  for (const name of ["FrozenFxRate", "QuoteFxSnapshot", "PresentedFxDisplay"] as const) {
+    assert.match(
+      fxBlock,
+      new RegExp(`\\b${name}\\b`),
+      `quote-types.ts döviz bloğunda ${name} yok: kapı boşalmış olabilir`
+    );
+  }
+  assert.match(
+    currency,
+    /\bConvertedReceipt\b/,
+    "quote-currency.ts'te ConvertedReceipt yok: kapı boşalmış olabilir"
+  );
   for (const [label, source] of [
     ["quote-currency.ts", currency],
     ["quote-types.ts · döviz bloğu", fxBlock],
@@ -534,6 +548,14 @@ const ALLOWED_IMPORTERS: readonly string[] = ["src/components/quote/format.ts"];
 /**
  * Listede olması YASAK olan dosyalar. Tek tek yazılıdırlar ki bir yeniden
  * adlandırma nöbetçiyi sessizce boşaltmasın (varlıkları da sınanır).
+ *
+ * LİSTENİN EN KRİTİK ÜYESİ `quote-tender.ts` ve sebebi kendi başına bir
+ * cümle: o dosya TEK tahsilat zinciridir ve iki yönlü bir tip kapısı taşır
+ * (`TENDER_STEPS_COVER_ALL_DEDUCTIONS`, `:98-103` — `TenderDeductions`a alan
+ * ekleyip adımını yazmamak DERLEME hatasıdır). Oraya sızacak bir döviz alanı
+ * o kapının göremediği bir hâl üretirdi: "kaydedilir ama tahsilattan
+ * düşmez", yani müşteriden FAZLA tahsilat. Tasarım §3.4 onu hiç saymıyor
+ * çünkü tasarım yazıldığında dosya YOKTU.
  */
 const FORBIDDEN_IMPORTERS = [
   "src/lib/config/quote-pricing.ts",
@@ -563,6 +585,25 @@ function walkSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** `src/**` bir kez yürünür; kalkan da eşitlik iddiası da AYNI listeye bakar. */
+const SCANNED_SOURCES = walkSources(join(ROOT, "src")).map((f) =>
+  relative(ROOT, f).split(sep).join("/")
+);
+
+/**
+ * "GRAF ÇOK KÜÇÜK" KALKANI. Kapalı küme iddiası bir KARŞILAŞTIRMADIR: tarama
+ * bir gün sessizce boşalırsa (klasör taşınır, uzantı süzgeci bozulur,
+ * `readdirSync` gizli bir dizine takılır) iddia BOŞ listeyi boş beyaz listeyle
+ * karşılaştırır ve SONSUZA DEK yeşil kalır — yani nöbetçi ölür, kimse fark
+ * etmez. Emsal: `scripts/test-quote-maintenance-db.ts:1488`
+ * (`assert.ok(seen.size > 100, …)`).
+ *
+ * Eşik bugünkü dosya sayısının (924) çok altında ve bilerek: kalkan taramanın
+ * ÇÖKTÜĞÜNÜ yakalar, depo büyüdükçe güncellenmesi gereken bir dosya sayımı
+ * yapmaz.
+ */
+const MIN_SCANNED_SOURCES = 400;
+
 /**
  * Dosya `quote-currency`yi import ediyor mu? Yalnız MODÜL ADI konumuna bakar:
  * yorumda geçen bir söz import değildir. `import type` de sayılır — kapı
@@ -579,11 +620,30 @@ test("`importsCurrency` gerçekten import yakalıyor (nöbetçi uyanık)", () =>
   assert.ok(!importsCurrency("// quote-currency yalnız sunum katmanında kullanılır"));
 });
 
+test("NÖBETÇİ: tarama `src/**`ı gerçekten yürüyor, listelerin satırları CANLI", () => {
+  assert.ok(
+    SCANNED_SOURCES.length > MIN_SCANNED_SOURCES,
+    `tarama yalnız ${SCANNED_SOURCES.length} dosya buldu (eşik ${MIN_SCANNED_SOURCES}): ` +
+      "kapalı küme iddiası boş grafta karşılaştırma yapıyor, yani nöbetçi ölü"
+  );
+  // İki listenin de her satırı taramanın GERÇEKTEN gördüğü bir dosya olmalı.
+  // Taşınmış ya da yeniden adlandırılmış bir yol, listeyi hiçbir şeyi
+  // kapılamayan ölü bir satıra çevirirdi — `readFileSync` yokluğu yakalar ama
+  // `src/**` dışına çıkmış bir dosyayı yakalamaz.
+  const seen = new Set(SCANNED_SOURCES);
+  for (const rel of [...ALLOWED_IMPORTERS, ...FORBIDDEN_IMPORTERS]) {
+    assert.ok(seen.has(rel), `liste satırı taramanın DIŞINDA: ${rel}`);
+  }
+});
+
 test("KAPALI İTHALATÇI KÜMESİ: `src/**` listesi beyaz listeye eşit", () => {
-  const importers = walkSources(join(ROOT, "src"))
-    .filter((f) => importsCurrency(readFileSync(f, "utf8")))
-    .map((f) => relative(ROOT, f).split(sep).join("/"))
-    .sort();
+  assert.ok(SCANNED_SOURCES.length > MIN_SCANNED_SOURCES, "boş graf kalkanı (yukarıdaki nöbetçi)");
+  const importers = SCANNED_SOURCES.filter((rel) =>
+    importsCurrency(readFileSync(join(ROOT, rel), "utf8"))
+  ).sort();
+  // ALT KÜME DEĞİL, EŞİT: yeni bir ithalatçı adı buraya ELLE yazılmadan
+  // sisteme giremez. Emsal `scripts/test-ops-spine.ts`in kapalı bayrak
+  // listeleri; gerekçe de aynı.
   assert.deepEqual(importers, [...ALLOWED_IMPORTERS].sort());
 });
 

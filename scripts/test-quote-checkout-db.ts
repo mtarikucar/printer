@@ -320,6 +320,10 @@ async function main() {
       "../src/lib/services/gift-card-reservation"
     );
     const { quoteCheckoutSchema } = await import("../src/lib/validators/quote-checkout");
+    // Saf çevirim: ekranın döviz rakamını ÜRETEN fonksiyon. Burada yalnız
+    // "gövdeye böyle bir sayı gelirse ne olur" vakasını KURMAK için kullanılır;
+    // `quote-checkout.ts` onu import ETMEZ (kapalı küme, test-quote-currency.ts).
+    const { convertKurusToMinor } = await import("../src/lib/config/quote-currency");
 
     const snapshot = await loadActiveSnapshot();
 
@@ -1679,6 +1683,83 @@ async function main() {
     });
 
     await setFlag("quote_gift_card_enabled", true, "qa");
+
+    await test("ÇEVRİLMİŞ tutar beyanı 409 total_mismatch alır, hiçbir iz bırakmaz", async () => {
+      // Döviz GÖSTERİMİ sızma kapısı. `expectedTotalKurus` istemcinin "ben şunu
+      // gördüm" beyanıdır (`validators/quote-checkout.ts:12`) ve şeması yalnız
+      // `int().min(1).max(MAX_AMOUNT_KURUS)` der — çevrilmiş bir sent rakamı bu
+      // aralığın TAM İÇİNDE durur, yani doğrulayıcı onu GÖRMEZ. Onu durduran
+      // tek şey `quote-checkout.ts:855`in tutar karşılaştırmasıdır.
+      //
+      // Kanıtladığı şey: tarayıcı bir gün yanlışlıkla ekranda gördüğü döviz
+      // rakamını gönderirse sunucu SESSİZCE kabul edip müşteriden yanlış
+      // tutarı tahsil ETMEZ — 409 verir ve arkasında hiçbir şey bırakmaz.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [{ geometry: CUBE, quantity: 2 }]);
+      const { quote, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      // 1 EUR = 48,7412 ₺ (TCMB döviz alış) ile ₺ toplamın SENT karşılığı.
+      const minor = convertKurusToMinor(total, 48_741_200);
+      assert.notEqual(minor, total, "çevrilmiş rakam ₺ toplama eşit: vaka hiçbir şey kanıtlamaz");
+
+      // Kart AÇIK bayrakla ve GEÇERLİ bir kodla gelir: rezervasyon işlemin
+      // İÇİNDE, tutar karşılaştırmasından SONRA açılıyor. Kod geçersiz olsaydı
+      // istek zaten daha erken düşer ve "rezervasyon açılmadı" iddiası bedava
+      // yeşil kalırdı.
+      const card = await makeGiftCard(500_000);
+      const paytrBefore = paytrCalls.length;
+      const jobsBefore = jobs.length;
+      const parsed = quoteCheckoutSchema.safeParse(
+        body({
+          expectedVersion: quote.version,
+          expectedTotalKurus: minor,
+          giftCardCode: card.code,
+        })
+      );
+      assert.equal(parsed.success, true, "doğrulayıcı bu gövdeyi GEÇİRİR: kapı servis tarafında");
+
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: quote.id,
+          userId: payer.id,
+          email: payer.email,
+          input: parsed.data!,
+          req: fakeRequest(),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "total_mismatch" &&
+          /tutar/i.test(err.message)
+      );
+
+      assert.equal(await pendingQuoteCheckout(quote.id), null, "taslak açıldı");
+      assert.equal(
+        (await db.select().from(orderDrafts).where(eq(orderDrafts.userId, payer.id))).length,
+        0,
+        "reddedilen istek taslak bıraktı"
+      );
+      assert.equal(
+        (await db.select().from(quoteCheckouts).where(eq(quoteCheckouts.quoteId, quote.id))).length,
+        0,
+        "köprü satırı yazıldı"
+      );
+      const [untouched] = await db.select().from(giftCards).where(eq(giftCards.id, card.id));
+      assert.equal(untouched.balanceKurus, 500_000, "kart bakiyesi rezerve edildi");
+      assert.equal(untouched.status, "active");
+      assert.equal(
+        (await db
+          .select()
+          .from(giftCardRedemptions)
+          .where(eq(giftCardRedemptions.giftCardId, card.id))).length,
+        0,
+        "hediye kartı rezervasyonu açıldı"
+      );
+      const [locked] = await db.select().from(quotes).where(eq(quotes.id, quote.id));
+      assert.equal(locked.status, quote.status, "teklifin durumu oynadı");
+      assert.equal(paytrCalls.length, paytrBefore, "PayTR çağrıldı");
+      assert.equal(jobs.length, jobsBefore, "kuyruğa iş girdi");
+    });
 
     await test("kısmi kart: brüt DEĞİŞMEZ, PayTR'a NET tutar gider", async () => {
       const payer = await makeUser();

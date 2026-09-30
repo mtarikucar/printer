@@ -3335,6 +3335,115 @@ test("döviz sözlüğü iki dilde de TAM ve yer tutucuları yerinde", () => {
   assert.match(tr["instantQuote.document.fxFooter"], /TCMB/);
 });
 
+// ─── BAYRAK-KAPALI KANITI (Faz 2b · D4) ─────────────────────────────────────
+//
+// Bayrağı kapatmak DAĞITIM GEREKTİRMEZ: `platform_flags` tablosunda tek bir
+// satır (`/admin/ayarlar`). Kapatmanın sunum tarafındaki karşılığı
+// `presentQuote`un `display` anahtarını hiç göndermemesidir
+// (`scripts/test-quote-api.ts`). Bu bölüm o anahtarın YOKLUĞUNUN EKRANDA ne
+// demek olduğunu tek tek iddia ediyor — ve "bayrak kapalı" ile "bayrak açık
+// ama kur yok" AYNI yüzey sonucunu vermek zorunda, çünkü ikisi de `display`
+// göndermiyor.
+
+test("BAYRAK KAPALI: `/teklif` yüzeylerinin HİÇBİRİNDE döviz yok, ₺ YERİNDE", () => {
+  // Tarayıcıda kalmış bir "EUR" tercihi hiçbir yüzeyi çeviremez: bu yüzden
+  // seçim her yüzeye AÇIKÇA "EUR" olarak verilir ve yine de ₺ beklenir.
+  // `display` yok, `rate` yok — dönüşüm yapacak bir kur hiç ortada değil.
+  //
+  // Demetin alanları: etiket · markup · ₺ RAKAM basmak zorunda mı ·
+  // karşılanamayan seçimi AÇIKLAMAKLA yükümlü mü. Sonuncusu yalnız
+  // BELGE öyle, çünkü tek `?kur=` isteği ALAN yüzey odur (ayrı bir sunucu
+  // render'ı, tarayıcı tercihini okuyamaz); kendi vakası hemen aşağıda o
+  // cümlenin YAZILDIĞINI iddia ediyor. Öteki yüzeylerde aynı cümle, döviz
+  // istemeyen müşteriye gösterilen anlamsız bir hata olurdu.
+  const off = pricedQuote();
+  const surfaces = [
+    ["çalışma alanı", plain(renderWorkspace(off)), true, false],
+    ["özet", plain(renderSummary(off, "EUR")), true, false],
+    ["parça kartı", plain(renderPartCard(off.parts[0]!, off, null)), true, false],
+    ["belge", plain(renderDocument(off, "EUR")), true, true],
+    ["ödeme ekranı", renderCheckout({ quote: off }), true, false],
+    ["ödeme formu", renderCheckoutForm({ quote: off, rate: null }), true, false],
+    [
+      "hesap listesi",
+      plain(
+        inLocale(
+          createElement(QuoteListTable, {
+            items: [{ ...QUOTE_ROW, totalKurus: 14800, fxSnapshot: null }],
+            currency: "EUR",
+          })
+        )
+      ),
+      true,
+      false,
+    ],
+    ["teklif başlığı", plain(renderHeader(off, "EUR", null)), false, false],
+  ] as const;
+
+  for (const [label, html, mustShowTry, mayExplainMissingFx] of surfaces) {
+    for (const symbol of FX_SYMBOLS) {
+      assert.ok(!html.includes(symbol), `${label}: ${symbol} sızdı`);
+    }
+    assert.ok(!html.includes(tr["instantQuote.fx.label"]), `${label}: seçici çizildi`);
+    assert.ok(!html.includes(tr["instantQuote.fx.rateNote"]), `${label}: kur cümlesi çizildi`);
+    assert.ok(
+      !html.includes(tr["instantQuote.fx.chargedInTry"]),
+      `${label}: ₺ gösterimde anlamsız tahsilat uyarısı çizildi`
+    );
+    if (!mayExplainMissingFx) {
+      assert.ok(
+        !html.includes(tr["instantQuote.fx.unavailable"]),
+        `${label}: seçim yapılmamışken "karşılanamadı" cümlesi çizildi`
+      );
+    }
+    // ₺ RAKAM YERİNDE: hiç fiyat basmayan bir ekran da yukarıdaki olumsuz
+    // iddiaların TAMAMINI geçerdi. Kapatma yolu fiyatı gizlemek DEĞİL.
+    if (mustShowTry) {
+      assert.ok(html.includes(money(14800)), `${label}: bağlayıcı ₺ tutar kayboldu`);
+    }
+  }
+});
+
+test("BAYRAK KAPALI: belge `?kur=EUR` ile açılsa bile YALNIZ ₺ basar", () => {
+  // Belge ayrı bir SUNUCU render'ı: tarayıcı tercihini okuyamaz, seçimi
+  // `?kur=` ile alır. Karşılanamayan bir seçim sayfayı DÜŞÜRMEZ ve sessiz de
+  // kalmaz — tek cümleyle söyler, kâğıdın tamamı ₺ kalır (D3 kararı #1).
+  const html = plain(renderDocument(pricedQuote(), "EUR"));
+  assert.ok(html.includes(tr["instantQuote.fx.unavailable"]), "karşılanamayan seçim sessiz kaldı");
+  assert.ok(html.includes(money(14800)), "bağlayıcı ₺ toplam kayboldu");
+  assert.ok(html.includes(money(7400)), "₺ birim fiyat kayboldu");
+  for (const symbol of FX_SYMBOLS) {
+    assert.ok(!html.includes(symbol), `${symbol} sızdı`);
+  }
+  // İkinci kolonun BAŞLIĞI da yok: boş bir "≈ EUR" kolonu kâğıtta durmaz.
+  assert.ok(
+    !html.includes(fill(tr["instantQuote.document.fxColumn"], { currency: "EUR" })),
+    "boş döviz kolonu başlığı çizildi"
+  );
+});
+
+test("BAYRAK KAPALI: ödenecek tutar ZATEN ₺ydi, ₺ KALIYOR", () => {
+  // Bu iddia bayrağın konusu bile değil — tahsil edilen rakam bayrak AÇIKKEN
+  // de ₺ydi (32 Sayılı Karar m.4/g) — ama kapatma kanıtının parçası: kapanış
+  // ödeme ekranında hiçbir şeyi oynatmıyor.
+  const notice = fill(tr["instantQuote.fx.chargedInTry"], { amount: money(14800) });
+  const withFx = renderCheckoutForm({ quote: fxQuote(), totalKurus: 14800, rate: EUR_RATE });
+  const withoutFx = renderCheckoutForm({ quote: pricedQuote(), totalKurus: 14800, rate: null });
+  for (const [label, html] of [
+    ["bayrak açık", withFx],
+    ["bayrak kapalı", withoutFx],
+  ] as const) {
+    assert.ok(html.includes(money(14800)), `${label}: ödenecek ₺ tutar yok`);
+  }
+  // Bayrak açıkken EKLENEN tek şey uyarı cümlesi; kapanınca o da gidiyor ve
+  // ödenecek rakam DEĞİŞMİYOR.
+  assert.ok(withFx.includes(notice), "açıkken uyarı yok");
+  assert.ok(!withoutFx.includes(notice), "kapalıyken uyarı var");
+  for (const symbol of FX_SYMBOLS) {
+    assert.ok(!withoutFx.includes(symbol), `kapalıyken ${symbol} sızdı`);
+  }
+});
+
 test("SİPARİŞ/İADE ve e-posta yüzeyleri bu turda döviz ÖĞRENMEDİ", () => {
   // Y3 + Y4: o yüzeylerin rakamı YAPILMIŞ/YAPILACAK bir tahsilatı anlatır ve
   // e-postalar hiç tutar taşımaz. Kapı dosya listesiyle tutulur — biri

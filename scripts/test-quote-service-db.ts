@@ -1543,6 +1543,43 @@ async function main() {
       assert.ok(await frozenFx(fxQuoteId), "bayrak kapandı diye donmuş kur silinmemeli");
     });
 
+    await test("KAPATMA GERİ ALINABİLİR: bayrak yeniden açılınca AYNI rakam gelir", async () => {
+      // BU BİR ÖZELLİKTİR, HATA DEĞİL. Teklif kendi anlık görüntüsüyle
+      // BAĞLAYICIDIR: bayrak bir gün kapanıp yeniden açıldığında müşterinin
+      // gördüğü rakamın DEĞİŞMESİ, gördüğü şeye güvenilmemesi demek olurdu.
+      // Kapatma yolu bu yüzden donmuş satıra DOKUNMAZ — tek bir
+      // `platform_flags` satırıdır, dağıtım bile gerektirmez.
+      const read = async () => {
+        const view = await loadPresentedQuote(await loadAccess(fxQuoteId, userId));
+        return view.display ?? null;
+      };
+      try {
+        await setFlag("quote_fx_display_enabled", true, "test");
+        const first = await read();
+        assert.ok(first, "birinci açılışta kur gelmedi");
+
+        await setFlag("quote_fx_display_enabled", false, "test");
+        assert.equal(await read(), null, "kapalı bayrakta kur hâlâ gidiyor");
+
+        // Kapalı geçen sürede kur OYNADI: yeniden açılış bugünün kurunu değil
+        // TEKLİFİN kurunu göstermek zorunda. Bu satır olmasa vaka "hiçbir şey
+        // değişmedi" diye bedava yeşil kalırdı.
+        await admin.query(
+          "UPDATE fx_rates SET micro_try_per_unit = 52000000 WHERE currency = 'EUR' AND bulletin_date = $1",
+          [TODAY]
+        );
+
+        await setFlag("quote_fx_display_enabled", true, "test");
+        const second = await read();
+        assert.deepEqual(second, first, "bayrak yeniden açılınca müşteri BAŞKA bir rakam gördü");
+        assert.equal(eurMicro(second?.snapshot ?? null), 49_000_000, "teklifin kendi kuru oynadı");
+      } finally {
+        // Üretimdeki çıkış durumu KAPALI: sonraki turlar bayat bir Redis
+        // önbelleğinden açık bayrak devralmasın.
+        await setFlag("quote_fx_display_enabled", false, "test");
+      }
+    });
+
     await queue.obliterate({ force: true }).catch(() => {});
     console.log(`${checks} quote service DB checks passed`);
   } finally {

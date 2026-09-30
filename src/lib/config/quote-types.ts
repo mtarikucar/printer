@@ -443,6 +443,16 @@ export interface FrozenQuotePart {
   quantity: number;
   dimensionsMm: Vec3;
   volumeCm3: number | null;
+  /**
+   * Parçanın ÜÇGENLEME SAPMASI (mm); mesh parçalarında null.
+   *
+   * Ödeme anındaki kalıcı kayıt: bu parçanın hangi sapmayla ölçüldüğü — yani
+   * hangi geometriden fiyatlandığı — sonradan değiştirilemeyecek biçimde
+   * burada durur (üretici/admin görünümlerinin kaynağı). Müşteriye gösterilen
+   * teklif BELGESİ bunu okumaz; onun kaynağı `PresentedPart.tessellationMm`
+   * (tek türetme yeri `quote-present.ts`).
+   */
+  tessellationMm: number | null;
   unitKurus: number;
   lineKurus: number;
   note: string | null;
@@ -487,6 +497,16 @@ export interface PresentedPart {
   volumeCm3: number | null;
   areaCm2: number | null;
   bodyCount: number | null;
+  /**
+   * Üçgenleme sapması (mm); üçgenleri dosyadan gelen parçalarda (STL/OBJ/3MF)
+   * null. `PartGeometry.tessellation.deflectionMm`den türer.
+   *
+   * Bir FİYAT değil, ürün NİTELİĞİdir: bu yüzden fiyat kapısından bağımsız,
+   * fiyatsız izleyiciye de gider (ad `…Kurus` ile bitmediği için `publicIssue`
+   * süzgecine de takılmaz). Çalışma alanı ve teklif belgesi bunu okur —
+   * anlaşmazlık savunması sapmanın YAZILI olmasına bağlı (tasarım §3).
+   */
+  tessellationMm: number | null;
   suggestedUnits: QuoteUnits | null;
   config: PartConfig;
   note: string | null;

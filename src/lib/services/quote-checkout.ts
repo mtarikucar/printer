@@ -350,6 +350,10 @@ function freezeParts(
       quantity: part.quantity,
       dimensionsMm: c.dfm.scaled.extentsMm,
       volumeCm3: c.dfm.scaled.volumeCm3,
+      // Hangi sapmayla ölçüldüğü ödeme anında DONAR: üretici/admin görünümleri
+      // ve sonraki bir uygunluk tartışması bu kaydı okur. Tutar hesabına
+      // girmez — bir nitelik, bir fiyat değil.
+      tessellationMm: part.geometry?.tessellation?.deflectionMm ?? null,
       unitKurus: c.price.unitKurus,
       lineKurus: c.price.lineKurus,
       note: part.note,

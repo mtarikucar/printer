@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
+import { QUOTE_SOURCE_FORMATS } from "@/lib/config/quote-types";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { buildPrintServiceJsonLd } from "@/lib/seo/service";
 import { isFlagEnabled } from "@/lib/services/flags";
@@ -43,13 +44,23 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function PrintServicePage() {
-  const [snapshot, flagEnabled] = await Promise.all([
+  const [snapshot, flagEnabled, stepFlagEnabled] = await Promise.all([
     loadLandingSnapshot(),
     isFlagEnabled("instant_quote_enabled"),
+    isFlagEnabled("quote_step_enabled"),
   ]);
   // Admin oturumu yalnız bayrak KAPALIYKEN sorulur: açıkken hiçbir çerez
   // okunmaz ve sayfa gerçekten statik olarak (revalidate 3600) üretilebilir.
-  const uploaderVisible = flagEnabled || (await isAdminSession());
+  // Bu yüzden STEP kapısı da AYNI okumayı paylaşır — ikinci bir çerez okuması
+  // eklemek, motor açıkken sayfayı her istekte dinamik yapardı.
+  const adminSession = flagEnabled ? false : await isAdminSession();
+  const uploaderVisible = flagEnabled || adminSession;
+  // Müşteriye NE seçtirileceği (dropzone `accept` + istemci doğrulaması).
+  // Bayrak kapalı + admin oturumu = iç test hâli; sıradan ziyaretçi `.step`i
+  // hiç göremez, yani seçtirip sonra uçta 400 vermemiz imkânsız.
+  const acceptedFormats = stepFlagEnabled || adminSession
+    ? [...QUOTE_SOURCE_FORMATS]
+    : QUOTE_SOURCE_FORMATS.filter((format) => format !== "step");
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -65,6 +76,7 @@ export default async function PrintServicePage() {
             <LandingUploader
               maxFileBytes={snapshot.settings.maxFileBytes}
               maxPartsPerQuote={snapshot.settings.maxPartsPerQuote}
+              acceptedFormats={acceptedFormats}
             />
           ) : (
             <ComingSoonNote />

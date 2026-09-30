@@ -1,7 +1,7 @@
 "use client";
 
 import type { JSX } from "react";
-import { fill, mm } from "@/components/quote/format";
+import { decimal2, fill, mm } from "@/components/quote/format";
 import type { BankDetails } from "@/lib/config/payment";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
 import type { PresentedCatalog, PresentedPart, PresentedQuote } from "@/lib/config/quote-types";
@@ -222,6 +222,17 @@ export function QuoteDocument({
                       x: mm(part.dimensionsMm.x),
                       y: mm(part.dimensionsMm.y),
                       z: mm(part.dimensionsMm.z),
+                    })}
+                  </span>
+                )}
+                {/* Üçgenleme sapması satılan şeyin NİTELİĞİdir (CAD yüzeyi
+                    üçgen ağa çevrilir), bu yüzden kâğıtta yazılı durur:
+                    "parça CAD'ime göre köşeli geldi" tartışmasında dayanak
+                    budur. Değer parçadan gelir, burada hesaplanmaz. */}
+                {part.tessellationMm !== null && (
+                  <span className="quote-doc__muted block">
+                    {fill(d["instantQuote.document.stepTessellation"], {
+                      mm: decimal2(part.tessellationMm),
                     })}
                   </span>
                 )}

@@ -28,7 +28,8 @@ import os from "node:os";
 import path from "node:path";
 import { NextRequest } from "next/server";
 import pg from "pg";
-import type { PartGeometry } from "../src/lib/config/quote-types";
+import { STEP_TESSELLATION } from "../src/lib/config/quote-step";
+import type { PartGeometry, QuoteSourceFormat } from "../src/lib/config/quote-types";
 
 const connectionString = process.env.QA_QUOTE_DB_URL;
 if (!connectionString) throw new Error("QA_QUOTE_DB_URL required");
@@ -220,6 +221,18 @@ const CUBE: PartGeometry = {
 const THIN: PartGeometry = { ...CUBE, bodyCount: 3, wallP1: 0.2, wallP5: 0.3 };
 
 /**
+ * AYNI küp, ama STEP'ten çevrilmiş: birim dosyadan okundu (mm), üçgen ağ
+ * ölçülen sapmayla üretildi. Geometri mesh küple BİREBİR aynı olduğu için
+ * fiyatının da aynı çıkması gerekir — sapma bir NİTELİK, fiyat girdisi değil.
+ */
+const STEP_CUBE: PartGeometry = {
+  ...CUBE,
+  sourceUnits: "mm",
+  tessellation: STEP_TESSELLATION,
+  solidCount: 1,
+};
+
+/**
  * Servisin isteği OKUDUĞU kadarı: başlıklar (IP, tarayıcı, idempotency) ve
  * çerezler (attribution, dil). `NextRequest`'i kurmak Next'in çalışma zamanını
  * gerektirir; servis ondan yalnız bu iki yüzeyi kullanır.
@@ -329,7 +342,13 @@ async function main() {
 
     async function makeQuote(
       userId: string,
-      parts: Array<{ geometry: PartGeometry; quantity?: number; technologyKey?: string }>
+      parts: Array<{
+        geometry: PartGeometry;
+        quantity?: number;
+        technologyKey?: string;
+        /** Kaynak biçim; dosya adı ve depolama anahtarı buna göre yazılır. */
+        sourceFormat?: QuoteSourceFormat;
+      }>
     ): Promise<{ id: string; number: string; version: number }> {
       const now = new Date();
       const [quote] = await db
@@ -353,14 +372,15 @@ async function main() {
           (f) => f.technologyKey === null || f.technologyKey === technologyKey
         )!;
         const partId = randomUUID();
+        const sourceFormat = spec.sourceFormat ?? "stl";
         await db.insert(quoteParts).values({
           id: partId,
           quoteId: quote.id,
           sortOrder: index,
           name: `Parça ${index + 1}`,
-          fileName: `parca-${index + 1}.stl`,
-          sourceKey: `quote-parts/${partId}/source.stl`,
-          sourceFormat: "stl",
+          fileName: `parca-${index + 1}.${sourceFormat}`,
+          sourceKey: `quote-parts/${partId}/source.${sourceFormat}`,
+          sourceFormat,
           sourceBytes: 684,
           sourceSha256: randomUUID().replace(/-/g, "").repeat(2),
           analysisStatus: "ready",
@@ -607,6 +627,71 @@ async function main() {
         .where(eq(orderDrafts.userId, buyer.id));
       assert.equal(drafts.length, 1, "ikinci taslak YOK");
       assert.equal(jobs.length, before, "ikinci kez iş kuyruğa alınmaz");
+    });
+
+    await test("ödemede donan parça STEP'in sapmasını taşır, para hattı DEĞİŞMEZ", async () => {
+      // İki iş birden kanıtlanıyor:
+      //  (1) `parts_snapshot` STEP parçası için `tessellationMm` taşır, mesh
+      //      parçası için null — "hangi sapmayla ölçüldü" sorusunun cevabı
+      //      ödeme anında donar (üretici/admin görünümleri ve sonraki bir
+      //      uygunluk tartışması bunu okur);
+      //  (2) TUTARLAR bu özellikten etkilenmez: geometrisi birebir aynı olan
+      //      STEP ve mesh parçası AYNI fiyatı alır, dondurulan kalemlerin
+      //      toplamı tahsil edilen tutarı verir.
+      const payer = await makeUser();
+      const q = await makeQuote(payer.id, [
+        { geometry: STEP_CUBE, quantity: 2, sourceFormat: "step" },
+        { geometry: CUBE, quantity: 2 },
+      ]);
+      const { quote, parts, computed } = await expected(q.id);
+      const total = computed.totals.totalKurus;
+      const result = await createQuoteCheckout({
+        quoteId: quote.id,
+        userId: payer.id,
+        email: payer.email,
+        input: quoteCheckoutSchema.parse(
+          body({ expectedVersion: quote.version, expectedTotalKurus: total })
+        ),
+        req: fakeRequest({ "idempotency-key": `qa-step-${randomUUID()}` }),
+      });
+      assert.equal(result.finalAmountKurus, total);
+
+      const [row] = await db
+        .select()
+        .from(quoteCheckouts)
+        .where(eq(quoteCheckouts.quoteId, quote.id));
+      const frozen = [...row.partsSnapshot].sort((a, b) => a.position - b.position);
+      assert.equal(frozen.length, 2);
+      assert.equal(frozen[0].sourceFormat, "step");
+      assert.equal(frozen[0].tessellationMm, STEP_TESSELLATION.deflectionMm);
+      assert.equal(frozen[1].sourceFormat, "stl");
+      assert.equal(frozen[1].tessellationMm, null, "mesh parçasına sapma yazılmış");
+      // Üreticiye giden dosya HÂLÂ bizim ürettiğimiz STL: müşterinin CAD
+      // dosyası ağa dağıtılmaz.
+      assert.equal(frozen[0].canonicalStlKey, parts[0].canonicalStlKey);
+      assert.match(frozen[0].canonicalStlKey, /canonical\.stl$/);
+
+      // ── Para regresyonu ────────────────────────────────────────────────
+      assert.equal(
+        frozen[0].unitKurus,
+        frozen[1].unitKurus,
+        "aynı geometri STEP'te başka fiyatlanmış"
+      );
+      assert.equal(frozen[0].lineKurus, frozen[1].lineKurus);
+      assert.equal(
+        frozen.reduce((sum, p) => sum + p.lineKurus, 0) +
+          row.addonsSnapshot.reduce((sum, a) => sum + a.kurus, 0) +
+          computed.totals.minOrderTopUpKurus,
+        total,
+        "dondurulan kalemler toplamı tutarı vermiyor"
+      );
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(draft.amountKurus, total);
+      assert.equal(draft.productionBaseKurus, total, "tamamı üretim payı");
+      assert.equal(draft.paintingPriceKurus, 0);
     });
 
     await test("başlıksız istemcide İKİ FARKLI teklif tek anahtara ÇÖKMEZ", async () => {

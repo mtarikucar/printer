@@ -1137,6 +1137,7 @@ const en = {
   "instantQuote.document.reference": "Reference",
   "instantQuote.document.referencePending":
     "The payment reference for the transfer description is issued at the “Go to checkout” step.",
+  "instantQuote.document.stepTessellation": "Tessellation deviation: at most {mm} mm",
   "instantQuote.document.taxId": "Tax ID",
   "instantQuote.document.taxOffice": "Tax office",
   "instantQuote.document.title": "Quote document",
@@ -1227,6 +1228,10 @@ const en = {
   "instantQuote.part.rename": "Rename",
   "instantQuote.part.scale": "Scale",
   "instantQuote.part.select": "Select part",
+  "instantQuote.part.stepTessellation":
+    "The STEP surfaces were converted to a triangle mesh for printing; deviation is at most {mm} mm.",
+  "instantQuote.part.stepUnitsLocked":
+    "The unit was read from the STEP file (mm) and cannot be changed.",
   "instantQuote.part.units": "Unit",
   "instantQuote.part.unitsSuggestion": "This file looks like {units} — apply",
   "instantQuote.part.viewModel": "View in 3D",
@@ -1311,6 +1316,8 @@ const en = {
   "instantQuote.upload.invalidFormat":
     "{file}: only STL, OBJ and 3MF files can be uploaded.",
   "instantQuote.upload.processing": "Processing…",
+  "instantQuote.upload.stepTooLarge":
+    "{file}: STEP files can be at most {maxMb} MB — a STEP file carries far more geometry at the same size. Split the part or send it as STL.",
   "instantQuote.upload.tooLarge": "{file}: the file is over the {maxMb} MB limit.",
   "instantQuote.upload.tooManyParts": "A quote can hold at most {max} parts.",
   "instantQuote.upload.uploading": "Uploading…",

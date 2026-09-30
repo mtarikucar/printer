@@ -156,6 +156,8 @@ const frozenPart = (over: Partial<FrozenQuotePart> = {}): FrozenQuotePart => ({
   quantity: 1,
   dimensionsMm: { x: 40, y: 30, z: 20 },
   volumeCm3: 12,
+  // Mesh parçası: üçgenler dosyadan geldi, çevrilecek bir B-rep yoktu.
+  tessellationMm: null,
   unitKurus: 5000,
   lineKurus: 5000,
   note: null,

@@ -2,6 +2,8 @@
 
 import { useRef, useState, type JSX } from "react";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
+import { STEP_MAX_BYTES } from "@/lib/config/quote-step";
+import type { QuoteSourceFormat } from "@/lib/config/quote-types";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { UploadProgress } from "@/lib/upload-with-progress";
@@ -16,8 +18,36 @@ import { fill } from "./format";
  * güvenlik sınırı değil.
  */
 
-export const QUOTE_UPLOAD_EXTENSIONS = ["stl", "obj", "3mf"] as const;
-export const QUOTE_UPLOAD_ACCEPT = ".stl,.obj,.3mf";
+/**
+ * Biçim → uzantı(lar). `Record<QuoteSourceFormat, …>` bilerek: beşinci bir
+ * biçim eklendiğinde `tsc` bu tabloyu sayar, liste sessizce eksik kalmaz.
+ *
+ * STEP'in İKİ uzantısı, TEK biçim anahtarı var (`.stp`, DOS'tan kalma
+ * kısaltma; aynı ISO 10303 dosyası — uçtaki kapı da öyle okuyor,
+ * `quote-model-validation.ts`).
+ */
+const FORMAT_EXTENSIONS: Record<QuoteSourceFormat, readonly string[]> = {
+  stl: ["stl"],
+  obj: ["obj"],
+  "3mf": ["3mf"],
+  step: ["step", "stp"],
+};
+
+/**
+ * Kabul edilen uzantılar. Liste SABİT DEĞİL, `catalog.acceptedFormats`ten
+ * türer: `quote_step_enabled` kapalıyken `"step"` o listede yoktur, yani
+ * müşteriye `.step` seçtirip sonra uçta 400 vermemiz imkânsızdır.
+ */
+export function acceptedExtensions(formats: readonly QuoteSourceFormat[]): string[] {
+  return formats.flatMap((format) => [...FORMAT_EXTENSIONS[format]]);
+}
+
+/** `<input accept>` dizesi (".stl,.obj,.3mf"). */
+export function acceptedAccept(formats: readonly QuoteSourceFormat[]): string {
+  return acceptedExtensions(formats)
+    .map((extension) => `.${extension}`)
+    .join(",");
+}
 
 export interface QuoteFileCheck {
   accepted: File[];
@@ -41,17 +71,39 @@ export function megabytes(bytes: number): number {
  */
 export function validateQuoteFiles(
   files: File[],
-  opts: { maxFileBytes: number; maxParts: number; currentCount: number; d: Dictionary }
+  opts: {
+    maxFileBytes: number;
+    maxParts: number;
+    currentCount: number;
+    /** `catalog.acceptedFormats` — bayrak kapalıyken `"step"` içermez. */
+    acceptedFormats: readonly QuoteSourceFormat[];
+    d: Dictionary;
+  }
 ): QuoteFileCheck {
-  const { d, maxFileBytes, maxParts, currentCount } = opts;
+  const { d, maxFileBytes, maxParts, currentCount, acceptedFormats } = opts;
   const maxMb = megabytes(maxFileBytes);
+  const allowed = new Set(acceptedExtensions(acceptedFormats));
   const accepted: File[] = [];
   const errors: string[] = [];
   let room = Math.max(0, maxParts - currentCount);
 
   for (const file of files) {
-    if (!(QUOTE_UPLOAD_EXTENSIONS as readonly string[]).includes(extensionOf(file.name))) {
+    const extension = extensionOf(file.name);
+    if (!allowed.has(extension)) {
       errors.push(fill(d["instantQuote.upload.invalidFormat"], { file: file.name }));
+      continue;
+    }
+    // STEP'in tavanı genel tavandan AYRI ve daha düşük (16 MiB): aynı bayt
+    // sayısı STEP'te mesh'ten kat kat fazla geometri taşır. Sıra önemli —
+    // STEP tavanı genel tavanın altında olduğu için önce o sorulur, yoksa
+    // müşteri yanlış rakamı okurdu.
+    if (FORMAT_EXTENSIONS.step.includes(extension) && file.size > STEP_MAX_BYTES) {
+      errors.push(
+        fill(d["instantQuote.upload.stepTooLarge"], {
+          file: file.name,
+          maxMb: megabytes(STEP_MAX_BYTES),
+        })
+      );
       continue;
     }
     if (file.size > maxFileBytes) {
@@ -78,12 +130,15 @@ export interface QuoteUploadState {
 
 export function QuoteDropzone({
   maxFileBytes,
+  accept,
   uploads,
   errors,
   disabled,
   onFiles,
 }: {
   maxFileBytes: number;
+  /** `acceptedAccept(catalog.acceptedFormats)` — sabit DEĞİL, bayrağa bağlı. */
+  accept: string;
   uploads: QuoteUploadState[];
   errors: string[];
   disabled?: boolean;
@@ -123,7 +178,7 @@ export function QuoteDropzone({
           ref={inputRef}
           type="file"
           multiple
-          accept={QUOTE_UPLOAD_ACCEPT}
+          accept={accept}
           className="hidden"
           disabled={disabled}
           onChange={(e) => {

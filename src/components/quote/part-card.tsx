@@ -79,6 +79,12 @@ export function QuotePartCard({
 
   const analyzing = part.analysisStatus === "queued" || part.analysisStatus === "analyzing";
   const failed = part.analysisStatus === "failed";
+  // STEP'in ölçü birimi DOSYADAN okunur (birim ISO 10303 gereği dosyanın
+  // kendisinde yazılıdır ve CAD çekirdeği onu uygular), bu yüzden burada
+  // değiştirilemez: "cm" seçmek parçayı 10× büyütür, hacmi 1000× şişirir ve
+  // fiyatı 1000× yanlışlardı. Kilit yalnız ekranda değil, uçta ve
+  // veritabanında da duruyor (`quote_parts_step_units_chk`) — savunma derinliği.
+  const unitsLocked = part.sourceFormat === "step";
 
   const material = catalog.materials.find(
     (m) => m.key === config.materialKey && m.technologyKey === config.technologyKey
@@ -230,64 +236,92 @@ export function QuotePartCard({
             <p className="text-xs text-text-secondary">{d["instantQuote.part.analyzing"]}</p>
           )}
 
+          {/* Üçgenleme sapması satılan şeyin NİTELİĞİdir, bir fiyat değil:
+              fiyat kapısı kapalı izleyici de, paylaşım bağlantısını açan da
+              görür (aynı cümle teklif belgesinde de yazılı). Koşul DEĞERE
+              bakar, biçime değil: üçgenleri dosyadan gelen bir parçada alan
+              null'dır ve satır hiç çizilmez. */}
+          {part.tessellationMm !== null && (
+            <p className="text-[11px] text-text-muted">
+              {fill(d["instantQuote.part.stepTessellation"], {
+                mm: decimal2(part.tessellationMm),
+              })}
+            </p>
+          )}
+
           {/* Birim + ölçek: dosyanın birimi yanlışsa her sayı yanlıştır, bu
               yüzden konfig panelinin içine gömülmez, kartta durur. */}
           {viewer.canEdit && (
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-text-muted">
-                  {d["instantQuote.part.units"]}
-                </span>
-                <select
-                  className="input-base !w-20 !py-1.5 text-xs"
-                  value={config.units}
-                  disabled={disabled}
-                  onChange={(e) => patch({ units: e.target.value as QuoteUnits })}
-                >
-                  {QUOTE_UNITS.map((u) => (
-                    <option key={u} value={u}>
-                      {u}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-text-muted">
-                  {d["instantQuote.part.scale"]}
-                </span>
-                <input
-                  type="number"
-                  min={0.01}
-                  max={100}
-                  step={0.01}
-                  value={scale.value}
-                  disabled={disabled}
-                  className="input-base !w-24 !py-1.5 text-xs tabular-nums"
-                  onChange={(e) => scale.edit(e.target.value)}
-                  onBlur={() => {
-                    const next = Number(scale.value);
-                    // Aralık dışı ya da okunamayan giriş sunucuya GİTMEZ; alan
-                    // geçerli değere döner.
-                    if (!Number.isFinite(next) || next < 0.01 || next > 100) {
-                      scale.discard();
-                      return;
-                    }
-                    // `String(next)` yazımı normalleştirir ("1,50" değil "1.5"),
-                    // yani inen prop ile karşılaştırma tutar.
-                    scale.commit(String(next));
-                    if (next !== config.scale) patch({ scale: next });
-                  }}
-                />
-              </label>
-              {part.suggestedUnits && part.suggestedUnits !== config.units && (
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => patch({ units: part.suggestedUnits as QuoteUnits })}
-                  className="rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1 text-[11px] text-ink-2 disabled:opacity-40"
-                >
-                  {fill(d["instantQuote.part.unitsSuggestion"], { units: part.suggestedUnits })}
-                </button>
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] text-text-muted">
+                    {d["instantQuote.part.units"]}
+                  </span>
+                  <select
+                    className="input-base !w-20 !py-1.5 text-xs"
+                    value={config.units}
+                    disabled={disabled || unitsLocked}
+                    onChange={(e) => patch({ units: e.target.value as QuoteUnits })}
+                  >
+                    {QUOTE_UNITS.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] text-text-muted">
+                    {d["instantQuote.part.scale"]}
+                  </span>
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={100}
+                    step={0.01}
+                    value={scale.value}
+                    disabled={disabled}
+                    className="input-base !w-24 !py-1.5 text-xs tabular-nums"
+                    onChange={(e) => scale.edit(e.target.value)}
+                    onBlur={() => {
+                      const next = Number(scale.value);
+                      // Aralık dışı ya da okunamayan giriş sunucuya GİTMEZ; alan
+                      // geçerli değere döner.
+                      if (!Number.isFinite(next) || next < 0.01 || next > 100) {
+                        scale.discard();
+                        return;
+                      }
+                      // `String(next)` yazımı normalleştirir ("1,50" değil "1.5"),
+                      // yani inen prop ile karşılaştırma tutar.
+                      scale.commit(String(next));
+                      if (next !== config.scale) patch({ scale: next });
+                    }}
+                  />
+                </label>
+                {/* Birim ÖNERİSİ çipi STEP parçasında kendiliğinden susar ve bu
+                    bir KURALDIR, tesadüf değil: `suggestUnits` ilk satırda
+                    `sourceUnits`i döndürüyor (`quote-units.ts`), STEP'te o daima
+                    "mm" ve seçili birim de mm'ye kilitli — koşul asla tutmaz.
+                    Mesh dosyaları birimsizdir (`sourceUnits = null`) ve orada
+                    "sayılar şüpheli derecede küçük" sezgisi çalışmaya devam
+                    eder. Yani burada eklenecek bir kod yok, korunacak bir
+                    değişmez var. */}
+                {part.suggestedUnits && part.suggestedUnits !== config.units && (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => patch({ units: part.suggestedUnits as QuoteUnits })}
+                    className="rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1 text-[11px] text-ink-2 disabled:opacity-40"
+                  >
+                    {fill(d["instantQuote.part.unitsSuggestion"], { units: part.suggestedUnits })}
+                  </button>
+                )}
+              </div>
+              {unitsLocked && (
+                <p className="text-[11px] text-text-muted">
+                  {d["instantQuote.part.stepUnitsLocked"]}
+                </p>
               )}
             </div>
           )}

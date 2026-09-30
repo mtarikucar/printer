@@ -7,12 +7,13 @@ import { track } from "@/lib/analytics/client";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import {
-  QUOTE_UPLOAD_ACCEPT,
+  acceptedAccept,
   megabytes,
   validateQuoteFiles,
   type QuoteUploadState,
 } from "@/components/quote/dropzone";
 import { fill } from "@/components/quote/format";
+import type { QuoteSourceFormat } from "@/lib/config/quote-types";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { QuoteApiError, addQuotePart, createQuote } from "@/lib/quote/client-api";
 import { uploadLargeFile } from "@/lib/upload-large-file";
@@ -37,9 +38,17 @@ import { UploadError } from "@/lib/upload-with-progress";
 export function LandingUploader({
   maxFileBytes,
   maxPartsPerQuote,
+  acceptedFormats,
 }: {
   maxFileBytes: number;
   maxPartsPerQuote: number;
+  /**
+   * Müşteriye NE seçtirileceği: `quote_step_enabled` kapalıyken `"step"` bu
+   * listede YOKTUR. Sayfa bunu bayraktan türetir (`page.tsx`), bileşen bayrak
+   * OKUMAZ — açılış sayfası istemcide çalışır ve bayrak sunucu tarafı bir
+   * ayardır.
+   */
+  acceptedFormats: QuoteSourceFormat[];
 }): JSX.Element {
   const d = useDictionary();
   const router = useRouter();
@@ -69,6 +78,7 @@ export function LandingUploader({
       maxFileBytes,
       maxParts: maxPartsPerQuote,
       currentCount: 0,
+      acceptedFormats,
       d,
     });
     setErrors(rejected);
@@ -151,7 +161,7 @@ export function LandingUploader({
           ref={inputRef}
           type="file"
           multiple
-          accept={QUOTE_UPLOAD_ACCEPT}
+          accept={acceptedAccept(acceptedFormats)}
           className="hidden"
           disabled={busy}
           onChange={(e) => {

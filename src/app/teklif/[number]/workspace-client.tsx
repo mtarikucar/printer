@@ -9,7 +9,12 @@ import type {
 } from "@/lib/config/quote-types";
 import { track } from "@/lib/analytics/client";
 import { QuoteBulkBar } from "@/components/quote/bulk-bar";
-import { QuoteDropzone, validateQuoteFiles, type QuoteUploadState } from "@/components/quote/dropzone";
+import {
+  QuoteDropzone,
+  acceptedAccept,
+  validateQuoteFiles,
+  type QuoteUploadState,
+} from "@/components/quote/dropzone";
 import { fill } from "@/components/quote/format";
 import { QuotePartCard } from "@/components/quote/part-card";
 import { QuotePartConfigPanel } from "@/components/quote/part-config-panel";
@@ -321,6 +326,9 @@ export function QuoteWorkspaceClient({
         maxFileBytes: catalog.maxFileBytes,
         maxParts: catalog.maxPartsPerQuote,
         currentCount: parts.length + uploads.length,
+        // Sayfanın HER YERİNE bırakılan dosya da bu kapıdan geçer: `accept`
+        // dizesi yalnız dosya SEÇİCİSİNİ süzer, sürükle-bırak onu atlar.
+        acceptedFormats: catalog.acceptedFormats,
         d,
       });
       setUploadErrors(errors);
@@ -500,6 +508,7 @@ export function QuoteWorkspaceClient({
           {canEdit && (
             <QuoteDropzone
               maxFileBytes={catalog.maxFileBytes}
+              accept={acceptedAccept(catalog.acceptedFormats)}
               uploads={uploads}
               errors={uploadErrors}
               disabled={busy}

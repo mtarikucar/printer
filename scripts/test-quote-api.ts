@@ -383,6 +383,34 @@ test("catalog.acceptedFormats bayraktan gelir; YÜKLENMİŞ STEP parçası bayra
   assert.deepEqual(open.catalog.acceptedFormats, ["stl", "obj", "3mf", "step"]);
 });
 
+test("sapma TEK yerde türer: geometri → PresentedPart.tessellationMm", () => {
+  // Teklif belgesinin kaynağı `loadPresentedQuote` → `PresentedPart`tır
+  // (`parts_snapshot` o ekranda okunmaz), yani anlaşmazlık savunmasının
+  // taşıyıcısı bu alan. Türetme bir yerde durur: geometride ne yazılıysa o.
+  const stepPart = makePart({
+    fileName: "govde.step",
+    sourceFormat: "step",
+    sourceKey: "quote-parts/p1/source.step",
+    geometry: { ...CUBE, sourceUnits: "mm", tessellation: STEP_TESSELLATION, solidCount: 1 },
+  });
+  const step = present(OWNER_VIEW, makeQuote(), [stepPart]);
+  assert.equal(step.parts[0].tessellationMm, STEP_TESSELLATION.deflectionMm);
+
+  // Mesh parçasında (üçgenler dosyadan geldi) alan null KALIR.
+  assert.equal(present(OWNER_VIEW).parts[0].tessellationMm, null);
+  // Analizi henüz bitmemiş parçada geometri yok: yine null, patlamaz.
+  const pending = present(OWNER_VIEW, makeQuote(), [
+    makePart({ analysisStatus: "queued", geometry: null }),
+  ]);
+  assert.equal(pending.parts[0].tessellationMm, null);
+
+  // Sapma bir NİTELİK, fiyat değil: fiyat kapısı kapalı izleyiciye de gider
+  // (ad `…Kurus` ile bitmediği için fiyat süzgecine hiç takılmaz).
+  const gated = present(ANON_VIEW, makeQuote(), [stepPart]);
+  assert.equal(gated.parts[0].tessellationMm, STEP_TESSELLATION.deflectionMm);
+  assert.equal("price" in gated.parts[0], false);
+});
+
 test("fiyat kapısı kapalıyken gövdede TEK BİR fiyat anahtarı yok", () => {
   const view = present(ANON_VIEW);
   const json = JSON.stringify(view);

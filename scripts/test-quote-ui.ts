@@ -22,7 +22,7 @@ import { PriceGateModal } from "../src/components/quote/price-gate-modal";
 import { QuotePartCard } from "../src/components/quote/part-card";
 import { QuoteBulkBar } from "../src/components/quote/bulk-bar";
 import { dfmMessage } from "../src/components/quote/dfm-list";
-import { validateQuoteFiles } from "../src/components/quote/dropzone";
+import { acceptedAccept, validateQuoteFiles } from "../src/components/quote/dropzone";
 import { QuoteBanners } from "../src/components/quote/quote-banners";
 import { QuoteChatPanel } from "../src/components/quote/quote-chat-panel";
 import {
@@ -87,8 +87,10 @@ import type {
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
+import { STEP_MAX_BYTES } from "../src/lib/config/quote-step";
 import {
   DFM_CODES,
+  QUOTE_SOURCE_FORMATS,
   QUOTE_STATUSES,
   type CustomerQuoteListItem,
   type LibraryPart,
@@ -199,6 +201,51 @@ test("parametreli DfM cümleleri yer tutucularını kaybetmemiş", () => {
       assert.ok(value.includes(p), `${PREFIX}${suffix} içinde ${p} yok`);
     }
   }
+});
+
+test("STEP cümleleri İKİ sözlükte de var ve yer tutucuları ayrışmamış", () => {
+  // `en.ts` `Dictionary` tipinin kaynağı, yani eksik anahtar `tsc`yi kırar —
+  // ama YER TUTUCU ayrışması kırmaz: bir dilde `{mm}` cümlede olduğu gibi
+  // kalır. Nöbetçi bu yüzden değerleri de karşılaştırır.
+  const stepKeys: Record<string, string[]> = {
+    "upload.stepTooLarge": ["{file}", "{maxMb}"],
+    "part.stepUnitsLocked": [],
+    "part.stepTessellation": ["{mm}"],
+    "document.stepTessellation": ["{mm}"],
+  };
+  for (const [suffix, params] of Object.entries(stepKeys)) {
+    const key = PREFIX + suffix;
+    for (const [name, dict] of [
+      ["tr", tr as Record<string, string>],
+      ["en", en as Record<string, string>],
+    ] as const) {
+      const value = dict[key];
+      assert.ok(value, `${key} ${name}.ts içinde yok`);
+      for (const p of params) {
+        assert.ok(value.includes(p), `${key} (${name}) içinde ${p} yok`);
+      }
+    }
+  }
+  const placeholders = (value: string) => [...new Set(value.match(/\{\w+\}/g) ?? [])].sort();
+  for (const key of trKeys) {
+    assert.deepEqual(
+      placeholders((tr as Record<string, string>)[key]),
+      placeholders((en as Record<string, string>)[key]),
+      `${key}: yer tutucular iki sözlükte ayrışmış`
+    );
+  }
+});
+
+test("STEP için yeni müşteri hata KODU açılmadı", () => {
+  // Tasarım §6 kararı: `step_too_complex` / `step_unreadable` müşteriye
+  // bugünkü `analysis_failed` cümlesiyle gider. DfM kod kümesini büyütmek
+  // sahadaki her uyarı onayını (`dfmWarningKey`) ve admin süzgeçlerini
+  // etkilerdi; ayrım müşteriye GİTMEYEN metinde (admin) yapılır.
+  assert.deepEqual(
+    DFM_CODES.filter((code) => code.startsWith("step")),
+    []
+  );
+  assert.ok(trKeys.includes(`${PREFIX}dfm.analysis_failed`));
 });
 
 test("her teklif durumunun bir rozeti var ve fiyat kapısı yer tutucusu rakamsız", () => {
@@ -411,6 +458,8 @@ function partFixture(over: Partial<PresentedPart> = {}): PresentedPart {
     areaCm2: 180,
     bodyCount: 1,
     suggestedUnits: null,
+    // Mesh parçası: üçgenler dosyadan geldi, çevrilen bir B-rep yok.
+    tessellationMm: null,
     config: {
       technologyKey: "fdm",
       materialKey: "pla",
@@ -623,17 +672,23 @@ test("katalogdan düşen malzeme parçayı malzeme seçimine yönlendirir", () =
 test("dosya elemesi uzantıyı, boyutu ve parça tavanını Türkçe anlatır", () => {
   // Tarayıcı kontrolü bir KOLAYLIK (uç aynı kuralları yeniden uygular); işi
   // müşteriye saniyesinde söylemek. Sığan dosyalar elenenlerden etkilenmez.
-  const file = (name: string, size: number) =>
-    ({ name, size }) as unknown as File;
   const { accepted, errors } = validateQuoteFiles(
     [
-      file("govde.stl", 1_000),
-      file("cizim.step", 1_000),
-      file("dev.obj", 200 * 1024 * 1024),
-      file("kapak.3mf", 2_000),
-      file("taban.stl", 3_000),
+      fakeFile("govde.stl", 1_000),
+      fakeFile("cizim.step", 1_000),
+      fakeFile("dev.obj", 200 * 1024 * 1024),
+      fakeFile("kapak.3mf", 2_000),
+      fakeFile("taban.stl", 3_000),
     ],
-    { maxFileBytes: 100 * 1024 * 1024, maxParts: 2, currentCount: 0, d: tr }
+    {
+      maxFileBytes: 100 * 1024 * 1024,
+      maxParts: 2,
+      currentCount: 0,
+      // Bayrak KAPALI: `.step` müşteriye seçtirilmediği gibi, elle bırakılsa
+      // da burada düşer.
+      acceptedFormats: MESH_FORMATS,
+      d: tr,
+    }
   );
   assert.deepEqual(
     accepted.map((f) => f.name),
@@ -644,6 +699,170 @@ test("dosya elemesi uzantıyı, boyutu ve parça tavanını Türkçe anlatır", 
     "dev.obj: dosya 100 MB sınırını aşıyor.",
     "Bir teklifte en fazla 2 parça olabilir.",
   ]);
+});
+
+// ─── STEP: istemci kapısı, birim kilidi, sapma (S5) ─────────────────────────
+
+/** Bayrak kapalı / açık hâlin biçim listeleri — ikisi de TEK kaynaktan türer. */
+const MESH_FORMATS = QUOTE_SOURCE_FORMATS.filter((f) => f !== "step");
+const ALL_FORMATS = [...QUOTE_SOURCE_FORMATS];
+
+function fakeFile(name: string, size: number): File {
+  return { name, size } as unknown as File;
+}
+
+/**
+ * STEP parçası: birimi dosyadan OKUNMUŞ (mm), sapması ölçülmüş.
+ *
+ * `suggestedUnits` bilerek `"mm"`: `suggestUnits` (`quote-units.ts`) ilk satırda
+ * `g.sourceUnits`i döndürüyor ve STEP'te o daima `"mm"`. Yani çipin susması
+ * "öneri üretilmedi" değil, "öneri seçili birimin AYNISI" demek.
+ */
+function stepPartFixture(over: Partial<PresentedPart> = {}): PresentedPart {
+  return partFixture({
+    id: "step-1",
+    name: "Gövde",
+    fileName: "govde.step",
+    sourceFormat: "step",
+    suggestedUnits: "mm",
+    tessellationMm: 0.01,
+    ...over,
+  });
+}
+
+/** Markup'taki İLK `re` etiketini verir — nitelikler etiket bazında sınanmalı. */
+function tagOf(html: string, re: RegExp): string {
+  const match = html.match(re);
+  assert.ok(match, `etiket bulunamadı: ${re}`);
+  return match[0];
+}
+
+test("bayrak KAPALIYKEN dosya seçicisi .step'i HİÇ göstermez", () => {
+  // Müşteriye seçtirip sonra uçta 400 vermek en kötü hâl olurdu: `accept`
+  // dizesi bu yüzden kataloğun `acceptedFormats`ından türer, sabit değildir.
+  assert.equal(acceptedAccept(MESH_FORMATS), ".stl,.obj,.3mf");
+  assert.equal(acceptedAccept(ALL_FORMATS), ".stl,.obj,.3mf,.step,.stp");
+
+  const closed = renderWorkspace(quoteFixture());
+  assert.match(tagOf(closed, /<input type="file"[^>]*>/), /accept="\.stl,\.obj,\.3mf"/);
+  assert.ok(!closed.includes(".step"), "bayrak kapalıyken .step seçilebilir görünüyor");
+
+  const open = renderWorkspace(
+    quoteFixture({ catalog: { ...catalogFixture, acceptedFormats: ALL_FORMATS } })
+  );
+  assert.match(
+    tagOf(open, /<input type="file"[^>]*>/),
+    /accept="\.stl,\.obj,\.3mf,\.step,\.stp"/
+  );
+});
+
+test("istemci kapısı bayrağa bağlı: STEP listedeyken .step kabul edilir", () => {
+  const files = [fakeFile("govde.step", 1_000), fakeFile("kapak.STP", 1_000)];
+  const opts = { maxFileBytes: 100 * 1024 * 1024, maxParts: 5, currentCount: 0, d: tr };
+
+  const closed = validateQuoteFiles(files, { ...opts, acceptedFormats: MESH_FORMATS });
+  assert.deepEqual(closed.accepted, []);
+  assert.deepEqual(closed.errors, [
+    fill(tr["instantQuote.upload.invalidFormat"], { file: "govde.step" }),
+    fill(tr["instantQuote.upload.invalidFormat"], { file: "kapak.STP" }),
+  ]);
+
+  const open = validateQuoteFiles(files, { ...opts, acceptedFormats: ALL_FORMATS });
+  assert.deepEqual(
+    open.accepted.map((f) => f.name),
+    ["govde.step", "kapak.STP"],
+    "iki uzantı TEK biçimdir: .stp de kabul edilmeli"
+  );
+  assert.deepEqual(open.errors, []);
+});
+
+test("STEP'in kendi tavanı istemcide de AYRI: aynı boyuttaki STL geçer", () => {
+  // Genel tavan bir katalog AYARI, STEP'in tavanı bir DAĞITIM kararı: aynı
+  // bayt sayısı STEP'te mesh'ten kat kat fazla geometri taşır.
+  const size = STEP_MAX_BYTES + 1;
+  const { accepted, errors } = validateQuoteFiles(
+    [fakeFile("dev.step", size), fakeFile("dev.stl", size)],
+    {
+      maxFileBytes: 100 * 1024 * 1024,
+      maxParts: 5,
+      currentCount: 0,
+      acceptedFormats: ALL_FORMATS,
+      d: tr,
+    }
+  );
+  assert.deepEqual(
+    accepted.map((f) => f.name),
+    ["dev.stl"],
+    "genel tavanın altındaki STL, STEP tavanı yüzünden düşmüş"
+  );
+  assert.deepEqual(errors, [
+    fill(tr["instantQuote.upload.stepTooLarge"], { file: "dev.step", maxMb: 16 }),
+  ]);
+});
+
+test("STEP parçasında birim seçimi KİLİTLİ, mesh parçasında etkin", () => {
+  const step = stepPartFixture();
+  const stepHtml = renderPartCard(step, quoteFixture({ parts: [step] }));
+  assert.match(tagOf(stepHtml, /<select[^>]*>/), /disabled/);
+  assert.ok(
+    stepHtml.includes(tr["instantQuote.part.stepUnitsLocked"]),
+    "kilidin SEBEBİ yazılmamış"
+  );
+
+  const mesh = partFixture();
+  const meshHtml = renderPartCard(mesh, quoteFixture({ parts: [mesh] }));
+  assert.doesNotMatch(tagOf(meshHtml, /<select[^>]*>/), /disabled/);
+  assert.ok(
+    !meshHtml.includes(tr["instantQuote.part.stepUnitsLocked"]),
+    "mesh parçasına STEP birim notu düşmüş"
+  );
+});
+
+test("STEP parçasında ölçek girişi ETKİN kalır ve sığdırma önerisi okunur", () => {
+  // Birim kilidi ölçeği KAPATMAZ: baskı hacmine sığmayan parçanın çözümü
+  // `fitScale`dir ve o yol STEP'te de aynen çalışır.
+  const step = stepPartFixture({
+    dfm: [
+      {
+        code: "too_large",
+        severity: "error",
+        params: { maxX: 250, maxY: 210, maxZ: 210, fitScale: 0.75 },
+      },
+    ],
+  });
+  const html = renderPartCard(step, quoteFixture({ parts: [step] }));
+  assert.doesNotMatch(tagOf(html, /<input type="number"[^>]*>/), /disabled/);
+  assert.match(html, /Ölçeği 0,75 yaparsanız sığar\./);
+});
+
+test("STEP parçasında birim ÖNERİSİ çipi çizilmez", () => {
+  const step = stepPartFixture();
+  const html = renderPartCard(step, quoteFixture({ parts: [step] }));
+  assert.ok(
+    !html.includes("Bu dosya"),
+    "beyan edilmiş birime rağmen birim önerisi çipi çizilmiş"
+  );
+  // Aynı çip mesh parçasında ÇALIŞMAYA devam eder (sessizlik STEP'e özel).
+  const mesh = partFixture({ suggestedUnits: "in" });
+  assert.match(
+    renderPartCard(mesh, quoteFixture({ parts: [mesh] })),
+    /Bu dosya in olabilir/
+  );
+});
+
+test("sapma notu değere bağlıdır: STEP parçasında var, mesh parçasında yok", () => {
+  const step = stepPartFixture();
+  assert.ok(
+    renderPartCard(step, quoteFixture({ parts: [step] })).includes(
+      fill(tr["instantQuote.part.stepTessellation"], { mm: "0,01" })
+    ),
+    "sapma cümlesi kartta yok"
+  );
+  const mesh = partFixture();
+  assert.ok(
+    !renderPartCard(mesh, quoteFixture({ parts: [mesh] })).includes("sapma"),
+    "mesh parçasına sapma notu düşmüş"
+  );
 });
 
 test("baskı hacmine sığmayan parça çözümü rakamla söyler", () => {
@@ -1242,6 +1461,24 @@ test("belge fiyat kapısını aynen uygular ve imzalı model adresi taşımaz", 
   assert.match(html, /Fiyatları görmek için giriş yapın/);
   // Belge paylaşılan bir çıktıdır: imzalı GLB / kaynak adresi ASLA girmez.
   assert.doesNotMatch(html, /\.glb/);
+});
+
+test("belgeye sapma satırı PresentedPart'tan girer, dolu değilse çizilmez", () => {
+  // Anlaşmazlık savunması bu satıra bağlı (tasarım §3): "parça CAD'ime göre
+  // köşeli geldi" tartışmasında sapmanın YAZILI olduğu yer teklif belgesidir.
+  // Belgenin kaynağı `loadPresentedQuote` → `PresentedPart`tır;
+  // `quote_checkouts.parts_snapshot` (yani `FrozenQuotePart`) bu ekranda hiç
+  // okunmaz, bu yüzden testte de kullanılmaz.
+  const step = stepPartFixture({
+    price: { unitKurus: 7400, lineKurus: 14800, source: "auto", priceBreaks: [] },
+  });
+  const html = plain(renderDocument(pricedQuote({ parts: [step] })));
+  assert.ok(
+    html.includes(fill(tr["instantQuote.document.stepTessellation"], { mm: "0,01" })),
+    "belgede sapma satırı yok"
+  );
+  const mesh = plain(renderDocument(pricedQuote()));
+  assert.ok(!mesh.includes("sapma"), "mesh parçalı belgeye sapma satırı düşmüş");
 });
 
 test("belgenin yazdırma düğmesi çıktıya girmez", () => {

@@ -217,6 +217,11 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
       volumeCm3: scaled?.volumeCm3 ?? null,
       areaCm2: scaled?.areaCm2 ?? null,
       bodyCount: part.geometry?.bodyCount ?? null,
+      // Sapmanın TEK türetme yeri: çalışma alanı da teklif belgesi de bu alanı
+      // okur (belge `parts_snapshot`a bakmaz). Ölçüm parametreleri geometriyle
+      // birlikte donduğu için eski parçalar eski sapmalarıyla okunmaya devam
+      // eder — `STEP_TESSELLATION_VERSION` artsa bile.
+      tessellationMm: part.geometry?.tessellation?.deflectionMm ?? null,
       suggestedUnits: part.geometry ? suggestUnits(part.geometry, maxBuild) : null,
       config: {
         technologyKey: part.technologyKey,

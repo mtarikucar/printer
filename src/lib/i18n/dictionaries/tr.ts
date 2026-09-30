@@ -1149,6 +1149,7 @@ const tr: Dictionary = {
   "instantQuote.document.reference": "Açıklama",
   "instantQuote.document.referencePending":
     "Havale açıklamasına yazılacak ödeme referansı “Ödemeye geç” adımında verilir.",
+  "instantQuote.document.stepTessellation": "Üçgenleme sapması: en çok {mm} mm",
   "instantQuote.document.taxId": "VKN / TCKN",
   "instantQuote.document.taxOffice": "Vergi dairesi",
   "instantQuote.document.title": "Teklif belgesi",
@@ -1239,6 +1240,10 @@ const tr: Dictionary = {
   "instantQuote.part.rename": "Yeniden adlandır",
   "instantQuote.part.scale": "Ölçek",
   "instantQuote.part.select": "Parçayı seç",
+  "instantQuote.part.stepTessellation":
+    "STEP yüzeyleri baskı için üçgen ağa çevrildi; sapma en çok {mm} mm.",
+  "instantQuote.part.stepUnitsLocked":
+    "Ölçü birimi STEP dosyasından okundu (mm) ve değiştirilemez.",
   "instantQuote.part.units": "Birim",
   "instantQuote.part.unitsSuggestion": "Bu dosya {units} olabilir — uygula",
   "instantQuote.part.viewModel": "3B görüntüle",
@@ -1323,6 +1328,8 @@ const tr: Dictionary = {
   "instantQuote.upload.invalidFormat":
     "{file}: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
   "instantQuote.upload.processing": "İşleniyor…",
+  "instantQuote.upload.stepTooLarge":
+    "{file}: STEP dosyaları en çok {maxMb} MB olabilir — STEP aynı boyutta çok daha fazla geometri taşır. Parçayı ayırın ya da STL olarak gönderin.",
   "instantQuote.upload.tooLarge": "{file}: dosya {maxMb} MB sınırını aşıyor.",
   "instantQuote.upload.tooManyParts": "Bir teklifte en fazla {max} parça olabilir.",
   "instantQuote.upload.uploading": "Yükleniyor…",

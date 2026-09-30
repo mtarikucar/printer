@@ -137,3 +137,22 @@ export function emitQuoteChanged(args: { quoteId: string; userId?: string | null
     quoteId: args.quoteId,
   });
 }
+
+/**
+ * Çerçeve anlaşma değişti (parti serbest bırakıldı/iptal edildi, kilit
+ * uzatıldı, anlaşma iptal edildi).
+ *
+ * `emitQuoteChanged`in birebir deseni: BEKLEMEZ (`void`) ve yayın en iyi çaba
+ * işidir — `publishRealtime` hatayı zaten yutuyor, oysa parti serbest bırakma
+ * bir PARA işlemidir ve Redis'in erişilemez olması onu düşürmemeli.
+ * `userId` her zaman vardır (anonim çerçeve YOK) ama alan yine de isteğe
+ * bağlı: yayın hiçbir hâlde çağıranı hataya sürüklememeli.
+ */
+export function emitFrameworkChanged(args: {
+  frameworkId: string;
+  userId?: string | null;
+}): void {
+  const t = [topics.framework(args.frameworkId), topics.admin()];
+  if (args.userId) t.push(topics.customer(args.userId));
+  void publishRealtime(t, { kind: "framework", frameworkId: args.frameworkId });
+}

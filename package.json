@@ -149,6 +149,7 @@
     "test:fx-rates": "npx tsx scripts/test-fx-rates.ts",
     "test:fx:db": "npx tsx scripts/test-fx-db.ts",
     "test:quote-framework": "npx tsx scripts/test-quote-framework.ts",
+    "test:quote-framework:db": "npx tsx scripts/test-quote-framework-db.ts",
     "test:framework-migration:db": "npx tsx scripts/test-framework-migration-db.ts"
   },
   "dependencies": {

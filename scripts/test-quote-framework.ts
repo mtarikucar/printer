@@ -24,6 +24,7 @@
  * Çalıştır: npx tsx scripts/test-quote-framework.ts
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { addBusinessDays, istanbulDateKey } from "../src/lib/config/business-days";
@@ -295,6 +296,49 @@ test("tutar adları `…Kurus` ile BİTER (fiyat kapısı çerçeveyi de süzsü
   for (const name of ["amountMinor", "amountMicro", "totalMinor"]) {
     assert.ok(!moduleCode.includes(name), `${name}: döviz adlandırması çerçeveye taşınmış`);
   }
+});
+
+// SERVİS KATMANI (`src/lib/services/quote-framework.ts`) da denetlenir: saf
+// olmak zorunda DEĞİL (DB'ye bağlanıyor) ama `server-only` grafına
+// GİREMEZ — bakım turu (standalone Node worker) onu import edecek.
+const SERVICE = "src/lib/services/quote-framework.ts";
+const serviceCode = stripComments(readFileSync(join(ROOT, SERVICE), "utf8"));
+
+test(`${SERVICE}: \`server-only\` İÇERMEZ`, () => {
+  assert.doesNotMatch(serviceCode, /["']server-only["']/);
+});
+test(`${SERVICE}: \`quote-checkout\` dizesini İÇERMEZ`, () => {
+  // `quote-checkout.ts` → `analytics/attribution-server.ts` → `server-only`:
+  // standalone Node worker'ını açılışta crash-loop'a sokar. `freezeParts` bu
+  // yüzden `quote-service.ts`e taşındı.
+  assert.doesNotMatch(serviceCode, /quote-checkout/);
+});
+test(`${SERVICE}: \`loadActiveSnapshot\` ÇAĞIRMAZ (kilidi açan tek çağrı)`, () => {
+  // Klonun snapshot'ı ANLAŞMANIN snapshot'ıdır. Canlı kataloğu okumak,
+  // kilitli fiyatı sessizce bugünün fiyatına çevirmek olurdu.
+  assert.doesNotMatch(serviceCode, /loadActiveSnapshot/);
+});
+test(`${SERVICE}: tahsilat zincirini İÇERMEZ (çerçeve bir indirim değil)`, () => {
+  assert.doesNotMatch(serviceCode, /quote-tender|computeTender|payableKurus/);
+});
+test(`${SERVICE}: ikinci bir kapasite sorgusu KURMAZ`, () => {
+  // Kapasitenin tek sahibi `manufacturer-capacity.ts`tir (KARAR 1): eşik ve
+  // tezgâh tanımı orada durur, burada YALNIZ çağrılır.
+  assert.match(serviceCode, /loadManufacturerCapacities/);
+  assert.match(serviceCode, /manufacturerHasRoom/);
+  assert.doesNotMatch(serviceCode, /ACTIVE_MFG_STATUSES|orderStillOnManufacturerBench/);
+});
+test("`freezeParts` depoda TEK yerde TANIMLI (tek dondurma yolu)", () => {
+  // İkinci bir dondurma, kilitli fiyatın sürüklenmesinin en kısa yoludur.
+  const defs = execFileSync(
+    "grep",
+    ["-rlE", "^(export )?function freezeParts\\(", "src", "scripts"],
+    { cwd: ROOT, encoding: "utf8" }
+  )
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  assert.deepEqual(defs, ["src/lib/services/quote-service.ts"]);
 });
 
 // ─── 5) Anlaşma kurulumu: boyama YASAK, tavan tek ───────────────────────────

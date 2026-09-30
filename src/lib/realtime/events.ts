@@ -20,6 +20,10 @@ export type RealtimeEvent =
   | { kind: "quote_part"; quoteId: string; partId: string; status: AnalysisStatus }
   // Teklifin kendisi değişti (yeniden fiyatlama, admin eylemi, durum geçişi).
   | { kind: "quote"; quoteId: string }
+  // Çerçeve anlaşma değişti (parti serbest bırakıldı/iptal edildi, kilit
+  // uzatıldı, anlaşma iptal edildi). FİYAT TAŞIMAZ: müşteri ekranı haberi
+  // alınca anlaşmayı kendi yetkisiyle yeniden çeker.
+  | { kind: "framework"; frameworkId: string }
   | { kind: "badge" };
 
 // A connection subscribes to a SET of topics; an event is published with the
@@ -37,6 +41,9 @@ export const topics = {
   // Teklif odası: sahibi (ya da anonim çerez sahibi) açık teklif sayfasında
   // parça analizini canlı izler.
   quote: (quoteId: string) => `quote:${quoteId}`,
+  // Çerçeve anlaşma odası: müşteri açık `/cerceve/[number]` sayfasında parti
+  // serbest bırakmayı canlı görür.
+  framework: (frameworkId: string) => `framework:${frameworkId}`,
 };
 
 export interface RealtimeEnvelope {

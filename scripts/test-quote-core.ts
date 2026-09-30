@@ -979,7 +979,13 @@ test("STEP geometrisi de birim çevrimini quote-units.ts'te yapar", () => {
   // (`suggestUnits`) STEP'te hiç çalışmaz, çünkü dosya birimini kendisi söylüyor.
   const build = { x: 250, y: 210, z: 210 };
   assert.equal(suggestUnits(STEP_CUBE_20MM, build), "mm");
-  assert.equal(suggestUnits({ ...STEP_CUBE_20MM, ...cube(5), sourceUnits: "mm" }, build), "mm");
+  const smallStep: PartGeometry = {
+    ...cube(5),
+    sourceUnits: "mm",
+    tessellation: STEP_TESSELLATION,
+    solidCount: 1,
+  };
+  assert.equal(suggestUnits(smallStep, build), "mm", "5 mm'lik STEP parçasına inç ÖNERİLMEZ");
   assert.equal(suggestUnits(cube(5), build), "in", "mesh'te sezgi çalışmaya devam eder");
 });
 test("STEP geometrisi DfM uyarılarını aynı şekilde doğurur", () => {

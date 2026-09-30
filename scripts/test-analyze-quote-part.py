@@ -9,7 +9,9 @@ the three side files (thumb.png, preview.glb, canonical.stl).
 
 The expected key set is READ OUT OF `src/lib/config/quote-types.ts`, so a key
 renamed on the TypeScript side fails here instead of silently producing a report
-no consumer can read.
+no consumer can read. The STEP cases read `src/lib/config/quote-step.ts` the same
+way: STEP parts are priced from a mesh WE produce, so the deflection the report
+carries must be the one the shipped constant documents.
 """
 import io
 import json

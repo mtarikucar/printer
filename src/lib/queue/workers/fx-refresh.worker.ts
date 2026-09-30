@@ -25,7 +25,17 @@ import { isFlagEnabled } from "../../services/flags";
 import { getRedisConnection } from "../connection";
 import { FX_REFRESH_QUEUE } from "../quote-queues";
 
-async function runJob(job: Job) {
+/**
+ * Turun GÖVDESİ. İhraç edilmesinin tek sebebi kanıt: bayrak kapalıyken turun
+ * TCMB'ye hiç çıkmadığı ve `fx_rates`e satır YAZMADIĞI, kaynak taramasıyla
+ * değil GERÇEK bir koşumla iddia ediliyor (`scripts/test-fx-db.ts`). Bir
+ * regexp "bayrak okuması `refreshFxRates`ten önce geliyor" der; "satır
+ * yazılmadı" diyemez.
+ *
+ * Parametre `Pick<Job, "log">`: gövdenin işten kullandığı TEK şey günlük
+ * satırıdır ve imza bunu söyler — testin bütün bir `Job` uydurması gerekmez.
+ */
+export async function runFxRefreshJob(job: Pick<Job, "log">) {
   // Bayrak okuması turun İLK işi: özellik kapalıyken TCMB'ye hiç çıkılmaz.
   // Kapatma bir DB satırıdır, dağıtım gerektirmez — bu satır o kapatmanın
   // worker tarafındaki karşılığıdır.
@@ -51,7 +61,7 @@ async function runJob(job: Job) {
 }
 
 export function startFxRefreshWorker(): Worker {
-  const worker = new Worker(FX_REFRESH_QUEUE, runJob, {
+  const worker = new Worker(FX_REFRESH_QUEUE, runFxRefreshJob, {
     connection: getRedisConnection(),
     concurrency: 1,
   });

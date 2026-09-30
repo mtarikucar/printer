@@ -74,6 +74,9 @@ const test = async (name: string, run: () => Promise<void>) => {
 const BULLETIN = "2026-09-25";
 const THIRD_BUSINESS_DAY = new Date("2026-09-30T09:00:00Z");
 const FOURTH_BUSINESS_DAY = new Date("2026-10-01T09:00:00Z");
+/** "Bülten bugün eksik, dünkü satır taze" vakası: PAZARTESİ yayım, SALI okuma. */
+const MONDAY = "2026-09-28";
+const TUESDAY = new Date("2026-09-29T09:00:00Z");
 
 async function main() {
   await admin.connect();
@@ -133,8 +136,12 @@ async function main() {
       loadActiveFxSnapshot,
       loadFxAdminOverview,
       loadLatestFxBulletin,
+      refreshFxRates,
       upsertFxBulletin,
     } = await import("../src/lib/services/fx-rates");
+    const { FLAG_DEFAULTS } = await import("../src/lib/config/flags");
+    const { isFlagEnabled, setFlag } = await import("../src/lib/services/flags");
+    const { runFxRefreshJob } = await import("../src/lib/queue/workers/fx-refresh.worker");
 
     const snapshot = await loadActiveSnapshot();
     /** Tatil listesinin KAYNAĞI: `quote_pricing_settings.holidays` (ikinci takvim yok). */
@@ -307,6 +314,113 @@ async function main() {
       assert.ok(after.getTime() > catalogBefore.getTime(), "katalog yazımı ölçüyü oynatmadı");
       const view = await loadPresentedQuote(await access());
       assert.equal(view.catalogChangedSinceSnapshot, true);
+    });
+
+    // ─── Bozulmuş yol 4: BUGÜNÜN bülteni eksik, DÜNKÜ satır TAZE ───────────
+
+    await test("BUGÜN bülten YOK ama DÜNKÜ satır TAZE → gösterim ÇALIŞIR, tarih DÜNÜN", async () => {
+      // Bu hâl ARIZA DEĞİL, normal çalışma: TCMB yalnız iş günü yayımlıyor ve
+      // bülten gün içinde geç çıkabiliyor. Kritik olan şu: "bugünün kuru" diye
+      // dünkü rakamı BUGÜNÜN tarihiyle damgalamıyoruz — müşteriye DÜNÜN tarihi
+      // AYNEN gösteriliyor. Aksi hâlde belgede yazan tarih, TCMB'de o tarihte
+      // yayımlanmış rakamla TUTMAZDI.
+      assert.equal(await upsertFxBulletin(bulletin(MONDAY)), 3, "dünkü tam bülten kurulamadı");
+      const active = await loadActiveFxSnapshot([], TUESDAY);
+      assert.ok(active, "DÜN yayımlanmış taze bülten gösterimi kapattı");
+      assert.equal(active.bulletinDate, MONDAY, "bülten tarihi BUGÜNE kaydırılmış");
+      // `takenAt` OKUMA anıdır, bültenin tarihi DEĞİL: ikisi karışmamalı.
+      assert.equal(active.takenAt, TUESDAY.toISOString());
+      const overview = await loadFxAdminOverview([], TUESDAY);
+      assert.equal(overview.stale, false, "bir iş günü eski bülten bayat sayıldı");
+      assert.equal(overview.bulletin?.bulletinDate, MONDAY, "admin ekranı dünün tarihini yazmıyor");
+    });
+
+    // ─── Bozulmuş yol 5: TCMB erişilemez ───────────────────────────────────
+
+    await test("TCMB ERİŞİLEMEZ: tur satır YAZMAZ, son satır YERİNDE kalır, ATMAZ", async () => {
+      const before = await rowCount();
+      const latestBefore = await loadLatestFxBulletin();
+      assert.ok(latestBefore, "vaka geçerli bir son satırla başlamalı");
+
+      const realFetch = globalThis.fetch;
+      const realWarn = console.warn;
+      const warnings: string[] = [];
+      globalThis.fetch = (() => {
+        throw new Error("ECONNRESET");
+      }) as unknown as typeof fetch;
+      console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+      let outcome: Awaited<ReturnType<typeof refreshFxRates>>;
+      try {
+        // FIRLATMIYOR: etiketli sonuç döner. Atan bir tur, işçinin yeniden
+        // deneme yolunu değil çağıranın yolunu bozardı (admin ucu da bunu
+        // DOĞRUDAN çağırıyor).
+        outcome = await refreshFxRates();
+      } finally {
+        globalThis.fetch = realFetch;
+        console.warn = realWarn;
+      }
+      assert.equal(outcome.ok, false, "erişilemeyen TCMB başarılı sayıldı");
+      assert.ok(!outcome.ok && outcome.reason === "network_error", `etiket: ${JSON.stringify(outcome)}`);
+      assert.ok(
+        warnings.some((w) => w.includes("ECONNRESET")),
+        "yutulan arıza günlüğe yazılmadı: kimsenin bakmadığı bir arıza olurdu"
+      );
+
+      assert.equal(await rowCount(), before, "başarısız tur satır yazdı");
+      assert.deepEqual(
+        await loadLatestFxBulletin(),
+        latestBefore,
+        "son geçerli kur yerinden oynadı (fail-closed bozuldu)"
+      );
+      // …ve gösterim HÂLÂ çalışıyor: erişilemeyen bir tur, elde duran taze
+      // bülteni geçersiz kılmaz.
+      const active = await loadActiveFxSnapshot([], TUESDAY);
+      assert.equal(active?.bulletinDate, MONDAY, "başarısız tur gösterimi kapattı");
+    });
+
+    // ─── Bayrak-kapalı kanıtı: tur ilk satırda çıkar ────────────────────────
+
+    await test("BAYRAK KAPALI: tur TCMB'ye HİÇ çıkmaz ve satır YAZMAZ", async () => {
+      // Kapatma bir DB satırıdır (`platform_flags`), dağıtım gerektirmez. Bu
+      // vaka onun worker tarafındaki karşılığı: kapalı bir özellik için dış
+      // servise çıkılmaz ve tabloya dokunulmaz. Kapı gerçekten İLK satırda:
+      // `fetch` ATAN bir vekile bağlanıyor, yani çağrılsa tur kırmızıya döner.
+      const before = await rowCount();
+      const latestBefore = await loadLatestFxBulletin();
+      // Üretimdeki ÇIKIŞ DURUMU derlenmiş varsayılanda yazılı.
+      assert.equal(
+        FLAG_DEFAULTS.quote_fx_display_enabled,
+        false,
+        "özelliğin çıkış durumu artık KAPALI değil: bu vakanın konusu değişti"
+      );
+      // …ama bayrak AÇIKÇA yazılır, varsayılana bırakılmaz: `isFlagEnabled`
+      // cevabı 10 saniyelik bir REDİS önbeleğinde duruyor ve QA Redis'i turlar
+      // arasında PAYLAŞILIYOR (tek kullanımlık ŞEMA onu izole etmiyor) — bir
+      // önceki tur bayrağı açık bırakırsa vaka rastgele kırmızıya dönerdi.
+      // `setFlag` önbelleği sildiği için koşum deterministik olur. Emsal:
+      // `scripts/test-quote-checkout-db.ts` hediye kartı bayrağı.
+      await setFlag("quote_fx_display_enabled", false, "qa");
+      assert.equal(await isFlagEnabled("quote_fx_display_enabled"), false);
+
+      const logs: string[] = [];
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (() => {
+        throw new Error("bayrak KAPALIYKEN TCMB'ye çıkıldı");
+      }) as unknown as typeof fetch;
+      try {
+        await runFxRefreshJob({
+          log: async (message: string) => logs.push(message),
+        });
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+
+      assert.equal(await rowCount(), before, "kapalı bayrakta satır yazıldı");
+      assert.deepEqual(await loadLatestFxBulletin(), latestBefore, "kapalı bayrakta satır oynadı");
+      assert.ok(
+        logs.some((l) => l.includes("quote_fx_display_enabled")),
+        `turun atlandığı işin günlüğüne yazılmadı: ${JSON.stringify(logs)}`
+      );
     });
 
     console.log(`${checks} fx DB checks passed`);

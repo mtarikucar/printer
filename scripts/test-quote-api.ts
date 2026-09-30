@@ -156,6 +156,7 @@ function present(
     stepEnabled?: boolean;
     fxDisplayEnabled?: boolean;
     isFrameworkBatch?: boolean;
+    hasLiveFramework?: boolean;
   } = {}
 ) {
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
@@ -184,6 +185,8 @@ function present(
     // Parti kapısı da PARAMETRE: `presentQuote` sorgu yapmaz, gerçeği
     // yükleyici (`loadPresentedQuote` → `quoteIsFrameworkBatch`) BEYAN eder.
     isFrameworkBatch: extra.isFrameworkBatch ?? false,
+    // Anlaşmanın KAYNAK teklifi ölçüsü de öyle (`quoteHasLiveFramework`).
+    hasLiveFramework: extra.hasLiveFramework ?? false,
   });
 }
 
@@ -530,6 +533,7 @@ test("bekleyen ödeme teklifi kilitler ama ödemeye devam açık kalır", () => 
     stepEnabled: false,
     fxDisplayEnabled: false,
     isFrameworkBatch: false,
+    hasLiveFramework: false,
   });
   assert.equal(view.locked, true);
   assert.equal(view.liveDraftReference, "FIG-ABCD1234");
@@ -549,6 +553,17 @@ test("çerçeve partisi KİLİTLİ gösterilir, ödemesi AÇIK kalır", () => {
   // Aynı teklif parti OLMASA düzenlenebilirdi: kilidi getiren şey alanın kendisi.
   const plain = present(OWNER_VIEW, quote, [makePart()], { isFrameworkBatch: false });
   assert.equal(plain.locked, false);
+});
+
+test("anlaşmanın KAYNAK teklifi de KİLİTLİ gösterilir, ödemesi AÇIK kalır", () => {
+  // İkinci kapsam: anlaşmanın tanımı bu teklifte duruyor. Ekran onu
+  // düzenlenebilir gösterirse müşteri malzemeyi değiştirir ve BİR SONRAKİ
+  // parti başka bir ürünü kilitli fiyattan üretir (`assertEditable` bu
+  // teklifi de 409 ile reddediyor).
+  const quote = makeQuote({ status: "quoted" });
+  const source = present(OWNER_VIEW, quote, [makePart()], { hasLiveFramework: true });
+  assert.equal(source.locked, true);
+  assert.equal(source.readiness.canCheckout, true, "kaynak teklif ÖDENEBİLİR kalmalı");
 });
 
 test("süresi dolmuş teklif kilitlidir ve engel cümlesini taşır", () => {

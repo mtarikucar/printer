@@ -18,7 +18,7 @@
  * modülü worker sürecinden de görebilmeli.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -26,6 +26,7 @@ import {
   orders,
   quoteCheckouts,
   quoteFrameworkBatches,
+  quoteFrameworks,
   quoteParts,
   quotes,
   type Quote,
@@ -35,7 +36,11 @@ import { DISTANCE_CONTRACT_VERSION } from "@/lib/config/distance-contract";
 import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
 import { computeQuote, defaultPartConfig } from "@/lib/config/quote-compute";
 import { partPricingKey } from "@/lib/config/quote-keys";
-import { quotePermissions } from "@/lib/config/quote-policy";
+import {
+  QUOTE_FRAMEWORK_BATCH_REASON,
+  QUOTE_FRAMEWORK_SOURCE_REASON,
+  quotePermissions,
+} from "@/lib/config/quote-policy";
 import {
   QUOTE_UNITS,
   REVIEW_KINDS,
@@ -164,6 +169,35 @@ export async function quoteIsFrameworkBatch(
   return row !== undefined;
 }
 
+/**
+ * Bu teklif, KAPANMAMIŞ bir çerçeve anlaşmanın KAYNAK teklifi mi?
+ *
+ * Ölçü tek kolondur: `quote_frameworks.quote_id`. `cancelled` ve `completed`
+ * anlaşmalar SAYILMAZ — ikisinden de yeni parti doğmaz (`releaseBatch` yalnız
+ * `active` anlaşmada çalışır ve `extendFrameworkLock` bu ikisini reddeder),
+ * yani kaynağın kilidi onlarla birlikte DÜŞER. `expired` SAYILIR: uzatma onu
+ * `active`a geri döndürüyor, yani tanımı hâlâ bir partiyi üretebilir.
+ *
+ * `tx` verilirse ÇAĞIRANIN işleminde okunur (`liveDraftForQuote` ile aynı
+ * gerekçe: havuzda beş bağlantı var).
+ */
+export async function quoteHasLiveFramework(
+  quoteId: string,
+  tx?: QuoteReader
+): Promise<boolean> {
+  const [row] = await (tx ?? db)
+    .select({ id: quoteFrameworks.id })
+    .from(quoteFrameworks)
+    .where(
+      and(
+        eq(quoteFrameworks.quoteId, quoteId),
+        notInArray(quoteFrameworks.status, ["cancelled", "completed"])
+      )
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
 async function assertEditable(tx: QuoteCacheTx, quote: Quote): Promise<void> {
   const live = await liveDraftForQuote(quote.id, tx);
   const permissions = quotePermissions(
@@ -174,6 +208,9 @@ async function assertEditable(tx: QuoteCacheTx, quote: Quote): Promise<void> {
       // R1'in kapısı: parti klonunu düzenlemek `demoteQuotedToDraft`i
       // çağırırdı ve kilitli fiyat canlı katalog fiyatına dönerdi.
       isFrameworkBatch: await quoteIsFrameworkBatch(quote.id, tx),
+      // İKİNCİ kapsam: anlaşmanın KAYNAK teklifi. Kilitlenen şey yalnız fiyat
+      // değil TANIM — gerekçe `QUOTE_FRAMEWORK_SOURCE_REASON`da.
+      hasLiveFramework: await quoteHasLiveFramework(quote.id, tx),
     }
   );
   if (!permissions.canEdit) {
@@ -1179,6 +1216,21 @@ export async function updateQuote(access: QuoteAccess, patch: QuotePatch): Promi
  * DOLMUŞ teklifin çıkış yoludur, oysa süre dolumu `canEdit`'i kapatır. Kapalı
  * olan tek şey siparişe dönmüş / iptal edilmiş teklif ve bekleyen ödemedir.
  *
+ * ÇERÇEVE KAPILARI BU YÜZDEN BURADA, ELLE KURULUR. `assertEditable`
+ * koşmadığı için (`requireEdit: false`) `quotePermissions`ın iki çerçeve
+ * kapısı bu yola HİÇ uğramaz, oysa yeniden fiyatlamanın çerçeveye verdiği
+ * zarar düzenlemeden BÜYÜKTÜR:
+ *  - **Parti klonunda:** `pricing_snapshot` CANLI kataloğa döner, `status`
+ *    `draft` olur, `expires_at` kilidi AŞAR ve manuel fiyatlar NULL'lanır —
+ *    yani anlaşmanın kilitli fiyatı o parti için tamamen kaybolur. Eşitlik
+ *    kapısı parayı korur ama parti KALICI olarak ödenemez hâle gelir
+ *    (`releaseBatch` `planned` olmayan partiyi bırakmaz, ikinci bir klon yolu
+ *    yoktur).
+ *  - **Anlaşmanın kaynak teklifinde:** `snapshot_taken_at` BUGÜNE döner, oysa
+ *    klonun damgası oradan okunuyor (`releaseBatch`) — sonraki her parti,
+ *    anlaşmanın ESKİ kataloğunu taşırken TAZE damgalı görünürdü. Ayrıca
+ *    kaynağın tanımı anlaşmanın `parts_snapshot`ından ayrışırdı.
+ *
  * Manuel fiyatlar DÜŞER: admin onları eski katalog ve eski geçerlilik
  * penceresi için vermişti.
  */
@@ -1199,6 +1251,12 @@ export async function repriceQuote(access: QuoteAccess): Promise<void> {
       }
       if ((await liveDraftForQuote(quote.id, tx)) !== null) {
         throw new QuoteServiceError("Bu teklif için bekleyen bir ödeme var.", 409, "quote_locked");
+      }
+      if (await quoteIsFrameworkBatch(quote.id, tx)) {
+        throw new QuoteServiceError(QUOTE_FRAMEWORK_BATCH_REASON, 409, "quote_locked");
+      }
+      if (await quoteHasLiveFramework(quote.id, tx)) {
+        throw new QuoteServiceError(QUOTE_FRAMEWORK_SOURCE_REASON, 409, "quote_locked");
       }
       const now = new Date();
       await tx
@@ -1303,6 +1361,9 @@ export async function requestReview(access: QuoteAccess, args: ReviewRequest): P
         // Parti klonu için inceleme İSTENMEZ: fiyatı anlaşma belirledi ve bir
         // inceleme talebi teklifi `needs_review`a çekip ödemeyi kapatırdı.
         isFrameworkBatch: await quoteIsFrameworkBatch(quote.id, tx),
+        // Anlaşmanın kaynak teklifi de öyle: inceleme yeni bir manuel fiyata
+        // çıkar ve anlaşmanın DONMUŞ tanımıyla ayrışır.
+        hasLiveFramework: await quoteHasLiveFramework(quote.id, tx),
       }
     );
     if (!permissions.canRequestReview) {
@@ -1845,6 +1906,50 @@ export async function requote(access: QuoteAccess): Promise<{ number: string }> 
 
 // ─── Çerçeve partisinin klonu ───────────────────────────────────────────────
 
+/**
+ * Anlaşmanın DONMUŞ tanımıyla klonun tanımının karşılaştırıldığı alanlar.
+ *
+ * "Ne üretilecek" sorusunun cevabı bunlardır. DIŞARIDA BIRAKILANLAR ve
+ * gerekçeleri:
+ *  - `quantity`/`lineKurus`/`unitKurus`: adet PARTİNİN kararıdır (tasarımın
+ *    kendisi), fiyat da parti satırından gelir.
+ *  - `partId`/`position`/`canonicalStlKey`/`thumbnailKey`/`drawingKey`: kimlik
+ *    ve depolama anahtarları; klon kendi satırlarını ve kendi hardlink'lerini
+ *    taşır.
+ *  - `name`/`note`/`fileName`/`drawingName`: METİN. Bir parçanın adını
+ *    değiştirmek üretileni değiştirmez ve bir partiyi bu yüzden ödenemez hâle
+ *    getirmek zararın kendisinden büyük olurdu.
+ *  - `technologyName`/`materialName`/`finishName`: anahtarlardan ve AYNI
+ *    snapshot'tan türüyor, yani anahtar eşitse bunlar da eşittir.
+ *  - `dfmWarnings`: uyarı listesi adede bağlı (`dfmWarningKey`); parti adedi
+ *    bilerek farklıdır.
+ *
+ * `colorName` + `colorHex`, `colorKey`in ölçülebilen izidir: `FrozenQuotePart`
+ * anahtarı taşımıyor (sözleşme tipi, YALNIZ eklenerek genişletilir) ama ad ve
+ * kod anlaşmanın snapshot'ından çözülüyor, yani renk değişince ikisi de sapar.
+ * `scaleFactor` = `unitFactor(units) × scale`, yani birim ve ölçek bir sayıda.
+ */
+const FRAMEWORK_DEFINITION_FIELDS = [
+  "sourceFormat",
+  "scaleFactor",
+  "technologyKey",
+  "materialKey",
+  "colorName",
+  "colorHex",
+  "finishKey",
+  "layerUm",
+  "infillPct",
+  "tessellationMm",
+] as const;
+
+/** Sapan İLK alanın adı, yoksa null. */
+function frameworkPartDrift(agreed: FrozenQuotePart, clone: FrozenQuotePart): string | null {
+  for (const field of FRAMEWORK_DEFINITION_FIELDS) {
+    if (agreed[field] !== clone[field]) return field;
+  }
+  return null;
+}
+
 /** Klonlanacak parti satırı: KAYNAK teklifin parçası, parti adedi, kilitli fiyat. */
 export interface FrameworkBatchCloneLine {
   /** `quote_framework_batch_lines.part_id` = anlaşmanın kaynak teklifindeki parça. */
@@ -1859,6 +1964,14 @@ export interface FrameworkBatchCloneArgs {
   sourceQuote: Quote;
   /** ANLAŞMANIN dondurduğu katalog — `loadActiveSnapshot()` DEĞİL. */
   snapshot: PricingSnapshot;
+  /**
+   * ANLAŞMANIN dondurduğu parça TANIMI (`quote_frameworks.parts_snapshot`).
+   *
+   * Kilidin ikinci yarısı: klon yapılandırmayı CANLI kaynak parçadan okuyor
+   * (`copyPartInto` → `configForSnapshot`), o yüzden yazılan tanım anlaşmada
+   * donmuş tanımla KARŞILAŞTIRILIR (`frameworkPartDrift`).
+   */
+  partsSnapshot: readonly FrozenQuotePart[];
   /** Anlaşmanın `snapshot_taken_at`ı; klon tarihi DEĞİL (gerekçe aşağıda). */
   snapshotTakenAt: Date;
   leadTier: LeadTierKey;
@@ -1926,6 +2039,11 @@ export interface FrameworkBatchClone {
  *
  * `linkOrCopyStoredFile` dosyaları HARDLINK'ler (sıfır disk maliyeti) ve
  * analizi biten parça yeniden ANALİZ EDİLMEZ — klon anında fiyatlı görünür.
+ *
+ * TANIM KAPISI (gövdenin sonunda): yapılandırma CANLI kaynak parçadan geldiği
+ * için yazılan tanım, anlaşmanın `parts_snapshot`ıyla ALAN ALAN karşılaştırılır
+ * ve saparsa 409 `framework_part_changed` döner. Kilit yalnız FİYATI değil
+ * TANIMI da kapsar; gerekçe kapının başındaki yorumda.
  */
 export async function cloneQuoteForFrameworkBatch(
   tx: QuoteCacheTx,
@@ -2055,6 +2173,50 @@ export async function cloneQuoteForFrameworkBatch(
   const cache = await recomputeQuoteCache(created.id, tx);
   if (!cache) {
     throw new QuoteServiceError("Parti teklifi yazılamadı; tekrar deneyin.", 409, "clone_failed");
+  }
+
+  // ─── TANIM KAPISI ─────────────────────────────────────────────────────────
+  //
+  // Eşitlik kapısı (`frameworkBatchDriftCode`) PARAYI sınıyor ve tam da bu
+  // sapmayı GÖREMEZ: yapılandırma kaynak parçadan geldiği için manuel anahtar
+  // YAZILAN konfigürasyondan yeniden üretilir ve toplam yine `amount_kurus`a
+  // EŞİT çıkar. Yani kaynak parçanın malzemesi imzadan sonra değişirse parti
+  // BAŞKA bir ürünü ESKİ kilitli fiyattan üretirdi — müşteri lehine ya da
+  // aleyhine, ikisi de anlaşmanın ihlali.
+  //
+  // Birinci savunma kaynak teklifi salt okunur yapan kapıdır
+  // (`QUOTE_FRAMEWORK_SOURCE_REASON`); bu ikinci savunma, tanımı BAŞKA bir
+  // yolla (elle SQL, ileride bir admin ucu) değişen anlaşmada serbest
+  // bırakmanın SESSİZCE geçmesini engeller. Kıyasın ölçüsü TEK DONDURMA
+  // YOLUDUR (`freezeParts`) — anlaşmanın `parts_snapshot`ı da o işlevden
+  // doğdu, yani iki taraf aynı gözle ölçülüyor.
+  const clonedParts = await tx
+    .select()
+    .from(quoteParts)
+    .where(and(eq(quoteParts.quoteId, created.id), isNull(quoteParts.deletedAt)))
+    .orderBy(asc(quoteParts.sortOrder), asc(quoteParts.createdAt));
+  const cloneFrozen = freezeParts(args.snapshot, clonedParts, cache.computed);
+  const agreedByPartId = new Map(args.partsSnapshot.map((p) => [p.partId, p]));
+  for (const [index, line] of args.lines.entries()) {
+    const agreed = agreedByPartId.get(line.partId);
+    const written = cloneFrozen[index];
+    if (!agreed || !written) {
+      throw new QuoteServiceError(
+        "Parti satırı anlaşmanın donmuş parça tanımıyla eşleşmiyor; parti serbest bırakılamaz.",
+        409,
+        "framework_part_changed"
+      );
+    }
+    const field = frameworkPartDrift(agreed, written);
+    if (field !== null) {
+      throw new QuoteServiceError(
+        `Anlaşmanın kaynak teklifindeki "${agreed.name}" parçasının yapılandırması ` +
+          `anlaşmada donmuş hâlinden farklı (${field}); parti serbest bırakılamaz. ` +
+          "Anlaşmanın tanımını geri alın ya da yeni bir anlaşma kurun.",
+        409,
+        "framework_part_changed"
+      );
+    }
   }
   return { id: created.id, number: created.number, computed: cache.computed };
 }
@@ -2193,6 +2355,10 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
   // `demoteQuotedToDraft`e giden yoldur ve anlaşmanın kilitli fiyatını düşürür.
   // Ekran ile uç AYNI cevabı verir (uç tarafı: `assertEditable`).
   const isFrameworkBatch = await quoteIsFrameworkBatch(quote.id);
+  // Anlaşmanın KAYNAK teklifi de salt okunur: ekranda açık kalan bir düzenleme
+  // düğmesi, ucun 409'uyla biten bir düğmedir (kural motorunun dosya başlığı:
+  // "ekranın uygulamadığı bir kuralı ucun yazması buradan imkânsızdır").
+  const hasLiveFramework = await quoteHasLiveFramework(quote.id);
 
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
     leadTier: quote.leadTier,
@@ -2207,21 +2373,25 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
     viewer: access.viewer,
     liveDraftReference: live?.reference ?? null,
     orderNumber,
-    // "Katalog güncellendi — yeniden fiyatla" bandı bir ÇAĞRIDIR ve çerçeve
-    // partisinde yapılacak bir şey yok: klon salt okunurdur (`repriceQuote`
-    // `canEdit` ister) ve fiyatı anlaşmayla KİLİTLİDİR. Bandı orada çizmek,
-    // müşteriye hiç basamayacağı bir düğme göstermek ve kilitli fiyatı ŞÜPHELİ
-    // göstermek olurdu. Damga BOZULMAZ (klon anlaşmanın `snapshot_taken_at`ını
-    // taşımaya devam eder — bkz. `cloneQuoteForFrameworkBatch`); susan şey
-    // yalnız banttır.
+    // "Katalog güncellendi — yeniden fiyatla" bandı bir ÇAĞRIDIR ve çerçevenin
+    // İKİ tarafında da yapılacak bir şey yok: `repriceQuote` hem parti klonunu
+    // hem anlaşmanın kaynak teklifini 409 ile REDDEDİYOR (gerekçesi orada) ve
+    // fiyat anlaşmayla KİLİTLİDİR. Bandı orada çizmek, müşteriye hiç
+    // basamayacağı bir düğme göstermek ve kilitli fiyatı ŞÜPHELİ göstermek
+    // olurdu. Damga BOZULMAZ (klon anlaşmanın `snapshot_taken_at`ını taşımaya
+    // devam eder — bkz. `cloneQuoteForFrameworkBatch`); susan şey yalnız
+    // banttır.
     catalogChanged:
-      !isFrameworkBatch && catalogAt.getTime() > quote.snapshotTakenAt.getTime(),
+      !isFrameworkBatch &&
+      !hasLiveFramework &&
+      catalogAt.getTime() > quote.snapshotTakenAt.getTime(),
     now: new Date(),
     sign: getPublicUrl,
     shareBaseUrl: `${appUrl()}/teklif/${quote.number}`,
     stepEnabled,
     fxDisplayEnabled,
     isFrameworkBatch,
+    hasLiveFramework,
   });
 }
 

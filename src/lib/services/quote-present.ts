@@ -216,6 +216,16 @@ export interface PresentQuoteInput {
    * kilitli fiyatı canlı katalog fiyatına döner (tasarım R1).
    */
   isFrameworkBatch: boolean;
+  /**
+   * Bu teklif, KAPANMAMIŞ bir çerçeve anlaşmanın KAYNAK teklifi mi
+   * (`quoteHasLiveFramework`, `quote-service.ts`).
+   *
+   * ZORUNLU, gerekçe `isFrameworkBatch` ile aynı: opsiyonel bırakmak, ekranın
+   * anlaşmanın TANIMINI düzenlenebilir göstermesi demekti. Müşteri düzenlerse
+   * sonraki parti BAŞKA bir ürünü kilitli fiyattan üretir
+   * (`QUOTE_FRAMEWORK_SOURCE_REASON`).
+   */
+  hasLiveFramework: boolean;
 }
 
 export function presentQuote(input: PresentQuoteInput): PresentedQuote {
@@ -228,6 +238,7 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
       hasLiveDraft: input.liveDraftReference !== null,
       now,
       isFrameworkBatch: input.isFrameworkBatch,
+      hasLiveFramework: input.hasLiveFramework,
     }
   );
 

@@ -31,6 +31,7 @@ import {
   orderModelFiles,
   orders,
   quoteCheckouts,
+  quoteFrameworkBatches,
   quotes,
 } from "@/lib/db/schema";
 import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
@@ -69,6 +70,36 @@ const STL_VERTEX_FLOATS = 9;
 // ─── 1. Bağlama: hangi teklif hangi siparişe ait ────────────────────────────
 
 /**
+ * ÇERÇEVE KÖPRÜSÜNÜN İKİNCİ YARISI: partinin SİPARİŞİ.
+ *
+ * Teklif bir çerçeve partisinin klonuysa (`quote_framework_batches.quote_id`)
+ * partinin siparişi burada yazılır. Okuyan taraf (`loadFrameworkDetail` ve
+ * `ledgerOf`, `quote-framework.ts`) kovaları `order_id` üzerinden kuruyor:
+ * yazılmazsa ödenmiş bir parti müşteri ekranında SONSUZA DEK "ödeme bekliyor"
+ * kovasında kalır, `orderNumber`/`paymentStatus`/`commissionRateBps` null
+ * görünür ve tercih edilen üretici dalı hiç tetiklenmez.
+ *
+ * `order_id IS NULL` KOŞULLU: ikinci bir kickoff hiçbir şey yazmaz (tekil
+ * indeks `order_id` üzerinde) ve çift ödeme hâlinde partinin ilk siparişi
+ * KORUNUR. Ölçü partinin klon teklifidir, yani teklif siparişi olmayan hiçbir
+ * sipariş buraya girmez.
+ */
+async function bridgeFrameworkBatchOrderTx(
+  tx: Tx,
+  args: { quoteId: string; orderId: string }
+): Promise<void> {
+  await tx
+    .update(quoteFrameworkBatches)
+    .set({ orderId: args.orderId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(quoteFrameworkBatches.quoteId, args.quoteId),
+        isNull(quoteFrameworkBatches.orderId)
+      )
+    );
+}
+
+/**
  * Ödenen taslağın teklifini siparişe bağlar. `kickOffOrderProcessing`in
  * İŞLEMİNDE çağrılır: sipariş satırı zaten kilitli ve durum geçişiyle aynı
  * commit'e girer, yani "sipariş `review`'a geçti ama teklif bağlanmadı" hâli
@@ -101,7 +132,13 @@ export async function linkQuoteToOrderTx(
     .set({ orderId: args.orderId, status: "ordered", updatedAt: now })
     .where(and(eq(quotes.id, checkout.quoteId), isNull(quotes.orderId)))
     .returning({ id: quotes.id });
-  if (linked) return { quoteId: checkout.quoteId };
+  if (linked) {
+    await bridgeFrameworkBatchOrderTx(tx, {
+      quoteId: checkout.quoteId,
+      orderId: args.orderId,
+    });
+    return { quoteId: checkout.quoteId };
+  }
 
   // Yazamadık: teklifin zaten bir siparişi var. Kendi siparişimizse bu yalnız
   // ikinci bir kickoff'tur (tekrar çağrılabilirlik), söylenecek bir şey yok.
@@ -111,6 +148,12 @@ export async function linkQuoteToOrderTx(
     .where(eq(quotes.id, checkout.quoteId))
     .limit(1);
   if (!existing?.orderId || existing.orderId === args.orderId) {
+    // İkinci kickoff: köprü koşullu olduğu için ilk koşuda yazılan bağ aynen
+    // kalır, yazılmadıysa (eski satır) burada onarılır.
+    await bridgeFrameworkBatchOrderTx(tx, {
+      quoteId: checkout.quoteId,
+      orderId: args.orderId,
+    });
     return { quoteId: checkout.quoteId };
   }
 

@@ -321,9 +321,13 @@ async function main() {
     const { loadActiveSnapshot } = await import("../src/lib/services/quote-catalog");
     const { toPricingPartInput } = await import("../src/lib/services/quote-cache");
     const { adminManualPriceKey } = await import("../src/lib/services/quote-admin");
-    const { quoteIsFrameworkBatch, updatePart, parsePartPatch } = await import(
-      "../src/lib/services/quote-service"
-    );
+    const {
+      parsePartPatch,
+      quoteHasLiveFramework,
+      quoteIsFrameworkBatch,
+      repriceQuote,
+      updatePart,
+    } = await import("../src/lib/services/quote-service");
     const { resolveQuoteAccess } = await import("../src/lib/services/quote-access");
     const {
       activateFramework,
@@ -913,7 +917,12 @@ async function main() {
       const [clone] = await db.select().from(quotes).where(eq(quotes.id, clone1.quoteId)).limit(1);
       const p = quotePermissions(
         { status: clone.status, expiresAt: clone.expiresAt, orderId: clone.orderId },
-        { hasLiveDraft: false, now: new Date(), isFrameworkBatch: true }
+        {
+          hasLiveDraft: false,
+          now: new Date(),
+          isFrameworkBatch: true,
+          hasLiveFramework: false,
+        }
       );
       assert.equal(p.canEdit, false);
       assert.equal(p.canCheckout, true);
@@ -1010,6 +1019,15 @@ async function main() {
       assert.equal(draft.paintingPriceKurus, 0);
       assert.equal(draft.quantity, 50, "kapasite sayacı Σ parti adedi");
 
+      // KÖPRÜNÜN İLK YARISI, ÜRETİM KODUNUN ELİYLE: taslak doğduğu işlemde
+      // partiye bağlandı. Test HİÇBİR ŞEY yazmıyor.
+      const [withDraft] = await db
+        .select({ draftId: quoteFrameworkBatches.draftId })
+        .from(quoteFrameworkBatches)
+        .where(eq(quoteFrameworkBatches.id, batchIds[0]))
+        .limit(1);
+      assert.equal(withDraft.draftId, draft.id, "parti kendi TASLAĞINA bağlandı");
+
       const promoted = await promoteDraftToOrder(draft.id);
       paidOrderId = promoted.orderId;
       const [order] = await db.select().from(orders).where(eq(orders.id, paidOrderId)).limit(1);
@@ -1039,11 +1057,18 @@ async function main() {
       );
     });
 
-    await test("parti siparişinin çerçeveye bağı kurulur (order_id köprüsü)", async () => {
-      await db
-        .update(quoteFrameworkBatches)
-        .set({ orderId: paidOrderId })
-        .where(eq(quoteFrameworkBatches.id, batchIds[0]));
+    await test("parti siparişinin çerçeveye bağı ÜRETİM KODUNDA kurulur", async () => {
+      // KÖPRÜNÜN İKİNCİ YARISI: `linkQuoteToOrderTx` (`quote-order.ts`)
+      // taslağın siparişe terfisiyle AYNI işlemde partinin `order_id`ini
+      // yazdı. Test burada HİÇBİR ŞEY yazmıyor — yazsa, olmayan bir davranışı
+      // var gibi okuturdu ve üretimde ödenmiş parti sonsuza dek "ödeme
+      // bekliyor" kovasında kalırdı.
+      const [bridged] = await db
+        .select({ orderId: quoteFrameworkBatches.orderId })
+        .from(quoteFrameworkBatches)
+        .where(eq(quoteFrameworkBatches.id, batchIds[0]))
+        .limit(1);
+      assert.equal(bridged.orderId, paidOrderId, "köprüyü ÜRETİM kodu yazdı");
       const detail = (await loadFrameworkDetail(frameworkId))!;
       const batch = detail.batches.find((b) => b.id === batchIds[0])!;
       assert.equal(batch.orderId, paidOrderId);
@@ -1886,6 +1911,251 @@ async function main() {
       for (const key of Object.keys(view[0])) {
         assert.ok(!key.endsWith("Kurus"), `üreticiye fiyat sızdı: ${key}`);
       }
+    });
+
+    // ═══ 14) TANIM da kilitli: repriceQuote ve kaynak teklif ═════════════════
+    //
+    // Fiyat kilidinin İKİ deliği bu bölümde kapanıyor:
+    //  1. `repriceQuote` `assertEditable` KOŞMAZ (`requireEdit: false`), yani
+    //     parti kapısı o yola hiç uğramıyordu: müşteri kendi partisini
+    //     yeniden fiyatlayıp kilitli fiyatı YOK EDEBİLİRDİ (parti de kalıcı
+    //     olarak ödenemez hâle gelirdi — `releaseBatch` `planned` olmayan
+    //     partiyi bırakmaz).
+    //  2. Klon yapılandırmayı CANLI kaynak parçadan okuyor. Kaynak teklif
+    //     düzenlenebilir kalırsa müşteri imzadan SONRA malzemeyi/ölçeği
+    //     değiştirir, sonraki parti YENİ tanımla üretilir ve ESKİ kilitli
+    //     birim fiyatla faturalanır. EŞİTLİK KAPISI BUNU GÖREMEZ: manuel
+    //     anahtar yazılan konfigürasyondan yeniden üretildiği için toplam yine
+    //     `amount_kurus`a EŞİT çıkar.
+    let owner = { id: "", email: "" };
+    let q = { id: "", number: "", version: 0, partIds: [] as string[] };
+    let lockId = "";
+    let plannedIds: string[] = [];
+    let plannedSums: number[] = [];
+    let released = { quoteId: "", amountKurus: 0 };
+    await test("anlaşma kurulur ve parti 1 serbest bırakılır (kurulum)", async () => {
+      owner = await makeUser();
+      q = await makeQuote(owner.id, [{ name: "Kapak", quantity: 40 }]);
+      const st = await computeOf(q.id);
+      const created = await createFrameworkFromQuote({
+        quoteId: q.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        priceLockedUntil: LOCK_UNTIL,
+        shippingAddress: address,
+      });
+      assert.equal(created.ok, true, JSON.stringify(created));
+      if (!created.ok) return;
+      lockId = created.id;
+      await activateFramework({
+        frameworkId: lockId,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+      const lead = st.computed.totals.leadDays ?? 5;
+      const planned = await planBatches({
+        frameworkId: lockId,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        batches: [
+          { plannedShipDate: shipDate(lead, 10), lines: [{ partId: q.partIds[0], quantity: 20 }] },
+          { plannedShipDate: shipDate(lead, 40), lines: [{ partId: q.partIds[0], quantity: 20 }] },
+        ],
+      });
+      assert.equal(planned.ok, true, JSON.stringify(planned));
+      if (!planned.ok) return;
+      plannedIds = planned.batches.map((b) => b.id!);
+      plannedSums = planned.batches.map((b) => b.amountKurus);
+      released = await releaseBatch({
+        frameworkId: lockId,
+        batchId: plannedIds[0],
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+      assert.equal(released.amountKurus, plannedSums[0]);
+    });
+
+    await test("iki ölçü AYRI: klon parti, kaynak teklif ANLAŞMA", async () => {
+      assert.equal(await quoteIsFrameworkBatch(released.quoteId), true);
+      assert.equal(await quoteHasLiveFramework(released.quoteId), false);
+      assert.equal(await quoteIsFrameworkBatch(q.id), false);
+      assert.equal(await quoteHasLiveFramework(q.id), true, "kaynak: anlaşma SÜRÜYOR");
+    });
+
+    await test("parti klonuna repriceQuote 409: kilitli fiyat YOK OLMAZ", async () => {
+      const [before] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.id, released.quoteId))
+        .limit(1);
+      const [partBefore] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.quoteId, released.quoteId))
+        .limit(1);
+      session = { userId: owner.id, email: owner.email };
+      const access = await resolveQuoteAccess(released.quoteId);
+      assert.ok(access !== null);
+      const ret = await refusal(() => repriceQuote(access!));
+      assert.equal(ret.status, 409);
+      assert.equal(ret.code, "quote_locked");
+      assert.equal(
+        ret.message,
+        "Bu teklif bir çerçeve anlaşmanın partisidir; düzenlenemez.",
+        "uç EKRANLA aynı cümleyi söyler"
+      );
+      const [after] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.id, released.quoteId))
+        .limit(1);
+      assert.equal(after.status, "quoted", "`draft`a DÜŞMEDİ");
+      assert.deepEqual(
+        after.pricingSnapshot,
+        before.pricingSnapshot,
+        "snapshot CANLI kataloğa dönmedi"
+      );
+      assert.equal(
+        after.snapshotTakenAt.getTime(),
+        before.snapshotTakenAt.getTime(),
+        "damga bugüne kaymadı"
+      );
+      assert.equal(
+        after.expiresAt.getTime(),
+        before.expiresAt.getTime(),
+        "geçerlilik kilidi AŞMADI"
+      );
+      const [partAfter] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, partBefore.id))
+        .limit(1);
+      assert.equal(partAfter.manualPriceKey, partBefore.manualPriceKey, "anahtar NULL'lanmadı");
+      assert.equal(partAfter.manualUnitPriceKurus, partBefore.manualUnitPriceKurus);
+      const state = await computeOf(released.quoteId);
+      assert.equal(
+        state.computed.totals.totalKurus,
+        released.amountKurus,
+        "parti hâlâ KİLİTLİ tutarı hesaplıyor (yani hâlâ ödenebilir)"
+      );
+    });
+
+    await test("anlaşmanın KAYNAK teklifine repriceQuote 409: damga KAYMAZ", async () => {
+      const [before] = await db.select().from(quotes).where(eq(quotes.id, q.id)).limit(1);
+      session = { userId: owner.id, email: owner.email };
+      const access = await resolveQuoteAccess(q.id);
+      assert.ok(access !== null);
+      const ret = await refusal(() => repriceQuote(access!));
+      assert.equal(ret.status, 409);
+      assert.equal(ret.code, "quote_locked");
+      assert.equal(
+        ret.message,
+        "Bu teklif bir çerçeve anlaşmanın tanımıdır; anlaşma sürerken düzenlenemez."
+      );
+      const [after] = await db.select().from(quotes).where(eq(quotes.id, q.id)).limit(1);
+      assert.equal(after.status, "quoted");
+      assert.equal(
+        after.snapshotTakenAt.getTime(),
+        before.snapshotTakenAt.getTime(),
+        // Klonun damgası BURADAN okunuyor (`releaseBatch`): kaynak yeniden
+        // fiyatlanırsa sonraki her parti anlaşmanın ESKİ kataloğunu taşırken
+        // TAZE damgalı görünürdü.
+        "kaynağın damgası KAYMADI"
+      );
+    });
+
+    await test("kaynak teklifin parçası DÜZENLENEMEZ: tanım da kilitli", async () => {
+      const [partBefore] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, q.partIds[0]))
+        .limit(1);
+      session = { userId: owner.id, email: owner.email };
+      const access = await resolveQuoteAccess(q.id);
+      assert.ok(access !== null);
+      const ret = await refusal(() =>
+        updatePart(access!, q.partIds[0], parsePartPatch({ scale: 1.1 }))
+      );
+      assert.equal(ret.status, 409);
+      assert.equal(ret.code, "quote_locked");
+      assert.equal(
+        ret.message,
+        "Bu teklif bir çerçeve anlaşmanın tanımıdır; anlaşma sürerken düzenlenemez."
+      );
+      const [partAfter] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, q.partIds[0]))
+        .limit(1);
+      assert.equal(partAfter.scale, partBefore.scale, "ölçek DEĞİŞMEDİ");
+    });
+
+    await test("tanım BAŞKA bir yolla saparsa serbest bırakma 409 `framework_part_changed`", async () => {
+      // Kapıyı ATLAYARAK (doğrudan SQL — ileride bir admin ucu ya da elle
+      // bir onarım) kaynak parçanın ölçeğini değiştiriyoruz. Bu, tutarı
+      // BOZMAYAN bir sapmadır: manuel anahtar yazılan konfigürasyondan
+      // yeniden üretilir, yani eşitlik kapısı sessiz kalır. Yakalayan şey
+      // TANIM KAPISI olmak zorunda.
+      await db
+        .update(quoteParts)
+        .set({ scale: 1.1 })
+        .where(eq(quoteParts.id, q.partIds[0]));
+      const quotesBefore = (await db.select({ id: quotes.id }).from(quotes)).length;
+      const ret = await refusal(() =>
+        releaseBatch({
+          frameworkId: lockId,
+          batchId: plannedIds[1],
+          adminEmail: "qa-admin@example.test",
+          reason: REASON,
+        })
+      );
+      assert.equal(ret.status, 409);
+      assert.equal(
+        ret.code,
+        "framework_part_changed",
+        "fiyat kapısı DEĞİL tanım kapısı yakaladı"
+      );
+      assert.match(ret.message, /scaleFactor/, "sapan alan ADIYLA söylenir");
+      const [batch] = await db
+        .select()
+        .from(quoteFrameworkBatches)
+        .where(eq(quoteFrameworkBatches.id, plannedIds[1]))
+        .limit(1);
+      assert.equal(batch.status, "planned", "parti PLANLI kaldı");
+      assert.equal(batch.quoteId, null, "yarım klon BAĞLANMADI");
+      const quotesAfter = (await db.select({ id: quotes.id }).from(quotes)).length;
+      assert.equal(quotesAfter, quotesBefore, "klon satırı da GERİ ALINDI");
+
+      // Tanım geri alınınca parti yine KİLİTLİ tutarla serbest bırakılır.
+      await db.update(quoteParts).set({ scale: 1 }).where(eq(quoteParts.id, q.partIds[0]));
+      const out = await releaseBatch({
+        frameworkId: lockId,
+        batchId: plannedIds[1],
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+      assert.equal(out.amountKurus, plannedSums[1]);
+      const state = await computeOf(out.quoteId);
+      assert.equal(state.computed.totals.totalKurus, out.amountKurus);
+    });
+
+    await test("anlaşma iptal edilince kaynak teklif YİNE düzenlenebilir", async () => {
+      await cancelFramework({
+        frameworkId: lockId,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+      assert.equal(await quoteHasLiveFramework(q.id), false, "kapanmış anlaşma SAYILMAZ");
+      session = { userId: owner.id, email: owner.email };
+      const access = await resolveQuoteAccess(q.id);
+      assert.ok(access !== null);
+      await updatePart(access!, q.partIds[0], parsePartPatch({ scale: 1.05 }));
+      const [part] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, q.partIds[0]))
+        .limit(1);
+      assert.equal(part.scale, 1.05, "kilit anlaşmayla birlikte DÜŞTÜ");
     });
 
     await test("listeler: müşteri kendi anlaşmalarını, admin hepsini görür", async () => {

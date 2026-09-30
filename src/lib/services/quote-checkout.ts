@@ -133,6 +133,7 @@ import {
   QuoteServiceError,
   freezeParts,
   liveDraftForQuote,
+  quoteHasLiveFramework,
 } from "@/lib/services/quote-service";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { parseTaxId } from "@/lib/services/tax-id";
@@ -752,7 +753,16 @@ async function freezeCheckout(args: {
       .limit(1);
     const permissions = quotePermissions(
       { status: quote.status, expiresAt: quote.expiresAt, orderId: quote.orderId },
-      { hasLiveDraft: false, now, isFrameworkBatch: frameworkBatch !== undefined }
+      {
+        hasLiveDraft: false,
+        now,
+        isFrameworkBatch: frameworkBatch !== undefined,
+        // Anlaşmanın KAYNAK teklifi ödenebilir kalır (kural motorunun kararı);
+        // ölçü yine de BEYAN edilir, çünkü alan zorunlu ve `false` yazmak bir
+        // yalan olurdu — kural motoru yarın kaynağı daraltırsa bu yol da
+        // kendiliğinden doğru davranır.
+        hasLiveFramework: await quoteHasLiveFramework(quote.id, tx),
+      }
     );
     if (!permissions.canCheckout) {
       throw new QuoteServiceError(
@@ -994,6 +1004,20 @@ async function freezeCheckout(args: {
       leadTier: quote.leadTier,
       leadDays: totals.leadDays,
     });
+
+    // ÇERÇEVE KÖPRÜSÜNÜN İLK YARISI: partinin taslağı. Köprüyü YAZAN yer
+    // taslağın DOĞDUĞU yerdir; okuyan yer (`loadFrameworkDetail`) ikinci bir
+    // gerçek üretemez. `orders`/`order_drafts` tanımlarına kolon EKLENMEDİ
+    // (o dosyalar başka bir oturumun elinde) — bağ partinin kendi satırında
+    // durur. Üzerine yazılır, boşaltılmaz: taslak süresi dolup müşteri
+    // yeniden ödemeye başladığında parti YENİ taslağa bağlanır (tekil indeks
+    // `draft_id` üzerinde, yani bir taslak en fazla bir partiye ait).
+    if (frameworkBatch) {
+      await tx
+        .update(quoteFrameworkBatches)
+        .set({ draftId: draft.id, updatedAt: now })
+        .where(eq(quoteFrameworkBatches.id, frameworkBatch.id));
+    }
 
     return { draft, quote, tender, bankTransferDeadline, attribution };
   });

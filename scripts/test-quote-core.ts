@@ -34,6 +34,7 @@ import { computeQuote, defaultPartConfig } from "../src/lib/config/quote-compute
 import { addBusinessDays, istanbulDateKey } from "../src/lib/config/business-days";
 import {
   QUOTE_FRAMEWORK_BATCH_REASON,
+  QUOTE_FRAMEWORK_SOURCE_REASON,
   checkoutBlockers,
   quotePermissions,
 } from "../src/lib/config/quote-policy";
@@ -828,6 +829,7 @@ function perms(
     orderId: string | null;
     hasLiveDraft: boolean;
     isFrameworkBatch: boolean;
+    hasLiveFramework: boolean;
   }> = {}
 ) {
   return quotePermissions(
@@ -842,6 +844,8 @@ function perms(
       // ZORUNLU alan: sarmalayıcının varsayılanı YALNIZ testin okunurluğu
       // için; üretimdeki dört çağrı yeri gerçeği BEYAN etmek zorunda.
       isFrameworkBatch: over.isFrameworkBatch ?? false,
+      // İkinci ZORUNLU çerçeve ölçüsü: anlaşmanın KAYNAK teklifi.
+      hasLiveFramework: over.hasLiveFramework ?? false,
     }
   );
 }
@@ -953,6 +957,42 @@ test("parti OLMAYAN teklifte davranış DEĞİŞMEDİ", () => {
     blockedReason: null,
   });
   assert.equal(perms("needs_review", { isFrameworkBatch: false }).canEdit, true);
+});
+test("anlaşmanın KAYNAK teklifi DÜZENLENEMEZ ama ÖDENEBİLİR", () => {
+  // İkinci kapsam: kilitlenen şey yalnız FİYAT değil TANIM. Kaynak teklif
+  // düzenlenebilir kalırsa müşteri imzadan sonra malzemeyi değiştirir, bir
+  // sonraki parti YENİ tanımla üretilir ve ESKİ kilitli birim fiyatla
+  // faturalanır — eşitlik kapısı bunu GÖREMEZ (manuel anahtar yazılan
+  // konfigürasyondan yeniden üretilir, toplam yine tutar).
+  for (const status of ["draft", "needs_review", "quoted"] as QuoteStatus[]) {
+    const p = perms(status, { hasLiveFramework: true });
+    assert.equal(p.canEdit, false, status);
+    assert.equal(p.canRequestReview, false, status);
+    assert.equal(p.canCheckout, true, status);
+    assert.equal(p.blockedReason, QUOTE_FRAMEWORK_SOURCE_REASON, status);
+  }
+  assert.equal(
+    QUOTE_FRAMEWORK_SOURCE_REASON,
+    "Bu teklif bir çerçeve anlaşmanın tanımıdır; anlaşma sürerken düzenlenemez."
+  );
+  // İki ölçü AYRI iki satırdır ve cümleleri de ayrı: müşteri hangi kapsamda
+  // olduğunu görmeli.
+  assert.notEqual(QUOTE_FRAMEWORK_SOURCE_REASON, QUOTE_FRAMEWORK_BATCH_REASON);
+  // Öncelik: siparişe dönmüş/iptal/süresi dolmuş kaynak ÖNCE o sebebi söyler.
+  assert.equal(
+    perms("ordered", { hasLiveFramework: true }).blockedReason,
+    "Bu teklif siparişe dönüştü."
+  );
+  assert.equal(
+    perms("quoted", { hasLiveFramework: true, expiresAt: PAST }).canCheckout,
+    false
+  );
+  // PARTİ kapısı kaynak kapısından ÖNCE gelir (bir teklif ikisinde birden
+  // olamaz, ama sıra yazılı olmalı).
+  assert.equal(
+    perms("quoted", { isFrameworkBatch: true, hasLiveFramework: true }).blockedReason,
+    QUOTE_FRAMEWORK_BATCH_REASON
+  );
 });
 test("checkoutBlockers hazır teklifte boş döner", () => {
   const parts = [part({}, { quantity: 10 })];

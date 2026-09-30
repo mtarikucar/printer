@@ -933,6 +933,10 @@ export async function releaseBatch(args: {
     const clone = await cloneQuoteForFrameworkBatch(tx, {
       sourceQuote,
       snapshot,
+      // TANIM KAPISININ ölçüsü: klon yapılandırmayı CANLI kaynak parçadan
+      // okuyor, o yüzden yazılan tanım anlaşmanın DONMUŞ tanımıyla
+      // karşılaştırılır (409 `framework_part_changed`).
+      partsSnapshot: framework.partsSnapshot,
       // ANLAŞMANIN snapshot damgası = kaynak teklifin `snapshot_taken_at`ı:
       // anlaşma o teklifin `pricing_snapshot`ını KOPYALADI, yani kilitli
       // kataloğun yaşı odur. `quote_frameworks` ayrı bir damga kolonu

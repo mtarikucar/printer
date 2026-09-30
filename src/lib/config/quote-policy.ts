@@ -23,6 +23,23 @@ export const QUOTE_IN_REVIEW_REASON = "Teklifiniz ekibimizin incelemesinde.";
  */
 export const QUOTE_FRAMEWORK_BATCH_REASON =
   "Bu teklif bir çerçeve anlaşmanın partisidir; düzenlenemez.";
+/**
+ * Bir çerçeve anlaşmanın KAYNAK teklifi (anlaşma kapanmamış).
+ *
+ * Anlaşma bu teklifin parçalarını `parts_snapshot`ta DONDURDU ve her parti o
+ * tanımın klonudur (`cloneQuoteForFrameworkBatch` yapılandırmayı CANLI kaynak
+ * parçadan okur). Kaynak düzenlenebilir kalırsa müşteri imzadan sonra
+ * malzemeyi/yüzeyi/katmanı — hatta kritik toleransı — değiştirir, bir sonraki
+ * parti YENİ tanımla üretilir ve ESKİ kilitli birim fiyatla faturalanır;
+ * eşitlik kapısı bunu göremez, çünkü manuel anahtar yazılan konfigürasyondan
+ * yeniden üretilir ve toplam yine `amount_kurus`a EŞİT çıkar. Kilitlenen şey
+ * yalnız FİYAT değil TANIMDIR.
+ *
+ * Müşterinin çıkış yolu kapalı değil: `requote` kaynağa DOKUNMAZ (bugünün
+ * kataloğuyla yeni bir teklif açar) ve anlaşma iptal/tamamlanınca kilit düşer.
+ */
+export const QUOTE_FRAMEWORK_SOURCE_REASON =
+  "Bu teklif bir çerçeve anlaşmanın tanımıdır; anlaşma sürerken düzenlenemez.";
 
 export interface QuotePermissions {
   canEdit: boolean;
@@ -55,10 +72,26 @@ export interface QuotePermissions {
  *
  * `canCheckout` parti hâlinde AÇIK KALIR: kapatmak, serbest bırakılmış ve
  * müşterinin ödemesi beklenen bir partiyi tuzağa düşürmek olurdu.
+ *
+ * ─── `hasLiveFramework` de ZORUNLU (AYNI gerekçe, ikinci kapsam) ────────────
+ *
+ * `isFrameworkBatch` KLONU kapatıyor; `hasLiveFramework` anlaşmanın KAYNAK
+ * teklifini kapatır (`QUOTE_FRAMEWORK_SOURCE_REASON`, gerekçesi orada). İki
+ * ölçü AYRI iki satırdır (`quote_framework_batches.quote_id` ↔
+ * `quote_frameworks.quote_id`) ve bir teklif ikisinden yalnız birinde olabilir.
+ * Kaynakta da `canCheckout` AÇIK KALIR: anlaşma kurmak teklifin kendisini
+ * ödenemez yapmaz ve kapatmak, bugün ödenebilir olan bir teklifi anlaşma
+ * kuruldu diye tuzağa düşürmek olurdu (daraltmak bir ÜRÜN kararıdır, bu tur
+ * onu vermiyor).
  */
 export function quotePermissions(
   q: { status: QuoteStatus; expiresAt: Date; orderId: string | null },
-  ctx: { hasLiveDraft: boolean; now: Date; isFrameworkBatch: boolean }
+  ctx: {
+    hasLiveDraft: boolean;
+    now: Date;
+    isFrameworkBatch: boolean;
+    hasLiveFramework: boolean;
+  }
 ): QuotePermissions {
   const closed = { canEdit: false, canCheckout: false, canRequestReview: false };
 
@@ -90,6 +123,16 @@ export function quotePermissions(
       canCheckout: true,
       canRequestReview: false,
       blockedReason: QUOTE_FRAMEWORK_BATCH_REASON,
+    };
+  }
+  if (ctx.hasLiveFramework) {
+    // Anlaşmanın TANIMI bu satırda duruyor: bir düzenleme, sonraki partinin
+    // BAŞKA bir ürünü kilitli fiyattan üretmesi demektir. Ödeme AÇIK kalır.
+    return {
+      canEdit: false,
+      canCheckout: true,
+      canRequestReview: false,
+      blockedReason: QUOTE_FRAMEWORK_SOURCE_REASON,
     };
   }
   if (q.status === "needs_review") {

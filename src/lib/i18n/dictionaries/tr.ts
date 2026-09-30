@@ -1162,6 +1162,22 @@ const tr: Dictionary = {
   "instantQuote.document.title": "Teklif belgesi",
   "instantQuote.document.validUntil": "Bu teklif {date} tarihine kadar geçerlidir.",
 
+  // instantQuote — çerçeve anlaşma (planlı parti teslimi)
+  // Bu turda YALNIZ saf çekirdeğin kapalı kümelerinin karşılıkları: ilerleme
+  // kovaları ve fiyat kilidi cümlesi. Kovalar DAİMA taahhüde toplanır
+  // (`frameworkProgressBuckets`), yani bu etiketlerin toplamı çubuğun
+  // tamamıdır. Ekran ve uç cümleleri sonraki turlarda eklenir.
+  "instantQuote.framework.awaitingPayment": "Ödeme bekleyen",
+  "instantQuote.framework.cancelledOrRefunded": "İptal / iade",
+  "instantQuote.framework.committed": "Taahhüt edilen",
+  "instantQuote.framework.delivered": "Teslim edilen",
+  "instantQuote.framework.inProduction": "Üretimde",
+  "instantQuote.framework.lockExpired": "Fiyat geçerliliği doldu — yeni fiyat için bize yazın",
+  "instantQuote.framework.planned": "Planlanan",
+  "instantQuote.framework.priceLockedUntil": "Fiyat {date} tarihine kadar geçerli",
+  "instantQuote.framework.shipped": "Sevk edilen",
+  "instantQuote.framework.title": "Çerçeve anlaşma",
+
   // instantQuote — döviz GÖSTERİMİ (TCMB kuru)
   // GÖSTERİM, yalnız gösterim: bağlayıcı her tutar ve tahsil edilen her kuruş
   // Türk lirasıdır (32 Sayılı Karar m.4/g + 2008-32/34 Tebliğ m.8). Bu yüzden

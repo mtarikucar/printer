@@ -1146,6 +1146,23 @@ const en = {
   "instantQuote.document.title": "Quote document",
   "instantQuote.document.validUntil": "This quote is valid until {date}.",
 
+  // instantQuote — framework agreement (planned batch delivery)
+  // This round carries ONLY the labels of the pure core's closed sets: the
+  // progress buckets and the price-lock sentence. The buckets ALWAYS add up to
+  // the commitment (`frameworkProgressBuckets`), so these labels together are
+  // the whole bar. Screen and endpoint sentences land in later rounds.
+  "instantQuote.framework.awaitingPayment": "Awaiting payment",
+  "instantQuote.framework.cancelledOrRefunded": "Cancelled / refunded",
+  "instantQuote.framework.committed": "Committed",
+  "instantQuote.framework.delivered": "Delivered",
+  "instantQuote.framework.inProduction": "In production",
+  "instantQuote.framework.lockExpired":
+    "The price is no longer valid — write to us for a new price",
+  "instantQuote.framework.planned": "Planned",
+  "instantQuote.framework.priceLockedUntil": "Price valid until {date}",
+  "instantQuote.framework.shipped": "Shipped",
+  "instantQuote.framework.title": "Framework agreement",
+
   // instantQuote — foreign-currency DISPLAY (TCMB rate)
   "instantQuote.fx.chargedInTry":
     "Payment is collected in Turkish lira (₺), in the amount of {amount}.",

@@ -258,6 +258,25 @@ check(
   /import\s*\{[\s\S]*?painterLoadUnits[\s\S]*?\}\s*from/.test(ownerCode) &&
     !/function\s+painterLoadUnits/.test(ownerCode)
 );
+// ÜÇÜNCÜ OKUYAN: çerçeve siparişlerin plan kapısı. Aynı pin, aynı sebep —
+// `frameworkBatchLoadUnits` ağırlık kuralını IMPORT eder, kopyalamaz. Kopya
+// olsaydı plan zamanında sığan bir parti, atama zamanında sığmayabilirdi.
+const frameworkCode = stripComments(
+  readFileSync(join(ROOT, "src/lib/config/quote-framework.ts"), "utf8")
+);
+check(
+  "çerçeve çekirdeği de ağırlık kuralını IMPORT eder (kopya yok)",
+  /import\s*\{[\s\S]*?painterLoadUnits[\s\S]*?\}\s*from/.test(frameworkCode) &&
+    !/function\s+painterLoadUnits/.test(frameworkCode) &&
+    !/PAINTER_UNITS_PER_EXTRA_SLOT\s*=/.test(frameworkCode)
+);
+// Eşik TEK sahiplidir: saf çekirdek `maxConcurrentOrders` ile karşılaştırma
+// YAPMAZ, kapasite kararını argüman olarak alır (KARAR 2).
+check(
+  "çerçeve çekirdeği kapasite EŞİĞİNİ kurmaz (maxConcurrentOrders yok)",
+  !frameworkCode.includes("maxConcurrentOrders"),
+  frameworkCode.match(/.*maxConcurrentOrders.*/)?.[0]
+);
 // Ham count(*) geri gelirse ölçü yeniden ikiye ayrılır.
 check(
   "modül siparişleri count(*) ile SAYMAZ (ölçü birimdir)",
@@ -460,6 +479,9 @@ for (const f of [
   "src/lib/services/capability.ts",
   "src/lib/config/order-status-policy.ts",
   "src/lib/config/painter-scoring.ts",
+  // Çerçeve siparişlerin saf çekirdeği: ağırlık kuralını buradan okuyor ve
+  // BullMQ worker'ı ile istemci bileşenleri aynı dosyayı yükleyecek.
+  "src/lib/config/quote-framework.ts",
 ]) {
   check(
     `${f}: "server-only" import etmiyor`,

@@ -337,10 +337,16 @@ async function main() {
       extendFrameworkLock,
       listAdminFrameworks,
       listCustomerFrameworks,
+      loadFrameworkAudit,
       loadFrameworkDetail,
+      loadFrameworkEntry,
+      loadFrameworkForwardLoad,
       loadManufacturerPlannedBatches,
+      loadOrderFrameworkCard,
       planBatches,
+      releasableBatchCount,
       releaseBatch,
+      setFrameworkPreferences,
     } = await import("../src/lib/services/quote-framework");
     const { createQuoteCheckout } = await import("../src/lib/services/quote-checkout");
     const { quoteCheckoutSchema } = await import("../src/lib/validators/quote-checkout");
@@ -2172,6 +2178,202 @@ async function main() {
         "süzgeç çalışıyor"
       );
       assert.ok(cancelledOnly.items.some((i) => i.id === frameworkId));
+    });
+
+    // ═══ 16) F3'ÜN OKUMA/YAZMA YÜZEYLERİ ════════════════════════
+    //
+    // Admin ekranlarını besleyen yeni sorguların HEPSİ burada GERÇEK
+    // veritabanına karşı koşuyor. Gerekçe: dördü de elle yazılmış SQL
+    // (korelasyonlu alt sorgu, `BETWEEN …::date`, JSON anlık görüntüsü okuma)
+    // ve bir sözdizimi/alias hatası yalnız çalışma anında görünür — `tsc`
+    // hepsini yeşil geçirir.
+
+    await test("sipariş → anlaşma köprüsü kartı (parti n/m)", async () => {
+      const card = await loadOrderFrameworkCard(paidOrderId);
+      assert.ok(card, "ödenmiş partinin kartı yok");
+      assert.equal(card!.frameworkId, frameworkId);
+      assert.match(card!.frameworkNumber, /^C-\d{6,}$/, card!.frameworkNumber);
+      assert.equal(card!.batchPosition, 1, "parti sırası");
+      assert.ok(card!.batchCount >= 1, `parti sayısı: ${card!.batchCount}`);
+      assert.equal(card!.units, 50, "partinin adedi");
+      // Parti OLMAYAN sipariş → null. Sorgu YİNE koşuyor: asıl risk
+      // korelasyonlu alt sorgunun alias'ıydı ve bir hata burada 42P01 verir.
+      assert.equal(await loadOrderFrameworkCard(randomUUID()), null);
+    });
+
+    await test("pencere, ileriye dönük yük, denetim izi ve tercihler", async () => {
+      const [shop] = await db
+        .insert(manufacturers)
+        .values({
+          companyName: "QA Çapa Atölyesi",
+          email: `mfg-anchor-${randomUUID()}@example.test`,
+          passwordHash: "x",
+          contactPerson: "QA Yetkili",
+          phone: "+905321234599",
+          status: "active",
+          maxConcurrentOrders: 50,
+        })
+        .returning({ id: manufacturers.id });
+      const o = await makeUser();
+      const qq = await makeQuote(o.id, [{ name: "Panel", quantity: 60 }]);
+      const st = await computeOf(qq.id);
+      const lead = st.computed.totals.leadDays ?? 5;
+      const created = await createFrameworkFromQuote({
+        quoteId: qq.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        priceLockedUntil: LOCK_UNTIL,
+        shippingAddress: address,
+        preferredManufacturerId: shop.id,
+      });
+      assert.equal(created.ok, true, JSON.stringify(created));
+      if (!created.ok) return;
+      await activateFramework({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+
+      // Penceresi AÇIK parti: tarihi TAM olarak en erken gün (bugün bıraksan
+      // ancak yetişir). Penceresi KAPALI parti: iki ay ileri.
+      const near = shipDate(lead, 0);
+      const far = shipDate(lead, 60);
+      const before = await releasableBatchCount();
+      const planned = await planBatches({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        batches: [
+          { plannedShipDate: near, lines: [{ partId: qq.partIds[0], quantity: 20 }] },
+          { plannedShipDate: far, lines: [{ partId: qq.partIds[0], quantity: 20 }] },
+        ],
+      });
+      assert.equal(planned.ok, true, JSON.stringify(planned));
+      const after = await releasableBatchCount();
+      assert.equal(
+        after - before,
+        1,
+        `yalnız penceresi açılmış parti sayılmalı (önce ${before}, sonra ${after})`
+      );
+
+      const detail = (await loadFrameworkDetail(created.id))!;
+      assert.equal(detail.leadDays, lead, "teslim günü donmuş anlık görüntüden");
+      const nearBatch = detail.batches.find((b) => b.plannedShipDate === near)!;
+      const farBatch = detail.batches.find((b) => b.plannedShipDate === far)!;
+      assert.equal(nearBatch.releaseWindowOpen, true, "yakın partinin penceresi kapalı");
+      assert.equal(farBatch.releaseWindowOpen, false, "uzak partinin penceresi açık");
+
+      // İLERİYE DÖNÜK YÜK: 30 günlük pencere YALNIZ yakın partiyi görür.
+      const load = await loadFrameworkForwardLoad({
+        manufacturerId: shop.id,
+        windowDays: 30,
+      });
+      assert.equal(load.batchCount, 1, "30 günlük pencerede bir parti");
+      assert.equal(load.units, 20);
+      assert.equal(load.loadUnits, 2, "1 + floor(20/20)");
+      const wide = await loadFrameworkForwardLoad({
+        manufacturerId: shop.id,
+        windowDays: 120,
+      });
+      assert.equal(wide.batchCount, 2, "120 günlük pencerede iki parti");
+      assert.equal(wide.units, 40);
+
+      // DENETİM İZİ: kaynağın altında, en yenisi başta.
+      const audit = await loadFrameworkAudit(qq.id);
+      assert.deepEqual(
+        [...audit].map((a) => a.action).sort(),
+        ["framework_activate", "framework_batch_plan", "framework_create"],
+        JSON.stringify(audit.map((a) => a.action))
+      );
+
+      // TERCİHLER: çapa kaldırılır, not yazılır — PARA DEĞİŞMEZ.
+      await setFrameworkPreferences({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        preferredManufacturerId: null,
+        adminNote: "QA notu",
+      });
+      const cleared = (await loadFrameworkDetail(created.id))!;
+      assert.equal(cleared.preferredManufacturerId, null, "çapa kalkmadı");
+      assert.equal(cleared.adminNote, "QA notu");
+      assert.equal(
+        cleared.committedTotalKurus,
+        detail.committedTotalKurus,
+        "tercih değişikliği TAAHHÜT TOPLAMINA dokundu"
+      );
+      assert.equal(
+        cleared.batchesTotalKurus,
+        detail.batchesTotalKurus,
+        "tercih değişikliği Σ parti tutarına dokundu"
+      );
+      // Çapa kalktıysa ileriye dönük yük de düşer (anlaşma o atölyeye
+      // planlanmış sayılmaz).
+      const dropped = await loadFrameworkForwardLoad({
+        manufacturerId: shop.id,
+        windowDays: 120,
+      });
+      assert.equal(dropped.batchCount, 0, "çapa kalktı ama yük hâlâ sayılıyor");
+
+      // DENETİM SATIRI YAZILMADI — BİLEREK: `quote_admin_actions.action`
+      // kapalı CHECK kümesinde bu ucun karşılığı yok ve bu tur migration
+      // üretmiyor. Var olan bir eylemin adıyla satır yazmak izi yalanlamaktı.
+      const auditAfter = await loadFrameworkAudit(qq.id);
+      assert.equal(auditAfter.length, audit.length, "PATCH denetim satırı yazdı");
+
+      // Olmayan bir atölye ÇAPA OLAMAZ: yazılsaydı her partide sessizce
+      // sıralamaya düşen bir "çapa" kalırdı.
+      const bad = await refusal(() =>
+        setFrameworkPreferences({
+          frameworkId: created.id,
+          adminEmail: "qa-admin@example.test",
+          reason: REASON,
+          preferredManufacturerId: randomUUID(),
+        })
+      );
+      assert.equal(bad.code, "manufacturer_unavailable", bad.message);
+      assert.equal(bad.status, 409);
+    });
+
+    await test("giriş kapısı: fiyatlı teklif uygun, anlaşması olan teklif DEĞİL", async () => {
+      const o2 = await makeUser();
+      const fresh = await makeQuote(o2.id, [{ name: "Taban", quantity: 25 }]);
+      const entry = await loadFrameworkEntry(fresh.id);
+      assert.equal(entry.eligible, true, JSON.stringify(entry.refusals));
+      assert.deepEqual(entry.refusals, []);
+      assert.equal(entry.existingFramework, null);
+      assert.ok(entry.manufacturers.length >= 1, "çapa seçicisinin listesi boş");
+
+      // Anlaşması OLAN teklif: düğme yerine anlaşmaya bağlantı.
+      const taken = await loadFrameworkEntry(sourceQuote.id);
+      assert.equal(taken.eligible, false);
+      assert.ok(taken.existingFramework, "var olan anlaşma bildirilmiyor");
+      assert.equal(taken.existingFramework!.id, frameworkId);
+      assert.ok(
+        taken.refusals.some((r) => /zaten bir çerçeve anlaşma/.test(r)),
+        JSON.stringify(taken.refusals)
+      );
+
+      // TASLAK teklif: kapı UCUN verdiği cevabı aynen yazıyor.
+      const draftQuote = await makeQuote(o2.id, [{ name: "Taslak", quantity: 25 }], {
+        status: "draft",
+      });
+      const draftEntry = await loadFrameworkEntry(draftQuote.id);
+      assert.equal(draftEntry.eligible, false);
+      assert.ok(
+        draftEntry.refusals.some((r) => /fiyatlandırılmış/.test(r)),
+        JSON.stringify(draftEntry.refusals)
+      );
+      const ret = await refusal(() =>
+        createFrameworkFromQuote({
+          quoteId: draftQuote.id,
+          adminEmail: "qa-admin@example.test",
+          reason: REASON,
+          priceLockedUntil: LOCK_UNTIL,
+          shippingAddress: address,
+        })
+      );
+      assert.equal(ret.code, "quote_not_quoted", "ekran ile uç AYNI kapıyı okumuyor");
     });
 
     console.log(`${checks} quote framework DB checks passed`);

@@ -470,6 +470,66 @@ async function main() {
     );
   });
 
+  // ─── pymeshlab EKLENTİ KAPISI ────────────────────────────────────────────
+  //
+  // `import pymeshlab` BAŞARILI olduğu hâlde filtrelerin HİÇBİRİ yüklenmemiş
+  // olabilir: eklentiler Qt üzerinden yüklenir ve `libOpenGL.so.0`,
+  // `libfontconfig.so.1`, `libfreetype.so.6` adıyla istenir. Biri yoksa
+  // `MeshSet` bütün `meshing_*` metotlarını kaybeder ve her çağrı
+  // `AttributeError` verir.
+  //
+  // ÖLÇÜLDÜ (node:20-slim + `docker/Dockerfile`in apt listesi, 2026-09-30):
+  // üç kütüphane EKSİKKEN eksik nesneler tam olarak bu üçü, `MeshSet`te
+  // `meshing_close_holes` ve `meshing_decimation_quadric_edge_collapse` YOK;
+  // üçü eklendiğinde eksik nesne kalmıyor, su geçirmez OLMAYAN açık kutu
+  // onarılıp 8000 mm³ ölçülüyor ve 20.480 yüz 2000'e iniyor.
+  //
+  // BEDELİ SESSİZDİ: iki çağrı da `except` ile korunuyor, yani hata loga
+  // düşüyor ve sonuç "onarılamadı" oluyor — su geçirmez olmayan her yükleme
+  // `no_volume` DfM hatasıyla otomatik fiyat alamıyor ve yüz tavanının
+  // üstündeki her parçanın ön izlemesi hiç üretilmiyor.
+  await test("Dockerfile pymeshlab eklentilerinin yüklenmesini garanti eder", async () => {
+    const dockerfile = await readFile(
+      join(import.meta.dirname, "..", "docker", "Dockerfile"),
+      "utf8"
+    );
+    const baseStage = dockerfile.slice(0, dockerfile.indexOf("FROM base AS deps"));
+    for (const pkg of ["libopengl0", "libfontconfig1", "libfreetype6"]) {
+      assert.ok(
+        new RegExp(`^\\s+${pkg} \\\\$`, "m").test(baseStage),
+        `base aşamasının apt listesinde ${pkg} yok: pymeshlab filtreleri sessizce kaybolur`
+      );
+    }
+
+    // Kapı, kodun GERÇEKTEN çağırdığı filtreleri saymak zorunda. Liste
+    // python kaynağından TÜRETİLİR: yeni bir filtre çağrısı eklenip kapıya
+    // yazılmazsa bu iddia kırmızıya döner.
+    const used = new Set<string>();
+    for (const name of ["process_mesh.py", "analyze_quote_part.py", "process_upload_model.py"]) {
+      const src = await readFile(join(import.meta.dirname, name), "utf8");
+      for (const m of src.matchAll(/\b[a-z_0-9]+\.(meshing_[a-z_]+)\(/g)) used.add(m[1]);
+    }
+    assert.ok(used.size > 0, "python kaynağında hiç meshing_* çağrısı bulunamadı");
+
+    // Satır sonu `\` ile bölünmüş RUN komutu tek mantıksal satıra getirilir;
+    // aranan şey `MeshSet()` kuran ve `hasattr` ile sınayan komut.
+    const gate = baseStage
+      .replace(/\\\n\s*/g, " ")
+      .split("\n")
+      .find((line) => line.startsWith("RUN ") && line.includes("pymeshlab.MeshSet()"));
+    assert.ok(gate, "base aşamasında pymeshlab eklenti kapısı yok");
+    assert.ok(
+      gate.includes("hasattr"),
+      "eklenti kapısı yalnız import ediyor: import EKSİK EKLENTİYLE DE başarılı olur"
+    );
+    for (const filter of [...used].sort()) {
+      assert.ok(
+        gate.includes(`'${filter}'`),
+        `eklenti kapısı ${filter} filtresini saymıyor: kodun çağırdığı her filtre kapıda olmalı`
+      );
+    }
+  });
+
   console.log("\nquote-model-validation — boyut ve biçim kapıları");
 
   await test("maxBytes aşılırsa → too_large", async () => {

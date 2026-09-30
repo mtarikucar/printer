@@ -6,11 +6,33 @@
 # deliberately NOT installed.
 FROM node:20-slim AS base
 
+# pymeshlab'in FİLTRE EKLENTİLERİ Qt üzerinden yüklenir ve bu üç kütüphaneyi
+# ADIYLA ister. Biri eksikse `import pymeshlab` YİNE BAŞARILI olur — eksik olan
+# çekirdek değil, eklentilerdir — ama `MeshSet` bütün filtre metotlarını
+# KAYBEDER ve her çağrı `AttributeError` verir. Ölçüm (node:20-slim + aşağıdaki
+# liste, 2026-09-30): eksik `libOpenGL.so.0`, `libfontconfig.so.1`,
+# `libfreetype.so.6`; `meshing_close_holes` ve
+# `meshing_decimation_quadric_edge_collapse` yok. Üçü eklendiğinde: eksik
+# nesne kalmıyor, su geçirmez OLMAYAN açık kutu onarılıp 8000 mm³ ölçülüyor,
+# 20k yüz 2000'e indiriliyor.
+#
+# BEDELİ SESSİZDİ, çünkü iki çağrı da `except` ile korunuyor:
+# `repair_with_pymeshlab` onarılmamış ağı geri verir → hacim ÖLÇÜLEMEZ →
+# `no_volume` DfM hatası → su geçirmez olmayan HER yükleme otomatik fiyat
+# alamaz, elle teklife düşer (`quote-pricing.ts`: "Hacim ölçülemeyen parça
+# fiyatlanamaz"); `decimate_if_needed` de ağı olduğu gibi bırakır → yüz
+# tavanının üstündeki parçanın ÖN İZLEMESİ hiç üretilmez.
+#
+# `libgl1-mesa-glx` (libGL.so.1) bunların yerine GEÇMEZ: `libOpenGL.so.0`
+# libglvnd'nin ayrı paketidir (`libopengl0`) ve libgl1'in bağımlılığı değildir.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
     libgl1-mesa-glx \
+    libopengl0 \
+    libfontconfig1 \
+    libfreetype6 \
     libglib2.0-0 \
     libgomp1 \
     poppler-utils \
@@ -24,6 +46,16 @@ COPY scripts/requirements.txt scripts/requirements.txt
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r scripts/requirements.txt
 ENV PATH="/opt/venv/bin:$PATH"
+
+# EKLENTİ KAPISI — `import pymeshlab` YETMEZ (yukarıdaki apt yorumuna bakın).
+# Çekirdek eksik bir Qt eklenti kümesiyle de sorunsuz import edilir; kaybolan
+# şey FİLTRE METOTLARIdır ve ikisi de `except` ile korunduğu için üretimde
+# sessizce kaybolur. Bu satır, kullanılan iki filtrenin VARLIĞINI imaj
+# DERLEMESİNDE sınar: bir gün apt listesinden biri düşerse müşterinin yüklemesi
+# değil, DERLEME kırılır.
+RUN /opt/venv/bin/python3 -c "import pymeshlab, sys; ms = pymeshlab.MeshSet(); \
+missing = [n for n in ('meshing_close_holes', 'meshing_repair_non_manifold_edges', 'meshing_repair_non_manifold_vertices', 'meshing_decimation_quadric_edge_collapse') if not hasattr(ms, n)]; \
+sys.exit('pymeshlab filtre eklentileri yuklenmedi (eksik sistem kutuphanesi): ' + ', '.join(missing)) if missing else print('pymeshlab filtreleri hazir')"
 
 # ── Deps: install all node dependencies (including devDeps for tsx) ──
 FROM base AS deps

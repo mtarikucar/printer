@@ -21,17 +21,32 @@
  * DEĞİLDİR: kur verilmediğinde mevcut `formatCurrency`ye düşer, yani ₺ yolu
  * bu turda tek satır bile değişmedi.
  *
+ * Dikişin ÜÇ girişi var ve üçü aynı kuralı paylaşır:
+ *  - `money(kurus, rate)` — tek başına duran bir tutar (birim fiyat, KDV).
+ *  - `lineMoney(kurus, minor, rate)` — TOPLANAN bir kümenin satırı; değeri
+ *    kümenin ara toplamına AYRILMIŞTIR (`convertPartLines`).
+ *  - `fxSurface(...)` — yüzeyin TEK KAPISI: fiş çevrilemiyorsa kur, fiş ve
+ *    satır kümesi birlikte yok olur, yani yarısı `€` yarısı `₺` bir ekran
+ *    doğamaz.
+ *
  * Bu dosya SAF ve İSTEMCİ/SUNUCU ORTAK: `"use client"` yoktur, çünkü belge
  * sayfasının sunucu bileşeni `?kur=` çözümlemesini (`parseDisplayCurrency`) ve
  * kur seçimini (`displayRate`) kendisi yapmak zorunda — bunlar bir istemci
  * modülünde dursa sunucu onları çağıramazdı.
  */
-import { convertKurusToMinor, isConvertibleAmount } from "@/lib/config/quote-currency";
+import {
+  convertKurusToMinor,
+  convertPartLines,
+  convertReceipt,
+  isConvertibleAmount,
+  type ConvertedReceipt,
+} from "@/lib/config/quote-currency";
 import {
   DISPLAY_CURRENCIES,
   type DisplayCurrency,
   type FrozenFxRate,
   type QuoteFxSnapshot,
+  type QuoteTotals,
 } from "@/lib/config/quote-types";
 import { formatCurrency, formatMoneyMinor } from "@/lib/i18n/format";
 
@@ -66,6 +81,11 @@ export function decimal2(value: number): string {
  * sunucu bileşeninde atılan `RangeError` boş gövdeli bir 500'dür — döviz
  * kolonu, YANINDA durduğu bağlayıcı ₺ okumasını da öldürürdü. Gösterim ₺
  * belgesini asla riske atmaz; gerekirse KENDİSİ yok olur.
+ *
+ * Bu düşüş bir AĞ, kapı değil: müşteri onu hiç görmez, çünkü yüzeyin kapısı
+ * (`fxSurface`) çevrilemeyen bir fişte kuru KOMPLE düşürür. Tek tutarlık düşüş
+ * yalnız yüzey kapısını atlayan (ör. `/account/teklifler` satırı) bir çağrıda
+ * ya da bir programlama hatasında devreye girer.
  */
 export function money(kurus: number, rate?: FrozenFxRate | null): string {
   if (!rate || rate.currency === BINDING_CURRENCY) return formatCurrency(kurus, "tr");
@@ -74,6 +94,108 @@ export function money(kurus: number, rate?: FrozenFxRate | null): string {
     convertKurusToMinor(kurus, rate.microTryPerUnit),
     rate.currency,
     "tr"
+  );
+}
+
+/**
+ * ÇEVRİLMİŞ BİR KÜMENİN bir satırı: `minor` o kümeye AYRILMIŞ değerdir
+ * (`convertPartLines`), yani satırların toplamı ekranda duran ara toplamı
+ * BİREBİR tutar. `minor` yoksa tek tutarlık yola (`money`) düşer.
+ *
+ * İkinci bir biçimleyici DEĞİL, aynı dikişin ikinci girişi: `money` tek başına
+ * duran bir tutarı (birim fiyat, KDV, tavan cümlesi) biçimler; `lineMoney`
+ * TOPLANAN bir kümenin satırını. Ayrımın gerekçesi `convertPartLines`
+ * başlığında: bağımsız yuvarlanan satırlar ara toplamı tutmaz ve bir
+ * proformada bu bir hatadır.
+ */
+export function lineMoney(
+  kurus: number,
+  minor: number | null | undefined,
+  rate: FrozenFxRate | null
+): string {
+  if (!rate || minor === null || minor === undefined) return money(kurus, rate);
+  return formatMoneyMinor(minor, rate.currency, "tr");
+}
+
+/** `fxSurface`in okuduğu tek şey: parçanın kimliği ve (varsa) satır tutarı. */
+export interface FxSurfacePart {
+  id: string;
+  price?: { lineKurus: number } | null;
+}
+
+/**
+ * Bir YÜZEYİN döviz gösterimi — tek kapı.
+ *
+ * `rate`, `receipt` ve satır tutarları BİRLİKTE doğar ya da HİÇBİRİ doğmaz:
+ * gösterim tavanını aşan (`MAX_AMOUNT_KURUS`; teklif tarafında tavan
+ * UYGULANMAZ, bkz. `quote-currency.ts` başlığı) ya da bozuk kurlu bir teklifte
+ * `convertReceipt` `null` döner ve yüzeyin TAMAMI ₺ kalır.
+ *
+ * Kapı neden TUTAR BAŞINA değil YÜZEY BAŞINA: `money()` çevrilemeyen tek bir
+ * tutarı ₺'ye düşürür (atmamak için), ama bu tek başına bırakıldığında
+ * kalemleri `€…` toplamı `₺…` basan bir fiş üretirdi — okuyucunun topladığı
+ * sayılar ile toplam farklı para biriminde olurdu. Tasarımın bu hâl için sözü
+ * "gösterim KENDİSİ yok olur", yarısı değil.
+ */
+export interface FxSurface {
+  /** Yüzeyin gösterim kuru; `null` = yalnız ₺. */
+  rate: FrozenFxRate | null;
+  /** `rate` varken DAİMA dolu: fiş satırları + GÖRÜNEN yuvarlama farkı. */
+  receipt: ConvertedReceipt | null;
+  /** parça id → satır tutarının AYRILMIŞ döviz değeri (`lineMoney`). */
+  partLineMinor: ReadonlyMap<string, number>;
+}
+
+const NO_PART_LINES: ReadonlyMap<string, number> = new Map();
+const FX_OFF: FxSurface = { rate: null, receipt: null, partLineMinor: NO_PART_LINES };
+
+export function fxSurface(
+  snapshot: QuoteFxSnapshot | null | undefined,
+  currency: DisplayCurrency,
+  totals: QuoteTotals | null | undefined,
+  parts: readonly FxSurfacePart[]
+): FxSurface {
+  const rate = displayRate(snapshot, currency);
+  // `totals` yoksa fiyat kapısı kapalıdır (`presentQuote` alanı hiç
+  // göndermiyor): kur ekranda, fiyat kapısının ARKASINDA değil (R7).
+  if (!rate || !totals) return FX_OFF;
+  const receipt = convertReceipt(totals, rate);
+  if (!receipt) return FX_OFF;
+  const priced = parts.filter(
+    (part): part is FxSurfacePart & { price: { lineKurus: number } } => Boolean(part.price)
+  );
+  const minors = convertPartLines(
+    priced.map((part) => part.price.lineKurus),
+    totals.partsKurus,
+    rate
+  );
+  if (!minors) return FX_OFF;
+  return {
+    rate,
+    receipt,
+    partLineMinor: new Map(priced.map((part, index) => [part.id, minors[index]])),
+  };
+}
+
+/**
+ * Bu teklifte döviz gösterimi MÜMKÜN mü — seçicinin çizilme kapısı.
+ *
+ * `display`in varlığı yetmez: gösterim tavanını aşan bir teklifte hiçbir birim
+ * çevrilemez (`fxSurface`), yani seçici HİÇBİR ŞEY yapmayan ölü bir düğme
+ * kümesi olurdu. Kapı seçilmiş birimden BAĞIMSIZ sorulur (₺ seçiliyken de
+ * seçici durmalı), o yüzden katalogdaki yabancı birimlerin HERHANGİ BİRİ
+ * çevrilebiliyorsa `true`.
+ */
+export function fxDisplayPossible(
+  display: { snapshot: QuoteFxSnapshot; currencies: readonly DisplayCurrency[] } | null | undefined,
+  totals: QuoteTotals | null | undefined,
+  parts: readonly FxSurfacePart[]
+): boolean {
+  if (!display) return false;
+  return display.currencies.some(
+    (currency) =>
+      currency !== BINDING_CURRENCY &&
+      fxSurface(display.snapshot, currency, totals, parts).rate !== null
   );
 }
 

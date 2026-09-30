@@ -6,7 +6,7 @@ import type { DisplayCurrency, PresentedQuote } from "@/lib/config/quote-types";
 import { formatDateLong } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { QuotePatch } from "@/lib/quote/client-api";
-import { displayRate } from "./format";
+import { fxSurface } from "./format";
 import { useSyncedField } from "./synced-field";
 
 /**
@@ -48,11 +48,15 @@ export function QuoteHeader({
   const canEdit = quote.viewer.canEdit;
   const showDocument =
     quote.viewer.isOwner || (quote.viewer.isShare && quote.viewer.canSeePrices);
-  // Ölü bir `?kur=` yazılmaz: seçim ancak teklifin donmuş kuru onu
-  // karşılıyorsa adrese girer.
+  // Ölü bir `?kur=` yazılmaz: seçim ancak BELGENİN onu gerçekten çizebildiği
+  // hâlde adrese girer. Kapı yüzeyin kapısıdır (`fxSurface`), yalnız kurun
+  // varlığı değil: çevrilemeyen bir fişte (gösterim tavanı) belge zaten tek
+  // kolona döner ve bağlantı "karşılanamadı" cümlesine götürürdü.
   const documentQuery = [
     shareToken ? `t=${encodeURIComponent(shareToken)}` : null,
-    displayRate(quote.display?.snapshot, currency) ? `kur=${currency}` : null,
+    fxSurface(quote.display?.snapshot, currency, quote.totals, quote.parts).rate
+      ? `kur=${currency}`
+      : null,
   ].filter((part): part is string => part !== null);
 
   return (

@@ -16,7 +16,7 @@ import {
   type QuoteUploadState,
 } from "@/components/quote/dropzone";
 import { useDisplayCurrency } from "@/components/quote/display-currency";
-import { displayRate, fill } from "@/components/quote/format";
+import { fill, fxSurface } from "@/components/quote/format";
 import { QuotePartCard } from "@/components/quote/part-card";
 import { QuotePartConfigPanel } from "@/components/quote/part-config-panel";
 import { QuotePartViewerModal } from "@/components/quote/part-viewer-modal";
@@ -251,8 +251,16 @@ export function QuoteWorkspaceClient({
   // Gösterim tercihi TEK yerde okunur ve aşağıya KUR olarak dağıtılır: seçici
   // özet panelinde durur, ama parça kartı, kademe seçici ve inceleme diyaloğu
   // aynı kuru kullanmak zorunda — iki ayrı okuma bir gün ayrışırdı.
+  // Kapı YÜZEY başınadır (`fxSurface`): çevrilemeyen bir fişte (gösterim
+  // tavanı, bozuk kur) kur `null` olur ve çalışma alanının TAMAMI ₺ kalır —
+  // parça kartları `€` basarken özetin `₺` basması olmaz.
   const currency = useDisplayCurrency();
-  const rate = displayRate(quote.display?.snapshot, currency);
+  const { rate, partLineMinor } = fxSurface(
+    quote.display?.snapshot,
+    currency,
+    quote.totals,
+    quote.parts
+  );
 
   // Tek bir çalışma alanı boyunca yaşayan sıra kapısı (bkz. createResponseOrder).
   const [order] = useState(createResponseOrder);
@@ -572,6 +580,7 @@ export function QuoteWorkspaceClient({
                       catalog={catalog}
                       viewer={{ ...viewer, canEdit }}
                       rate={rate}
+                      lineMinor={partLineMinor.get(part.id) ?? null}
                       selected={selected.includes(part.id)}
                       busy={busy}
                       onSelectChange={(id, on) =>

@@ -218,3 +218,58 @@ export function convertReceipt(totals: QuoteTotals, rate: FrozenFxRate): Convert
     roundingMinor: totalMinor - summedMinor,
   };
 }
+
+/**
+ * Parça satırlarının çevrilmiş hâli — toplamı ÇEVRİLMİŞ ARA TOPLAMA (`≈
+ * partsKurus`) BİREBİR eşit. Çevrilemeyen kümede `null`.
+ *
+ * NEDEN AYRI BİR FONKSİYON: `convertReceipt` parçaları TEK toplu satır sayar
+ * (`partsKurus`), ama belge ve ödeme fişi parçaları SATIR SATIR basar. Her
+ * satırı bağımsız yuvarlarsak (`convertKurusToMinor` doğrudan) o satırların
+ * toplamı, hemen altlarında duran "≈ ara toplam" rakamını tutmaz: 10.000 kr +
+ * 4.800 kr, EUR 48,7412 → 205 + 98 = 303 ama ara toplam 304. Bir proformada
+ * "toplamı tutmayan satırlar" hatadır (dosya başlığı + tasarım §3.2 R5) ve bu
+ * fark `convertReceipt`in "Yuvarlama" satırının KAPSAMADIĞI ikinci bir
+ * düzeydir — çünkü o satır ara toplam ile TOPLAM arasındaki farkı anlatır.
+ *
+ * YÖNTEM — kümülatif yuvarlama: satır i, çevrilmiş KÜMÜLATİF toplamların
+ * farkıdır. Küme bittiğinde kümülatif toplam tam olarak
+ * `convertKurusToMinor(partsKurus)`tır, yani Σ satır = ara toplam KANITLI; her
+ * satır da kendi bağımsız çevriminden en çok 1 minor birim sapar ve hiçbir
+ * satır negatife düşmez (çevrim monoton, satırlar >= 0).
+ *
+ * `allocatePaytrBasket` (`prices.ts:174`) emsalinden bilinçli AYRILMA: orada
+ * fark ARTAN TEK satırda soğurulur, çünkü PayTR sepetini müşteri okumaz.
+ * Burada okur — tek satıra yığılan fark, az tutarlı satırların çoğunda "€0,00"
+ * ve sonunda şişmiş bir satır demek olurdu. Kümülatif yöntem farkı satırlara
+ * en çok 1 minor olarak dağıtır.
+ *
+ * `roundingMinor` emsalinden AYRILMA: ara toplam ile satırlar arasındaki fark
+ * GÖRÜNEN bir satır YAPILMAZ, çünkü belgede zaten iki satır düzeyi var (parça
+ * satırları → ara toplam → toplam) ve ikinci bir "Yuvarlama" satırı kâğıdı
+ * okunamaz kılardı. Toplam düzeyindeki fark ise GÖRÜNÜR kalır.
+ */
+export function convertPartLines(
+  lineKurusList: readonly number[],
+  partsKurusSum: number,
+  rate: FrozenFxRate
+): number[] | null {
+  if (!isUsableRate(rate.microTryPerUnit)) return null;
+  if (!isConvertibleAmount(partsKurusSum)) return null;
+  if (lineKurusList.some((kurus) => !isConvertibleAmount(kurus))) return null;
+  // Küme ara toplamı VERMİYORSA çevirmek yanlış bir kâğıt üretirdi: fiyatsız
+  // parça satır tutarı taşımaz, dolayısıyla çağıran yalnız FİYATLI satırları
+  // geçmek zorundadır (`computeQuote`: `partsKurus = Σ fiyatlı lineKurus`).
+  const summedKurus = lineKurusList.reduce((sum, kurus) => sum + kurus, 0);
+  if (summedKurus !== partsKurusSum) return null;
+  const minors: number[] = [];
+  let runningKurus = 0;
+  let runningMinor = 0;
+  for (const kurus of lineKurusList) {
+    runningKurus += kurus;
+    const cumulativeMinor = convertKurusToMinor(runningKurus, rate.microTryPerUnit);
+    minors.push(cumulativeMinor - runningMinor);
+    runningMinor = cumulativeMinor;
+  }
+  return minors;
+}

@@ -1,10 +1,17 @@
 "use client";
 
 import type { JSX } from "react";
-import { decimal2, displayRate, fill, mm, money, rateText } from "@/components/quote/format";
+import {
+  decimal2,
+  fill,
+  fxSurface,
+  lineMoney,
+  mm,
+  money,
+  rateText,
+} from "@/components/quote/format";
 import type { BankDetails } from "@/lib/config/payment";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
-import { convertReceipt } from "@/lib/config/quote-currency";
 import type {
   DisplayCurrency,
   FrozenFxRate,
@@ -121,11 +128,19 @@ export function QuoteDocument({
   const showPrices = quote.viewer.canSeePrices && totals != null;
   const invoice = quote.invoice ?? null;
   const leadTier = quote.leadOptions.find((o) => o.key === quote.leadTier) ?? null;
-  const rate = showPrices ? displayRate(quote.display?.snapshot, currency) : null;
-  const receipt = rate && totals ? convertReceipt(totals, rate) : null;
-  // Müşteri `?kur=EUR` ile geldi ama karşılanamadı (bayrak kapalı, kur bayat
-  // ya da o birim donmuş snapshot'ta yok). Sessiz kalmak "istediğim kolon
-  // nerede" sorusunu cevapsız bırakırdı; ₺ isteyene ise hiçbir şey yazılmaz.
+  // Kur, fiş ve parça satırları BİRLİKTE doğar ya da hiçbiri doğmaz
+  // (`fxSurface`): çevrilemeyen bir fişte kâğıt tek kolona, yalnız BAĞLAYICI
+  // ₺'ye döner — yarısı `€` yarısı `₺` bir proforma olmaz.
+  const { rate, receipt, partLineMinor } = fxSurface(
+    quote.display?.snapshot,
+    currency,
+    showPrices ? totals : null,
+    quote.parts
+  );
+  // Müşteri `?kur=EUR` ile geldi ama karşılanamadı (bayrak kapalı, kur bayat,
+  // o birim donmuş snapshot'ta yok ya da fiş çevrilemiyor). Sessiz kalmak
+  // "istediğim kolon nerede" sorusunu cevapsız bırakırdı; ₺ isteyene ise
+  // hiçbir şey yazılmaz.
   const fxUnavailable = currency !== "TRY" && rate === null;
 
   return (
@@ -313,10 +328,17 @@ export function QuoteDocument({
                   </td>
                   {/* Kâğıtta ikinci kolon SATIR TUTARINI taşır: birim fiyatın
                       da yaklaşığını basmak dört fiyat kolonu demek olurdu ve
-                      okuyucunun topladığı sayı satır tutarıdır. */}
+                      okuyucunun topladığı sayı satır tutarıdır.
+
+                      Rakam `partLineMinor`den gelir, satırın kendi bağımsız
+                      çevriminden DEĞİL: bu kolonu satır satır toplayan okuyucu
+                      hemen altta duran "≈ ara toplam" rakamını bulmak zorunda
+                      (`convertPartLines`, tasarım §3.2 R5). */}
                   {rate && (
                     <td className="quote-doc__muted align-top text-right tabular-nums">
-                      {part.price ? money(part.price.lineKurus, rate) : "—"}
+                      {part.price
+                        ? lineMoney(part.price.lineKurus, partLineMinor.get(part.id), rate)
+                        : "—"}
                     </td>
                   )}
                 </>
@@ -345,11 +367,15 @@ export function QuoteDocument({
                 rate={rate}
               />
             )}
-            {/* Satırlar ayrı ayrı yuvarlandığı için toplamları çevrilmiş
-                toplamdan sapabilir. Kâğıtta bunu GİZLEMEK olmaz: proformayı
-                satır satır toplayan okuyucu farkı bulmak zorunda. ₺ kolonunda
-                fark YOKTUR (sunucu hesabı), o yüzden yalnız döviz kolonu
-                yazılır. */}
+            {/* Fişin satırları (ara toplam · ek hizmet · asgari tamamlama)
+                ayrı ayrı yuvarlandığı için toplamları çevrilmiş TOPLAMDAN
+                sapabilir. Kâğıtta bunu GİZLEMEK olmaz: proformayı satır satır
+                toplayan okuyucu farkı bulmak zorunda. ₺ kolonunda fark YOKTUR
+                (sunucu hesabı), o yüzden yalnız döviz kolonu yazılır.
+
+                PARÇA satırlarının farkı burada DEĞİL: o düzey ara toplama
+                ayrılmış satırlarla (`convertPartLines`) kapanıyor, yani
+                parça kolonu zaten ara toplamı tutuyor. */}
             {receipt && receipt.roundingMinor !== 0 && (
               <div className="flex gap-4">
                 <dt className="quote-doc__muted flex-1">{d["instantQuote.fx.rounding"]}</dt>

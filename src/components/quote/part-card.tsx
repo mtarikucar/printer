@@ -12,7 +12,7 @@ import type {
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { PartPatch } from "@/lib/quote/client-api";
 import { QuoteDfmList } from "./dfm-list";
-import { fill, decimal2, mm, money } from "./format";
+import { fill, decimal2, lineMoney, mm, money } from "./format";
 import { QuotePriceBreakTable } from "./price-break-table";
 import { useSyncedField } from "./synced-field";
 
@@ -36,6 +36,13 @@ export interface QuotePartCardProps {
   viewer: QuoteViewer;
   /** Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺. */
   rate?: FrozenFxRate | null;
+  /**
+   * Satır tutarının, teklifin parça ara toplamına AYRILMIŞ döviz değeri
+   * (`fxSurface().partLineMinor`). Kartın kendi bağımsız çevrimi yerine bunu
+   * basmasının sebebi somut: aynı parça belgenin ikinci kolonunda da duruyor
+   * ve iki yüzeyde bir cent ayrışması "tek dikiş" sözünü bozardı.
+   */
+  lineMinor?: number | null;
   selected: boolean;
   busy?: boolean;
   onSelectChange: (partId: string, selected: boolean) => void;
@@ -61,6 +68,7 @@ export function QuotePartCard({
   catalog,
   viewer,
   rate = null,
+  lineMinor = null,
   selected,
   busy,
   onSelectChange,
@@ -388,6 +396,7 @@ export function QuotePartCard({
         <PriceBlock
           part={part}
           rate={rate}
+          lineMinor={lineMinor}
           canSeePrices={viewer.canSeePrices}
           analyzing={analyzing}
           failed={failed}
@@ -410,6 +419,7 @@ function Spec({ label, children }: { label: string; children: React.ReactNode })
 function PriceBlock({
   part,
   rate,
+  lineMinor,
   canSeePrices,
   analyzing,
   failed,
@@ -417,6 +427,7 @@ function PriceBlock({
 }: {
   part: PresentedPart;
   rate: FrozenFxRate | null;
+  lineMinor: number | null;
   canSeePrices: boolean;
   analyzing: boolean;
   failed: boolean;
@@ -456,7 +467,7 @@ function PriceBlock({
               {d["instantQuote.price.line"]}
             </span>
             <span className="text-base font-semibold tabular-nums text-text-primary">
-              {money(part.price.lineKurus, rate)}
+              {lineMoney(part.price.lineKurus, lineMinor, rate)}
             </span>
           </span>
           {part.price.source === "manual" && (

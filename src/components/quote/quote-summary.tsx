@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useSyncExternalStore, type JSX, type ReactNode } from "react";
 import { Card, Textarea } from "@/components/ui";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
-import { convertReceipt } from "@/lib/config/quote-currency";
 import type {
   DisplayCurrency,
   PresentedQuote,
@@ -16,7 +15,7 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 import type { QuotePatch } from "@/lib/quote/client-api";
 import { AddonsPicker } from "./addons-picker";
 import { DisplayCurrencyPicker } from "./display-currency";
-import { displayRate, fill, money } from "./format";
+import { fill, fxDisplayPossible, fxSurface, money } from "./format";
 import { LeadTierPicker } from "./lead-tier-picker";
 import { useSyncedField } from "./synced-field";
 
@@ -160,14 +159,16 @@ export function QuoteSummary({
   const poNumber = useSyncedField(quote.poNumber ?? "");
 
   const { viewer, totals, readiness } = quote;
-  // Seçim → teklifin KENDİ dondurduğu kur. `display` yoksa (bayrak kapalı, kur
-  // bayat ya da fiyat kapısı kapalı) `null` döner ve panel ₺ kalır.
-  const rate = displayRate(quote.display?.snapshot, currency);
+  // Seçim → teklifin KENDİ dondurduğu kur + çevrilmiş fiş, TEK kapıdan
+  // (`fxSurface`). `display` yoksa (bayrak kapalı, kur bayat ya da fiyat
+  // kapısı kapalı) ya da fiş çevrilemiyorsa (gösterim tavanı) İKİSİ de `null`
+  // döner ve panelin TAMAMI ₺ kalır — kalemleri `€` toplamı `₺` bir fiş
+  // olmaz.
+  //
   // YUVARLAMA: her satır ayrı yuvarlandığı için satırların toplamı çevrilmiş
   // toplamdan sapabilir. Bir fişte "toplamı tutmayan satırlar" hatadır, o
-  // yüzden fark GÖRÜNEN bir satır olur. Çevrilemeyen fişte `null` döner ve
-  // satır hiç doğmaz (`quote-currency.ts` hiç ATMAZ).
-  const receipt = rate && totals ? convertReceipt(totals, rate) : null;
+  // yüzden fark GÖRÜNEN bir satır olur.
+  const { rate, receipt } = fxSurface(quote.display?.snapshot, currency, totals, quote.parts);
   // `viewer.canEdit` ERİŞİM hakkıdır (sahip mi, paylaşım mı); `locked` ise
   // teklifin DURUMUDUR (siparişe dönmüş, süresi dolmuş, ödeme sürüyor).
   // Yazan her denetim ikisini birden sormak zorunda.
@@ -306,8 +307,13 @@ export function QuoteSummary({
 
         {/* ── Gösterim para birimi ─────────────────────────────────────── */}
         {/* Seçici `display` YOKKEN hiç çizilmez; kararı bileşenin kendisi
-            verir (bkz. `display-currency.tsx`). */}
-        <DisplayCurrencyPicker display={quote.display} currency={currency} />
+            verir (bkz. `display-currency.tsx`). Buradaki ikinci kapı ÖLÜ
+            düğmeyi engelliyor: gösterim tavanını aşan bir teklifte hiçbir
+            birim çevrilemez, yani seçici hiçbir şey yapmazdı. */}
+        <DisplayCurrencyPicker
+          display={fxDisplayPossible(quote.display, totals, quote.parts) ? quote.display : null}
+          currency={currency}
+        />
 
         {/* ── Engeller ──────────────────────────────────────────────────── */}
         {readiness.blockers.length > 0 && (

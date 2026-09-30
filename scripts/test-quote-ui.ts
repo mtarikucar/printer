@@ -2828,8 +2828,69 @@ const ROUNDING_TOTALS: QuoteTotals = {
   leadDays: 5,
 };
 
+/**
+ * Aynı fişin İKİ parçalı hâli: parça satırları (5.000 + 5.000) ara toplamı
+ * (10.000 kr) vermek zorunda. Bağımsız yuvarlansalardı 103 + 103 = 206 çıkar
+ * ve hemen altındaki "≈ ara toplam" 205'i tutmazdı; AYRILMIŞ satırlar
+ * (`convertPartLines`) 103 + 102 = 205 verir.
+ */
+function fxRoundingQuote(over: Partial<PresentedQuote> = {}): PresentedQuote {
+  return fxQuote({
+    totals: ROUNDING_TOTALS,
+    parts: [
+      partFixture({
+        id: "p1",
+        name: "Braket",
+        price: { unitKurus: 2500, lineKurus: 5000, source: "auto", priceBreaks: [] },
+      }),
+      partFixture({
+        id: "p2",
+        name: "Kapak",
+        price: { unitKurus: 2500, lineKurus: 5000, source: "auto", priceBreaks: [] },
+      }),
+    ],
+    ...over,
+  });
+}
+
+/**
+ * GÖSTERİM TAVANINI aşan teklif: ₺2.000.000 üstü bir teklif GÖRÜNTÜLENEBİLİR
+ * (tavan bir ÖDEME tavanıdır, teklif tarafında uygulanmaz —
+ * `quote-currency.ts` başlığı), ama fişi çevrilemez. Yüzeyin tamamı ₺ kalmak
+ * zorunda: kalemleri `€` toplamı `₺` bir ekran, okuyucunun topladığı sayılar
+ * ile toplamı farklı para biriminde bırakırdı.
+ */
+const OVER_CAP_TOTALS: QuoteTotals = {
+  allPriced: true,
+  partsKurus: 150_000_000,
+  addonLines: [{ key: "certificate", name: "Malzeme sertifikası", kurus: 60_000_000 }],
+  addonsKurus: 60_000_000,
+  minOrderTopUpKurus: 0,
+  totalKurus: 210_000_000,
+  kdvExcludedKurus: 175_000_000,
+  kdvKurus: 35_000_000,
+  leadDays: 5,
+};
+
+function fxOverCapQuote(over: Partial<PresentedQuote> = {}): PresentedQuote {
+  return fxQuote({
+    totals: OVER_CAP_TOTALS,
+    parts: [
+      partFixture({
+        price: { unitKurus: 75_000_000, lineKurus: 150_000_000, source: "auto", priceBreaks: [] },
+      }),
+    ],
+    ...over,
+  });
+}
+
 /** Dövizde HİÇ görünmemesi gereken üç simge. */
 const FX_SYMBOLS = ["€", "$", "£"] as const;
+
+/** Bir rakamın markup'ta KAÇ KEZ geçtiği: "ikinci satır ayrılmış mı" çivisi. */
+function occurrences(html: string, needle: string): number {
+  return html.split(needle).length - 1;
+}
 
 test("çevirim dikişi TEK: `money` ₺ dışına yalnız DONMUŞ kurla çıkar", () => {
   // Kur yoksa ya da TRY seçiliyse mevcut biçimleyici aynen çalışır: depodaki
@@ -2838,9 +2899,13 @@ test("çevirim dikişi TEK: `money` ₺ dışına yalnız DONMUŞ kurla çıkar"
   assert.equal(fxMoney(14800), formatCurrency(14800, "tr"));
   // 14800 kr / 48,7412 = 303,647… € → 304 cent.
   assert.equal(fxMoney(14800, EUR_RATE), "€3,04");
-  // GÖSTERİM TAVANI: çevrilemeyen tutar ₺'ye DÜŞER, atmaz — bir sunucu
+  // GÖSTERİM TAVANI: çevrilemeyen tutar ₺'ye DÜŞER, ATMAZ — bir sunucu
   // bileşeninde atılan `RangeError` boş gövdeli bir 500'dür ve döviz kolonu,
   // yanında durduğu BAĞLAYICI ₺ okumasını da öldürürdü.
+  //
+  // Bu düşüş bir AĞ, kapı DEĞİL: müşteri onu hiç görmez, çünkü yüzey kapısı
+  // (`fxSurface`) çevrilemeyen bir fişte kuru KOMPLE düşürür. "Yarısı €
+  // yarısı ₺" hâli aşağıda YÜZEY davranışı olarak çivilidir.
   const overCap = MAX_AMOUNT_KURUS + 1;
   assert.equal(fxMoney(overCap, EUR_RATE), formatCurrency(overCap, "tr"));
   assert.equal(fxMoney(-1, EUR_RATE), formatCurrency(-1, "tr"));
@@ -2900,7 +2965,7 @@ test("özet, `display` YOKKEN tek bir döviz simgesi bile basmaz", () => {
 });
 
 test("YUVARLAMA satırı yalnız fark VARKEN çizilir", () => {
-  const withRounding = plain(renderSummary(fxQuote({ totals: ROUNDING_TOTALS }), "EUR"));
+  const withRounding = plain(renderSummary(fxRoundingQuote(), "EUR"));
   assert.ok(withRounding.includes(tr["instantQuote.fx.rounding"]), "yuvarlama satırı yok");
   assert.ok(withRounding.includes("€0,01"), "yuvarlama tutarı yok");
   // Satırlar + yuvarlama = toplam: 205 + 98 + 1 = 304.
@@ -2914,7 +2979,7 @@ test("YUVARLAMA satırı yalnız fark VARKEN çizilir", () => {
 });
 
 test("belgede İKİ kolon durur: bağlayıcı ₺ VE yanında ≈ döviz", () => {
-  const html = plain(renderDocument(fxQuote({ totals: ROUNDING_TOTALS }), "EUR"));
+  const html = plain(renderDocument(fxRoundingQuote(), "EUR"));
   assert.ok(html.includes("€"), "döviz kolonu yok");
   assert.ok(html.includes("₺"), "BAĞLAYICI ₺ kolonu kayboldu");
   assert.ok(html.includes(money(14800)), "₺ toplam yok");
@@ -2926,6 +2991,110 @@ test("belgede İKİ kolon durur: bağlayıcı ₺ VE yanında ≈ döviz", () =>
   // Yuvarlama satırı kâğıtta da görünür: satırları toplayan okuyucu farkı
   // belgede bulmalı.
   assert.ok(html.includes(tr["instantQuote.fx.rounding"]), "belgede yuvarlama satırı yok");
+});
+
+test("belgenin döviz kolonu TOPLANIR: parça satırları ara toplamı verir", () => {
+  // İki parça 5.000 + 5.000 kr, EUR 48,7412. Bağımsız yuvarlama 103 + 103 =
+  // 206 verir ve hemen altındaki "≈ ara toplam" 205'i TUTMAZ — kâğıtta
+  // açıklanmamış bir cent. Ayrılmış satırlar (`convertPartLines`) 103 + 102
+  // basar: satın alma birimi kolonu toplayınca ara toplamı bulur (R5).
+  const html = plain(renderDocument(fxRoundingQuote(), "EUR"));
+  assert.equal(occurrences(html, "€1,03"), 1, "ilk parça satırı yok ya da iki kez basılmış");
+  assert.equal(
+    occurrences(html, "€1,02"),
+    1,
+    "ikinci parça satırı AYRILMAMIŞ (bağımsız yuvarlanmış) — kolon ara toplamı tutmuyor"
+  );
+  // 103 + 102 = 205 → ara toplam; 205 + 98 (ek hizmet) + 1 (yuvarlama) = 304.
+  assert.ok(html.includes("€2,05"), "≈ parça ara toplamı yok");
+  assert.ok(html.includes("€0,98"), "≈ ek hizmet satırı yok");
+  assert.ok(html.includes("€0,01"), "≈ yuvarlama satırı yok");
+  assert.ok(html.includes("€3,04"), "≈ toplam yok");
+  // Bağlayıcı kolon aynı satırlarda ₺ kalır: iki kolon YAN YANA.
+  assert.ok(html.includes(money(5000)), "parça satırının bağlayıcı ₺ tutarı kayboldu");
+  assert.ok(html.includes(money(10000)), "₺ ara toplam kayboldu");
+});
+
+test("ÖDEME FİŞİ döviz seçiliyken TOPLANIR: satırlar + yuvarlama = brüt toplam", () => {
+  // Fişte ara toplam satırı YOK: satırların kendisi (parça · ek hizmet)
+  // doğrudan brüt toplamla karşılaştırılır, o yüzden YUVARLAMA satırı bu
+  // yüzeyde de çizilmek zorunda. Yoksa müşteri 1,03 + 1,02 + 0,98 = 3,03
+  // toplar ve fişte 3,04 okur.
+  const html = plain(
+    inLocale(
+      createElement(QuoteCheckoutReceipt, {
+        quote: fxRoundingQuote(),
+        totalKurus: 14800,
+        giftCardAmountKurus: 0,
+        havaleDiscountKurus: 0,
+        payableKurus: 14800,
+        rate: EUR_RATE,
+      })
+    )
+  );
+  assert.equal(occurrences(html, "€1,03"), 1, "ilk parça satırı yok");
+  assert.equal(occurrences(html, "€1,02"), 1, "ikinci parça satırı AYRILMAMIŞ");
+  assert.ok(html.includes("€0,98"), "ek hizmet satırı yok");
+  assert.ok(html.includes(tr["instantQuote.fx.rounding"]), "fişte YUVARLAMA satırı yok");
+  assert.ok(html.includes("€0,01"), "yuvarlama tutarı yok");
+  assert.ok(html.includes("€3,04"), "brüt toplam yok");
+
+  // ₺ gösterimde fark YOKTUR (sunucu hesabı): satır da doğmaz.
+  const tryOnly = plain(
+    inLocale(
+      createElement(QuoteCheckoutReceipt, {
+        quote: fxRoundingQuote(),
+        totalKurus: 14800,
+        giftCardAmountKurus: 0,
+        havaleDiscountKurus: 0,
+        payableKurus: 14800,
+      })
+    )
+  );
+  assert.ok(!tryOnly.includes(tr["instantQuote.fx.rounding"]), "₺ fişte yuvarlama satırı çizildi");
+});
+
+test("GÖSTERİM TAVANINI aşan teklifte yüzeyin TAMAMI ₺ kalır (yarısı değil)", () => {
+  // ₺2.000.000 üstü bir teklif görüntülenebilir ama fişi çevrilemez. Kapı
+  // TUTAR başına olsaydı kalemler `€3.077.436,26` toplam `₺2.100.000,00`
+  // basılırdı: okuyucunun topladığı sayılar ile toplam farklı para
+  // biriminde olurdu. Tasarımın sözü "gösterim KENDİSİ yok olur".
+  const surfaces = {
+    özet: plain(renderSummary(fxOverCapQuote(), "EUR")),
+    belge: plain(renderDocument(fxOverCapQuote(), "EUR")),
+    ödeme: renderCheckout({
+      quote: fxOverCapQuote({ shipByDate: "2026-11-02" }),
+      totalKurus: 210_000_000,
+      currency: "EUR",
+    }),
+    fiş: plain(
+      inLocale(
+        createElement(QuoteCheckoutReceipt, {
+          quote: fxOverCapQuote(),
+          totalKurus: 210_000_000,
+          giftCardAmountKurus: 0,
+          havaleDiscountKurus: 0,
+          payableKurus: 210_000_000,
+          rate: EUR_RATE,
+        })
+      )
+    ),
+  };
+  for (const [label, html] of Object.entries(surfaces)) {
+    for (const symbol of FX_SYMBOLS) {
+      assert.ok(!html.includes(symbol), `${label}: ${symbol} sızdı`);
+    }
+    assert.ok(html.includes(money(210_000_000)), `${label}: bağlayıcı ₺ toplam yok`);
+  }
+  // Seçici de çizilmez: hiçbir birim çevrilemediği için ÖLÜ bir düğme olurdu.
+  assert.ok(!surfaces["özet"].includes(tr["instantQuote.fx.label"]), "ölü seçici çizildi");
+  // Belge bağlantısı ölü bir `?kur=` yazmaz.
+  assert.match(renderHeader(fxOverCapQuote(), "EUR", null), /\/teklif\/T-000123\/belge"/);
+  // `?kur=EUR` ile gelen müşteri sessiz bırakılmaz: cümle yazılır.
+  assert.ok(
+    surfaces["belge"].includes(tr["instantQuote.fx.unavailable"]),
+    "karşılanamayan seçim belgede sessiz kaldı"
+  );
 });
 
 test("belge alt bilgisi bülten tarihini, kaynağı ve bağlayıcı kolonu YAZAR", () => {

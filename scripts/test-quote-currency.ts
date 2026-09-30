@@ -9,7 +9,10 @@
  * 2. `convertReceipt`in fişi TOPLANIR: `Σ lines.minor + roundingMinor
  *    === totalMinor` ve `|roundingMinor| <= lines.length`. Bir proformada
  *    "toplamı tutmayan satırlar" hatadır; bu yüzden fark gizlice
- *    soğurulmaz, GÖRÜNEN bir satır olur.
+ *    soğurulmaz, GÖRÜNEN bir satır olur. Aynı kural PARÇA satırları için
+ *    `convertPartLines`ta: satırların toplamı, hemen altlarında duran
+ *    çevrilmiş ARA TOPLAMA birebir eşittir ve hiçbir satır kendi bağımsız
+ *    çevriminden 1 minor birimden fazla sapmaz.
  * 3. Döviz kolonu ₺ okumasını ASLA öldürmez: gösterim tavanının dışına düşen
  *    bir teklifte (`MAX_AMOUNT_KURUS` bir ÖDEME tavanıdır, teklif tarafında
  *    uygulanmaz) `convertReceipt` ATMAZ, `null` döner — yani "döviz gösterimi
@@ -27,6 +30,7 @@ import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
 import {
   addonReceiptKey,
   convertKurusToMinor,
+  convertPartLines,
   convertReceipt,
   isConvertibleAmount,
   type ConvertedReceipt,
@@ -289,6 +293,99 @@ test("10.000 rastgele (kur, tutar) çiftinde fişin toplamı TUTAR", () => {
   assert.ok(worstRounding >= 1, `en kötü fark ${worstRounding}`);
 });
 
+console.log("parça satırları — kolon ARA TOPLAMA toplanır");
+
+/** Satırın kendi bağımsız çevrimi: ayrılmış değerle karşılaştırma tabanı. */
+function naiveMinor(kurus: number, rate: FrozenFxRate): number {
+  return convertKurusToMinor(kurus, rate.microTryPerUnit);
+}
+
+test("altın değer: bağımsız yuvarlama ara toplamı TUTMAZ, ayrılmış satırlar TUTAR", () => {
+  // Denetimin verdiği vaka: 10.000 kr + 4.800 kr, EUR 48,7412.
+  const rate: FrozenFxRate = { currency: "EUR", microTryPerUnit: 48_741_200 };
+  const lines = [10_000, 4_800];
+  const subtotal = 14_800;
+  // Bağımsız yuvarlama: 205 + 98 = 303, ama ara toplam 304 → kâğıtta
+  // açıklanmamış 1 cent (bu turun düzelttiği hata).
+  assert.equal(naiveMinor(10_000, rate) + naiveMinor(4_800, rate), 303);
+  assert.equal(naiveMinor(subtotal, rate), 304);
+  const allocated = convertPartLines(lines, subtotal, rate);
+  assert.deepEqual(allocated, [205, 99]);
+  assert.equal(allocated!.reduce((sum, m) => sum + m, 0), naiveMinor(subtotal, rate));
+});
+
+test("boş küme: satır yok, ara toplam 0", () => {
+  assert.deepEqual(convertPartLines([], 0, EUR_47_32), []);
+});
+
+test("tam bölünen kurda fark HİÇ doğmaz (ayırma zararsız)", () => {
+  assert.deepEqual(convertPartLines([40_000, 4_000], 44_000, EUR_FLAT_40), [1_000, 100]);
+});
+
+test("ara toplamı VERMEYEN küme sessizce çevrilmez: null (döviz yok)", () => {
+  // Fiyatsız bir parça satır tutarı taşımaz; çağıran yalnız FİYATLI satırları
+  // geçmek zorundadır. Tutmayan bir küme bir PROGRAMLAMA hatasıdır ve cezası
+  // "döviz gösterimi yok"tur, yanlış bir kâğıt değil.
+  assert.equal(convertPartLines([10_000, 4_800], 14_801, EUR_47_32), null);
+  assert.equal(convertPartLines([], 10_000, EUR_47_32), null);
+});
+
+test("tavan ve bozuk kur kümeyi düşürür, ATMAZ", () => {
+  assert.equal(convertPartLines([MAX_AMOUNT_KURUS, 1], MAX_AMOUNT_KURUS + 1, EUR_47_32), null);
+  assert.equal(convertPartLines([-1, 10_001], 10_000, EUR_47_32), null);
+  assert.equal(
+    convertPartLines([10_000], 10_000, { currency: "EUR", microTryPerUnit: 0 }),
+    null
+  );
+  // Sınırdaki küme ise ÇEVRİLİR: kapı fazla geniş de değil, fazla dar da.
+  assert.deepEqual(convertPartLines([MAX_AMOUNT_KURUS], MAX_AMOUNT_KURUS, EUR_47_32), [
+    naiveMinor(MAX_AMOUNT_KURUS, EUR_47_32),
+  ]);
+});
+
+test("10.000 rastgele kümede Σ satır = ara toplam, sapma <= 1 minor", () => {
+  let seed = 0x1b873593;
+  const next = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  let sawAllocation = false;
+  let worstDrift = 0;
+  for (let i = 0; i < 10_000; i++) {
+    const rate: FrozenFxRate = {
+      currency: FX_CURRENCIES[i % FX_CURRENCIES.length]!,
+      microTryPerUnit: 1_000_000 + Math.floor(next() * 100_000_000),
+    };
+    const lines: number[] = [];
+    const lineCount = 1 + Math.floor(next() * 12);
+    for (let l = 0; l < lineCount; l++) lines.push(1 + Math.floor(next() * 200_000));
+    const subtotal = lines.reduce((sum, kurus) => sum + kurus, 0);
+    const allocated = convertPartLines(lines, subtotal, rate);
+    assert.ok(allocated, `tur ${i}: çevrilebilir küme null döndü`);
+    assert.equal(
+      allocated.reduce((sum, minor) => sum + minor, 0),
+      naiveMinor(subtotal, rate),
+      `tur ${i}: satırlar ara toplamı tutmuyor`
+    );
+    for (const [index, minor] of allocated.entries()) {
+      // Satır kendi bağımsız çevriminden en çok 1 minor sapar: fark tek bir
+      // satıra YIĞILMAZ (`allocatePaytrBasket` emsalinden ayrılmanın sebebi).
+      const drift = Math.abs(minor - naiveMinor(lines[index]!, rate));
+      assert.ok(drift <= 1, `tur ${i} satır ${index}: sapma ${drift} > 1`);
+      assert.ok(minor >= 0, `tur ${i} satır ${index}: negatif satır ${minor}`);
+      if (drift !== 0) sawAllocation = true;
+      worstDrift = Math.max(worstDrift, drift);
+    }
+  }
+  // Sınav gerçekten sınav: ayırma bu havuzda EN AZ bir kez devreye giriyor,
+  // yani değişmez "hiç sapma yok" diye kolayca sağlanmıyor.
+  assert.ok(sawAllocation, "hiçbir turda ayırma devreye girmedi — vaka havuzu zayıf");
+  assert.equal(worstDrift, 1);
+});
+
 console.log("gösterim tavanı — döviz kolonu ₺ okumasını ASLA öldürmez");
 
 test("GÖSTERİM KAPISI tavanla aynı sayıda: sınır dahil, bir kuruş üstü hariç", () => {
@@ -423,21 +520,16 @@ test("ADLANDIRMA KAPISI: yeni hiçbir ad `Kurus` ile bitmiyor", () => {
  * Çevrilmiş rakamı PARA taşıyan koda sokmak derlemeyi bozmaz, sessizce yanlış
  * bir tahsilat üretir. O yüzden ithalatçı kümesi KAPALIDIR.
  *
- * Liste D3'te sunum katmanıyla doldu ve üç dosyadan ibarettir — çünkü render
- * dikişi TEK: `components/quote/format.ts` (`money()`). On dört arayüz dosyası
- * çevirimi ondan alır, hiçbiri bu modülü kendisi import etmez. Diğer ikisi
- * FİŞİN TAMAMINI çevirmek zorunda olan iki yüzeydir (`convertReceipt` →
- * "Yuvarlama" satırı): sağ sütundaki özet ve kâğıt belge.
+ * Liste D3'te TEK dosyadan ibaret: `components/quote/format.ts`. Orada üç
+ * giriş var — `money()` (tek başına duran tutar), `lineMoney()` (toplanan bir
+ * kümenin satırı) ve `fxSurface()` (yüzeyin tek kapısı: kur, fiş ve satır
+ * kümesi birlikte doğar ya da hiçbiri doğmaz). Yüzeyler `convertReceipt` /
+ * `convertPartLines`ı artık kendileri çağırmıyor, o kapıdan alıyor.
  *
- * Listeye yeni bir satır eklemek BİLİNÇLİ bir karar olmalı: dördüncü bir
- * dosyanın kendi çevirimini yazması, ilk kur değişikliğinde iki rakamın
- * ayrışması demektir.
+ * Listeye ikinci bir satır eklemek BİLİNÇLİ bir karar olmalı: kendi çevirimini
+ * yazan bir dosya, ilk kur değişikliğinde iki rakamın ayrışması demektir.
  */
-const ALLOWED_IMPORTERS: readonly string[] = [
-  "src/app/teklif/[number]/belge/quote-document.tsx",
-  "src/components/quote/format.ts",
-  "src/components/quote/quote-summary.tsx",
-];
+const ALLOWED_IMPORTERS: readonly string[] = ["src/components/quote/format.ts"];
 
 /**
  * Listede olması YASAK olan dosyalar. Tek tek yazılıdırlar ki bir yeniden

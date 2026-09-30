@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, type JSX } from "react";
 import { useDisplayCurrency } from "@/components/quote/display-currency";
 import { QuoteCheckoutForm } from "@/components/quote/quote-checkout-form";
-import { displayRate, fill, money } from "@/components/quote/format";
+import { fill, fxSurface, lineMoney, money } from "@/components/quote/format";
 import { Card } from "@/components/ui";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
 import {
@@ -20,7 +20,7 @@ import type {
 } from "@/lib/config/quote-types";
 import type { TurkishAddress } from "@/lib/db/schema";
 import type { QuoteGiftCardPreview } from "@/lib/services/quote-checkout";
-import { formatCurrency, formatDateLong } from "@/lib/i18n/format";
+import { formatCurrency, formatDateLong, formatMoneyMinor } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 export interface QuoteCheckoutClientProps {
@@ -69,10 +69,18 @@ export function QuoteCheckoutClient({
   const [paymentMethod, setPaymentMethod] = useState<TenderPaymentMethod>("card");
   const [giftPreview, setGiftPreview] = useState<QuoteGiftCardPreview | null>(null);
   const preferred = useDisplayCurrency();
-  // Seçim → teklifin KENDİ dondurduğu kur. Fişin ÜST tarafı (parça satırı, ek
-  // hizmet, brüt toplam, KDV) bu kurla ikinci bir okuma alır; TAHSİL EDİLECEK
-  // rakamlar almaz (aşağıdaki fişte gerekçesi yazılı).
-  const rate = displayRate(quote.display?.snapshot, currency ?? preferred);
+  // Seçim → teklifin KENDİ dondurduğu kur, YÜZEY kapısından (`fxSurface`):
+  // fiş çevrilemiyorsa (gösterim tavanı, bozuk kur) kur `null` olur ve ekranın
+  // TAMAMI ₺ kalır — kalemleri `€` toplamı `₺` bir fiş doğamaz. Fişin ÜST
+  // tarafı (parça satırı, ek hizmet, brüt toplam, KDV) bu kurla ikinci bir
+  // okuma alır; TAHSİL EDİLECEK rakamlar almaz (aşağıdaki fişte gerekçesi
+  // yazılı).
+  const { rate } = fxSurface(
+    quote.display?.snapshot,
+    currency ?? preferred,
+    quote.totals,
+    quote.parts
+  );
 
   // Kart uygulandıysa iki rakam da ön izlemeden gelir; yoksa kartsız tabandan.
   const views = giftPreview ?? tender;
@@ -137,16 +145,20 @@ export function QuoteCheckoutReceipt({
   giftCardAmountKurus,
   havaleDiscountKurus,
   payableKurus,
-  rate = null,
+  rate: wantedRate = null,
 }: {
   quote: PresentedQuote;
   /**
-   * Seçili gösterim biriminin DONMUŞ kuru; `null` = yalnız ₺.
+   * İSTENEN gösterim biriminin DONMUŞ kuru; `null` = yalnız ₺.
    *
    * Fişin ÜST tarafı ikinci bir okuma alır (ne alıyorum, brüt kaça). TAHSİL
    * EDİLEN üç satır — hediye kartından karşılanan, havale indirimi ve ödenecek
    * tutar — ₺ KALIR: müşteri yaklaşık bir sayıyı ödeyeceği tutar sanmamalı
    * (MSY m.6/2-a + 32 Sayılı Karar m.4/g).
+   *
+   * Bir İSTEKTİR, karar değil: fiş TOPLANAN bir küme çizdiği için kapıyı
+   * (`fxSurface`) kendisi de uygular — çevrilemeyen bir fişte prop dolu olsa
+   * bile yüzeyin tamamı ₺ kalır.
    */
   rate?: FrozenFxRate | null;
   totalKurus: number;
@@ -159,6 +171,20 @@ export function QuoteCheckoutReceipt({
 }): JSX.Element {
   const d = useDictionary();
   const totals = quote.totals as QuoteTotals;
+  // Fişin SATIR KÜMESİ aynı kapıdan okunur: parça satırları ara toplama
+  // AYRILMIŞ değerlerle basılır ve satırlar ile brüt toplam arasındaki
+  // yuvarlama farkı GÖRÜNEN bir satır olur. Aksi hâlde müşteri, satırları
+  // toplayınca toplamı tutmayan bir fiş okurdu (tasarım §3.2 R5).
+  //
+  // Kapı burada İKİNCİ kez uygulanıyor (yüzeyi `QuoteCheckoutClient` de
+  // kapılıyor) çünkü fişin çizdiği şey TOPLANAN bir kümedir: kuru dolu ama
+  // fişi çevrilemeyen bir çağrıda satırlar `€` toplam `₺` olurdu.
+  const { rate, receipt, partLineMinor } = fxSurface(
+    quote.display?.snapshot,
+    wantedRate?.currency ?? "TRY",
+    totals,
+    quote.parts
+  );
 
   return (
     <Card padding="none" className="h-fit overflow-hidden">
@@ -186,7 +212,9 @@ export function QuoteCheckoutReceipt({
                 )}
               </span>
               <span className="shrink-0 tabular-nums text-text-secondary">
-                {part.price ? money(part.price.lineKurus, rate) : "—"}
+                {part.price
+                  ? lineMoney(part.price.lineKurus, partLineMinor.get(part.id), rate)
+                  : "—"}
               </span>
             </li>
           ))}
@@ -212,6 +240,20 @@ export function QuoteCheckoutReceipt({
             </span>
             <span className="text-sm tabular-nums text-text-secondary">
               {money(totals.minOrderTopUpKurus, rate)}
+            </span>
+          </div>
+        )}
+
+        {/* YUVARLAMA: satırlar ayrı ayrı yuvarlandığı için toplamları
+            çevrilmiş brüt toplamdan sapabilir. Fark GİZLENMEZ — fişi satır
+            satır toplayan müşteri onu bulmak zorunda (tasarım §3.2 R5). ₺
+            gösterimde fark YOKTUR (sunucu hesabı), o yüzden satır yalnız
+            döviz seçiliyken ve fark ≠ 0 iken doğar. */}
+        {receipt && receipt.roundingMinor !== 0 && (
+          <div className="flex items-baseline justify-between gap-3 border-t border-border-default pt-3">
+            <span className="text-sm text-text-secondary">{d["instantQuote.fx.rounding"]}</span>
+            <span className="text-sm tabular-nums text-text-secondary">
+              {formatMoneyMinor(receipt.roundingMinor, receipt.currency, "tr")}
             </span>
           </div>
         )}

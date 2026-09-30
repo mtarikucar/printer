@@ -1451,6 +1451,28 @@ async function main() {
       );
     });
 
+    // Kur çekme turu AYRI bir işçidir (bakım işine sokulmadı: 600 sn'lik kilit
+    // 400 mektup için var, bir HTTP çağrısı için değil). Aynı üç iddia onun
+    // için de yazılır, çünkü kaydedilmemiş bir işçi = hiç çekilmeyen kur =
+    // müşteriye hiç görünmeyen döviz kolonu.
+    syncTest("workers/start.ts kur işçisini ve ALTI SAATLİK zamanlayıcıyı kurar", () => {
+      const src = stripComments(fs.readFileSync(path.join(root, "workers/start.ts"), "utf8"));
+      assert.ok(
+        /startFxRefreshWorker\(\)/.test(src),
+        "kur işçisi başlatılmıyor: iş kuyruğa girer ama kimse almaz"
+      );
+      assert.ok(
+        /getFxRefreshQueue\(\)\s*\.upsertJobScheduler\(\s*"fx-refresh-6h",\s*\{\s*every:\s*6\s*\*\s*3600\s*\*\s*1000\s*\}/.test(
+          src
+        ),
+        "altı saatlik zamanlayıcı kayıtlı değil (fx-refresh-6h / 6 * 3600 * 1000)"
+      );
+      assert.ok(
+        /fxRefreshWorker\.close\(\)/.test(src),
+        "kur işçisi kapanışta kapatılmıyor: SIGTERM'de iş yarım kalır"
+      );
+    });
+
     // `quote-checkout.ts`e dokunan iki DB paketi `server-only`i TAKLİT ederek
     // (module stub) çalışıyor, yani asıl tuzağı artık yakalayamazlar. Bu
     // yüzden graf STATİK yürünür: hiçbir modül import EDİLMEZ, kaynak okunur.

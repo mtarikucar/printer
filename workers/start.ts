@@ -21,7 +21,9 @@ import { startManufacturerAcceptSlaWorker } from "../src/lib/queue/workers/manuf
 import { startQuotePartAnalysisWorker } from "../src/lib/queue/workers/quote-part-analysis.worker";
 import { startQuoteOrderFilesWorker } from "../src/lib/queue/workers/quote-order-files.worker";
 import { startQuoteMaintenanceWorker } from "../src/lib/queue/workers/quote-maintenance.worker";
+import { startFxRefreshWorker } from "../src/lib/queue/workers/fx-refresh.worker";
 import {
+  getFxRefreshQueue,
   getQuoteAnalysisQueue,
   getQuoteMaintenanceQueue,
   getQuoteOrderFilesQueue,
@@ -109,6 +111,11 @@ const quoteOrderFilesWorker = startQuoteOrderFilesWorker();
 // (işlemsel) ve terk (yalnız ticari ileti izniyle) hatırlatmalarını gönderir,
 // saklama süresi dolan teklif dosyalarını siler.
 const quoteMaintenanceWorker = startQuoteMaintenanceWorker();
+// Anlık teklif: TCMB günlük kur bültenini çeker (yalnız GÖSTERİM kuru; her
+// bağlayıcı tutar ₺ kalır). Bakım işçisinden AYRI, çünkü oradaki 600 sn'lik
+// kilit 400 mektup için var, bir HTTP çağrısı için değil. Bayrak kapalıysa
+// (quote_fx_display_enabled) tur ilk satırda çıkar.
+const fxRefreshWorker = startFxRefreshWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -217,6 +224,16 @@ getQuoteMaintenanceQueue().upsertJobScheduler(
   { name: "tick" }
 );
 
+// TCMB kuru: GÜNDE BİR DEĞİL, ALTI SAATTE BİR. Bülten gün içinde geç
+// yayımlanabilir ve kaçan tek bir tur kuru 24 saat bekletirdi. Tur
+// idempotenttir (`ON CONFLICT DO NOTHING` — aynı bülten ikinci kez yazılmaz),
+// yani fazla tur bedava. Emsal: `model-approval-sla-6h`.
+getFxRefreshQueue().upsertJobScheduler(
+  "fx-refresh-6h",
+  { every: 6 * 3600 * 1000 },
+  { name: "tick" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -239,6 +256,7 @@ console.log("  - painter-accept-sla (repeatable: every 1h)");
 console.log("  - quote-part-analysis (concurrency: 1, python; recovery: every 5m)");
 console.log("  - quote-order-files (concurrency: 2; recovery: every 5m)");
 console.log("  - quote-maintenance (concurrency: 1; repeatable: every 1h)");
+console.log("  - fx-refresh (concurrency: 1, tcmb; repeatable: every 6h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -264,6 +282,7 @@ async function shutdown() {
     quotePartAnalysisWorker.close(),
     quoteOrderFilesWorker.close(),
     quoteMaintenanceWorker.close(),
+    fxRefreshWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

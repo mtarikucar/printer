@@ -12,11 +12,13 @@
  * `Custom Id cannot contain :` atar. Bu yüzden her kimlik tire ile kurulur.
  */
 import { Queue } from "bullmq";
+import { istanbulDateKey } from "@/lib/config/business-days";
 import { getRedisConnection } from "./connection";
 
 export const QUOTE_ANALYSIS_QUEUE = "quote-part-analysis";
 export const QUOTE_ORDER_FILES_QUEUE = "quote-order-files";
 export const QUOTE_MAINTENANCE_QUEUE = "quote-maintenance";
+export const FX_REFRESH_QUEUE = "fx-refresh";
 
 /** Tek bir parçanın geometri analizi (python). */
 export interface QuotePartAnalysisJob {
@@ -30,7 +32,7 @@ export interface QuoteOrderFilesJob {
 }
 
 /**
- * Üç kuyruğun ortak iş varsayılanları: iki deneme (ikincisi 10 sn sonra),
+ * Kuyrukların ortak iş varsayılanları: iki deneme (ikincisi 10 sn sonra),
  * tamamlanan/başarısız işlerden son 500'ü saklanır — bir müşteri "fiyatım
  * neden çıkmadı" diye sorduğunda iz elde kalsın diye.
  */
@@ -44,6 +46,7 @@ const DEFAULT_JOB_OPTIONS = {
 let analysisQueue: Queue<QuotePartAnalysisJob> | null = null;
 let orderFilesQueue: Queue<QuoteOrderFilesJob> | null = null;
 let maintenanceQueue: Queue | null = null;
+let fxRefreshQueue: Queue | null = null;
 
 export function getQuoteAnalysisQueue(): Queue<QuotePartAnalysisJob> {
   if (!analysisQueue) {
@@ -73,6 +76,17 @@ export function getQuoteMaintenanceQueue(): Queue {
     });
   }
   return maintenanceQueue;
+}
+
+/** TCMB günlük kur bülteninin çekme turu (yalnız GÖSTERİM kuru besler). */
+export function getFxRefreshQueue(): Queue {
+  if (!fxRefreshQueue) {
+    fxRefreshQueue = new Queue(FX_REFRESH_QUEUE, {
+      connection: getRedisConnection(),
+      defaultJobOptions: DEFAULT_JOB_OPTIONS,
+    });
+  }
+  return fxRefreshQueue;
 }
 
 /**
@@ -112,4 +126,22 @@ export async function enqueueQuoteOrderFiles(orderId: string, quoteId: string): 
     { orderId, quoteId },
     { jobId: `quote-order-files-${orderId}` }
   );
+}
+
+/**
+ * O GÜNÜN kur turunu kuyruğa alır — günde en fazla bir kez.
+ *
+ * Kimlik GÜN anahtarıdır (İstanbul), yani tekilleştirme bedavadır: aynı gün
+ * ikinci bir ekleme `add()`in YUTMA davranışına düşer (bkz. `enqueuePartAnalysis`
+ * yorumu — bullmq, saklanan bir işin kimliğiyle gelen eklemeyi hata vermeden
+ * yutar ve var olan işi döndürür). Otomatik tur için tam doğru davranış budur:
+ * zamanlayıcı günde birkaç kez tetiklese bile tur bir kez koşar.
+ *
+ * TAM BU YÜZDEN ELLE TETİK BURADAN GEÇMEZ. Admin'in "Şimdi çek" düğmesi
+ * `refreshFxRates()`i DOĞRUDAN çağırır (`/api/admin/fx-rates`): aynı gün ikinci
+ * kez basıldığında bu fonksiyon SESSİZCE hiçbir şey yapmaz ve ekran "başladı"
+ * derdi. Kuralı `scripts/test-fx-rates.ts` çiviliyor.
+ */
+export async function enqueueFxRefresh(now: Date = new Date()): Promise<void> {
+  await getFxRefreshQueue().add("tick", {}, { jobId: `fx-refresh-${istanbulDateKey(now)}` });
 }

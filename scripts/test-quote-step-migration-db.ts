@@ -70,6 +70,79 @@ function ok(name: string, condition: unknown, detail?: string) {
 async function rows(sql: string, params: unknown[] = []) {
   return (await client.query(sql, params)).rows;
 }
+/**
+ * Dosyayı `psql`in gördüğü ÜST DÜZEY ifadelere ayırır. Sınır yalnız üst düzey
+ * `;`dir: dolar alıntısı (`$$…$$`), tek alıntı (`''` kaçışı dâhil), çift
+ * alıntılı tanımlayıcı ve yorumların İÇİ sayılmaz. Yorumlar atılır, böylece
+ * yalnız yorumdan oluşan bir kuyruk ifade sayılmaz.
+ */
+function topLevelStatements(sql: string): string[] {
+  const out: string[] = [];
+  let buf = "";
+  let i = 0;
+  while (i < sql.length) {
+    const rest = sql.slice(i);
+    if (rest.startsWith("--")) {
+      const end = sql.indexOf("\n", i);
+      i = end === -1 ? sql.length : end + 1;
+      continue;
+    }
+    if (rest.startsWith("/*")) {
+      const end = sql.indexOf("*/", i);
+      i = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    const dollar = /^\$[A-Za-z_]*\$/.exec(rest);
+    if (dollar) {
+      const close = sql.indexOf(dollar[0], i + dollar[0].length);
+      assert.ok(close !== -1, `kapanmamış dolar alıntısı: ${dollar[0]}`);
+      buf += sql.slice(i, close + dollar[0].length);
+      i = close + dollar[0].length;
+      continue;
+    }
+    const ch = sql[i];
+    if (ch === "'" || ch === '"') {
+      let j = i + 1;
+      while (j < sql.length) {
+        if (sql[j] !== ch) { j++; continue; }
+        if (sql[j + 1] === ch) { j += 2; continue; }
+        break;
+      }
+      assert.ok(j < sql.length, `kapanmamış alıntı: ${ch}`);
+      buf += sql.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (ch === ";") {
+      if (buf.trim()) out.push(buf.trim());
+      buf = "";
+      i++;
+      continue;
+    }
+    buf += ch;
+    i++;
+  }
+  if (buf.trim()) out.push(buf.trim());
+  return out;
+}
+/** Down'ın gerçek uygulama yolundaki ifadeleri (tek kullanımlık şemaya çevrilmiş). */
+const downStatements = topLevelStatements(down);
+/**
+ * `psql -f` gibi uygular: her ÜST DÜZEY ifade KENDİ işleminde koşar — psql `-1`
+ * olmadan tam olarak böyle davranır ve down'ın TEK uygulama yolu odur. İlk
+ * hatada durup o hatayı döner, hata yoksa `undefined`. Sarmalayıcı bir işlem ya
+ * da savepoint YOK: çağrıdan sonra okunan şey geri sarılmış değil KALICI olandır.
+ */
+async function applyLikePsql(statements: string[]): Promise<unknown> {
+  for (const statement of statements) {
+    try {
+      await client.query(statement);
+    } catch (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
 /** Kısıdın veritabanındaki İFADESİ; kısıt yoksa null. */
 async function constraintDef(name: string): Promise<string | null> {
   const found = await rows(
@@ -125,15 +198,20 @@ async function rejectsPart(name: string, quoteId: string, overrides: Record<stri
   checks++; console.log(`PASS ${name}`);
 }
 /**
- * Geri alma DURUR. Ret bir `RAISE EXCEPTION` olduğu için tüm blok atomik olarak
- * geri sarılır — "hiçbir şeye dokunmadan durdu" güvencesi budur; aşağıdaki
- * kontroller de şemanın ve journal satırının yerinde kaldığını doğrular.
+ * Geri alma DURUR — ve durduğunda GERÇEKTEN hiçbir şey kalıcı olmaz.
+ *
+ * Dosya `applyLikePsql` ile ifade ifade koşturulur; ne bir işleme sarılır ne de
+ * savepoint'e geri sarılır. Aşağıdaki üç okuma bu yüzden ÇÜRÜTÜLEBİLİR: down
+ * ileride iki üst düzey ifadeye ayrılır ve journal `DELETE`i `DO` bloğunun
+ * DIŞINA çıkarsa yarım uygulama olur (kısıtlar dörtlü kalır ama 0070'in kaydı
+ * silinir → `drizzle-kit migrate` 0070'i yeniden uygular ya da operatör "geri
+ * aldım" sanır) ve "journal satırı yerinde kalır" KIRMIZI olur. Bugünkü dosya
+ * tek `DO` bloğu olduğu için ret her şeyi atomik geri sarar.
  */
 async function refusesDown(name: string) {
-  await client.query("SAVEPOINT before_down");
-  await assert.rejects(client.query(down), /0070 geri alma reddedildi/, name);
-  await client.query("ROLLBACK TO SAVEPOINT before_down");
-  checks++; console.log(`PASS ${name}`);
+  const failure = await applyLikePsql(downStatements);
+  ok(name, failure instanceof Error && /0070 geri alma reddedildi/.test(failure.message),
+    failure === undefined ? "down reddetmedi, geçti" : `beklenmeyen hata: ${String(failure)}`);
   check(`${name} — liste dört değerde kalır`, await formatsInDb(), [...QUOTE_SOURCE_FORMATS]);
   ok(`${name} — birim kilidi yerinde kalır`, await constraintDef("quote_parts_step_units_chk"));
   check(`${name} — journal satırı yerinde kalır`,
@@ -157,6 +235,18 @@ ok("schema.ts birim kilidini adıyla tanımlar",
 check("journal girdisi kayıt defterinin sayılarını taşır", [entry.idx, entry.when, entry.version], [70, WHEN, "7"]);
 ok("0070'in `when`i üretim watermark'ının ÜSTÜNDE", entry.when > PRODUCTION_WATERMARK,
   `${entry.when} <= ${PRODUCTION_WATERMARK}: migrate 0070'i sessizce atlar`);
+// ─── Down YARIM uygulanamaz ─────────────────────────────────────────────────
+//
+// Down'ın tek uygulama yolu `psql -f` ve psql (`-1` olmadan) her ÜST DÜZEY
+// ifadeyi KENDİ işleminde koşar. Dosya tek bir `DO` bloğu olduğu sürece ret
+// (RAISE EXCEPTION) her şeyi geri sarar. Journal `DELETE`i bloğun DIŞINA
+// çıkarsa yarım uygulama mümkün olur: kısıtlar dörtlü hâlde kalır ama 0070'in
+// kaydı silinir. Aşağısı o yapıyı çiviler; davranış kanıtı `refusesDown`ta.
+const downTopLevel = topLevelStatements(fs.readFileSync(downPath, "utf8"));
+check("down TEK üst düzey ifadedir", downTopLevel.length, 1);
+ok("journal satırının silinmesi o tek `DO` bloğunun İÇİNDEdir",
+  /^DO \$\$[\s\S]*DELETE FROM drizzle\.__drizzle_migrations[\s\S]*\$\$$/.test(downTopLevel[0] ?? ""),
+  `üst düzey ifade beklenen DO bloğu değil: ${(downTopLevel[0] ?? "").slice(0, 120)}`);
 
 async function main() {
   await client.connect();
@@ -211,19 +301,22 @@ async function main() {
     await client.query("ROLLBACK");
 
     // ─── Geri alma: müşteri verisi varsa REDDEDER ──────────────────────────
+    //
+    // Sarmalayıcı işlem YOK ve olmamalı: `refusesDown` down'ı psql gibi ifade
+    // ifade uyguluyor, retten sonraki okumalar KALICI durumu görüyor.
     const stepPart = await insertPart(quote.id, { source_format: "step", units: "mm" });
-    await client.query("BEGIN");
     await refusesDown("yazılmış bir STEP satırı geri almayı REDDETTİRİR");
-    await client.query("ROLLBACK");
 
     await client.query("UPDATE quote_parts SET deleted_at = now() WHERE id = $1", [stepPart.id]);
-    await client.query("BEGIN");
     await refusesDown("YUMUŞAK SİLİNMİŞ bir STEP satırı da geri almayı REDDETTİRİR");
-    await client.query("ROLLBACK");
 
     // ─── Temizse geri alma TAM ─────────────────────────────────────────────
     await client.query("DELETE FROM quote_parts WHERE source_format = 'step'");
-    await client.query(down); await client.query(down);
+    // İki kez, yine psql yolunda: idempotent olmalı, hiçbir ifade patlamamalı.
+    const firstDown = await applyLikePsql(downStatements);
+    assert.equal(firstDown, undefined, `temiz tabloda down hatasız koşmalı: ${String(firstDown)}`);
+    const secondDown = await applyLikePsql(downStatements);
+    assert.equal(secondDown, undefined, `down ikinci kez de hatasız koşmalı: ${String(secondDown)}`);
     check("down listeyi üç değerine döndürür", await formatsInDb(), ["stl", "obj", "3mf"]);
     check("down birim kilidini YOK EDER", await constraintDef("quote_parts_step_units_chk"), null);
     check("down yalnız KENDİ journal satırını siler",

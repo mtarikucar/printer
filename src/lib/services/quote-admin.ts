@@ -656,6 +656,15 @@ const ANALYSIS_ERROR_TEXT: Record<string, string> = {
   too_heavy:
     "Model bu makine için fazla ağır (yüz sayısı tavanın üstünde) — sadeleştirilmiş " +
     "bir dosya isteyin ya da manuel fiyat girin.",
+  // STEP'in iki reddi. İkisi de "dosya bozuk"tan farklı bir İŞ söylüyor; ayrımı
+  // `mesh-runner.ts` `PYTHON_FAILURE_CODES` eşlemesi taşıyor (eşleme yoksa bu
+  // cümleler hiç görünmez).
+  step_too_complex:
+    "STEP dosyasının yüzey sayısı tavanın üstünde (ya da çevrim belleğe sığmadı) — " +
+    "müşteriden parçayı tek tek göndermesini ya da hazır bir STL vermesini isteyin.",
+  step_unreadable:
+    "CAD çekirdeği bu STEP dosyasını okuyamadı (geometri aktarılamadı) — müşteriden " +
+    "CAD programından AP203 ya da AP214 olarak yeniden dışa aktarmasını isteyin.",
   // Bu kodu python değil KURTARMA SÜPÜRMESİ yazar: parça deneme tavanına vurdu
   // (`quote-analysis.ts` MAX_ANALYSIS_ATTEMPTS) ve bir daha denenmeyecek.
   [ANALYSIS_GIVE_UP_ERROR]:

@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 
 import { UPLOAD_MODEL_FORMATS, type UploadModelFormat } from "@/lib/config/upload";
+import { STEP_MAX_BYTES } from "@/lib/config/quote-step";
 import type { QuoteSourceFormat, QuoteUnits } from "@/lib/config/quote-types";
 import { validateStagedModel } from "@/lib/services/model-file-validation";
 import {
@@ -25,6 +26,14 @@ import {
  * sıkıştırılmış, açılınca ne kadar yer kaplayacağını İDDİA ediyor. Karar bu
  * iddialara bakılarak verilir; dosyayı gerçekten açmak, kotaları geçmiş ve
  * sahibi belli bir işin (analiz worker'ı, ayrı süreç) işidir.
+ *
+ * STEP (`.step`/`.stp`) aynı disiplinle eklendi: ISO 10303-21 METİN dosyasıdır,
+ * burada AYRIŞTIRILMAZ — yalnız baş/kuyruk okunur (kabuk sağlam mı, DATA
+ * bölümü var mı). B-rep yüzeylerini saymak ve OCCT'yi çalıştırmak worker'ın
+ * işidir (`scripts/step_mesh.py`). STEP `UPLOAD_MODEL_FORMATS`e GİRMEZ: o
+ * liste `/create` yükleyicisini, ürün editörünü ve ZIP tarayıcısını da besler
+ * ve tasarım §1 onları bilerek kapsam dışı bırakıyor — bu yüzden STEP dalı
+ * 3MF dalının KARDEŞİDİR, o dizinin üyesi değil.
  *
  * Saf sunucu modülü: DB yok, oturum yok. `server-only` DE YOK — çağıran rota
  * zincirinin dışında (betik/test) de çalışabilmeli.
@@ -55,8 +64,22 @@ const MAX_ENTRY_RATIO = 1000;
 /** Birim sezgisi için model XML'inin başından okunacak bayt. */
 const UNIT_SNIFF_BYTES = 1024;
 
+// ISO 10303-21 değişim dosyasının kabuğu: `ISO-10303-21;` … `HEADER; … ENDSEC;`
+// … `DATA; … ENDSEC;` … `END-ISO-10303-21;`. Bölüm adları büyük harfle yazılır
+// ama standart büyük/küçük harfi zorlamıyor; kapı bu yüzden harf duyarsız ve
+// satır başına bağlı DEĞİL (küçük bir yazıcı tüm dosyayı tek satırda üretse de
+// geçerli bir dosyayı reddetmeyelim). Tek istisna ISO imzası: o, dosyanın İLK
+// jetonu olmak zorunda.
+const STEP_ISO_RE = /^\s*ISO-10303-21\s*;/;
+const STEP_ISO_END_RE = /\bEND-ISO-10303-21\s*;/i;
+const STEP_HEADER_RE = /\bHEADER\s*;/i;
+const STEP_DATA_RE = /\bDATA\s*;/i;
+/** `DATA;` hemen `ENDSEC;` ile kapanıyorsa dosyada hiç varlık (gövde) yok. */
+const STEP_EMPTY_DATA_RE = /\bDATA\s*;\s*ENDSEC\s*;/i;
+const STEP_MAX_MB = Math.floor(STEP_MAX_BYTES / (1024 * 1024));
+
 const MESSAGES: Record<string, string> = {
-  unsupported_format: "Yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
+  unsupported_format: "Yalnız STL, OBJ, 3MF ve STEP dosyaları yüklenebilir.",
   unknown_upload: "Yükleme oturumu bulunamadı; dosyayı tekrar yükleyin.",
   empty_file: "Dosya boş görünüyor; tekrar yükleyin.",
   size_mismatch: "Yükleme tamamlanmadı; dosyayı tekrar yükleyin.",
@@ -76,6 +99,13 @@ const MESSAGES: Record<string, string> = {
   "3mf_no_model": "3MF paketinde 3B model (3D/*.model) bulunamadı.",
   "3mf_bomb":
     "3MF paketi güvenli bulunmadı (açıldığında aşırı büyüyor); dosyayı yeniden dışa aktarın.",
+  step_not_iso:
+    "Geçerli bir STEP dosyası değil (ISO 10303-21 kabuğu eksik ya da dosya yarım kalmış); CAD programınızdan AP203/AP214 olarak yeniden dışa aktarın.",
+  step_no_data:
+    "STEP dosyasında DATA bölümü yok; CAD programınızdan AP203/AP214 olarak yeniden dışa aktarın.",
+  step_no_geometry:
+    "STEP dosyasının DATA bölümü boş; katı gövdeyi (solid) de içerecek şekilde yeniden dışa aktarın.",
+  step_too_large: `STEP dosyaları en çok ${STEP_MAX_MB} MB olabilir — STEP aynı boyutta çok daha fazla geometri taşır. Parçayı ayırın ya da STL olarak gönderin.`,
 };
 
 const FALLBACK_MESSAGE = "Dosya doğrulanamadı; başka bir dışa aktarım deneyin.";
@@ -97,7 +127,10 @@ export async function validateStagedQuoteModel(
 ): Promise<QuoteModelValidation> {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
   const is3mf = ext === "3mf";
-  if (!is3mf && !UPLOAD_MODEL_FORMATS.includes(ext as UploadModelFormat)) {
+  // İki uzantı, TEK biçim anahtarı (`"step"`): diskteki ad biçim anahtarından
+  // türediği için `.stp` yüklemesi de `quote-parts/<id>/source.step` olur.
+  const isStep = ext === "step" || ext === "stp";
+  if (!is3mf && !isStep && !UPLOAD_MODEL_FORMATS.includes(ext as UploadModelFormat)) {
     return fail("unsupported_format");
   }
 
@@ -108,6 +141,13 @@ export async function validateStagedQuoteModel(
     const mb = Math.floor(maxBytes / (1024 * 1024));
     return fail("too_large", `Dosya çok büyük (en fazla ${mb} MB).`);
   }
+  // STEP'in İKİNCİ (ve daha düşük) tavanı. Genel tavan bir KATALOG AYARIDIR
+  // (yönetici değiştirir, reklam edilen sayı); bu tavan bir DAĞITIM kararıdır:
+  // aynı bayt sayısı STEP'te mesh'ten kat kat fazla geometri taşır ve worker'ı
+  // ölçen tek şey `mem_limit`tir (ölçüm: `quote-step.ts` `STEP_MAX_BYTES`).
+  // İkisi birbirinden BAĞIMSIZ kalmalı — genel tavanı büyütmek STEP'i
+  // büyütmez, STEP'i büyütmek önce yeni bir bellek ölçümü ister.
+  if (isStep && size > STEP_MAX_BYTES) return fail("step_too_large");
 
   // İstemci `PUT` sırasında boyut bildirdiyse, diskteki dosya birebir o
   // olmalı: eksik kalmış bir yükleme geçerli ama YARIM bir modeldir.
@@ -127,6 +167,22 @@ export async function validateStagedQuoteModel(
     );
     if (!zip.ok) return fail(zip.code);
     format = "3mf";
+  } else if (isStep) {
+    // Kararı UZANTI değil İÇERİK verir: `.step` adlı bir ZIP burada düşer.
+    // `latin1` bilinçli — STEP ASCII'dir ve 256 KB'ın ortasından kesilen çok
+    // baytlı bir dizi utf8 çözümünde jetonları bozabilirdi.
+    const head = (await readStagedHead(uploadId, HEAD_BYTES)).toString("latin1");
+    const tail = (await readStagedTail(uploadId, TAIL_BYTES)).toString("latin1");
+    if (
+      !STEP_ISO_RE.test(head) ||
+      !STEP_HEADER_RE.test(head) ||
+      !STEP_ISO_END_RE.test(tail)
+    ) {
+      return fail("step_not_iso");
+    }
+    if (!STEP_DATA_RE.test(head)) return fail("step_no_data");
+    if (STEP_EMPTY_DATA_RE.test(head)) return fail("step_no_geometry");
+    format = "step";
   } else {
     const head = await readStagedHead(uploadId, HEAD_BYTES);
     const tail = await readStagedTail(uploadId, TAIL_BYTES);

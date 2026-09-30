@@ -285,6 +285,104 @@ async function main() {
     if (!res.ok) assert.equal(res.code, "3mf_no_eocd");
   });
 
+  console.log("\nquote-model-validation — STEP kapısı");
+
+  // STEP bir METİN dosyasıdır ve bu kapı onu AÇMAZ/AYRIŞTIRMAZ: yalnız baş ve
+  // kuyruk okunur (3MF'te paketi açmama disiplininin aynısı). Bu yüzden
+  // geçerli vakalar GERÇEK fixture'larla, retler fixture'ın üzerinde bayt
+  // cerrahisiyle kurulur — uzantının değil İÇERİĞİN karar verdiği ancak böyle
+  // kanıtlanır.
+  const stepText = await readFile(join(FIXTURES, "cube20.step"), "utf8");
+  const headerOnly = stepText.slice(0, stepText.indexOf("DATA;"));
+
+  for (const [fixture, name] of [
+    ["cube20.step", "cube20.step"],
+    ["cube1in.step", "part.stp"],
+  ] as const) {
+    await test(`${name} → ok, biçim step`, async () => {
+      const bytes = await readFile(join(FIXTURES, fixture));
+      const id = await stage(bytes);
+      const res = await validateStagedQuoteModel(id, name, MAX);
+      assert.equal(res.ok, true, `beklenmedik ret: ${JSON.stringify(res)}`);
+      if (!res.ok) return;
+      // İki uzantı TEK anahtara düşer; diskteki ad bu anahtardan türediği için
+      // (`promoteStagedUpload(... source.${format})`) bir `.stp` yüklemesi de
+      // `source.step` olur ve analiz onu bu adla bulur.
+      assert.equal(res.format, "step");
+      assert.equal(res.size, bytes.length);
+      assert.equal(res.sha256, createHash("sha256").update(bytes).digest("hex"));
+    });
+  }
+
+  await test(".step uzantılı ZIP reddedilir (kararı içerik verir) → step_not_iso", async () => {
+    const id = await stage(make3mf());
+    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "step_not_iso");
+  });
+
+  await test("ISO-10303-21 başlığı olmayan gövde → step_not_iso", async () => {
+    const id = await stage(Buffer.from(stepText.replace(/^\s*ISO-10303-21\s*;\s*/, "")));
+    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "step_not_iso");
+  });
+
+  await test("kuyruğu kesik gövde (END-ISO-10303-21 yok) → step_not_iso", async () => {
+    const id = await stage(Buffer.from(stepText.slice(0, stepText.indexOf("END-ISO-10303-21"))));
+    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "step_not_iso");
+  });
+
+  await test("DATA; bölümü olmayan gövde → step_no_data", async () => {
+    const id = await stage(Buffer.from(`${headerOnly}END-ISO-10303-21;\n`));
+    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "step_no_data");
+  });
+
+  await test("DATA; bölümü boş olan gövde → step_no_geometry", async () => {
+    const id = await stage(Buffer.from(`${headerOnly}DATA;\nENDSEC;\nEND-ISO-10303-21;\n`));
+    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.equal(res.code, "step_no_geometry");
+  });
+
+  // İKİ TAVAN AYRI KAPIDIR. Genel `maxBytes` katalog ayarından gelir (32 MiB),
+  // STEP'in kendi tavanı koddan (16 MiB): aynı bayt sayısı STEP'te mesh'ten kat
+  // kat fazla geometri taşır (S1 ölçümü, aşağıdaki zarf yorumundaki STEP
+  // satırı). Aynı boyuttaki bir `.stl`in KABUL edilmesi bunun bir boyut
+  // sınırı değil BİÇİME özel bir kapı olduğunun kanıtıdır.
+  const { STEP_MAX_BYTES } = await import("../src/lib/config/quote-step");
+
+  await test("genel tavanın altında ama STEP tavanının üstünde → step_too_large", async () => {
+    // Dolgu DATA bölümünün İÇİNE yorum olarak girer: dosya geçerli bir STEP
+    // kalır, yani reddi içerik değil TAVAN verir.
+    const filler = STEP_MAX_BYTES + 1 - stepText.length;
+    const big = Buffer.from(stepText.replace("DATA;", `DATA;\n/*${"0".repeat(filler)}*/`));
+    assert.ok(big.length > STEP_MAX_BYTES, `dosya STEP tavanının üstünde değil: ${big.length}`);
+    assert.ok(big.length < MAX, "dosya GENEL tavanı da aşıyor: iki kapı ayrışmış olmaz");
+    const id = await stage(big);
+    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    assert.equal(res.ok, false);
+    if (!res.ok) {
+      assert.equal(res.code, "step_too_large");
+      assert.match(res.error, /MB/);
+    }
+  });
+
+  await test("aynı boyuttaki .stl KABUL edilir (STEP tavanı yalnız STEP'i bağlar)", async () => {
+    // İkili STL: 80 baytlık başlık + uint32 üçgen sayısı + 50 bayt/üçgen.
+    const triangles = Math.ceil((STEP_MAX_BYTES - 84) / 50) + 1;
+    const stl = Buffer.alloc(84 + triangles * 50);
+    stl.writeUInt32LE(triangles, 80);
+    assert.ok(stl.length > STEP_MAX_BYTES, `STL dosyası STEP tavanının üstünde değil: ${stl.length}`);
+    const id = await stage(stl);
+    const res = await validateStagedQuoteModel(id, "part.stl", MAX);
+    assert.equal(res.ok, true, `beklenmedik ret: ${JSON.stringify(res)}`);
+  });
+
   console.log("\ninspect3mfCentralDirectory — birim sezgisi");
 
   await test("sıkıştırılmamış model girdisinde <model unit> okunur", async () => {
@@ -326,6 +424,15 @@ async function main() {
   // 1,50 GiB; 1,99M yüz / 94,7 MB → 2,43 GiB, yani 2 GiB'lik kapta OOM.
   // 32 MiB'lik tavanın zarfı ≈ 0,8 GiB. Tavan büyütülecekse ÖNCE `mem_limit`
   // büyür; bu test ikisinin birbirinden sessizce ayrılmasını engeller.
+  //
+  // STEP satırı (S1 ölçümü, aynı yöntem — `/usr/bin/time -v`, tepe RSS):
+  // 15,1 MB STEP → 20.001 B-rep yüzey → 1,17M üçgen → step_mesh 0,961 GiB +
+  // analiz 1,436 GiB, GEÇER; 30,2 MB STEP → 41.472 yüzey → 2,43M üçgen →
+  // step_mesh 1,616 GiB ama analiz `too_many_faces` (1,5M tavanı) ile REDDEDER.
+  // Yani 32 MiB'lik GENEL tavan STEP'te worker'ı tek başına korumuyor;
+  // `STEP_MAX_BYTES = 16 MiB` ölçülen "sığar" vakasının hemen üstüdür ve genel
+  // tavanın ALTINDA kalmak zorundadır (`test-quote-core.ts` bunu çiviliyor).
+  // Reklam edilen tavan ve `mem_limit` bu özellik yüzünden DEĞİŞMEDİ.
   await test("tohumdaki maxFileBytes = SEED_MAX_FILE_BYTES ve worker mem_limit ile tutarlı", async () => {
     const { SEED_SNAPSHOT, SEED_MAX_FILE_BYTES, QUOTE_ANALYSIS_MEM_LIMIT_GB } = await import(
       "../src/lib/config/quote-seed"
@@ -385,11 +492,21 @@ async function main() {
     if (!res.ok) assert.equal(res.code, "invalid_stl");
   });
 
+  // Bu vaka LİSTENİN KAPALI olduğunu kanıtlar, "STEP yok" demez: `.iges`
+  // (cascadio'da yalnız deneysel okuyucusu var) ve öteki yerel CAD biçimleri
+  // tasarım §1'de bilerek kapsam dışı. Uzantı listesi genişlediğinde bu vaka
+  // GERÇEKTEN desteklenmeyen bir uzantıyla güncellenir — sessizce silinmez,
+  // yoksa kapının kapalı olduğunu hiçbir şey sınamaz.
   await test("desteklenmeyen uzantı → unsupported_format", async () => {
     const id = await stage(await readFile(join(FIXTURES, "cube20.stl")));
-    const res = await validateStagedQuoteModel(id, "part.step", MAX);
+    const res = await validateStagedQuoteModel(id, "part.iges", MAX);
     assert.equal(res.ok, false);
-    if (!res.ok) assert.equal(res.code, "unsupported_format");
+    if (!res.ok) {
+      assert.equal(res.code, "unsupported_format");
+      // Cümle kabul edilen biçimleri SAYAR: STEP kabul edildiği hâlde burada
+      // anılmasa müşteri yükleyebileceği bir dosyayı yüklemekten vazgeçerdi.
+      assert.match(res.error, /STEP/);
+    }
   });
 
   await test("sahnelenmiş dosya yoksa → unknown_upload", async () => {

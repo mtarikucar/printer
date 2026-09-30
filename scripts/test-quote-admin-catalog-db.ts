@@ -57,11 +57,23 @@ const journal = JSON.parse(
 const entry = journal.entries.find((e) => e.tag === TAG);
 assert.ok(entry, `${TAG} journal girdisi gerekli`);
 assert.equal(entry.when, WHEN, "0066 journal `when` değeri sözleşmedeki sayı olmalı");
-assert.equal(
-  Math.max(...journal.entries.map((e) => e.when)),
-  WHEN,
-  "0066 en büyük `when` olmalı (yoksa migrate onu sessizce atlar)"
-);
+// ESKİ HÂLİ "0066 en büyük `when` olmalı" diyordu ve 0070 inince KIRILDI —
+// `:db` testi olduğu için `test:unit` zincirinde olmadan haftalarca kırmızı
+// kalabilirdi. Asıl kural 0066'ya özel değil: migrator journal'ı DİZİ SIRASINDA
+// uygular ama tek bir `max(created_at)` işaretine bakar, yani `when` değerleri
+// `idx` ile birlikte ARTMAK zorundadır. Bir migration küçük bir `when` ile
+// inerse `migrate` onu sessizce atlar ve "başarılı" der. Bu hâliyle iddia her
+// yeni migration'da kendiliğinden geçerli kalır.
+const ordered = [...journal.entries].sort((a, b) => a.idx - b.idx);
+for (let i = 1; i < ordered.length; i++) {
+  const prev = ordered[i - 1];
+  const curr = ordered[i];
+  assert.ok(
+    curr.when > prev.when,
+    `journal \`when\` sırası bozuk: ${curr.tag} (${curr.when}) ${prev.tag} (${prev.when}) ` +
+      "değerinden büyük olmalı, yoksa migrate onu sessizce atlar"
+  );
+}
 
 /** Tohumun sabit kimlikleri: kısıt sondası hangi satıra dokunacağını bilsin. */
 const FDM = "00000000-0000-4000-8000-000000000f01";

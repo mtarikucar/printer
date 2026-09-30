@@ -188,7 +188,13 @@ export interface ConvertedReceipt {
  * fiş çevrildiyse ikisi de toplamın altında kaldığı için tavan içindedir.
  */
 export function convertReceipt(totals: QuoteTotals, rate: FrozenFxRate): ConvertedReceipt | null {
-  if (!isUsableRate(rate.microTryPerUnit)) return null;
+  // `rate`in KENDİSİ de sınanır, alanı değil: `quotes.fx_snapshot` CHECK'i
+  // olmayan bir jsonb ve `noUncheckedIndexedAccess` kapalı, yani
+  // `snapshot.rates[0]` derleyiciye göre `FrozenFxRate` olduğu hâlde çalışma
+  // anında `undefined` olabilir (`rates: []` taşıyan bir satır mümkün). O hâlde
+  // ilk alan okuması TypeError atar ve bu fonksiyonun "HİÇ atmaz" sözleşmesi —
+  // yani yanındaki BAĞLAYICI ₺ okumasının hayatta kalması — çökerdi.
+  if (!rate || !isUsableRate(rate.microTryPerUnit)) return null;
   const amounts: Array<{ key: string; kurus: number }> = [
     { key: PARTS_LINE_KEY, kurus: totals.partsKurus },
     ...totals.addonLines.map((line) => ({ key: addonReceiptKey(line.key), kurus: line.kurus })),

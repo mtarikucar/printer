@@ -446,7 +446,12 @@ test("donmuş BOZUK kur fişi düşürmez, null döner", () => {
 
 console.log("sızma engelleri");
 
-/** `//` ve `/* *​/` yorumlarını atar: prozada geçen bir ad TANIM sayılmasın. */
+// Satır ve blok yorumlarını atar: prozada geçen bir ad TANIM sayılmasın.
+//
+// Bu açıklama BİLEREK satır yorumu: blok yorumunun içinde blok yorumu
+// kapatıcısından söz etmek, kapatıcıyı GÖRÜNMEZ bir U+200B ile bölmeyi
+// gerektiriyordu ve o karakteri temizleyen herhangi bir biçimlendirme adımı
+// yorumu erken kapatıp dosyanın kalanını koda çevirirdi.
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 }

@@ -51,9 +51,13 @@
 -- `created_at`ine bakar (drizzle-orm/pg-core/dialect.js: "order by created_at
 -- desc limit 1" + `lastDbMigration.created_at < migration.folderMillis`), yani
 -- 0055'ten SONRA kaydedilmiş bir satır (0056, …, 0062, 0064, 0065, 0066, 0067,
--- 0070) dururken 0055 yeniden uygulanmaz. 0055'i gerçekten geri almak için önce
--- ÜSTÜNDEKİLER — EN YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi
--- satırlarıyla geri alınır, sonra bu dosya çalıştırılır:
+-- 0070, 0071) dururken 0055 yeniden uygulanmaz. 0055'i gerçekten geri almak
+-- için önce ÜSTÜNDEKİLER — EN YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve
+-- kendi satırlarıyla geri alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0071_fx_rates.down.sql
+--   -- 0071'in down'ı KENDİ kaydını (created_at = 1790790800000) siler.
+--   -- `fx_rates` tablosunu ve `quotes.fx_snapshot` kolonunu düşürür; ödenmiş
+--   -- teklifte gösterilen kur kanıtı varsa veri silmeden DURUR.
 --   \i drizzle/0070_step_format.down.sql
 --   -- 0070'in down'ı KENDİ kaydını (created_at = 1790787200000) siler.
 --   -- Yalnız iki CHECK'i eski hâline döndürür; `source_format='step'` satırı

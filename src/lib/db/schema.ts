@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   timestamp,
+  date,
   integer,
   doublePrecision,
   jsonb,
@@ -3665,6 +3666,7 @@ import {
   ANALYSIS_STATUSES,
   CATALOG_ENTITIES,
   COST_LINE_KINDS,
+  FX_CURRENCIES,
   INVOICE_TYPES,
   LEAD_TIER_KEYS,
   QUOTE_ADMIN_ACTIONS,
@@ -3679,6 +3681,7 @@ import type {
   CatalogEntity,
   FrozenQuoteAddon,
   FrozenQuotePart,
+  FxCurrency,
   InvoiceType,
   LeadTier,
   LeadTierKey,
@@ -3688,6 +3691,7 @@ import type {
   QtyBreak,
   QuoteAdminAction,
   QuoteCostLineKind,
+  QuoteFxSnapshot,
   QuoteSourceFormat,
   QuoteStatus,
   QuoteUnits,
@@ -3914,6 +3918,15 @@ export const quotes = pgTable("quotes", {
   /** Teklif oluşturulurken/yeniden fiyatlanırken dondurulan aktif katalog. */
   pricingSnapshot: jsonb("pricing_snapshot").$type<PricingSnapshot>().notNull(),
   snapshotTakenAt: timestamp("snapshot_taken_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * Teklifin dondurduğu TCMB kur kümesi (0071); null = döviz gösterimi yok.
+   * YALNIZ GÖSTERİM: bağlayıcı tutar `total_kurus`tur ve tahsilat ₺'dir.
+   *
+   * `pricing_snapshot`ın İÇİNE girmez — o sürümlenmiş bir KATALOG sözleşmesi
+   * (`PricingSnapshot`, `version: 1`) ve `quote-seed.ts` şekline bakıyor; kur
+   * bir katalog satırı değil, bir gün sabitidir.
+   */
+  fxSnapshot: jsonb("fx_snapshot").$type<QuoteFxSnapshot>(),
   version: integer("version").notNull().default(1),
   // Liste/rapor önbelleği; fiyatlanamayan teklifte null kalır.
   totalKurus: integer("total_kurus"),
@@ -4112,3 +4125,49 @@ export const quoteAdminActionsRelations = relations(quoteAdminActions, ({ one })
 
 export type Quote = typeof quotes.$inferSelect;
 export type QuotePart = typeof quoteParts.$inferSelect;
+
+// ═══ Döviz gösterimi (0071) ═════════════════════════════════════════════════
+//
+// TCMB'nin GÜNLÜK bülteninden okunan kurlar. GÖSTERİM içindir: bağlayıcı her
+// tutar ve tahsil edilen her kuruş ₺'dir (gerekçe `quote-currency.ts` dosya
+// başlığında — 32 Sayılı Karar m.4/g + 2008-32/34 Tebliğ m.8).
+//
+// NEDEN AYRI TABLO — bu bloğun en önemli maddesi. Kur `quote_pricing_settings`
+// tablosuna KONULAMAZ: `catalogUpdatedAt()` (`quote-catalog.ts`) o tablonun
+// `updated_at`ini `greatest(...)` içine alıyor ve `loadPresentedQuote` bunu
+// `quotes.snapshot_taken_at` ile karşılaştırıp `catalogChangedSinceSnapshot`
+// bayrağını üretiyor. Kur her sabah yazıldığı için o satıra dokunan bir tasarım
+// AÇIK HER TEKLİFTE "Katalog güncellendi — yeniden fiyatla" bandını yakardı.
+// Aynı sebeple `catalogUpdatedAt()`ın `greatest(...)` listesine `fx_rates`
+// EKLENMEZ.
+//
+// pg enum YOK (ev kuralı, gerekçesi 0064 bloğunun başlığında): `currency` ve
+// `source` `text` + adlandırılmış CHECK. Para birimi listesi tip
+// sözleşmesinden (`FX_CURRENCIES`) üretilir; `source` tek elemanlı bir liste
+// olduğu için yerinde yazılır (`quotes_tax_id_type_chk` emsali).
+export const fxRates = pgTable("fx_rates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  currency: text("currency").$type<FxCurrency>().notNull(),
+  /** TCMB bülteninin KENDİ tarihi (YYYY-MM-DD, İstanbul) — "bugün" değil. */
+  bulletinDate: date("bulletin_date").notNull(),
+  /** 1 birim döviz = kaç MİKRO-TRY (TCMB döviz alış / `Unit`, ×1e6, tamsayı). */
+  microTryPerUnit: bigint("micro_try_per_unit", { mode: "number" }).notNull(),
+  /** Bültendeki `Unit` (USD/EUR/GBP için 1) — kanıt olarak saklanır. */
+  bulletinUnit: integer("bulletin_unit").notNull().default(1),
+  source: text("source").$type<"tcmb">().notNull().default("tcmb"),
+  /**
+   * Çekme turunun damgası. Operatörün sorduğu tek soru "kur güncel mi" ve
+   * cevabı `max(fetched_at)`tır; başarısız tur satır YAZMAZ (fail-closed), o
+   * yüzden ayrı bir "çekme turu" tablosu yok.
+   */
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("fx_rates_currency_date_uq").on(t.currency, t.bulletinDate),
+  index("fx_rates_recent_idx").on(t.bulletinDate.desc()),
+  check("fx_rates_currency_chk", sql`${t.currency} IN (${quoteInList(FX_CURRENCIES)})`),
+  check("fx_rates_source_chk", sql`${t.source} IN ('tcmb')`),
+  check("fx_rates_rate_chk", sql`${t.microTryPerUnit} > 0`),
+  check("fx_rates_unit_chk", sql`${t.bulletinUnit} > 0`),
+]);
+
+export type FxRateRow = typeof fxRates.$inferSelect;

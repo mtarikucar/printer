@@ -74,6 +74,8 @@ function makeQuote(overrides: Partial<Quote> = {}): Quote {
     billingAddress: null,
     pricingSnapshot: SEED_SNAPSHOT,
     snapshotTakenAt: new Date("2026-09-20T00:00:00.000Z"),
+    // Döviz gösterimi (0071) kapalı: bu turda hiçbir teklif kur dondurmuyor.
+    fxSnapshot: null,
     version: 3,
     totalKurus: null,
     leadDays: null,

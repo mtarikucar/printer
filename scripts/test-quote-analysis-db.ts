@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
+import type { PartGeometry } from "../src/lib/config/quote-types";
 // Küçük resim yazımı sınavı GERÇEK bir PNG ister: sharp dönüştürmeyi başarmazsa
 // test yazım yolunu hiç denemeden "geçer".
 import sharp from "sharp";
@@ -81,7 +82,9 @@ const rowOf = async (partId: string) =>
     analysis_status: string;
     analysis_attempt: number;
     analysis_error: string | null;
-    geometry: { volume: number | null; bodyCount: number } | null;
+    // Tam tip: STEP iddiaları `tessellation`/`solidCount`/`sourceUnits` de
+    // okuyor ve kolon zaten `$type<PartGeometry>()` ile tiplenmiş.
+    geometry: PartGeometry | null;
     units: string;
     canonical_stl_key: string | null;
     preview_glb_key: string | null;
@@ -397,6 +400,57 @@ async function main() {
       assert.equal(row.units, "in", "dosyanın beyan ettiği birim alındı");
       // 1 inçlik küp: ölçüm DOSYA BİRİMİNDE, yani 1 birim³.
       assert.ok(Math.abs(row.geometry!.volume! - 1) < 0.01, `volume=${row.geometry!.volume}`);
+    });
+
+    await test("STEP: ölçüm biter, tessellation ve solidCount yazılır, birim mm KALIR", async () => {
+      const { STEP_TESSELLATION } = await import("../src/lib/config/quote-step");
+      const step = await makePart("scripts/fixtures/quote/cube20.step", {
+        source_format: "step",
+      });
+      assert.equal(await analyzeQuotePart(step), "ready");
+      const row = await rowOf(step);
+      assert.equal(row.units, "mm");
+      assert.equal(row.geometry!.sourceUnits, "mm", "çekirdek parçayı mm'ye uyguladı");
+      // 20 mm küp, çekirdekten: hacim mm³ (metre ölçeğinden çevrim kanıtı S3'te).
+      assert.ok(Math.abs(row.geometry!.volume! - 8000) < 10, `volume=${row.geometry!.volume}`);
+      // Anlaşmazlık savunmasının kaynağı: parça HANGİ sapmayla üçgenlendi.
+      assert.deepEqual(row.geometry!.tessellation, { ...STEP_TESSELLATION });
+      assert.equal(row.geometry!.solidCount, 1, "gövde sayısı çekirdek raporundan gelmedi");
+      assert.ok(row.canonical_stl_key, "üreticinin basacağı STL yazılmadı");
+    });
+
+    await test("STEP: satırda 'cm' dursa bile analiz mm'yi ZORLAR", async () => {
+      // §3'ün tuzağı: bugünkü `CASE WHEN units='mm' …` müşterinin seçimini
+      // KORUR. STEP'te korumak, bu UPDATE'i 0070'in CHECK'ine çarptırıp 23514
+      // ile düşürür; parça `MAX_ANALYSIS_ATTEMPTS` turu döner ve `failed` olur.
+      //
+      // CHECK, satırın 'cm' olmasına hiç izin vermediği için tuzağı kurmak onu
+      // GEÇİCİ olarak düşürmeyi gerektiriyor. Bedeli yok, kazancı büyük:
+      // `unitsPatch`in STEP dalı kaldırılırsa bu iddia KIRMIZI olur (korunan
+      // 'cm' satırda kalır) — kilidin gerçekten ZORLADIĞININ tek kanıtı.
+      const step = await makePart("scripts/fixtures/quote/cube20.step", {
+        source_format: "step",
+      });
+      await admin.query(
+        "ALTER TABLE quote_parts DROP CONSTRAINT quote_parts_step_units_chk"
+      );
+      try {
+        await admin.query("UPDATE quote_parts SET units='cm' WHERE id = $1", [step]);
+        assert.equal(await analyzeQuotePart(step), "ready");
+        assert.equal((await rowOf(step)).units, "mm", "müşterinin 'cm'si korundu");
+      } finally {
+        // Kısıt geri kurulur ki BUNDAN SONRAKİ testler gerçek şemaya karşı
+        // koşsun. Onarma satırı yalnız iddia düştüğünde iş yapar: kısıt 'cm'
+        // kalmış bir satırla kurulamaz ve `finally`nin hatası yukarıdaki
+        // GERÇEK iddiayı gizlerdi.
+        await admin.query(
+          "UPDATE quote_parts SET units='mm' WHERE source_format='step' AND units <> 'mm'"
+        );
+        await admin.query(
+          `ALTER TABLE quote_parts ADD CONSTRAINT quote_parts_step_units_chk
+             CHECK (source_format <> 'step' OR units = 'mm')`
+        );
+      }
     });
 
     await test("müşteri birimi seçtiyse analiz onu ezmez", async () => {

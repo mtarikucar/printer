@@ -20,7 +20,12 @@ import sharp from "sharp";
 import { db } from "@/lib/db";
 import { quoteParts, quotes } from "@/lib/db/schema";
 import { ANALYSIS_GIVE_UP_ERROR } from "@/lib/config/quote-types";
-import type { AnalysisStatus, PartGeometry, QuoteUnits } from "@/lib/config/quote-types";
+import type {
+  AnalysisStatus,
+  PartGeometry,
+  QuoteSourceFormat,
+  QuoteUnits,
+} from "@/lib/config/quote-types";
 import { MeshProcessError, runAnalyzeQuotePart } from "@/lib/services/mesh-runner";
 import {
   absoluteFilePath,
@@ -270,8 +275,17 @@ async function deleteSupersededOutputs(
  * 3MF kendi birimini beyan eder; STL/OBJ etmez (`sourceUnits = null`). Koşul
  * güncellemenin İÇİNDE, `CASE` ile kurulur: müşteri analiz sürerken birimi
  * elle değiştirmiş olabilir ve iş onun seçimini ezmemelidir.
+ *
+ * STEP'TE İSTİSNA: birim müşterinin seçimi DEĞİL, dosyanın kendisidir (ISO
+ * 10303 uzunluk birimi; çekirdek onu mm'ye uygular) — ve 0070'in
+ * `quote_parts_step_units_chk` CHECK'i satırda `units <> 'mm'` GÖRMEK
+ * İSTEMEZ. Aşağıdaki `CASE` müşterinin seçimini KORUR; STEP'te korumak, bu
+ * UPDATE'i `23514` ile düşürür, parça `MAX_ANALYSIS_ATTEMPTS` turu boyunca
+ * yeniden denenir ve sonunda `failed` olurdu. Bu yüzden STEP'te mm
+ * KOŞULSUZ yazılır (PATCH tarafındaki eşi: `resolveConfig`, quote-service.ts).
  */
-function unitsPatch(geometry: PartGeometry) {
+function unitsPatch(geometry: PartGeometry, sourceFormat: QuoteSourceFormat) {
+  if (sourceFormat === "step") return { units: "mm" as QuoteUnits };
   if (!geometry.sourceUnits) return {};
   return {
     units: sql<QuoteUnits>`CASE WHEN ${quoteParts.units} = 'mm' THEN ${geometry.sourceUnits} ELSE ${quoteParts.units} END`,
@@ -349,7 +363,7 @@ export async function analyzeQuotePart(
         canonicalStlKey: stored.canonicalStlKey,
         previewGlbKey: stored.previewGlbKey,
         thumbnailKey: stored.thumbnailKey,
-        ...unitsPatch(geometry),
+        ...unitsPatch(geometry, part.sourceFormat),
         updatedAt: new Date(),
       })
       .where(

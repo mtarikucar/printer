@@ -55,7 +55,7 @@ import {
   promoteStagedUpload,
   uploadOwnerKey,
 } from "@/lib/services/chunked-upload";
-import { UUID_RE, type QuoteAccess } from "@/lib/services/quote-access";
+import { stepUploadsEnabled, UUID_RE, type QuoteAccess } from "@/lib/services/quote-access";
 import { recomputeQuoteCache, type QuoteCacheTx } from "@/lib/services/quote-cache";
 import { catalogUpdatedAt, loadActiveSnapshot } from "@/lib/services/quote-catalog";
 import { validateStagedQuoteModel } from "@/lib/services/quote-model-validation";
@@ -313,6 +313,20 @@ export async function addPartFromUpload(
     snapshot.settings.maxFileBytes
   );
   if (!validation.ok) throw new QuoteServiceError(validation.error, 400, validation.code);
+
+  // GÜVENLİK SINIRI BURADIR. İstemcinin biçim listesi (`acceptedFormats` →
+  // dropzone `accept`) yalnız bir KOLAYLIKTIR; gövde elle de kurulabilir.
+  //
+  // Ve bayrak kapalıyken gelen `.step` SESSİZCE YOK SAYILMAZ: 400 + kod.
+  // Sessizce yok saymak (ya da 200 dönmek) müşteriye dosyasının alındığını
+  // sandırırdı — teklifinde olmayan bir parçayı beklemeye başlardı.
+  if (validation.format === "step" && !(await stepUploadsEnabled(access.viewer))) {
+    throw new QuoteServiceError(
+      "STEP dosyaları şu an kabul edilmiyor; parçayı STL, OBJ ya da 3MF olarak dışa aktarıp yükleyin.",
+      400,
+      "step_disabled"
+    );
+  }
 
   const { partId, position } = await mutateQuote(access, async (tx, quote) => {
     // Kilit altında İKİNCİ kontrol: iki istek aynı anda geldiyse yalnız biri
@@ -613,7 +627,27 @@ function resolveConfig(
   if (patch.layerUm !== undefined) next.layerUm = patch.layerUm;
   if (patch.infillPct !== undefined) next.infillPct = patch.infillPct;
   if (patch.quantity !== undefined) next.quantity = patch.quantity;
-  if (patch.units !== undefined) next.units = patch.units;
+  if (patch.units !== undefined) {
+    // STEP'İN BİRİM KİLİDİ. Dosya kendi birimini taşır ve çekirdek onu mm'ye
+    // uygular; "cm" seçmek parçayı 10× büyütür, hacmi (yani fiyatı) 1000×
+    // şişirirdi. Kilidin yeri BURASI: yamayı ayrıştıran `parsePartPatch`
+    // parçayı hiç görmez, oysa buradan HEM tek parça (`updatePart`) HEM toplu
+    // (`bulkUpdateParts`) yol geçer — tek noktada yazmak iki ucu birden kapar.
+    //
+    // Bu ret 0070'in `quote_parts_step_units_chk` CHECK'inin TS tarafındaki
+    // EŞİDİR ve "daha anlaşılır mesaj" değil, 500'ü engelleyen tek şeydir:
+    // olmasaydı UPDATE 23514 ile düşer, rota Türkçe cümle yerine BOŞ GÖVDELİ
+    // bir 500 döndürürdü. `scale` bilerek serbest kalır (tasarım §1.4:
+    // kilitli olan birim, ölçek değil).
+    if (part.sourceFormat === "step" && patch.units !== "mm") {
+      throw new QuoteServiceError(
+        "Ölçü birimi STEP dosyasından okundu (mm) ve değiştirilemez.",
+        400,
+        "invalid_option"
+      );
+    }
+    next.units = patch.units;
+  }
   if (patch.scale !== undefined) next.scale = patch.scale;
   if (patch.criticalTolerance !== undefined) next.criticalTolerance = patch.criticalTolerance;
 
@@ -1781,6 +1815,12 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
     orderNumber = row?.orderNumber ?? null;
   }
 
+  // Bayrak okuması sunum katmanına DEĞİL buraya düşer (quote-present saf ve
+  // senkron kalmalı). Sunucu kapısı (`addPartFromUpload`) ile AYNI işlevden
+  // okunur, yani müşteriye seçtirilen biçim ile ucun kabul ettiği biçim
+  // ayrışamaz. Maliyet: Redis önbellekli (10 s) bir bayrak okuması.
+  const stepEnabled = await stepUploadsEnabled(access.viewer);
+
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
     leadTier: quote.leadTier,
     addonKeys: quote.addonKeys,
@@ -1798,6 +1838,7 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
     now: new Date(),
     sign: getPublicUrl,
     shareBaseUrl: `${appUrl()}/teklif/${quote.number}`,
+    stepEnabled,
   });
 }
 

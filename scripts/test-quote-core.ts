@@ -14,7 +14,8 @@ import type {
   PricingPartInput,
   QuoteStatus,
 } from "../src/lib/config/quote-types";
-import { LEAD_TIER_KEYS } from "../src/lib/config/quote-types";
+import { LEAD_TIER_KEYS, QUOTE_SOURCE_FORMATS } from "../src/lib/config/quote-types";
+import { presentPublicCatalog } from "../src/lib/services/quote-present";
 import { scaledGeometry, suggestUnits, unitFactor } from "../src/lib/config/quote-units";
 import { dfmWarningKey, partPricingKey } from "../src/lib/config/quote-keys";
 import {
@@ -1019,6 +1020,25 @@ test("yeni geometri alanları anahtar şemasına GİRMEZ", () => {
     assert.equal(partPricingKey(step, tier), partPricingKey(mesh, tier));
   }
   assert.equal(dfmWarningKey(["thin_walls"], step), dfmWarningKey(["thin_walls"], mesh));
+});
+test("acceptedFormats bayrağı PARAMETRE olarak alır, kendisi OKUMAZ", () => {
+  // Sunum katmanı SAF ve SENKRONdur: `isFlagEnabled` async ve DB'ye gider, onu
+  // buraya sokmak her serileştirmeye bir bayrak okuması eklerdi. Bu yüzden
+  // bayrağı ÇAĞIRAN okur (`stepUploadsEnabled`) ve sonucu parametre olarak
+  // geçer — bu test tam olarak o saflığın kanıtıdır: DB, çerez, oturum yok.
+  const open = presentPublicCatalog(SEED_SNAPSHOT, true);
+  const closed = presentPublicCatalog(SEED_SNAPSHOT, false);
+  assert.deepEqual(open.acceptedFormats, [...QUOTE_SOURCE_FORMATS]);
+  assert.deepEqual(closed.acceptedFormats, ["stl", "obj", "3mf"]);
+  // Liste TEK kaynaktan türer: beşinci bir biçim eklendiğinde bu satır onu
+  // kendiliğinden bekler, yani "bazı yerlerde var" durumu oluşamaz.
+  assert.deepEqual(
+    closed.acceptedFormats,
+    QUOTE_SOURCE_FORMATS.filter((f) => f !== "step")
+  );
+  // Kamuya açık katalogda hiçbir fiyat anahtarı yok kuralı korunur: yeni alan
+  // `…Kurus` ile bitmiyor, yani fiyat kapısının süzgecine hiç takılmaz.
+  assert.ok(!Object.keys(open).some((k) => k.endsWith("Kurus")));
 });
 test("STEP_TESSELLATION sürümlü ve ölçülmüş değerlerde", () => {
   // Bu üç sayı FİYATIN girdisidir (hacim tessellation'dan gelir). Değişirlerse

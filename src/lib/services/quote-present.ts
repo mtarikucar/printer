@@ -16,6 +16,7 @@
  */
 import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
+import { QUOTE_SOURCE_FORMATS } from "@/lib/config/quote-types";
 import type {
   ComputedQuote,
   DfmIssue,
@@ -76,11 +77,29 @@ function publicIssue(issue: DfmIssue): DfmIssue {
  * Kamuya açık katalog (açılış sayfası / yükleyici): hiçbir fiyat alanı yok.
  * Fiyatlar yalnız bir teklifin içinde, fiyat kapısı açık izleyiciye gider.
  */
-export function presentPublicCatalog(snapshot: PricingSnapshot): PresentedCatalog {
-  return presentCatalog(snapshot, false);
+export function presentPublicCatalog(
+  snapshot: PricingSnapshot,
+  stepEnabled: boolean
+): PresentedCatalog {
+  return presentCatalog(snapshot, false, stepEnabled);
 }
 
-function presentCatalog(snapshot: PricingSnapshot, canSeePrices: boolean): PresentedCatalog {
+/**
+ * `stepEnabled` BİR PARAMETREDİR, burada okunmaz.
+ *
+ * `isFlagEnabled` async'tir ve DB'ye gider; bu dosya ise SAF ve SENKRON —
+ * sayfanın RSC props'u, uç, e-posta ve belge aynı işlevden geçer. Bayrağı
+ * içeride okumak sunum katmanına bir veritabanı sokmak ve her serileştirmeye
+ * bir okuma eklemek olurdu. Bayrağı çağıran okur (`stepUploadsEnabled`,
+ * `quote-access.ts`) — o TEK okuma noktası hem bu listeyi hem sunucu kapısını
+ * besler, yani dropzone'un seçtirdiği biçim ile ucun kabul ettiği biçim
+ * ayrışamaz.
+ */
+function presentCatalog(
+  snapshot: PricingSnapshot,
+  canSeePrices: boolean,
+  stepEnabled: boolean
+): PresentedCatalog {
   return {
     technologies: snapshot.technologies.map((t) => ({
       key: t.key,
@@ -129,6 +148,11 @@ function presentCatalog(snapshot: PricingSnapshot, canSeePrices: boolean): Prese
     leadTiers: snapshot.settings.leadTiers.map((t) => ({ key: t.key, name: t.name })),
     maxPartsPerQuote: snapshot.settings.maxPartsPerQuote,
     maxFileBytes: snapshot.settings.maxFileBytes,
+    // Biçim listesi TEK kaynaktan (`QUOTE_SOURCE_FORMATS`) türer; elle yazılmış
+    // bir kopya, beşinci bir biçim geldiğinde sessizce eksik kalırdı.
+    acceptedFormats: stepEnabled
+      ? [...QUOTE_SOURCE_FORMATS]
+      : QUOTE_SOURCE_FORMATS.filter((format) => format !== "step"),
   };
 }
 
@@ -148,6 +172,13 @@ export interface PresentQuoteInput {
   sign: (key: string) => string;
   /** Paylaşım bağlantısının kökü: `<app>/teklif/T-000123`. */
   shareBaseUrl: string;
+  /**
+   * `quote_step_enabled` bu izleyici için açık mı (`stepUploadsEnabled`).
+   * Yalnız `catalog.acceptedFormats`i belirler; parçanın kendisi bayraktan
+   * BAĞIMSIZ gösterilir — bayrak kapandığında YÜKLENMİŞ STEP parçaları
+   * çalışmaya devam eder (tasarım §5 geri dönüş planı).
+   */
+  stepEnabled: boolean;
 }
 
 export function presentQuote(input: PresentQuoteInput): PresentedQuote {
@@ -289,7 +320,7 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
     liveDraftReference: viewer.isOwner ? input.liveDraftReference : null,
     orderNumber: viewer.isOwner ? input.orderNumber : null,
     viewer,
-    catalog: presentCatalog(snapshot, canSeePrices),
+    catalog: presentCatalog(snapshot, canSeePrices, input.stepEnabled),
     parts: presentedParts,
     partCount: parts.length,
     unitCount: parts.reduce((sum, p) => sum + p.quantity, 0),

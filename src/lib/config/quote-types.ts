@@ -542,6 +542,15 @@ export interface PresentedCatalog {
   leadTiers: Array<{ key: LeadTierKey; name: string }>;
   maxPartsPerQuote: number;
   maxFileBytes: number;
+  /**
+   * Müşteriye NE seçtirileceğini bu liste söyler (dropzone `accept` + istemci
+   * doğrulaması). `quote_step_enabled` KAPALIYKEN `"step"` bu listede YOKTUR.
+   *
+   * Bu bir KOLAYLIKTIR, güvenlik sınırı değil: kural sunucuda, parçayı yazan
+   * tek yerde durur (`addPartFromUpload`). Liste `QUOTE_SOURCE_FORMATS`ten
+   * türetilir, elle yazılmaz.
+   */
+  acceptedFormats: QuoteSourceFormat[];
 }
 
 export interface PresentedQuote {

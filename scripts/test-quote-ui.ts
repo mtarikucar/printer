@@ -390,6 +390,9 @@ const catalogFixture: PresentedCatalog = {
   ],
   maxPartsPerQuote: 20,
   maxFileBytes: 100 * 1024 * 1024,
+  // Bayrak KAPALI hâl: arayüz fikstürü müşteriye `.step` seçtirmez. Dropzone'un
+  // bu listeden `accept` üretmesi S5'in işi; burada yalnız sözleşme taşınır.
+  acceptedFormats: ["stl", "obj", "3mf"],
 };
 
 function partFixture(over: Partial<PresentedPart> = {}): PresentedPart {

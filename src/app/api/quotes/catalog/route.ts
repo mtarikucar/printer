@@ -18,7 +18,7 @@
  */
 import { NextResponse } from "next/server";
 import { CUSTOMER_READ_FAILED_ERROR, handleRouteFailure } from "@/lib/api/route-error";
-import { quoteApiEnabled } from "@/lib/services/quote-access";
+import { quoteApiEnabled, stepUploadsEnabled } from "@/lib/services/quote-access";
 import { loadActiveSnapshot } from "@/lib/services/quote-catalog";
 import { presentPublicCatalog } from "@/lib/services/quote-present";
 import { openQuoteRouteBody } from "../_shared";
@@ -41,7 +41,13 @@ async function handleGET(): Promise<NextResponse> {
       { headers: { "Cache-Control": DISABLED_CACHE_CONTROL } }
     );
   }
-  return NextResponse.json({ enabled, catalog: presentPublicCatalog(await loadActiveSnapshot()) });
+  // Bu uçta izleyici YOK (henüz teklif de yok), bu yüzden STEP kapısı oturumdan
+  // okunur: bayrak kapalıyken yalnız admin `.step` seçebilir.
+  const [snapshot, stepEnabled] = await Promise.all([
+    loadActiveSnapshot(),
+    stepUploadsEnabled(null),
+  ]);
+  return NextResponse.json({ enabled, catalog: presentPublicCatalog(snapshot, stepEnabled) });
 }
 
 export async function GET() {

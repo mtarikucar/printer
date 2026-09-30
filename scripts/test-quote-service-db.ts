@@ -81,6 +81,18 @@ function stlFixture(tag: string): Buffer {
   return bytes;
 }
 
+/**
+ * Aynı küpün STEP'i; etiket DATA bölümüne YORUM olarak girer.
+ *
+ * Böylece her kopyanın sha256'sı ayrıdır (parça kütüphanesi dosyaları özetiyle
+ * topluyor) ve dosya hâlâ geçerli bir ISO 10303-21 gövdesidir — doğrulama
+ * kapısı gerçekten onu okur.
+ */
+function stepFixture(tag: string): Buffer {
+  const text = fs.readFileSync(path.join(root, "scripts/fixtures/quote/cube20.step"), "utf8");
+  return Buffer.from(text.replace("DATA;", `DATA;\n/* ${tag} */`));
+}
+
 async function main() {
   await admin.connect();
   try {
@@ -181,6 +193,7 @@ async function main() {
       uploadOwnerKey,
     } = await import("../src/lib/services/chunked-upload");
     const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
+    const { setFlag } = await import("../src/lib/services/flags");
 
     const queue = getQuoteAnalysisQueue();
     // Paylaşılan QA Redis'i: önceki koşuların artıkları bu testin iddialarını
@@ -201,9 +214,13 @@ async function main() {
     }
 
     /** Sahnelenmiş yükleme: dosyayı diske koyar ve sahibini deftere yazar. */
-    async function stage(tag: string, owner: string): Promise<string> {
+    async function stage(
+      tag: string,
+      owner: string,
+      fixture: (tag: string) => Buffer = stlFixture
+    ): Promise<string> {
       const uploadId = await createStagedUpload();
-      const bytes = stlFixture(tag);
+      const bytes = fixture(tag);
       const written = await appendChunk(uploadId, new Response(new Uint8Array(bytes)).body, 0);
       assert.equal(written.ok, true, "parça diske yazıldı");
       await setStagedUploadMeta(uploadId, { owner, expectedSize: bytes.length });
@@ -1223,6 +1240,169 @@ async function main() {
       } finally {
         await admin.query(`ALTER TABLE ${namespace}.quote_messages_yok RENAME TO quote_messages`);
       }
+    });
+
+    // ─── STEP: sunucu kapısı ve birim kilidi ────────────────────────────────
+
+    // İki kapı, iki AYRI rol. Sunucu (`addPartFromUpload`) KURAL koyar:
+    // bayrak kapalıyken gövdede gelen `.step` 400 alır. İstemci
+    // (`acceptedFormats` → dropzone `accept`) yalnız KOLAYLIKTIR ve gövde elle
+    // kurulabilir. Bu yüzden kapının sınandığı yer burasıdır.
+    //
+    // Kendi kullanıcısı ve kendi teklifi: yukarıdaki müşteri listesi testleri
+    // `userId`nin teklif ve parça SAYILARINI birebir iddia ediyor.
+    const stepUserId = randomUUID();
+    let stepQuote = { id: "", number: "" };
+    let stepPartId = "";
+    let meshPartId = "";
+
+    await test("bayrak KAPALI: gövdede gelen .step 400 step_disabled alır", async () => {
+      await admin.query(`INSERT INTO users (id, email, full_name) VALUES ($1, $2, $3)`, [
+        stepUserId,
+        `step-${stepUserId}@ornek.test`,
+        "STEP Müşterisi",
+      ]);
+      // Varsayılan zaten `false`; yine de AÇIKÇA kapatılır — bayrak okuması 10
+      // saniye Redis'te önbelleklenir ve önceki bir koşunun artığı bu iddiayı
+      // sessizce yeşile çevirebilirdi (`setFlag` önbelleği siler).
+      await setFlag("quote_step_enabled", false, "test");
+      stepQuote = await createQuote({
+        userId: stepUserId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      const access = await loadAccess(stepQuote.id, stepUserId);
+      const staged = await stage("step-kapali", `u:${stepUserId}`, stepFixture);
+      await assert.rejects(
+        addPartFromUpload(access, { uploadId: staged, fileName: "govde.step" }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 400 &&
+          err.code === "step_disabled" &&
+          /STEP/.test(err.message)
+      );
+      // SESSİZ YOK SAYMA YOK: ne satır açıldı ne de "eklendi" gibi bir cevap
+      // döndü. Müşteri teklifinde olmayan bir parçayı beklemeye başlamaz.
+      assert.equal(await livePartCount(stepQuote.id), 0, "reddedilen .step satır bıraktı");
+    });
+
+    await test("bayrak KAPALI + admin oturumu: iç test kapısı açık", async () => {
+      // `quoteApiEnabled` deseni: lansman öncesi iç testi bayrağı açmadan
+      // yapılabilir. Yükleme admin anahtarıyla sahnelenir, çünkü
+      // `/api/uploads/chunk` çağıranın İLK eşleşen kimliğini yazar.
+      const adminKey = uploadOwnerKey({ role: "admin", userId: "admin@ornek.test" });
+      const staged = await stage("step-admin", adminKey, stepFixture);
+      const base = await loadAccess(stepQuote.id, null);
+      const added = await addPartFromUpload(
+        {
+          ...base,
+          viewer: { canSeePrices: true, canEdit: true, isOwner: false, isShare: false, isAdmin: true },
+          uploadOwnerKeys: [adminKey],
+        },
+        { uploadId: staged, fileName: "admin.step" }
+      );
+      const [part] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, added.partId))
+        .limit(1);
+      assert.equal(part.sourceFormat, "step");
+      // `.stp` de olsa aynı anahtar, aynı dosya adı: analiz `source.step`i arar.
+      assert.ok(part.sourceKey.endsWith("/source.step"), `kaynak adı: ${part.sourceKey}`);
+      await deletePart(await loadAccess(stepQuote.id, stepUserId), added.partId);
+    });
+
+    await test("bayrak AÇIK: .stp yüklemesi de tek biçim anahtarına düşer", async () => {
+      await setFlag("quote_step_enabled", true, "test");
+      const access = await loadAccess(stepQuote.id, stepUserId);
+      const staged = await stage("step-acik", `u:${stepUserId}`, stepFixture);
+      const added = await addPartFromUpload(access, { uploadId: staged, fileName: "govde.stp" });
+      stepPartId = added.partId;
+      const [part] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, stepPartId))
+        .limit(1);
+      assert.equal(part.sourceFormat, "step", ".stp başka bir biçim anahtarına düştü");
+      assert.ok(part.sourceKey.endsWith("/source.step"), `kaynak adı: ${part.sourceKey}`);
+      assert.equal(part.units, "mm", "STEP parçası mm ile doğmadı");
+      assert.ok(fs.existsSync(path.join(uploads, part.sourceKey)), "kaynak dosya diskte yok");
+      // Karşılaştırma parçası: aynı teklifte bir mesh parçası.
+      const meshStaged = await stage("step-mesh", `u:${stepUserId}`, stlFixture);
+      meshPartId = (await addPartFromUpload(access, { uploadId: meshStaged, fileName: "mesh.stl" }))
+        .partId;
+    });
+
+    const unitsOf = async (partId: string) =>
+      (await admin.query("SELECT units FROM quote_parts WHERE id = $1", [partId])).rows[0]
+        .units as string;
+
+    await test("STEP parçasında units:'cm' 400 invalid_option alır, gövdesi TÜRKÇE", async () => {
+      // Bu ret "daha anlaşılır mesaj" değil, 500'Ü ENGELLEYEN TEK ŞEYDİR:
+      // olmasaydı UPDATE 0070'in CHECK'ine takılıp 23514 ile düşer ve rota
+      // BOŞ GÖVDELİ bir 500 döndürürdü.
+      await assert.rejects(
+        updatePart(await loadAccess(stepQuote.id, stepUserId), stepPartId, { units: "cm" }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 400 &&
+          err.code === "invalid_option" &&
+          /STEP/.test(err.message) &&
+          /değiştirilemez/.test(err.message)
+      );
+      assert.equal(await unitsOf(stepPartId), "mm", "reddedilen yama yine de yazıldı");
+    });
+
+    await test("aynı yama bir .stl parçasında GEÇER (kilit yalnız STEP'i bağlar)", async () => {
+      await updatePart(await loadAccess(stepQuote.id, stepUserId), meshPartId, { units: "cm" });
+      assert.equal(await unitsOf(meshPartId), "cm");
+      await updatePart(await loadAccess(stepQuote.id, stepUserId), meshPartId, { units: "mm" });
+    });
+
+    await test("STEP'te ölçek SERBEST, mm'yi yeniden yazmak da serbest", async () => {
+      // Tasarım §1.4: kilitli olan BİRİM, ölçek değil — müşteri parçayı
+      // büyütüp küçültmeye devam eder.
+      await updatePart(await loadAccess(stepQuote.id, stepUserId), stepPartId, { scale: 1.5 });
+      const [scaled] = await db
+        .select()
+        .from(quoteParts)
+        .where(eq(quoteParts.id, stepPartId))
+        .limit(1);
+      assert.equal(scaled.scale, 1.5);
+      // Kilit, DB CHECK'inin (`source_format <> 'step' OR units = 'mm'`) TS
+      // tarafındaki EŞİDİR: CHECK'in kabul ettiği tek değer olan `mm` burada da
+      // geçer (hiçbir şeyi değiştirmeyen bir yamayı reddetmek, toplu "hepsini
+      // mm yap" yamasını STEP'li bir seçimde kırardı).
+      await updatePart(await loadAccess(stepQuote.id, stepUserId), stepPartId, { units: "mm" });
+      assert.equal(await unitsOf(stepPartId), "mm");
+    });
+
+    await test("TOPLU yama: STEP varsa reddedilir ve STL'in birimi DEĞİŞMEZ", async () => {
+      // Bu vaka olmadan tek parça ucu kapalı, toplu uç AÇIK kalırdı. Sıra
+      // bilerek "önce STL": ret yalnız veritabanından gelse STL'in yaması
+      // ÖNCE uygulanmış olurdu ve işlemin geri alınması sınanmış olmazdı.
+      await assert.rejects(
+        bulkUpdateParts(await loadAccess(stepQuote.id, stepUserId), [meshPartId, stepPartId], {
+          units: "cm",
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 400 &&
+          err.code === "invalid_option"
+      );
+      assert.equal(await unitsOf(meshPartId), "mm", "toplu yama yarı uygulanmış kaldı");
+      assert.equal(await unitsOf(stepPartId), "mm");
+      await setFlag("quote_step_enabled", false, "test");
+    });
+
+    await test("bayrak kapansa da YÜKLENMİŞ STEP parçası teklifte kalır", async () => {
+      // Geri dönüş planı (tasarım §5): bayrak yalnız YENİ yüklemeyi durdurur.
+      const view = await loadPresentedQuote(await loadAccess(stepQuote.id, stepUserId));
+      assert.deepEqual(view.catalog.acceptedFormats, ["stl", "obj", "3mf"]);
+      const step = view.parts.find((p) => p.id === stepPartId);
+      assert.ok(step, "yüklenmiş STEP parçası görünümden düştü");
+      assert.equal(step.sourceFormat, "step");
+      assert.equal(step.config.units, "mm");
     });
 
     await queue.obliterate({ force: true }).catch(() => {});

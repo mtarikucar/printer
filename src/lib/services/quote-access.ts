@@ -173,6 +173,27 @@ export async function quoteApiEnabled(): Promise<boolean> {
 }
 
 /**
+ * STEP (`.step`/`.stp`) yüklemesi bu istek için açık mı.
+ *
+ * TEK okuma noktası, bilerek: aynı cevap hem SUNUCU KAPISINI
+ * (`addPartFromUpload`, güvenlik sınırı) hem müşteriye gönderilen biçim
+ * listesini (`PresentedCatalog.acceptedFormats`, kolaylık) besler. İki ayrı
+ * okuma, dropzone'un `.step` seçtirdiği ama ucun 400 döndürdüğü bir hâl
+ * üretirdi — özelliğin en olası sessiz kırılması.
+ *
+ * `quoteApiEnabled` deseni: bayrak kapalıyken admin oturumu iç test için
+ * geçer. `viewer` verildiğinde admin-lik ONDAN da okunur, çünkü erişim çözümü
+ * onu bu istekte zaten sormuştur (`resolveQuoteAccess`) — ama yetmez: teklifin
+ * SAHİBİ olan bir admin `isOwner` dalına düşer ve `isAdmin` false olur, o
+ * yüzden oturum yine sorulur.
+ */
+export async function stepUploadsEnabled(viewer: QuoteViewer | null): Promise<boolean> {
+  if (await isFlagEnabled("quote_step_enabled")) return true;
+  if (viewer?.isAdmin) return true;
+  return isAdminSession();
+}
+
+/**
  * İstek kimliği: müşteri oturumu + anonim çerez.
  *
  * `customer-auth` TEMBEL yüklenir çünkü `@/lib/env` (ve `next/headers`) ile

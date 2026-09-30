@@ -16,6 +16,7 @@ import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
 import { computeQuote } from "../src/lib/config/quote-compute";
 import { partPricingKey } from "../src/lib/config/quote-keys";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
+import { STEP_TESSELLATION } from "../src/lib/config/quote-step";
 import type { PartGeometry, QuoteViewer } from "../src/lib/config/quote-types";
 import type { Quote, QuotePart } from "../src/lib/db/schema";
 import { resolveQuoteAccess, resolveQuoteViewer, shouldClaimQuote } from "../src/lib/services/quote-access";
@@ -143,7 +144,11 @@ function present(
   viewer: QuoteViewer,
   quote = makeQuote(),
   parts = [makePart()],
-  extra: { liveDraftReference?: string | null; orderNumber?: string | null } = {}
+  extra: {
+    liveDraftReference?: string | null;
+    orderNumber?: string | null;
+    stepEnabled?: boolean;
+  } = {}
 ) {
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
     leadTier: quote.leadTier,
@@ -161,6 +166,10 @@ function present(
     now: NOW,
     sign,
     shareBaseUrl: "https://figurunica.test/teklif/T-000001",
+    // Bayrak, serileştiriciye PARAMETRE olarak gelir: bu dosya DB'siz
+    // çalıştığı için `presentQuote`un bir bayrak okuması yapmadığının da
+    // kanıtıdır (okuyan yer `stepUploadsEnabled`, `quote-access.ts`).
+    stepEnabled: extra.stepEnabled ?? false,
   });
 }
 
@@ -355,6 +364,25 @@ test("sahip: toplamlar, parça fiyatı, fatura ve paylaşım bağlantısı gör�
   assert.ok(view.leadOptions.every((o) => typeof o.totalKurus === "number"));
 });
 
+test("catalog.acceptedFormats bayraktan gelir; YÜKLENMİŞ STEP parçası bayraktan bağımsızdır", () => {
+  // Geri dönüş planının (tasarım §5) sözleşmesi: bayrak kapanınca yeni STEP
+  // YÜKLEMESİ durur, yüklenmiş parça çalışmaya DEVAM eder — görünür, ölçülü ve
+  // fiyatlı kalır. Aksi hâlde "bayrağı kapat" komutu, ödemesini bekleyen
+  // müşterinin teklifini bozan bir işlem olurdu.
+  const stepPart = makePart({
+    fileName: "govde.step",
+    sourceFormat: "step",
+    sourceKey: "quote-parts/p1/source.step",
+    geometry: { ...CUBE, sourceUnits: "mm", tessellation: STEP_TESSELLATION, solidCount: 1 },
+  });
+  const closed = present(OWNER_VIEW, makeQuote(), [stepPart]);
+  assert.deepEqual(closed.catalog.acceptedFormats, ["stl", "obj", "3mf"]);
+  assert.equal(closed.parts[0].sourceFormat, "step");
+  assert.ok((closed.parts[0].price?.unitKurus ?? 0) > 0, "kapalı bayrakta STEP parçası fiyatsız");
+  const open = present(OWNER_VIEW, makeQuote(), [stepPart], { stepEnabled: true });
+  assert.deepEqual(open.catalog.acceptedFormats, ["stl", "obj", "3mf", "step"]);
+});
+
 test("fiyat kapısı kapalıyken gövdede TEK BİR fiyat anahtarı yok", () => {
   const view = present(ANON_VIEW);
   const json = JSON.stringify(view);
@@ -457,6 +485,7 @@ test("bekleyen ödeme teklifi kilitler ama ödemeye devam açık kalır", () => 
     now: NOW,
     sign,
     shareBaseUrl: "https://figurunica.test/teklif/T-000001",
+    stepEnabled: false,
   });
   assert.equal(view.locked, true);
   assert.equal(view.liveDraftReference, "FIG-ABCD1234");

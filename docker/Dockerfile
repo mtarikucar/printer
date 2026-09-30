@@ -150,11 +150,25 @@ COPY --chown=nextjs:nodejs tsconfig.json ./
 # worker dies at startup with MODULE_NOT_FOUND and crash-loops forever.
 COPY --chown=nextjs:nodejs sentry.worker.config.ts ./
 COPY --chown=nextjs:nodejs workers ./workers
+# The CAD kernel (OpenCASCADE via cascadio, ~104 MB unpacked) is installed HERE
+# and not in `base`, because `base` is shared with the app image and the app
+# never reads a STEP file — see scripts/requirements-cad.txt. Copied on its own,
+# BEFORE `scripts`, so that editing any python script does not invalidate this
+# layer and re-download the wheel. /opt/venv was created as root in `base` and
+# `USER nextjs` is still below, so this runs as root, which is what pip needs.
+COPY scripts/requirements-cad.txt scripts/requirements-cad.txt
+RUN /opt/venv/bin/pip install --no-cache-dir -r scripts/requirements-cad.txt
 COPY --chown=nextjs:nodejs scripts ./scripts
 # Import guard: process_upload_model.py once imported helpers that a
 # process_mesh.py refactor had deleted, and every upload/product-file preview
 # failed silently at runtime. A broken import now fails the image build.
-RUN /opt/venv/bin/python3 -c "import sys; sys.path.insert(0,'scripts'); import process_upload_model, process_mesh, render_turntable, analyze_quote_part"
+#
+# step_mesh.py is in the list for a second reason: it is the ONLY importer of
+# cascadio, so this line is also the test that the CAD wheel is present and that
+# its bundled OCCT libraries still resolve. If the pinned version disappears
+# from PyPI or a shared object goes missing, the IMAGE BUILD fails here —
+# instead of a customer's STEP upload failing in production.
+RUN /opt/venv/bin/python3 -c "import sys; sys.path.insert(0,'scripts'); import process_upload_model, process_mesh, render_turntable, analyze_quote_part, step_mesh"
 COPY --chown=nextjs:nodejs src ./src
 COPY --chown=nextjs:nodejs drizzle.config.ts ./
 # Migration SQL files — so `docker exec printer_worker npx drizzle-kit migrate`

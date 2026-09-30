@@ -1,0 +1,35 @@
+# CAD (STEP/STP) reading — installed ONLY in the `worker` stage.
+#
+# WHY A SEPARATE FILE. scripts/requirements.txt is installed in the `base` stage
+# of docker/Dockerfile, and `base` is the parent of deps, model, builder, app AND
+# worker — so anything added there lands in the Next.js app image too. cascadio
+# unpacks to 104 MB (measured in the built worker image: 104,144,530 bytes under
+# site-packages, 103.6 MB of it the bundled OpenCASCADE .so set; the pip layer
+# reports 104 MB against the 680 MB of requirements.txt), and the app never reads
+# a STEP file: only the BullMQ worker does, through scripts/step_mesh.py.
+#
+# VERSION PINNING TRAP. cascadio's own README warns that the project deletes old
+# releases from PyPI to stay inside its storage quota, and names 0.0.13 as the
+# LTS. A pinned version can therefore vanish and break the image build — which
+# is the failure we want (docker/Dockerfile's import guard turns it into a build
+# failure, not a customer's upload failing), but it still has to be recoverable.
+# The sha256 of the wheels this pin was measured against is recorded here so the
+# same bytes can be restored from our own mirror and installed with
+#   pip install --no-index --find-links <dir> -r scripts/requirements-cad.txt
+#
+# THE WHEEL THE IMAGE USES — node:20-slim is Debian bookworm, python 3.11.2, so
+# pip resolves the cp311 build, NOT the cp312-abi3 one. Mirror this file:
+#   cascadio-0.1.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+#   28,355,770 bytes
+#   sha256 ac5be9ad00124b35b4f702ff4152124baec7f3b1cf254bb2b341191ea1a2ed2c
+#
+# The wheel every number in the S1 measurement report came from (the QA venv runs
+# python 3.12, which resolves the abi3 build):
+#   cascadio-0.1.1-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+#   28,350,060 bytes
+#   sha256 9f17efee8ac97483984eedee315d3637f5f28375af524005bd62035d8d2546c6
+#
+# The wheel bundles every OCCT library it needs and links nothing outside glibc
+# and libstdc++ (measured with ldd), so no apt package has to be added to the
+# base image for it.
+cascadio==0.1.1

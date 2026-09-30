@@ -35,7 +35,7 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("thirteen flags, closed set", () => {
+test("fourteen flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
     "auto_assign_cart_platform",
     "auto_assign_custom",
@@ -53,6 +53,10 @@ test("thirteen flags, closed set", () => {
     // Teklif ödemesinde hediye kartı (G): yeni bir satış yüzeyi değil, mevcut
     // yüzeye eklenen bir ödeme aracı — ama müşteriye açılması ayrı bir karar.
     "quote_gift_card_enabled",
+    // STEP/STP CAD dosyaları. Yeni bir MÜŞTERİ YÜZEYİ açmıyor: mevcut teklif
+    // yükleyicisine bir dosya biçimi ekliyor (sunucuda `addPartFromUpload`,
+    // istemcide `acceptedFormats` → dropzone `accept`).
+    "quote_step_enabled",
     "wa_agent_enabled",
     "wa_bot_enabled",
   ]);
@@ -98,6 +102,7 @@ test("a new customer surface ships behind a closed flag", () => {
   assert.deepEqual([...FEATURE_FLAG_KEYS], [
     "instant_quote_enabled",
     "quote_gift_card_enabled",
+    "quote_step_enabled",
   ]);
   for (const key of FEATURE_FLAG_KEYS) {
     assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);

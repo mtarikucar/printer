@@ -47,6 +47,12 @@ export const FLAG_KEYS = [
   // (`expireDraft` → `refundGiftCardForDraft`) bu anahtarı OKUMAZ — kapatmak
   // yarı yolda kalmış bir bakiyeyi kartta kilitli bırakmamalı.
   "quote_gift_card_enabled",
+  // Teklife STEP/STP (CAD) dosyası yüklenmesi. Yeni bir satış yüzeyi DEĞİL:
+  // bugünkü yükleyiciye dördüncü bir dosya biçimi ekliyor, fiyat ve ödeme
+  // aynı yoldan akıyor. Ayrı anahtar, çünkü OCCT çevrimi worker imajındaki
+  // ~100 MB'lık bir bağımlılığa dayanıyor ve o bağımlılık sahada kırılırsa
+  // (wheel PyPI'dan silinir, bir `.so` eksilir) tek düğmeyle geri dönülmeli.
+  "quote_step_enabled",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -78,6 +84,12 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   // Aynı kural PARA yüzeyleri için daha da sıkıdır: hediye kartı kabulü
   // müşterinin bakiyesini harcar, o yüzden açılması ayrı bir karardır.
   quote_gift_card_enabled: false,
+  // KAPALI doğar, çünkü açılması İKİ kapıyı birden açar ve ikisi de bu
+  // sevkiyatta henüz YAZILMADI (S4/S5): sunucuda `addPartFromUpload`ın "step"
+  // biçimini kabul etmesi — GÜVENLİK sınırı — ve istemcide
+  // `acceptedFormats` → dropzone `accept` — kolaylık. Anahtar onlardan önce
+  // doğar ki o iki kapı yazıldığında sahayı kapalı bulsunlar.
+  quote_step_enabled: false,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -94,6 +106,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   auto_assign_painter: "Otomatik boyacı ataması (üretici QC onayında)",
   instant_quote_enabled: "Anlık teklif motoru",
   quote_gift_card_enabled: "Teklif ödemesinde hediye kartı",
+  quote_step_enabled: "Teklifte STEP/STP dosyaları",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -142,6 +155,11 @@ export const FEATURE_FLAG_KEYS = [
   // tahsilata sayar), bu yüzden kill switch kapsamında DEĞİL: acil durumda onu
   // kapatmak kaybı azaltmaz, yalnız ödemeyi zorlaştırır.
   "quote_gift_card_enabled",
+  // STEP de bu kümeye ait: dışarıya para harcamıyor (çevrim bizim worker'ımızda
+  // koşuyor, ücretli bir API'ye gitmiyor) ve sipariş yönlendirmiyor (kaynak
+  // dosya biçimi atama girdisi değil) — yalnız "bu biçim müşteriye açık mı"
+  // sorusunu cevaplıyor.
+  "quote_step_enabled",
 ] as const satisfies readonly FlagKey[];
 
 /**

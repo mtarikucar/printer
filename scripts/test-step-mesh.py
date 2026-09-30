@@ -22,6 +22,12 @@ those claims is a way the price can silently go wrong:
                    RSS — an OOM kill in the 2 g worker container).
   clean refusal    a broken STEP comes back as an exit code and a named error,
                    never a python traceback and never a silent abort.
+  memory ceiling   --max-address-space-gb is a DEPLOYMENT KNOB: the number on
+                   the command line is read back out of RLIMIT_AS, inside the
+                   run, before OCCT reserves anything. A successful conversion
+                   proves nothing here — limit_address_space() swallows every
+                   setrlimit failure into a stderr warning, so a knob that
+                   never applies looks identical from the outside.
   watertight       OCCT triangulates face by face; without vertex welding the
                    mesh reads "not watertight" and the manufacturer receives an
                    STL full of holes. This assertion is the task's acceptance
@@ -49,6 +55,48 @@ FIXTURES = os.path.join(SCRIPTS_DIR, "fixtures", "quote")
 # in closed form, so the only objective check on the tessellation budget.
 CYLINDER_VOLUME_MM3 = math.pi * 100.0 * 20.0
 VOLUME_BUDGET_PERCENT = 0.2
+
+# Run in a CHILD, twice over, because RLIMIT_AS is a property of a process: this
+# test process must not end up carrying the ceiling itself, and the thing under
+# observation is the CLI's OWN run, not a re-implementation of it.
+#
+#   (1) limit_address_space() on its own — does setrlimit actually land?
+#   (2) main() driven through argv — is the flag's value in force at the moment
+#       convert() is entered? convert() is where cascadio reserves its arenas,
+#       so anything later would be too late. The spy reads the live soft limit
+#       and then calls the REAL conversion, so this is a full conversion of the
+#       fixture under the ceiling, not a stub.
+#
+# Both numbers are printed as one JSON line; the parent asserts the exact bytes.
+RLIMIT_PROBE_SOURCE = '''\
+"""Read RLIMIT_AS back out of step_mesh: from the helper, and from a real run."""
+import json
+import resource
+import sys
+
+scripts_dir, step_path, out_stl = sys.argv[1:4]
+sys.path.insert(0, scripts_dir)
+import step_mesh
+
+step_mesh.limit_address_space(4.0)
+direct = resource.getrlimit(resource.RLIMIT_AS)[0]
+
+observed = {}
+real_convert = step_mesh.convert
+
+
+def spy(*args, **kwargs):
+    observed["soft"] = resource.getrlimit(resource.RLIMIT_AS)[0]
+    return real_convert(*args, **kwargs)
+
+
+step_mesh.convert = spy
+sys.argv = ["step_mesh.py", step_path, out_stl, "--max-address-space-gb", "3"]
+code = step_mesh.main()
+print(json.dumps({"direct": direct, "inMain": observed.get("soft"), "exit": code}))
+'''
+PROBE_DIRECT_BYTES = 4 * 1024**3
+PROBE_MAIN_BYTES = 3 * 1024**3
 
 failures: list[str] = []
 
@@ -238,22 +286,73 @@ def main() -> int:
             proc.stderr.strip()[-400:],
         )
 
-        # ── --max-address-space-gb: a deployment knob, both ways. ────────────
+        # ── --max-address-space-gb: the knob, OBSERVED in RLIMIT_AS. ─────────
+        #    Without this probe nothing in this file can tell the knob from a
+        #    no-op: gutting limit_address_space() (`return` at the top) and
+        #    making setrlimit raise both leave every other check here green —
+        #    measured, see the S1 fix report.
+        probe_path = os.path.join(workdir, "rlimit_probe.py")
+        with open(probe_path, "w") as handle:
+            handle.write(RLIMIT_PROBE_SOURCE)
+        probe_out = os.path.join(workdir, "as-probe", "out.stl")
+        os.makedirs(os.path.dirname(probe_out), exist_ok=True)
+        probe = subprocess.run(
+            [sys.executable, probe_path, SCRIPTS_DIR,
+             os.path.join(FIXTURES, "cube20.step"), probe_out],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        seen: dict = {}
+        if probe.stdout.strip():
+            try:
+                seen = json.loads(probe.stdout.strip().splitlines()[-1])
+            except ValueError:
+                seen = {}
+        probe_detail = f"stdout={probe.stdout.strip()[-200:]} stderr={probe.stderr.strip()[-200:]}"
+        check(
+            "limit_address_space(4) really lowers RLIMIT_AS to 4 GiB — the "
+            "ceiling is APPLIED, not merely accepted on the command line",
+            seen.get("direct") == PROBE_DIRECT_BYTES,
+            probe_detail,
+        )
+        check(
+            "--max-address-space-gb 3 is already in force when the conversion "
+            "STARTS — the flag is a deployment knob, not a no-op",
+            seen.get("inMain") == PROBE_MAIN_BYTES,
+            probe_detail,
+        )
+        check(
+            "the fixture still converts under the 3 GiB ceiling it was handed",
+            seen.get("exit") == 0,
+            probe_detail,
+        )
+        # The real CLI, same flag, across a real process boundary: the value is
+        # pinned above, this only proves the flag does not break the CLI path.
         proc, out_stl, meta = run(
             workdir, "cube20.step", "--max-address-space-gb", "4", tag="as-ok"
         )
-        check("--max-address-space-gb 4: a plausible ceiling is honoured and the "
-              "conversion still succeeds", proc.returncode == 0, proc.stderr.strip()[-400:])
+        check("--max-address-space-gb 4: the CLI still converts under an explicit "
+              "ceiling", proc.returncode == 0, proc.stderr.strip()[-400:])
+        # 1 GB is BELOW MIN_ADDRESS_SPACE_GB (2.5, the measured floor), so this
+        # case is the argparse guard, not the conversion: it is refused before
+        # any work, which is the point — a ceiling under the floor would make
+        # OCCT die by signal instead of refusing, and a dead child writes no
+        # report at all.
         proc, out_stl, meta = run(
             workdir, "cube20.step", "--max-address-space-gb", "1", tag="as-too-small"
         )
-        check("--max-address-space-gb 1: refused with exit 2, not a MemoryError",
+        check("--max-address-space-gb 1 (under the measured floor): refused with "
+              "exit 2 before any work, not a MemoryError",
               proc.returncode == 2, f"returncode={proc.returncode}")
         check("--max-address-space-gb 1: no python traceback",
               "Traceback" not in proc.stderr and "MemoryError" not in proc.stderr,
               proc.stderr.strip()[-400:])
         check("--max-address-space-gb 1: the refusal says which limit is wrong",
               "address space" in proc.stderr.lower(), proc.stderr.strip()[-400:])
+        check("--max-address-space-gb 1: refused with NO meta.json — an argument "
+              "bug is the caller's, not a verdict on the customer's file",
+              meta is None, f"meta={json.dumps(meta) if meta else None}")
 
         # ── the face counter itself: exact, whatever the chunk size. ─────────
         for fixture, expected in (

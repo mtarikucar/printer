@@ -33,7 +33,13 @@ import { computeQuote, defaultPartConfig } from "../src/lib/config/quote-compute
 import { addBusinessDays, istanbulDateKey } from "../src/lib/config/business-days";
 import { checkoutBlockers, quotePermissions } from "../src/lib/config/quote-policy";
 import { formatQuoteNumber, parseQuoteNumber } from "../src/lib/config/quote-number";
-import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
+import { SEED_MAX_FILE_BYTES, SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
+import {
+  STEP_MAX_BREP_FACES,
+  STEP_MAX_BYTES,
+  STEP_TESSELLATION,
+  STEP_TESSELLATION_VERSION,
+} from "../src/lib/config/quote-step";
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -72,6 +78,20 @@ const CUBE_20MM: PartGeometry = {
   overhangArea: 400,
   sourceUnits: null,
   objectCount: 1,
+  // Mesh dosyası: üçgenler dosyadan geldi, çevrilen bir B-rep yok.
+  tessellation: null,
+  solidCount: null,
+};
+
+/**
+ * AYNI küp, bu kez STEP'ten: birim dosyanın kendisinden okundu (ISO 10303) ve
+ * çekirdek uyguladı, üçgen ağ BİZİM ürettiğimiz sapmayla üretildi.
+ */
+const STEP_CUBE_20MM: PartGeometry = {
+  ...CUBE_20MM,
+  sourceUnits: "mm",
+  tessellation: STEP_TESSELLATION,
+  solidCount: 1,
 };
 
 function cube(edge: number, over: Partial<PartGeometry> = {}): PartGeometry {
@@ -929,6 +949,79 @@ test("checkoutBlockers eksikleri Türkçe sayar", () => {
       /süre/i.test(s)
     )
   );
+});
+
+// ─── 10) STEP sabitleri ve STEP geometrisi ──────────────────────────────────
+
+console.log("\n10) STEP");
+test("STEP'in kendi bayt tavanı genel tavanın ALTINDA", () => {
+  // Aynı bayt sayısı STEP'te mesh'ten kat kat fazla geometri taşır: S1 ölçümü
+  // 30,2 MB'lık bir STEP'ten 2,43M üçgen çıkardı (worker tavanı 1,5M). Genel
+  // tavan (`maxFileBytes`) tek başına worker'ı KORUMUYOR.
+  assert.ok(
+    STEP_MAX_BYTES < SEED_MAX_FILE_BYTES,
+    `STEP tavanı ${STEP_MAX_BYTES} genel tavanın (${SEED_MAX_FILE_BYTES}) altında olmalı`
+  );
+  assert.ok(STEP_MAX_BREP_FACES > 0);
+});
+test("STEP geometrisi de birim çevrimini quote-units.ts'te yapar", () => {
+  // Çekirdek parçayı mm'ye çevirmiş olsa bile ölçek çarpanı hâlâ TEK yerde
+  // uygulanır: `PartGeometry` DOSYA BİRİMİNDEDİR kuralının STEP'te de geçerli
+  // olduğunun kanıtı (mm dosya birimi olduğu için factor = scale).
+  const g = scaledGeometry(STEP_CUBE_20MM, "mm", 1);
+  near(g.factor, 1);
+  near(g.volumeMm3 ?? 0, 8000);
+  near(g.extentsMm.x, 20);
+  const doubled = scaledGeometry(STEP_CUBE_20MM, "mm", 2);
+  near(doubled.factor, 2);
+  near(doubled.extentsMm.z, 40);
+  // Birim ÖNERİSİ de tahmine düşmez: küçük sayılar için inç/cm öneren sezgi
+  // (`suggestUnits`) STEP'te hiç çalışmaz, çünkü dosya birimini kendisi söylüyor.
+  const build = { x: 250, y: 210, z: 210 };
+  assert.equal(suggestUnits(STEP_CUBE_20MM, build), "mm");
+  assert.equal(suggestUnits({ ...STEP_CUBE_20MM, ...cube(5), sourceUnits: "mm" }, build), "mm");
+  assert.equal(suggestUnits(cube(5), build), "in", "mesh'te sezgi çalışmaya devam eder");
+});
+test("STEP geometrisi DfM uyarılarını aynı şekilde doğurur", () => {
+  // İade riski uyarı hattına bağlıdır: STEP'ten gelen bir parça delikliyse ya da
+  // çok gövdeliyse müşteri bunu STL'de olduğu gibi görmek zorunda.
+  const leaky = part({
+    geometry: {
+      ...STEP_CUBE_20MM,
+      isVolume: false,
+      volumeEstimated: true,
+      isWatertight: false,
+    },
+  });
+  const leakyRes = evaluatePartDfm(leaky, S);
+  assert.ok(
+    leakyRes.issues.some((i) => i.code === "not_watertight" && i.severity === "warning"),
+    "STEP parçasında not_watertight uyarısı yok"
+  );
+  const assembly = part({ geometry: { ...STEP_CUBE_20MM, bodyCount: 2, solidCount: 2 } });
+  const issue = evaluatePartDfm(assembly, S).issues.find((i) => i.code === "multiple_bodies");
+  assert.ok(issue, "STEP assembly'sinde multiple_bodies uyarısı yok");
+  assert.equal(issue.params?.count, 2);
+});
+test("yeni geometri alanları anahtar şemasına GİRMEZ", () => {
+  // Para değişmezi: `partPricingKey` `sourceSha256` + konfig okur. Tessellation
+  // ya da solidCount anahtara girse sahadaki TÜM manuel fiyatlar ve uyarı
+  // onayları bu sevkiyatla birlikte sessizce düşerdi.
+  const mesh = part({ geometry: CUBE_20MM });
+  const step = part({ geometry: STEP_CUBE_20MM });
+  for (const tier of LEAD_TIER_KEYS) {
+    assert.equal(partPricingKey(step, tier), partPricingKey(mesh, tier));
+  }
+  assert.equal(dfmWarningKey(["thin_walls"], step), dfmWarningKey(["thin_walls"], mesh));
+});
+test("STEP_TESSELLATION sürümlü ve ölçülmüş değerlerde", () => {
+  // Bu üç sayı FİYATIN girdisidir (hacim tessellation'dan gelir). Değişirlerse
+  // `STEP_TESSELLATION_VERSION` artar; eski parçalar yeniden ÖLÇÜLMEZ.
+  assert.deepEqual(
+    { ...STEP_TESSELLATION },
+    { deflectionMm: 0.01, angularRad: 0.5, relative: false }
+  );
+  assert.ok(Number.isInteger(STEP_TESSELLATION_VERSION) && STEP_TESSELLATION_VERSION >= 1);
 });
 
 console.log(

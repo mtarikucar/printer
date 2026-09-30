@@ -42,6 +42,9 @@ const CUBE: PartGeometry = {
   overhangArea: 400,
   sourceUnits: null,
   objectCount: 1,
+  // Mesh dosyası: üçgenler dosyadan geldi, çevrilen bir B-rep yok.
+  tessellation: null,
+  solidCount: null,
 };
 
 function makeQuote(overrides: Partial<Quote> = {}): Quote {

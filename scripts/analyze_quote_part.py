@@ -2,10 +2,11 @@
 """Measure ONE uploaded part for the instant quote engine.
 
 Usage:
-    analyze_quote_part.py <input> <stl|obj|3mf> <outdir>
+    analyze_quote_part.py <input> <stl|obj|3mf|step> <outdir>
                           [--thumb-size 512] [--max-faces-walls 2500000]
                           [--max-faces-bodies 2500000]
                           [--max-input-faces 1500000]
+                          [--max-brep-faces 20000]
                           [--max-address-space-gb 8]
 
 Writes into <outdir>:
@@ -32,13 +33,31 @@ key for key, in camelCase. Three rules this file exists to enforce:
      fixture: a 1 inch cube still loads as a 1-unit cube). So the `unit`
      attribute is read out of the package XML and returned as `sourceUnits`
      while the mesh stays exactly as the file wrote it.
+
+STEP IS THE ONE EXCEPTION TO RULE 3, AND IT IS NOT A GUESS. A STEP file carries
+its length unit inside itself (ISO 10303-21, `SI_UNIT` /
+`CONVERSION_BASED_UNIT`), the CAD kernel reads that unit and applies it — cascadio
+emits glTF, which is defined in METRES — and `scripts/step_mesh.py` scales the
+result ×1000. So a STEP part reaches `measure` already in MILLIMETRES and
+`sourceUnits` is reported as "mm" for every STEP file, whatever unit it declared.
+MEASURED on two fixtures (S1 report §2.4): cube20.step (mm) and cube1in.step
+(INCH, a 1-unit cube) come out 20 mm and 25.4 mm. This is also why STEP is the
+one format whose unit the customer must NOT be allowed to override.
+
+STEP also DOES NOT bring its own triangles: they are produced here, with the
+parameters in `src/lib/config/quote-step.ts` (`STEP_TESSELLATION`), and they are
+therefore an input to the PRICE. The parameters used are reported back in
+`geometry.tessellation` so that a part can always be read with the deflection it
+was actually measured at.
 """
 import argparse
 import json
 import os
 import re
 import resource
+import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 
@@ -150,6 +169,43 @@ UNIT_MAP = {"millimeter": "mm", "centimeter": "cm", "inch": "in"}
 XML_HEAD_BYTES = 64 * 1024
 XML_CHUNK_BYTES = 4 * 1024 * 1024
 XML_SCAN_LIMIT_BYTES = 256 * 1024 * 1024
+# ─── STEP ───────────────────────────────────────────────────────────────────
+# The conversion itself lives in scripts/step_mesh.py and runs as a CHILD
+# process; every constant below is this side of that boundary. The child is
+# spawned by ABSOLUTE path: the worker process does not always start in /app, and
+# the imports above only work because the interpreter puts this file's directory
+# on sys.path, which says nothing about the working directory.
+STEP_MESH_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "step_mesh.py")
+# ISO 10303-21 entity names that carry ONE bounded face of a solid (AP214 writes
+# ADVANCED_FACE, AP203 manifold-surface exports write FACE_SURFACE). Counting
+# them in the BYTES is the only way to know how big a B-rep is before OCCT
+# touches it. Same tokens as step_mesh.py's BREP_FACE_TOKENS, on purpose: this is
+# the outer of two identical gates, and it is the one that runs while the
+# expensive process does not yet exist.
+STEP_FACE_TOKENS = (b"ADVANCED_FACE", b"FACE_SURFACE")
+# Mirrors step_mesh.py's DEFAULT_MAX_BREP_FACES and
+# src/lib/config/quote-step.ts STEP_MAX_BREP_FACES — one number, three readers.
+# MEASURED (S1 §2.3, inside the worker image under `mem_limit: 2g`): 20,001 B-rep
+# faces → 1.17M triangles → measured here in 1.44 GiB / 66.5 s; 41,472 faces →
+# 2.43M triangles → refused by DEFAULT_MAX_INPUT_FACES after 39.6 s of OCCT work
+# and a 121.7 MB STL. This gate turns that refusal into 0.8 s and 0.16 GiB.
+DEFAULT_MAX_BREP_FACES = 20_000
+# Twice the general upload ceiling (SEED_MAX_FILE_BYTES, 32 MiB); a longer file is
+# scanned only this far and the partial count is then a LOWER bound — enough to
+# refuse, never enough to admit. Same reasoning as step_mesh.py's SCAN_LIMIT_BYTES.
+STEP_SCAN_LIMIT_BYTES = 64 * 1024 * 1024
+# The child's own wall-clock ceiling. MEASURED (S1 §2.7): the heaviest acceptable
+# part (at the face ceiling) converts in 19.2 s, so 240 s is 12× the measured
+# worst case — and it sits BELOW the TypeScript runner's ANALYZE_TIMEOUT_MS
+# (300_000, src/lib/services/mesh-runner.ts) on purpose: if OCCT ever hangs, this
+# process must be the one that survives to write report.json. Being SIGKILLed by
+# the runner instead would leave no report, and a part with no report is
+# re-queued by the stuck-part sweep every 20 minutes.
+STEP_TIMEOUT_SECONDS = 240
+# The two codes step_mesh.py is allowed to hand back, and the two the TypeScript
+# side knows (`MeshProcessError.code`). Anything else from the child is OUR bug,
+# not a verdict on the customer's file.
+STEP_ERROR_CODES = ("step_too_complex", "step_unreadable")
 
 
 class AnalysisError(Exception):
@@ -304,6 +360,15 @@ def estimate_face_count(input_path: str, source_format: str) -> tuple[int | None
                                             than the triangles per mesh, since
                                             the `<triangles>` container tag
                                             starts with the token as well
+      step                                  None: a STEP file has no triangles
+                                            to count. Its own ceiling is the
+                                            B-rep FACE count (a different unit,
+                                            ~59× smaller on the fixtures, so it
+                                            must never be returned here as if it
+                                            were a triangle estimate) and it is
+                                            checked by `check_step_brep_budget`;
+                                            the triangle ceiling is applied to
+                                            the count the conversion reports.
 
     With `truncated` True (an obj/3mf longer than XML_SCAN_LIMIT_BYTES) the
     count covers the scanned prefix only, so it is a LOWER bound: it may not be
@@ -312,6 +377,8 @@ def estimate_face_count(input_path: str, source_format: str) -> tuple[int | None
     this case returned `None` and the precheck was skipped altogether, which is
     exactly how a 2 MB 3MF carrying 600 MB of model XML reached `load_part`.
     """
+    if source_format == "step":
+        return None, False
     try:
         size = os.path.getsize(input_path)
         if source_format == "stl":
@@ -404,6 +471,202 @@ def load_part(input_path: str, source_format: str) -> trimesh.Trimesh:
     return mesh
 
 
+def check_step_brep_budget(input_path: str, max_brep_faces: int) -> None:
+    """Refuse an oversized B-rep from the BYTES, before OCCT reserves anything.
+
+    This is the first of the two gates that keep a STEP part from OOM-killing the
+    worker (the second is the triangle count the conversion reports, below). It
+    has to work on bytes, exactly like the mesh formats' precheck: an OOM kill
+    writes no report.json, so the part gets the generic "file unreadable" message
+    and the stuck-part sweep re-queues the same job every 20 minutes.
+
+    Each token is counted in its own pass over the file, so the chunk-boundary
+    overlap of one token can never swallow or double-count the other (the bug
+    fixed in step_mesh.py's single-pass counter: over-counting a ceiling means
+    refusing a legitimate part).
+    """
+    faces = 0
+    truncated = False
+    for token in STEP_FACE_TOKENS:
+        try:
+            with open(input_path, "rb") as handle:
+                found, cut_short = count_token(handle, token, STEP_SCAN_LIMIT_BYTES)
+        except OSError as exc:
+            # Unreadable input is the conversion's verdict to give, not this
+            # gate's: let the child try and report with its own code.
+            print(f"Warning: B-rep precheck skipped: {exc}", file=sys.stderr)
+            return
+        faces += found
+        truncated = truncated or cut_short
+    if faces > max_brep_faces:
+        raise AnalysisError(
+            "step_too_complex",
+            f"this STEP file declares {'at least ' if truncated else ''}{faces} B-rep faces, "
+            f"above the {max_brep_faces} that fit in the worker",
+        )
+    if truncated:
+        # Under the ceiling but the scan hit its cap: the file is larger than
+        # STEP_SCAN_LIMIT_BYTES (64 MiB), i.e. twice the general upload ceiling.
+        # Nothing is proven about the rest of it, and OCCT would read the whole
+        # file into memory before deciding.
+        raise AnalysisError(
+            "step_too_complex",
+            f"this STEP file is larger than the {STEP_SCAN_LIMIT_BYTES}-byte scan limit "
+            "and cannot be measured inside the worker's memory budget",
+        )
+
+
+def read_step_meta(work_dir: str) -> dict | None:
+    """The child's meta.json, or None. Best effort — the exit code is the contract."""
+    try:
+        with open(os.path.join(work_dir, "meta.json")) as handle:
+            meta = json.load(handle)
+        return meta if isinstance(meta, dict) else None
+    except Exception as exc:  # noqa: BLE001 - a missing verdict is handled below
+        print(f"Warning: conversion meta.json unreadable: {exc}", file=sys.stderr)
+        return None
+
+
+def step_failure(returncode: int, meta: dict | None) -> AnalysisError:
+    """The child's refusal, named so that the sweep can eventually give up."""
+    if meta is not None and meta.get("ok") is False and meta.get("error") in STEP_ERROR_CODES:
+        message = meta.get("message")
+        return AnalysisError(
+            str(meta["error"]),
+            str(message) if isinstance(message, str) and message else "STEP conversion refused",
+        )
+    if returncode < 0:
+        # Killed by a SIGNAL, with no verdict of its own — which is precisely how
+        # OCCT fails when it runs out of address space: SIGSEGV, no MemoryError,
+        # no traceback, empty stderr (MEASURED, S1 §2.8a). A signal death
+        # supports only one reading, "too complex for this container", and naming
+        # it is what makes MAX_ANALYSIS_ATTEMPTS terminate instead of the sweep
+        # re-queueing the job forever.
+        return AnalysisError(
+            "step_too_complex",
+            f"the STEP conversion was killed by signal {-returncode} "
+            "(out of memory for this part)",
+        )
+    return AnalysisError(
+        "step_unreadable", f"the STEP conversion failed (exit {returncode})"
+    )
+
+
+def parse_step_tessellation(meta: dict) -> dict:
+    """The three deflection parameters the conversion actually used.
+
+    They are validated here rather than passed through, because they end up in
+    `geometry.tessellation`, which `parseGeometry` reads key by key: a missing or
+    non-finite number would surface as a `bad_report` on the TypeScript side with
+    nothing to say about which of the two processes broke.
+    """
+    raw = meta.get("tessellation")
+    fields = ("deflectionMm", "angularRad", "relative")
+    if not isinstance(raw, dict) or any(key not in raw for key in fields):
+        raise AnalysisError(
+            "internal", "the STEP conversion reported no usable tessellation parameters"
+        )
+    if not isinstance(raw["relative"], bool):
+        raise AnalysisError("internal", "tessellation.relative is not a boolean")
+    return {
+        "deflectionMm": required_number(raw["deflectionMm"], "tessellation.deflectionMm"),
+        "angularRad": required_number(raw["angularRad"], "tessellation.angularRad"),
+        "relative": raw["relative"],
+    }
+
+
+def load_step_part(
+    input_path: str, out_dir: str, max_brep_faces: int, max_input_faces: int
+) -> tuple[trimesh.Trimesh, dict, int]:
+    """(mesh in MILLIMETRES, tessellation, solid count) — converted in a CHILD process.
+
+    WHY A CHILD: OCCT does not raise. At a tight RLIMIT_AS the conversion dies
+    with SIGSEGV — no MemoryError, no traceback, an empty stderr (MEASURED, S1
+    §2.8a) — and a process that dies that way writes no report at all. As a child
+    it may die freely: this process stays alive to write report.json, which is the
+    difference between the sweep giving up after MAX_ANALYSIS_ATTEMPTS and
+    re-queueing the same job every 20 minutes forever. The child also gets its own
+    memory budget and `use_parallel=False`, neither of which this process wants.
+
+    The child's RLIMIT_AS is deliberately NOT forwarded: its measured floor is
+    2.5 GB (below that OCCT dies by signal instead of refusing) while this
+    process' floor is 2.0 GB, so passing this process' knob down could turn a
+    valid part into an argument error. Two processes, two measured budgets.
+    """
+    # Its own directory, INSIDE out_dir: the child's meta.json has a FIXED name,
+    # so two conversions sharing a directory would overwrite each other's
+    # verdict. out_dir is also the volume that already has room for canonical.stl.
+    with tempfile.TemporaryDirectory(prefix="step-mesh-", dir=out_dir) as work_dir:
+        stl_path = os.path.join(work_dir, "tessellated.stl")
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    STEP_MESH_SCRIPT,
+                    input_path,
+                    stl_path,
+                    # One knob, both gates: an operator who lowers the ceiling
+                    # here lowers it in the child as well.
+                    "--max-faces",
+                    str(max_brep_faces),
+                ],
+                # stdout is dropped: nothing the child says belongs on it, and
+                # OCCT prints its diagnostics — which quote the offending source
+                # line, and in a STEP that can be a HEADER line with the
+                # designer's name — straight to fd 1. The child silences those
+                # itself; this is the second lock on the same door (KVKK).
+                # stderr is inherited so the child's own one-line refusal reaches
+                # the worker log.
+                stdout=subprocess.DEVNULL,
+                timeout=STEP_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise AnalysisError(
+                "step_too_complex",
+                f"the STEP conversion did not finish within {STEP_TIMEOUT_SECONDS} seconds",
+            ) from exc
+        meta = read_step_meta(work_dir)
+        if proc.returncode != 0:
+            raise step_failure(proc.returncode, meta)
+        if meta is None or meta.get("ok") is not True:
+            # Exit 0 with no usable verdict is OUR bug, not a judgement on the
+            # customer's file, so it gets the internal code rather than one of
+            # the two STEP codes the operator screen explains.
+            raise AnalysisError(
+                "internal", "the STEP conversion exited 0 without a usable meta.json"
+            )
+        tessellation = parse_step_tessellation(meta)
+        triangles = meta.get("triangles")
+        solid_count = meta.get("solidCount")
+        if not isinstance(triangles, int) or not isinstance(solid_count, int):
+            raise AnalysisError(
+                "internal", "the STEP conversion reported no triangle or solid count"
+            )
+        if triangles > max_input_faces:
+            # The SECOND gate, and it is not redundant: triangles per B-rep face
+            # depend on the geometry (58.7 on the fixtures, far more on a curvy
+            # part), so the face ceiling does NOT bound the triangle count on its
+            # own (S1 §8.4). The conversion is already paid for; what this
+            # refusal still saves is loading that mesh into this process.
+            raise AnalysisError(
+                "too_many_faces",
+                f"the STEP conversion produced {triangles} triangles, "
+                f"above the {max_input_faces} ceiling",
+            )
+        # The child wrote a plain binary STL, so the ordinary loader applies —
+        # including its "no triangles" check. NO ROTATION: glTF is Y-up and the
+        # OBJ branch rotates for that reason, but MEASURED (S1 §2.5) this path
+        # produces Z-up geometry — bracket_asym.step (10 × 20 × 40 in the file)
+        # comes out [10, 20, 40] in that order, where a Y-up frame would give
+        # [10, 40, 20]. The claim is pinned by that fixture in
+        # scripts/test-analyze-quote-part.py, so a trimesh/cascadio version that
+        # starts rotating turns the test red instead of silently laying parts on
+        # their side.
+        mesh = load_part(stl_path, "stl")
+    return mesh, tessellation, solid_count
+
+
 def count_bodies(mesh: trimesh.Trimesh, capped: bool) -> int:
     """Disconnected shells. Nothing is merged and nothing is dropped."""
     if capped:
@@ -446,10 +709,20 @@ def measure(
     mesh: trimesh.Trimesh,
     source_units: str | None,
     object_count: int,
+    tessellation: dict | None,
+    solid_count: int | None,
     max_faces_walls: int,
     max_faces_bodies: int,
 ) -> dict:
-    """The PartGeometry payload, measured on the untouched full-resolution mesh."""
+    """The PartGeometry payload, measured on the untouched full-resolution mesh.
+
+    `tessellation` and `solid_count` describe a mesh that did not exist before we
+    made it, so they are None for every format that brings its own triangles.
+    They are still WRITTEN for those formats, as null: `parseGeometry`
+    (src/lib/services/mesh-runner.ts) reads every key of PartGeometry and treats a
+    missing one as `bad_report`, because a key that is silently absent becomes
+    `undefined` in the jsonb column and then NaN in the price.
+    """
     face_count = len(mesh.faces)
     walls_capped = face_count > max_faces_walls
     bodies_capped = face_count > max_faces_bodies
@@ -493,6 +766,8 @@ def measure(
         "overhangArea": required_number(overhang_area(mesh, extents[2]), "overhangArea"),
         "sourceUnits": source_units,
         "objectCount": int(object_count),
+        "tessellation": tessellation,
+        "solidCount": None if solid_count is None else int(solid_count),
     }
 
 
@@ -565,6 +840,7 @@ def analyze(
     max_faces_walls: int,
     max_faces_bodies: int,
     max_input_faces: int,
+    max_brep_faces: int,
 ) -> dict:
     started = time.time()
     timings: dict[str, float] = {}
@@ -596,18 +872,48 @@ def analyze(
             f"Model data is larger than the {XML_SCAN_LIMIT_BYTES}-byte scan limit "
             "and cannot be measured inside the worker's memory budget",
         )
+    if source_format == "step":
+        # A STEP has no triangles to count, so the precheck above returned None;
+        # its own ceiling is the B-rep face count, and it is read from the bytes
+        # for the same reason: OCCT must not reserve an arena for a part we are
+        # going to refuse.
+        check_step_brep_budget(input_path, max_brep_faces)
 
     mark = time.time()
-    mesh = load_part(input_path, source_format)
     source_units: str | None = None
     object_count = 1
-    if source_format == "3mf":
-        source_units, object_count = read_3mf_model_meta(input_path)
-        object_count = max(object_count, 1)
+    tessellation: dict | None = None
+    solid_count: int | None = None
+    if source_format == "step":
+        mesh, tessellation, solid_count = load_step_part(
+            input_path, out_dir, max_brep_faces, max_input_faces
+        )
+        # The unit is not a suggestion here: ISO 10303 writes it into the file,
+        # the kernel applied it and the child scaled the result to millimetres
+        # (MEASURED on cube20.step and cube1in.step, S1 §2.4). This is what makes
+        # the unit lock on STEP parts legitimate rather than an assumption.
+        source_units = "mm"
+        # The kernel's product structure is the honest answer to "how many
+        # objects were in this file", the same question `objectCount` answers for
+        # 3MF. At least 1: a converted part that measured is one object.
+        object_count = max(solid_count, 1)
+    else:
+        mesh = load_part(input_path, source_format)
+        if source_format == "3mf":
+            source_units, object_count = read_3mf_model_meta(input_path)
+            object_count = max(object_count, 1)
     timings["loadSeconds"] = round(time.time() - mark, 3)
 
     mark = time.time()
-    geometry = measure(mesh, source_units, object_count, max_faces_walls, max_faces_bodies)
+    geometry = measure(
+        mesh,
+        source_units,
+        object_count,
+        tessellation,
+        solid_count,
+        max_faces_walls,
+        max_faces_bodies,
+    )
     timings["measureSeconds"] = round(time.time() - mark, 3)
 
     mark = time.time()
@@ -652,7 +958,7 @@ def write_failure(out_dir: str, code: str, message: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Measure an uploaded part for an instant quote")
     parser.add_argument("input")
-    parser.add_argument("format", choices=["stl", "obj", "3mf"])
+    parser.add_argument("format", choices=["stl", "obj", "3mf", "step"])
     parser.add_argument("outdir")
     parser.add_argument("--thumb-size", type=int, default=512)
     parser.add_argument(
@@ -674,6 +980,12 @@ def main() -> int:
         help="refuse a part whose estimated triangle count is above this (before loading it)",
     )
     parser.add_argument(
+        "--max-brep-faces",
+        type=int,
+        default=DEFAULT_MAX_BREP_FACES,
+        help="STEP only: refuse a B-rep with more faces than this (counted from the bytes)",
+    )
+    parser.add_argument(
         "--max-address-space-gb",
         type=float,
         default=DEFAULT_ADDRESS_SPACE_GB,
@@ -692,7 +1004,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if args.max_faces_walls < 1 or args.max_faces_bodies < 1 or args.max_input_faces < 1:
+    if (
+        args.max_faces_walls < 1
+        or args.max_faces_bodies < 1
+        or args.max_input_faces < 1
+        or args.max_brep_faces < 1
+    ):
         print("Error: face ceilings must be positive", file=sys.stderr)
         return 2
 
@@ -715,6 +1032,7 @@ def main() -> int:
             args.max_faces_walls,
             args.max_faces_bodies,
             args.max_input_faces,
+            args.max_brep_faces,
         )
         write_report(args.outdir, report)
     except AnalysisError as exc:

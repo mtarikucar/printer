@@ -34,6 +34,11 @@ sys.path.insert(0, SCRIPTS_DIR)
 import analyze_quote_part  # noqa: E402
 FIXTURES = os.path.join(SCRIPTS_DIR, "fixtures", "quote")
 QUOTE_TYPES_TS = os.path.join(REPO_ROOT, "src", "lib", "config", "quote-types.ts")
+QUOTE_STEP_TS = os.path.join(REPO_ROOT, "src", "lib", "config", "quote-step.ts")
+# cylinder_r10h20.step: π × 10² × 20. The tessellation budget is the only
+# OBJECTIVE number in this file that the price depends on directly.
+CYLINDER_VOLUME_MM3 = 6283.185307
+CYLINDER_TOLERANCE_PCT = 0.2
 # render_turntable.BG_RGB — anything else in the image is the model.
 BG_RGB = np.array([246, 246, 248], dtype=np.uint8)
 
@@ -58,6 +63,51 @@ def contract_keys() -> set[str]:
     if body is None:
         raise SystemExit(f"PartGeometry interface not found in {QUOTE_TYPES_TS}")
     return set(re.findall(r"^  (\w+)\??:", body.group(1), re.M))
+
+
+def step_tessellation() -> dict:
+    """STEP_TESSELLATION, parsed from the shared TypeScript constant.
+
+    A STEP part is priced from a mesh that did not exist before we tessellated
+    it, so the deflection IS an input to the price. Reading the three numbers out
+    of src/lib/config/quote-step.ts and comparing them with what the pipeline
+    reported is what keeps the documented constant and the produced mesh from
+    drifting apart (the frozen price would otherwise be computed from a mesh no
+    shipped constant describes).
+    """
+    with open(QUOTE_STEP_TS) as handle:
+        source = handle.read()
+    body = re.search(r"export const STEP_TESSELLATION = \{(.*?)\n\}", source, re.S)
+    if body is None:
+        raise SystemExit(f"STEP_TESSELLATION not found in {QUOTE_STEP_TS}")
+    fields = dict(re.findall(r"^\s*(\w+):\s*([^,\n]+),", body.group(1), re.M))
+    return {
+        "deflectionMm": float(fields["deflectionMm"]),
+        "angularRad": float(fields["angularRad"]),
+        "relative": fields["relative"] == "true",
+    }
+
+
+def check_contract(label: str, geometry: dict, keys: set[str]) -> None:
+    """The report carries EXACTLY the PartGeometry keys — no more, no fewer.
+
+    `parseGeometry` (src/lib/services/mesh-runner.ts) reads every key and throws
+    `bad_report` on a missing one, deliberately: a key that is silently absent
+    lands in the jsonb column as `undefined` and then as NaN in the price. So a
+    field added for STEP has to be written as `null` by the mesh formats too, and
+    this check runs on every format for exactly that reason.
+    """
+    missing = sorted(keys - geometry.keys())
+    extra = sorted(geometry.keys() - keys)
+    check(f"{label}: geometry matches PartGeometry key for key",
+          not missing and not extra, f"missing={missing} extra={extra}")
+
+
+def check_no_tessellation(label: str, geometry: dict) -> None:
+    """A mesh format brings its own triangles; nothing was tessellated for it."""
+    check(f"{label}: tessellation and solidCount are null (no kernel involved)",
+          geometry.get("tessellation") is None and geometry.get("solidCount") is None,
+          f"tessellation={geometry.get('tessellation')} solidCount={geometry.get('solidCount')}")
 
 
 def analyze(
@@ -104,10 +154,8 @@ def main() -> int:
         report, outdir = analyze("cube20.stl", "stl", workdir)
         if report and report.get("ok"):
             geometry = report.get("geometry") or {}
-            missing = sorted(keys - geometry.keys())
-            extra = sorted(geometry.keys() - keys)
-            check("cube20.stl: geometry matches PartGeometry key for key",
-                  not missing and not extra, f"missing={missing} extra={extra}")
+            check_contract("cube20.stl", geometry, keys)
+            check_no_tessellation("cube20.stl", geometry)
             check("cube20.stl: volume 8000", near(geometry.get("volume"), 8000.0, 1.0),
                   f"volume={geometry.get('volume')}")
             check("cube20.stl: area 2400", near(geometry.get("area"), 2400.0, 1.0),
@@ -173,6 +221,8 @@ def main() -> int:
                   json.dumps(geometry))
             check("cube20.obj: OBJ carries no units", geometry.get("sourceUnits") is None,
                   f"sourceUnits={geometry.get('sourceUnits')}")
+            check_contract("cube20.obj", geometry, keys)
+            check_no_tessellation("cube20.obj", geometry)
 
         # ── two_bodies.stl: shells are counted, never merged or dropped ──────
         report, _ = analyze("two_bodies.stl", "stl", workdir)
@@ -231,7 +281,173 @@ def main() -> int:
                   f"volume={geometry.get('volume')}")
             check("cube1in.3mf: objectCount 1", geometry.get("objectCount") == 1,
                   f"objectCount={geometry.get('objectCount')}")
+            check_contract("cube1in.3mf", geometry, keys)
+            check_no_tessellation("cube1in.3mf", geometry)
             check_thumb("cube1in.3mf (--thumb-size 256)", outdir, 256)
+
+        # ── STEP: the branch that MAKES the mesh it measures ─────────────────
+        # Every other format hands us triangles; STEP hands us surfaces, and the
+        # child process (scripts/step_mesh.py, OCCT) turns them into triangles
+        # with the parameters below. So for STEP the tessellation IS an input to
+        # the price, and the unit is the file's own: ISO 10303 writes the length
+        # unit into the file and the kernel applies it (cascadio emits metres,
+        # the child scales ×1000) — nothing here assumes millimetres.
+        tessellation = step_tessellation()
+        report, outdir = analyze("cube20.step", "step", workdir)
+        if report and report.get("ok"):
+            geometry = report.get("geometry") or {}
+            check_contract("cube20.step", geometry, keys)
+            check("cube20.step: volume 8000 mm³", near(geometry.get("volume"), 8000.0, 10.0),
+                  f"volume={geometry.get('volume')}")
+            ext = geometry.get("extents") or {}
+            check("cube20.step: extents 20 × 20 × 20 mm",
+                  all(near(ext.get(axis), 20.0, 0.01) for axis in ("x", "y", "z")),
+                  f"extents={ext}")
+            check("cube20.step: sourceUnits mm (read from the file, not assumed)",
+                  geometry.get("sourceUnits") == "mm", f"sourceUnits={geometry.get('sourceUnits')}")
+            check("cube20.step: tessellation is the shipped STEP_TESSELLATION",
+                  geometry.get("tessellation") == tessellation,
+                  f"report={geometry.get('tessellation')} quote-step.ts={tessellation}")
+            check("cube20.step: solidCount 1 (from the kernel's product structure)",
+                  geometry.get("solidCount") == 1, f"solidCount={geometry.get('solidCount')}")
+            check("cube20.step: objectCount follows the solid count",
+                  geometry.get("objectCount") == 1, f"objectCount={geometry.get('objectCount')}")
+            # Vertex welding is part of the conversion: OCCT triangulates face by
+            # face, so an unwelded cube reads as NOT watertight and the
+            # manufacturer would receive an STL full of seams.
+            check("cube20.step: isWatertight true (the conversion welded the vertices)",
+                  geometry.get("isWatertight") is True,
+                  f"isWatertight={geometry.get('isWatertight')}")
+            stl_path = os.path.join(outdir, "canonical.stl")
+            if os.path.exists(stl_path):
+                with open(stl_path, "rb") as handle:
+                    head = handle.read(6)
+                canonical = trimesh.load(stl_path, force="mesh")
+                # The manufacturer's file must be the geometry the price was
+                # measured on, in millimetres, not the STEP we cannot slice.
+                check("cube20.step: canonical.stl is a binary STL in mm",
+                      head[:5] != b"solid"
+                      and near(float(abs(canonical.volume)), 8000.0, 10.0)
+                      and near(float(max(canonical.extents)), 20.0, 0.01),
+                      f"head={head!r} volume={float(abs(canonical.volume))} "
+                      f"extents={canonical.extents}")
+            else:
+                check("cube20.step: canonical.stl written", False, "missing")
+
+        # cube1in.step declares INCH and carries a 1-unit cube: 25.4 mm is the
+        # proof that the file's unit is applied and mm is never assumed.
+        report, _ = analyze("cube1in.step", "step", workdir)
+        if report and report.get("ok"):
+            geometry = report.get("geometry") or {}
+            ext = geometry.get("extents") or {}
+            check("cube1in.step: extents 25.4 mm (the file's INCH unit was applied)",
+                  all(near(ext.get(axis), 25.4, 0.01) for axis in ("x", "y", "z")),
+                  f"extents={ext}")
+            check("cube1in.step: sourceUnits still mm (the kernel converted it)",
+                  geometry.get("sourceUnits") == "mm", f"sourceUnits={geometry.get('sourceUnits')}")
+
+        # bracket_asym.step is 10 × 20 × 40 in the STEP file. The axes must come
+        # out in the SAME order: glTF is Y-up and the OBJ branch rotates for that
+        # reason, so whether this path needs the same rotation is a MEASURED
+        # question (S1 §2.5: it does not — the part arrives Z-up).
+        report, _ = analyze("bracket_asym.step", "step", workdir)
+        if report and report.get("ok"):
+            ext = (report.get("geometry") or {}).get("extents") or {}
+            check("bracket_asym.step: extents (10, 20, 40) on the SAME axes (no Y↔Z swap)",
+                  near(ext.get("x"), 10.0, 0.01) and near(ext.get("y"), 20.0, 0.01)
+                  and near(ext.get("z"), 40.0, 0.01),
+                  f"extents={ext} (a Y-up rotation would give 10, 40, 20)")
+
+        # two_bodies.step is a real STEP assembly (3 PRODUCTs, 2 solids). The two
+        # counts must AGREE: bodyCount is counted on the triangles, solidCount is
+        # the kernel's product structure, and if they disagree the conversion
+        # merged bodies the quote has to price separately.
+        report, _ = analyze("two_bodies.step", "step", workdir)
+        if report and report.get("ok"):
+            geometry = report.get("geometry") or {}
+            check("two_bodies.step: bodyCount 2 and solidCount 2 agree",
+                  geometry.get("bodyCount") == 2 and geometry.get("solidCount") == 2,
+                  f"bodyCount={geometry.get('bodyCount')} solidCount={geometry.get('solidCount')}")
+            check("two_bodies.step: objectCount 2", geometry.get("objectCount") == 2,
+                  f"objectCount={geometry.get('objectCount')}")
+
+        # The deflection budget, measured against an analytic volume. This is the
+        # single objective check on the tessellation constant: at the design's
+        # proposed 0.05 mm the same cylinder loses 0.325 % of its volume, i.e. it
+        # would be under-priced by more than the accepted budget.
+        report, _ = analyze("cylinder_r10h20.step", "step", workdir)
+        if report and report.get("ok"):
+            volume = (report.get("geometry") or {}).get("volume")
+            error_pct = (
+                abs(volume - CYLINDER_VOLUME_MM3) / CYLINDER_VOLUME_MM3 * 100.0
+                if isinstance(volume, (int, float)) else None
+            )
+            check(f"cylinder_r10h20.step: volume within {CYLINDER_TOLERANCE_PCT} % of "
+                  f"{CYLINDER_VOLUME_MM3:.2f} mm³",
+                  error_pct is not None and error_pct < CYLINDER_TOLERANCE_PCT,
+                  f"volume={volume} error={error_pct}%")
+
+        # ── the B-rep precheck refuses BEFORE the kernel reserves anything ────
+        # cube20.step declares 6 ADVANCED_FACE entities; a ceiling of 5 must
+        # refuse it from the BYTES, with its own code, and leave no output — the
+        # whole point is that OCCT never runs (at the real ceiling it costs
+        # 39.6 s and 1.6 GiB to find out).
+        outdir = os.path.join(workdir, "step-too-complex")
+        proc = subprocess.run(
+            [sys.executable, CLI, os.path.join(FIXTURES, "cube20.step"), "step", outdir,
+             "--max-brep-faces", "5"],
+            capture_output=True, text=True, timeout=300,
+        )
+        check("STEP over --max-brep-faces: exit 2", proc.returncode == 2,
+              f"exit={proc.returncode} {proc.stderr.strip()[-200:]}")
+        report_path = os.path.join(outdir, "report.json")
+        if os.path.exists(report_path):
+            with open(report_path) as handle:
+                report = json.load(handle)
+            check("STEP over --max-brep-faces: refused as step_too_complex",
+                  report.get("ok") is False and report.get("error") == "step_too_complex",
+                  json.dumps(report)[:300])
+        else:
+            check("STEP over --max-brep-faces: failure report written", False,
+                  "missing report.json")
+        check("STEP over --max-brep-faces: nothing was converted",
+              not os.path.exists(os.path.join(outdir, "canonical.stl")),
+              "canonical.stl was written, so the kernel ran anyway")
+
+        # ── a STEP the kernel cannot read gets the OTHER code ────────────────
+        # The child returns exit 2 with its own verdict; the parent has to carry
+        # that verdict into report.json, because that is what lets the analysis
+        # give up after MAX_ANALYSIS_ATTEMPTS instead of re-queueing forever.
+        with open(os.path.join(FIXTURES, "cube20.step"), "rb") as handle:
+            whole_step = handle.read()
+        broken_step = os.path.join(workdir, "truncated.step")
+        with open(broken_step, "wb") as handle:
+            # Half a STEP: the HEADER (with its author/organisation fields) is
+            # intact, the DATA section is cut in the middle of the geometry.
+            handle.write(whole_step[: len(whole_step) // 2])
+        outdir = os.path.join(workdir, "step-unreadable")
+        proc = subprocess.run(
+            [sys.executable, CLI, broken_step, "step", outdir],
+            capture_output=True, text=True, timeout=300,
+        )
+        check("truncated STEP: exit 2", proc.returncode == 2,
+              f"exit={proc.returncode} {proc.stderr.strip()[-200:]}")
+        report_path = os.path.join(outdir, "report.json")
+        if os.path.exists(report_path):
+            with open(report_path) as handle:
+                report = json.load(handle)
+            check("truncated STEP: the child's step_unreadable reaches report.json",
+                  report.get("ok") is False and report.get("error") == "step_unreadable",
+                  json.dumps(report)[:300])
+        else:
+            check("truncated STEP: failure report written", False, "missing report.json")
+        # KVKK: OCCT's parser diagnostics quote the offending SOURCE LINE, which
+        # in a STEP can be a HEADER line carrying the designer's name, company or
+        # local path. Nothing from the file may appear in what we log or store.
+        check("truncated STEP: no OCCT parser noise and no header token leaked",
+              "ERR StepFile" not in (proc.stdout + proc.stderr)
+              and "figurunica" not in (proc.stdout + proc.stderr).lower(),
+              f"stdout={proc.stdout.strip()[-200:]} stderr={proc.stderr.strip()[-200:]}")
 
         # ── generated sphere: the down-facing area is really measured ────────
         # The cube above proves the plate footprint is excluded (overhang 0);
@@ -460,7 +676,7 @@ def main() -> int:
                     oversize, "3mf", outdir, 256,
                     analyze_quote_part.DEFAULT_MAX_FACES_WALLS,
                     analyze_quote_part.DEFAULT_MAX_FACES_BODIES,
-                    500)
+                    500, analyze_quote_part.DEFAULT_MAX_BREP_FACES)
             except analyze_quote_part.AnalysisError as exc:
                 code = exc.code
             check("3MF past the scan limit, prefix already over the ceiling: refused",
@@ -474,7 +690,7 @@ def main() -> int:
                     oversize, "3mf", outdir, 256,
                     analyze_quote_part.DEFAULT_MAX_FACES_WALLS,
                     analyze_quote_part.DEFAULT_MAX_FACES_BODIES,
-                    10_000_000)
+                    10_000_000, analyze_quote_part.DEFAULT_MAX_BREP_FACES)
             except analyze_quote_part.AnalysisError as exc:
                 code, message = exc.code, exc.message
             check("3MF past the scan limit, prefix under the ceiling: still refused",

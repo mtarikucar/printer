@@ -279,6 +279,9 @@ async function main() {
       overhangArea: 400,
       sourceUnits: null,
       objectCount: 1,
+      // Mesh dosyası: üçgenler dosyadan geldi, çevrilen bir B-rep yok.
+      tessellation: null,
+      solidCount: null,
     };
     /** İNÇ biriminde 1 birimlik küp: milimetreye çevrilince 25.4 mm. */
     const INCH_CUBE: PartGeometry = {

@@ -80,6 +80,24 @@ export interface Vec3 {
   z: number;
 }
 
+/**
+ * Çekirdeğin B-rep yüzeyleri üçgen ağa çevirirken kullandığı sapma parametreleri.
+ *
+ * AYRI VE ADLANDIRILMIŞ bir tip, satır içi bir nesne tipi DEĞİL: python testi
+ * (`scripts/test-analyze-quote-part.py` `contract_keys()`) `PartGeometry` bloğunu
+ * ilk sütun-0 kapanış süslüsüne kadar regex'le okuyor; satır içi çok satırlı bir
+ * nesne tipinin kapanış süslüsü yanlış girintilenirse arayüz ortadan kesilir ve
+ * anahtar kümesi testi anlaşılmaz biçimde kırmızıya döner.
+ *
+ * Açı toleransının birimi RADYAN'dır (cascadio `tol_angular`), derece değil —
+ * ölçüm: `task-s1-report.md` §3 karar 1 / defter kaydı SK-2.
+ */
+export interface PartTessellation {
+  deflectionMm: number;
+  angularRad: number;
+  relative: boolean;
+}
+
 export interface PartGeometry {
   /** Kapalı hacim (dosya birimi³). Ölçülemediyse null. */
   volume: number | null;
@@ -99,10 +117,30 @@ export interface PartGeometry {
   wallP5: number | null;
   /** Aşağı bakan (destek isteyen) yüzey alanı (dosya birimi²). */
   overhangArea: number;
-  /** 3MF `<model unit>` özniteliği; STL/OBJ için null. */
+  /**
+   * 3MF `<model unit>` özniteliği; STL/OBJ için null. STEP'te DAİMA `"mm"` —
+   * birim ISO 10303 gereği dosyanın kendisinde yazılıdır ve CAD çekirdeği
+   * (cascadio `detectLengthUnit()`) onu uygulayarak metre çıkarır, ölçüm hattı
+   * da ×1000 ile mm'ye alır. Yani STEP'te birim TAHMİN değil, OKUNMUŞ veridir.
+   */
   sourceUnits: QuoteUnits | null;
-  /** 3MF içindeki nesne sayısı; STL/OBJ için 1. */
+  /** 3MF içindeki nesne sayısı; STL/OBJ için 1, STEP'te katı gövde sayısı. */
   objectCount: number;
+  /**
+   * Çekirdeğin ürettiği üçgen ağın sapma parametreleri; mesh dosyalarında
+   * (STL/OBJ/3MF) null, çünkü orada üçgenler dosyanın kendisinden gelir.
+   * Geometriyle BİRLİKTE saklanır: sabit (`STEP_TESSELLATION`) ileride
+   * değişirse eski parçalar eski değerleriyle okunur ve hangi parçanın hangi
+   * sapmayla ölçüldüğü — dolayısıyla hangi ağdan fiyatlandığı — görülebilir.
+   */
+  tessellation: PartTessellation | null;
+  /**
+   * Çekirdek raporu: STEP'in ÜRÜN yapısında kaç katı gövde vardı (assembly
+   * ipucu). Mesh'ten sayılan `bodyCount` ile ayrışabilir — değen iki gövde
+   * mesh'te tek bileşendir — ve ayrışma bilginin kendisidir. Mesh
+   * dosyalarında null.
+   */
+  solidCount: number | null;
 }
 
 /** `scaledGeometry` çıktısı — milimetre cinsinden. */

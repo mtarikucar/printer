@@ -52,6 +52,9 @@ const ANCHOR_GEOMETRY: PartGeometry = {
   overhangArea: ANCHOR_EDGE_MM ** 2,
   sourceUnits: null,
   objectCount: 1,
+  // Referans parça bir mesh gibi ele alınır: çevrilen bir B-rep yok.
+  tessellation: null,
+  solidCount: null,
 };
 
 const ANCHOR_SCALED = scaledGeometry(ANCHOR_GEOMETRY, "mm", 1);

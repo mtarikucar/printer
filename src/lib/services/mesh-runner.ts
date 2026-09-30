@@ -17,7 +17,13 @@ import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { QUOTE_UNITS } from "@/lib/config/quote-types";
-import type { PartGeometry, QuoteSourceFormat, QuoteUnits, Vec3 } from "@/lib/config/quote-types";
+import type {
+  PartGeometry,
+  PartTessellation,
+  QuoteSourceFormat,
+  QuoteUnits,
+  Vec3,
+} from "@/lib/config/quote-types";
 
 const DEFAULT_TIMEOUT_MS = 600_000; // 10 min hard ceiling, then SIGKILL
 /** Quote analysis is a customer waiting on a price, not a background render. */
@@ -27,7 +33,20 @@ const VENV_PYTHON = "/opt/venv/bin/python3";
 export class MeshProcessError extends Error {
   constructor(
     message: string,
-    readonly code: "python_missing" | "exit_nonzero" | "timeout" | "bad_report" | "too_heavy",
+    readonly code:
+      | "python_missing"
+      | "exit_nonzero"
+      | "timeout"
+      | "bad_report"
+      | "too_heavy"
+      // STEP: CAD çekirdeğinin iki reddi. Kodun kendisi `quote_parts.analysis_error`
+      // kolonuna yazılır ve adminde Türkçe cümleye çevrilir (`quote-admin.ts`
+      // `ANALYSIS_ERROR_TEXT`); müşteri bugünkü `analysis_failed` cümlesini görür.
+      // Bir kodu bu birliğe eklemek TEK BAŞINA yetmez — `describeFailure`
+      // eşlemesine de girmeli, yoksa python'un kodu `exit_nonzero`a düşer ve
+      // buradaki ayrım ölü kod olur.
+      | "step_too_complex"
+      | "step_unreadable",
     readonly stderr?: string
   ) {
     super(message);
@@ -189,6 +208,34 @@ function parseGeometry(raw: unknown): PartGeometry {
     if (typeof geometry[key] !== "boolean") invalid.push(key);
     return geometry[key] === true;
   };
+  /**
+   * `tessellation` bir NESNE olduğu için kendi ayrıştırıcısını ister (`parseVec3`
+   * deseni). Anahtar YOKSA geçersiz — "eksik anahtar = fiyatta NaN" kuralı bu
+   * alanda da geçerli; `null` geçerli (mesh formatları hiçbir şey üçgenlemez);
+   * nesneyse ÜÇ alanının da okunabilir olması şart. Yarım bir nesne
+   * düzeltilmez: sapmayı okuyamıyorsak fiyatın hangi ağdan geldiğini de
+   * söyleyemeyiz, ve bunu sonradan öğrenmenin yolu yok (parça yeniden ölçülmez).
+   */
+  const tessellation = (key: string): PartTessellation | null => {
+    if (!(key in geometry)) {
+      invalid.push(key);
+      return null;
+    }
+    const value = geometry[key];
+    if (value === null) return null;
+    if (typeof value !== "object") {
+      invalid.push(key);
+      return null;
+    }
+    const raw = value as Record<string, unknown>;
+    const deflectionMm = finiteNumber(raw.deflectionMm);
+    const angularRad = finiteNumber(raw.angularRad);
+    if (deflectionMm === null || angularRad === null || typeof raw.relative !== "boolean") {
+      invalid.push(key);
+      return null;
+    }
+    return { deflectionMm, angularRad, relative: raw.relative };
+  };
 
   const extents = parseVec3(geometry.extents);
   if (extents === null) invalid.push("extents");
@@ -219,6 +266,8 @@ function parseGeometry(raw: unknown): PartGeometry {
     overhangArea: required("overhangArea"),
     sourceUnits,
     objectCount: required("objectCount"),
+    tessellation: tessellation("tessellation"),
+    solidCount: nullable("solidCount"),
   };
 
   if (invalid.length > 0) {
@@ -229,6 +278,27 @@ function parseGeometry(raw: unknown): PartGeometry {
   }
   return parsed;
 }
+
+/**
+ * Python'un kodu → `MeshProcessError.code`.
+ *
+ * `quote_parts.analysis_error` yalnız bu KABA kodu saklar, python'un kendi kodunu
+ * değil. Eşlemede OLMAYAN her kod `exit_nonzero`a düşer ("dosya bozuk ya da
+ * desteklenmiyor") — bu yüzden ayrı bir operatör cümlesi hak eden her python
+ * kodunun burada bir satırı olmak zorundadır, yoksa `ANALYSIS_ERROR_TEXT`teki
+ * cümle asla görünmez.
+ */
+const PYTHON_FAILURE_CODES: Record<string, MeshProcessError["code"]> = {
+  // "Parça bu konteyner için fazla ağır" ise müşteriye ve admine "dosya bozuk"tan
+  // BAŞKA bir şey söylemek zorundadır: tek çıkışı sadeleştirilmiş bir model ya da
+  // manuel teklif.
+  too_many_faces: "too_heavy",
+  // B-rep tavanı (ya da çevrimin sinyalle ölümü): parçayı ayırmak veya STL
+  // istemek gerekir, dosya bozuk değildir.
+  step_too_complex: "step_too_complex",
+  // CAD çekirdeği dosyayı hiç okuyamadı: AP203/AP214 olarak yeniden ihracat.
+  step_unreadable: "step_unreadable",
+};
 
 /** Enrich a nonzero exit with the failure code the script left in report.json. */
 async function describeFailure(error: unknown, reportPath: string): Promise<unknown> {
@@ -243,11 +313,7 @@ async function describeFailure(error: unknown, reportPath: string): Promise<unkn
       const detail = typeof report.message === "string" ? `: ${report.message}` : "";
       return new MeshProcessError(
         `Part analysis failed (${report.error})${detail}`,
-        // `quote_parts.analysis_error` yalnız bu KABA kodu saklar, python'un
-        // kendi kodunu değil. "Parça bu konteyner için fazla ağır" ise müşteriye
-        // ve admine "dosya bozuk"tan BAŞKA bir şey söylemek zorundadır: tek
-        // çıkışı sadeleştirilmiş bir model ya da manuel teklif.
-        report.error === "too_many_faces" ? "too_heavy" : "exit_nonzero",
+        PYTHON_FAILURE_CODES[report.error] ?? "exit_nonzero",
         error.stderr
       );
     }

@@ -479,6 +479,9 @@ async function main() {
       overhangArea: 0,
       sourceUnits: null,
       objectCount: 1,
+      // Simülatörde dosya da çevrim de yok: üçgen ağ parametresi ölçülmemiştir.
+      tessellation: null,
+      solidCount: null,
     };
     return {
       id: "sim",

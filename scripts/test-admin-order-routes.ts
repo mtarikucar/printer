@@ -974,8 +974,299 @@ for (const rel of GUARDED_PAGES) {
   ok(`${rel}: her arıza bayrağının bir kullanımı var`, silent.length === 0, silent);
 }
 
-console.log(
-  `\n${controls.length} kontrol tarandı, ${hit.size} ayrı uç+yöntem eşleşti` +
-    (failed ? `\n${failed} FAILED` : "\ntümü geçti")
-);
-process.exitCode = failed ? 1 : 0;
+// ─── 6. TERCİH EDİLEN ÜRETİCİ: çerçeve anlaşmanın çapalı atölyesi ───────────
+//
+// Çerçeve anlaşma bir atölyeye ÇAPALANABİLİR ve o anlaşmanın her partisi önce
+// ona denenir. Bu bölüm iki şeyi birden çiviliyor:
+//
+//  1. SIRA (kaynak): onay rotası çapayı `autoAssignIfEligible`tan ÖNCE dener ve
+//     sıralamaya yalnız çapa TUTMADIĞINDA düşer.
+//  2. DAVRANIŞ (canlı): `tryFrameworkPreferredPlacement` gerçekten
+//     `assignManufacturerToOrder`ı `selectionBasis: "framework_preferred"` ile
+//     çağırır, red hâlinde siparişe GEREKÇELİ not yazıp `null` döner (yani
+//     sıralamaya düşülür) ve HİÇBİR hâlde fırlatmaz.
+//
+// Kapı ATLANMAZ: mülkiyet → aktiflik → malzeme → büyük format →
+// `acceptingOrders` → kapasite kapılarının hepsi `assignManufacturerToOrder`ın
+// İÇİNDEdir. Çerçevenin yaptığı tek şey SIRALAMADAN ÖNCE bir aday denemektir.
+async function frameworkAnchorChecks(): Promise<void> {
+  console.log("\ntercih edilen üretici (çerçeve çapası)");
+
+  // ── 6a. Kaynak: sıra ve kapının dalı ────────────────────────────────────
+  const approveRel = "src/app/api/admin/orders/[id]/approve/route.ts";
+  const approveSrc = read(approveRel);
+  const approveSf = parse(approveRel);
+
+  /** Adı verilen işlevin çağrıları (AST): metin araması yorumları da sayardı. */
+  const callsOf = (sf: ts.SourceFile, name: string): ts.CallExpression[] => {
+    const out: ts.CallExpression[] = [];
+    forEachNode(sf, (n) => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) {
+        out.push(n);
+      }
+    });
+    return out;
+  };
+
+  const preferredCalls = callsOf(approveSf, "tryFrameworkPreferredPlacement");
+  ok(
+    `${approveRel}: çapa tam olarak bir kez denenir`,
+    preferredCalls.length === 1,
+    preferredCalls.length
+  );
+  const autoCalls = callsOf(approveSf, "autoAssignIfEligible");
+  ok(
+    `${approveRel}: sıralama yolu hâlâ tek çağrı`,
+    autoCalls.length === 1,
+    autoCalls.length
+  );
+  if (preferredCalls.length === 1 && autoCalls.length === 1) {
+    ok(
+      `${approveRel}: çapa sıralamadan ÖNCE deneniyor`,
+      preferredCalls[0].getStart() < autoCalls[0].getStart()
+    );
+    const args = preferredCalls[0].arguments.map((a) => a.getText()).join(", ");
+    ok(`${approveRel}: çapa denemesi admin kimliğini taşıyor`, /adminEmail/.test(args), args);
+  }
+  // Sıralamaya DÜŞÜŞ koşullu: çapa tuttuğunda ikinci bir atama denenmez.
+  ok(
+    `${approveRel}: sıralama yalnız çapa tutmadığında çalışıyor`,
+    /preferred === null/.test(approveSrc),
+    "koşul yok: iki atama denemesi üst üste koşabilir"
+  );
+
+  // Denetim gerekçesi ETİKETLİ olmak zorunda: `ASSIGN_SELECTION_BASIS_TR`
+  // `Record<AssignSelectionBasis, string>` olduğu için etiketi unutmak DERLEME
+  // hatasıdır — ama etiketin ÇERÇEVEDEN bahsettiğini tsc bilmez.
+  {
+    const assign = read("src/lib/services/manufacturer-assign.ts");
+    ok(
+      "AssignSelectionBasis sekizinci üyeyi taşıyor",
+      /\|\s*"framework_preferred"/.test(assign)
+    );
+    const { ASSIGN_SELECTION_BASIS_TR } = await import(
+      "../src/lib/services/manufacturer-assign"
+    );
+    ok(
+      "çerçeve gerekçesinin Türkçe etiketi yazılı",
+      ASSIGN_SELECTION_BASIS_TR.framework_preferred ===
+        "çerçeve anlaşmasının çapalı atölyesi",
+      ASSIGN_SELECTION_BASIS_TR.framework_preferred
+    );
+  }
+
+  // ── 6b. Davranış: çapa gerçekten ne yapıyor ─────────────────────────────
+  //
+  // `@/lib/db` ve `assignManufacturerToOrder` taklit edilir; ÖLÇÜLEN şey
+  // `framework-placement.ts`in kendi kararlarıdır.
+  const { default: Module } = await import("node:module");
+  const { getTableName } = await import("drizzle-orm");
+  const schema = await import("../src/lib/db/schema");
+
+  /** Tabloya göre satır döndüren, zincirlenebilir sahte sorgu. */
+  interface DbScript {
+    rows: Record<string, unknown[]>;
+    noteUpdates: { table: string; set: Record<string, unknown> }[];
+  }
+  let script: DbScript = { rows: {}, noteUpdates: [] };
+
+  function fakeQuery(rows: unknown[]): Record<string, unknown> {
+    const q: Record<string, unknown> = {};
+    q.from = (table: unknown) => fakeQuery(script.rows[getTableName(table as never)] ?? []);
+    q.innerJoin = () => q;
+    q.leftJoin = () => q;
+    q.where = () => q;
+    q.orderBy = () => q;
+    q.limit = () => Promise.resolve(rows);
+    q.returning = () => Promise.resolve(rows);
+    q.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) =>
+      Promise.resolve(rows).then(res, rej);
+    return q;
+  }
+  const fakeDb = {
+    select: () => fakeQuery([]),
+    update: (table: unknown) => ({
+      set: (set: Record<string, unknown>) => {
+        script.noteUpdates.push({ table: getTableName(table as never), set });
+        return { where: () => fakeQuery([]) };
+      },
+    }),
+    insert: () => ({ values: async () => undefined }),
+  };
+
+  interface AssignCall {
+    orderId: string;
+    manufacturerId: string;
+    selectionBasis?: string;
+    adminEmail?: string;
+  }
+  let assignCalls: AssignCall[] = [];
+  let assignResult: unknown = { ok: true, order: { id: "o1" } };
+  let assignThrows = false;
+
+  const loader = Module as unknown as {
+    _load: (name: string, ...rest: unknown[]) => unknown;
+  };
+  const originalLoad = loader._load;
+  loader._load = function (name, ...rest) {
+    if (name === "@/lib/db") return { db: fakeDb };
+    if (name === "@/lib/services/manufacturer-assign") {
+      const real = originalLoad.call(this, name, ...rest) as Record<string, unknown>;
+      return {
+        ...real,
+        assignManufacturerToOrder: async (args: AssignCall) => {
+          assignCalls.push(args);
+          if (assignThrows) throw new Error("atama patladı");
+          return assignResult;
+        },
+      };
+    }
+    return originalLoad.call(this, name, ...rest);
+  };
+
+  try {
+    const { frameworkPlacementNote, tryFrameworkPreferredPlacement } = await import(
+      "../src/lib/services/framework-placement"
+    );
+
+    const reset = () => {
+      script = { rows: {}, noteUpdates: [] };
+      assignCalls = [];
+      assignResult = { ok: true, order: { id: "o1" } };
+      assignThrows = false;
+    };
+    /** Sipariş bir çerçeve partisi ve anlaşmanın çapalı atölyesi var. */
+    const batchRow = () => ({
+      quote_framework_batches: [
+        {
+          frameworkNumber: "C-000123",
+          frameworkStatus: "active",
+          preferredManufacturerId: "mfg-1",
+          position: 3,
+        },
+      ],
+      manufacturers: [{ companyName: "Atölye X" }],
+    });
+
+    reset();
+    script.rows = batchRow();
+    let out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok("çapa UYGUN: atama çerçeve gerekçesiyle çağrıldı", assignCalls.length === 1, assignCalls);
+    ok(
+      "çapa UYGUN: selectionBasis 'framework_preferred'",
+      assignCalls[0]?.selectionBasis === "framework_preferred",
+      assignCalls[0]
+    );
+    ok("çapa UYGUN: hedef atölye anlaşmanınki", assignCalls[0]?.manufacturerId === "mfg-1");
+    ok("çapa UYGUN: admin kimliği denetime taşınıyor", !!assignCalls[0]?.adminEmail);
+    ok(
+      "çapa UYGUN: sonuç 'atandı' diyor (sıralamaya düşülmez)",
+      out !== null && out.manufacturerId === "mfg-1" && out.frameworkNumber === "C-000123",
+      out
+    );
+    ok("çapa UYGUN: siparişe not YAZILMAZ", script.noteUpdates.length === 0, script.noteUpdates);
+
+    reset();
+    script.rows = batchRow();
+    assignResult = { ok: false, reason: "capacity_full" };
+    out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok("kapasite DOLU: sıralamaya düşülür (null döner)", out === null, out);
+    ok("kapasite DOLU: atama bir kez denenmiş", assignCalls.length === 1, assignCalls.length);
+    {
+      const update = script.noteUpdates.find((u) => u.table === "orders");
+      ok("kapasite DOLU: siparişin admin notu güncellendi", !!update?.set.adminNotes, update);
+      // Cümlenin KENDİSİ saf yardımcıdan okunur: `adminNotes` bir SQL
+      // birleştirmesinin içine giriyor ve oradan metin olarak geri okunamaz.
+      const note = frameworkPlacementNote({
+        frameworkNumber: "C-000123",
+        shopLabel: "Atölye X",
+        reason: "capacity_full",
+      });
+      ok("kapasite DOLU: not anlaşmayı adlandırıyor", /C-000123/.test(note), note);
+      ok("kapasite DOLU: not atölyeyi adlandırıyor", /Atölye X/.test(note), note);
+      ok("kapasite DOLU: not ret KODUNU taşıyor", /capacity_full/.test(note), note);
+      ok("kapasite DOLU: not sıralamaya düşüldüğünü söylüyor", /sıralama seçti/.test(note), note);
+      // Not EKLENİR, üzerine yazılmaz: araya giren [SLA]/[ATAMA]/[N12]
+      // bayrakları kaybolmasın (ev kuralı, order-status-policy.ts).
+      const placementSrc = read("src/lib/services/framework-placement.ts").replace(/\s+/g, " ");
+      ok(
+        "kapasite DOLU: not üzerine YAZMIYOR (SQL birleştirme)",
+        /CASE WHEN .{0,200}IS NULL OR .{0,120}= '' .{0,200}\|\| E'\\n' \|\|/.test(placementSrc),
+        "adminNotes üzerine yazılıyor olabilir"
+      );
+    }
+
+    reset();
+    // Parti OLMAYAN sipariş: hiç atama denenmez, not yazılmaz, sıralamaya
+    // düşülür — yani bugünkü davranış birebir korunur.
+    script.rows = { quote_framework_batches: [] };
+    out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok("parti OLMAYAN sipariş: null", out === null);
+    ok("parti OLMAYAN sipariş: atama denenmedi", assignCalls.length === 0, assignCalls);
+    ok("parti OLMAYAN sipariş: not yazılmadı", script.noteUpdates.length === 0);
+
+    reset();
+    // Çapası olmayan anlaşma da sıralamaya düşer: çapa bir kapı değil, bir aday.
+    script.rows = {
+      quote_framework_batches: [
+        {
+          frameworkNumber: "C-000124",
+          frameworkStatus: "active",
+          preferredManufacturerId: null,
+          position: 1,
+        },
+      ],
+    };
+    out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok("çapası olmayan anlaşma: null, atama denenmedi", out === null && assignCalls.length === 0);
+
+    reset();
+    script.rows = batchRow();
+    assignThrows = true;
+    let threw = false;
+    // Arıza BEKLENİYOR ve modül onu gürültülü loglar (doğru davranış); test
+    // çıktısı yine de temiz kalmalı, yoksa gerçek bir hata bu yığın izinin
+    // içinde kaybolur.
+    const realError = console.error;
+    console.error = () => {};
+    try {
+      out = await tryFrameworkPreferredPlacement({
+        orderId: "order-1",
+        adminEmail: "sahip@test.invalid",
+      });
+    } catch {
+      threw = true;
+    } finally {
+      console.error = realError;
+    }
+    // ONAY İSTEĞİ ATAMA YÜZÜNDEN 500 DÖNMEMELİ: rotanın tek `catch`i
+    // `handleRouteFailure`dır ve buradan fırlayan bir hata onayın kendisini
+    // "başarısız" gösterirdi — oysa sipariş ÇOKTAN onaylandı.
+    ok("atama patlasa bile çapa FIRLATMAZ (onay 500 dönmez)", !threw && out === null, {
+      threw,
+      out,
+    });
+  } finally {
+    loader._load = originalLoad;
+  }
+}
+
+void frameworkAnchorChecks().then(() => {
+  console.log(
+    `\n${controls.length} kontrol tarandı, ${hit.size} ayrı uç+yöntem eşleşti` +
+      (failed ? `\n${failed} FAILED` : "\ntümü geçti")
+  );
+  process.exitCode = failed ? 1 : 0;
+});

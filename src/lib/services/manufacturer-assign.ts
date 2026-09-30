@@ -316,7 +316,12 @@ export type AssignSelectionBasis =
   | "decline_retry"
   | "sweep_ranking"
   | "sweep_seller"
-  | "sweep_screen_confirmed";
+  | "sweep_screen_confirmed"
+  // Çerçeve anlaşmanın ÇAPALI atölyesi: parti siparişi sıralamaya girmeden
+  // önce anlaşmanın `preferred_manufacturer_id`sine denendi ve KAPILARIN
+  // HEPSİNDEN geçti. Ayrı bir üye, çünkü "bu iş buraya nasıl geldi" sorusunun
+  // cevabı burada sıralama değil, MÜŞTERİYLE YAPILMIŞ BİR ANLAŞMADIR.
+  | "framework_preferred";
 
 /**
  * Gerekçelerin Türkçe karşılığı. `AssignSelectionBasis` üzerine tiplenmiştir:
@@ -333,6 +338,7 @@ export const ASSIGN_SELECTION_BASIS_TR: Record<AssignSelectionBasis, string> = {
     "atama taraması, ürünün sahibi satıcı atölyesi (sıralama dışı) — admin onayladı",
   sweep_screen_confirmed:
     "atama taraması, aynı onaydaki atamalar sıralamayı değiştirdi; admin'in ekranda onayladığı (hâlâ uygun) atölye kullanıldı",
+  framework_preferred: "çerçeve anlaşmasının çapalı atölyesi",
 };
 
 /* ────────────────────────────────────────────────────────────────────────────

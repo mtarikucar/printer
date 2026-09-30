@@ -23,6 +23,7 @@ import {
 } from "@/lib/config/order-status-policy";
 import { isOrderRefunded, notRefundedGuard } from "@/lib/services/manufacturer-assign";
 import { autoAssignIfEligible } from "@/lib/services/order-confirm";
+import { tryFrameworkPreferredPlacement } from "@/lib/services/framework-placement";
 import { handleRouteFailure, ADMIN_ACTION_FAILED_ERROR } from "@/lib/api/route-error";
 
 /**
@@ -247,8 +248,19 @@ export async function POST(
     //
     // Beklenerek çağrılır: admin sayfayı yenilediğinde atanmış üreticiyi görsün.
     // Fonksiyon asla fırlatmaz, yani onay yanıtını bozamaz.
-    const placement =
+    //
+    // ÇERÇEVE ÇAPASI SIRALAMADAN ÖNCE: sipariş bir çerçeve partisiyse ve
+    // anlaşma bir atölyeye çapalanmışsa önce O atölye denenir
+    // (`selectionBasis: "framework_preferred"`). Kapıların hiçbiri atlanmaz —
+    // hepsi `assignManufacturerToOrder`ın içindedir — ve kapı reddederse
+    // `tryFrameworkPreferredPlacement` siparişe gerekçeli notu yazıp `null`
+    // döner, yani AŞAĞIDAKİ sıralama yolu devreye girer. O da fırlatmaz.
+    const preferred =
       nextStatus === "approved"
+        ? await tryFrameworkPreferredPlacement({ orderId: id, adminEmail })
+        : null;
+    const placement =
+      nextStatus === "approved" && preferred === null
         ? await autoAssignIfEligible(id, { reason: "admin onayı" })
         : null;
 
@@ -256,7 +268,7 @@ export async function POST(
       success: true,
       status: nextStatus,
       // İstemci "atandı mı, neden atanmadı" bilgisini gösterebilsin diye döner.
-      autoAssigned: placement?.assigned ?? false,
+      autoAssigned: preferred !== null || (placement?.assigned ?? false),
       ...(placement?.skipped ? { autoAssignSkipped: placement.skipped } : {}),
     });
   } catch (e) {

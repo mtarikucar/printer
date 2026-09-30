@@ -39,6 +39,11 @@ import trimesh
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 CLI = os.path.join(SCRIPTS_DIR, "step_mesh.py")
+sys.path.insert(0, SCRIPTS_DIR)
+# The face pre-check is also exercised directly: its whole job is to be EXACT
+# across the chunk boundary, and the only way to assert that is to move the
+# boundary under a file whose true count is known.
+import step_mesh  # noqa: E402
 FIXTURES = os.path.join(SCRIPTS_DIR, "fixtures", "quote")
 # π r² h with r = 10 mm, h = 20 mm. The ONLY fixture whose true volume is known
 # in closed form, so the only objective check on the tessellation budget.
@@ -249,6 +254,40 @@ def main() -> int:
               proc.stderr.strip()[-400:])
         check("--max-address-space-gb 1: the refusal says which limit is wrong",
               "address space" in proc.stderr.lower(), proc.stderr.strip()[-400:])
+
+        # ── the face counter itself: exact, whatever the chunk size. ─────────
+        for fixture, expected in (
+            ("cube20.step", 6),
+            ("cylinder_r10h20.step", 3),
+            ("two_bodies.step", 12),
+        ):
+            found, truncated = step_mesh.count_brep_faces(os.path.join(FIXTURES, fixture))
+            check(f"count_brep_faces({fixture}) == {expected}, whole file",
+                  (found, truncated) == (expected, False), f"found={found} truncated={truncated}")
+        # One byte at a time puts a token boundary inside every window, which is
+        # where an off-by-one over-counts (a false refusal) or under-counts (an
+        # unmeasurable part admitted).
+        real_chunk = step_mesh.SCAN_CHUNK_BYTES
+        try:
+            for chunk in (1, 7, 12, 13, 64):
+                step_mesh.SCAN_CHUNK_BYTES = chunk
+                found, truncated = step_mesh.count_brep_faces(
+                    os.path.join(FIXTURES, "two_bodies.step"))
+                check(f"count_brep_faces is exact with a {chunk}-byte chunk",
+                      (found, truncated) == (12, False), f"found={found} truncated={truncated}")
+        finally:
+            step_mesh.SCAN_CHUNK_BYTES = real_chunk
+        # Past the scan limit the count is a LOWER bound, and a lower bound that
+        # already clears the ceiling is enough to refuse.
+        real_limit = step_mesh.SCAN_LIMIT_BYTES
+        try:
+            step_mesh.SCAN_LIMIT_BYTES = 2048
+            found, truncated = step_mesh.count_brep_faces(
+                os.path.join(FIXTURES, "two_bodies.step"))
+            check("count_brep_faces past the scan limit reports a truncated lower bound",
+                  truncated is True and 0 <= found < 12, f"found={found} truncated={truncated}")
+        finally:
+            step_mesh.SCAN_LIMIT_BYTES = real_limit
 
     if failures:
         print(f"\n{len(failures)} check(s) failed")

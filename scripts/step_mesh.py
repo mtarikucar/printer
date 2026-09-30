@@ -179,10 +179,30 @@ def _silence_fds(*filenos: int):
         os.close(devnull)
 
 
+def _count_from(window: bytes, token: bytes, start: int) -> int:
+    """Occurrences of `token` in `window` that begin at index `start` or later."""
+    count = 0
+    position = start
+    while True:
+        found = window.find(token, position)
+        if found < 0:
+            return count
+        count += 1
+        position = found + 1
+
+
 def count_brep_faces(path: str) -> tuple[int, bool]:
     """(faces found, truncated) — read in chunks, constant memory.
 
-    The window overlap is what makes the count exact across chunk boundaries.
+    The window overlap is what makes the count exact across chunk boundaries,
+    and the per-token start index is what keeps it from counting the same match
+    twice. The overlap has to be as long as the LONGEST token minus one, which
+    is long enough to hold a whole SHORTER token — so for each token, a match
+    that already ended inside the previous window (index ≤ len(overlap) - len)
+    is skipped. Getting this wrong in the over-counting direction would refuse a
+    legitimate part; in the under-counting direction it would admit one that
+    cannot be measured. Neither is acceptable, so the count is exact.
+
     `truncated` is True when the file is longer than SCAN_LIMIT_BYTES, in which
     case the count covers the scanned prefix only and is a lower bound.
     """
@@ -198,7 +218,7 @@ def count_brep_faces(path: str) -> tuple[int, bool]:
             read += len(chunk)
             window = overlap + chunk
             for token in BREP_FACE_TOKENS:
-                count += window.count(token)
+                count += _count_from(window, token, max(0, len(overlap) - len(token) + 1))
             overlap = window[-(longest - 1):]
         return count, bool(handle.read(1))
 
@@ -378,7 +398,14 @@ def main() -> int:
         mesh, solid_count = convert(
             args.input, args.deflection, args.angular, args.relative
         )
-        mesh.export(args.output, file_type="stl")
+        try:
+            mesh.export(args.output, file_type="stl")
+        except OSError as exc:
+            # Disk, not geometry: not the customer's part being refused, so it
+            # gets no verdict in meta.json — but it must not surface as a
+            # traceback either, because the parent reads the exit code.
+            print(f"Error: {args.output} could not be written: {exc}", file=sys.stderr)
+            return 2
     except StepError as exc:
         write_failure(args.output, exc.code, exc.message)
         return 2

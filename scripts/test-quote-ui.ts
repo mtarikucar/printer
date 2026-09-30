@@ -85,7 +85,23 @@ import {
 } from "../src/app/3d-baski/pricing-anchors";
 import { QuoteListTable } from "../src/app/account/teklifler/quotes-client";
 import { PartLibraryGrid } from "../src/app/account/parcalar/parts-client";
-import { fill } from "../src/components/quote/format";
+import {
+  displayRate,
+  fill,
+  money as fxMoney,
+  parseDisplayCurrency,
+  rateText,
+} from "../src/components/quote/format";
+import {
+  DISPLAY_CURRENCY_PREF_KEY,
+  DisplayCurrencyPicker,
+  displayCurrencySnapshot,
+  readDisplayCurrencyPref,
+  setDisplayCurrency,
+  writeDisplayCurrencyPref,
+} from "../src/components/quote/display-currency";
+import { QuoteHeader } from "../src/components/quote/quote-header";
+import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
 import { formatCurrency } from "../src/lib/i18n/format";
 import type { TenderViews } from "../src/lib/config/quote-tender";
 import type {
@@ -101,11 +117,15 @@ import {
   QUOTE_SOURCE_FORMATS,
   QUOTE_STATUSES,
   type CustomerQuoteListItem,
+  type DisplayCurrency,
+  type FrozenFxRate,
   type LibraryPart,
+  type PresentedFxDisplay,
   type PresentedCatalog,
   type PresentedPart,
   type PresentedQuote,
   type PricingSnapshot,
+  type QuoteFxSnapshot,
   type QuoteSourceFormat,
   type QuoteTotals,
   type QuoteViewer,
@@ -558,12 +578,17 @@ function renderWorkspace(quote: PresentedQuote, shareToken: string | null = null
   return inLocale(createElement(QuoteWorkspaceClient, { initialQuote: quote, shareToken }));
 }
 
-function renderPartCard(part: PresentedPart, quote: PresentedQuote): string {
+function renderPartCard(
+  part: PresentedPart,
+  quote: PresentedQuote,
+  rate: FrozenFxRate | null = null
+): string {
   return inLocale(
     createElement(QuotePartCard, {
       part,
       catalog: quote.catalog,
       viewer: quote.viewer,
+      rate,
       selected: false,
       onSelectChange: noop,
       onPatch: noop,
@@ -1160,10 +1185,11 @@ function pricedQuote(over: Partial<PresentedQuote> = {}): PresentedQuote {
   });
 }
 
-function renderSummary(quote: PresentedQuote): string {
+function renderSummary(quote: PresentedQuote, currency: DisplayCurrency = "TRY"): string {
   return inLocale(
     createElement(QuoteSummary, {
       quote,
+      currency,
       onPatch: noop,
       onRequestReview: noop,
       onRequestPrices: noop,
@@ -1528,8 +1554,16 @@ const BANK_FIXTURE = {
   branch: "Etimesgut",
 };
 
-function renderDocument(quote: PresentedQuote): string {
-  return inLocale(createElement(QuoteDocument, { quote, bank: BANK_FIXTURE }));
+function renderDocument(quote: PresentedQuote, currency: DisplayCurrency = "TRY"): string {
+  return inLocale(createElement(QuoteDocument, { quote, bank: BANK_FIXTURE, currency }));
+}
+
+function renderHeader(
+  quote: PresentedQuote,
+  currency: DisplayCurrency = "TRY",
+  shareToken: string | null = null
+): string {
+  return inLocale(createElement(QuoteHeader, { quote, currency, shareToken, onPatch: noop }));
 }
 
 test("belge teklifin kimliğini, parçalarını ve geçerliliğini yazar", () => {
@@ -1930,6 +1964,7 @@ const QUOTE_ROW: CustomerQuoteListItem = {
   expiresAt: "2026-10-20T09:00:00.000Z",
   expired: false,
   orderNumber: null,
+  fxSnapshot: null,
 };
 
 test("teklif listesi numarayı, durumu, tutarı ve bağlantıyı yazar", () => {
@@ -2742,5 +2777,408 @@ test("toplu işlem çubuğu telefonda tek satırlık eylem şeridi taşır", () 
     "instantQuote.bulk.clear",
   ] as const) {
     assert.ok(html.includes(tr[key]), `${tr[key]} düğmesinin adı kayboldu`);
+  }
+});
+
+// ─── Döviz GÖSTERİMİ: tek render dikişi (Faz 2b · D3) ────────────────────────
+//
+// Bu bölümün tek sınavı şudur: EKRANDA ne değişti ve ne DEĞİŞMEDİ. Bağlayıcı
+// her tutar ₺ kalmalı (32 Sayılı Karar m.4/g + 2008-32/34 Tebliğ m.8); döviz
+// yalnız YANINDA duran yaklaşık bir ikinci okumadır. En önemli çivi ödeme
+// ekranındadır: tahsil edilecek rakam dövize ÇEVRİLMEZ.
+
+const FX_SNAPSHOT: QuoteFxSnapshot = {
+  version: 1,
+  source: "tcmb",
+  bulletinDate: "2026-09-29",
+  takenAt: "2026-09-29T15:30:00.000Z",
+  rates: [
+    { currency: "EUR", microTryPerUnit: 48_741_200 },
+    { currency: "USD", microTryPerUnit: 41_523_100 },
+    { currency: "GBP", microTryPerUnit: 55_903_400 },
+  ],
+};
+
+const FX_DISPLAY: PresentedFxDisplay = {
+  snapshot: FX_SNAPSHOT,
+  currencies: ["TRY", "EUR", "USD", "GBP"],
+};
+
+const EUR_RATE: FrozenFxRate = { currency: "EUR", microTryPerUnit: 48_741_200 };
+
+/** Döviz gösterimi AÇIK bir teklif (bayrak açık + kur donmuş + fiyat kapısı açık). */
+function fxQuote(over: Partial<PresentedQuote> = {}): PresentedQuote {
+  return pricedQuote({ display: FX_DISPLAY, ...over });
+}
+
+/**
+ * YUVARLAMA üreten fiş: satırlar ayrı ayrı yuvarlandığı için toplamı tutmaz.
+ * 10000 kr → 205, 4800 kr → 98 (Σ 303); 14800 kr → 304. Fark +1 cent ve
+ * ekranda GÖRÜNEN bir satır olmak zorunda.
+ */
+const ROUNDING_TOTALS: QuoteTotals = {
+  allPriced: true,
+  partsKurus: 10000,
+  addonLines: [{ key: "certificate", name: "Malzeme sertifikası", kurus: 4800 }],
+  addonsKurus: 4800,
+  minOrderTopUpKurus: 0,
+  totalKurus: 14800,
+  kdvExcludedKurus: 12000,
+  kdvKurus: 2800,
+  leadDays: 5,
+};
+
+/** Dövizde HİÇ görünmemesi gereken üç simge. */
+const FX_SYMBOLS = ["€", "$", "£"] as const;
+
+test("çevirim dikişi TEK: `money` ₺ dışına yalnız DONMUŞ kurla çıkar", () => {
+  // Kur yoksa ya da TRY seçiliyse mevcut biçimleyici aynen çalışır: depodaki
+  // 44 çağrı yeri `formatCurrency`yi kullanmaya devam ediyor.
+  assert.equal(fxMoney(14800, null), formatCurrency(14800, "tr"));
+  assert.equal(fxMoney(14800), formatCurrency(14800, "tr"));
+  // 14800 kr / 48,7412 = 303,647… € → 304 cent.
+  assert.equal(fxMoney(14800, EUR_RATE), "€3,04");
+  // GÖSTERİM TAVANI: çevrilemeyen tutar ₺'ye DÜŞER, atmaz — bir sunucu
+  // bileşeninde atılan `RangeError` boş gövdeli bir 500'dür ve döviz kolonu,
+  // yanında durduğu BAĞLAYICI ₺ okumasını da öldürürdü.
+  const overCap = MAX_AMOUNT_KURUS + 1;
+  assert.equal(fxMoney(overCap, EUR_RATE), formatCurrency(overCap, "tr"));
+  assert.equal(fxMoney(-1, EUR_RATE), formatCurrency(-1, "tr"));
+});
+
+test("`displayRate` seçimi DONMUŞ snapshot'tan çözer, yoksa ₺'ye düşer", () => {
+  assert.deepEqual(displayRate(FX_SNAPSHOT, "EUR"), EUR_RATE);
+  assert.equal(displayRate(FX_SNAPSHOT, "TRY"), null);
+  assert.equal(displayRate(null, "EUR"), null, "kur yoksa döviz gösterimi de yok");
+  assert.equal(displayRate(undefined, "EUR"), null);
+  // Donmuş snapshot'ta o birim YOKSA (katalog sonradan büyümüş olabilir)
+  // sessizce ₺: yarım bir küme göstermek yanlış rakam göstermektir.
+  assert.equal(displayRate({ ...FX_SNAPSHOT, rates: [EUR_RATE] }, "USD"), null);
+});
+
+test("`?kur=` geçersiz/bilinmeyen değerde SESSİZCE TRY'ye düşer", () => {
+  assert.equal(parseDisplayCurrency("EUR"), "EUR");
+  assert.equal(parseDisplayCurrency("eur"), "EUR");
+  assert.equal(parseDisplayCurrency("TRY"), "TRY");
+  for (const bad of ["CHF", "xyz", "", "JPY", undefined, null, 42, ["EUR"]]) {
+    assert.equal(parseDisplayCurrency(bad), "TRY", `${String(bad)} TRY'ye düşmedi`);
+  }
+});
+
+test("kur metni mikro-TRY'yi TCMB'nin dört hanesiyle yazar", () => {
+  assert.equal(rateText(EUR_RATE), "48,7412");
+});
+
+test("özet, EUR seçiliyken ₺'nin YANINA döviz okuması koyar", () => {
+  const html = plain(renderSummary(fxQuote(), "EUR"));
+  assert.ok(html.includes("€3,04"), "toplamın döviz karşılığı yok");
+  // Çalışma alanının fişi SEÇİLİ birimde okunur (K2): ₺ rakamı yerini verir.
+  // İki kolon yalnız BELGEDE durur (K3) — bir sonraki vaka.
+  assert.ok(!html.includes(money(14800)), "aynı tutar iki kez basılmış");
+  // Ama "₺" kelimesi ekrandan kaybolmaz: kur cümlesi hangi paraya karşılık
+  // okuduğunu söyler.
+  assert.ok(html.includes("₺"), "₺ bağı tamamen kopmuş");
+  // Kur ve BÜLTEN TARİHİ her rakamın yanında yazılı olmak zorunda (R6).
+  assert.ok(html.includes("48,7412"), "kur yazılmamış");
+  assert.ok(html.includes("TCMB"), "kaynak atfı yok");
+  assert.ok(html.includes("29 Eylül 2026"), "bülten tarihi yok");
+  assert.ok(html.includes(tr["instantQuote.fx.indicative"]), "bilgi amaçlılık cümlesi yok");
+  // Seçici sağ sütunda durur.
+  assert.ok(html.includes(tr["instantQuote.fx.label"]), "para birimi seçicisi çizilmemiş");
+  assert.ok(html.includes(tr["instantQuote.fx.try"]), "₺ seçeneği yok");
+});
+
+test("özet, `display` YOKKEN tek bir döviz simgesi bile basmaz", () => {
+  // Bayrak kapalı / kur bayat hâli: `presentQuote` `display` anahtarını hiç
+  // göndermez ve EUR tercihi tarayıcıda kalmış olsa bile ekran ₺ kalır.
+  const html = plain(renderSummary(pricedQuote(), "EUR"));
+  for (const symbol of FX_SYMBOLS) {
+    assert.ok(!html.includes(symbol), `${symbol} sızdı`);
+  }
+  assert.ok(!html.includes(tr["instantQuote.fx.label"]), "seçici çizilmiş");
+  assert.ok(html.includes(money(14800)), "₺ toplam yok");
+});
+
+test("YUVARLAMA satırı yalnız fark VARKEN çizilir", () => {
+  const withRounding = plain(renderSummary(fxQuote({ totals: ROUNDING_TOTALS }), "EUR"));
+  assert.ok(withRounding.includes(tr["instantQuote.fx.rounding"]), "yuvarlama satırı yok");
+  assert.ok(withRounding.includes("€0,01"), "yuvarlama tutarı yok");
+  // Satırlar + yuvarlama = toplam: 205 + 98 + 1 = 304.
+  assert.ok(withRounding.includes("€2,05"), "parça ara toplamı yok");
+  assert.ok(withRounding.includes("€0,98"), "ek hizmet satırı yok");
+  assert.ok(withRounding.includes("€3,04"), "toplam yok");
+
+  // Tek satırlık fişte fark SIFIRDIR: gereksiz satır çizilmez.
+  const without = plain(renderSummary(fxQuote(), "EUR"));
+  assert.ok(!without.includes(tr["instantQuote.fx.rounding"]), "sıfır fark satırı çizildi");
+});
+
+test("belgede İKİ kolon durur: bağlayıcı ₺ VE yanında ≈ döviz", () => {
+  const html = plain(renderDocument(fxQuote({ totals: ROUNDING_TOTALS }), "EUR"));
+  assert.ok(html.includes("€"), "döviz kolonu yok");
+  assert.ok(html.includes("₺"), "BAĞLAYICI ₺ kolonu kayboldu");
+  assert.ok(html.includes(money(14800)), "₺ toplam yok");
+  assert.ok(html.includes("€3,04"), "≈ toplam yok");
+  assert.ok(
+    html.includes(fill(tr["instantQuote.document.fxColumn"], { currency: "EUR" })),
+    "≈ kolon başlığı yok"
+  );
+  // Yuvarlama satırı kâğıtta da görünür: satırları toplayan okuyucu farkı
+  // belgede bulmalı.
+  assert.ok(html.includes(tr["instantQuote.fx.rounding"]), "belgede yuvarlama satırı yok");
+});
+
+test("belge alt bilgisi bülten tarihini, kaynağı ve bağlayıcı kolonu YAZAR", () => {
+  const html = plain(renderDocument(fxQuote(), "EUR"));
+  assert.ok(html.includes("TCMB"), "kaynak atfı yok (TCMB verisi atıfla kullanılır)");
+  assert.ok(html.includes("29 Eylül 2026"), "bülten tarihi yok");
+  assert.ok(html.includes("48,7412"), "kur yok");
+  assert.match(html, /Bağlayıcı tutar Türk lirası kolonudur/);
+});
+
+test("belgede `?kur=` karşılanamazsa cümle YAZILIR, sayfa DÜŞMEZ", () => {
+  // Bayrak kapalı ya da kur bayat: `display` yok. Müşteri `?kur=EUR` ile
+  // gelmişse sessiz kalmak "istediğim kolon nerede" sorusunu cevapsız bırakır.
+  const html = plain(renderDocument(pricedQuote(), "EUR"));
+  assert.ok(html.includes(tr["instantQuote.fx.unavailable"]), "karşılanamayan seçim sessiz kaldı");
+  for (const symbol of FX_SYMBOLS) {
+    assert.ok(!html.includes(symbol), `${symbol} sızdı`);
+  }
+  // TRY istenmişse cümle de YOK: döviz istemeyen müşteriye hata gösterilmez.
+  const tryOnly = plain(renderDocument(pricedQuote(), "TRY"));
+  assert.ok(!tryOnly.includes(tr["instantQuote.fx.unavailable"]));
+});
+
+test("ÖDEME EKRANI: brüt toplam ikincil okuma alır, havale indirimi ₺ KALIR", () => {
+  const html = renderCheckout({
+    quote: fxQuote({ shipByDate: "2026-11-02" }),
+    currency: "EUR",
+  });
+  // Fişin ÜST tarafı (parça satırı, ek hizmet, brüt toplam, KDV) ikincil
+  // okumayı alabilir: "ne alıyorum, brüt kaça".
+  assert.ok(html.includes("€3,04"), "brüt toplamın döviz okuması yok");
+  assert.ok(html.includes(money(14800)), "bağlayıcı ₺ toplam kayboldu");
+  // Havale indirimi YAPILACAK bir tahsilatın parçasıdır: çevrilmez.
+  assert.ok(html.includes(`−${money(444)}`), "havale indirimi ₺ değil");
+  assert.ok(!html.includes("−€"), "havale indirimi dövize çevrilmiş");
+});
+
+test("ÖDEME FİŞİ: hediye kartı ve ödenecek tutar satırları YALNIZ ₺", () => {
+  // Fişi doğrudan çizmek tender dökümünü (brüt → kart → ödenecek) durumdan
+  // bağımsız sınanabilir kılıyor; bu turun EN ÖNEMLİ çivisi burada.
+  const html = plain(
+    inLocale(
+      createElement(QuoteCheckoutReceipt, {
+        quote: fxQuote(),
+        totalKurus: 14800,
+        giftCardAmountKurus: GIFT_PREVIEW.giftCardAmountKurus,
+        havaleDiscountKurus: GIFT_PREVIEW.bankTransfer.havaleDiscountKurus,
+        payableKurus: GIFT_PREVIEW.card.payableKurus,
+        rate: EUR_RATE,
+      })
+    )
+  );
+  // Müşteri yaklaşık sayıyı ödeyeceği tutar sanmamalı (MSY m.6/2-a + 32
+  // Sayılı Karar m.4/g): üç satır da ₺.
+  for (const [key, kurus] of [
+    ["instantQuote.checkout.giftCard.applied", 4000],
+    ["instantQuote.checkout.giftCard.remaining", 10800],
+  ] as const) {
+    assert.ok(html.includes(fill(tr[key], { amount: money(kurus) })), `${key} ₺ değil`);
+  }
+  assert.ok(html.includes(`−${money(311)}`), "havale indirimi ₺ değil");
+  // Brüt toplam ise ikincil okumasını alır: fişin iki yarısı BİLEREK farklı.
+  assert.ok(html.includes("€3,04"), "brüt toplamın döviz okuması yok");
+});
+
+test("ÖDEME FORMU: düğme üstündeki tutar ve sözleşme özeti YALNIZ ₺", () => {
+  const html = renderCheckoutForm({
+    quote: fxQuote(),
+    rate: EUR_RATE,
+    giftPreview: GIFT_PREVIEW,
+  });
+  // Düğme: `submit · ₺108,00` (hediye kartı uygulanmış).
+  assert.ok(
+    html.includes(`${tr["instantQuote.checkout.submit"]} · ${money(10800)}`),
+    "düğme üstündeki tutar ₺ değil"
+  );
+  // MSY m.6/2-a: "vergiler dâhil toplam fiyat", ödeme yükümlülüğünden HEMEN
+  // ÖNCE. `DistanceContractConsent` para birimini ÖĞRENMEZ.
+  assert.ok(html.includes(money(10800)), "sözleşme özetindeki tutar ₺ değil");
+  // Tahsilatın ₺ olduğu AÇIKÇA yazılı ve onay bloğunun HEMEN ÜSTÜNDE.
+  const notice = fill(tr["instantQuote.fx.chargedInTry"], { amount: money(10800) });
+  assert.ok(html.includes(notice), "tahsilat ₺ uyarısı yok");
+  const noticeAt = html.indexOf(notice);
+  const consentAt = html.indexOf(tr["consent.contract.summaryTitle"]);
+  assert.ok(consentAt > 0, "mesafeli satış onayı çizilmemiş");
+  assert.ok(noticeAt > 0 && noticeAt < consentAt, "uyarı onayın ÜSTÜNDE değil");
+});
+
+test("ÖDEME FORMU: döviz seçilmemişken tahsilat uyarısı da YOK", () => {
+  const html = renderCheckoutForm({ quote: fxQuote(), rate: null });
+  assert.ok(
+    !html.includes(fill(tr["instantQuote.fx.chargedInTry"], { amount: money(14800) })),
+    "₺ gösterimde anlamsız bir uyarı çizildi"
+  );
+});
+
+test("parça kartı, kademe tablosu ve ek hizmetler aynı dikişten geçer", () => {
+  const part = partFixture({
+    price: {
+      unitKurus: 7400,
+      lineKurus: 14800,
+      source: "auto",
+      priceBreaks: [
+        { quantity: 1, unitKurus: 7400 },
+        { quantity: 10, unitKurus: 6400 },
+      ],
+    },
+  });
+  const html = plain(renderPartCard(part, fxQuote({ parts: [part] }), EUR_RATE));
+  assert.ok(html.includes(fxMoney(7400, EUR_RATE)), "birim fiyatın döviz okuması yok");
+  assert.ok(html.includes(fxMoney(14800, EUR_RATE)), "satır tutarının döviz okuması yok");
+  assert.ok(html.includes(fxMoney(6400, EUR_RATE)), "kademe tablosu ₺'de kalmış");
+  // Kart da fişle aynı davranır: aynı tutar iki kez basılmaz.
+  assert.ok(!html.includes(money(7400)), "aynı birim fiyat iki kez basılmış");
+
+  // Kur YOKKEN aynı kart ₺ basar — dikişin iki yönü de sınanıyor.
+  const tryOnly = plain(renderPartCard(part, pricedQuote({ parts: [part] })));
+  assert.ok(tryOnly.includes(money(7400)), "₺ birim fiyat yok");
+  for (const symbol of FX_SYMBOLS) {
+    assert.ok(!tryOnly.includes(symbol), `${symbol} sızdı`);
+  }
+});
+
+test("hesap listesindeki tutar kolonu teklifin KENDİ donmuş kurunu izler", () => {
+  const withRate = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [{ ...QUOTE_ROW, totalKurus: 14800, fxSnapshot: FX_SNAPSHOT }],
+        currency: "EUR",
+      })
+    )
+  );
+  assert.ok(withRate.includes("€3,04"), "liste tercihi izlemiyor");
+
+  // Kuru olmayan satır (bayrak kapalıyken ya da eski teklifte) ₺ kalır.
+  const noRate = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [{ ...QUOTE_ROW, totalKurus: 14800, fxSnapshot: null }],
+        currency: "EUR",
+      })
+    )
+  );
+  assert.ok(noRate.includes(money(14800)));
+  for (const symbol of FX_SYMBOLS) {
+    assert.ok(!noRate.includes(symbol), `${symbol} sızdı`);
+  }
+});
+
+test("belge bağlantısı aktif seçimi taşır; `?t=` ile birlikte doğru ayraçla", () => {
+  assert.match(renderHeader(fxQuote(), "EUR", null), /\/teklif\/T-000123\/belge\?kur=EUR"/);
+  assert.match(
+    plain(renderHeader(fxQuote(), "EUR", "abc123")),
+    /\/teklif\/T-000123\/belge\?t=abc123&kur=EUR"/
+  );
+  // ₺ seçiliyken adres KİRLENMEZ.
+  assert.match(renderHeader(fxQuote(), "TRY", null), /\/teklif\/T-000123\/belge"/);
+  // Kur karşılanamıyorsa ölü bir `?kur=` yazılmaz.
+  assert.match(renderHeader(pricedQuote(), "EUR", null), /\/teklif\/T-000123\/belge"/);
+});
+
+test("tercih deposu atan `localStorage` ile de ÇALIŞIR (bellek kopyası)", () => {
+  const throwing = {
+    getItem() {
+      throw new Error("SecurityError");
+    },
+    setItem() {
+      throw new Error("SecurityError");
+    },
+  } as unknown as Storage;
+  // Erişimin KENDİSİ atsa bile okuma bağlayıcı birime düşer, yazma sessizce
+  // yutulur: bir gösterim kolaylığı yüzünden teklif ekranı çökmemeli.
+  assert.equal(readDisplayCurrencyPref(throwing), "TRY");
+  assert.doesNotThrow(() => writeDisplayCurrencyPref(throwing, "EUR"));
+  assert.equal(readDisplayCurrencyPref(null), "TRY");
+
+  const store = new Map<string, string>();
+  const ok = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  } as unknown as Storage;
+  writeDisplayCurrencyPref(ok, "USD");
+  assert.equal(readDisplayCurrencyPref(ok), "USD");
+  // Depodaki çöp değer bağlayıcı birime düşer (kapalı küme).
+  store.set(DISPLAY_CURRENCY_PREF_KEY, "CHF");
+  assert.equal(readDisplayCurrencyPref(ok), "TRY");
+
+  // Yazma başarısız olsa bile DÜĞME çalışmalı: seçim bellekte de tutulur.
+  setDisplayCurrency("GBP");
+  assert.equal(displayCurrencySnapshot(), "GBP");
+  setDisplayCurrency("TRY");
+  assert.equal(displayCurrencySnapshot(), "TRY");
+});
+
+test("seçici `display` YOKKEN hiç çizilmez", () => {
+  assert.equal(
+    inLocale(createElement(DisplayCurrencyPicker, { display: null })),
+    "",
+    "kur yokken seçici çizildi"
+  );
+  const html = inLocale(createElement(DisplayCurrencyPicker, { display: FX_DISPLAY }));
+  assert.ok(html.includes(tr["instantQuote.fx.label"]));
+  for (const currency of FX_DISPLAY.currencies) {
+    if (currency === "TRY") continue;
+    assert.ok(html.includes(currency), `${currency} seçeneği yok`);
+  }
+  // ₺ seçiliyken kur cümlesi YOK: çevrilmiş bir rakam da yok.
+  assert.ok(!html.includes("48,7412"), "₺ gösterimde kur cümlesi çizildi");
+});
+
+test("döviz sözlüğü iki dilde de TAM ve yer tutucuları yerinde", () => {
+  for (const key of [
+    "instantQuote.fx.label",
+    "instantQuote.fx.try",
+    "instantQuote.fx.rateNote",
+    "instantQuote.fx.indicative",
+    "instantQuote.fx.rounding",
+    "instantQuote.fx.unavailable",
+    "instantQuote.fx.chargedInTry",
+    "instantQuote.document.fxColumn",
+    "instantQuote.document.fxFooter",
+  ] as const) {
+    assert.ok(trKeys.includes(key), `${key} Türkçe sözlükte yok`);
+    assert.ok(enKeys.includes(key), `${key} İngilizce sözlükte yok`);
+  }
+  for (const key of ["instantQuote.fx.rateNote", "instantQuote.document.fxFooter"] as const) {
+    for (const placeholder of [/\{currency\}/, /\{rate\}/, /\{date\}/]) {
+      assert.match(tr[key], placeholder, `${key} yer tutucusunu kaybetti`);
+      assert.match(en[key], placeholder, `${key} (en) yer tutucusunu kaybetti`);
+    }
+  }
+  assert.match(tr["instantQuote.fx.chargedInTry"], /\{amount\}/);
+  assert.match(en["instantQuote.fx.chargedInTry"], /\{amount\}/);
+  assert.match(tr["instantQuote.document.fxColumn"], /\{currency\}/);
+  // Tahsilatın ₺ olduğu AÇIKÇA yazılı olmak zorunda.
+  assert.match(tr["instantQuote.fx.chargedInTry"], /Türk lirası/);
+  assert.match(tr["instantQuote.fx.indicative"], /Türk lirası/);
+  assert.match(tr["instantQuote.document.fxFooter"], /TCMB/);
+});
+
+test("SİPARİŞ/İADE ve e-posta yüzeyleri bu turda döviz ÖĞRENMEDİ", () => {
+  // Y3 + Y4: o yüzeylerin rakamı YAPILMIŞ/YAPILACAK bir tahsilatı anlatır ve
+  // e-postalar hiç tutar taşımaz. Kapı dosya listesiyle tutulur — biri
+  // çevirim dikişini import ederse burada görünür.
+  for (const rel of [
+    "src/components/distance-contract-consent.tsx",
+    "src/lib/services/quote-notify.ts",
+  ]) {
+    const code = fs.readFileSync(path.resolve(rel), "utf8");
+    assert.doesNotMatch(
+      code,
+      /quote-currency|formatMoneyMinor|\bmoney\(/,
+      `${rel} döviz gösterimini öğrenmiş`
+    );
   }
 });

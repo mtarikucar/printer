@@ -682,6 +682,13 @@ export interface CustomerQuoteListItem {
   expiresAt: string;
   expired: boolean;
   orderNumber: string | null;
+  /**
+   * Teklifin KENDİ dondurduğu kur kümesi; `null` = yalnız ₺ gösterilir (kur
+   * yok, bayat ya da döviz gösterimi bayrağı KAPALI). Listedeki tutarın teklif
+   * sayfasındaki rakamla birebir aynı okunması için bugünün bülteni DEĞİL,
+   * teklifin donmuş kuru kullanılır.
+   */
+  fxSnapshot: QuoteFxSnapshot | null;
 }
 
 /** `/account/parcalar` satırı: aynı dosya (sha256) tek kez listelenir. */

@@ -3,16 +3,16 @@
 import { useState, type JSX } from "react";
 import { QUOTE_UNITS } from "@/lib/config/quote-types";
 import type {
+  FrozenFxRate,
   PresentedCatalog,
   PresentedPart,
   QuoteUnits,
   QuoteViewer,
 } from "@/lib/config/quote-types";
-import { formatCurrency } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { PartPatch } from "@/lib/quote/client-api";
 import { QuoteDfmList } from "./dfm-list";
-import { fill, decimal2, mm } from "./format";
+import { fill, decimal2, mm, money } from "./format";
 import { QuotePriceBreakTable } from "./price-break-table";
 import { useSyncedField } from "./synced-field";
 
@@ -34,6 +34,8 @@ export interface QuotePartCardProps {
   part: PresentedPart;
   catalog: PresentedCatalog;
   viewer: QuoteViewer;
+  /** Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺. */
+  rate?: FrozenFxRate | null;
   selected: boolean;
   busy?: boolean;
   onSelectChange: (partId: string, selected: boolean) => void;
@@ -58,6 +60,7 @@ export function QuotePartCard({
   part,
   catalog,
   viewer,
+  rate = null,
   selected,
   busy,
   onSelectChange,
@@ -366,6 +369,7 @@ export function QuotePartCard({
           <QuoteDfmList
             issues={issues}
             catalog={catalog}
+            rate={rate}
             warningKey={part.dfmWarningKey}
             acknowledged={part.dfmAcknowledged}
             disabled={disabled}
@@ -383,6 +387,7 @@ export function QuotePartCard({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-default bg-bg-surface px-4 py-3">
         <PriceBlock
           part={part}
+          rate={rate}
           canSeePrices={viewer.canSeePrices}
           analyzing={analyzing}
           failed={failed}
@@ -404,12 +409,14 @@ function Spec({ label, children }: { label: string; children: React.ReactNode })
 
 function PriceBlock({
   part,
+  rate,
   canSeePrices,
   analyzing,
   failed,
   onRequestPrices,
 }: {
   part: PresentedPart;
+  rate: FrozenFxRate | null;
   canSeePrices: boolean;
   analyzing: boolean;
   failed: boolean;
@@ -441,7 +448,7 @@ function PriceBlock({
               {d["instantQuote.price.unit"]}
             </span>
             <span className="text-base font-semibold tabular-nums text-text-primary">
-              {formatCurrency(part.price.unitKurus, "tr")}
+              {money(part.price.unitKurus, rate)}
             </span>
           </span>
           <span>
@@ -449,7 +456,7 @@ function PriceBlock({
               {d["instantQuote.price.line"]}
             </span>
             <span className="text-base font-semibold tabular-nums text-text-primary">
-              {formatCurrency(part.price.lineKurus, "tr")}
+              {money(part.price.lineKurus, rate)}
             </span>
           </span>
           {part.price.source === "manual" && (
@@ -467,6 +474,7 @@ function PriceBlock({
               <QuotePriceBreakTable
                 breaks={part.price.priceBreaks}
                 quantity={part.config.quantity}
+                rate={rate}
               />
             </div>
           </details>

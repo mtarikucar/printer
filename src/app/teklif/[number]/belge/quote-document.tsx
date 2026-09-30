@@ -1,17 +1,24 @@
 "use client";
 
 import type { JSX } from "react";
-import { decimal2, fill, mm } from "@/components/quote/format";
+import { decimal2, displayRate, fill, mm, money, rateText } from "@/components/quote/format";
 import type { BankDetails } from "@/lib/config/payment";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
-import type { PresentedCatalog, PresentedPart, PresentedQuote } from "@/lib/config/quote-types";
+import { convertReceipt } from "@/lib/config/quote-currency";
+import type {
+  DisplayCurrency,
+  FrozenFxRate,
+  PresentedCatalog,
+  PresentedPart,
+  PresentedQuote,
+} from "@/lib/config/quote-types";
 import {
   BUSINESS_ADDRESS_FULL,
   BUSINESS_LEGAL_NAME,
   BUSINESS_TAX_ID,
 } from "@/lib/config/business-identity";
 import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY } from "@/lib/config/contact";
-import { formatCurrency, formatDateLong } from "@/lib/i18n/format";
+import { formatCurrency, formatDateLong, formatMoneyMinor } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 /**
@@ -30,6 +37,14 @@ import { useDictionary } from "@/lib/i18n/locale-context";
  *    ve kaynak dosya adresleri buraya (ve paylaşım görünümüne, e-postalara)
  *    asla girmez. Küçük resim bunun istisnasıdır: belgenin okunabilmesi için
  *    parçanın neye benzediği görünmeli.
+ *
+ * Döviz seçildiğinde kâğıtta İKİ KOLON durur: BAĞLAYICI ₺ kolonu ve onun
+ * YANINDA "≈ <döviz>". Tek kolonluk bir döviz proforması 32 Sayılı Karar
+ * m.4/g + 2008-32/34 Tebliğ m.8 tartışmasına davetiyedir (Türkiye'de
+ * yerleşikler arası satış sözleşmesinde bedel TL olmak ZORUNDA). Alt bilgi
+ * hangisinin bağlayıcı olduğunu, kurun kaynağını (TCMB) ve BÜLTEN TARİHİNİ
+ * yazar — TCMB verisi kamuya açık ve ücretsizdir ama ATIFLA kullanılır, ve
+ * aynı cümle "bana €100 dendi" iddiasını belge üzerinde kapatan azaltmadır.
  */
 
 /** Parçanın tek satırlık üretim tarifi: teknoloji · malzeme · renk · yüzey. */
@@ -55,18 +70,63 @@ function Field({ label, value }: { label: string; value: string }): JSX.Element 
   );
 }
 
+/**
+ * Toplam bloğunun bir satırı: etiket · BAĞLAYICI ₺ · (varsa) ≈ döviz.
+ *
+ * Tek yerde kurulur ki altı satırın hiçbiri bir gün ikinci kolonu unutmasın —
+ * kolonu eksik bir satır, okuyucunun toplayamadığı bir proforma demektir.
+ * `rate` yokken işaretleme eskisiyle aynıdır: üçüncü hücre hiç doğmaz.
+ */
+function TotalRow({
+  label,
+  kurus,
+  rate,
+  emphasis,
+}: {
+  label: JSX.Element | string;
+  kurus: number;
+  rate: FrozenFxRate | null;
+  emphasis?: boolean;
+}): JSX.Element {
+  return (
+    <div
+      className={`flex gap-4 ${emphasis ? "quote-doc__total pt-1.5 text-sm font-semibold" : ""}`}
+    >
+      <dt className={emphasis ? "flex-1" : "quote-doc__muted flex-1"}>{label}</dt>
+      <dd className="w-[24mm] shrink-0 text-right tabular-nums">{formatCurrency(kurus, "tr")}</dd>
+      {rate && (
+        <dd className="quote-doc__muted w-[24mm] shrink-0 text-right tabular-nums">
+          {money(kurus, rate)}
+        </dd>
+      )}
+    </div>
+  );
+}
+
 export function QuoteDocument({
   quote,
   bank,
+  currency = "TRY",
 }: {
   quote: PresentedQuote;
   bank: BankDetails;
+  /**
+   * `?kur=` ile gelen gösterim birimi. Belge AYRI bir sunucu render'ıdır ve
+   * tarayıcıdaki tercihi okuyamaz; seçim adreste taşınır (`quote-header.tsx`).
+   */
+  currency?: DisplayCurrency;
 }): JSX.Element {
   const d = useDictionary();
   const { totals, catalog } = quote;
   const showPrices = quote.viewer.canSeePrices && totals != null;
   const invoice = quote.invoice ?? null;
   const leadTier = quote.leadOptions.find((o) => o.key === quote.leadTier) ?? null;
+  const rate = showPrices ? displayRate(quote.display?.snapshot, currency) : null;
+  const receipt = rate && totals ? convertReceipt(totals, rate) : null;
+  // Müşteri `?kur=EUR` ile geldi ama karşılanamadı (bayrak kapalı, kur bayat
+  // ya da o birim donmuş snapshot'ta yok). Sessiz kalmak "istediğim kolon
+  // nerede" sorusunu cevapsız bırakırdı; ₺ isteyene ise hiçbir şey yazılmaz.
+  const fxUnavailable = currency !== "TRY" && rate === null;
 
   return (
     <article className="quote-doc">
@@ -188,6 +248,11 @@ export function QuoteDocument({
                 <th scope="col" className="w-24 text-right">
                   {d["instantQuote.document.column.line"]}
                 </th>
+                {rate && (
+                  <th scope="col" className="w-24 text-right">
+                    {fill(d["instantQuote.document.fxColumn"], { currency: rate.currency })}
+                  </th>
+                )}
               </>
             )}
           </tr>
@@ -246,6 +311,14 @@ export function QuoteDocument({
                   <td className="align-top text-right tabular-nums">
                     {part.price ? formatCurrency(part.price.lineKurus, "tr") : "—"}
                   </td>
+                  {/* Kâğıtta ikinci kolon SATIR TUTARINI taşır: birim fiyatın
+                      da yaklaşığını basmak dört fiyat kolonu demek olurdu ve
+                      okuyucunun topladığı sayı satır tutarıdır. */}
+                  {rate && (
+                    <td className="quote-doc__muted align-top text-right tabular-nums">
+                      {part.price ? money(part.price.lineKurus, rate) : "—"}
+                    </td>
+                  )}
                 </>
               )}
             </tr>
@@ -256,46 +329,63 @@ export function QuoteDocument({
       {/* ── Toplam ────────────────────────────────────────────────────── */}
       {showPrices ? (
         <section className="mt-5 flex justify-end">
-          <dl className="w-full max-w-[80mm] space-y-1 text-xs">
-            <div className="flex justify-between gap-4">
-              <dt>{d["instantQuote.summary.partsSubtotal"]}</dt>
-              <dd className="tabular-nums">{formatCurrency(totals.partsKurus, "tr")}</dd>
-            </div>
+          <dl className={`w-full space-y-1 text-xs ${rate ? "max-w-[110mm]" : "max-w-[80mm]"}`}>
+            <TotalRow
+              label={d["instantQuote.summary.partsSubtotal"]}
+              kurus={totals.partsKurus}
+              rate={rate}
+            />
             {totals.addonLines.map((line) => (
-              <div key={line.key} className="flex justify-between gap-4">
-                <dt>{line.name}</dt>
-                <dd className="tabular-nums">{formatCurrency(line.kurus, "tr")}</dd>
-              </div>
+              <TotalRow key={line.key} label={line.name} kurus={line.kurus} rate={rate} />
             ))}
             {totals.minOrderTopUpKurus > 0 && (
-              <div className="flex justify-between gap-4">
-                <dt>{d["instantQuote.summary.minOrderTopUp"]}</dt>
-                <dd className="tabular-nums">
-                  {formatCurrency(totals.minOrderTopUpKurus, "tr")}
+              <TotalRow
+                label={d["instantQuote.summary.minOrderTopUp"]}
+                kurus={totals.minOrderTopUpKurus}
+                rate={rate}
+              />
+            )}
+            {/* Satırlar ayrı ayrı yuvarlandığı için toplamları çevrilmiş
+                toplamdan sapabilir. Kâğıtta bunu GİZLEMEK olmaz: proformayı
+                satır satır toplayan okuyucu farkı bulmak zorunda. ₺ kolonunda
+                fark YOKTUR (sunucu hesabı), o yüzden yalnız döviz kolonu
+                yazılır. */}
+            {receipt && receipt.roundingMinor !== 0 && (
+              <div className="flex gap-4">
+                <dt className="quote-doc__muted flex-1">{d["instantQuote.fx.rounding"]}</dt>
+                <dd className="w-[24mm] shrink-0" />
+                <dd className="quote-doc__muted w-[24mm] shrink-0 text-right tabular-nums">
+                  {formatMoneyMinor(receipt.roundingMinor, receipt.currency, "tr")}
                 </dd>
               </div>
             )}
-            <div className="quote-doc__total flex justify-between gap-4 pt-1.5 text-sm font-semibold">
-              <dt>
-                {d["instantQuote.summary.total"]}{" "}
-                <span className="quote-doc__muted text-xs font-normal">
-                  {d["instantQuote.summary.kdvIncluded"]}
-                </span>
+            <TotalRow
+              emphasis
+              label={
+                <>
+                  {d["instantQuote.summary.total"]}{" "}
+                  <span className="quote-doc__muted text-xs font-normal">
+                    {d["instantQuote.summary.kdvIncluded"]}
+                  </span>
+                </>
+              }
+              kurus={totals.totalKurus}
+              rate={rate}
+            />
+            <TotalRow
+              label={d["instantQuote.summary.kdvExcluded"]}
+              kurus={totals.kdvExcludedKurus}
+              rate={rate}
+            />
+            <TotalRow
+              label={fill(d["instantQuote.summary.kdv"], { rate: KDV_RATE_BPS / 100 })}
+              kurus={totals.kdvKurus}
+              rate={rate}
+            />
+            <div className="flex gap-4">
+              <dt className="quote-doc__muted flex-1">
+                {d["instantQuote.summary.freeShipping"]}
               </dt>
-              <dd className="tabular-nums">{formatCurrency(totals.totalKurus, "tr")}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="quote-doc__muted">{d["instantQuote.summary.kdvExcluded"]}</dt>
-              <dd className="tabular-nums">{formatCurrency(totals.kdvExcludedKurus, "tr")}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="quote-doc__muted">
-                {fill(d["instantQuote.summary.kdv"], { rate: KDV_RATE_BPS / 100 })}
-              </dt>
-              <dd className="tabular-nums">{formatCurrency(totals.kdvKurus, "tr")}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="quote-doc__muted">{d["instantQuote.summary.freeShipping"]}</dt>
               <dd />
             </div>
           </dl>
@@ -355,6 +445,21 @@ export function QuoteDocument({
           date: formatDateLong(quote.expiresAt, "tr"),
         })}
       </p>
+
+      {/* Kaynak (TCMB), BÜLTEN TARİHİ, kur ve hangi kolonun BAĞLAYICI olduğu
+          kâğıtta HER ZAMAN yazılı durur. */}
+      {rate && quote.display && (
+        <p className="quote-doc__muted mt-1 text-xs">
+          {fill(d["instantQuote.document.fxFooter"], {
+            date: formatDateLong(quote.display.snapshot.bulletinDate, "tr"),
+            currency: rate.currency,
+            rate: rateText(rate),
+          })}
+        </p>
+      )}
+      {fxUnavailable && (
+        <p className="quote-doc__muted mt-1 text-xs">{d["instantQuote.fx.unavailable"]}</p>
+      )}
     </article>
   );
 }

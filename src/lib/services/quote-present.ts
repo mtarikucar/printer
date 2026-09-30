@@ -16,7 +16,7 @@
  */
 import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
-import { QUOTE_SOURCE_FORMATS } from "@/lib/config/quote-types";
+import { DISPLAY_CURRENCIES, QUOTE_SOURCE_FORMATS } from "@/lib/config/quote-types";
 import type {
   ComputedQuote,
   DfmIssue,
@@ -194,6 +194,17 @@ export interface PresentQuoteInput {
    * çalışmaya devam eder (tasarım §5 geri dönüş planı).
    */
   stepEnabled: boolean;
+  /**
+   * `quote_fx_display_enabled` açık mı — döviz GÖSTERİMİ bayrağı.
+   *
+   * ZORUNLU bir alan, `optional` DEĞİL. Sebebi `stepEnabled` ile aynı: bu
+   * dosya SAF ve SENKRONDUR, `isFlagEnabled` ise async'tir ve DB'ye gider;
+   * bayrağı içeride okumak sunum katmanına bir veritabanı sokmak olurdu.
+   * Zorunluluk ise bilinçli: `presentQuote`un üç çağrı yeri var ve her birinin
+   * niyetini BEYAN etmesi bedava. `optional` bırakmak, testlerin sessizce eski
+   * davranışta kalması demekti.
+   */
+  fxDisplayEnabled: boolean;
 }
 
 export function presentQuote(input: PresentQuoteInput): PresentedQuote {
@@ -368,6 +379,30 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
       : null;
   }
   if (canSeePrices) view.totals = computed.totals;
+
+  // Döviz GÖSTERİMİ: kur bir FİYATTIR ve fiyat kapısının ARKASINDA durur
+  // (tasarım R7). Üç kapı birden aranır ve biri kapalıysa `display` anahtarı
+  // HİÇ EKLENMEZ — `undefined` bile değil, `null` bile değil, anahtarın
+  // kendisi yoktur (dosyanın açılış KURALI: `undefined` atamak `JSON.stringify`
+  // için yetse de RSC props'unda ve `Object.keys`te görünür).
+  //
+  // `quote.fxSnapshot === null` BOZULMUŞ YOL DEĞİL, normal bir hâldir: kur
+  // hiç çekilememiş ya da BAYAT olabilir (`loadActiveFxSnapshot` o hâlde
+  // `null` döner). Sayfa o zaman düşmez, yalnız ₺ gösterir.
+  //
+  // `currencies` donmuş snapshot'ın KENDİ satırlarından türer, `FX_CURRENCIES`
+  // sabitinden değil: katalog yarın büyürse eski bir snapshot yeni birimi
+  // taşımaz ve seçici müşteriye çevrilemeyen bir birim seçtirmemeli. Baştaki
+  // eleman daima bağlayıcı olandır.
+  if (canSeePrices && input.fxDisplayEnabled && quote.fxSnapshot) {
+    view.display = {
+      snapshot: quote.fxSnapshot,
+      currencies: [
+        DISPLAY_CURRENCIES[0],
+        ...quote.fxSnapshot.rates.map((r) => r.currency),
+      ],
+    };
+  }
 
   return view;
 }

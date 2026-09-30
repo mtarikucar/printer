@@ -1,11 +1,10 @@
 "use client";
 
 import type { JSX } from "react";
-import type { DfmIssue, PresentedCatalog } from "@/lib/config/quote-types";
+import type { DfmIssue, FrozenFxRate, PresentedCatalog } from "@/lib/config/quote-types";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { formatCurrency } from "@/lib/i18n/format";
-import { fill } from "./format";
+import { fill, money } from "./format";
 
 /**
  * Üretilebilirlik (DfM) uyarıları.
@@ -44,7 +43,8 @@ function technologyName(catalog: PresentedCatalog | undefined, key: unknown): st
 export function dfmMessage(
   d: Dictionary,
   issue: DfmIssue,
-  catalog?: PresentedCatalog
+  catalog?: PresentedCatalog,
+  rate?: FrozenFxRate | null
 ): string {
   const params = localize(issue.params);
 
@@ -55,7 +55,7 @@ export function dfmMessage(
     // (`presentQuote` kuruş taşıyan parametreleri ayıklar); o hâlde tutarı
     // anmayan cümle yazılır — yer tutucunun kendisi ekranda durmaz.
     return typeof max === "number"
-      ? fill(template, { maxTotal: formatCurrency(max, "tr") })
+      ? fill(template, { maxTotal: money(max, rate) })
       : template.replace(/\s*\(\{maxTotal\}\)/, "");
   }
 
@@ -87,6 +87,8 @@ const TONE: Record<DfmIssue["severity"], string> = {
 export interface QuoteDfmListProps {
   issues: DfmIssue[];
   catalog?: PresentedCatalog;
+  /** Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺. */
+  rate?: FrozenFxRate | null;
   /** Onay gerektiren uyarıların anahtarı; null ise onay kutusu çıkmaz. */
   warningKey?: string | null;
   acknowledged?: boolean;
@@ -99,6 +101,7 @@ export interface QuoteDfmListProps {
 export function QuoteDfmList({
   issues,
   catalog,
+  rate = null,
   warningKey = null,
   acknowledged = false,
   onAcknowledge,
@@ -116,7 +119,7 @@ export function QuoteDfmList({
             key={`${issue.code}-${i}`}
             className={`rounded-lg border px-3 py-2 text-xs leading-relaxed ${TONE[issue.severity]}`}
           >
-            {dfmMessage(d, issue, catalog)}
+            {dfmMessage(d, issue, catalog, rate)}
             {issue.code === "config_invalid" && onEditConfig && (
               <button
                 type="button"

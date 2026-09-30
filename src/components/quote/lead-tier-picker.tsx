@@ -1,10 +1,10 @@
 "use client";
 
 import type { JSX } from "react";
-import type { LeadOption, LeadTierKey } from "@/lib/config/quote-types";
-import { formatCurrency, formatDateLong } from "@/lib/i18n/format";
+import type { FrozenFxRate, LeadOption, LeadTierKey } from "@/lib/config/quote-types";
+import { formatDateLong } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { fill } from "./format";
+import { fill, money } from "./format";
 
 /**
  * Teslim kademesi seçici — "ne kadar beklersem ne kadar öderim".
@@ -25,9 +25,12 @@ export function LeadTierPicker({
   shipByDate,
   disabled,
   onChange,
+  rate = null,
 }: {
   options: LeadOption[];
   value: LeadTierKey;
+  /** Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺. */
+  rate?: FrozenFxRate | null;
   /** Seçili kademe için kargoya teslim tarihi (ISO); yoksa null. */
   shipByDate: string | null;
   disabled?: boolean;
@@ -82,7 +85,7 @@ export function LeadTierPicker({
                   göndermez; burada gösterilecek bir şey de yoktur. */}
               {typeof option.totalKurus === "number" && (
                 <span className="shrink-0 text-sm font-semibold tabular-nums text-text-primary">
-                  {formatCurrency(option.totalKurus, "tr")}
+                  {money(option.totalKurus, rate)}
                 </span>
               )}
             </label>

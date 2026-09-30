@@ -13,7 +13,7 @@ import {
   type TenderPaymentMethod,
   type TenderViews,
 } from "@/lib/config/quote-tender";
-import type { PresentedQuote } from "@/lib/config/quote-types";
+import type { FrozenFxRate, PresentedQuote } from "@/lib/config/quote-types";
 import type { QuoteGiftCardPreview } from "@/lib/services/quote-checkout";
 import type { CountryCode } from "@/lib/phone";
 import { DISTRICTS, PROVINCES } from "@/lib/data/turkey-address";
@@ -57,6 +57,16 @@ export interface QuoteCheckoutFormProps {
   /** Uygulanmış kartın sunucu ön izlemesi; yoksa null. */
   giftPreview: QuoteGiftCardPreview | null;
   onGiftPreviewChange: (preview: QuoteGiftCardPreview | null) => void;
+  /**
+   * Seçili gösterim biriminin DONMUŞ kuru; `null` = yalnız ₺.
+   *
+   * Bu formda HİÇBİR tutar çevrilmez — havale indirimi, hediye kartı, düğme
+   * üstündeki tutar ve mesafeli sözleşme özetindeki "vergiler dâhil toplam
+   * fiyat" (MSY m.6/2-a) ₺ KALIR. Kur yalnız TAHSİLATIN ₺ olduğunu söyleyen
+   * uyarının çizilip çizilmeyeceğini belirler: ₺ gösterimdeki müşteriye o
+   * cümle anlamsız bir tekrar olurdu.
+   */
+  rate?: FrozenFxRate | null;
   /** Müşterinin adres defterindeki varsayılan adresi; yoksa null. */
   savedAddress: TurkishAddress | null;
 }
@@ -132,6 +142,7 @@ export function QuoteCheckoutForm({
   giftPreview,
   onGiftPreviewChange,
   savedAddress,
+  rate = null,
 }: QuoteCheckoutFormProps): JSX.Element {
   const d = useDictionary();
   const router = useRouter();
@@ -580,6 +591,16 @@ export function QuoteCheckoutForm({
           ))}
         </div>
       </section>
+
+      {/* Tahsilatın ₺ olduğu, ödeme yükümlülüğünden HEMEN ÖNCE ve mesafeli
+          sözleşme onayının ÜSTÜNDE yazılı durur: döviz karşılıklarını okumuş
+          müşteri hangi rakamın tahsil edileceğini tartışmasız bilmeli (tasarım
+          §3.5'teki dört azaltmadan biri). */}
+      {rate && (
+        <p className="rounded-xl border border-border-default bg-bg-muted px-3 py-2.5 text-xs text-text-secondary">
+          {fill(d["instantQuote.fx.chargedInTry"], { amount: formatCurrency(payableKurus, "tr") })}
+        </p>
+      )}
 
       <DistanceContractConsent
         variant={consentVariantForOrderType("upload")}

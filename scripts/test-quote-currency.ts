@@ -423,11 +423,21 @@ test("ADLANDIRMA KAPISI: yeni hiçbir ad `Kurus` ile bitmiyor", () => {
  * Çevrilmiş rakamı PARA taşıyan koda sokmak derlemeyi bozmaz, sessizce yanlış
  * bir tahsilat üretir. O yüzden ithalatçı kümesi KAPALIDIR.
  *
- * Bu turda (D1) sunum katmanı henüz yok, yani liste BOŞ: modülü import eden ilk
- * `src/**` dosyası bu testi kırmızıya çevirir ve listeye BİLEREK yazılmasını
- * ister. Beyaz liste D4'te sunum katmanının gerçek dosyalarıyla kilitlenir.
+ * Liste D3'te sunum katmanıyla doldu ve üç dosyadan ibarettir — çünkü render
+ * dikişi TEK: `components/quote/format.ts` (`money()`). On dört arayüz dosyası
+ * çevirimi ondan alır, hiçbiri bu modülü kendisi import etmez. Diğer ikisi
+ * FİŞİN TAMAMINI çevirmek zorunda olan iki yüzeydir (`convertReceipt` →
+ * "Yuvarlama" satırı): sağ sütundaki özet ve kâğıt belge.
+ *
+ * Listeye yeni bir satır eklemek BİLİNÇLİ bir karar olmalı: dördüncü bir
+ * dosyanın kendi çevirimini yazması, ilk kur değişikliğinde iki rakamın
+ * ayrışması demektir.
  */
-const ALLOWED_IMPORTERS: readonly string[] = [];
+const ALLOWED_IMPORTERS: readonly string[] = [
+  "src/app/teklif/[number]/belge/quote-document.tsx",
+  "src/components/quote/format.ts",
+  "src/components/quote/quote-summary.tsx",
+];
 
 /**
  * Listede olması YASAK olan dosyalar. Tek tek yazılıdırlar ki bir yeniden

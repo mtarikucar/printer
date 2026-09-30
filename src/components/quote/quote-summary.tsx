@@ -4,12 +4,19 @@ import Link from "next/link";
 import { useSyncExternalStore, type JSX, type ReactNode } from "react";
 import { Card, Textarea } from "@/components/ui";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
-import type { PresentedQuote, QuoteTotals, ReviewKind } from "@/lib/config/quote-types";
-import { formatCurrency } from "@/lib/i18n/format";
+import { convertReceipt } from "@/lib/config/quote-currency";
+import type {
+  DisplayCurrency,
+  PresentedQuote,
+  QuoteTotals,
+  ReviewKind,
+} from "@/lib/config/quote-types";
+import { formatMoneyMinor } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { QuotePatch } from "@/lib/quote/client-api";
 import { AddonsPicker } from "./addons-picker";
-import { fill } from "./format";
+import { DisplayCurrencyPicker } from "./display-currency";
+import { displayRate, fill, money } from "./format";
 import { LeadTierPicker } from "./lead-tier-picker";
 import { useSyncedField } from "./synced-field";
 
@@ -116,6 +123,13 @@ function Row({ label, children }: { label: string; children: ReactNode }): JSX.E
 
 export interface QuoteSummaryProps {
   quote: PresentedQuote;
+  /**
+   * Seçili gösterim birimi. Tercih çalışma alanında okunur ve buraya PROP
+   * olarak gelir: seçiciyi bu panel çiziyor ama kuru bütün alt bileşenlere
+   * (parça kartı, kademe seçici, ek hizmetler) çalışma alanı dağıtıyor, yani
+   * seçim tek yerde okunmalı.
+   */
+  currency?: DisplayCurrency;
   busy?: boolean;
   onPatch: (patch: QuotePatch) => void;
   /**
@@ -130,6 +144,7 @@ export interface QuoteSummaryProps {
 
 export function QuoteSummary({
   quote,
+  currency = "TRY",
   busy,
   onPatch,
   onRequestReview,
@@ -145,6 +160,14 @@ export function QuoteSummary({
   const poNumber = useSyncedField(quote.poNumber ?? "");
 
   const { viewer, totals, readiness } = quote;
+  // Seçim → teklifin KENDİ dondurduğu kur. `display` yoksa (bayrak kapalı, kur
+  // bayat ya da fiyat kapısı kapalı) `null` döner ve panel ₺ kalır.
+  const rate = displayRate(quote.display?.snapshot, currency);
+  // YUVARLAMA: her satır ayrı yuvarlandığı için satırların toplamı çevrilmiş
+  // toplamdan sapabilir. Bir fişte "toplamı tutmayan satırlar" hatadır, o
+  // yüzden fark GÖRÜNEN bir satır olur. Çevrilemeyen fişte `null` döner ve
+  // satır hiç doğmaz (`quote-currency.ts` hiç ATMAZ).
+  const receipt = rate && totals ? convertReceipt(totals, rate) : null;
   // `viewer.canEdit` ERİŞİM hakkıdır (sahip mi, paylaşım mı); `locked` ise
   // teklifin DURUMUDUR (siparişe dönmüş, süresi dolmuş, ödeme sürüyor).
   // Yazan her denetim ikisini birden sormak zorunda.
@@ -175,6 +198,7 @@ export function QuoteSummary({
           value={quote.leadTier}
           shipByDate={quote.shipByDate}
           disabled={!editable || busy}
+          rate={rate}
           onChange={(leadTier) => onPatch({ leadTier })}
         />
 
@@ -182,6 +206,7 @@ export function QuoteSummary({
           addons={quote.catalog.addons}
           selected={quote.addonKeys}
           disabled={!editable || busy}
+          rate={rate}
           onChange={(addonKeys) => onPatch({ addonKeys })}
         />
 
@@ -197,7 +222,7 @@ export function QuoteSummary({
           <dl className="space-y-1.5">
             <Row label={d["instantQuote.summary.partsSubtotal"]}>
               {totals ? (
-                formatCurrency(totals.partsKurus, "tr")
+                money(totals.partsKurus, rate)
               ) : (
                 <span className="font-mono text-text-muted">{d["instantQuote.price.hidden"]}</span>
               )}
@@ -205,13 +230,24 @@ export function QuoteSummary({
 
             {totals?.addonLines.map((line) => (
               <Row key={line.key} label={line.name}>
-                {formatCurrency(line.kurus, "tr")}
+                {money(line.kurus, rate)}
               </Row>
             ))}
 
             {totals && totals.minOrderTopUpKurus > 0 && (
               <Row label={d["instantQuote.summary.minOrderTopUp"]}>
-                {formatCurrency(totals.minOrderTopUpKurus, "tr")}
+                {money(totals.minOrderTopUpKurus, rate)}
+              </Row>
+            )}
+
+            {/* Fark YALNIZ ≠ 0 iken çizilir; sıfır farkta satır gürültüdür.
+                "KDV hariç" anahtarı açıkken de çizilmez: o hâlde gösterilen
+                toplam zaten satırların toplamı DEĞİL (bir alttaki
+                `kdvLineNote` bunu söylüyor) ve ikinci bir açıklama satırı
+                müşteriyi iki kez şaşırtırdı. */}
+            {receipt && receipt.roundingMinor !== 0 && !kdvExcluded && (
+              <Row label={d["instantQuote.fx.rounding"]}>
+                {formatMoneyMinor(receipt.roundingMinor, receipt.currency, "tr")}
               </Row>
             )}
           </dl>
@@ -234,7 +270,7 @@ export function QuoteSummary({
             </span>
             <span className="text-xl font-semibold tabular-nums text-text-primary">
               {totals ? (
-                formatCurrency(displayedTotalKurus(totals, kdvExcluded), "tr")
+                money(displayedTotalKurus(totals, kdvExcluded), rate)
               ) : (
                 <span className="font-mono text-text-muted">{d["instantQuote.price.hidden"]}</span>
               )}
@@ -249,7 +285,7 @@ export function QuoteSummary({
                   : d["instantQuote.summary.kdvIncluded"]}
                 {" · "}
                 {fill(d["instantQuote.summary.kdv"], { rate: KDV_RATE_BPS / 100 })}{" "}
-                <span className="tabular-nums">{formatCurrency(totals.kdvKurus, "tr")}</span>
+                <span className="tabular-nums">{money(totals.kdvKurus, rate)}</span>
               </span>
               <button
                 type="button"
@@ -267,6 +303,11 @@ export function QuoteSummary({
             </p>
           )}
         </div>
+
+        {/* ── Gösterim para birimi ─────────────────────────────────────── */}
+        {/* Seçici `display` YOKKEN hiç çizilmez; kararı bileşenin kendisi
+            verir (bkz. `display-currency.tsx`). */}
+        <DisplayCurrencyPicker display={quote.display} currency={currency} />
 
         {/* ── Engeller ──────────────────────────────────────────────────── */}
         {readiness.blockers.length > 0 && (

@@ -1,11 +1,14 @@
 "use client";
 
 import type { JSX } from "react";
-import type { AddonPriceType, PresentedCatalog } from "@/lib/config/quote-types";
-import { formatCurrency } from "@/lib/i18n/format";
+import type {
+  AddonPriceType,
+  FrozenFxRate,
+  PresentedCatalog,
+} from "@/lib/config/quote-types";
 import type { Dictionary } from "@/lib/i18n/dictionaries";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { fill } from "./format";
+import { fill, money } from "./format";
 
 type Addon = PresentedCatalog["addons"][number];
 
@@ -32,11 +35,14 @@ export function AddonsPicker({
   selected,
   disabled,
   onChange,
+  rate = null,
 }: {
   addons: Addon[];
   selected: string[];
   disabled?: boolean;
   onChange: (keys: string[]) => void;
+  /** Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺. */
+  rate?: FrozenFxRate | null;
 }): JSX.Element | null {
   const d = useDictionary();
   if (addons.length === 0) return null;
@@ -72,7 +78,7 @@ export function AddonsPicker({
                     <span className="text-sm text-text-primary">{addon.name}</span>
                     {typeof addon.priceKurus === "number" && (
                       <span className="text-sm tabular-nums text-text-primary">
-                        {formatCurrency(addon.priceKurus, "tr")}
+                        {money(addon.priceKurus, rate)}
                         {note && (
                           <span className="ml-1 text-[11px] font-normal text-text-muted">
                             {note}

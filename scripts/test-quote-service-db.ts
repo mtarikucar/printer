@@ -1405,6 +1405,144 @@ async function main() {
       assert.equal(step.config.units, "mm");
     });
 
+    // ─── Döviz kurunun DONDURULMASI (Faz 2b · D3) ───────────────────────────
+    //
+    // Dört yazım yeri var ve ikisi kur ÇEKER, biri KOPYALAR, biri de hiç
+    // yazmaz. Ayrımın sebebi tek cümle: müşteri teklifi açtığı gün gördüğü
+    // rakamı görmeye devam etmeli, ama YENİ bir fiyat YENİ bir kur demektir.
+
+    const { istanbulDateKey } = await import("../src/lib/config/business-days");
+    const { upsertFxBulletin } = await import("../src/lib/services/fx-rates");
+
+    /** Teklifin DB'deki donmuş kur kümesi. */
+    const frozenFx = async (quoteId: string) => {
+      const [row] = await db
+        .select({ fx: quotes.fxSnapshot })
+        .from(quotes)
+        .where(eq(quotes.id, quoteId))
+        .limit(1);
+      return row?.fx ?? null;
+    };
+    const eurMicro = (snapshot: Awaited<ReturnType<typeof frozenFx>>) =>
+      snapshot?.rates.find((r) => r.currency === "EUR")?.microTryPerUnit ?? null;
+    /** Bülten TAZE olmak zorunda: bayat kur `loadActiveFxSnapshot`ta null olur. */
+    const bulletinFor = (date: string, eur: number) => ({
+      bulletinDate: date,
+      rates: [
+        { currency: "EUR" as const, microTryPerUnit: eur, bulletinUnit: 1 },
+        { currency: "USD" as const, microTryPerUnit: 41_523_100, bulletinUnit: 1 },
+        { currency: "GBP" as const, microTryPerUnit: 55_903_400, bulletinUnit: 1 },
+      ],
+    });
+    const YESTERDAY = istanbulDateKey(new Date(Date.now() - 86_400_000));
+    const TODAY = istanbulDateKey(new Date());
+
+    let fxQuoteId = "";
+    await test("KUR YOKKEN `fx_snapshot` NULL kalır (yarım snapshot yazılmaz)", async () => {
+      const { rows } = await admin.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM fx_rates"
+      );
+      assert.equal(Number(rows[0].n), 0, "test boş kur tablosuyla başlamalı");
+      const empty = await createQuote({ userId, anonymousId: null, termsAccepted: true });
+      assert.equal(await frozenFx(empty.id), null);
+    });
+
+    await test("createQuote bülteni DONDURUR (tarih + kur DB'deki değerlerle birebir)", async () => {
+      assert.equal(await upsertFxBulletin(bulletinFor(YESTERDAY, 48_000_000)), 3);
+      const created = await createQuote({ userId, anonymousId: null, termsAccepted: true });
+      fxQuoteId = created.id;
+      const snapshot = await frozenFx(fxQuoteId);
+      assert.ok(snapshot, "kur varken snapshot yazılmalıydı");
+      assert.equal(snapshot.version, 1);
+      assert.equal(snapshot.source, "tcmb");
+      assert.equal(snapshot.bulletinDate, YESTERDAY);
+      assert.equal(eurMicro(snapshot), 48_000_000);
+    });
+
+    await test("DONDURMA GERÇEKTEN DONMUŞ: yeni bülten MEVCUT teklifi oynatmaz", async () => {
+      assert.equal(await upsertFxBulletin(bulletinFor(TODAY, 49_000_000)), 3);
+      const snapshot = await frozenFx(fxQuoteId);
+      assert.equal(snapshot?.bulletinDate, YESTERDAY, "donmuş tarih değişti");
+      assert.equal(eurMicro(snapshot), 48_000_000, "donmuş kur değişti");
+      // D2'nin katalog bandı regresyonunun UÇTAN UCA hâli: kur yazımı
+      // `catalogUpdatedAt()`a girmediği için müşteriye her sabah "Katalog
+      // güncellendi — yeniden fiyatla" bandı yanmaz.
+      const view = await loadPresentedQuote(await loadAccess(fxQuoteId, userId));
+      assert.equal(view.catalogChangedSinceSnapshot, false, "kur yazımı bandı yaktı");
+    });
+
+    await test("repriceQuote kuru TAZELER (yeni fiyat, yeni kur)", async () => {
+      await repriceQuote(await loadAccess(fxQuoteId, userId));
+      const snapshot = await frozenFx(fxQuoteId);
+      assert.equal(snapshot?.bulletinDate, TODAY);
+      assert.equal(eurMicro(snapshot), 49_000_000);
+    });
+
+    let fxSplitId = "";
+    await test("splitByTechnology ebeveynin kurunu KOPYALAR, yeniden ÇEKMEZ", async () => {
+      const parent = await createQuote({ userId, anonymousId: null, termsAccepted: true });
+      fxSplitId = parent.id;
+      await addPartFromUpload(await loadAccess(parent.id, userId), {
+        uploadId: await stage("fixture-fx1", `u:${userId}`),
+        fileName: "fx-fdm.stl",
+      });
+      const second = await addPartFromUpload(await loadAccess(parent.id, userId), {
+        uploadId: await stage("fixture-fx2", `u:${userId}`),
+        fileName: "fx-sla.stl",
+      });
+      await updatePart(await loadAccess(parent.id, userId), second.partId, {
+        technologyKey: "sla",
+      });
+      const parentFx = await frozenFx(parent.id);
+      assert.ok(parentFx);
+
+      // Bölmeden HEMEN ÖNCE kur satırı değişir: yeniden çeken bir uygulama
+      // burada çocuğa 51.000.000 yazardı ve müşteri aynı teklifin iki
+      // parçasında İKİ FARKLI döviz rakamı görürdü.
+      await admin.query(
+        "UPDATE fx_rates SET micro_try_per_unit = 51000000 WHERE currency = 'EUR' AND bulletin_date = $1",
+        [TODAY]
+      );
+      const { newQuoteNumbers } = await splitByTechnology(await loadAccess(parent.id, userId));
+      assert.equal(newQuoteNumbers.length, 1);
+      const [child] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.number, newQuoteNumbers[0]))
+        .limit(1);
+      assert.deepEqual(child.fxSnapshot, parentFx, "çocuk kendi kurunu çekmiş");
+      assert.equal(eurMicro(await frozenFx(parent.id)), 49_000_000, "ebeveyn de oynamamalı");
+    });
+
+    await test("requote kuru TAZELER (yeni teklif, yeni kur)", async () => {
+      const created = await requote(await loadAccess(fxSplitId, userId));
+      const [fresh] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.number, created.number))
+        .limit(1);
+      assert.equal(fresh.fxSnapshot?.bulletinDate, TODAY);
+      assert.equal(eurMicro(fresh.fxSnapshot), 51_000_000, "yeniden teklif eski kuru kopyaladı");
+      assert.equal(eurMicro(await frozenFx(fxSplitId)), 49_000_000, "kaynak teklif oynadı");
+    });
+
+    await test("BAYRAK açıkken donmuş kur müşteriye AYNEN gider", async () => {
+      await setFlag("quote_fx_display_enabled", true, "test");
+      try {
+        const view = await loadPresentedQuote(await loadAccess(fxQuoteId, userId));
+        assert.equal("display" in view, true, "bayrak açık ama anahtar gelmedi");
+        assert.equal(view.display?.snapshot.bulletinDate, TODAY);
+        assert.equal(view.display?.currencies[0], "TRY");
+      } finally {
+        await setFlag("quote_fx_display_enabled", false, "test");
+      }
+      // Bayrak kapanınca anahtar TEKRAR yok olur; donmuş satır DB'de zararsız
+      // kalır (kapatma yolu deploy gerektirmez, tek DB satırıdır).
+      const off = await loadPresentedQuote(await loadAccess(fxQuoteId, userId));
+      assert.equal("display" in off, false);
+      assert.ok(await frozenFx(fxQuoteId), "bayrak kapandı diye donmuş kur silinmemeli");
+    });
+
     await queue.obliterate({ force: true }).catch(() => {});
     console.log(`${checks} quote service DB checks passed`);
   } finally {

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useState, type JSX } from "react";
+import { useDisplayCurrency } from "@/components/quote/display-currency";
 import { QuoteCheckoutForm } from "@/components/quote/quote-checkout-form";
-import { fill } from "@/components/quote/format";
+import { displayRate, fill, money } from "@/components/quote/format";
 import { Card } from "@/components/ui";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
 import {
@@ -11,7 +12,12 @@ import {
   type TenderPaymentMethod,
   type TenderViews,
 } from "@/lib/config/quote-tender";
-import type { PresentedQuote, QuoteTotals } from "@/lib/config/quote-types";
+import type {
+  DisplayCurrency,
+  FrozenFxRate,
+  PresentedQuote,
+  QuoteTotals,
+} from "@/lib/config/quote-types";
 import type { TurkishAddress } from "@/lib/db/schema";
 import type { QuoteGiftCardPreview } from "@/lib/services/quote-checkout";
 import { formatCurrency, formatDateLong } from "@/lib/i18n/format";
@@ -26,6 +32,13 @@ export interface QuoteCheckoutClientProps {
   /** `quote_gift_card_enabled`; kapalıyken kod alanı HİÇ çizilmez. */
   giftCardEnabled: boolean;
   savedAddress: TurkishAddress | null;
+  /**
+   * Seçili gösterim birimi. Varsayılan olarak TERCİH DEPOSUNDAN okunur (aynı
+   * depo çalışma alanını da besliyor), bu yüzden `?kur=` gerekmez: ödeme
+   * ekranı bir istemci bileşenidir ve müşteri seçimini sayfa değiştirince
+   * kaybetmez. Prop yalnız testin niyetini beyan etmesi için var.
+   */
+  currency?: DisplayCurrency;
 }
 
 /**
@@ -50,10 +63,16 @@ export function QuoteCheckoutClient({
   tender,
   giftCardEnabled,
   savedAddress,
+  currency,
 }: QuoteCheckoutClientProps): JSX.Element {
   const d = useDictionary();
   const [paymentMethod, setPaymentMethod] = useState<TenderPaymentMethod>("card");
   const [giftPreview, setGiftPreview] = useState<QuoteGiftCardPreview | null>(null);
+  const preferred = useDisplayCurrency();
+  // Seçim → teklifin KENDİ dondurduğu kur. Fişin ÜST tarafı (parça satırı, ek
+  // hizmet, brüt toplam, KDV) bu kurla ikinci bir okuma alır; TAHSİL EDİLECEK
+  // rakamlar almaz (aşağıdaki fişte gerekçesi yazılı).
+  const rate = displayRate(quote.display?.snapshot, currency ?? preferred);
 
   // Kart uygulandıysa iki rakam da ön izlemeden gelir; yoksa kartsız tabandan.
   const views = giftPreview ?? tender;
@@ -79,6 +98,7 @@ export function QuoteCheckoutClient({
             quote={quote}
             totalKurus={totalKurus}
             tender={tender}
+            rate={rate}
             paymentMethod={paymentMethod}
             onPaymentMethodChange={setPaymentMethod}
             giftCardEnabled={giftCardEnabled}
@@ -92,6 +112,7 @@ export function QuoteCheckoutClient({
           <QuoteCheckoutReceipt
             quote={quote}
             totalKurus={totalKurus}
+            rate={rate}
             giftCardAmountKurus={giftPreview?.giftCardAmountKurus ?? 0}
             havaleDiscountKurus={views.bankTransfer.havaleDiscountKurus}
             payableKurus={view.payableKurus}
@@ -116,8 +137,18 @@ export function QuoteCheckoutReceipt({
   giftCardAmountKurus,
   havaleDiscountKurus,
   payableKurus,
+  rate = null,
 }: {
   quote: PresentedQuote;
+  /**
+   * Seçili gösterim biriminin DONMUŞ kuru; `null` = yalnız ₺.
+   *
+   * Fişin ÜST tarafı ikinci bir okuma alır (ne alıyorum, brüt kaça). TAHSİL
+   * EDİLEN üç satır — hediye kartından karşılanan, havale indirimi ve ödenecek
+   * tutar — ₺ KALIR: müşteri yaklaşık bir sayıyı ödeyeceği tutar sanmamalı
+   * (MSY m.6/2-a + 32 Sayılı Karar m.4/g).
+   */
+  rate?: FrozenFxRate | null;
   totalKurus: number;
   /** Hediye kartından karşılanan tutar; kart yoksa 0. */
   giftCardAmountKurus: number;
@@ -155,7 +186,7 @@ export function QuoteCheckoutReceipt({
                 )}
               </span>
               <span className="shrink-0 tabular-nums text-text-secondary">
-                {part.price ? formatCurrency(part.price.lineKurus, "tr") : "—"}
+                {part.price ? money(part.price.lineKurus, rate) : "—"}
               </span>
             </li>
           ))}
@@ -167,7 +198,7 @@ export function QuoteCheckoutReceipt({
               <div key={line.key} className="flex items-baseline justify-between gap-3">
                 <dt className="text-sm text-text-secondary">{line.name}</dt>
                 <dd className="text-sm tabular-nums text-text-secondary">
-                  {formatCurrency(line.kurus, "tr")}
+                  {money(line.kurus, rate)}
                 </dd>
               </div>
             ))}
@@ -180,7 +211,7 @@ export function QuoteCheckoutReceipt({
               {d["instantQuote.summary.minOrderTopUp"]}
             </span>
             <span className="text-sm tabular-nums text-text-secondary">
-              {formatCurrency(totals.minOrderTopUpKurus, "tr")}
+              {money(totals.minOrderTopUpKurus, rate)}
             </span>
           </div>
         )}
@@ -191,14 +222,14 @@ export function QuoteCheckoutReceipt({
               {d["instantQuote.summary.total"]}
             </span>
             <span className="text-xl font-semibold tabular-nums text-text-primary">
-              {formatCurrency(totalKurus, "tr")}
+              {money(totalKurus, rate)}
             </span>
           </div>
           <p className="mt-1 text-xs text-text-muted">
             {d["instantQuote.summary.kdvIncluded"]}
             {" · "}
             {fill(d["instantQuote.summary.kdv"], { rate: KDV_RATE_BPS / 100 })}{" "}
-            <span className="tabular-nums">{formatCurrency(totals.kdvKurus, "tr")}</span>
+            <span className="tabular-nums">{money(totals.kdvKurus, rate)}</span>
           </p>
           {/* Hediye kartı bir ÖDEME ARACIDIR: brüt toplamı ve fatura matrahını
               düşürmez (tasarım §3.3), o yüzden "indirim" DEĞİL "karşılanan"

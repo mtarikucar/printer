@@ -1139,6 +1139,13 @@ const tr: Dictionary = {
   "instantQuote.document.column.unit": "Birim fiyat",
   "instantQuote.document.company": "Firma",
   "instantQuote.document.customer": "Müşteri",
+  // Belgedeki İKİNCİ kolon: bağlayıcı ₺ kolonunun YANINDA duran yaklaşık
+  // karşılık. Alt bilgi cümlesi hangisinin bağlayıcı olduğunu ve kurun
+  // kaynağını (TCMB + bülten tarihi) YAZILI bırakır; TCMB verisi kamuya açık
+  // ve ücretsizdir ama ATIFLA kullanılır.
+  "instantQuote.document.fxColumn": "≈ {currency}",
+  "instantQuote.document.fxFooter":
+    "Bağlayıcı tutar Türk lirası kolonudur. Döviz karşılıkları {date} tarihli TCMB döviz alış kuru (1 {currency} = {rate} ₺) ile hesaplanmış bilgi amaçlı değerlerdir.",
   "instantQuote.document.iban": "IBAN",
   "instantQuote.document.issuedAt": "Düzenleme tarihi",
   "instantQuote.document.leadTime": "Teslim süresi",
@@ -1154,6 +1161,22 @@ const tr: Dictionary = {
   "instantQuote.document.taxOffice": "Vergi dairesi",
   "instantQuote.document.title": "Teklif belgesi",
   "instantQuote.document.validUntil": "Bu teklif {date} tarihine kadar geçerlidir.",
+
+  // instantQuote — döviz GÖSTERİMİ (TCMB kuru)
+  // GÖSTERİM, yalnız gösterim: bağlayıcı her tutar ve tahsil edilen her kuruş
+  // Türk lirasıdır (32 Sayılı Karar m.4/g + 2008-32/34 Tebliğ m.8). Bu yüzden
+  // `chargedInTry` cümlesi mesafeli sözleşme onayının HEMEN ÜSTÜNDE durur ve
+  // ödenecek tutarı ₺ olarak yazar — müşteri yaklaşık sayıyı ödeyeceği tutar
+  // sanmamalı.
+  "instantQuote.fx.chargedInTry":
+    "Ödeme Türk lirası (₺) olarak, {amount} tutarında tahsil edilir.",
+  "instantQuote.fx.indicative":
+    "Döviz karşılıkları bilgi amaçlıdır; tahsilat Türk lirası (₺) ile yapılır.",
+  "instantQuote.fx.label": "Para birimi",
+  "instantQuote.fx.rateNote": "1 {currency} = {rate} ₺ · TCMB {date} kuru",
+  "instantQuote.fx.rounding": "Yuvarlama",
+  "instantQuote.fx.try": "Türk lirası (₺)",
+  "instantQuote.fx.unavailable": "Güncel TCMB kuru alınamadığı için döviz gösterimi kapalı.",
 
   // instantQuote — teslim kademesi
   "instantQuote.lead.days": "{days} iş günü",

@@ -1,9 +1,9 @@
 "use client";
 
 import type { JSX } from "react";
-import type { PriceBreakPoint } from "@/lib/config/quote-types";
-import { formatCurrency } from "@/lib/i18n/format";
+import type { FrozenFxRate, PriceBreakPoint } from "@/lib/config/quote-types";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { money } from "./format";
 
 /**
  * Adet kademe tablosu: "10 alırsan birim fiyat ne olur".
@@ -16,9 +16,12 @@ import { useDictionary } from "@/lib/i18n/locale-context";
 export function QuotePriceBreakTable({
   breaks,
   quantity,
+  rate = null,
 }: {
   breaks: PriceBreakPoint[];
   quantity: number;
+  /** Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺. */
+  rate?: FrozenFxRate | null;
 }): JSX.Element | null {
   const d = useDictionary();
   if (breaks.length === 0) return null;
@@ -54,7 +57,7 @@ export function QuotePriceBreakTable({
               >
                 <td className="px-2.5 py-1.5 tabular-nums">{point.quantity}</td>
                 <td className="px-2.5 py-1.5 text-right tabular-nums">
-                  {formatCurrency(point.unitKurus, "tr")}
+                  {money(point.unitKurus, rate)}
                 </td>
               </tr>
             );

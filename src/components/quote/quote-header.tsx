@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useState, type JSX, type ReactNode } from "react";
-import type { PresentedQuote } from "@/lib/config/quote-types";
+import type { DisplayCurrency, PresentedQuote } from "@/lib/config/quote-types";
 import { formatDateLong } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { QuotePatch } from "@/lib/quote/client-api";
+import { displayRate } from "./format";
 import { useSyncedField } from "./synced-field";
 
 /**
@@ -22,12 +23,22 @@ export function QuoteHeader({
   onPatch,
   actions,
   shareToken,
+  currency = "TRY",
 }: {
   quote: PresentedQuote;
   onPatch: (patch: QuotePatch) => void;
   actions?: ReactNode;
   /** Paylaşım izleyicisinin belge bağlantısı da token'ı taşımak zorunda. */
   shareToken?: string | null;
+  /**
+   * Seçili gösterim birimi — belge bağlantısına `?kur=` olarak girer.
+   *
+   * Belge AYRI bir sunucu render'ıdır ve tarayıcıdaki tercihi okuyamaz: seçim
+   * adreste taşınmazsa müşteri çalışma alanında € okuyup kâğıtta yalnız ₺
+   * görürdü. Ödeme ekranı bu köprüye ihtiyaç duymaz, çünkü aynı tercih
+   * deposunu okuyan bir istemci bileşenidir.
+   */
+  currency?: DisplayCurrency;
 }): JSX.Element {
   const d = useDictionary();
   const [editing, setEditing] = useState(false);
@@ -37,6 +48,12 @@ export function QuoteHeader({
   const canEdit = quote.viewer.canEdit;
   const showDocument =
     quote.viewer.isOwner || (quote.viewer.isShare && quote.viewer.canSeePrices);
+  // Ölü bir `?kur=` yazılmaz: seçim ancak teklifin donmuş kuru onu
+  // karşılıyorsa adrese girer.
+  const documentQuery = [
+    shareToken ? `t=${encodeURIComponent(shareToken)}` : null,
+    displayRate(quote.display?.snapshot, currency) ? `kur=${currency}` : null,
+  ].filter((part): part is string => part !== null);
 
   return (
     <header className="border-b border-border-default bg-bg-base">
@@ -101,7 +118,7 @@ export function QuoteHeader({
           {showDocument && (
             <Link
               href={`/teklif/${quote.number}/belge${
-                shareToken ? `?t=${encodeURIComponent(shareToken)}` : ""
+                documentQuery.length > 0 ? `?${documentQuery.join("&")}` : ""
               }`}
               className="btn-secondary !px-4 !py-2 text-xs"
             >

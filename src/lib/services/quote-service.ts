@@ -55,6 +55,8 @@ import {
   promoteStagedUpload,
   uploadOwnerKey,
 } from "@/lib/services/chunked-upload";
+import { isFlagEnabled } from "@/lib/services/flags";
+import { loadActiveFxSnapshot } from "@/lib/services/fx-rates";
 import { stepUploadsEnabled, UUID_RE, type QuoteAccess } from "@/lib/services/quote-access";
 import { recomputeQuoteCache, type QuoteCacheTx } from "@/lib/services/quote-cache";
 import { catalogUpdatedAt, loadActiveSnapshot } from "@/lib/services/quote-catalog";
@@ -195,6 +197,11 @@ export async function createQuote(args: {
   const snapshot = await loadActiveSnapshot();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + snapshot.settings.quoteValidDays * 86_400_000);
+  // Kur teklifin AÇILIŞINDA donar ve teklifle birlikte yaşar; `null` dönerse
+  // (kur hiç çekilememiş ya da BAYAT) kolon `null` KALIR — yarım bir snapshot
+  // yazmak, ekrana bir gün yanlış kurla çevrilmiş rakam basmak demekti. Tatil
+  // listesi teklifin kendi kataloğundan gelir; ikinci bir takvim yok.
+  const fxSnapshot = await loadActiveFxSnapshot(snapshot.settings.holidays, now);
 
   const [row] = await db
     .insert(quotes)
@@ -206,6 +213,7 @@ export async function createQuote(args: {
       anonymousId: args.userId ? null : args.anonymousId,
       pricingSnapshot: snapshot,
       snapshotTakenAt: now,
+      fxSnapshot,
       expiresAt,
       termsAcceptedAt: now,
       termsVersion: DISTANCE_CONTRACT_VERSION,
@@ -1141,6 +1149,10 @@ export async function updateQuote(access: QuoteAccess, patch: QuotePatch): Promi
  */
 export async function repriceQuote(access: QuoteAccess): Promise<void> {
   const snapshot = await loadActiveSnapshot();
+  // Yeni fiyat, YENİ kur. Okuma işlemin DIŞINDA: `mutateQuote` teklif satırını
+  // kilitliyor ve havuzda beş bağlantı var — kilidi tutarken ikinci bir
+  // bağlantıdan okumak iki eşzamanlı ziyaretçide havuzu tüketirdi.
+  const fxSnapshot = await loadActiveFxSnapshot(snapshot.settings.holidays);
   await mutateQuote(
     access,
     async (tx, quote) => {
@@ -1159,6 +1171,7 @@ export async function repriceQuote(access: QuoteAccess): Promise<void> {
         .set({
           pricingSnapshot: snapshot,
           snapshotTakenAt: now,
+          fxSnapshot,
           expiresAt: new Date(now.getTime() + snapshot.settings.quoteValidDays * 86_400_000),
           status: "draft",
           updatedAt: now,
@@ -1427,6 +1440,12 @@ export async function splitByTechnology(access: QuoteAccess): Promise<SplitResul
           addonKeys: quote.addonKeys,
           pricingSnapshot: quote.pricingSnapshot,
           snapshotTakenAt: quote.snapshotTakenAt,
+          // Ebeveynin kuru KOPYALANIR, yeniden ÇEKİLMEZ: bölünen parçalar aynı
+          // teklifin devamıdır (snapshot ve geçerlilik süresi de devralınıyor)
+          // ve müşteri açtığı gün gördüğü rakamı görmeye devam etmeli. Yeniden
+          // çekmek, bölme düğmesine basmayı sessiz bir yeniden fiyatlamaya
+          // çevirirdi — oysa bölme bir yeniden fiyatlama DEĞİLDİR.
+          fxSnapshot: quote.fxSnapshot,
           expiresAt: quote.expiresAt,
           sourceQuoteId: quote.id,
           ...inheritedQuoteFields(quote),
@@ -1663,6 +1682,9 @@ export async function requote(access: QuoteAccess): Promise<{ number: string }> 
     ? quote.leadTier
     : "standard";
   const addonKeys = quote.addonKeys.filter((key) => snapshot.addons.some((a) => a.key === key));
+  // Yeni teklif, yeni kur: kaynağa dokunulmuyor ve fiyat BUGÜNÜN kataloğundan
+  // çıkıyor, dolayısıyla kur da bugünün bülteninden çıkmak zorunda.
+  const fxSnapshot = await loadActiveFxSnapshot(snapshot.settings.holidays, now);
 
   const { created, queued } = await db.transaction(async (tx) => {
     const [row] = await tx
@@ -1674,6 +1696,7 @@ export async function requote(access: QuoteAccess): Promise<{ number: string }> 
         addonKeys,
         pricingSnapshot: snapshot,
         snapshotTakenAt: now,
+        fxSnapshot,
         expiresAt: new Date(now.getTime() + snapshot.settings.quoteValidDays * 86_400_000),
         sourceQuoteId: quote.id,
         ...inheritedQuoteFields(quote),
@@ -1820,6 +1843,12 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
   // okunur, yani müşteriye seçtirilen biçim ile ucun kabul ettiği biçim
   // ayrışamaz. Maliyet: Redis önbellekli (10 s) bir bayrak okuması.
   const stepEnabled = await stepUploadsEnabled(access.viewer);
+  // Aynı gerekçe döviz bayrağı için de geçerli: `presentQuote` SAF ve
+  // SENKRONDUR, bayrağı KENDİSİ okuyamaz. DÖRDÜNCÜ BİR SORGU EKLENMEDİ —
+  // `quote.fxSnapshot` `quotes` satırının kendi kolonudur ve `access.quote`
+  // üzerinden bedava geliyor; eklenen tek şey Redis önbellekli (10 s) bir
+  // bayrak okumasıdır.
+  const fxDisplayEnabled = await isFlagEnabled("quote_fx_display_enabled");
 
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
     leadTier: quote.leadTier,
@@ -1839,6 +1868,7 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
     sign: getPublicUrl,
     shareBaseUrl: `${appUrl()}/teklif/${quote.number}`,
     stepEnabled,
+    fxDisplayEnabled,
   });
 }
 
@@ -1858,6 +1888,11 @@ export async function listCustomerQuotes(
       createdAt: quotes.createdAt,
       updatedAt: quotes.updatedAt,
       expiresAt: quotes.expiresAt,
+      // Teklifin KENDİ dondurduğu kur: listedeki tutar, açıldığında teklif
+      // sayfasında görünecek rakamla birebir aynı olmalı. Bugünün bülteniyle
+      // çevirmek iki ekranda iki farklı sayı demekti. AYNI sorguda geliyor,
+      // ek bir okuma yok.
+      fxSnapshot: quotes.fxSnapshot,
       orderNumber: orders.orderNumber,
     })
     .from(quotes)
@@ -1890,6 +1925,11 @@ export async function listCustomerQuotes(
     for (const row of rowsWithCounts) counts.set(row.quoteId, { parts: row.parts, units: row.units });
   }
 
+  // Bayrak kapalıyken kur gövdeye HİÇ girmez: tarayıcıda kalmış eski bir
+  // "EUR" tercihi listeyi dövize çeviremesin (kapatma yolunun "bütün yüzeyler
+  // ₺'ye döner" sözü buraya da bağlı). `loadPresentedQuote` ile aynı okuma,
+  // Redis önbellekli.
+  const fxDisplayEnabled = await isFlagEnabled("quote_fx_display_enabled");
   const now = Date.now();
   return {
     items: page_.map((q) => ({
@@ -1906,6 +1946,7 @@ export async function listCustomerQuotes(
       expiresAt: q.expiresAt.toISOString(),
       expired: q.status === "expired" || q.expiresAt.getTime() < now,
       orderNumber: q.orderNumber,
+      fxSnapshot: fxDisplayEnabled ? q.fxSnapshot : null,
     })),
     hasNext: rows.length > PAGE_SIZE,
   };

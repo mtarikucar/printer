@@ -1127,6 +1127,9 @@ const en = {
   "instantQuote.document.column.unit": "Unit price",
   "instantQuote.document.company": "Company",
   "instantQuote.document.customer": "Customer",
+  "instantQuote.document.fxColumn": "≈ {currency}",
+  "instantQuote.document.fxFooter":
+    "The binding amount is the Turkish lira column. Foreign-currency figures are indicative, computed with the TCMB foreign-exchange buying rate of {date} (1 {currency} = {rate} ₺).",
   "instantQuote.document.iban": "IBAN",
   "instantQuote.document.issuedAt": "Issued",
   "instantQuote.document.leadTime": "Lead time",
@@ -1142,6 +1145,18 @@ const en = {
   "instantQuote.document.taxOffice": "Tax office",
   "instantQuote.document.title": "Quote document",
   "instantQuote.document.validUntil": "This quote is valid until {date}.",
+
+  // instantQuote — foreign-currency DISPLAY (TCMB rate)
+  "instantQuote.fx.chargedInTry":
+    "Payment is collected in Turkish lira (₺), in the amount of {amount}.",
+  "instantQuote.fx.indicative":
+    "Foreign-currency figures are indicative; payment is collected in Turkish lira (₺).",
+  "instantQuote.fx.label": "Currency",
+  "instantQuote.fx.rateNote": "1 {currency} = {rate} ₺ · TCMB rate of {date}",
+  "instantQuote.fx.rounding": "Rounding",
+  "instantQuote.fx.try": "Turkish lira (₺)",
+  "instantQuote.fx.unavailable":
+    "Foreign-currency display is off because the current TCMB rate could not be retrieved.",
 
   // instantQuote — lead tier
   "instantQuote.lead.days": "{days} business days",

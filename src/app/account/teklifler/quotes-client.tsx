@@ -2,9 +2,14 @@
 
 import { useCallback, useEffect, useState, type JSX } from "react";
 import Link from "next/link";
-import { fill } from "@/components/quote/format";
-import type { CustomerQuoteListItem, QuoteStatus } from "@/lib/config/quote-types";
-import { formatCurrency, formatDate } from "@/lib/i18n/format";
+import { useDisplayCurrency } from "@/components/quote/display-currency";
+import { displayRate, fill, money } from "@/components/quote/format";
+import type {
+  CustomerQuoteListItem,
+  DisplayCurrency,
+  QuoteStatus,
+} from "@/lib/config/quote-types";
+import { formatDate } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 /**
@@ -38,7 +43,18 @@ function displayStatus(item: CustomerQuoteListItem): QuoteStatus {
   return item.expired ? "expired" : item.status;
 }
 
-export function QuoteListTable({ items }: { items: CustomerQuoteListItem[] }): JSX.Element {
+export function QuoteListTable({
+  items,
+  currency = "TRY",
+}: {
+  items: CustomerQuoteListItem[];
+  /**
+   * Gösterim birimi tercihi. Her satır TEKLİFİN KENDİ donmuş kuruyla çevrilir
+   * (bugünün bülteniyle değil): aksi hâlde liste, aynı teklifin sayfasından
+   * farklı bir sayı gösterirdi. Kuru olmayan satır ₺ kalır.
+   */
+  currency?: DisplayCurrency;
+}): JSX.Element {
   const d = useDictionary();
   const c = (key: "number" | "title" | "parts" | "status" | "total" | "expiry") =>
     d[`instantQuote.account.quotes.column.${key}`];
@@ -82,7 +98,9 @@ export function QuoteListTable({ items }: { items: CustomerQuoteListItem[] }): J
                   </span>
                 </td>
                 <td className="py-3 pr-4 font-mono text-[13px] tabular-nums text-text-primary">
-                  {item.totalKurus === null ? "—" : formatCurrency(item.totalKurus, "tr")}
+                  {item.totalKurus === null
+                    ? "—"
+                    : money(item.totalKurus, displayRate(item.fxSnapshot, currency))}
                 </td>
                 <td className="py-3 pr-4 text-text-secondary">
                   {formatDate(item.expiresAt, "tr")}
@@ -114,6 +132,10 @@ export function QuoteListTable({ items }: { items: CustomerQuoteListItem[] }): J
 
 export function AccountQuotesClient(): JSX.Element {
   const d = useDictionary();
+  // Tercih çalışma alanındaki seçiciyle AYNI depodan gelir: müşteri teklif
+  // sayfasında € seçtiyse listede de € okur. Burada seçici yoktur — bir liste
+  // ekranı, tercihi değiştirmenin yeri değil.
+  const currency = useDisplayCurrency();
   const [items, setItems] = useState<CustomerQuoteListItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
@@ -179,7 +201,7 @@ export function AccountQuotesClient(): JSX.Element {
 
   return (
     <>
-      <QuoteListTable items={items} />
+      <QuoteListTable items={items} currency={currency} />
       {hasNext ? (
         <button
           type="button"

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { parseDisplayCurrency } from "@/components/quote/format";
 import { getBankDetails } from "@/lib/config/payment";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getLocale } from "@/lib/i18n/get-locale";
@@ -41,6 +42,12 @@ export default async function QuoteDocumentPage({
   if (!(await quoteApiEnabled())) notFound();
 
   const shareToken = typeof query.t === "string" ? query.t : null;
+  // Gösterim birimi: geçersiz/bilinmeyen her değer SESSİZCE bağlayıcı ₺'ye
+  // düşer (`parseDisplayCurrency`). Adres çubuğuna yazılan bir dizgi yüzünden
+  // proforma açılmamazlık etmemeli. Bayrak kapalıysa ya da kur bayatsa
+  // `presented.display` hiç gelmez ve seçim kendiliğinden yok sayılır —
+  // belge o hâlde bilgilendirici bir cümle yazar, boş bir kolon çizmez.
+  const currency = parseDisplayCurrency(query.kur);
   // Adres parçası Next tarafından zaten çözülmüştür (bkz. `../page.tsx`).
   const access = await resolveQuoteAccess(number, { shareToken });
   if (!access) notFound();
@@ -74,7 +81,7 @@ export default async function QuoteDocumentPage({
         <QuoteDocumentPrintButton />
       </div>
 
-      <QuoteDocument quote={quote} bank={getBankDetails()} />
+      <QuoteDocument quote={quote} bank={getBankDetails()} currency={currency} />
     </div>
   );
 }

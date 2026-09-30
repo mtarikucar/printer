@@ -15,7 +15,8 @@ import {
   validateQuoteFiles,
   type QuoteUploadState,
 } from "@/components/quote/dropzone";
-import { fill } from "@/components/quote/format";
+import { useDisplayCurrency } from "@/components/quote/display-currency";
+import { displayRate, fill } from "@/components/quote/format";
 import { QuotePartCard } from "@/components/quote/part-card";
 import { QuotePartConfigPanel } from "@/components/quote/part-config-panel";
 import { QuotePartViewerModal } from "@/components/quote/part-viewer-modal";
@@ -247,6 +248,11 @@ export function QuoteWorkspaceClient({
   const { viewer, catalog } = quote;
   const canEdit = viewer.canEdit && !readOnly;
   const parts = quote.parts;
+  // Gösterim tercihi TEK yerde okunur ve aşağıya KUR olarak dağıtılır: seçici
+  // özet panelinde durur, ama parça kartı, kademe seçici ve inceleme diyaloğu
+  // aynı kuru kullanmak zorunda — iki ayrı okuma bir gün ayrışırdı.
+  const currency = useDisplayCurrency();
+  const rate = displayRate(quote.display?.snapshot, currency);
 
   // Tek bir çalışma alanı boyunca yaşayan sıra kapısı (bkz. createResponseOrder).
   const [order] = useState(createResponseOrder);
@@ -493,6 +499,7 @@ export function QuoteWorkspaceClient({
         quote={quote}
         onPatch={patchQuote}
         shareToken={shareToken}
+        currency={currency}
         actions={<QuoteHeaderActions quote={quote} onQuoteChanged={apply} />}
       />
 
@@ -564,6 +571,7 @@ export function QuoteWorkspaceClient({
                       part={part}
                       catalog={catalog}
                       viewer={{ ...viewer, canEdit }}
+                      rate={rate}
                       selected={selected.includes(part.id)}
                       busy={busy}
                       onSelectChange={(id, on) =>
@@ -622,6 +630,7 @@ export function QuoteWorkspaceClient({
         <aside className="lg:sticky lg:top-6 lg:self-start">
           <QuoteSummary
             quote={quote}
+            currency={currency}
             busy={busy}
             onPatch={patchQuote}
             onRequestReview={setReviewKind}
@@ -648,6 +657,7 @@ export function QuoteWorkspaceClient({
           kind={reviewKind}
           quote={quote}
           shareToken={shareToken}
+          rate={rate}
           onClose={() => setReviewKind(null)}
           onQuoteChanged={apply}
         />

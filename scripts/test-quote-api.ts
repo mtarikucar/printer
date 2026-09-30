@@ -17,7 +17,11 @@ import { computeQuote } from "../src/lib/config/quote-compute";
 import { partPricingKey } from "../src/lib/config/quote-keys";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import { STEP_TESSELLATION } from "../src/lib/config/quote-step";
-import type { PartGeometry, QuoteViewer } from "../src/lib/config/quote-types";
+import type {
+  PartGeometry,
+  QuoteFxSnapshot,
+  QuoteViewer,
+} from "../src/lib/config/quote-types";
 import type { Quote, QuotePart } from "../src/lib/db/schema";
 import { resolveQuoteAccess, resolveQuoteViewer, shouldClaimQuote } from "../src/lib/services/quote-access";
 import { toPricingPartInput } from "../src/lib/services/quote-cache";
@@ -150,6 +154,7 @@ function present(
     liveDraftReference?: string | null;
     orderNumber?: string | null;
     stepEnabled?: boolean;
+    fxDisplayEnabled?: boolean;
   } = {}
 ) {
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
@@ -172,6 +177,9 @@ function present(
     // çalıştığı için `presentQuote`un bir bayrak okuması yapmadığının da
     // kanıtıdır (okuyan yer `stepUploadsEnabled`, `quote-access.ts`).
     stepEnabled: extra.stepEnabled ?? false,
+    // Döviz bayrağı da aynı sebeple PARAMETRE. Varsayılan KAPALI: çıkış
+    // durumu, `quote_fx_display_enabled`in üretimdeki hâlidir.
+    fxDisplayEnabled: extra.fxDisplayEnabled ?? false,
   });
 }
 
@@ -516,6 +524,7 @@ test("bekleyen ödeme teklifi kilitler ama ödemeye devam açık kalır", () => 
     sign,
     shareBaseUrl: "https://figurunica.test/teklif/T-000001",
     stepEnabled: false,
+    fxDisplayEnabled: false,
   });
   assert.equal(view.locked, true);
   assert.equal(view.liveDraftReference, "FIG-ABCD1234");
@@ -611,6 +620,88 @@ test("bozuk kaçışlı numara FIRLATMAZ, 404'e düşer", async () => {
   for (const bad of ["a%", "%", "T-%E0%A4%A", "T-000123%"]) {
     assert.equal(await resolveQuoteAccess(bad), null, `${bad} 404 vermedi`);
   }
+});
+
+// ─── Döviz GÖSTERİMİ: `display` anahtarı (Faz 2b · D3) ──────────────────────
+//
+// Kur bir FİYATTIR: fiyat kapısının ARKASINDA durur (tasarım R7). Üç kapı
+// birden aranır ve biri kapalıysa anahtar HİÇ EKLENMEZ — `view.display ===
+// undefined` iddiası YETMEZ, anahtarın YOKLUĞU iddia edilir (`quote-present.ts`
+// açılış kuralı: `undefined` atamak `JSON.stringify`de kaybolsa da RSC
+// props'unda ve `Object.keys`te görünür).
+
+const FX_SNAPSHOT: QuoteFxSnapshot = {
+  version: 1,
+  source: "tcmb",
+  bulletinDate: "2026-09-29",
+  takenAt: "2026-09-29T15:30:00.000Z",
+  rates: [
+    { currency: "EUR", microTryPerUnit: 48_741_200 },
+    { currency: "USD", microTryPerUnit: 41_523_100 },
+    { currency: "GBP", microTryPerUnit: 55_903_400 },
+  ],
+};
+
+test("bayrak KAPALIYKEN `display` anahtarı gövdede HİÇ YOK", () => {
+  const view = present(OWNER_VIEW, makeQuote({ fxSnapshot: FX_SNAPSHOT }));
+  assert.equal("display" in view, false, "bayrak kapalı ama anahtar gönderilmiş");
+});
+
+test("fiyat kapısı KAPALIYKEN `display` anahtarı gövdede HİÇ YOK", () => {
+  // R7: kur ekranda, fiyat kapısı arkasında değil. Bayrak AÇIK, kur DOLU —
+  // eksik olan tek şey `canSeePrices`.
+  for (const viewer of [ANON_VIEW, SHARE_VIEW]) {
+    const view = present(viewer, makeQuote({ fxSnapshot: FX_SNAPSHOT }), [makePart()], {
+      fxDisplayEnabled: true,
+    });
+    assert.equal("display" in view, false, "fiyat kapısı kapalı ama kur gönderilmiş");
+    assert.equal("totals" in view, false, "fiyat kapısı sızdırıyor (kontrol)");
+  }
+});
+
+test("BOZULMUŞ YOL: kur YOKSA sayfa DÜŞMEZ, yalnız anahtar gelmez", () => {
+  // `fx_snapshot` NULL, kur hiç çekilememiş ya da BAYAT olduğu için
+  // (`loadActiveFxSnapshot` o hâlde null döner). Bayrak açık olsa bile gövde
+  // sessizce ₺ kalır — bu vaka ZORUNLU.
+  const view = present(OWNER_VIEW, makeQuote({ fxSnapshot: null }), [makePart()], {
+    fxDisplayEnabled: true,
+  });
+  assert.equal("display" in view, false);
+  assert.ok(view.totals, "fiyat gövdesi kur yokluğundan etkilenmemeli");
+});
+
+test("MUTLU YOL: bülten tarihi müşteriye AYNEN gider, baştaki birim BAĞLAYICI", () => {
+  const view = present(OWNER_VIEW, makeQuote({ fxSnapshot: FX_SNAPSHOT }), [makePart()], {
+    fxDisplayEnabled: true,
+  });
+  assert.equal("display" in view, true, "mutlu yolda anahtar gelmedi");
+  assert.deepEqual(view.display?.snapshot, FX_SNAPSHOT);
+  assert.equal(view.display?.snapshot.bulletinDate, "2026-09-29");
+  assert.equal(view.display?.currencies[0], "TRY", "baştaki eleman bağlayıcı olan değil");
+  // Seçici listesi DONMUŞ snapshot'ın kendi satırlarından türer, sabitten
+  // değil: eski bir snapshot yarın eklenen bir birimi taşımaz ve müşteriye
+  // çevrilemeyen bir birim seçtirilmemeli.
+  assert.deepEqual(view.display?.currencies, ["TRY", "EUR", "USD", "GBP"]);
+  const half = { ...FX_SNAPSHOT, rates: [FX_SNAPSHOT.rates[0]] };
+  const halfView = present(OWNER_VIEW, makeQuote({ fxSnapshot: half }), [makePart()], {
+    fxDisplayEnabled: true,
+  });
+  assert.deepEqual(halfView.display?.currencies, ["TRY", "EUR"]);
+});
+
+test("`display` eklenmesi para gövdesini KİRLETMEDİ", () => {
+  // Sunum eklemesinin para yoluna dokunmadığının kanıtı: aynı teklif iki kez
+  // serileştirilir ve `totals` bit bit AYNI çıkar.
+  const quote = makeQuote({ fxSnapshot: FX_SNAPSHOT });
+  const withoutFx = present(OWNER_VIEW, quote);
+  const withFx = present(OWNER_VIEW, quote, [makePart()], { fxDisplayEnabled: true });
+  assert.deepEqual(withFx.totals, withoutFx.totals);
+  // Ve hiçbir alanı `…Kurus` ile bitmiyor (fiyat kapısı ada bakıyor).
+  const fxKeys = Object.keys(withFx.display ?? {});
+  assert.deepEqual(
+    fxKeys.filter((k) => k.endsWith("Kurus")),
+    []
+  );
 });
 
 test("teklif sayfaları adresteki numarayı İKİNCİ kez çözmez", () => {

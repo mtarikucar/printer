@@ -2,11 +2,10 @@
 
 import { useState, type JSX } from "react";
 import { Button, Textarea } from "@/components/ui";
-import type { PresentedQuote, ReviewKind } from "@/lib/config/quote-types";
-import { formatCurrency } from "@/lib/i18n/format";
+import type { FrozenFxRate, PresentedQuote, ReviewKind } from "@/lib/config/quote-types";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { QuoteApiError, requestQuoteReview, type ReviewRequest } from "@/lib/quote/client-api";
-import { fill } from "./format";
+import { fill, money } from "./format";
 import { QuoteModal } from "./modal-shell";
 
 /**
@@ -48,6 +47,7 @@ export function QuoteReviewDialog({
   shareToken,
   onClose,
   onQuoteChanged,
+  rate = null,
 }: {
   open: boolean;
   kind: ReviewKind;
@@ -55,6 +55,15 @@ export function QuoteReviewDialog({
   shareToken: string | null;
   onClose: () => void;
   onQuoteChanged: (quote: PresentedQuote) => void;
+  /**
+   * Seçili gösterim biriminin DONMUŞ kuru; `null` = bağlayıcı ₺.
+   *
+   * YALNIZ mevcut birim fiyatın GÖSTERİMİNİ çevirir. Müşterinin yazdığı hedef
+   * fiyat ₺ KALIR (`parseMoneyInput` kuruş üretir ve
+   * `quote_parts.target_unit_price_kurus`a yazılır): döviz girdisi, kur
+   * değiştiği anda müşterinin yazdığı rakamın ANLAMINI değiştirirdi.
+   */
+  rate?: FrozenFxRate | null;
 }): JSX.Element | null {
   const d = useDictionary();
   const [note, setNote] = useState("");
@@ -137,7 +146,7 @@ export function QuoteReviewDialog({
                           söyler; fiyat kapısı kapalıysa gövdede hiç yoktur. */}
                       {part.price && (
                         <span className="ml-2 text-xs text-text-muted">
-                          {formatCurrency(part.price.unitKurus, "tr")}
+                          {money(part.price.unitKurus, rate)}
                         </span>
                       )}
                     </label>

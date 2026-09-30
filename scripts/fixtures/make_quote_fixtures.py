@@ -12,6 +12,19 @@ timestamp, so re-running this reproduces the committed files.
   two_bodies.stl  binary STL, two disjoint closed 10 mm cubes (10 mm apart on X)
   open_box.stl    binary STL, the 20 mm cube with its +Z face missing
   cube1in.3mf     3MF, one 1-unit cube declared as <model unit="inch">
+
+The STEP fixtures in the same directory are NOT written by this script and must
+not be — a B-rep cannot be produced with the standard library, and pulling a CAD
+kernel in here would make the fixtures depend on the very thing they are meant
+to test. They are committed artefacts; the CAD session that produced them (and
+every measured number that justifies them) is written down in
+.superpowers/sdd/2026-09-22-anlik-teklif-motoru/task-s1-report.md.
+
+  cube20.step           AP214, mm units, 20 mm cube        (scale proof, part 1)
+  cube1in.step          AP214, INCH units, 1-unit cube     (scale proof, part 2)
+  bracket_asym.step     AP214, mm units, 10 × 20 × 40 box  (axis-order proof)
+  two_bodies.step       AP214, mm units, TWO products      (solidCount proof)
+  cylinder_r10h20.step  AP214, mm units, r10 h20 cylinder  (volume-error proof)
 """
 import os
 import struct

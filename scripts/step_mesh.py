@@ -17,6 +17,24 @@ with the same two codes the TypeScript side knows: `step_too_complex` (the B-rep
 is bigger than the ceiling) and `step_unreadable` (OCCT could not read or could
 not transfer the file).
 
+THE META CONTRACT IS FIVE KEYS, NOT FOUR. Success and refusal write the SAME
+file, so one of them has to say which it is: `ok` is that one field, and the
+parent never has to infer the payload's shape from which keys happen to be
+present (a truncated or half-written meta.json would otherwise read as a
+measurement with missing numbers — and a missing number is a NaN in the price).
+The exit code remains the contract; meta.json is the detail, written best effort.
+`ok` is pinned in scripts/test-step-mesh.py. The file NAME is fixed, so the
+parent (S2) must give every conversion its own output directory: two concurrent
+conversions sharing one directory would overwrite each other's verdict.
+
+TWO DEVIATIONS FROM THE DESIGN DOCUMENT, both measured, both in the S1 report:
+`--deflection` defaults to 0.01 mm (the design proposed 0.05 — it loses 0.325 %
+of the cylinder's volume, over the 0.2 % budget) and the tessellation unit is
+`angularRad`, not the design's `angularDeg` (cascadio's parameter is radians).
+S4's `STEP_TESSELLATION` in src/lib/config/quote-step.ts must be written with
+THESE two values, or the frozen price is computed from a mesh this script never
+produced.
+
 WHY THIS IS A SEPARATE PROCESS from analyze_quote_part.py — three reasons, all
 measured in the S1 spike report
 (.superpowers/sdd/2026-09-22-anlik-teklif-motoru/task-s1-report.md):

@@ -101,6 +101,14 @@ import {
   writeDisplayCurrencyPref,
 } from "../src/components/quote/display-currency";
 import { QuoteHeader } from "../src/components/quote/quote-header";
+import { FrameworkSummary } from "../src/components/framework/framework-summary";
+import {
+  frameworkNotice,
+  planRows,
+  progressSegments,
+  toQuantity,
+  type FrameworkActionKey,
+} from "../src/app/admin/cerceve/[id]/framework-values";
 import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
 import { formatCurrency } from "../src/lib/i18n/format";
 import type { TenderViews } from "../src/lib/config/quote-tender";
@@ -3459,4 +3467,258 @@ test("SİPARİŞ/İADE ve e-posta yüzeyleri bu turda döviz ÖĞRENMEDİ", () =
       `${rel} döviz gösterimini öğrenmiş`
     );
   }
+});
+
+// ─── ÇERÇEVE SİPARİŞLER: admin ekranı (0073) ────────────────────────────────
+//
+// Üç şey ölçülür ve üçü de PARA sorusudur:
+//
+//  1. İKİ TOPLAM AYRI ALANDA durur ve ekran hiçbirini ötekinin yerine yazmaz.
+//     `committedTotalKurus` tek-sevkiyat projeksiyonudur, `batchesTotalKurus`
+//     ise Σ parti tutarıdır; ikisi GENELDE EŞİT DEĞİLDİR (sabit/parça-başı ek
+//     hizmetler her partide yeniden tahsil edilir).
+//  2. EKRANDA PARA ARİTMETİĞİ YOKTUR: `client.tsx` dosyalarında çarpma, bölme
+//     ve oran yok; tutar önizlemesi sunucudan (`dryRun`) geliyor.
+//  3. Adet alanı BOŞ ile OKUNAMAZ'ı ayırıyor: yanlış ayrım planlanmış bir
+//     adedi sessizce düşürürdü.
+
+test("ÇERÇEVE: iki toplam AYRI alanlarda, biri ötekinin yerine yazılmıyor", () => {
+  const committedTotalKurus = 1_200_000;
+  const batchesTotalKurus = 1_260_000; // ek hizmetler her partide yeniden işler
+  const html = renderToStaticMarkup(
+    createElement(FrameworkSummary, {
+      parts: [
+        {
+          partId: "p1",
+          position: 1,
+          name: "Gövde",
+          technologyName: "FDM",
+          materialName: "PLA",
+          finishName: "Ham",
+          quantity: 400,
+          unitKurus: 3000,
+          lineKurus: 1_200_000,
+        },
+      ],
+      addons: [],
+      committedUnits: 400,
+      committedTotalKurus,
+      batchesTotalKurus,
+    })
+  );
+  assert.ok(
+    html.includes(formatCurrency(committedTotalKurus, "tr")),
+    "tek-sevkiyat projeksiyonu ekranda yok"
+  );
+  assert.ok(
+    html.includes(formatCurrency(batchesTotalKurus, "tr")),
+    "Σ parti tutarı ekranda yok"
+  );
+  // İki alan AYRI etiketle duruyor: aynı rakam iki kez yazılıp "toplam" diye
+  // sunulmuyor.
+  assert.match(html, /tek sevkiyatta/i, "birinci toplamın etiketi yok");
+  assert.match(html, /parti tutar/i, "ikinci toplamın etiketi yok");
+  // Ve ekran aradaki FARKI hesaplamıyor: bir çıkarma "kayıp para" gibi
+  // okunacak üçüncü bir sayı üretirdi.
+  assert.ok(
+    !html.includes(formatCurrency(batchesTotalKurus - committedTotalKurus, "tr")),
+    "ekran iki toplamın farkını üçüncü bir sayı olarak yazıyor"
+  );
+});
+
+test("ÇERÇEVE: client.tsx dosyalarında para aritmetiği YOK", () => {
+  // Program değişmezi: her tutar uçtan gelir. Tarama, YORUMLARI ve dizeleri
+  // çıkardıktan sonra kalan KODDA aritmetik operatör arar.
+  const CLIENTS = [
+    "src/app/admin/cerceve/client.tsx",
+    "src/app/admin/cerceve/[id]/client.tsx",
+    "src/components/framework/framework-summary.tsx",
+    "src/components/framework/batch-timeline.tsx",
+    "src/components/framework/batch-planner.tsx",
+    "src/components/framework/progress-bars.tsx",
+  ];
+  for (const rel of CLIENTS) {
+    const raw = fs.readFileSync(path.resolve(rel), "utf8");
+    const code = raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+      .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+      .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+      .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+    // `Kurus` taşıyan bir ifadenin yanında HİÇBİR aritmetik operatör
+    // olmamalı: toplama da yasak, çünkü "satırları ekranda toplamak" ek
+    // hizmetleri ve asgari tamamlamayı görmeyen bir toplam üretirdi.
+    const moneyArithmetic = code.match(
+      /\w*[Kk]urus\w*\s*[*/%+-][^>=]|[*/%+-]\s*\w*[Kk]urus\w*/g
+    );
+    assert.equal(
+      moneyArithmetic,
+      null,
+      `${rel}: tutar üzerinde aritmetik var → ${moneyArithmetic?.join(", ")}`
+    );
+    // Kuruş ↔ ₺ çevrimi de ekranda YAPILMAZ: tek biçimleyici
+    // `formatCurrency`dir ve `/ 100` yazan bir ekran ikinci bir para kuralı
+    // kurmuş olurdu.
+    for (const conversion of [/\/\s*100\b/, /\*\s*100\b/, /toFixed\(/]) {
+      assert.doesNotMatch(code, conversion, `${rel}: ekranda para çevrimi var`);
+    }
+  }
+});
+
+test("ÇERÇEVE: yığın çubuk oranı SAF modülde, kovalar taahhüde toplanır", () => {
+  const progress = {
+    committedUnits: 400,
+    unplannedUnits: 100,
+    plannedUnits: 100,
+    awaitingPaymentUnits: 50,
+    inProductionUnits: 50,
+    shippedUnits: 50,
+    deliveredUnits: 40,
+    cancelledOrRefundedUnits: 10,
+  };
+  const segments = progressSegments(progress);
+  assert.equal(segments.length, 7, "altı kova + ayrık kova beklenir");
+  const units = segments.reduce((sum, s) => sum + s.units, 0);
+  assert.equal(units, progress.committedUnits, "kovaların toplamı taahhüdü tutmuyor");
+  const pct = segments.reduce((sum, s) => sum + s.pct, 0);
+  assert.ok(Math.abs(pct - 100) < 1e-9, `oranların toplamı 100 değil: ${pct}`);
+  // Taahhüt SIFIRKEN hiçbir dilim çizilmez: sıfıra bölmek `NaN` genişlik
+  // demekti ve `NaN` bir CSS değeri olarak SESSİZCE yok sayılır.
+  for (const s of progressSegments({ ...progress, committedUnits: 0 })) {
+    assert.equal(s.pct, 0, `${s.key}: sıfır taahhütte oran üretildi`);
+  }
+});
+
+test("ÇERÇEVE: adet alanı BOŞ ile OKUNAMAZ'ı ayırır", () => {
+  // Ayrım adet kaybını önler: `NaN` JSON'da `null`a düşer ve `null` bir adet
+  // alanında "bu parçayı partiye hiç koyma" demektir.
+  assert.equal(toQuantity(""), null);
+  assert.equal(toQuantity("   "), null);
+  assert.equal(toQuantity("0"), null, "sıfır adet = alan boş");
+  assert.equal(toQuantity("120"), 120);
+  for (const bad of ["1o", "abc", "1e3", "0x10", "-5", "1.5", "1,5", "12a3"]) {
+    assert.equal(toQuantity(bad), "invalid", `${bad} okunamadı sayılmalı`);
+  }
+});
+
+test("ÇERÇEVE: okunamayan ya da kalandan büyük TEK alan bütün planı durdurur", () => {
+  const parts = [
+    { partId: "a", position: 1, name: "Gövde", remaining: 200 },
+    { partId: "b", position: 2, name: "Kapak", remaining: 50 },
+  ];
+  assert.deepEqual(planRows(parts, { a: "120", b: "" }), [{ partId: "a", quantity: 120 }]);
+  const unreadable = planRows(parts, { a: "120", b: "1o" });
+  assert.equal(typeof unreadable, "string");
+  assert.match(unreadable as string, /P02 Kapak/, "hangi parça olduğu yazmalı");
+  const tooMany = planRows(parts, { a: "120", b: "60" });
+  assert.equal(typeof tooMany, "string");
+  assert.match(tooMany as string, /kalan 50/, "kalan taahhüt yazmalı");
+  // Hiç adet yazılmamış bir plan da gönderilmez.
+  assert.equal(typeof planRows(parts, {}), "string");
+});
+
+test("ÇERÇEVE: başarı cümlesi İŞLEMDEN gelir (sekiz düğme aynı cümleyi paylaşmıyor)", () => {
+  const actions: FrameworkActionKey[] = [
+    "plan-preview",
+    "plan",
+    "release",
+    "batch-cancel",
+    "activate",
+    "cancel",
+    "extend",
+    "preferences",
+  ];
+  const texts = new Set(actions.map((a) => frameworkNotice(a)));
+  assert.equal(texts.size, actions.length, "iki işlem aynı cümleyi paylaşıyor");
+  for (const a of actions) {
+    assert.ok(frameworkNotice(a).length > 20, `${a}: cümle yok`);
+  }
+  // Ön izleme HİÇBİR ŞEY YAZMADIĞINI söylemek zorunda.
+  assert.match(frameworkNotice("plan-preview"), /YAZILMADI/);
+  // Anlaşma iptali ödenmiş partilere dokunmadığını söylemek zorunda.
+  assert.match(frameworkNotice("cancel"), /ÖDENMİŞ/);
+  // Çapa bir kapı değil, bir aday.
+  assert.match(frameworkNotice("preferences"), /ilk adayıdır/);
+});
+
+test("ÇERÇEVE: tezgâh etiketi PROP olarak iner, ekran kapasite modülünü import etmez", () => {
+  // İstemci bileşeni `services/manufacturer-capacity`i IMPORT EDEMEZ (`pg`yi
+  // paketine sürükler); etiket sunucuda `manufacturerLoadLabel` ile üretilir.
+  // Depo geneli tarayıcı da bunu ayrıca kontrol ediyor
+  // (`scripts/test-manufacturer-capacity.ts`).
+  for (const rel of [
+    "src/app/admin/cerceve/[id]/client.tsx",
+    "src/app/admin/cerceve/[id]/framework-values.ts",
+  ]) {
+    const code = fs.readFileSync(path.resolve(rel), "utf8");
+    assert.doesNotMatch(
+      code,
+      /services\/manufacturer-capacity/,
+      `${rel}: kapasite modülü istemciye sızmış`
+    );
+  }
+  const page = fs.readFileSync(path.resolve("src/app/admin/cerceve/[id]/page.tsx"), "utf8");
+  assert.match(page, /manufacturerLoadLabel\(/, "etiket sunucuda üretilmiyor");
+  const client = fs.readFileSync(
+    path.resolve("src/app/admin/cerceve/[id]/client.tsx"),
+    "utf8"
+  );
+  assert.match(client, /benchLabel/, "etiket prop olarak inmiyor");
+  // Ve ekran kendi eşiğini KURMUYOR: ileriye dönük yük GÖSTERİMDİR.
+  assert.doesNotMatch(client, /maxConcurrentOrders/, "ekranda elle kapasite eşiği var");
+});
+
+test("ÇERÇEVE: parti tutarı önizlemesi SUNUCUDAN gelir (dryRun), ekran hesaplamaz", () => {
+  const planner = fs.readFileSync(
+    path.resolve("src/components/framework/batch-planner.tsx"),
+    "utf8"
+  );
+  // Planlayıcı tutarı PROP olarak alır ve kendi satır toplamını kurmaz.
+  assert.match(planner, /preview: PlanPreviewRow\[\] \| null/, "önizleme prop değil");
+  assert.doesNotMatch(planner, /unitKurus/, "planlayıcı kilitli birim fiyatı okuyor");
+  const client = fs.readFileSync(
+    path.resolve("src/app/admin/cerceve/[id]/client.tsx"),
+    "utf8"
+  );
+  assert.match(client, /dryRun: true/, "ön izleme ucu dryRun ile çağrılmıyor");
+});
+
+test("ÇERÇEVE: bayrak kapalıyken admin yüzeyleri 404 (403 değil)", () => {
+  // Kapalı bir özelliğin varlığını duyurmanın anlamı yok: iki sayfa da
+  // `frameworkSurfacesEnabled` → `notFound()` deseniyle kapanıyor ve hiçbir
+  // yerde 403 üretmiyor.
+  for (const rel of ["src/app/admin/cerceve/page.tsx", "src/app/admin/cerceve/[id]/page.tsx"]) {
+    const raw = fs.readFileSync(path.resolve(rel), "utf8");
+    // Yorumlar ÇIKARILIR: başlık "403 DEĞİL" diye yazıyor ve o bir kod değil,
+    // gerekçe.
+    const code = raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+      .replace(/\s+/g, " ");
+    assert.match(
+      code,
+      /if \(!\(await frameworkSurfacesEnabled\(\)\)\) notFound\(\);/,
+      `${rel}: bayrak kapısı yok`
+    );
+    assert.doesNotMatch(code, /\b403\b/, `${rel}: 403 üretiyor`);
+  }
+  // Teklif karar ekranındaki dönüştürme düğmesi bayrak kapalıyken HİÇ render
+  // EDİLMEZ: kapı sayfada, prop `null` iner.
+  const quotePage = fs
+    .readFileSync(path.resolve("src/app/admin/teklifler/[id]/page.tsx"), "utf8")
+    .replace(/\s+/g, " ");
+  assert.match(
+    quotePage,
+    /if \(await frameworkSurfacesEnabled\(\)\) \{ frameworkEntry = await loadFrameworkEntry/,
+    "dönüştürme kapısı bayrağa bağlı değil"
+  );
+  const quoteClient = fs.readFileSync(
+    path.resolve("src/app/admin/teklifler/[id]/client.tsx"),
+    "utf8"
+  );
+  assert.match(
+    quoteClient,
+    /\{\(frameworkEntry \|\| frameworkEntryUnreadable\) && \(/,
+    "kart bayrak kapalıyken de çizilebiliyor"
+  );
 });

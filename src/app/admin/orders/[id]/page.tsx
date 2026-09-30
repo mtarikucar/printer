@@ -41,6 +41,7 @@ import { modelApprovalUrl } from "@/lib/services/model-approval";
 import { isRefunded } from "@/lib/config/order-status-policy";
 import { buildOrderMoneyBreakdown } from "@/lib/services/order-money";
 import { loadOrderQuoteParts } from "@/lib/services/quote-order";
+import { loadOrderFrameworkCard } from "@/lib/services/quote-framework";
 import { moneySplitEditBlock } from "@/lib/config/order-money-edit";
 import {
   gateMode,
@@ -410,6 +411,22 @@ export default async function AdminOrderDetailPage({
   );
   const quoteUnreadable = quoteRead === null;
   const orderQuote = quoteRead?.q ?? null;
+
+  // ─── Çerçeve anlaşma kartı (salt okunur) ─────────────────────────────────
+  //
+  // Sipariş bir çerçeve partisiyse admin "bu iş hangi anlaşmadan, kaçıncı
+  // parti olarak geldi" sorusunu burada görür (admin eksiksizliği kararı).
+  // Cevap AYNI deyimle sarılır: `loadOrderFrameworkCard` null döndüğünde
+  // "parti değil", `displayRead` null döndüğünde "okuma FIRLADI" — ikisi tek
+  // nulla düşerse çerçeveyle ilgisi olmayan HER siparişte "okunamadı" uyarısı
+  // çıkardı.
+  const frameworkRead = await displayRead(
+    "çerçeve anlaşma",
+    order.id,
+    (async () => ({ f: await loadOrderFrameworkCard(order.id) }))()
+  );
+  const frameworkUnreadable = frameworkRead === null;
+  const orderFramework = frameworkRead?.f ?? null;
   const filesByRevision = new Map<number, typeof modelFileRows>();
   for (const f of modelFileRows) {
     const list = filesByRevision.get(f.revision) ?? [];
@@ -1112,6 +1129,8 @@ export default async function AdminOrderDetailPage({
     journeyUnreadable && "Yolculuk karekodu",
     quoteUnreadable &&
       "Teklif tanımı (bu sipariş bir teklif siparişi OLABİLİR; parça listesi, fatura bilgisi ve teslim kademesi gösterilemiyor — para dökümündeki satırlar da bu tanımdan geliyor)",
+    frameworkUnreadable &&
+      "Çerçeve anlaşma bağı (bu sipariş bir çerçeve anlaşmanın partisi OLABİLİR; anlaşma numarası ve parti sırası gösterilemiyor)",
   ].filter((x): x is string => typeof x === "string");
 
   // Serialize everything for client component
@@ -1466,7 +1485,12 @@ export default async function AdminOrderDetailPage({
       painterRanking: painterRankingUnreadable,
       painterAssignmentDecisions: painterAssignmentDecisionsUnreadable,
       quote: quoteUnreadable,
+      /** Çerçeve köprüsü okunamadı: "parti değil" DEMEK DEĞİLDİR. */
+      framework: frameworkUnreadable,
     },
+    // Çerçeve anlaşma kartı: SALT OKUNUR. Fiyat kilidi, taahhüt ve parti planı
+    // anlaşmanın kendi ekranında yönetilir; burada yalnız bağ görünür.
+    framework: orderFramework,
     // Teklif kartı (Özet sekmesi). Admin FİYATLARI görür — üretici panelinin
     // aynı listesi fiyatsızdır (bkz. manufacturer/orders/[id]/page.tsx).
     quote: orderQuote

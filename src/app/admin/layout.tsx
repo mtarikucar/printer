@@ -15,6 +15,7 @@ import {
   NOT_REFUNDED,
 } from "@/lib/services/admin-order-sql";
 import { needsReviewCountQuery } from "@/lib/services/quote-admin";
+import { releasableBatchCount } from "@/lib/services/quote-framework";
 
 /**
  * GÖSTERİM amaçlı rozet okuması: sonuç yalnızca kenar çubuğunda GÖSTERİLİR, bir
@@ -121,6 +122,7 @@ export default async function AdminLayout({
     painterQcPendingRead,
     waAwaitingRead,
     quoteReviewRead,
+    releasableBatchRead,
   ] = await Promise.all([
     // The Orders badge counts work waiting on the admin, in two disjoint parts.
     // Refunded orders are left out of both, because every forward action on a
@@ -232,6 +234,13 @@ export default async function AdminLayout({
       "inceleme bekleyen teklifler",
       needsReviewCountQuery()
     ),
+    // Çerçeve siparişler: serbest bırakma penceresi AÇILMIŞ planlı partiler.
+    // Rozet "bugün elini değdirmen gereken iş" sayar ve ölçü plan kapısının
+    // iş günü kuralının tersidir (`frameworkReleaseWindowOpen`) — ekranın
+    // kendi eşiği YOKTUR. `orders`a hiç bakmaz: planlı parti tezgâhta yer
+    // kaplamaz. 0073 uygulanmamış bir ortamda bu okuma düşer ve rozet "?"
+    // gösterir — sıfır değil, BİLİNMİYOR.
+    displayRead("serbest bırakılabilir partiler", releasableBatchCount()),
   ]);
 
   // null = okunamadı (BİLİNMİYOR); sayı = gerçek sayım.
@@ -266,6 +275,7 @@ export default async function AdminLayout({
     painterQcPendingRead === null && "Boyacı QC bekleyen işler",
     waAwaitingRead === null && "Yanıt bekleyen WhatsApp konuşmaları",
     quoteReviewRead === null && "İnceleme bekleyen teklifler",
+    releasableBatchRead === null && "Serbest bırakılabilir çerçeve partileri",
   ].filter((x): x is string => typeof x === "string");
 
   // Kenar çubuğunun metinleri burada, SUNUCUDA çözülür ve prop olarak iner:
@@ -310,6 +320,9 @@ export default async function AdminLayout({
             painterQcPendingCount={painterQcPendingCount}
             waAwaitingReplyCount={waAwaitingCount}
             needsReviewCount={needsReviewCount}
+            // `countOf` satır kümesi bekliyor; bu okuma doğrudan sayı
+            // döndürüyor. `null` YİNE "okunamadı" demektir.
+            releasableBatchCount={releasableBatchRead}
           />
         }
       >

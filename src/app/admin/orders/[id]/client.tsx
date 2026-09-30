@@ -779,7 +779,25 @@ interface Props {
       painterAssignmentDecisions?: boolean;
       /** Teklif tanımı okunamadı: "teklif siparişi değil" DEMEK DEĞİLDİR. */
       quote?: boolean;
+      /** Çerçeve köprüsü okunamadı: "parti değil" DEMEK DEĞİLDİR. */
+      framework?: boolean;
     };
+    /**
+     * Siparişin bağlı olduğu ÇERÇEVE ANLAŞMA partisi — SALT OKUNUR.
+     *
+     * Fiyat kilidi, taahhüt ve parti planı anlaşmanın kendi ekranında
+     * (`/admin/cerceve/[id]`) yönetilir; bu kart yalnız bağı gösterir.
+     */
+    framework?: {
+      frameworkId: string;
+      frameworkNumber: string;
+      frameworkStatus: string;
+      batchPosition: number;
+      batchCount: number;
+      plannedShipDate: string;
+      units: number;
+      amountKurus: number;
+    } | null;
     /**
      * Siparişin ödendiği teklif belgesi (anlık teklif motoru). Admin görünümü
      * FİYATLI: üretici panelindeki aynı liste fiyatsızdır.
@@ -2112,7 +2130,7 @@ function PartnerChatPanel({ orderId, loc }: { orderId: string; loc: Locale }) {
 
 // ─── Main Component ──────────────────────────────────────────
 export function OrderDetailClient({ data, locale }: Props) {
-  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, painterAssignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures, quote } = data;
+  const { order, printGate, approvedImageUrl, photos, modelRevisions, modelRevisionsUnreadable, latestGeneration, latestReport, generationAttempts, adminActions, adminMessages, manufacturer, painter, manufacturerActions: mfgActions, manufacturerActionsUnreadable, manufacturerStatus, painting, journey, qcPhotos, qcReviews, qcRound, qcRevisionMismatch, qcProof, assignedToManufacturerAt, manufacturerAcceptedAt, manufacturerPrintedAt, assignmentAgeHours, activeManufacturers, candidates, assignmentDecisions, painterAssignmentDecisions, declinedManufacturers, modelUpload, modelApproval, partnerAck, onBehalfHolder, money, readFailures, quote, framework } = data;
   // Turun onaylanamama sebebi TEK yerde cümleye çevrilir: kırmızı kutu, kapalı
   // onay düğmesinin başlığı, denetimli istisnanın bağlantısı ve onay kutusu
   // aynı sebebi anlatsın. Dördü ayrı ayrı yazıldığında ekran "eski baskı"
@@ -6231,6 +6249,54 @@ export function OrderDetailClient({ data, locale }: Props) {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={approvedImageUrl} alt="Onaylanan tasarım" className="w-full max-h-72 object-contain" />
                 </div>
+              </div>
+            )}
+
+            {/* ─── Çerçeve anlaşma (salt okunur) ─────────
+                Sipariş bir çerçeve partisiyse admin "hangi anlaşma, kaçıncı
+                parti, hangi tarihe planlandı" sorusunu burada görür. Karar
+                yüzeyi DEĞİLDİR: fiyat kilidi ve parti planı anlaşmanın kendi
+                ekranında yönetilir. */}
+            {readFailures?.framework && (
+              <div
+                role="alert"
+                className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+              >
+                <p className="font-semibold">Çerçeve anlaşma bağı şu anda okunamadı</p>
+                <p className="mt-1 text-amber-900/80">
+                  Bu siparişin bir çerçeve anlaşmanın partisi OLUP OLMADIĞI
+                  bilinmiyor; kartın yokluğu &quot;parti değil&quot; anlamına gelmez.
+                </p>
+              </div>
+            )}
+            {framework && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Çerçeve anlaşma
+                  </h3>
+                  <Link
+                    href={`/admin/cerceve/${framework.frameworkId}`}
+                    className="font-mono text-sm font-semibold text-green-700 hover:text-green-900"
+                  >
+                    {framework.frameworkNumber} →
+                  </Link>
+                </div>
+                <p className="text-sm text-gray-900">
+                  {framework.frameworkNumber} · Parti {framework.batchPosition}/
+                  {framework.batchCount} · planlanan sevk{" "}
+                  {formatDate(framework.plannedShipDate, loc)}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {framework.units} adet · {formatCurrency(framework.amountKurus, loc)} ·
+                  anlaşma durumu: {framework.frameworkStatus}
+                </p>
+                <p className="mt-2 text-xs text-gray-400">
+                  Ödeme PARTİ BAŞINADIR: bu sipariş anlaşmanın yalnız bu partisini
+                  kapsar ve tutarı anlaşma imzalandığı gündeki kilitli fiyattan
+                  gelir. Taahhüt, fiyat kilidi ve parti planı anlaşmanın ekranında
+                  yönetilir.
+                </p>
               </div>
             )}
 

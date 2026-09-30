@@ -2011,3 +2011,91 @@ export async function loadFrameworkForwardLoad(args: {
     loadUnits: frameworkBatchLoadUnits(units),
   };
 }
+
+// ─── Sipariş → anlaşma köprüsü (salt okunur kart) ──────────────────────────
+
+export interface OrderFrameworkCard {
+  frameworkId: string;
+  frameworkNumber: string;
+  frameworkStatus: FrameworkStatus;
+  /** "Parti 3/8"in ilk yarısı. */
+  batchPosition: number;
+  /** İkinci yarısı: iptal EDİLMEMİŞ parti sayısı. */
+  batchCount: number;
+  plannedShipDate: string;
+  units: number;
+  amountKurus: number;
+}
+
+/**
+ * Bu sipariş bir çerçeve partisi mi — SALT OKUNUR kart için.
+ *
+ * Köprü `quote_framework_batches.order_id`dir: `orders` şemasına tek kolon
+ * eklenmedi (tasarım §2.4). Kartın kendisi hiçbir kararı etkilemez, yalnız
+ * "bu iş hangi anlaşmadan geldi" sorusunu cevaplar — admin eksiksizliği
+ * kararı: admin'de her şey görünür.
+ *
+ * `orders`a BAKMAZ ve kapasite ölçüsüne HİÇ karışmaz.
+ */
+export async function loadOrderFrameworkCard(
+  orderId: string
+): Promise<OrderFrameworkCard | null> {
+  const [row] = await db
+    .select({
+      frameworkId: quoteFrameworks.id,
+      frameworkNumber: quoteFrameworks.number,
+      frameworkStatus: quoteFrameworks.status,
+      batchPosition: quoteFrameworkBatches.position,
+      plannedShipDate: quoteFrameworkBatches.plannedShipDate,
+      units: quoteFrameworkBatches.units,
+      amountKurus: quoteFrameworkBatches.amountKurus,
+      batchCount: sql<number>`(
+        SELECT count(*)::int FROM ${quoteFrameworkBatches} AS sibling
+        WHERE sibling.framework_id = ${quoteFrameworks.id}
+          AND sibling.status <> 'cancelled'
+      )`,
+    })
+    .from(quoteFrameworkBatches)
+    .innerJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
+    .where(eq(quoteFrameworkBatches.orderId, orderId))
+    .limit(1);
+  return row ?? null;
+}
+
+// ─── Denetim izi ────────────────────────────────────────────────────────────
+
+export interface FrameworkAuditRow {
+  id: string;
+  action: string;
+  adminEmail: string;
+  reason: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+/**
+ * Anlaşmanın denetim izi — VAR OLAN tablodan, kaynak teklifin altından.
+ *
+ * `quote_admin_actions.quote_id` NOT NULL ve çerçevenin kaynak teklifi HER
+ * ZAMAN vardır, o yüzden yeni bir denetim tablosu kurulmadı: aynı satırlar
+ * `/admin/teklifler/[id]` detayında da görünür. Bu okuma kaynak teklifin TÜM
+ * izini döner (fiyatlama kararları dâhil), çünkü anlaşmanın hikâyesi o
+ * kararlarla başlıyor.
+ */
+export async function loadFrameworkAudit(quoteId: string): Promise<FrameworkAuditRow[]> {
+  const rows = await db
+    .select()
+    .from(quoteAdminActions)
+    .where(eq(quoteAdminActions.quoteId, quoteId))
+    .orderBy(desc(quoteAdminActions.createdAt));
+  return rows.map((r) => ({
+    id: r.id,
+    action: r.action,
+    adminEmail: r.adminEmail,
+    reason: r.reason,
+    before: r.before,
+    after: r.after,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}

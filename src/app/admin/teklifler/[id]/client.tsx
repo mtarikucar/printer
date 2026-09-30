@@ -11,6 +11,7 @@ import type { QuoteStatus } from "@/lib/config/quote-types";
 import { formatCurrency, formatDateTime } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import type { AdminQuoteDetail, AdminQuotePartView } from "@/lib/services/quote-admin";
+import type { FrameworkEntryGate } from "@/lib/services/quote-framework";
 import {
   daysOrNaN,
   fromKurus,
@@ -87,7 +88,19 @@ function Card({
   );
 }
 
-export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
+export function QuoteDetailClient({
+  quote,
+  frameworkEntry = null,
+  frameworkEntryUnreadable = false,
+}: {
+  quote: AdminQuoteDetail;
+  /**
+   * Çerçeve giriş kapısı — `null` = bayrak KAPALI (ya da kapı okunamadı) ve
+   * ekranda çerçeveye dair tek kelime geçmez.
+   */
+  frameworkEntry?: FrameworkEntryGate | null;
+  frameworkEntryUnreadable?: boolean;
+}) {
   const d = useDictionary();
   const router = useRouter();
 
@@ -599,6 +612,19 @@ export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
             </p>
           </Card>
 
+          {/* ─── Çerçeve anlaşma girişi ─────────────────────────────────
+              Bayrak KAPALIYKEN bu blok HİÇ render edilmez (`frameworkEntry`
+              null iner). Açıkken kapı ucun kapısıyla AYNI kaynaktan gelir:
+              ekran, ucun reddettiği bir düğme göstermez. */}
+          {(frameworkEntry || frameworkEntryUnreadable) && (
+            <FrameworkEntryCard
+              quoteId={quote.id}
+              quoteNumber={quote.number}
+              entry={frameworkEntry}
+              unreadable={frameworkEntryUnreadable}
+            />
+          )}
+
           <Card title={d["instantQuote.chat.title"]}>
             {chatOpen ? (
               <OrderChat
@@ -619,6 +645,256 @@ export function QuoteDetailClient({ quote }: { quote: AdminQuoteDetail }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * "Çerçeve anlaşmaya dönüştür" — giriş noktası.
+ *
+ * ─── PARA GÖVDEDEN GİTMEZ ──────────────────────────────────────────────────
+ *
+ * Form yalnız KİLİT TARİHİ, adres, başlık, çapalı atölye ve gerekçe taşır:
+ * taahhüt adetleri ve kilitli birim fiyatlar kaynak teklifin DONMUŞ anlık
+ * görüntüsünden kopyalanır. Bir tutar alanı gönderilmesi hâlinde uç isteği
+ * 400 ile REDDEDER (sessizce yok saymaz), o yüzden burada böyle bir alan
+ * hiç yoktur.
+ *
+ * Adres teklifin FATURA adresinden ön doldurulur — çerçeve tek adres kilitler
+ * ve admin'e altı alanı elle yazdırmak, en olası veri girişi hatasıydı.
+ */
+function FrameworkEntryCard({
+  quoteId,
+  quoteNumber,
+  entry,
+  unreadable,
+}: {
+  quoteId: string;
+  quoteNumber: string;
+  entry: FrameworkEntryGate | null;
+  unreadable: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [lockDate, setLockDate] = useState("");
+  const [anchor, setAnchor] = useState("");
+  const [reason, setReason] = useState("");
+  const prefill = entry?.defaultShippingAddress ?? null;
+  const [address, setAddress] = useState({
+    adres: prefill?.adres ?? "",
+    mahalle: prefill?.mahalle ?? "",
+    ilce: prefill?.ilce ?? "",
+    il: prefill?.il ?? "",
+    postaKodu: prefill?.postaKodu ?? "",
+    telefon: prefill?.telefon ?? "",
+  });
+
+  if (unreadable) {
+    return (
+      <Card title="Çerçeve anlaşma" tone="warning">
+        <p className="text-sm text-amber-900">
+          Bu teklifin çerçeve anlaşmaya dönüştürülebilirliği şu anda okunamadı.
+          Düğmenin yokluğu &quot;dönüştürülemez&quot; anlamına GELMEZ; birkaç dakika
+          sonra sayfayı yenileyin.
+        </p>
+      </Card>
+    );
+  }
+  if (!entry) return null;
+
+  if (entry.existingFramework) {
+    return (
+      <Card title="Çerçeve anlaşma">
+        <p className="text-sm text-gray-700">
+          Bu teklifin çerçeve anlaşması var:{" "}
+          <Link
+            href={`/admin/cerceve/${entry.existingFramework.id}`}
+            className="font-medium text-green-700 hover:underline"
+          >
+            {entry.existingFramework.number} →
+          </Link>
+        </p>
+        <p className="mt-2 text-xs text-gray-500">
+          Bir teklifin EN FAZLA bir anlaşması olur. İkinci bir taahhüt için teklifi
+          yeniden fiyatlayıp ayrı bir anlaşma kurun.
+        </p>
+      </Card>
+    );
+  }
+
+  if (!entry.eligible) {
+    return (
+      <Card title="Çerçeve anlaşma">
+        <p className="text-sm text-gray-700">
+          Bu teklif çerçeve anlaşmaya dönüştürülemez:
+        </p>
+        <ul className="mt-2 list-disc pl-5 text-sm text-gray-600">
+          {entry.refusals.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs text-gray-500">
+          Aynı kapılar uçta da uygulanır: bu liste ekranın yorumu değil, isteğin
+          alacağı cevaptır.
+        </p>
+      </Card>
+    );
+  }
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/frameworks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteId,
+          priceLockedUntil: lockDate,
+          shippingAddress: address,
+          ...(title.trim() ? { title: title.trim() } : {}),
+          ...(anchor ? { preferredManufacturerId: anchor } : {}),
+          reason,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        id?: string;
+        refusals?: Array<{ message: string }>;
+      };
+      if (!response.ok || !data.id) {
+        setError(
+          data.refusals?.map((r) => r.message).join(" ") ??
+            data.error ??
+            `Anlaşma kurulamadı (HTTP ${response.status}).`
+        );
+        return;
+      }
+      router.push(`/admin/cerceve/${data.id}`);
+    } catch {
+      setError("Sunucuya ulaşılamadı; işlemin geçip geçmediğini görmek için sayfayı yenileyin.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Çerçeve anlaşma">
+      <p className="text-sm text-gray-600">
+        {quoteNumber} fiyatlı ve çerçeveye uygun. Anlaşma, bu teklifin{" "}
+        <strong>parça tanımını, birim fiyatlarını ve katalog anlık görüntüsünü
+        DONDURUR</strong>; teslim partiler hâlinde planlanır ve{" "}
+        <strong>ödeme parti başına</strong> alınır. Anlaşmanın kendisi bir satış
+        değildir: burada hiçbir tahsilat yapılmaz.
+      </p>
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-3 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white"
+        >
+          Çerçeve anlaşmaya dönüştür
+        </button>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <label className="block text-sm">
+            <span className="block text-xs text-gray-500">Başlık (isteğe bağlı)</span>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="block text-xs text-gray-500">
+              Fiyat kilidinin son günü
+            </span>
+            <input
+              type="date"
+              value={lockDate}
+              onChange={(e) => setLockDate(e.target.value)}
+              className="mt-1 rounded-lg border border-gray-300 px-2 py-1"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="block text-xs text-gray-500">
+              Çapalı atölye (isteğe bağlı — yalnız atamanın ilk adayı)
+            </span>
+            <select
+              value={anchor}
+              onChange={(e) => setAnchor(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1"
+            >
+              <option value="">— çapa yok (sıralama seçsin) —</option>
+              {entry.manufacturers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.companyName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <fieldset className="rounded-xl border border-gray-200 p-3">
+            <legend className="px-1 text-xs text-gray-500">
+              Teslim adresi (anlaşma TEK adres kilitler)
+            </legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  ["adres", "Adres"],
+                  ["mahalle", "Mahalle"],
+                  ["ilce", "İlçe"],
+                  ["il", "İl"],
+                  ["postaKodu", "Posta kodu"],
+                  ["telefon", "Telefon"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="block text-sm">
+                  <span className="block text-xs text-gray-500">{label}</span>
+                  <input
+                    value={address[key]}
+                    onChange={(e) => setAddress({ ...address, [key]: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1"
+                  />
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <ReasonField value={reason} onChange={setReason} />
+          {error && (
+            <p
+              role="alert"
+              className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700"
+            >
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void submit()}
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+            >
+              {busy ? "Kuruluyor…" : "Anlaşmayı kur (taslak)"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setOpen(false)}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 disabled:opacity-40"
+            >
+              Vazgeç
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            Anlaşma <strong>taslak</strong> doğar: parti planlayabilirsiniz ama
+            aktifleştirmeden parti serbest bırakılamaz.
+          </p>
+        </div>
+      )}
+    </Card>
   );
 }
 

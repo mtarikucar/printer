@@ -50,6 +50,7 @@ export function AdminSidebar({
   painterQcPendingCount,
   waAwaitingReplyCount,
   needsReviewCount,
+  releasableBatchCount,
 }: {
   labels: AdminSidebarLabels;
   awaitingModelCount: number | null;
@@ -66,6 +67,8 @@ export function AdminSidebar({
   waAwaitingReplyCount: number | null;
   /** Anlık teklif motoru: inceleme bekleyen teklif sayısı. */
   needsReviewCount: number | null;
+  /** Çerçeve siparişler: serbest bırakma penceresi AÇILMIŞ planlı parti sayısı. */
+  releasableBatchCount: number | null;
 }) {
   const pathname = usePathname();
 
@@ -174,6 +177,17 @@ export function AdminSidebar({
           label: "Anlık teklifler",
           icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m-6-8h2M7 21h10a2 2 0 002-2V7.414A2 2 0 0018.414 6L15 2.586A2 2 0 0013.586 2H7a2 2 0 00-2 2v15a2 2 0 002 2z" />,
           badge: needsReviewCount,
+        },
+        {
+          // Çerçeve anlaşmalar: taahhüt + kilitli fiyat + parti planı. Rozet
+          // "bugün elini değdirmen gereken parti" sayar — serbest bırakma
+          // penceresi AÇILMIŞ planlı partiler. Ölçü plan kapısının iş günü
+          // kuralının tersidir (`frameworkReleaseWindowOpen`), ikinci bir
+          // "kaç gün önce uyar" eşiği YOKTUR.
+          href: "/admin/cerceve",
+          label: "Çerçeve siparişler",
+          icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />,
+          badge: releasableBatchCount,
         },
         {
           href: "/admin/baski-katalogu",

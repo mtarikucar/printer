@@ -53,6 +53,13 @@ export const FLAG_KEYS = [
   // ~100 MB'lık bir bağımlılığa dayanıyor ve o bağımlılık sahada kırılırsa
   // (wheel PyPI'dan silinir, bir `.so` eksilir) tek düğmeyle geri dönülmeli.
   "quote_step_enabled",
+  // Teklifte döviz GÖSTERİMİ (TCMB kuru). Kapsamı DAR: kapattığı şey döviz
+  // SEÇİCİSİ ve belgedeki/fişteki ikinci kolondur — tahsilat her hâlde ₺'dir,
+  // yani bu anahtar bir para yolunu değil bir OKUMA biçimini açar. Donmuş
+  // `fx_snapshot` değerleri ve günlük kur çekme turu bu anahtarın konusu
+  // DEĞİL: kapatmak ekrandaki ikinci kolonu kaldırır, veritabanındaki kuru
+  // silmez (açılınca müşteri aynı rakamı yeniden görür).
+  "quote_fx_display_enabled",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -90,6 +97,11 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   // `acceptedFormats` → dropzone `accept` — kolaylık. Anahtar onlardan önce
   // doğar ki o iki kapı yazıldığında sahayı kapalı bulsunlar.
   quote_step_enabled: false,
+  // Döviz gösterimi de KAPALI doğar: ekrana ikinci bir rakam koymak, o rakamın
+  // yanında bülten tarihi ve "tahsilat ₺ ile yapılır" cümlesi HAZIR olduğunda
+  // alınacak bir karardır (D3/D4). Kod yayına girmekle müşteriye açılmak aynı
+  // olay olmamalı.
+  quote_fx_display_enabled: false,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -107,6 +119,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   instant_quote_enabled: "Anlık teklif motoru",
   quote_gift_card_enabled: "Teklif ödemesinde hediye kartı",
   quote_step_enabled: "Teklifte STEP/STP dosyaları",
+  quote_fx_display_enabled: "Teklifte döviz gösterimi (TCMB kuru)",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -160,6 +173,11 @@ export const FEATURE_FLAG_KEYS = [
   // dosya biçimi atama girdisi değil) — yalnız "bu biçim müşteriye açık mı"
   // sorusunu cevaplıyor.
   "quote_step_enabled",
+  // Döviz gösterimi de ürün yüzeyi: AI_SPEND DEĞİL (TCMB bülteni ücretsiz ve
+  // resmî bir kamu verisi; kapatmak hiçbir kaybı azaltmaz), AUTO_ASSIGN DEĞİL
+  // (sipariş yönlendirmiyor). Cevapladığı soru tek: "ikinci kolon müşteriye
+  // açık mı".
+  "quote_fx_display_enabled",
 ] as const satisfies readonly FlagKey[];
 
 /**

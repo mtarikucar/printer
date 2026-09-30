@@ -35,7 +35,7 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("fourteen flags, closed set", () => {
+test("fifteen flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
     "auto_assign_cart_platform",
     "auto_assign_custom",
@@ -50,6 +50,9 @@ test("fourteen flags, closed set", () => {
     // Faz 1'in anlık teklif motoru: üçüncü kümenin (FEATURE) ilk anahtarı.
     "instant_quote_enabled",
     "meshy_enabled",
+    // Teklifte döviz GÖSTERİMİ (D): seçici ve ikinci kolon. Kapsamı DAR —
+    // donmuş `fx_snapshot` değerleri ve TCMB kur çekme turu ayrı konudur.
+    "quote_fx_display_enabled",
     // Teklif ödemesinde hediye kartı (G): yeni bir satış yüzeyi değil, mevcut
     // yüzeye eklenen bir ödeme aracı — ama müşteriye açılması ayrı bir karar.
     "quote_gift_card_enabled",
@@ -103,6 +106,7 @@ test("a new customer surface ships behind a closed flag", () => {
     "instant_quote_enabled",
     "quote_gift_card_enabled",
     "quote_step_enabled",
+    "quote_fx_display_enabled",
   ]);
   for (const key of FEATURE_FLAG_KEYS) {
     assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);

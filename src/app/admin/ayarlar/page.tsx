@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { killAllEngaged } from "@/lib/config/flags";
 import { getAllFlags } from "@/lib/services/flags";
 import { FlagsClient } from "./flags-client";
+import { FxClient } from "./fx-client";
 
 /**
  * `/admin/ayarlar` — özellik bayrakları.
@@ -26,6 +27,15 @@ export default async function AdminSettingsPage() {
       </p>
 
       <FlagsClient flags={flags} killAll={killAllEngaged()} />
+
+      {/*
+        Kur kartı bayrakların ALTINDA ayrı bir bölüm (mevcut bölüm bozulmadı):
+        bir bayrak bir KARARDIR, kur ise bir DURUMDUR ("kur güncel mi").
+        İkisini aynı listede göstermek, açılıp kapanan bir anahtarla okunan bir
+        ölçüyü karıştırmak olurdu. Kartın kendi verisini kendisi okuması da
+        bilinçli: kur okuması patlarsa bayrak ekranı ayakta kalır.
+      */}
+      <FxClient />
     </div>
   );
 }

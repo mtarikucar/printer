@@ -1059,8 +1059,11 @@ const tr: Dictionary = {
     "Tutarın tamamı hediye kartınızdan karşılanıyor; kart bilgisi istenmeyecek.",
   // Tamamı karşılanmış ama SİPARİŞE DÖNEMEMİŞ taslağın ekranı: ödenecek nakit
   // olmadığı için ödeme bağlantısı çizilmez (`pending-payment-client.tsx`).
+  // Başlık DURUM BİLDİRMEZ, yalnız olanı söyler: altındaki gövde cümlesi
+  // (`fullyCoveredRetry`) siparişin henüz yazılamadığını anlatıyor ve başlık da
+  // "siparişiniz oluşturuluyor" derse aynı kart kendi kendiyle çelişir.
   "instantQuote.checkout.giftCard.fullyCoveredPending":
-    "Tutarın tamamı hediye kartınızdan karşılandı; siparişiniz oluşturuluyor.",
+    "Tutarın tamamı hediye kartınızdan karşılandı.",
   // AYNI cümle `quote-checkout.ts`in `{autoConfirmed: false}` cevabında da
   // yazılı (servisler bu depoda sözlük okumuyor); ikisi `test-quote-ui.ts`te
   // birbirine çivilendi — birini değiştiren ÖTEKİNİ de değiştirmek zorunda.

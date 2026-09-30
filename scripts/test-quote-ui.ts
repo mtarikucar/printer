@@ -2116,6 +2116,13 @@ test("servisin iki müşteri cümlesi sözlükle BİREBİR aynı", () => {
   // sözlükteki cümleyi birebir taşımak zorunda.
   const source = fs
     .readFileSync(path.resolve("src/lib/services/quote-checkout.ts"), "utf8")
+    // YORUMLAR ÖNCE DÜŞER: bu dosyanın yorumları cümlenin kendisini alıntılıyor
+    // (ör. "AYNI cümle … yazılı"). Yorum sayılsaydı, canlı dizgi değişse bile
+    // alıntı iddiayı yeşil tutar ve çivi hiçbir şey tutmaz hâle gelirdi.
+    // Yalnız TAM SATIR `//` yorumları ve `/* */` blokları silinir: kod
+    // içindeki bir dizgide geçen `//` (URL) böylece korunur.
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "")
     // `"…" +\n      "…"` → tek literal: satıra sığmayan cümleler kaynakta
     // bölünmüş yazılıyor, sözlükte ise tek parça duruyor.
     .replace(/"\s*\+\s*"/g, "");

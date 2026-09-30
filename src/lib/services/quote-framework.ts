@@ -71,12 +71,10 @@ import {
   type QuotePart,
   type TurkishAddress,
 } from "@/lib/db/schema";
-import { istanbulDateKey } from "@/lib/config/business-days";
 import { actualReturnFacts } from "@/lib/config/order-money";
 import { computeQuote } from "@/lib/config/quote-compute";
 import {
   FRAMEWORK_PRICE_DRIFT_ERROR,
-  MAX_BATCHES_PER_FRAMEWORK,
   frameworkBatchDriftCode,
   frameworkBatchLoadUnits,
   frameworkBatchTotals,
@@ -183,14 +181,12 @@ function commitmentOf(framework: QuoteFramework): FrameworkCommitmentPart[] {
  */
 async function ledgerOf(
   tx: FrameworkTx | typeof db,
-  frameworkId: string,
-  excludeBatchId?: string
+  frameworkId: string
 ): Promise<FrameworkLedgerLine[]> {
   const rows = await tx
     .select({
       partId: quoteFrameworkBatchLines.partId,
       quantity: quoteFrameworkBatchLines.quantity,
-      batchId: quoteFrameworkBatches.id,
       batchStatus: quoteFrameworkBatches.status,
       orderId: quoteFrameworkBatches.orderId,
     })
@@ -200,14 +196,12 @@ async function ledgerOf(
       eq(quoteFrameworkBatches.id, quoteFrameworkBatchLines.batchId)
     )
     .where(eq(quoteFrameworkBatchLines.frameworkId, frameworkId));
-  return rows
-    .filter((r) => r.batchId !== excludeBatchId)
-    .map((r) => ({
-      partId: r.partId,
-      quantity: r.quantity,
-      batchStatus: r.batchStatus,
-      orderId: r.orderId,
-    }));
+  return rows.map((r) => ({
+    partId: r.partId,
+    quantity: r.quantity,
+    batchStatus: r.batchStatus,
+    orderId: r.orderId,
+  }));
 }
 
 /** Denetim satırı: iz VAR OLAN tabloda, anlaşmanın KAYNAK teklifinin altında. */
@@ -657,10 +651,7 @@ export async function planBatches(args: {
   // bağlantısını alıyor ve açık bir işlemi tutarken ikinci bağlantı istemek
   // yirmi eşzamanlı istekte havuzu kilitler (`freezeCheckout` ile aynı sıra).
   const [head] = await db
-    .select({
-      preferredManufacturerId: quoteFrameworks.preferredManufacturerId,
-      partsSnapshot: quoteFrameworks.partsSnapshot,
-    })
+    .select({ preferredManufacturerId: quoteFrameworks.preferredManufacturerId })
     .from(quoteFrameworks)
     .where(eq(quoteFrameworks.id, args.frameworkId))
     .limit(1);
@@ -1634,11 +1625,3 @@ export async function loadManufacturerPlannedBatches(
     loadUnits: frameworkBatchLoadUnits(r.units),
   }));
 }
-
-/** Bugünün İstanbul gün anahtarı — plan ekranının en erken tarihi için. */
-export function frameworkTodayKey(now: Date = new Date()): string {
-  return istanbulDateKey(now);
-}
-
-/** Tavan dışa açılır ki uçlar ikinci bir sayı yazmasın. */
-export { MAX_BATCHES_PER_FRAMEWORK };

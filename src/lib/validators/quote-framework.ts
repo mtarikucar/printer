@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
-import {
-  MAX_BATCHES_PER_FRAMEWORK,
-  MAX_FRAMEWORK_TOTAL_KURUS,
-} from "@/lib/config/quote-framework";
+import { MAX_BATCHES_PER_FRAMEWORK } from "@/lib/config/quote-framework";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { createTurkishAddressSchema } from "@/lib/validators/order";
 
@@ -20,9 +17,8 @@ import { createTurkishAddressSchema } from "@/lib/validators/order";
  * fiyatı geçersiz kılmasına kapı açardı — o kapı bu dosyada KAPALI TUTULUR.
  *
  * Tavanlar da burada YENİDEN YAZILMAZ, saf çekirdekten IMPORT EDİLİR
- * (`MAX_BATCHES_PER_FRAMEWORK`, `MAX_FRAMEWORK_TOTAL_KURUS`,
- * `MAX_AMOUNT_KURUS`): iki sayının ayrışması, şemanın kabul ettiği bir planın
- * servis tarafından reddedilmesi demekti.
+ * (`MAX_BATCHES_PER_FRAMEWORK`, `MAX_AMOUNT_KURUS`): iki sayının ayrışması,
+ * şemanın kabul ettiği bir planın servis tarafından reddedilmesi demekti.
  */
 
 /** `YYYY-MM-DD`, İstanbul takvimi (`business-days.ts` ile doğrulanır). */
@@ -154,12 +150,3 @@ export const frameworkExtendSchema: z.ZodType<FrameworkExtendInput> = z.object({
   priceLockedUntil: dateKeySchema,
   reason: reasonSchema,
 });
-
-/**
- * Anlaşma toplamının şema düzeyindeki tavanı — YALNIZ okunurluk için dışa
- * açıldı (uçlar bunu doğrulamaz, servis doğrular).
- *
- * Sayı burada yeniden YAZILMAZ: `MAX_FRAMEWORK_TOTAL_KURUS` saf çekirdekten
- * gelir ve o da `MAX_AMOUNT_KURUS`tan türer.
- */
-export const FRAMEWORK_BODY_TOTAL_CAP_KURUS = MAX_FRAMEWORK_TOTAL_KURUS;

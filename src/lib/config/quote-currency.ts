@@ -36,6 +36,34 @@
  * (`…Minor` kullanılır), çünkü `quote-present.ts`in fiyat kapısı
  * `key.endsWith("Kurus")` ile uygulanıyor.
  *
+ * ─── GÖSTERİM TAVANI: BİR TEKLİF ÇEVRİLEMEYEBİLİR ──────────────────────────
+ *
+ * `MAX_AMOUNT_KURUS` (`prices.ts`) bir ÖDEME tavanıdır: tanımı gereği admin
+ * elle sipariş rotasında ve müşteri ödemesinde uygulanır. TEKLİF tarafında
+ * uygulanMAZ — parça adedi `quote-service.ts`te 1…100.000, elle birim fiyat
+ * `quote-admin.ts`te tek başına tavana kadar, ve `computeQuote` toplam
+ * `maxAutoTotalKurus`ı aşınca yalnız bir DFM satırı ekler, toplamı KIRPMAZ.
+ * Yani ₺2.000.000 üstü bir teklif GÖRÜNTÜLENEBİLİR (ödemesi
+ * `quote-checkout.ts`te reddedilir, ama sayfası açılır).
+ *
+ * Bu yüzden tavan aşımı bu modülde İKİ farklı şeydir:
+ *
+ * - `convertKurusToMinor` bir ARİTMETİK ilkel: tavan dışı bir çağrı bir
+ *   PROGRAMLAMA hatasıdır ve `RangeError` atar (sessiz yanlış rakam yok).
+ * - `convertReceipt` GÖSTERİM giriş noktası: HİÇ atmaz. Çevrilemeyen bir fişte
+ *   `null` döner, yani "döviz gösterimi yok". Sebebi somut: bir sunucu
+ *   bileşeninde atılan `RangeError` boş gövdeli bir 500'dür — döviz kolonu,
+ *   YANINDA durduğu BAĞLAYICI ₺ okumasını da öldürürdü. Gösterim, ₺ belgesini
+ *   asla riske atmaz; gerekirse KENDİSİ yok olur.
+ *
+ * Tavan burada kasıtlı olarak ödeme tavanıyla AYNI sayıdır: müşteriye yaklaşık
+ * bir döviz rakamı yalnız gerçekten ÖDENEBİLİR bir ₺ tutarının yanında
+ * gösterilir. Kapı tek yerde yazılıdır (`isConvertibleAmount`) ki seçiciyi
+ * kapatan D3/D4 kodu aynı sayıyı ikinci kez yazmasın.
+ *
+ * `allPriced === false` iken `totalKurus` KISMİ bir toplamdır; onu gösterip
+ * göstermeme kararı ₺ tarafıyla AYNI yerde verilir, bu modülün işi değildir.
+ *
  * Saf modül: DB yok, `import "server-only"` YOK, `node:` import'u YOK — BullMQ
  * worker'ı ve istemci bileşenleri aynı dosyayı yükler.
  */
@@ -44,6 +72,34 @@ import type { FrozenFxRate, FxCurrency, QuoteTotals } from "@/lib/config/quote-t
 
 /** 1 TRY = 1e6 mikro-TRY. Kur satırları bu ölçekte tamsayı saklanır. */
 const MICRO_PER_TRY = 1_000_000;
+
+/**
+ * Bu tutar dövize çevrilebilir mi — GÖSTERİM kapısının TEK yazımı.
+ *
+ * Tavan ödeme tavanıyla aynı sayıdır (`MAX_AMOUNT_KURUS`, gerekçe dosya
+ * başlığında) ve taşma kanıtı bu sayıya BAĞLIdır: `2e8 × 1e6 = 2e14 <
+ * Number.MAX_SAFE_INTEGER = 9,007e15`. Tavan bir gün yükseltilirse kanıt da
+ * yükselmelidir; `scripts/test-quote-currency.ts` bunu `MAX_AMOUNT_KURUS ×
+ * 1e6`nın güvenli tamsayı kaldığını iddia ederek çiviler.
+ *
+ * Negatif de hariçtir: ileride bir İNDİRİM kalemi eklenirse fiş sessizce
+ * yanlış çevrilmesin, döviz gösterimi hiç doğmasın (o gün bilinçli bir karar
+ * gerekir — bu fonksiyonun tavanı o kararın kapısıdır).
+ */
+export function isConvertibleAmount(kurus: number): boolean {
+  return Number.isSafeInteger(kurus) && kurus >= 0 && kurus <= MAX_AMOUNT_KURUS;
+}
+
+/**
+ * Kur satırı kullanılabilir mi. Tamsayı şartı bir yazım hatasını yakalar:
+ * mikro yerine ₺ cinsinden bir kur (ör. 47.32) geçilirse rakam 1e6 katı büyük
+ * çıkardı. `fx_rates` tablosunda aynı kural CHECK olarak var, ama
+ * `quotes.fx_snapshot` jsonb'dir ve CHECK'i yoktur: donmuş bozuk bir satır
+ * gösterime buradan geçemez.
+ */
+function isUsableRate(microTryPerUnit: number): boolean {
+  return Number.isSafeInteger(microTryPerUnit) && microTryPerUnit > 0;
+}
 
 /**
  * kuruş → hedef para biriminin MINOR birimi (cent/penny). Tamsayı → tamsayı.
@@ -59,14 +115,17 @@ const MICRO_PER_TRY = 1_000_000;
  * bir rakam üretmez. (`quote-tender.ts`in `tenderKurus`/`grossKurus` emsali:
  * buraya kadar gelen geçersiz bir girdi bir PROGRAMLAMA hatasıdır, müşteriye
  * dönen bir cevap değil.)
+ *
+ * Bu ATAN sözleşme bir ARİTMETİK ilkelin sözleşmesidir. Müşteriye dönen yolun
+ * girişi `convertReceipt`tir ve o ASLA atmaz: tavanı aşan bir teklifte `null`
+ * döner (dosya başlığı "GÖSTERİM TAVANI"). Yani bu `RangeError`a ancak kapıyı
+ * ATLAYAN bir çağrı düşer.
  */
 export function convertKurusToMinor(kurus: number, microTryPerUnit: number): number {
-  if (!Number.isSafeInteger(kurus) || kurus < 0 || kurus > MAX_AMOUNT_KURUS) {
+  if (!isConvertibleAmount(kurus)) {
     throw new RangeError("Çevrilecek tutar 0 ile MAX_AMOUNT_KURUS arasında tam kuruş olmalı");
   }
-  // Tamsayı şartı bir yazım hatasını yakalar: mikro yerine ₺ cinsinden bir kur
-  // (ör. 47.32) geçilirse rakam 1e6 katı büyük çıkardı.
-  if (!Number.isSafeInteger(microTryPerUnit) || microTryPerUnit <= 0) {
+  if (!isUsableRate(microTryPerUnit)) {
     throw new RangeError("Kur (microTryPerUnit) pozitif bir tamsayı olmalı");
   }
   return Math.round((kurus * MICRO_PER_TRY) / microTryPerUnit);
@@ -91,7 +150,26 @@ export interface ConvertedReceipt {
 }
 
 /**
- * Teklif fişinin dövize çevrilmiş hâli. `totals`ı yalnız OKUR.
+ * Teklif fişinin dövize çevrilmiş hâli, ya da çevrilemiyorsa `null` (= "döviz
+ * gösterimi yok"). `totals`ı yalnız OKUR ve HİÇ ATMAZ.
+ *
+ * `null` dönen üç hâl — hepsi "₺ belgesi sağlam kalsın" kuralının sonucu
+ * (dosya başlığı "GÖSTERİM TAVANI"):
+ *
+ * 1. Bir tutar gösterim tavanının dışında (`isConvertibleAmount`): teklif
+ *    ₺2.000.000 üstü olabilir, çünkü tavan bir ÖDEME tavanıdır ve teklif
+ *    tarafında uygulanmaz. Böyle bir teklifte ₺ okunmaya devam eder, yalnız
+ *    döviz kolonu doğmaz.
+ * 2. Kur satırı bozuk (`isUsableRate`): `quotes.fx_snapshot` jsonb'dir, CHECK'i
+ *    yoktur; donmuş bozuk bir kur ekrana `Infinity` ya da ₺0 basmaz.
+ * 3. Satırlar toplamı `totalKurus`u vermiyor: `computeQuote` daima
+ *    `parts + addons + topUp = total` üretir, tutmayan bir girdi bir
+ *    PROGRAMLAMA hatasıdır — ama müşteriye dönen yüzeyde cezası "döviz yok"tur,
+ *    boş gövdeli bir 500 değil. (Kapının atmasını isteyen çağıran, ilkel
+ *    `convertKurusToMinor`ı kullanır.)
+ *
+ * `null` dönüşü BİLEREK tipe yazılıdır: `ConvertedReceipt | null`, D3/D4'ün
+ * çevrilemeyen fişi ele almasını derleyici zoruyla sağlar.
  *
  * YUVARLAMA DEĞİŞMEZİ: her satır bağımsız yuvarlandığı için satırların toplamı
  * çevrilmiş toplamdan ±(satır sayısı) minor birim sapabilir. Bir proformada
@@ -106,24 +184,31 @@ export interface ConvertedReceipt {
  *
  * KDV fişin satırlarına GİRMEZ: `kdvExcludedKurus`/`kdvKurus` toplamın
  * BÖLÜNMESİdir, ona eklenen bir kalem değil. İkisini `lines`a koymak toplam
- * değişmezini bozardı; ekranda gerekince `convertKurusToMinor` ile çevrilir.
+ * değişmezini bozardı; ekranda gerekince `convertKurusToMinor` ile çevrilir —
+ * fiş çevrildiyse ikisi de toplamın altında kaldığı için tavan içindedir.
  */
-export function convertReceipt(totals: QuoteTotals, rate: FrozenFxRate): ConvertedReceipt {
-  const addonsKurus = totals.addonLines.reduce((sum, line) => sum + line.kurus, 0);
-  const componentsKurus = totals.partsKurus + addonsKurus + totals.minOrderTopUpKurus;
-  if (componentsKurus !== totals.totalKurus) {
-    // `computeQuote` daima `parts + addons + topUp = total` üretir. Tutmayan bir
-    // girdiyle çizilen fiş, satırları toplamı vermeyen bir proforma olurdu.
-    throw new RangeError("Fişin satırları toplamı totalKurus'a eşit değil");
-  }
-  const lines: Array<{ key: string; minor: number }> = [];
-  const push = (key: string, kurus: number) => {
-    // Sıfır kuruşluk satır ekranda gürültüdür: fişte hiç doğmaz.
-    if (kurus !== 0) lines.push({ key, minor: convertKurusToMinor(kurus, rate.microTryPerUnit) });
-  };
-  push(PARTS_LINE_KEY, totals.partsKurus);
-  for (const line of totals.addonLines) push(addonReceiptKey(line.key), line.kurus);
-  push(MIN_ORDER_LINE_KEY, totals.minOrderTopUpKurus);
+export function convertReceipt(totals: QuoteTotals, rate: FrozenFxRate): ConvertedReceipt | null {
+  if (!isUsableRate(rate.microTryPerUnit)) return null;
+  const amounts: Array<{ key: string; kurus: number }> = [
+    { key: PARTS_LINE_KEY, kurus: totals.partsKurus },
+    ...totals.addonLines.map((line) => ({ key: addonReceiptKey(line.key), kurus: line.kurus })),
+    { key: MIN_ORDER_LINE_KEY, kurus: totals.minOrderTopUpKurus },
+  ];
+  // Toplam önce KURUŞ üzerinde sınanır: çevrilmiş satırların toplamı
+  // (yuvarlama yüzünden) bunu kanıtlayamaz.
+  const summedKurus = amounts.reduce((sum, item) => sum + item.kurus, 0);
+  if (summedKurus !== totals.totalKurus) return null;
+  // Her satır AYRI AYRI sınanır: negatif bir satır varsa bir başkası toplamı
+  // aşabilir, yani tek başına toplamı sınamak yetmez.
+  if (!isConvertibleAmount(totals.totalKurus)) return null;
+  if (amounts.some((item) => !isConvertibleAmount(item.kurus))) return null;
+  // Sıfır kuruşluk satır ekranda gürültüdür: fişte hiç doğmaz.
+  const lines = amounts
+    .filter((item) => item.kurus !== 0)
+    .map((item) => ({
+      key: item.key,
+      minor: convertKurusToMinor(item.kurus, rate.microTryPerUnit),
+    }));
   const totalMinor = convertKurusToMinor(totals.totalKurus, rate.microTryPerUnit);
   const summedMinor = lines.reduce((sum, line) => sum + line.minor, 0);
   return {

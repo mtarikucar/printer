@@ -2,7 +2,7 @@
  * Döviz GÖSTERİMİ çekirdeği: saf çevirim, fişin toplamı ve SIZMA ENGELLERİ.
  * DB yok, Redis yok, ağ yok.
  *
- * Üç şeyi kanıtlar:
+ * Dört şeyi kanıtlar:
  *
  * 1. `convertKurusToMinor` altın değerleri ve YÖNÜ doğru üretir, tavanda
  *    taşmaz ve bozuk girdide SESSİZ kalmaz (RangeError).
@@ -10,7 +10,12 @@
  *    === totalMinor` ve `|roundingMinor| <= lines.length`. Bir proformada
  *    "toplamı tutmayan satırlar" hatadır; bu yüzden fark gizlice
  *    soğurulmaz, GÖRÜNEN bir satır olur.
- * 3. Çevrilmiş rakam para taşıyan koda SIZAMAZ: yeni hiçbir ihraç edilen ad
+ * 3. Döviz kolonu ₺ okumasını ASLA öldürmez: gösterim tavanının dışına düşen
+ *    bir teklifte (`MAX_AMOUNT_KURUS` bir ÖDEME tavanıdır, teklif tarafında
+ *    uygulanmaz) `convertReceipt` ATMAZ, `null` döner — yani "döviz gösterimi
+ *    yok". Kapı fazla geniş de değil: sınırdaki fiş ve 10.000 rastgele fiş
+ *    ÇEVRİLİR.
+ * 4. Çevrilmiş rakam para taşıyan koda SIZAMAZ: yeni hiçbir ihraç edilen ad
  *    `…Kurus` ile bitmez (`quote-present.ts`in `endsWith("Kurus")` fiyat
  *    kapısı bulanmasın) ve `quote-currency` modülünü import eden dosyalar
  *    kapalı bir listeye eşittir.
@@ -23,6 +28,8 @@ import {
   addonReceiptKey,
   convertKurusToMinor,
   convertReceipt,
+  isConvertibleAmount,
+  type ConvertedReceipt,
 } from "../src/lib/config/quote-currency";
 import {
   DISPLAY_CURRENCIES,
@@ -75,6 +82,18 @@ function totals(input: {
     kdvKurus: totalKurus - Math.round((totalKurus * 10000) / 12000),
     leadDays: 5,
   };
+}
+
+/**
+ * `convertReceipt` çevrilemeyen fişte `null` döner. Normal yolu sınayan her
+ * vaka bu yardımcıdan geçer, böylece kapı bir gün FAZLA GENİŞ olursa (normal
+ * bir fişi reddederse) testler kırmızıya döner — "her şeye null dönerek geçen"
+ * bir uygulama mümkün değil.
+ */
+function mustConvert(input: QuoteTotals, rate: FrozenFxRate): ConvertedReceipt {
+  const receipt = convertReceipt(input, rate);
+  assert.ok(receipt, "çevrilebilir bir fiş null döndü");
+  return receipt;
 }
 
 console.log("çevirim");
@@ -141,7 +160,7 @@ test("FX_CURRENCIES ve DISPLAY_CURRENCIES kapalı, ilk gösterim ₺", () => {
 
 console.log("fiş");
 test("fiş satırları ve toplamı: parça + ek hizmet + asgari tamamlama", () => {
-  const receipt = convertReceipt(
+  const receipt = mustConvert(
     totals({
       partsKurus: 1_000_000,
       addonLines: [
@@ -167,7 +186,7 @@ test("fiş satırları ve toplamı: parça + ek hizmet + asgari tamamlama", () =
 });
 
 test("asgari sipariş tamamlaması satır olur, sıfırken satır olmaz", () => {
-  const withTopUp = convertReceipt(
+  const withTopUp = mustConvert(
     totals({ partsKurus: 12_000, minOrderTopUpKurus: 8_000 }),
     EUR_47_32
   );
@@ -175,7 +194,7 @@ test("asgari sipariş tamamlaması satır olur, sıfırken satır olmaz", () => 
     withTopUp.lines.map((l) => l.key),
     ["parts", "minOrderTopUp"]
   );
-  const without = convertReceipt(totals({ partsKurus: 20_000 }), EUR_47_32);
+  const without = mustConvert(totals({ partsKurus: 20_000 }), EUR_47_32);
   assert.deepEqual(
     without.lines.map((l) => l.key),
     ["parts"]
@@ -183,7 +202,7 @@ test("asgari sipariş tamamlaması satır olur, sıfırken satır olmaz", () => 
 });
 
 test("yuvarlama farkı SIFIR olabiliyor (ekranda o satır çizilmez)", () => {
-  const receipt = convertReceipt(
+  const receipt = mustConvert(
     totals({
       partsKurus: 40_000,
       addonLines: [{ key: "rohs_beyani", name: "RoHS beyanı", kurus: 4_000 }],
@@ -199,18 +218,19 @@ test("yuvarlama farkı SIFIR olabiliyor (ekranda o satır çizilmez)", () => {
 });
 
 test("boş fiş: satır yok, toplam 0, yuvarlama 0", () => {
-  const receipt = convertReceipt(totals({ partsKurus: 0 }), EUR_47_32);
+  const receipt = mustConvert(totals({ partsKurus: 0 }), EUR_47_32);
   assert.deepEqual(receipt.lines, []);
   assert.equal(receipt.totalMinor, 0);
   assert.equal(receipt.roundingMinor, 0);
 });
 
-test("toplamı tutmayan QuoteTotals sessizce çevrilmez, RangeError", () => {
+test("toplamı tutmayan QuoteTotals sessizce çevrilmez: null (döviz yok)", () => {
   // `computeQuote` daima `parts + addons + topUp = total` üretir; tutmayan bir
-  // girdi bir PROGRAMLAMA hatasıdır, müşteriye dönen bir cevap değil.
-  assert.throws(
-    () => convertReceipt(totals({ partsKurus: 10_000, totalKurus: 10_001 }), EUR_47_32),
-    RangeError
+  // girdi bir PROGRAMLAMA hatasıdır — ama müşteriye dönen yüzeyde cezası
+  // "döviz gösterimi yok"tur, teklif sayfasını düşüren bir atma değil.
+  assert.equal(
+    convertReceipt(totals({ partsKurus: 10_000, totalKurus: 10_001 }), EUR_47_32),
+    null
   );
 });
 
@@ -247,7 +267,9 @@ test("10.000 rastgele (kur, tutar) çiftinde fişin toplamı TUTAR", () => {
       addonLines,
       minOrderTopUpKurus: Math.floor(next() * 20_000),
     });
-    const receipt = convertReceipt(input, rate);
+    // `mustConvert`: 10.000 turun HEPSİ çevrilebilir olmalı — gösterim kapısı
+    // normal bir fişi reddederse bu havuz kırmızıya döner.
+    const receipt = mustConvert(input, rate);
     const summed = receipt.lines.reduce((sum, l) => sum + l.minor, 0);
     assert.equal(
       summed + receipt.roundingMinor,
@@ -265,6 +287,64 @@ test("10.000 rastgele (kur, tutar) çiftinde fişin toplamı TUTAR", () => {
   // yani değişmez "fark hiç oluşmuyor" diye kolayca sağlanmıyor.
   assert.ok(sawRounding, "hiçbir turda yuvarlama farkı doğmadı — vaka havuzu zayıf");
   assert.ok(worstRounding >= 1, `en kötü fark ${worstRounding}`);
+});
+
+console.log("gösterim tavanı — döviz kolonu ₺ okumasını ASLA öldürmez");
+
+test("GÖSTERİM KAPISI tavanla aynı sayıda: sınır dahil, bir kuruş üstü hariç", () => {
+  // Kapı ile ilkelin tavanı AYNI sayı olmalı; ikisi ayrışırsa ya kapı geçirdiği
+  // bir fişte ilkel atar (sayfa düşer) ya da kapı gereksiz yere daraltır.
+  assert.equal(isConvertibleAmount(MAX_AMOUNT_KURUS), true);
+  assert.equal(isConvertibleAmount(MAX_AMOUNT_KURUS + 1), false);
+  assert.equal(isConvertibleAmount(0), true);
+  for (const bad of [-1, 12.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(isConvertibleAmount(bad), false, `${bad}`);
+  }
+  // Taşma kanıtı tavana BAĞLI: tavan yükseltilirse bu iddia da yükselmeli.
+  assert.ok(Number.isSafeInteger(MAX_AMOUNT_KURUS * 1_000_000));
+});
+
+test("tavanı AŞAN teklifin fişi atmaz, null döner (sayfa düşmez)", () => {
+  // Bu girdi uydurma DEĞİL: `MAX_AMOUNT_KURUS` bir ÖDEME tavanıdır, teklif
+  // tarafında uygulanmaz (adet 1…100.000, elle birim fiyat tek başına tavana
+  // kadar, `computeQuote` toplamı kırpmaz), yani ₺2.000.000 üstü bir teklif
+  // GÖRÜNTÜLENEBİLİR. Döviz kolonu o sayfada yok olur; ₺ okuması sağlam kalır.
+  const overCeiling = totals({ partsKurus: MAX_AMOUNT_KURUS + 1 });
+  assert.equal(convertReceipt(overCeiling, EUR_47_32), null);
+  // Kapı olmasaydı ne olurdu: ilkel atar, sunucu bileşeninde boş gövdeli 500.
+  assert.throws(
+    () => convertKurusToMinor(overCeiling.totalKurus, EUR_47_32.microTryPerUnit),
+    RangeError
+  );
+  // Tam sınırdaki teklif ise ÇEVRİLİR — kapı fazla geniş değil.
+  const atCeiling = mustConvert(totals({ partsKurus: MAX_AMOUNT_KURUS }), EUR_47_32);
+  assert.equal(atCeiling.totalMinor, 4_226_543);
+  assert.equal(atCeiling.roundingMinor, 0);
+});
+
+test("tavanı aşan tek SATIR da fişi düşürmez, null döner", () => {
+  // Negatif bir satır (ileride bir indirim kalemi) toplamı tavanın altında
+  // tutarken bir başka satırı tavanın üstüne itebilir: bu yüzden her satır
+  // AYRI AYRI sınanır.
+  const negativeLine = totals({
+    partsKurus: MAX_AMOUNT_KURUS,
+    addonLines: [{ key: "indirim", name: "İndirim", kurus: -1_000 }],
+  });
+  assert.equal(negativeLine.totalKurus, MAX_AMOUNT_KURUS - 1_000);
+  assert.equal(isConvertibleAmount(negativeLine.totalKurus), true, "toplam tavanın ALTINDA");
+  assert.equal(convertReceipt(negativeLine, EUR_47_32), null);
+});
+
+test("donmuş BOZUK kur fişi düşürmez, null döner", () => {
+  // `quotes.fx_snapshot` jsonb'dir ve CHECK'i yoktur: `fx_rates` tablosundaki
+  // `micro_try_per_unit > 0` kuralı donmuş bir satır için geçerli değil.
+  for (const bad of [0, -47_320_000, Number.NaN, 47.32, Number.POSITIVE_INFINITY]) {
+    assert.equal(
+      convertReceipt(totals({ partsKurus: 20_000 }), { currency: "EUR", microTryPerUnit: bad }),
+      null,
+      `${bad}`
+    );
+  }
 });
 
 console.log("sızma engelleri");

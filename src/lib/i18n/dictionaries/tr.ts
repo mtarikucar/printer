@@ -1324,9 +1324,12 @@ const tr: Dictionary = {
   "instantQuote.upload.cta": "Teklife parça ekle",
   "instantQuote.upload.drop": "Dosyaları buraya bırakın",
   "instantQuote.upload.failed": "{file} yüklenemedi. Lütfen tekrar deneyin.",
-  "instantQuote.upload.hint": "STL, OBJ veya 3MF · en fazla {maxMb} MB",
+  // Cümle TEK tavan söyler (genel tavan): STEP'in kendi tavanı yalnız
+  // `stepTooLarge` hatasında geçer — bırakma alanının altındaki tek satıra iki
+  // rakam sığdırmak, hiçbirini okutmamak olurdu.
+  "instantQuote.upload.hint": "STL, OBJ, 3MF veya STEP · en fazla {maxMb} MB",
   "instantQuote.upload.invalidFormat":
-    "{file}: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
+    "{file}: yalnız STL, OBJ, 3MF ve STEP dosyaları yüklenebilir.",
   "instantQuote.upload.processing": "İşleniyor…",
   "instantQuote.upload.stepTooLarge":
     "{file}: STEP dosyaları en çok {maxMb} MB olabilir — STEP aynı boyutta çok daha fazla geometri taşır. Parçayı ayırın ya da STL olarak gönderin.",

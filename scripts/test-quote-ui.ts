@@ -87,7 +87,7 @@ import type {
 import en from "../src/lib/i18n/dictionaries/en";
 import tr from "../src/lib/i18n/dictionaries/tr";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
-import { STEP_MAX_BYTES } from "../src/lib/config/quote-step";
+import { STEP_MAX_BYTES, STEP_TESSELLATION } from "../src/lib/config/quote-step";
 import {
   DFM_CODES,
   QUOTE_SOURCE_FORMATS,
@@ -695,7 +695,7 @@ test("dosya elemesi uzantıyı, boyutu ve parça tavanını Türkçe anlatır", 
     ["govde.stl", "kapak.3mf"]
   );
   assert.deepEqual(errors, [
-    "cizim.step: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
+    "cizim.step: yalnız STL, OBJ, 3MF ve STEP dosyaları yüklenebilir.",
     "dev.obj: dosya 100 MB sınırını aşıyor.",
     "Bir teklifte en fazla 2 parça olabilir.",
   ]);
@@ -1706,6 +1706,29 @@ test("SSS müşterinin ilk sorduklarını RAKAMLA yanıtlar", () => {
   ]) {
     assert.ok(body.includes(needle), `SSS "${needle}" konusuna değinmiyor`);
   }
+});
+
+test("açılış metni STEP'i doğru anlatır: tavan ve sapma SABİTTEN gelir", () => {
+  // Bu metinler bayrak OKUMAZ, yani yayına çıktıkları anda müşteriye
+  // "STEP kabul ediliyor" derler. O yüzden söyledikleri şey uçtaki kuralla
+  // BİREBİR aynı olmalı: tavan `STEP_MAX_BYTES`, sapma `STEP_TESSELLATION`.
+  const html = renderLanding();
+  const stepMb = Math.floor(STEP_MAX_BYTES / (1024 * 1024));
+  assert.ok(html.includes(`${stepMb} MB`), "STEP tavanı sayfada yok");
+  assert.ok(
+    html.includes(`${STEP_TESSELLATION.deflectionMm.toLocaleString("tr-TR")} mm`),
+    "sapma değeri sayfada yok"
+  );
+  // Birim hikâyesi: "biz mm varsaydık" DEĞİL, "dosyadan okundu".
+  assert.match(html, /birimini dosyanın kendisinden okuyoruz/);
+  assert.match(html, /mm olarak sabitlenir/);
+  assert.ok(
+    !html.includes("Dönüştüremiyorsanız"),
+    "STEP'i STL'e çevirmeyi öğütleyen eski cümle sayfada kalmış"
+  );
+  // Hero, adım kartı ve SSS: üç yüzeyin üçü de biçim listesini aynı söyler.
+  const listings = html.match(/STL, OBJ,? (?:ve|veya) 3MF/g) ?? [];
+  assert.deepEqual(listings, [], `STEP'siz biçim listesi kalmış: ${listings.join(" | ")}`);
 });
 
 test("bayrak kapalıyken yükleyici yok ama SEO yüzeyi duruyor", () => {

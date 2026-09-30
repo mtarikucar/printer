@@ -36,7 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "3D Baskı Servisi — Anlık Teklif",
     description:
-      `STL, OBJ veya 3MF dosyanızı yükleyin, fiyatı anında görün. ${anchors}` +
+      `STL, OBJ, 3MF veya STEP dosyanızı yükleyin, fiyatı anında görün. ${anchors}` +
       " (20 mm küp, 1 adet, KDV dahil; asgari sipariş" +
       ` ${formatAnchorPrice(snapshot.settings.minOrderKurus)}). Tek teklifte` +
       ` ${snapshot.settings.maxPartsPerQuote} parçaya kadar; Türkiye içi kargo ücretsiz.`,

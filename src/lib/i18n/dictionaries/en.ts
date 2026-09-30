@@ -1312,9 +1312,9 @@ const en = {
   "instantQuote.upload.cta": "Add parts to the quote",
   "instantQuote.upload.drop": "Drop your files here",
   "instantQuote.upload.failed": "{file} could not be uploaded. Please try again.",
-  "instantQuote.upload.hint": "STL, OBJ or 3MF · up to {maxMb} MB",
+  "instantQuote.upload.hint": "STL, OBJ, 3MF or STEP · up to {maxMb} MB",
   "instantQuote.upload.invalidFormat":
-    "{file}: only STL, OBJ and 3MF files can be uploaded.",
+    "{file}: only STL, OBJ, 3MF and STEP files can be uploaded.",
   "instantQuote.upload.processing": "Processing…",
   "instantQuote.upload.stepTooLarge":
     "{file}: STEP files can be at most {maxMb} MB — a STEP file carries far more geometry at the same size. Split the part or send it as STL.",

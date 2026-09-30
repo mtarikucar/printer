@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { JSX, ReactNode } from "react";
 import { mm } from "@/components/quote/format";
+import { STEP_MAX_BYTES, STEP_TESSELLATION } from "@/lib/config/quote-step";
 import type {
   PricingSnapshot,
   SnapshotMaterial,
@@ -38,6 +39,15 @@ import {
 
 const CONFIDENTIALITY_SENTENCE =
   "Dosyalarınız yalnızca siparişinizi üreten, atanmış üretim ortağıyla paylaşılır.";
+
+/**
+ * STEP'in iki rakamı da SABİTTEN okunur (`quote-step.ts`), elle yazılmaz:
+ * tavan ya da sapma bir gün yeni bir ölçümle değişirse bu sayfa kendiliğinden
+ * doğru kalır. Sapma virgüllü yazılır ("0,01") — sayfanın geri kalanı da
+ * Türkçe okunuşu kullanıyor.
+ */
+const STEP_MAX_MB = Math.floor(STEP_MAX_BYTES / (1024 * 1024));
+const STEP_DEFLECTION_TR = STEP_TESSELLATION.deflectionMm.toLocaleString("tr-TR");
 
 // ─── Küçük biçimleyiciler ───────────────────────────────────────────────────
 
@@ -109,7 +119,7 @@ function landingSteps(snapshot: PricingSnapshot): Array<{ title: string; body: s
   return [
     {
       title: "Modelini yükle",
-      body: `STL, OBJ veya 3MF dosyanızı sürükleyin. Tek teklifte ${maxPartsPerQuote} parçaya, dosya başına ${megabytes(maxFileBytes)} MB'a kadar. Hesap açmadan yükleyebilirsiniz.`,
+      body: `STL, OBJ, 3MF veya STEP dosyanızı sürükleyin. Tek teklifte ${maxPartsPerQuote} parçaya, dosya başına ${megabytes(maxFileBytes)} MB'a (STEP'te ${STEP_MAX_MB} MB) kadar. Hesap açmadan yükleyebilirsiniz.`,
     },
     {
       title: "Özelliklerini seç",
@@ -162,7 +172,7 @@ export function landingFaq(snapshot: PricingSnapshot): FaqEntry[] {
   return [
     {
       q: "Hangi dosya formatlarını yükleyebilirim?",
-      a: `STL, OBJ ve 3MF. Tek teklifte en çok ${s.maxPartsPerQuote} parça, dosya başına en çok ${megabytes(s.maxFileBytes)} MB. Ölçü birimini (mm, cm, inç) parça başına değiştirebilirsiniz; 3MF dosyasının kendi birimi varsa otomatik okunur.`,
+      a: `STL, OBJ, 3MF ve STEP (.step / .stp). Tek teklifte en çok ${s.maxPartsPerQuote} parça, dosya başına en çok ${megabytes(s.maxFileBytes)} MB — STEP dosyalarında ${STEP_MAX_MB} MB, çünkü STEP aynı boyutta çok daha fazla geometri taşır. Ölçü birimini (mm, cm, inç) parça başına değiştirebilirsiniz; 3MF ve STEP dosyalarının kendi birimi okunur, STEP'te birim mm'ye sabitlenir.`,
     },
     // Asgari tutar sıfırlanırsa soru da kalkar: "yok" diyen bir SSS maddesi,
     // olmayan bir kuralı anlatmaktan iyidir.
@@ -186,8 +196,8 @@ export function landingFaq(snapshot: PricingSnapshot): FaqEntry[] {
       a: `Standart teslim ${leadSentence} olarak başlar; malzeme ve yüzey işlemi bunu uzatabilir. ${tierSentence}. Saat ${s.cutoffHour}.00 sonrasında verilen siparişler ertesi iş gününden sayılır, hafta sonu ve resmî tatiller hesaba katılmaz.`,
     },
     {
-      q: "STEP, SOLIDWORKS veya Fusion dosyamı nasıl dışa aktarırım?",
-      a: "Anlık fiyat için parçayı CAD programınızdan STL ya da 3MF olarak kaydedin: SOLIDWORKS'te Farklı Kaydet → STL → Seçenekler'den İnce (Fine) çözünürlük, Fusion 360'ta Dosya → Dışa Aktar → STL, Onshape'te sağ tuş → Export → STL. Kaba tesselasyon yüzeyleri köşeli gösterir, ince çözünürlüğü seçin. Dönüştüremiyorsanız dosyayı olduğu gibi gönderip manuel teklif isteyin.",
+      q: "STEP dosyamı doğrudan yükleyebilir miyim?",
+      a: `Evet, .step ve .stp dosyaları doğrudan yüklenir; dönüştürmeniz gerekmez. Ölçü birimini dosyanın kendisinden okuyoruz (STEP standardı birimi taşır), bu yüzden birim mm olarak sabitlenir ve parça kartından değiştirilemez — ölçek alanı serbest kalır. Yüzeyleri baskı için üçgen ağa çevirir, sapmayı en çok ${STEP_DEFLECTION_TR} mm'de tutar ve bu değeri teklif belgesine yazarız. STL'i tercih etmenizin hâlâ iki sebebi var: tesselasyonu siz seçersiniz (SOLIDWORKS'te Farklı Kaydet → STL → Seçenekler'den İnce (Fine) çözünürlük, Fusion 360'ta Dosya → Dışa Aktar → STL, Onshape'te sağ tuş → Export → STL) ve ${STEP_MAX_MB} MB'lık STEP tavanına takılmazsınız.`,
     },
     {
       q: "Anlık fiyat çıkmazsa ne oluyor?",
@@ -533,7 +543,7 @@ export function PrintServiceLanding({
               Modelinizi bırakın, fiyatı aynı ekranda görün.
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-text-secondary">
-              STL, OBJ veya 3MF dosyanızı yükleyin; ölçüleri, üretilebilirlik uyarılarını ve
+              STL, OBJ, 3MF veya STEP dosyanızı yükleyin; ölçüleri, üretilebilirlik uyarılarını ve
               adet kademeli fiyatı dakikalar içinde alın. FDM ve SLA baskı, Türkiye
               genelindeki üretim ortağı ağıyla.
             </p>

@@ -114,6 +114,42 @@ export function frameworkLineKurus(unitKurus: number, quantity: number): number 
   return unitKurus * quantity;
 }
 
+/**
+ * Fiyat sapmasının müşteriye gösterilen TEK cümlesi.
+ *
+ * Tek kaynak: aynı ret iki yerde uygulanıyor (`releaseBatch` ve parti
+ * ödemesi) ve iki ayrı cümle, müşteriyi "bu aynı arıza mı?" diye tahmine
+ * iterdi.
+ */
+export const FRAMEWORK_PRICE_DRIFT_ERROR =
+  "Bu partinin tutarı çerçeve anlaşmada yazan tutarla uyuşmuyor; ekibimiz " +
+  "kontrol edene kadar ödeme alınamaz.";
+
+/**
+ * EŞİTLİK KAPISI: klon teklifin BUGÜN hesaplanan BRÜTÜ, partinin kilitli
+ * tutarı mı? `null` = kapı açık.
+ *
+ * ── KARŞILAŞTIRMA BRÜT ÜZERİNDEDİR, `payableKurus` DEĞİL ──
+ *
+ * Girdi `computeQuote(...).totals.totalKurus` ↔ `quote_framework_batches.
+ * amount_kurus`; ikisi de brüt. Tahsil edilen nakitle (`quote-tender.ts`in
+ * `payableKurus`i) karşılaştırmak, hediye kartı kullanan HER partide yanlış
+ * alarm verir ve müşteriyi ödeyemez hâle sokardı — oysa hediye kartı brütü
+ * düşürmez, tahsil edilen nakdi düşürür (`quote-tender.ts` başlığı:
+ * "`amountKurus` BRÜTTÜR ve hiçbir adım onu düşürmez"). Bu yüzden bu modül
+ * tahsilat zincirini IMPORT ETMEZ ve etmemeli.
+ *
+ * TOLERANS YOK: kuruş tamsayısıdır. Bir epsilon, sapmanın toleransın altında
+ * kaldığı her turda kilitli fiyatın sessizce kaymasına izin verirdi. Yön de
+ * simetriktir — müşteri lehine bir sapma bile anlaşmada YAZMAYAN bir tutardır.
+ */
+export function frameworkBatchDriftCode(
+  computedTotalKurus: number,
+  batchAmountKurus: number
+): "framework_price_drift" | null {
+  return computedTotalKurus === batchAmountKurus ? null : "framework_price_drift";
+}
+
 /** Planlanan bir parti satırı (henüz DB'ye yazılmamış hâli). */
 export interface FrameworkBatchLineInput {
   /** `parts_snapshot[].partId`. */

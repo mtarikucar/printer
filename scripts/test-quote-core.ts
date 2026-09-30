@@ -32,7 +32,11 @@ import {
 import { evaluatePartDfm } from "../src/lib/config/quote-dfm";
 import { computeQuote, defaultPartConfig } from "../src/lib/config/quote-compute";
 import { addBusinessDays, istanbulDateKey } from "../src/lib/config/business-days";
-import { checkoutBlockers, quotePermissions } from "../src/lib/config/quote-policy";
+import {
+  QUOTE_FRAMEWORK_BATCH_REASON,
+  checkoutBlockers,
+  quotePermissions,
+} from "../src/lib/config/quote-policy";
 import { formatQuoteNumber, parseQuoteNumber } from "../src/lib/config/quote-number";
 import { SEED_MAX_FILE_BYTES, SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import {
@@ -817,14 +821,28 @@ console.log("\n9) Politika");
 const NOW = new Date("2026-09-22T10:00:00Z");
 const FUTURE = new Date("2026-10-22T10:00:00Z");
 const PAST = new Date("2026-09-01T10:00:00Z");
-function perms(status: QuoteStatus, over: Partial<{ expiresAt: Date; orderId: string | null; hasLiveDraft: boolean }> = {}) {
+function perms(
+  status: QuoteStatus,
+  over: Partial<{
+    expiresAt: Date;
+    orderId: string | null;
+    hasLiveDraft: boolean;
+    isFrameworkBatch: boolean;
+  }> = {}
+) {
   return quotePermissions(
     {
       status,
       expiresAt: over.expiresAt ?? FUTURE,
       orderId: over.orderId ?? null,
     },
-    { hasLiveDraft: over.hasLiveDraft ?? false, now: NOW }
+    {
+      hasLiveDraft: over.hasLiveDraft ?? false,
+      now: NOW,
+      // ZORUNLU alan: sarmalayıcının varsayılanı YALNIZ testin okunurluğu
+      // için; üretimdeki dört çağrı yeri gerçeği BEYAN etmek zorunda.
+      isFrameworkBatch: over.isFrameworkBatch ?? false,
+    }
   );
 }
 test("taslak düzenlenebilir ve ödenebilir", () => {
@@ -870,6 +888,71 @@ test("incelemedeki teklif düzenlenir ama ödenemez", () => {
   assert.equal(p.canCheckout, false);
   assert.equal(p.canRequestReview, false);
   assert.ok(p.blockedReason);
+});
+test("çerçeve partisi DÜZENLENEMEZ ama ÖDENEBİLİR", () => {
+  const p = perms("quoted", { isFrameworkBatch: true });
+  assert.equal(p.canEdit, false, "düzenleme açıksa demoteQuotedToDraft kilitli fiyatı düşürür");
+  assert.equal(p.canRequestReview, false, "parti için inceleme istenmez");
+  assert.equal(
+    p.canCheckout,
+    true,
+    "ÖDEME AÇIK KALIR: kapatmak serbest bırakılmış bir partiyi tuzağa düşürürdü"
+  );
+  assert.equal(
+    p.blockedReason,
+    QUOTE_FRAMEWORK_BATCH_REASON,
+    "cümle sözlükteki instantQuote.framework.readOnly ile BİREBİR aynı olmalı"
+  );
+  assert.equal(
+    QUOTE_FRAMEWORK_BATCH_REASON,
+    "Bu teklif bir çerçeve anlaşmanın partisidir; düzenlenemez."
+  );
+});
+test("çerçeve partisi draft ya da needs_review hâlinde bile düzenlenemez", () => {
+  // R1'in asıl deliği: `needs_review` dalı `canEdit: true` döndürüyor. Parti
+  // kapısı ondan ÖNCE gelmezse müşteri partisini düzenler, `demoteQuotedToDraft`
+  // koşar ve kilitli fiyat canlı katalog fiyatına döner.
+  for (const status of ["draft", "needs_review", "quoted"] as QuoteStatus[]) {
+    const p = perms(status, { isFrameworkBatch: true });
+    assert.equal(p.canEdit, false, status);
+    assert.equal(p.canRequestReview, false, status);
+    assert.equal(p.canCheckout, true, status);
+  }
+});
+test("siparişe dönmüş/iptal/süresi dolmuş parti ÖNCE o sebebi söyler", () => {
+  // "Düzenlenemez, çünkü partidir" değil "düzenlenemez, çünkü siparişe döndü".
+  assert.equal(
+    perms("ordered", { isFrameworkBatch: true }).blockedReason,
+    "Bu teklif siparişe dönüştü."
+  );
+  assert.equal(
+    perms("cancelled", { isFrameworkBatch: true }).blockedReason,
+    "Bu teklif iptal edildi."
+  );
+  assert.equal(
+    perms("quoted", { isFrameworkBatch: true, expiresAt: PAST }).blockedReason,
+    "Teklifin süresi doldu — yeniden fiyatlayın."
+  );
+  // …ve bu üç hâlde ödeme de KAPALI kalır (parti kapısı onu açmaz).
+  assert.equal(perms("ordered", { isFrameworkBatch: true }).canCheckout, false);
+  assert.equal(perms("quoted", { isFrameworkBatch: true, expiresAt: PAST }).canCheckout, false);
+});
+test("bekleyen ödeme, parti kapısından ÖNCE anlatılır", () => {
+  // İkisi de `canEdit=false` / `canCheckout=true` veriyor, yani hiçbir yetki
+  // değişmiyor; söylenen cümle EYLEME dönük olanı olmalı ("ödemene devam et").
+  const p = perms("quoted", { isFrameworkBatch: true, hasLiveDraft: true });
+  assert.equal(p.canEdit, false);
+  assert.equal(p.canCheckout, true);
+  assert.equal(p.blockedReason, "Bu teklif için bekleyen bir ödeme var.");
+});
+test("parti OLMAYAN teklifte davranış DEĞİŞMEDİ", () => {
+  assert.deepEqual(perms("draft", { isFrameworkBatch: false }), {
+    canEdit: true,
+    canCheckout: true,
+    canRequestReview: true,
+    blockedReason: null,
+  });
+  assert.equal(perms("needs_review", { isFrameworkBatch: false }).canEdit, true);
 });
 test("checkoutBlockers hazır teklifte boş döner", () => {
   const parts = [part({}, { quantity: 10 })];

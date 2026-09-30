@@ -15,6 +15,14 @@ export const QUOTE_LIVE_DRAFT_REASON = "Bu teklif için bekleyen bir ödeme var.
 export const QUOTE_ORDERED_REASON = "Bu teklif siparişe dönüştü.";
 export const QUOTE_CANCELLED_REASON = "Bu teklif iptal edildi.";
 export const QUOTE_IN_REVIEW_REASON = "Teklifiniz ekibimizin incelemesinde.";
+/**
+ * Bir çerçeve anlaşmanın serbest bırakılmış partisi.
+ *
+ * Cümle sözlükteki `instantQuote.framework.readOnly` ile BİREBİR aynı olmak
+ * zorundadır: ekran ile uç aynı sebebi söylemeli.
+ */
+export const QUOTE_FRAMEWORK_BATCH_REASON =
+  "Bu teklif bir çerçeve anlaşmanın partisidir; düzenlenemez.";
 
 export interface QuotePermissions {
   canEdit: boolean;
@@ -25,11 +33,32 @@ export interface QuotePermissions {
 
 /**
  * Sıra ÖNEMLİ: siparişe dönmüş/iptal bir teklif her şeyin üstündedir, sonra
- * süre dolumu, sonra bekleyen ödeme kilidi gelir.
+ * süre dolumu, sonra bekleyen ödeme kilidi, sonra ÇERÇEVE PARTİSİ kapısı gelir.
+ *
+ * ─── `isFrameworkBatch` ZORUNLU, opsiyonel DEĞİL ────────────────────────────
+ *
+ * Emsal `quote-tender.ts`in yazılı kararıdır ("TÜM ALANLAR ZORUNLU ve bu
+ * bilinçlidir… İsteğe bağlı bir alan, o yolların sessizce eski davranışta
+ * kalması demekti") ve burada bedeli ÖLÇÜLEBİLİR: serbest bırakılmış bir parti
+ * sıradan bir `quotes` satırıdır; müşteri onu düzenlerse `demoteQuotedToDraft`
+ * (`quote-service.ts`) devreye girer, `manualPriceKey` tutmaz
+ * (`quote-compute.ts`) ve KİLİTLİ FİYAT SESSİZCE CANLI KATALOG FİYATINA DÖNER
+ * — müşteri anlaşmada yazandan farklı bir tutar öder. Alanı zorunlu yapmak,
+ * derleyicinin dört okuma yolunu (servis, inceleme talebi, sunum, ödeme) tek
+ * tek saymasını sağlar.
+ *
+ * PARTİ KAPISININ YERİ: `needs_review` dalından ÖNCE olmak ZORUNDA — o dal
+ * `canEdit: true` döndürüyor, yani kapı ondan sonra gelse delik açık kalırdı.
+ * Bekleyen ödeme kilidinden SONRA olması ise bir seçim: ikisi de aynı yetkiyi
+ * (`canEdit=false`, `canCheckout=true`) veriyor, o yüzden hiçbir şey
+ * gevşemiyor; söylenen cümle EYLEME dönük olanı ("ödemene devam et") kalıyor.
+ *
+ * `canCheckout` parti hâlinde AÇIK KALIR: kapatmak, serbest bırakılmış ve
+ * müşterinin ödemesi beklenen bir partiyi tuzağa düşürmek olurdu.
  */
 export function quotePermissions(
   q: { status: QuoteStatus; expiresAt: Date; orderId: string | null },
-  ctx: { hasLiveDraft: boolean; now: Date }
+  ctx: { hasLiveDraft: boolean; now: Date; isFrameworkBatch: boolean }
 ): QuotePermissions {
   const closed = { canEdit: false, canCheckout: false, canRequestReview: false };
 
@@ -50,6 +79,17 @@ export function quotePermissions(
       canCheckout: true,
       canRequestReview: false,
       blockedReason: QUOTE_LIVE_DRAFT_REASON,
+    };
+  }
+  if (ctx.isFrameworkBatch) {
+    // Anlaşmanın kilitli fiyatı bu satırın manuel fiyatında duruyor: tek bir
+    // düzenleme onu düşürür. Ödeme ise AÇIK — parti tam olarak ödenmek için
+    // serbest bırakıldı.
+    return {
+      canEdit: false,
+      canCheckout: true,
+      canRequestReview: false,
+      blockedReason: QUOTE_FRAMEWORK_BATCH_REASON,
     };
   }
   if (q.status === "needs_review") {

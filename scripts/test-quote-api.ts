@@ -155,6 +155,7 @@ function present(
     orderNumber?: string | null;
     stepEnabled?: boolean;
     fxDisplayEnabled?: boolean;
+    isFrameworkBatch?: boolean;
   } = {}
 ) {
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
@@ -180,6 +181,9 @@ function present(
     // Döviz bayrağı da aynı sebeple PARAMETRE. Varsayılan KAPALI: çıkış
     // durumu, `quote_fx_display_enabled`in üretimdeki hâlidir.
     fxDisplayEnabled: extra.fxDisplayEnabled ?? false,
+    // Parti kapısı da PARAMETRE: `presentQuote` sorgu yapmaz, gerçeği
+    // yükleyici (`loadPresentedQuote` → `quoteIsFrameworkBatch`) BEYAN eder.
+    isFrameworkBatch: extra.isFrameworkBatch ?? false,
   });
 }
 
@@ -525,11 +529,26 @@ test("bekleyen ödeme teklifi kilitler ama ödemeye devam açık kalır", () => 
     shareBaseUrl: "https://figurunica.test/teklif/T-000001",
     stepEnabled: false,
     fxDisplayEnabled: false,
+    isFrameworkBatch: false,
   });
   assert.equal(view.locked, true);
   assert.equal(view.liveDraftReference, "FIG-ABCD1234");
   assert.equal(view.readiness.canCheckout, true);
   assert.equal(view.catalogChangedSinceSnapshot, true);
+});
+
+test("çerçeve partisi KİLİTLİ gösterilir, ödemesi AÇIK kalır", () => {
+  // Ekran ile uç AYNI cevabı vermeli: `assertEditable` bu teklifi 409 ile
+  // reddediyor (`quote-service.ts`), yani ekran onu düzenlenebilir
+  // GÖSTEREMEZ — gösterirse müşteri `demoteQuotedToDraft`i tetikler ve
+  // anlaşmanın kilitli fiyatı canlı katalog fiyatına döner (tasarım R1).
+  const quote = makeQuote({ status: "quoted" });
+  const batch = present(OWNER_VIEW, quote, [makePart()], { isFrameworkBatch: true });
+  assert.equal(batch.locked, true);
+  assert.equal(batch.readiness.canCheckout, true, "parti ÖDENEBİLİR kalmalı");
+  // Aynı teklif parti OLMASA düzenlenebilirdi: kilidi getiren şey alanın kendisi.
+  const plain = present(OWNER_VIEW, quote, [makePart()], { isFrameworkBatch: false });
+  assert.equal(plain.locked, false);
 });
 
 test("süresi dolmuş teklif kilitlidir ve engel cümlesini taşır", () => {

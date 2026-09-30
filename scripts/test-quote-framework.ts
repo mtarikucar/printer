@@ -34,6 +34,7 @@ import {
   FRAMEWORK_TERMS_VERSION,
   MAX_BATCHES_PER_FRAMEWORK,
   MAX_FRAMEWORK_TOTAL_KURUS,
+  frameworkBatchDriftCode,
   frameworkBatchLoadUnits,
   frameworkBatchTotals,
   frameworkCommitmentRemaining,
@@ -42,6 +43,7 @@ import {
   frameworkProgressBuckets,
   validateBatchPlan,
   validateFrameworkAgreement,
+  FRAMEWORK_PRICE_DRIFT_ERROR,
   type FrameworkBatchLineInput,
   type FrameworkCommitmentPart,
   type FrameworkProgressLine,
@@ -743,6 +745,45 @@ test("1.000 rastgele satır kümesinde kovalar DAİMA taahhüde toplanır", () =
       assert.ok(p.unplannedUnits >= 0, `tur ${round} · ${p.partId} negatif kova`);
     }
   }
+});
+
+// ─── 9) Eşitlik kapısı (fiyat sapması) ──────────────────────────────────────
+
+console.log("\n9) eşitlik kapısı: kilitli tutar ile bugün hesaplanan brüt");
+
+test("eşit tutarda kapı AÇIK (null döner)", () => {
+  assert.equal(frameworkBatchDriftCode(1_234_500, 1_234_500), null);
+  assert.equal(frameworkBatchDriftCode(1, 1), null);
+});
+
+test("bir kuruşluk sapma bile REDDEDİLİR", () => {
+  assert.equal(frameworkBatchDriftCode(1_234_501, 1_234_500), "framework_price_drift");
+  assert.equal(frameworkBatchDriftCode(1_234_499, 1_234_500), "framework_price_drift");
+});
+
+test("yön simetrik: yukarı da aşağı da sapmadır", () => {
+  // Aşağı sapma da reddedilir: müşteri lehine bir sapma bile anlaşmada YAZMAYAN
+  // bir tutardır ve kaynağı bilinmeyen bir hesaptır.
+  assert.equal(frameworkBatchDriftCode(1, 2), "framework_price_drift");
+  assert.equal(frameworkBatchDriftCode(2, 1), "framework_price_drift");
+});
+
+test("kapı TAMSAYI karşılaştırmasıdır, tolerans YOK", () => {
+  // Kuruş tamsayısıdır; bir epsilon toleransı, sapmanın toleransın altında
+  // kaldığı her turda kilitli fiyatın sessizce kaymasına izin verirdi.
+  assert.ok(!/epsilon|tolerance|Math\.abs/i.test(moduleCode), "tolerans/abs yazılmış");
+});
+
+test("reddin Türkçe cümlesi TEK yerde", () => {
+  assert.match(FRAMEWORK_PRICE_DRIFT_ERROR, /çerçeve/i);
+  assert.ok(FRAMEWORK_PRICE_DRIFT_ERROR.length > 30, "cümle müşteriye ne yapacağını söylemeli");
+});
+
+test("kapı BRÜT karşılaştırır: tahsilat zinciri bu modüle GİRMEZ", () => {
+  // `payableKurus` ile karşılaştırmak, hediye kartı kullanan her partiyi
+  // ödenemez bir 409'a düşürürdü (G birleşti).
+  assert.ok(!/payableKurus|giftCard|havaleDiscount/.test(moduleCode));
+  assert.ok(!/quote-tender/.test(moduleCode));
 });
 
 console.log(`\n${pass} geçti, ${fail} kaldı`);

@@ -49,6 +49,7 @@ import {
   giftCards,
   orderDrafts,
   quoteCheckouts,
+  quoteFrameworkBatches,
   quoteParts,
   quotes,
   users,
@@ -75,6 +76,10 @@ import {
 } from "@/lib/config/payment";
 import { MAX_AMOUNT_KURUS, allocatePaytrBasket } from "@/lib/config/prices";
 import { computeQuote } from "@/lib/config/quote-compute";
+import {
+  FRAMEWORK_PRICE_DRIFT_ERROR,
+  frameworkBatchDriftCode,
+} from "@/lib/config/quote-framework";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
 import {
   computeTender,
@@ -88,9 +93,7 @@ import {
 } from "@/lib/config/quote-tender";
 import type {
   ComputedQuote,
-  DfmCode,
   FrozenQuoteAddon,
-  FrozenQuotePart,
   PricingSnapshot,
 } from "@/lib/config/quote-types";
 import { DEFAULT_TEMPLATE_SLUG } from "@/lib/create/design-templates";
@@ -121,7 +124,16 @@ import {
 import { buildDraftReference, promoteDraftToOrder } from "@/lib/services/order-draft";
 import { buildMerchantOid, createPaytrToken } from "@/lib/services/paytr";
 import { toPricingInputs } from "@/lib/services/quote-present";
-import { QuoteServiceError, liveDraftForQuote } from "@/lib/services/quote-service";
+// `freezeParts` BURADAN TAŞINDI (`quote-service.ts`): anlaşmanın
+// `parts_snapshot`ı da o diziyi kullanıyor ve çerçeve servisi bu dosyayı
+// IMPORT EDEMEZ (`attribution-server.ts` → `server-only`, standalone Node
+// worker'ını crash-loop'a sokar). Gövde BİREBİR taşındı; ikinci bir dondurma
+// yolu, kilitli fiyatın sürüklenmesinin en kısa yoludur.
+import {
+  QuoteServiceError,
+  freezeParts,
+  liveDraftForQuote,
+} from "@/lib/services/quote-service";
 import { rateLimitAsync } from "@/lib/services/rate-limit";
 import { parseTaxId } from "@/lib/services/tax-id";
 import { getClientIpFromRequest } from "@/lib/utils/request";
@@ -277,89 +289,6 @@ function dominantOrderMaterial(
   // Katalogdan kalkmış bir teknoloji: reçine varsayılanı, siparişin akmasını
   // engellemez — admin sipariş ekranından değiştirebilir.
   return tech?.orderMaterial ?? "resin";
-}
-
-/**
- * Ödeme anında DONDURULAN parça tanımları.
- *
- * Üretici ve admin ekranları ile dosya bağlama işi bu satırı okur, canlı
- * `quote_parts`'ı değil: müşteri ödedikten sonra teklifini düzenleyemez ama
- * katalog ve adlar değişebilir, ve basılan şeyin tanımı ödenen tanım olmalı.
- */
-function freezeParts(
-  snapshot: PricingSnapshot,
-  parts: QuotePart[],
-  computed: ComputedQuote
-): FrozenQuotePart[] {
-  const priced = new Map(computed.parts.map((p) => [p.id, p]));
-  return parts.map((part, index) => {
-    const c = priced.get(part.id);
-    if (!c || !c.price.ok || c.dfm.scaled === null) {
-      // Buraya düşmek imkânsız: `checkoutBlockers` fiyatlanamayan parçayı
-      // zaten durdurur. Yine de sessiz bir sıfır fiyat dondurmayalım.
-      throw new QuoteServiceError(
-        "Teklifin fiyatı hesaplanamadı — sayfayı yenileyip tekrar deneyin.",
-        409,
-        "price_unavailable"
-      );
-    }
-    if (!part.canonicalStlKey) {
-      throw new QuoteServiceError(
-        "Bazı parçaların baskı dosyası henüz hazır değil — birkaç saniye sonra tekrar deneyin.",
-        409,
-        "canonical_missing"
-      );
-    }
-    const tech = snapshot.technologies.find((t) => t.key === part.technologyKey);
-    const material = snapshot.materials.find(
-      (m) => m.key === part.materialKey && m.technologyKey === part.technologyKey
-    );
-    const color = material?.colors.find((c2) => c2.key === part.colorKey);
-    const finish = snapshot.finishes.find(
-      (f) =>
-        f.key === part.finishKey &&
-        (f.technologyKey === null || f.technologyKey === part.technologyKey)
-    );
-    const warnings: DfmCode[] = c.dfm.issues
-      .filter((issue) => issue.severity === "warning")
-      .map((issue) => issue.code);
-
-    return {
-      partId: part.id,
-      position: index,
-      name: part.name,
-      fileName: part.fileName,
-      sourceFormat: part.sourceFormat,
-      canonicalStlKey: part.canonicalStlKey,
-      thumbnailKey: part.thumbnailKey,
-      drawingKey: part.drawingKey,
-      drawingName: part.drawingName,
-      scaleFactor: c.dfm.scaled.factor,
-      technologyKey: part.technologyKey,
-      // Ad çözülemezse anahtarın kendisi yazılır: boş bir hücre, üreticinin
-      // neyi basacağını bilmemesi demektir.
-      technologyName: tech?.name ?? part.technologyKey,
-      materialKey: part.materialKey,
-      materialName: material?.name ?? part.materialKey,
-      colorName: color?.name ?? part.colorKey,
-      colorHex: color?.hex ?? "#000000",
-      finishKey: part.finishKey,
-      finishName: finish?.name ?? part.finishKey,
-      layerUm: part.layerUm,
-      infillPct: part.infillPct,
-      quantity: part.quantity,
-      dimensionsMm: c.dfm.scaled.extentsMm,
-      volumeCm3: c.dfm.scaled.volumeCm3,
-      // Hangi sapmayla ölçüldüğü ödeme anında DONAR: üretici/admin görünümleri
-      // ve sonraki bir uygunluk tartışması bu kaydı okur. Tutar hesabına
-      // girmez — bir nitelik, bir fiyat değil.
-      tessellationMm: part.geometry?.tessellation?.deflectionMm ?? null,
-      unitKurus: c.price.unitKurus,
-      lineKurus: c.price.lineKurus,
-      note: part.note,
-      dfmWarnings: warnings,
-    };
-  });
 }
 
 /** Taslağın ödeme yöntemi; kolon teklif dışı bir değer taşırsa kart sayılır. */
@@ -801,9 +730,29 @@ async function freezeCheckout(args: {
     }
 
     const now = new Date();
+    // ÇERÇEVE PARTİSİ Mİ: aynı satır iki kapıya birden hizmet ediyor —
+    // `quotePermissions`ın parti kapısı (düzenleme kapalı, ödeme AÇIK) ve
+    // aşağıdaki EŞİTLİK KAPISI. Tek okuma, çünkü ikinci bir sorgu iki kapının
+    // farklı bir gerçek görmesine izin verirdi.
+    //
+    // OKUMA BEKLEYEN ÖDEME DALINDAN SONRA: o dal taslağı AYNEN geri veriyor ve
+    // taslağın tutarı ödeme anında ZATEN dondurulmuş (o an bu kapıdan geçti).
+    // Kapıyı tekrar koşturmak, müşteriyi hediye kartı rezervasyonu duran kendi
+    // bekleyen ödemesinden dışarı kilitleyebilirdi — oysa düzeltilecek şey
+    // taslak değil, klonun sonradan bozulan satırıdır.
+    const [frameworkBatch] = await tx
+      .select({
+        id: quoteFrameworkBatches.id,
+        frameworkId: quoteFrameworkBatches.frameworkId,
+        position: quoteFrameworkBatches.position,
+        amountKurus: quoteFrameworkBatches.amountKurus,
+      })
+      .from(quoteFrameworkBatches)
+      .where(eq(quoteFrameworkBatches.quoteId, quote.id))
+      .limit(1);
     const permissions = quotePermissions(
       { status: quote.status, expiresAt: quote.expiresAt, orderId: quote.orderId },
-      { hasLiveDraft: false, now }
+      { hasLiveDraft: false, now, isFrameworkBatch: frameworkBatch !== undefined }
     );
     if (!permissions.canCheckout) {
       throw new QuoteServiceError(
@@ -868,6 +817,35 @@ async function freezeCheckout(args: {
         400,
         "amount_out_of_range"
       );
+    }
+
+    // ─── EŞİTLİK KAPISI (çerçeve partisi) ────────────────────────────────
+    //
+    // Klon parti teklifi sıradan bir `quotes` satırıdır. Bir yolla manuel
+    // fiyatı düşerse (`manualPriceKey` tutmaz, `quote-compute.ts`) tutar canlı
+    // katalog fiyatına döner ve müşteri ANLAŞMADA YAZMAYAN bir tutar öder.
+    // Kapı, tahsilat başlamadan önce o sapmayı yakalar.
+    //
+    // KARŞILAŞTIRMA BRÜT ÜZERİNDEDİR: `totals.totalKurus` ↔
+    // `quote_framework_batches.amount_kurus`. `payableKurus` ile
+    // karşılaştırmak, hediye kartı kullanan HER partide yanlış alarm verir ve
+    // müşteriyi ödeyemez hâle sokardı — kart brütü düşürmez, tahsil edilen
+    // nakdi düşürür (`quote-tender.ts`: "`amountKurus` BRÜTTÜR ve hiçbir adım
+    // onu düşürmez"). Tahsilat zinciri de bu satırdan SONRA koşuyor, yani
+    // burada `payableKurus` henüz YOKTUR.
+    if (
+      frameworkBatch &&
+      frameworkBatchDriftCode(totals.totalKurus, frameworkBatch.amountKurus) !== null
+    ) {
+      // Admin uyarısı: sapma bir arızadır ve sessizce müşteriye 409 dönmek,
+      // kimsenin bakmadığı bir para hatası bırakmak olurdu.
+      console.error(
+        `[quote-framework] fiyat sapması: parti ${frameworkBatch.id} ` +
+          `(anlaşma kimliği ${frameworkBatch.frameworkId}, sıra ${frameworkBatch.position}) ` +
+          `kilitli ${frameworkBatch.amountKurus} kuruş, teklif ${quote.number} ` +
+          `bugün ${totals.totalKurus} kuruş hesapladı — ödeme reddedildi`
+      );
+      throw new QuoteServiceError(FRAMEWORK_PRICE_DRIFT_ERROR, 409, "framework_price_drift");
     }
 
     const invoice = resolveInvoice(input.invoice);

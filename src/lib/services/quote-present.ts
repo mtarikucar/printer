@@ -205,6 +205,17 @@ export interface PresentQuoteInput {
    * davranışta kalması demekti.
    */
   fxDisplayEnabled: boolean;
+  /**
+   * Bu teklif bir çerçeve anlaşmanın serbest bırakılmış PARTİSİ mi
+   * (`quoteIsFrameworkBatch`, `quote-service.ts`).
+   *
+   * ZORUNLU bir alan, `optional` DEĞİL — gerekçe `fxDisplayEnabled` ile aynı
+   * (bu dosya SAF ve SENKRONDUR, sorguyu kendisi yapamaz) ve bedeli daha
+   * ağır: opsiyonel bir alan, ekranın parti klonunu DÜZENLENEBİLİR göstermesi
+   * demekti. Müşteri düzenlerse `demoteQuotedToDraft` koşar ve anlaşmanın
+   * kilitli fiyatı canlı katalog fiyatına döner (tasarım R1).
+   */
+  isFrameworkBatch: boolean;
 }
 
 export function presentQuote(input: PresentQuoteInput): PresentedQuote {
@@ -213,7 +224,11 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
   const expired = quote.status === "expired" || now.getTime() > quote.expiresAt.getTime();
   const permissions = quotePermissions(
     { status: quote.status, expiresAt: quote.expiresAt, orderId: quote.orderId },
-    { hasLiveDraft: input.liveDraftReference !== null, now }
+    {
+      hasLiveDraft: input.liveDraftReference !== null,
+      now,
+      isFrameworkBatch: input.isFrameworkBatch,
+    }
   );
 
   const computedById = new Map(computed.parts.map((p) => [p.id, p]));

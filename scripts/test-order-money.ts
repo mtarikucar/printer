@@ -1489,6 +1489,50 @@ function quoteSnap(over: Partial<OrderMoneySnapshot> = {}): OrderMoneySnapshot {
   });
 }
 
+// ─── REGRESYON: çerçeve partisi para modelini DEĞİŞTİRMEDİ (0073) ──────────
+//
+// Bir çerçeve anlaşmanın partisi KENDİ siparişidir ve bugünkü ödeme yolundan
+// (`createQuoteCheckout` → `order_drafts` → `orders`) geçer. Çerçeve
+// `orders`/`order_drafts` şemalarına TEK KOLON EKLEMEDİ, yani para dökümünün
+// girdisinde partiyi ötekinden ayıran HİÇBİR alan yoktur — dökümün birebir
+// aynı çıkması bunun DOĞAL sonucudur ve burada iki yönden çivilenir:
+// (a) dökümün kendisi karşılaştırılır, (b) para modülünün kaynağı çerçeveden
+// hiç haberdar olmadığı için kaynak taraması da bunu doğrular.
+
+test("REGRESYON: parti siparişinin para dökümü teklif siparişiyle BİREBİR AYNI", () => {
+  // Parti siparişi = teklif siparişi. Partiyi ayırt eden köprü
+  // `quote_framework_batches.order_id`dir ve o kolon PARA GÖVDESİNE hiç
+  // girmez; `OrderMoneySnapshot` onu görmez.
+  const plain = derive(quoteSnap());
+  const batch = derive(quoteSnap());
+  assert.deepEqual(batch, plain, "aynı gövde → aynı döküm (fark üretecek alan YOK)");
+  // Ve döküm gerçekten para taşıyor: boş bir nesneyi karşılaştırmıyoruz.
+  assert.equal(plain.collection.amountKurus, 95000);
+  assert.equal(plain.lines.length, 3, "iki parça + bir ek hizmet");
+  assert.equal(
+    (plain.shares[0]?.baseKurus ?? 0) > 0,
+    true,
+    "partner payı hesaplanmış"
+  );
+});
+
+test("REGRESYON: para modülü çerçeveden HABERDAR DEĞİL (kaynak taraması)", () => {
+  // Çerçeve, hakediş tekilliğini (`manufacturer_earnings.order_id` UNIQUE)
+  // hiç kırmıyor çünkü PARTİ = SİPARİŞ. "Tek sipariş çok sevkiyat" modeli o
+  // tekilliği kıracaktı ve bu satır, o modele kaymanın kaynakta görünür
+  // olmasını sağlıyor.
+  for (const rel of [
+    "src/lib/config/order-money.ts",
+    "src/lib/services/earning-base.ts",
+    "src/lib/services/finance.ts",
+  ]) {
+    assert.ok(
+      !/framework|quote_framework|cerceve/i.test(readSrc(rel)),
+      `${rel}: para modülüne çerçeve kavramı girmiş — parti = sipariş olduğu için GEREKMEZ`
+    );
+  }
+});
+
 test("teklif siparişi 'quote' türüne düşer (yükleme türünün ÖNÜNDE)", () => {
   assert.equal(classifyMoneyOrder(quoteSnap()), "quote");
   // Parça yoksa eski davranış aynen: teklif olmayan yükleme siparişi.

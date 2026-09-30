@@ -54,6 +54,11 @@
 -- 0070, 0071) dururken 0055 yeniden uygulanmaz. 0055'i gerçekten geri almak
 -- için önce ÜSTÜNDEKİLER — EN YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve
 -- kendi satırlarıyla geri alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0073_framework_orders.down.sql
+--   -- 0073'ün down'ı KENDİ kaydını (created_at = 1790798000000) siler.
+--   -- Üç çerçeve tablosunu düşürür ve denetim CHECK'ini eski yedi değere
+--   -- döndürür. İmzalanmış anlaşma ya da çerçeve denetim izi varsa VERİ
+--   -- SİLMEDEN DURUR.
 --   \i drizzle/0071_fx_rates.down.sql
 --   -- 0071'in down'ı KENDİ kaydını (created_at = 1790790800000) siler.
 --   -- `fx_rates` tablosunu ve `quotes.fx_snapshot` kolonunu düşürür; ödenmiş

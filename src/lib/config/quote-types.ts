@@ -67,6 +67,22 @@ export const QUOTE_ADMIN_ACTIONS = [
   "review_reject",
   "extend_expiry",
   "reopen",
+  // Çerçeve anlaşmalar (0073). Denetim izi VAR OLAN tabloda kalır:
+  // `quote_admin_actions.quote_id` NOT NULL ve çerçevenin kaynak teklifi HER
+  // ZAMAN vardır, yani iz `/admin/teklifler/[id]` detayında kendiliğinden
+  // görünür (`loadAdminQuoteDetail`). Yeni bir denetim tablosu ikinci bir
+  // okuma yüzeyi demekti.
+  //
+  // Bu diziye eklemek ŞEMAYI da değiştirir: `quote_admin_actions_action_chk`
+  // listesi buradan üretilir (`schema.ts` · `quoteInList`), o yüzden 0073'ün
+  // SQL'i kısıdı DROP + ADD ile yeniden kurar.
+  "framework_create",
+  "framework_activate",
+  "framework_batch_plan",
+  "framework_batch_release",
+  "framework_batch_cancel",
+  "framework_cancel",
+  "framework_extend",
 ] as const;
 export type QuoteAdminAction = (typeof QUOTE_ADMIN_ACTIONS)[number];
 

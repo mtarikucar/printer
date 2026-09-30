@@ -4171,3 +4171,211 @@ export const fxRates = pgTable("fx_rates", {
 ]);
 
 export type FxRateRow = typeof fxRates.$inferSelect;
+
+// ═══ Çerçeve siparişler (0073) ══════════════════════════════════════════════
+//
+// Kurumsal müşteri bir kerede büyük miktar TAAHHÜT eder, fiyat anlaşma boyunca
+// KİLİTLENİR, teslim PARTİLER hâlinde planlanır. Üç tablo: anlaşma, parti ve
+// parti satırı.
+//
+// ─── ÖDEME PARTİ BAŞINADIR — bu bloğun birinci kuralı ──────────────────────
+//
+// Anlaşma FİYATI ve TAAHHÜDÜ bağlar, PARAYI bağlamaz: tahsilat yok, teslim
+// taahhüdü parti serbest bırakılınca doğar. Serbest bırakılan parti KENDİ
+// `quotes` klonunu alır ve bugünkü ödeme yolundan (`quote_checkouts` →
+// `order_drafts` → `orders`) geçer. Bu yüzden `orders`, `order_drafts` ve
+// `quotes` şemalarına TEK KOLON EKLENMEZ: köprü
+// `quote_framework_batches.quote_id/draft_id/order_id`dir ve `quotes_order_id_uq`
+// (bir teklif = bir sipariş) korunur, çünkü her parti KENDİ teklifini alır.
+//
+// ─── TÜM FK'LER `on delete restrict` ──────────────────────────────────────
+//
+// Kaynak teklif, kullanıcı, tercih edilen üretici, klon teklif, taslak ve
+// sipariş — hiçbiri cascade DEĞİL. Anlaşma bir SÖZLEŞMEDİR; öksüz kalması
+// detay sayfasında 500 demektir (tasarım R8).
+//
+// pg enum YOK (gerekçesi 0064 bloğunun başlığında): durum kolonları `text` +
+// adlandırılmış CHECK, listeleri tip sözleşmesinden (`quote-framework.ts`)
+// `quoteInList` ile üretilir.
+import { BATCH_STATUSES, FRAMEWORK_STATUSES } from "../config/quote-framework";
+import type { FrameworkBatchStatus, FrameworkStatus } from "../config/quote-framework";
+
+export const quoteFrameworks = pgTable("quote_frameworks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  seq: integer("seq").generatedAlwaysAsIdentity().unique(),
+  // `quotes.number`ın birebir kardeşi: `lpad` uzun sırayı KESMESİN diye
+  // genişlik EN AZ 6'dır.
+  number: text("number").notNull().unique()
+    .generatedAlwaysAs(sql`'C-' || lpad(seq::text, greatest(6, length(seq::text)), '0')`),
+  /** Anlaşmanın türediği teklif; denetim izi de onun detayında görünür. */
+  quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "restrict" }),
+  /** Anonim çerçeve YOK: taahhüt bir kişiye/şirkete yazılır. */
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  status: text("status").$type<FrameworkStatus>().notNull().default("draft"),
+  title: text("title"),
+  leadTier: text("lead_tier").$type<LeadTierKey>().notNull(),
+  addonKeys: jsonb("addon_keys").$type<string[]>().notNull().default([]),
+  /** `FrozenQuotePart[]`; taahhüt adedi her parçanın `quantity`sidir. */
+  partsSnapshot: jsonb("parts_snapshot").$type<FrozenQuotePart[]>().notNull(),
+  addonsSnapshot: jsonb("addons_snapshot").$type<FrozenQuoteAddon[]>().notNull().default([]),
+  /**
+   * `quotes.pricing_snapshot`ın KOPYASI. Kilidi GERÇEK yapan şey budur:
+   * katalog ya da ayar değişimi partiye sızmaz, parti klonu bu snapshot'tan
+   * fiyatlanır (`loadActiveSnapshot()` DEĞİL).
+   */
+  pricingSnapshot: jsonb("pricing_snapshot").$type<PricingSnapshot>().notNull(),
+  committedUnits: integer("committed_units").notNull(),
+  /**
+   * `bigint`: `integer` tavanı ₺21.4M ve bir çerçeve bunu AŞABİLİR. Parti
+   * tutarı `integer` kalır, çünkü tek ödeme `MAX_AMOUNT_KURUS`u aşamaz.
+   */
+  committedTotalKurus: bigint("committed_total_kurus", { mode: "number" }).notNull(),
+  priceLockedUntil: timestamp("price_locked_until", { withTimezone: true }).notNull(),
+  /** Anlaşmanın çapalı atölyesi; her parti ÖNCE ona denenir (kapıları atlamadan). */
+  preferredManufacturerId: uuid("preferred_manufacturer_id").references(() => manufacturers.id, {
+    onDelete: "restrict",
+  }),
+  /** Tek adres kilitlenir: farklı adres = ikinci anlaşma (fiyat konfige bağlı). */
+  shippingAddress: jsonb("shipping_address").$type<TurkishAddress>().notNull(),
+  termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
+  termsVersion: text("terms_version"),
+  customerNote: text("customer_note"),
+  adminNote: text("admin_note"),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+  activatedByEmail: text("activated_by_email"),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelReason: text("cancel_reason"),
+  releaseReminderSentAt: timestamp("release_reminder_sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // Bir teklif EN FAZLA bir çerçeveye dönüşür: ikinci dönüştürme aynı kilitli
+  // fiyatı iki ayrı taahhüde bağlamak olurdu.
+  uniqueIndex("quote_frameworks_quote_id_uq").on(t.quoteId),
+  index("quote_frameworks_user_idx").on(t.userId, t.createdAt.desc()),
+  index("quote_frameworks_status_idx").on(t.status, t.priceLockedUntil),
+  index("quote_frameworks_mfg_idx").on(t.preferredManufacturerId),
+  check("quote_frameworks_status_chk", sql`${t.status} IN (${quoteInList(FRAMEWORK_STATUSES)})`),
+  check("quote_frameworks_lead_tier_chk", sql`${t.leadTier} IN (${quoteInList(LEAD_TIER_KEYS)})`),
+  check("quote_frameworks_units_chk", sql`${t.committedUnits} > 0`),
+  check("quote_frameworks_total_chk", sql`${t.committedTotalKurus} > 0`),
+]);
+
+export const quoteFrameworkBatches = pgTable("quote_framework_batches", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  frameworkId: uuid("framework_id").notNull().references(() => quoteFrameworks.id, {
+    onDelete: "restrict",
+  }),
+  /** "Parti 3/8" — ekranın sırası. */
+  position: integer("position").notNull(),
+  status: text("status").$type<FrameworkBatchStatus>().notNull().default("planned"),
+  /** İstanbul takvimi; `business-days.ts` ile doğrulanır (donmuş tatil listesi). */
+  plannedShipDate: date("planned_ship_date").notNull(),
+  /** Σ satır adedi — yük ölçüsünün (`frameworkBatchLoadUnits`) girdisi. */
+  units: integer("units").notNull(),
+  amountKurus: integer("amount_kurus").notNull(),
+  /** Serbest bırakıldığında yazılan KLON teklif. */
+  quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "restrict" }),
+  draftId: uuid("draft_id").references(() => orderDrafts.id, { onDelete: "restrict" }),
+  orderId: uuid("order_id").references(() => orders.id, { onDelete: "restrict" }),
+  releasedAt: timestamp("released_at", { withTimezone: true }),
+  releasedByEmail: text("released_by_email"),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelReason: text("cancel_reason"),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("quote_framework_batches_fw_pos_uq").on(t.frameworkId, t.position),
+  // YARIŞ KAPISI: iki admin aynı partiyi serbest bırakırsa İKİNCİ klon
+  // veritabanında reddedilir (bir klon teklif = bir parti).
+  uniqueIndex("quote_framework_batches_quote_id_uq").on(t.quoteId),
+  uniqueIndex("quote_framework_batches_draft_id_uq").on(t.draftId),
+  uniqueIndex("quote_framework_batches_order_id_uq").on(t.orderId),
+  index("quote_framework_batches_plan_idx").on(t.plannedShipDate, t.status),
+  check("quote_framework_batches_status_chk", sql`${t.status} IN (${quoteInList(BATCH_STATUSES)})`),
+  check("quote_framework_batches_position_chk", sql`${t.position} >= 1`),
+  check("quote_framework_batches_units_chk", sql`${t.units} > 0`),
+  // Parti tutarı TEK ÖDEMEdir: `MAX_AMOUNT_KURUS` (₺2M) tavanı aynen geçerli.
+  check("quote_framework_batches_amount_chk", sql`${t.amountKurus} > 0 AND ${t.amountKurus} <= 200000000`),
+  // "Serbest bırakıldı ama klonu yok" hâli DB'de DOĞMAZ.
+  check(
+    "quote_framework_batches_released_chk",
+    sql`(${t.status} <> 'released') OR (${t.quoteId} IS NOT NULL AND ${t.releasedAt} IS NOT NULL)`
+  ),
+]);
+
+export const quoteFrameworkBatchLines = pgTable("quote_framework_batch_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /**
+   * FK'si AŞAĞIDA ADIYLA kurulur. Drizzle'ın türettiği ad
+   * (`quote_framework_batch_lines_batch_id_quote_framework_batches_id_fk`) 66
+   * karakter, yani Postgres'in 63 baytlık kimlik sınırını aşıyor ve veritabanı
+   * onu SESSİZCE kırpıyor. Kırpılan ad, migration'daki
+   * `conname = '<tam ad>'` kontrolüyle hiç eşleşmez: up ikinci koşuda kısıdı
+   * yeniden eklemeye kalkar ve "already exists" ile düşer (0061'de duran latent
+   * hata tam budur). Kısa ve açık ad bu tuzağı kapatır.
+   */
+  batchId: uuid("batch_id").notNull(),
+  /** Toplama için denormalize: kırılım sorgusunun tek GROUP BY'ı. */
+  frameworkId: uuid("framework_id").notNull().references(() => quoteFrameworks.id, {
+    onDelete: "restrict",
+  }),
+  /** `parts_snapshot[].partId`; FK YOK — `quote_parts` yumuşak silinebilir. */
+  partId: uuid("part_id").notNull(),
+  position: integer("position").notNull(),
+  quantity: integer("quantity").notNull(),
+  /** Anlaşmadan gelen KİLİTLİ birim fiyat. */
+  unitKurus: integer("unit_kurus").notNull(),
+  lineKurus: integer("line_kurus").notNull(),
+}, (t) => [
+  foreignKey({
+    name: "quote_framework_batch_lines_batch_id_fk",
+    columns: [t.batchId],
+    foreignColumns: [quoteFrameworkBatches.id],
+  }).onDelete("restrict"),
+  uniqueIndex("quote_framework_batch_lines_batch_part_uq").on(t.batchId, t.partId),
+  index("quote_framework_batch_lines_fw_part_idx").on(t.frameworkId, t.partId),
+  check("quote_framework_batch_lines_qty_chk", sql`${t.quantity} BETWEEN 1 AND 100000`),
+  check("quote_framework_batch_lines_unit_chk", sql`${t.unitKurus} > 0`),
+  // PARA DEĞİŞMEZİ SQL DÜZEYİNDE: uygulama hatası buraya gelemez. Aynı kural
+  // saf çekirdekte (`frameworkLineKurus`) ve `computeQuote`un manuel dalında.
+  check("quote_framework_batch_lines_line_chk", sql`${t.lineKurus} = ${t.unitKurus} * ${t.quantity}`),
+]);
+
+export const quoteFrameworksRelations = relations(quoteFrameworks, ({ one, many }) => ({
+  quote: one(quotes, { fields: [quoteFrameworks.quoteId], references: [quotes.id] }),
+  user: one(users, { fields: [quoteFrameworks.userId], references: [users.id] }),
+  preferredManufacturer: one(manufacturers, {
+    fields: [quoteFrameworks.preferredManufacturerId],
+    references: [manufacturers.id],
+  }),
+  batches: many(quoteFrameworkBatches),
+  lines: many(quoteFrameworkBatchLines),
+}));
+
+export const quoteFrameworkBatchesRelations = relations(quoteFrameworkBatches, ({ one, many }) => ({
+  framework: one(quoteFrameworks, {
+    fields: [quoteFrameworkBatches.frameworkId],
+    references: [quoteFrameworks.id],
+  }),
+  quote: one(quotes, { fields: [quoteFrameworkBatches.quoteId], references: [quotes.id] }),
+  draft: one(orderDrafts, { fields: [quoteFrameworkBatches.draftId], references: [orderDrafts.id] }),
+  order: one(orders, { fields: [quoteFrameworkBatches.orderId], references: [orders.id] }),
+  lines: many(quoteFrameworkBatchLines),
+}));
+
+export const quoteFrameworkBatchLinesRelations = relations(quoteFrameworkBatchLines, ({ one }) => ({
+  batch: one(quoteFrameworkBatches, {
+    fields: [quoteFrameworkBatchLines.batchId],
+    references: [quoteFrameworkBatches.id],
+  }),
+  framework: one(quoteFrameworks, {
+    fields: [quoteFrameworkBatchLines.frameworkId],
+    references: [quoteFrameworks.id],
+  }),
+}));
+
+export type QuoteFramework = typeof quoteFrameworks.$inferSelect;
+export type QuoteFrameworkBatch = typeof quoteFrameworkBatches.$inferSelect;
+export type QuoteFrameworkBatchLine = typeof quoteFrameworkBatchLines.$inferSelect;

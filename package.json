@@ -148,7 +148,8 @@
     "test:quote-currency": "npx tsx scripts/test-quote-currency.ts",
     "test:fx-rates": "npx tsx scripts/test-fx-rates.ts",
     "test:fx:db": "npx tsx scripts/test-fx-db.ts",
-    "test:quote-framework": "npx tsx scripts/test-quote-framework.ts"
+    "test:quote-framework": "npx tsx scripts/test-quote-framework.ts",
+    "test:framework-migration:db": "npx tsx scripts/test-framework-migration-db.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

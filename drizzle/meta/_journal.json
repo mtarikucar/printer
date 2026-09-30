@@ -484,6 +484,13 @@
       "when": 1790790800000,
       "tag": "0071_fx_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790798000000,
+      "tag": "0073_framework_orders",
+      "breakpoints": true
     }
   ]
 }

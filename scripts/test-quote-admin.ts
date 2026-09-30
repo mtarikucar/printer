@@ -33,9 +33,12 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
 import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
+import { FRAMEWORK_REFUSAL_LABELS_TR } from "../src/lib/config/quote-framework";
 import { partPricingKey } from "../src/lib/config/quote-keys";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
+import { QuoteServiceError } from "../src/lib/services/quote-service";
 import {
+  QUOTE_ADMIN_ACTIONS,
   QUOTE_STATUSES,
   REVIEW_KINDS,
   type AdminQuoteOutcome,
@@ -93,6 +96,521 @@ function refuses(code: string, why: string, run: () => unknown) {
     return;
   }
   assert.fail(`kabul edilmemeliydi: ${why}`);
+}
+
+/**
+ * ─── 7) ÇERÇEVE SİPARİŞ UÇLARI (0073) ──────────────────────────────────────
+ *
+ * Dört soru, dördü de "kapı gerçekten uçta mı":
+ *
+ *  1. DENETİM İZİ — yedi çerçeve eylemi `QUOTE_ADMIN_ACTIONS`te ve küme hâlâ
+ *     KAPALI. Şemadaki CHECK listesi bu diziden üretiliyor, yani kaçak bir
+ *     değer uygulamanın veritabanına 23514 yemesi demektir.
+ *  2. BAYRAK — kapalıyken uç YOK gibi davranır: 404, 403 DEĞİL ve gövde
+ *     varlık sızdırmaz. Admin oturumu iç test için geçer.
+ *  3. GEREKÇE — iptal ve uzatma uçları gerekçesiz 400 döner.
+ *  4. PARA — gövdede tutar alanı SESSİZCE YOK SAYILMAZ, REDDEDİLİR.
+ *
+ * DB yok: servis katmanı taklit edilir, ölçülen şey UÇLARIN kararları.
+ */
+async function frameworkAdminChecks(): Promise<void> {
+  console.log("\n7) Çerçeve sipariş uçları");
+
+  await test("yedi çerçeve eylemi denetim kümesinde ve küme KAPALI (tam 14 değer)", () => {
+    assert.deepEqual(
+      [...QUOTE_ADMIN_ACTIONS],
+      [
+        "manual_price",
+        "target_accept",
+        "target_counter",
+        "target_reject",
+        "review_reject",
+        "extend_expiry",
+        "reopen",
+        "framework_create",
+        "framework_activate",
+        "framework_batch_plan",
+        "framework_batch_release",
+        "framework_batch_cancel",
+        "framework_cancel",
+        "framework_extend",
+      ],
+      "denetim kümesi değişmiş: CHECK listesi buradan üretiliyor"
+    );
+  });
+
+  // ── Kaynak taraması: ev kuralları ────────────────────────────────────────
+  const ROUTES = [
+    "src/app/api/admin/frameworks/route.ts",
+    "src/app/api/admin/frameworks/[id]/route.ts",
+    "src/app/api/admin/frameworks/[id]/activate/route.ts",
+    "src/app/api/admin/frameworks/[id]/batches/route.ts",
+    "src/app/api/admin/frameworks/[id]/batches/[batchId]/release/route.ts",
+    "src/app/api/admin/frameworks/[id]/batches/[batchId]/cancel/route.ts",
+    "src/app/api/admin/frameworks/[id]/cancel/route.ts",
+    "src/app/api/admin/frameworks/[id]/extend/route.ts",
+  ];
+
+  await test("her çerçeve rotası handleRouteFailure ile kapanıyor (gövdesiz 500 yok)", () => {
+    for (const rel of ROUTES) {
+      const src = read(rel);
+      assert.match(src, /handleRouteFailure\(/, `${rel}: son çare cevabı yok`);
+      // Etiket ucun KENDİ yolunu söylemeli: günlükte hangi ucun patladığı
+      // yazmazsa şerit bir işe yaramaz.
+      assert.match(
+        src,
+        /handleRouteFailure\(\s*e,\s*\n?\s*"(GET|POST|PATCH) \/api\/admin\/frameworks/,
+        `${rel}: handleRouteFailure etiketi ucun yolunu taşımıyor`
+      );
+      // Beklenen retler `catch` içinde değil AKIŞTA çevrilir: `catch` bloğunda
+      // yalnız son çare durur.
+      const catchBody = src.match(/\} catch \(e\) \{([\s\S]*?)\n  \}/g) ?? [];
+      for (const block of catchBody) {
+        assert.doesNotMatch(
+          block,
+          /NextResponse\.json/,
+          `${rel}: catch bloğu kendi cevabını kuruyor`
+        );
+      }
+    }
+  });
+
+  await test("hiçbir yazma ucu denetim satırını İŞLEM DIŞINDA yazmıyor", () => {
+    // Ev kuralı (admin hijyen deseni): denetim satırı işin kendisiyle AYNI
+    // işlemde yazılır. Rotalar denetime hiç dokunmaz; tek yazıcı servistir ve
+    // `audit(...)` yalnız `tx` alır.
+    for (const rel of ROUTES) {
+      assert.doesNotMatch(
+        read(rel),
+        /quoteAdminActions/,
+        `${rel}: rota kendi denetim satırını yazıyor (işlem dışı)`
+      );
+    }
+    const service = read("src/lib/services/quote-framework.ts");
+    const auditCalls = [...service.matchAll(/await audit\(([^,]+),/g)].map((m) => m[1].trim());
+    assert.ok(auditCalls.length >= 7, `denetim çağrısı sayısı beklenenin altında: ${auditCalls.length}`);
+    for (const arg of auditCalls) {
+      assert.equal(arg, "tx", `işlem dışı denetim satırı: audit(${arg}, …)`);
+    }
+    // Ve tek INSERT noktası `audit`in kendisi olmalı.
+    const inserts = [...service.matchAll(/insert\(quoteAdminActions\)/g)];
+    assert.equal(inserts.length, 1, "denetim satırı birden fazla yerden yazılıyor");
+  });
+
+  // ── Canlı uçlar: bayrak, oturum, gerekçe, para alanı ─────────────────────
+  const loader = Module as unknown as { _load: (name: string, ...a: unknown[]) => unknown };
+  const originalLoad = loader._load;
+
+  /** Bayrak açık mı (uçların gördüğü tek kapı). */
+  let flagOn = false;
+  /** Admin oturumu var mı. */
+  let admin = false;
+  /** Servis çağrıları — uç kapıyı geçtiyse buraya düşer. */
+  let serviceCalls: string[] = [];
+  /** Doluyken `createFrameworkFromQuote` bu retle FIRLAR (giriş kapıları). */
+  let serviceRefusalError: unknown = null;
+  /** Doluyken `createFrameworkFromQuote` bu sonucu DÖNER (saf kapı retleri). */
+  let serviceOutcome: unknown = null;
+
+  loader._load = function (name, ...rest) {
+    if (name === "@/lib/services/quote-access") {
+      // Bayrak kapısı GERCEK modulden gelir, yalniz cevabi yonlendirilir:
+      // `isFlagEnabled` bir DB okumasidir ve bu testin veritabani yok. Kapinin
+      // KENDI sekli (bayrak VEYA admin oturumu) asagida kaynak uzerinden
+      // ayrica civileniyor.
+      const real = originalLoad.call(this, name, ...rest) as Record<string, unknown>;
+      return { ...real, frameworkSurfacesEnabled: async () => flagOn || admin };
+    }
+    if (name === "@/lib/auth/require-admin") {
+      return {
+        requireAdmin: async () =>
+          admin
+            ? { session: { user: { email: "sahip@test.invalid", role: "admin" } } }
+            : {
+                response: NextResponse.json(
+                  { error: "Bu işlem için admin oturumu gerekiyor." },
+                  { status: 401 }
+                ),
+              },
+      };
+    }
+    if (name === "@/lib/services/quote-framework") {
+      const real = originalLoad.call(this, name, ...rest) as Record<string, unknown>;
+      const stub = (label: string, value: unknown) => async () => {
+        serviceCalls.push(label);
+        return value;
+      };
+      return {
+        ...real,
+        listAdminFrameworks: stub("list", { items: [], hasNext: false }),
+        // `null` = "anlaşma yok" ve rota onu 404'e çevirir (doğru davranış);
+        // kapı testinin ölçtüğü şey o değil, o yüzden stub bir satır döner.
+        loadFrameworkDetail: stub("detail", { id: "x", number: "C-000001" }),
+        createFrameworkFromQuote: async () => {
+          serviceCalls.push("create");
+          if (serviceRefusalError) throw serviceRefusalError;
+          return serviceOutcome ?? { ok: true, id: "x", number: "C-000001" };
+        },
+        setFrameworkPreferences: stub("patch", { id: "x", preferredManufacturerId: null }),
+        activateFramework: stub("activate", { id: "x", number: "C-000001" }),
+        planBatches: stub("plan", { ok: true, batches: [] }),
+        releaseBatch: stub("release", {
+          batchId: "b",
+          position: 1,
+          quoteId: "q",
+          quoteNumber: "T-000001",
+          amountKurus: 1,
+        }),
+        cancelBatch: stub("batch-cancel", { batchId: "b" }),
+        cancelFramework: stub("cancel", { id: "x", cancelledBatchCount: 0 }),
+        extendFrameworkLock: stub("extend", {
+          id: "x",
+          priceLockedUntil: "2026-12-31",
+          status: "active",
+        }),
+      };
+    }
+    return originalLoad.call(this, name, ...rest);
+  };
+
+  const FW_ID = "11111111-1111-4111-8111-111111111111";
+  const BATCH_ID = "22222222-2222-4222-8222-222222222222";
+  const QUOTE_ID = "33333333-3333-4333-8333-333333333333";
+  const REASON = "Müşteriyle imzalanan çerçeve anlaşma gereği.";
+  const ADDRESS = {
+    adres: "Örnek Mah. 1. Sok. No 2",
+    mahalle: "Örnek",
+    ilce: "Kadıköy",
+    il: "İstanbul",
+    postaKodu: "34710",
+    telefon: "0555 111 22 33",
+  };
+
+  type Handler = (req: NextRequest, ctx?: unknown) => Promise<NextResponse>;
+  const fwCtx = { params: Promise.resolve({ id: FW_ID }) };
+  const batchCtx = { params: Promise.resolve({ id: FW_ID, batchId: BATCH_ID }) };
+
+  function fwReq(method: string, body?: unknown): NextRequest {
+    return new NextRequest("http://localhost/api/admin/frameworks", {
+      method,
+      headers: { "content-type": "application/json" },
+      body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
+    });
+  }
+
+  try {
+    const list = await import("../src/app/api/admin/frameworks/route");
+    const detail = await import("../src/app/api/admin/frameworks/[id]/route");
+    const activate = await import("../src/app/api/admin/frameworks/[id]/activate/route");
+    const batches = await import("../src/app/api/admin/frameworks/[id]/batches/route");
+    const release = await import(
+      "../src/app/api/admin/frameworks/[id]/batches/[batchId]/release/route"
+    );
+    const batchCancel = await import(
+      "../src/app/api/admin/frameworks/[id]/batches/[batchId]/cancel/route"
+    );
+    const cancel = await import("../src/app/api/admin/frameworks/[id]/cancel/route");
+    const extend = await import("../src/app/api/admin/frameworks/[id]/extend/route");
+
+    /** Uç + geçerli bir gövde: kapıların HEPSİNİ geçmesi gereken istek. */
+    const valid: Array<[string, Handler, unknown, unknown]> = [
+      ["GET /", list.GET as unknown as Handler, undefined, undefined],
+      [
+        "POST /",
+        list.POST as unknown as Handler,
+        undefined,
+        {
+          quoteId: QUOTE_ID,
+          priceLockedUntil: "2026-12-31",
+          shippingAddress: ADDRESS,
+          reason: REASON,
+        },
+      ],
+      ["GET /[id]", detail.GET as unknown as Handler, fwCtx, undefined],
+      ["PATCH /[id]", detail.PATCH as unknown as Handler, fwCtx, { reason: REASON }],
+      ["POST /[id]/activate", activate.POST as unknown as Handler, fwCtx, { reason: REASON }],
+      [
+        "POST /[id]/batches",
+        batches.POST as unknown as Handler,
+        fwCtx,
+        {
+          batches: [
+            { plannedShipDate: "2026-12-01", lines: [{ partId: QUOTE_ID, quantity: 10 }] },
+          ],
+          reason: REASON,
+        },
+      ],
+      [
+        "POST /[id]/batches/[batchId]/release",
+        release.POST as unknown as Handler,
+        batchCtx,
+        { reason: REASON },
+      ],
+      [
+        "POST /[id]/batches/[batchId]/cancel",
+        batchCancel.POST as unknown as Handler,
+        batchCtx,
+        { reason: REASON },
+      ],
+      ["POST /[id]/cancel", cancel.POST as unknown as Handler, fwCtx, { reason: REASON }],
+      [
+        "POST /[id]/extend",
+        extend.POST as unknown as Handler,
+        fwCtx,
+        { priceLockedUntil: "2027-06-30", reason: REASON },
+      ],
+    ];
+
+    await test("BAYRAK KAPALI + admin OLMAYAN oturum: her uç 404 (403 DEĞİL) ve varlık sızdırmıyor", async () => {
+      flagOn = false;
+      admin = false;
+      for (const [label, handler, ctx, body] of valid) {
+        serviceCalls = [];
+        const method = label.split(" ")[0]!;
+        const response = await handler(fwReq(method, body), ctx);
+        assert.equal(response.status, 404, `${label}: 404 dönmedi`);
+        const json = (await response.json()) as { error?: string; code?: string };
+        assert.equal(json.code, "framework_not_found", `${label}: kod farklı`);
+        // Gövde "var ama yetkin yok" demiyor: "var" bilgisinin kendisi sızıntı.
+        assert.doesNotMatch(
+          json.error ?? "",
+          /yetki|oturum|izin|403/i,
+          `${label}: gövde varlığı duyuruyor`
+        );
+        assert.equal(serviceCalls.length, 0, `${label}: servise gidildi`);
+      }
+    });
+
+    await test("BAYRAK KAPALI + ADMIN oturumu: her uç kapıyı geçer (iç test yolu)", async () => {
+      flagOn = false;
+      admin = true;
+      for (const [label, handler, ctx, body] of valid) {
+        serviceCalls = [];
+        const method = label.split(" ")[0]!;
+        const response = await handler(fwReq(method, body), ctx);
+        assert.notEqual(response.status, 404, `${label}: admin de 404 aldı`);
+        assert.notEqual(response.status, 401, `${label}: admin oturumu tanınmadı`);
+        assert.equal(serviceCalls.length, 1, `${label}: servise gidilmedi`);
+      }
+    });
+
+    await test("gerekçe ZORUNLU: iptaller ve uzatma gerekçesiz 400, gerekçeliyken geçer", async () => {
+      flagOn = true;
+      admin = true;
+      const reasonRequired: Array<[string, Handler, unknown, unknown]> = [
+        ["POST /[id]/cancel", cancel.POST as unknown as Handler, fwCtx, {}],
+        [
+          "POST /[id]/batches/[batchId]/cancel",
+          batchCancel.POST as unknown as Handler,
+          batchCtx,
+          {},
+        ],
+        [
+          "POST /[id]/extend",
+          extend.POST as unknown as Handler,
+          fwCtx,
+          { priceLockedUntil: "2027-06-30" },
+        ],
+      ];
+      for (const [label, handler, ctx, body] of reasonRequired) {
+        serviceCalls = [];
+        const response = await handler(fwReq("POST", body), ctx);
+        assert.equal(response.status, 400, `${label}: gerekçesiz istek geçti`);
+        assert.equal(serviceCalls.length, 0, `${label}: gerekçesiz istek servise gitti`);
+        // Kısa bir gerekçe de yetmez (denetim izine yazılacak).
+        serviceCalls = [];
+        const short = await handler(
+          fwReq("POST", { ...(body as object), reason: "kısa" }),
+          ctx
+        );
+        assert.equal(short.status, 400, `${label}: 5 karakterlik gerekçe geçti`);
+        assert.equal(serviceCalls.length, 0, `${label}: kısa gerekçe servise gitti`);
+      }
+      // Gerekçeliyken aynı uçlar geçer.
+      for (const [label, handler, ctx, body] of valid) {
+        if (!/cancel|extend/.test(label)) continue;
+        serviceCalls = [];
+        const response = await handler(fwReq("POST", body), ctx);
+        assert.equal(response.status, 200, `${label}: gerekçeli istek reddedildi`);
+      }
+    });
+
+    await test("gövdede TUTAR alanı sessizce yok sayılmaz, REDDEDİLİR (400)", async () => {
+      flagOn = true;
+      admin = true;
+      const withMoney: Array<[string, Handler, unknown, unknown]> = [
+        [
+          "POST / (committedTotalKurus)",
+          list.POST as unknown as Handler,
+          undefined,
+          {
+            quoteId: QUOTE_ID,
+            priceLockedUntil: "2026-12-31",
+            shippingAddress: ADDRESS,
+            reason: REASON,
+            committedTotalKurus: 500000,
+          },
+        ],
+        [
+          "POST /[id]/batches (satırda unitKurus)",
+          batches.POST as unknown as Handler,
+          fwCtx,
+          {
+            batches: [
+              {
+                plannedShipDate: "2026-12-01",
+                lines: [{ partId: QUOTE_ID, quantity: 10, unitKurus: 1 }],
+              },
+            ],
+            reason: REASON,
+          },
+        ],
+        [
+          "PATCH /[id] (amountKurus)",
+          detail.PATCH as unknown as Handler,
+          fwCtx,
+          { reason: REASON, amountKurus: 1 },
+        ],
+      ];
+      for (const [label, handler, ctx, body] of withMoney) {
+        serviceCalls = [];
+        const response = await handler(fwReq(label.startsWith("PATCH") ? "PATCH" : "POST", body), ctx);
+        assert.equal(response.status, 400, `${label}: para alanı geçti`);
+        const json = (await response.json()) as { code?: string };
+        assert.equal(json.code, "money_field_rejected", `${label}: kod farklı`);
+        assert.equal(serviceCalls.length, 0, `${label}: servise gidildi`);
+      }
+      // `expectedAmountKurus` bir BEYANDIR, girdi değil: reddedilmez.
+      serviceCalls = [];
+      const declared = await release.POST(
+        fwReq("POST", { reason: REASON, expectedAmountKurus: 123400 }) as never,
+        batchCtx as never
+      );
+      assert.equal(declared.status, 200, "beyan edilen tutar reddedildi");
+      assert.equal(serviceCalls.length, 1, "beyan servise taşınmadı");
+    });
+
+    await test("giriş kapıları UÇTA: ikinci anlaşma / draft teklif / boyama → 409 Türkçe cümleyle", async () => {
+      flagOn = true;
+      admin = true;
+      // (a) FIRLATILAN retler (`entryRefusals`in ilk reddi) aynen 409 olur.
+      const thrown: Array<[string, string]> = [
+        ["framework_exists", "Bu teklif için zaten bir çerçeve anlaşma var."],
+        [
+          "quote_not_quoted",
+          "Yalnız fiyatlandırılmış (quoted) bir teklif çerçeve anlaşmaya dönüştürülebilir.",
+        ],
+      ];
+      for (const [code, message] of thrown) {
+        serviceRefusalError = new QuoteServiceError(message, 409, code);
+        const response = await (list.POST as unknown as Handler)(
+          fwReq("POST", {
+            quoteId: QUOTE_ID,
+            priceLockedUntil: "2026-12-31",
+            shippingAddress: ADDRESS,
+            reason: REASON,
+          })
+        );
+        assert.equal(response.status, 409, `${code}: 409 dönmedi`);
+        const json = (await response.json()) as { error?: string; code?: string };
+        assert.equal(json.code, code, `${code}: kod taşınmadı`);
+        assert.equal(json.error, message, `${code}: Türkçe cümle taşınmadı`);
+      }
+      serviceRefusalError = null;
+
+      // (b) SAF KAPININ retleri (boyama kalemi, toplam tavanı) 409 + cümle.
+      serviceOutcome = {
+        ok: false,
+        refusals: [
+          {
+            code: "painting_forbidden",
+            message: `${FRAMEWORK_REFUSAL_LABELS_TR.painting_forbidden}.`,
+          },
+        ],
+      };
+      const painted = await (list.POST as unknown as Handler)(
+        fwReq("POST", {
+          quoteId: QUOTE_ID,
+          priceLockedUntil: "2026-12-31",
+          shippingAddress: ADDRESS,
+          reason: REASON,
+        })
+      );
+      assert.equal(painted.status, 409, "boyama kalemli teklif 409 dönmedi");
+      const paintedJson = (await painted.json()) as { error?: string; code?: string };
+      assert.equal(paintedJson.code, "painting_forbidden");
+      assert.match(paintedJson.error ?? "", /boyama kalemi/, "Türkçe cümle taşınmadı");
+      serviceOutcome = null;
+    });
+
+    await test("uuid OLMAYAN kimlik servise HİÇ gitmez (22P02 yerine 404)", async () => {
+      flagOn = true;
+      admin = true;
+      serviceCalls = [];
+      const bad = { params: Promise.resolve({ id: "C-000123" }) };
+      const response = await (detail.GET as unknown as Handler)(fwReq("GET"), bad);
+      assert.equal(response.status, 404);
+      assert.equal(serviceCalls.length, 0, "uuid olmayan kimlikle servise gidildi");
+      serviceCalls = [];
+      const badBatch = { params: Promise.resolve({ id: FW_ID, batchId: "3" }) };
+      const batchResponse = await (batchCancel.POST as unknown as Handler)(
+        fwReq("POST", { reason: REASON }),
+        badBatch
+      );
+      assert.equal(batchResponse.status, 404);
+      assert.equal(serviceCalls.length, 0, "uuid olmayan parti kimliğiyle servise gidildi");
+    });
+  } finally {
+    flagOn = false;
+    admin = false;
+    serviceRefusalError = null;
+    serviceOutcome = null;
+    loader._load = originalLoad;
+  }
+
+  await test("bayrak kapisi `quoteApiEnabled` desenini tekrar ediyor (bayrak VEYA admin)", () => {
+    // Kapinin cevabi yukarida yonlendirildi; SEKLI burada civileniyor: ayni
+    // dosyadaki `quoteApiEnabled` ile birebir ayni iki satir -- bayrak aciksa
+    // gec, degilse admin oturumuna bak. Ucuncu bir dal (or. "her oturum")
+    // kapali bir ozelligi duyururdu.
+    const access = read("src/lib/services/quote-access.ts").replace(/\s+/g, " ");
+    assert.match(
+      access,
+      /export async function frameworkSurfacesEnabled\(\): Promise<boolean> \{ if \(await isFlagEnabled\("framework_orders_enabled"\)\) return true; return isAdminSession\(\); \}/,
+      "kapi deseni degismis"
+    );
+  });
+
+  // ── Giriş kapıları UÇTA: aynı kaynak hem ekranı hem ucu besliyor ─────────
+  await test("giriş kapıları TEK kaynaktan: ekran ve uç aynı retleri okur", () => {
+    const service = read("src/lib/services/quote-framework.ts");
+    // `entryRefusals` kapıların tek kaynağı; iki çağıranı var.
+    assert.match(service, /function entryRefusals\(/, "kapı tek kaynakta değil");
+    const callers = [...service.matchAll(/entryRefusals\(\{/g)];
+    assert.equal(callers.length, 2, `entryRefusals çağıran sayısı: ${callers.length}`);
+    // Uç kapıyı FIRLATARAK uygular (409/400), ekran listeyi yazar.
+    assert.match(
+      service.replace(/\s+/g, " "),
+      /if \(gate\) throw new QuoteServiceError\(gate\.message, gate\.status, gate\.code\)/,
+      "uç ilk reddi fırlatmıyor"
+    );
+    for (const code of [
+      "quote_not_quoted",
+      "framework_exists",
+      "mixed_technology",
+      "price_unavailable",
+      "anonymous_quote",
+      "no_parts",
+    ]) {
+      assert.match(service, new RegExp(`code: "${code}"`), `${code} kapısı yok`);
+    }
+    // Boyama yasağı saf çekirdekte duruyor ve Türkçe cümlesi var.
+    assert.match(
+      FRAMEWORK_REFUSAL_LABELS_TR.painting_forbidden,
+      /boyama kalemi/,
+      "boyama reddinin Türkçe cümlesi değişmiş"
+    );
+  });
 }
 
 async function main() {
@@ -801,6 +1319,8 @@ async function main() {
     const page = read("src/app/admin/teklifler/page.tsx");
     assert.match(page, /parseAdminQuoteTab/, "sekme doğrulanmıyor");
   });
+
+  await frameworkAdminChecks();
 
   console.log(
     failures === 0

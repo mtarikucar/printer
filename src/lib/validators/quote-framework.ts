@@ -81,6 +81,25 @@ export const frameworkCreateSchema: z.ZodType<FrameworkCreateInput> = z.object({
   reason: reasonSchema,
 });
 
+// ─── PATCH /api/admin/frameworks/[id] ──────────────────────────────────────
+
+export interface FrameworkPatchInput {
+  /**
+   * Verilmezse DOKUNULMAZ, boş dize notu SİLER. Tutar taşıyan hiçbir alan
+   * YOKTUR ve olmamalı (dosya başlığı): tercih ucu parayı değiştirmez.
+   */
+  adminNote?: string;
+  /** `null` çapayı KALDIRIR; verilmezse dokunulmaz. */
+  preferredManufacturerId?: string | null;
+  reason: string;
+}
+
+export const frameworkPatchSchema: z.ZodType<FrameworkPatchInput> = z.object({
+  adminNote: z.string().trim().max(2000).optional(),
+  preferredManufacturerId: uuidSchema.nullable().optional(),
+  reason: reasonSchema,
+});
+
 // ─── POST /api/admin/frameworks/[id]/activate ───────────────────────────────
 
 export interface FrameworkActivateInput {

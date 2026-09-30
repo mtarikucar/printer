@@ -180,6 +180,24 @@ export async function quoteApiEnabled(): Promise<boolean> {
 }
 
 /**
+ * Çerçeve sipariş yüzeyleri açık mı (`/admin/cerceve/**`,
+ * `/api/admin/frameworks/**`).
+ *
+ * `quoteApiEnabled`in birebir deseni ve AYNI gerekçe: bayrak kapalıyken uç ve
+ * ekran YOK gibi davranır (404, 403 DEĞİL — kapalı bir özelliğin varlığını
+ * duyurmanın anlamı yok), admin oturumu iç test için kapıdan geçer.
+ *
+ * KAPSAM YÜZEYLERDİR, servis değil: serbest bırakılmış bir partinin klon
+ * teklifi bayrak kapalıyken de ÖDENMEYE DEVAM ETMEK ZORUNDA (sıradan bir
+ * `quotes` satırıdır ve `/teklif/[number]/odeme` yolundan geçer). Bayrağı
+ * kapatmak ödenmiş ya da ödenecek bir partiyi asla tuzağa düşürmez.
+ */
+export async function frameworkSurfacesEnabled(): Promise<boolean> {
+  if (await isFlagEnabled("framework_orders_enabled")) return true;
+  return isAdminSession();
+}
+
+/**
  * STEP (`.step`/`.stp`) yüklemesi bu istek için açık mı.
  *
  * TEK okuma noktası, bilerek: aynı cevap hem SUNUCU KAPISINI

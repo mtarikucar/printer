@@ -54,6 +54,7 @@
  * kapsamı iki yerde birden yanlış kurma riskini kaldırıyor.
  */
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { istanbulDateKey } from "@/lib/config/business-days";
 import { db } from "@/lib/db";
 import {
   manufacturers,
@@ -78,7 +79,9 @@ import {
   frameworkBatchDriftCode,
   frameworkBatchLoadUnits,
   frameworkBatchTotals,
+  frameworkLeadDays,
   frameworkProgressBuckets,
+  frameworkReleaseWindowOpen,
   validateBatchPlan,
   validateFrameworkAgreement,
   type FrameworkBatchLineInput,
@@ -428,65 +431,109 @@ export type CreateFrameworkOutcome =
  * olarak bu kopyadır. `committed_total_kurus` TEK-SEVKİYAT PROJEKSİYONUDUR
  * (bkz. `priceBatch`).
  */
+/**
+ * Bir teklifin çerçeveye DÖNÜŞTÜRÜLEBİLİRLİĞİ — TEK kaynak.
+ *
+ * Aynı kapıları iki yer soruyor: `/admin/teklifler/[id]` düğmesini çizmek için
+ * (`loadFrameworkEntry`) ve `POST /api/admin/frameworks` anlaşmayı kurmak için
+ * (`createFrameworkFromQuote`). Kapı iki kopya olsaydı ekran, ucun reddettiği
+ * bir düğmeyi (ya da tersi) gösterirdi — "kapılar UÇTA, yalnız ekranda değil"
+ * kuralının en olası sessiz ihlali bu.
+ *
+ * SIRA KURALIN PARÇASI: dönen ilk ret, ucun fırlattığı rettir.
+ */
+export interface FrameworkEntryRefusal {
+  code: string;
+  message: string;
+  status: number;
+}
+
+function entryRefusals(facts: {
+  anonymous: boolean;
+  status: string;
+  hasFramework: boolean;
+  partCount: number;
+  technologyCount: number;
+  allPriced: boolean;
+}): FrameworkEntryRefusal[] {
+  const out: FrameworkEntryRefusal[] = [];
+  if (facts.anonymous) {
+    out.push({
+      code: "anonymous_quote",
+      status: 409,
+      message: "Anonim teklif çerçeve anlaşmaya dönüştürülemez; müşteri hesabı gerekir.",
+    });
+  }
+  if (facts.status !== "quoted") {
+    out.push({
+      code: "quote_not_quoted",
+      status: 409,
+      message:
+        "Yalnız fiyatlandırılmış (quoted) bir teklif çerçeve anlaşmaya dönüştürülebilir.",
+    });
+  }
+  if (facts.hasFramework) {
+    out.push({
+      code: "framework_exists",
+      status: 409,
+      message: "Bu teklif için zaten bir çerçeve anlaşma var.",
+    });
+  }
+  if (facts.partCount === 0) {
+    out.push({ code: "no_parts", status: 400, message: "Teklifte parça yok." });
+  }
+  if (facts.technologyCount > 1) {
+    out.push({
+      code: "mixed_technology",
+      status: 409,
+      message:
+        "Çerçeve anlaşma tek teknolojiyle kurulur; teklifi teknolojiye göre ayırıp " +
+        "her biri için ayrı anlaşma kurun.",
+    });
+  }
+  if (!facts.allPriced) {
+    out.push({
+      code: "price_unavailable",
+      status: 409,
+      message: "Teklifin her parçası fiyatlı olmadan çerçeve anlaşma kurulamaz.",
+    });
+  }
+  return out;
+}
+
 export async function createFrameworkFromQuote(
   args: CreateFrameworkArgs
 ): Promise<CreateFrameworkOutcome> {
   const result = await db.transaction<CreateFrameworkOutcome>(async (tx) => {
     await tx.execute(LOCK_TIMEOUT);
     const quote = await lockSourceQuote(tx, args.quoteId);
-    if (quote.userId === null) {
-      throw new QuoteServiceError(
-        "Anonim teklif çerçeve anlaşmaya dönüştürülemez; müşteri hesabı gerekir.",
-        409,
-        "anonymous_quote"
-      );
-    }
-    if (quote.status !== "quoted") {
-      throw new QuoteServiceError(
-        "Yalnız fiyatlandırılmış (quoted) bir teklif çerçeve anlaşmaya dönüştürülebilir.",
-        409,
-        "quote_not_quoted"
-      );
-    }
     const [existing] = await tx
       .select({ id: quoteFrameworks.id })
       .from(quoteFrameworks)
       .where(eq(quoteFrameworks.quoteId, quote.id))
       .limit(1);
-    if (existing) {
-      throw new QuoteServiceError(
-        "Bu teklif için zaten bir çerçeve anlaşma var.",
-        409,
-        "framework_exists"
-      );
-    }
-
     const parts = await sourceParts(tx, quote.id);
-    if (parts.length === 0) {
-      throw new QuoteServiceError("Teklifte parça yok.", 400, "no_parts");
-    }
-    const technologies = new Set(parts.map((p) => p.technologyKey));
-    if (technologies.size > 1) {
-      throw new QuoteServiceError(
-        "Çerçeve anlaşma tek teknolojiyle kurulur; teklifi teknolojiye göre ayırıp " +
-          "her biri için ayrı anlaşma kurun.",
-        409,
-        "mixed_technology"
-      );
-    }
-
     const snapshot = quote.pricingSnapshot;
+    // Fiyat hesabı kapılardan ÖNCE koşar, çünkü "her parça fiyatlı mı"
+    // kapısının cevabı ondan geliyor. Parçasız teklifte `computeQuote`
+    // `allPriced: false` döner, o yüzden sıra bozulmaz: `no_parts` reddi
+    // `entryRefusals` içinde `price_unavailable`dan ÖNCE duruyor.
     const computed = computeQuote(snapshot, parts.map(toPricingPartInput), {
       leadTier: quote.leadTier,
       addonKeys: quote.addonKeys,
     });
-    if (!computed.totals.allPriced) {
-      throw new QuoteServiceError(
-        "Teklifin her parçası fiyatlı olmadan çerçeve anlaşma kurulamaz.",
-        409,
-        "price_unavailable"
-      );
-    }
+    const [gate] = entryRefusals({
+      anonymous: quote.userId === null,
+      status: quote.status,
+      hasFramework: !!existing,
+      partCount: parts.length,
+      technologyCount: new Set(parts.map((p) => p.technologyKey)).size,
+      allPriced: computed.totals.allPriced,
+    });
+    if (gate) throw new QuoteServiceError(gate.message, gate.status, gate.code);
+    // `entryRefusals` `anonymous` kapısını geçirdiyse `userId` doludur; tip
+    // düzeyinde de daraltılması gerekiyor (kolon nullable).
+    const userId = quote.userId!;
 
     // Boyama yasağı + toplam tavanı: saf kapı, ikisini AYRI AYRI rapor eder.
     const refusals = validateFrameworkAgreement({
@@ -507,7 +554,7 @@ export async function createFrameworkFromQuote(
       .insert(quoteFrameworks)
       .values({
         quoteId: quote.id,
-        userId: quote.userId,
+        userId,
         status: "draft",
         title: args.title?.trim() || null,
         leadTier: quote.leadTier,
@@ -1262,6 +1309,12 @@ export interface FrameworkBatchView {
   cancelledAt: string | null;
   cancelReason: string | null;
   note: string | null;
+  /**
+   * SERBEST BIRAKMA PENCERESİ AÇIK MI — sunucuda ölçülür, ekran kendi
+   * takvimini kurmaz (`frameworkReleaseWindowOpen`, plan kapısının 4.
+   * kuralının tersi). Yalnız `planned` partide anlamlıdır.
+   */
+  releaseWindowOpen: boolean;
   lines: FrameworkBatchLineView[];
 }
 
@@ -1278,6 +1331,11 @@ export interface FrameworkDetail {
   partsSnapshot: FrozenQuotePart[];
   addonsSnapshot: FrozenQuoteAddon[];
   committedUnits: number;
+  /**
+   * Anlaşmanın teslim süresi (iş günü), DONMUŞ anlık görüntüden. `null` =
+   * kademe katalogda yok, pencere ÖLÇÜLEMEZ.
+   */
+  leadDays: number | null;
   /**
    * TEK-SEVKİYAT PROJEKSİYONU: taahhüdün TAMAMI tek siparişte sevk edilseydi
    * ödenecek tutar.
@@ -1405,6 +1463,16 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
     }
   }
 
+  // Teslim süresi ANLAŞMA BAŞINA bir kez ölçülür (donmuş anlık görüntü +
+  // donmuş parça kümesi), sonra her partinin penceresine uygulanır.
+  const now = new Date();
+  const leadDays = frameworkLeadDays({
+    snapshot: framework.pricingSnapshot,
+    leadTier: framework.leadTier,
+    parts: framework.partsSnapshot,
+    addonKeys: framework.addonKeys,
+  });
+
   const batches: FrameworkBatchView[] = [];
   const progressLines: FrameworkProgressLine[] = [];
   let batchesTotalKurus = 0;
@@ -1429,6 +1497,14 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
       cancelledAt: b.cancelledAt?.toISOString() ?? null,
       cancelReason: b.cancelReason,
       note: b.note,
+      releaseWindowOpen:
+        b.status === "planned" &&
+        frameworkReleaseWindowOpen({
+          snapshot: framework.pricingSnapshot,
+          leadDays,
+          plannedShipDate: b.plannedShipDate,
+          now,
+        }),
       lines,
     });
     if (b.status !== "cancelled") batchesTotalKurus += b.amountKurus;
@@ -1458,7 +1534,6 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
     }
   }
 
-  const now = new Date();
   return {
     id: framework.id,
     number: framework.number,
@@ -1472,6 +1547,7 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
     partsSnapshot: framework.partsSnapshot,
     addonsSnapshot: framework.addonsSnapshot,
     committedUnits: framework.committedUnits,
+    leadDays,
     committedTotalKurus: framework.committedTotalKurus,
     batchesTotalKurus,
     priceLockedUntil: framework.priceLockedUntil.toISOString(),
@@ -1628,4 +1704,310 @@ export async function loadManufacturerPlannedBatches(
     units: r.units,
     loadUnits: frameworkBatchLoadUnits(r.units),
   }));
+}
+
+// ─── Tercihler: not ve çapalı atölye ────────────────────────────────────────
+
+/**
+ * Anlaşmanın admin notunu ve ÇAPALI ATÖLYESİNİ yazar.
+ *
+ * PARAYA DOKUNMAZ: ne taahhüt, ne kilitli fiyat, ne parti tutarı. Çapa yalnız
+ * atamanın İLK ADAYINI değiştirir (`framework-placement.ts`) ve kapıların
+ * hiçbirini atlamaz.
+ *
+ * ─── DENETİM SATIRI YAZILMIYOR — BİLEREK ───────────────────────────────────
+ *
+ * `quote_admin_actions.action` KAPALI bir CHECK kümesidir (`QUOTE_ADMIN_ACTIONS`)
+ * ve çerçeve için yedi değer taşıyor: create / activate / batch_plan /
+ * batch_release / batch_cancel / cancel / extend. Bu ucun karşılığı olan bir
+ * değer YOK ve bu tur migration ÜRETMİYOR. Var olan bir eylemin adıyla satır
+ * yazmak (ör. `framework_extend`) izi YALANLAMAK olurdu; kümenin dışına yazmayı
+ * denemek ise veritabanının 23514 ile reddettiği bir INSERT.
+ *
+ * Bu yüzden değişiklik SATIRIN KENDİSİNDE görünür kalır (`admin_note`,
+ * `preferred_manufacturer_id`, `updated_at`) ve gerekçe İSTENİR — ama iz için
+ * `framework_update` CHECK değeri bir sonraki migration turunun borcudur.
+ *
+ * Yalnız `draft` ve `active` anlaşmada çalışır: iptal edilmiş ya da tamamlanmış
+ * bir anlaşmanın çapasını değiştirmek hiçbir partiyi etkilemez, yalnız kaydı
+ * bulandırır.
+ */
+export async function setFrameworkPreferences(args: {
+  frameworkId: string;
+  adminEmail: string;
+  reason: string;
+  /** Verilmezse DOKUNULMAZ; boş dize notu SİLER. */
+  adminNote?: string | null;
+  /** Verilmezse DOKUNULMAZ; `null` çapayı KALDIRIR. */
+  preferredManufacturerId?: string | null;
+  now?: Date;
+}): Promise<{ id: string; preferredManufacturerId: string | null }> {
+  const now = args.now ?? new Date();
+  const out = await db.transaction(async (tx) => {
+    await tx.execute(LOCK_TIMEOUT);
+    const framework = await lockFramework(tx, args.frameworkId);
+    if (framework.status !== "draft" && framework.status !== "active") {
+      throw new QuoteServiceError(
+        "Yalnız taslak ya da aktif bir anlaşmanın tercihleri değiştirilebilir.",
+        409,
+        "framework_not_editable"
+      );
+    }
+    // Çapa, VAR OLAN ve AKTİF bir atölye olmak zorunda: olmayan bir kimliği
+    // yazmak, her partide sessizce sıralamaya düşen bir "çapa" bırakırdı.
+    if (args.preferredManufacturerId !== undefined && args.preferredManufacturerId !== null) {
+      const [shop] = await tx
+        .select({ id: manufacturers.id, status: manufacturers.status })
+        .from(manufacturers)
+        .where(eq(manufacturers.id, args.preferredManufacturerId))
+        .limit(1);
+      if (!shop || shop.status !== "active") {
+        throw new QuoteServiceError(
+          "Seçilen atölye bulunamadı ya da aktif değil.",
+          409,
+          "manufacturer_unavailable"
+        );
+      }
+    }
+    const next =
+      args.preferredManufacturerId === undefined
+        ? framework.preferredManufacturerId
+        : args.preferredManufacturerId;
+    await tx
+      .update(quoteFrameworks)
+      .set({
+        ...(args.adminNote === undefined ? {} : { adminNote: args.adminNote?.trim() || null }),
+        ...(args.preferredManufacturerId === undefined
+          ? {}
+          : { preferredManufacturerId: args.preferredManufacturerId }),
+        updatedAt: now,
+      })
+      .where(eq(quoteFrameworks.id, framework.id));
+    return { id: framework.id, preferredManufacturerId: next, userId: framework.userId };
+  });
+  emitFrameworkChanged({ frameworkId: out.id, userId: out.userId });
+  return { id: out.id, preferredManufacturerId: out.preferredManufacturerId };
+}
+
+// ─── Giriş noktası: teklif → anlaşma ────────────────────────────────────────
+
+export interface FrameworkEntryGate {
+  /** Düğme çizilebilir mi (ve uç kabul eder mi). */
+  eligible: boolean;
+  /** Neden olmaz — Türkçe cümleler, sırayla. */
+  refusals: string[];
+  /** Zaten bir anlaşması varsa ona bağlantı verilir, düğme değil. */
+  existingFramework: { id: string; number: string } | null;
+  /** Adres alanlarının ÖN DOLGUSU (teklifin fatura adresi); yoksa null. */
+  defaultShippingAddress: TurkishAddress | null;
+  /** Çapa seçicisinin listesi: yalnız AKTİF atölyeler. */
+  manufacturers: Array<{ id: string; companyName: string }>;
+}
+
+/**
+ * `/admin/teklifler/[id]` düğmesinin kapısı — kapı UÇTAKİYLE AYNI
+ * (`entryRefusals` + `validateFrameworkAgreement`, ikisi de tek kaynak).
+ *
+ * Bayrak BURADA OKUNMAZ: yüzeyi kapatmak sayfanın işi
+ * (`frameworkSurfacesEnabled`), servisin değil.
+ */
+export async function loadFrameworkEntry(quoteId: string): Promise<FrameworkEntryGate> {
+  const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId)).limit(1);
+  const shops = await db
+    .select({ id: manufacturers.id, companyName: manufacturers.companyName })
+    .from(manufacturers)
+    .where(eq(manufacturers.status, "active"))
+    .orderBy(asc(manufacturers.companyName));
+  if (!quote) {
+    return {
+      eligible: false,
+      refusals: ["Teklif bulunamadı."],
+      existingFramework: null,
+      defaultShippingAddress: null,
+      manufacturers: shops,
+    };
+  }
+
+  const [existing] = await db
+    .select({ id: quoteFrameworks.id, number: quoteFrameworks.number })
+    .from(quoteFrameworks)
+    .where(eq(quoteFrameworks.quoteId, quote.id))
+    .limit(1);
+  const parts = await db
+    .select()
+    .from(quoteParts)
+    .where(and(eq(quoteParts.quoteId, quote.id), isNull(quoteParts.deletedAt)))
+    .orderBy(asc(quoteParts.sortOrder), asc(quoteParts.createdAt));
+  const snapshot = quote.pricingSnapshot;
+  const computed = computeQuote(snapshot, parts.map(toPricingPartInput), {
+    leadTier: quote.leadTier,
+    addonKeys: quote.addonKeys,
+  });
+
+  const refusals = entryRefusals({
+    anonymous: quote.userId === null,
+    status: quote.status,
+    hasFramework: !!existing,
+    partCount: parts.length,
+    technologyCount: new Set(parts.map((p) => p.technologyKey)).size,
+    allPriced: computed.totals.allPriced,
+  }).map((r) => r.message);
+  // Boyama yasağı ve toplam tavanı UÇTA da aynı saf kapıdan geçiyor
+  // (`createFrameworkFromQuote`): ekran onları ikinci kez YORUMLAMAZ, aynı
+  // fonksiyonun cümlesini yazar.
+  for (const refusal of validateFrameworkAgreement({
+    snapshot,
+    parts,
+    committedTotalKurus: computed.totals.totalKurus,
+  })) {
+    refusals.push(refusal.message);
+  }
+
+  return {
+    eligible: refusals.length === 0,
+    refusals,
+    existingFramework: existing ?? null,
+    defaultShippingAddress: quote.billingAddress ?? null,
+    manufacturers: shops,
+  };
+}
+
+// ─── Kenar çubuğu rozeti: serbest bırakma penceresi açılmış partiler ────────
+
+/**
+ * Serbest bırakma PENCERESİ AÇILMIŞ planlı parti sayısı (kenar çubuğu rozeti).
+ *
+ * Pencere ölçüsü tek kaynaktan gelir (`frameworkReleaseWindowOpen`, plan
+ * kapısının 4. kuralının tersi); ikinci bir "kaç gün önce uyar" eşiği YOKTUR.
+ *
+ * İKİ SORGU, çünkü ölçü ANLAŞMA BAŞINA: donmuş katalog anlık görüntüsü her
+ * parti satırında tekrarlansaydı aynı JSON onlarca kez telden geçerdi. Yalnız
+ * planlı partisi OLAN anlaşmalar okunur.
+ *
+ * `orders`a HİÇ BAKILMAZ: planlı parti tezgâhta yer kaplamaz (ortada sipariş
+ * yok) ve kapasite ölçüsünün tek sahibi `manufacturer-capacity.ts`tir.
+ */
+export async function releasableBatchCount(now = new Date()): Promise<number> {
+  const planned = await db
+    .select({
+      frameworkId: quoteFrameworkBatches.frameworkId,
+      plannedShipDate: quoteFrameworkBatches.plannedShipDate,
+    })
+    .from(quoteFrameworkBatches)
+    .innerJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
+    .where(
+      and(eq(quoteFrameworks.status, "active"), eq(quoteFrameworkBatches.status, "planned"))
+    );
+  if (planned.length === 0) return 0;
+
+  const heads = await db
+    .select({
+      id: quoteFrameworks.id,
+      leadTier: quoteFrameworks.leadTier,
+      addonKeys: quoteFrameworks.addonKeys,
+      partsSnapshot: quoteFrameworks.partsSnapshot,
+      pricingSnapshot: quoteFrameworks.pricingSnapshot,
+    })
+    .from(quoteFrameworks)
+    .where(inArray(quoteFrameworks.id, [...new Set(planned.map((p) => p.frameworkId))]));
+
+  const byFramework = new Map(heads.map((h) => [h.id, h]));
+  const leadCache = new Map<string, number | null>();
+  let open = 0;
+  for (const batch of planned) {
+    const head = byFramework.get(batch.frameworkId);
+    if (!head) continue;
+    if (!leadCache.has(head.id)) {
+      leadCache.set(
+        head.id,
+        frameworkLeadDays({
+          snapshot: head.pricingSnapshot,
+          leadTier: head.leadTier,
+          parts: head.partsSnapshot,
+          addonKeys: head.addonKeys,
+        })
+      );
+    }
+    if (
+      frameworkReleaseWindowOpen({
+        snapshot: head.pricingSnapshot,
+        leadDays: leadCache.get(head.id) ?? null,
+        plannedShipDate: batch.plannedShipDate,
+        now,
+      })
+    ) {
+      open++;
+    }
+  }
+  return open;
+}
+
+// ─── İLERİYE DÖNÜK YÜK: GÖSTERİM, kapı DEĞİL ───────────────────────────────
+
+export interface FrameworkForwardLoad {
+  manufacturerId: string;
+  /** Pencerenin gün sayısı (takvim günü) ve sınırları, `YYYY-MM-DD`. */
+  windowDays: number;
+  fromDate: string;
+  toDate: string;
+  /** Pencereye düşen PLANLI parti sayısı. */
+  batchCount: number;
+  /** Σ `quote_framework_batch_lines.quantity`. */
+  units: number;
+  /** Ağırlıklı yük (`painterLoadUnits`) — okunabilir bir sayı, EŞİK DEĞİL. */
+  loadUnits: number;
+}
+
+/**
+ * Bir atölyeye İLERİYE DÖNÜK planlanmış birimler.
+ *
+ * **KAPI DEĞİLDİR** (`manufacturer-capacity.ts` KARAR 2): planlı parti tezgâhta
+ * yer KAPLAMAZ, çünkü ortada sipariş yoktur. Hiçbir ekran bu sayıya bakarak
+ * atölye kapatmaz; atamanın tek ölçüsü `loadUnits` KAPISIdır ve onun tek sahibi
+ * kapasite modülüdür.
+ *
+ * Sorgu `orders`a HİÇ DOKUNMAZ ve `ACTIVE_MFG_STATUSES` OKUMAZ: yalnız
+ * `quote_framework_batch_lines` toplanır. Buraya bir durum süzgeci eklemek
+ * ikinci bir kapasite sayımı kurmak olurdu ve depo geneli tarayıcı
+ * (`scripts/test-manufacturer-capacity.ts`) onu haklı olarak düşürür.
+ */
+export async function loadFrameworkForwardLoad(args: {
+  manufacturerId: string;
+  windowDays: number;
+  now?: Date;
+}): Promise<FrameworkForwardLoad> {
+  const now = args.now ?? new Date();
+  const fromDate = istanbulDateKey(now);
+  const toDate = istanbulDateKey(new Date(now.getTime() + args.windowDays * 86_400_000));
+
+  const [row] = await db
+    .select({
+      batchCount: sql<number>`count(DISTINCT ${quoteFrameworkBatches.id})::int`,
+      units: sql<number>`coalesce(sum(${quoteFrameworkBatchLines.quantity}), 0)::int`,
+    })
+    .from(quoteFrameworkBatchLines)
+    .innerJoin(
+      quoteFrameworkBatches,
+      eq(quoteFrameworkBatches.id, quoteFrameworkBatchLines.batchId)
+    )
+    .innerJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
+    .where(
+      and(
+        eq(quoteFrameworks.preferredManufacturerId, args.manufacturerId),
+        eq(quoteFrameworks.status, "active"),
+        eq(quoteFrameworkBatches.status, "planned"),
+        sql`${quoteFrameworkBatches.plannedShipDate} BETWEEN ${fromDate}::date AND ${toDate}::date`
+      )
+    );
+
+  const units = row?.units ?? 0;
+  return {
+    manufacturerId: args.manufacturerId,
+    windowDays: args.windowDays,
+    fromDate,
+    toDate,
+    batchCount: row?.batchCount ?? 0,
+    units,
+    loadUnits: frameworkBatchLoadUnits(units),
+  };
 }

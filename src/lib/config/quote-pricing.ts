@@ -193,8 +193,19 @@ export function priceUnitAuto(args: {
   };
 }
 
+/**
+ * Teslim gününün okuduğu ÜÇ anahtar.
+ *
+ * `PartConfig`in TAMAMI şart değil: dondurulmuş parça anlık görüntüsü
+ * (`FrozenQuotePart`) de geometri olmadan bu üçünü taşıyor ve çerçeve
+ * anlaşmanın serbest bırakma penceresi tam olarak onu okuyor.
+ */
+export type LeadDaysConfig =
+  | PartConfig
+  | Pick<PartConfig, "technologyKey" | "materialKey" | "finishKey">;
+
 /** Parçanın kademe UYGULANMAMIŞ iş günü tabanı. */
-export function partLeadDaysBase(s: PricingSnapshot, config: PartConfig): number {
+export function partLeadDaysBase(s: PricingSnapshot, config: LeadDaysConfig): number {
   const tech = findTechnology(s, config.technologyKey);
   const material = findMaterial(s, config.technologyKey, config.materialKey);
   const finish = findFinish(s, config.technologyKey, config.finishKey);
@@ -204,6 +215,36 @@ export function partLeadDaysBase(s: PricingSnapshot, config: PartConfig): number
 /** Kademe uygulanmış iş günü — hiçbir kademe kendi alt sınırının altına inemez. */
 export function applyTierDays(base: number, tier: LeadTier): number {
   return Math.max(tier.minDays, base + tier.daysDelta);
+}
+
+/**
+ * TEKLİFİN teslim süresi (iş günü): parçaların EN YAVAŞI + en yavaş ek hizmet,
+ * sonra kademe.
+ *
+ * `computeQuote`un içinden BURAYA ÇIKARILDI (davranış birebir aynı), çünkü
+ * ikinci bir çağıranı var: çerçeve anlaşmanın serbest bırakma penceresi
+ * (`frameworkReleaseWindowOpen`) aynı iş gününü DONMUŞ parça anlık
+ * görüntüsünden ölçmek zorunda ve `computeQuote` geometri istiyor. Formülün
+ * ikinci bir kopyası, penceresi ekranda bir gün, uçta başka bir gün açılan bir
+ * anlaşma demekti.
+ *
+ * Yalnız üç anahtar okunur (`LeadDaysConfig`), o yüzden dondurulmuş parça
+ * anlık görüntüsü de doğrudan geçebilir.
+ */
+export function quoteLeadDays(
+  s: PricingSnapshot,
+  parts: readonly LeadDaysConfig[],
+  addonKeys: readonly string[],
+  tier: LeadTier
+): number {
+  const partBase = parts.reduce(
+    (max, config) => Math.max(max, partLeadDaysBase(s, config)),
+    0
+  );
+  const addonExtra = s.addons
+    .filter((a) => addonKeys.includes(a.key))
+    .reduce((max, a) => Math.max(max, a.leadDaysExtra), 0);
+  return applyTierDays(partBase + addonExtra, tier);
 }
 
 /**

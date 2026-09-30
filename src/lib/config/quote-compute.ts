@@ -35,6 +35,7 @@ import {
   leadTier,
   partLeadDaysBase,
   priceUnitAuto,
+  quoteLeadDays,
 } from "@/lib/config/quote-pricing";
 import { suggestUnits } from "@/lib/config/quote-units";
 
@@ -188,14 +189,17 @@ function computeForTier(
   const totalKurus = partsKurus + addonsKurus + minOrderTopUpKurus;
   const kdv = computeKdv(totalKurus, KDV_RATE_BPS);
 
-  let leadDays: number | null = null;
-  if (allPriced) {
-    const partBase = parts.reduce((max, p) => Math.max(max, partLeadDaysBase(snapshot, p.config)), 0);
-    const addonExtra = snapshot.addons
-      .filter((a) => addonKeys.includes(a.key))
-      .reduce((max, a) => Math.max(max, a.leadDaysExtra), 0);
-    leadDays = applyTierDays(partBase + addonExtra, tier);
-  }
+  // Teslim süresi TEK YERDE hesaplanır (`quoteLeadDays`): çerçeve anlaşmanın
+  // serbest bırakma penceresi de aynı iş gününü ölçüyor ve formülün ikinci bir
+  // kopyası iki yüzeyde iki farklı gün demekti.
+  const leadDays: number | null = allPriced
+    ? quoteLeadDays(
+        snapshot,
+        parts.map((p) => p.config),
+        addonKeys,
+        tier
+      )
+    : null;
 
   return {
     parts: computedParts,

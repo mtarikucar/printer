@@ -40,7 +40,8 @@ import { countsAsRevenue } from "@/lib/config/order-money";
 import { REFUNDED_PAYMENT_STATUS } from "@/lib/config/order-status-policy";
 import { painterLoadUnits } from "@/lib/config/painter-scoring";
 import { MAX_AMOUNT_KURUS } from "@/lib/config/prices";
-import type { FrozenQuotePart, PricingSnapshot } from "@/lib/config/quote-types";
+import { quoteLeadDays } from "@/lib/config/quote-pricing";
+import type { FrozenQuotePart, LeadTierKey, PricingSnapshot } from "@/lib/config/quote-types";
 
 // ─── Kapalı kümeler (CHECK listelerinin kaynağı) ────────────────────────────
 
@@ -480,6 +481,64 @@ export function validateBatchPlan(args: {
   }
 
   return refusals;
+}
+
+// ─── Serbest bırakma penceresi ──────────────────────────────────────────────
+
+/**
+ * Anlaşmanın teslim süresi (iş günü) — DONMUŞ anlık görüntüden.
+ *
+ * Formül İKİNCİ KEZ YAZILMAZ: `quoteLeadDays` (`quote-pricing.ts`) teklif
+ * motorunun kendi hesabıdır ve `computeQuote` da onu çağırır. Buradaki tek
+ * fark girdinin geometrisiz olması — anlaşmanın `parts_snapshot`ı teslim
+ * gününün okuduğu üç anahtarı zaten taşıyor.
+ *
+ * `null` = anlaşmanın teslim kademesi donmuş katalogda YOK. Nötr bir kademe
+ * VARSAYILMAZ: bilinmeyen bir kademeyle ölçülmüş bir pencere, admin'e
+ * uydurulmuş bir tarih söylemekti.
+ */
+export function frameworkLeadDays(args: {
+  snapshot: PricingSnapshot;
+  leadTier: LeadTierKey;
+  parts: readonly Pick<FrozenQuotePart, "technologyKey" | "materialKey" | "finishKey">[];
+  addonKeys: readonly string[];
+}): number | null {
+  const tier = args.snapshot.settings.leadTiers.find((t) => t.key === args.leadTier);
+  if (!tier) return null;
+  return quoteLeadDays(args.snapshot, args.parts, args.addonKeys, tier);
+}
+
+/**
+ * Bu partinin SERBEST BIRAKMA PENCERESİ açıldı mı?
+ *
+ * Plan kapısının 4. kuralının TAM TERSİ ve aynı ölçüyle: parti planlanırken
+ * `plannedShipDate >= bugün + leadDays iş günü` isteniyordu, yani pencere
+ * `leadDays` iş günü ÖNCE açılır. Bugün bırakılan bir parti tarihini ancak
+ * yakalıyorsa (ya da çoktan geçtiyse) pencere AÇIKTIR.
+ *
+ * İkinci bir eşik ya da "kaç gün önce uyar" sabiti YOKTUR: uydurulmuş bir
+ * ufuk, admin'e ucun uygulamadığı bir aciliyet söylemekti. Tatil listesi ve
+ * `cutoffHour` da anlaşmanın DONMUŞ anlık görüntüsünden okunur — imzadan sonra
+ * ilan edilen bir resmî tatil imzalanmış bir planı kaydırmaz.
+ */
+export function frameworkReleaseWindowOpen(args: {
+  snapshot: PricingSnapshot;
+  /** `frameworkLeadDays`; `null` ise pencere ÖLÇÜLEMEZ ve `false` döner. */
+  leadDays: number | null;
+  /** `YYYY-MM-DD`, İstanbul takvimi. */
+  plannedShipDate: string;
+  now: Date;
+}): boolean {
+  if (args.leadDays === null) return false;
+  const earliest = istanbulDateKey(
+    addBusinessDays(
+      args.now,
+      args.leadDays,
+      args.snapshot.settings.holidays,
+      args.snapshot.settings.cutoffHour
+    )
+  );
+  return args.plannedShipDate <= earliest;
 }
 
 // ─── İlerleme görünümü (kovalar) ────────────────────────────────────────────

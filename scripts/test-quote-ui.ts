@@ -25,6 +25,9 @@ import { dfmMessage } from "../src/components/quote/dfm-list";
 import {
   acceptedAccept,
   acceptedExtensions,
+  formatNames,
+  megabytes,
+  uploadCodeMessage,
   validateQuoteFiles,
 } from "../src/components/quote/dropzone";
 import { QuoteBanners } from "../src/components/quote/quote-banners";
@@ -214,6 +217,11 @@ test("STEP cümleleri İKİ sözlükte de var ve yer tutucuları ayrışmamış"
   // ama YER TUTUCU ayrışması kırmaz: bir dilde `{mm}` cümlede olduğu gibi
   // kalır. Nöbetçi bu yüzden değerleri de karşılaştırır.
   const stepKeys: Record<string, string[]> = {
+    "upload.formatListAnd": ["{rest}", "{last}"],
+    "upload.formatListOr": ["{rest}", "{last}"],
+    "upload.hint": ["{formats}", "{maxMb}"],
+    "upload.invalidFormat": ["{file}", "{formats}"],
+    "upload.stepInvalid": ["{file}"],
     "upload.stepTooLarge": ["{file}", "{maxMb}"],
     "part.stepUnitsLocked": [],
     "part.stepTessellation": ["{mm}"],
@@ -701,7 +709,9 @@ test("dosya elemesi uzantıyı, boyutu ve parça tavanını Türkçe anlatır", 
     ["govde.stl", "kapak.3mf"]
   );
   assert.deepEqual(errors, [
-    "cizim.step: yalnız STL, OBJ, 3MF ve STEP dosyaları yüklenebilir.",
+    // Bayrak KAPALI olduğu için cümle STEP'i ANMAZ: reddettiğimiz biçimi
+    // kabul ediyoruz demek olurdu (liste `acceptedFormats`ten türer).
+    "cizim.step: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
     "dev.obj: dosya 100 MB sınırını aşıyor.",
     "Bir teklifte en fazla 2 parça olabilir.",
   ]);
@@ -772,8 +782,16 @@ test("istemci kapısı bayrağa bağlı: STEP listedeyken .step kabul edilir", (
   const closed = validateQuoteFiles(files, { ...opts, acceptedFormats: MESH_FORMATS });
   assert.deepEqual(closed.accepted, []);
   assert.deepEqual(closed.errors, [
-    fill(tr["instantQuote.upload.invalidFormat"], { file: "govde.step" }),
-    fill(tr["instantQuote.upload.invalidFormat"], { file: "kapak.STP" }),
+    // Cümledeki liste KABUL EDİLEN listedir: bayrak kapalıyken reddin içinde
+    // STEP anılmaz (aşağıdaki cümle testi bunu birebir yazıyor).
+    fill(tr["instantQuote.upload.invalidFormat"], {
+      file: "govde.step",
+      formats: "STL, OBJ ve 3MF",
+    }),
+    fill(tr["instantQuote.upload.invalidFormat"], {
+      file: "kapak.STP",
+      formats: "STL, OBJ ve 3MF",
+    }),
   ]);
 
   const open = validateQuoteFiles(files, { ...opts, acceptedFormats: ALL_FORMATS });
@@ -783,6 +801,105 @@ test("istemci kapısı bayrağa bağlı: STEP listedeyken .step kabul edilir", (
     "iki uzantı TEK biçimdir: .stp de kabul edilmeli"
   );
   assert.deepEqual(open.errors, []);
+});
+
+test("müşteri cümlesi biçim listesini BAYRAKTAN okur: kapalıyken STEP'i anmaz", () => {
+  // Sabit bir cümle ("yalnız STL, OBJ, 3MF ve STEP…") bayrak kapalıyken
+  // müşteriye, tam da reddettiğimiz biçimi kabul ettiğimizi söylerdi ve bu hâl
+  // GEÇİCİ değil: `quote_step_enabled` varsayılan olarak kapalı
+  // (`FLAG_DEFAULTS`). Liste bu yüzden `acceptedFormats`ten türer.
+  assert.equal(formatNames(MESH_FORMATS, tr["instantQuote.upload.formatListAnd"]), "STL, OBJ ve 3MF");
+  assert.equal(
+    formatNames(ALL_FORMATS, tr["instantQuote.upload.formatListAnd"]),
+    "STL, OBJ, 3MF ve STEP"
+  );
+  assert.equal(formatNames(ALL_FORMATS, en["instantQuote.upload.formatListOr"]), "STL, OBJ, 3MF or STEP");
+  // Tek biçimli liste bağlaç istemez (kalıp hiç kullanılmaz).
+  assert.equal(formatNames(["stl"], tr["instantQuote.upload.formatListAnd"]), "STL");
+
+  const reject = (formats: QuoteSourceFormat[]) =>
+    validateQuoteFiles([fakeFile("govde.igs", 1_000)], {
+      maxFileBytes: 100 * 1024 * 1024,
+      maxParts: 5,
+      currentCount: 0,
+      acceptedFormats: formats,
+      d: tr,
+    }).errors;
+  assert.deepEqual(reject(MESH_FORMATS), [
+    "govde.igs: yalnız STL, OBJ ve 3MF dosyaları yüklenebilir.",
+  ]);
+  // Bayrak AÇIKKEN cümle tasarım §6'nın birebir yazdığı hâle varır.
+  assert.deepEqual(reject(ALL_FORMATS), [
+    "govde.igs: yalnız STL, OBJ, 3MF ve STEP dosyaları yüklenebilir.",
+  ]);
+
+  // Ve aynı kural bırakma alanının altındaki İPUCU cümlesi için de geçerli:
+  // GERÇEK markup üzerinden, iki çağrı yerinde de.
+  const hint = (formats: QuoteSourceFormat[]) =>
+    fill(tr["instantQuote.upload.hint"], {
+      formats: formatNames(formats, tr["instantQuote.upload.formatListOr"]),
+      maxMb: megabytes(catalogFixture.maxFileBytes),
+    });
+  assert.equal(hint(MESH_FORMATS), "STL, OBJ veya 3MF · en fazla 100 MB");
+  assert.equal(hint(ALL_FORMATS), "STL, OBJ, 3MF veya STEP · en fazla 100 MB");
+
+  const closedWorkspace = renderWorkspace(quoteFixture());
+  assert.ok(closedWorkspace.includes(hint(MESH_FORMATS)), "çalışma alanı ipucusu listeden türemiyor");
+  assert.ok(
+    !closedWorkspace.includes("STEP"),
+    "bayrak kapalıyken çalışma alanı STEP'ten söz ediyor"
+  );
+  const openWorkspace = renderWorkspace(
+    quoteFixture({ catalog: { ...catalogFixture, acceptedFormats: ALL_FORMATS } })
+  );
+  assert.ok(openWorkspace.includes(hint(ALL_FORMATS)), "bayrak açıkken ipucu STEP'i anmıyor");
+
+  const landing = (formats: QuoteSourceFormat[]) =>
+    inLocale(
+      createElement(LandingUploader, {
+        maxFileBytes: catalogFixture.maxFileBytes,
+        maxPartsPerQuote: catalogFixture.maxPartsPerQuote,
+        acceptedFormats: formats,
+      })
+    );
+  assert.ok(landing(MESH_FORMATS).includes(hint(MESH_FORMATS)));
+  assert.ok(!landing(MESH_FORMATS).includes("STEP"), "açılış yükleyicisi kapalıyken STEP diyor");
+  assert.ok(landing(ALL_FORMATS).includes(hint(ALL_FORMATS)));
+});
+
+test("uçtaki STEP reddi sözlükteki cümleye çevrilir (stepInvalid)", () => {
+  // İstemci ISO 10303 kabuğunu OKUYAMAZ (dosya uca gitmeden bilinmez), o
+  // yüzden cümlenin tetiği bir SUNUCU kodudur; ama cümle müşteriye ne
+  // yapacağını söylediği için sözlükte durur ve iki yükleme yeri de onu
+  // aynı yerden okur.
+  assert.equal(
+    uploadCodeMessage("step_not_iso", "govde.step", tr),
+    "govde.step: geçerli bir STEP dosyası değil (ISO 10303 başlığı yok). CAD programınızdan AP203/AP214 olarak yeniden dışa aktarın."
+  );
+  assert.match(uploadCodeMessage("step_not_iso", "a.stp", en) ?? "", /AP203\/AP214/);
+  // Eşlenmeyen kod ucun KENDİ cümlesine bırakılır (tablo kod kümesini
+  // çoğaltmaz): `null` "ucun cümlesini göster" demek.
+  assert.equal(uploadCodeMessage("step_no_data", "govde.step", tr), null);
+  assert.equal(uploadCodeMessage(null, "govde.step", tr), null);
+
+  // Kodun kendisi uçtan gelir: adı değişirse bu eşleme sessizce ölür.
+  const server = fs.readFileSync(
+    path.resolve("src/lib/services/quote-model-validation.ts"),
+    "utf8"
+  );
+  assert.match(server, /fail\("step_not_iso"\)/);
+
+  // Ve iki yükleme yeri de eşlemeyi ÇAĞIRIYOR (cümle ölü anahtar değil).
+  for (const file of [
+    "src/app/teklif/[number]/workspace-client.tsx",
+    "src/app/3d-baski/landing-uploader.tsx",
+  ]) {
+    assert.match(
+      fs.readFileSync(path.resolve(file), "utf8"),
+      /uploadCodeMessage\(e\.code, file\.name, d\)/,
+      `${file}: uçtan gelen kod sözlüğe çevrilmiyor`
+    );
+  }
 });
 
 test("STEP'in kendi tavanı istemcide de AYRI: aynı boyuttaki STL geçer", () => {

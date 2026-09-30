@@ -8,7 +8,9 @@ import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { UploadProgressBar } from "@/components/ui/UploadProgressBar";
 import {
   acceptedAccept,
+  formatNames,
   megabytes,
+  uploadCodeMessage,
   validateQuoteFiles,
   type QuoteUploadState,
 } from "@/components/quote/dropzone";
@@ -111,10 +113,16 @@ export function LandingUploader({
           uploaded += 1;
           track("quote_upload");
         } catch (e) {
+          // Ucun KODU sözlükte bir cümleye karşılık geliyorsa o cümle gider
+          // (STEP'in ISO kabuğu → AP203/AP214 yönlendirmesi); yoksa ucun
+          // kendi cümlesi olduğu gibi gösterilir.
+          const mapped =
+            e instanceof QuoteApiError ? uploadCodeMessage(e.code, file.name, d) : null;
           addError(
-            e instanceof QuoteApiError || e instanceof UploadError
-              ? e.message
-              : fill(d["instantQuote.upload.failed"], { file: file.name })
+            mapped ??
+              (e instanceof QuoteApiError || e instanceof UploadError
+                ? e.message
+                : fill(d["instantQuote.upload.failed"], { file: file.name }))
           );
         } finally {
           setUploads((prev) => prev.filter((u) => u.id !== id));
@@ -173,7 +181,10 @@ export function LandingUploader({
           {d["instantQuote.upload.drop"]}
         </p>
         <p className="mt-1 text-xs text-text-muted">
-          {fill(d["instantQuote.upload.hint"], { maxMb: megabytes(maxFileBytes) })}
+          {fill(d["instantQuote.upload.hint"], {
+            formats: formatNames(acceptedFormats, d["instantQuote.upload.formatListOr"]),
+            maxMb: megabytes(maxFileBytes),
+          })}
         </p>
         <button
           type="button"

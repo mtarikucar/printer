@@ -1324,13 +1324,25 @@ const tr: Dictionary = {
   "instantQuote.upload.cta": "Teklife parça ekle",
   "instantQuote.upload.drop": "Dosyaları buraya bırakın",
   "instantQuote.upload.failed": "{file} yüklenemedi. Lütfen tekrar deneyin.",
+  // Biçim listesi bir CÜMLE PARÇASI olarak gelir (`{formats}`), sabit yazılmaz:
+  // kabul edilen liste bayrağa bağlıdır (`catalog.acceptedFormats`) ve sabit
+  // cümle, `quote_step_enabled` kapalıyken STEP'i REDDEDEN cümlenin içinde
+  // STEP'in kabul edildiğini söylerdi. Bağlaç kalıpları aşağıda: bağlaç dile
+  // aittir, bu yüzden kodda değil sözlükte durur.
+  "instantQuote.upload.formatListAnd": "{rest} ve {last}",
+  "instantQuote.upload.formatListOr": "{rest} veya {last}",
   // Cümle TEK tavan söyler (genel tavan): STEP'in kendi tavanı yalnız
   // `stepTooLarge` hatasında geçer — bırakma alanının altındaki tek satıra iki
   // rakam sığdırmak, hiçbirini okutmamak olurdu.
-  "instantQuote.upload.hint": "STL, OBJ, 3MF veya STEP · en fazla {maxMb} MB",
-  "instantQuote.upload.invalidFormat":
-    "{file}: yalnız STL, OBJ, 3MF ve STEP dosyaları yüklenebilir.",
+  "instantQuote.upload.hint": "{formats} · en fazla {maxMb} MB",
+  "instantQuote.upload.invalidFormat": "{file}: yalnız {formats} dosyaları yüklenebilir.",
   "instantQuote.upload.processing": "İşleniyor…",
+  // Uçtaki `step_not_iso` reddinin müşteri cümlesi (`uploadCodeMessage`).
+  // İstemci ISO kabuğunu okuyamaz (dosya uca gitmeden bilinmez), o yüzden
+  // cümle bir SUNUCU koduna bağlıdır — ama cümle müşteriye ne yapacağını
+  // söylediği için sözlükte durur (tr + en kuralı).
+  "instantQuote.upload.stepInvalid":
+    "{file}: geçerli bir STEP dosyası değil (ISO 10303 başlığı yok). CAD programınızdan AP203/AP214 olarak yeniden dışa aktarın.",
   "instantQuote.upload.stepTooLarge":
     "{file}: STEP dosyaları en çok {maxMb} MB olabilir — STEP aynı boyutta çok daha fazla geometri taşır. Parçayı ayırın ya da STL olarak gönderin.",
   "instantQuote.upload.tooLarge": "{file}: dosya {maxMb} MB sınırını aşıyor.",

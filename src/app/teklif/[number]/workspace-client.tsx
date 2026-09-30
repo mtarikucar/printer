@@ -11,7 +11,7 @@ import { track } from "@/lib/analytics/client";
 import { QuoteBulkBar } from "@/components/quote/bulk-bar";
 import {
   QuoteDropzone,
-  acceptedAccept,
+  uploadCodeMessage,
   validateQuoteFiles,
   type QuoteUploadState,
 } from "@/components/quote/dropzone";
@@ -358,10 +358,16 @@ export function QuoteWorkspaceClient({
           );
           track("quote_upload");
         } catch (e) {
+          // Ucun KODU sözlükte bir cümleye karşılık geliyorsa o cümle gider
+          // (STEP'in ISO kabuğu → AP203/AP214 yönlendirmesi); yoksa ucun
+          // kendi cümlesi olduğu gibi gösterilir.
+          const mapped =
+            e instanceof QuoteApiError ? uploadCodeMessage(e.code, file.name, d) : null;
           const message =
-            e instanceof QuoteApiError || e instanceof UploadError
+            mapped ??
+            (e instanceof QuoteApiError || e instanceof UploadError
               ? e.message
-              : fill(d["instantQuote.upload.failed"], { file: file.name });
+              : fill(d["instantQuote.upload.failed"], { file: file.name }));
           setUploadErrors((prev) => (prev.includes(message) ? prev : [...prev, message]));
         } finally {
           order.endWrite();
@@ -369,7 +375,7 @@ export function QuoteWorkspaceClient({
         }
       }
     },
-    [apply, canEdit, catalog.maxFileBytes, catalog.maxPartsPerQuote, d, order, parts.length, quoteId, shareToken, uploads.length]
+    [apply, canEdit, catalog.acceptedFormats, catalog.maxFileBytes, catalog.maxPartsPerQuote, d, order, parts.length, quoteId, shareToken, uploads.length]
   );
 
   // Sayfanın HER YERİNE bırakılabilir: müşteri dosyayı tam olarak bırakma
@@ -508,7 +514,7 @@ export function QuoteWorkspaceClient({
           {canEdit && (
             <QuoteDropzone
               maxFileBytes={catalog.maxFileBytes}
-              accept={acceptedAccept(catalog.acceptedFormats)}
+              acceptedFormats={catalog.acceptedFormats}
               uploads={uploads}
               errors={uploadErrors}
               disabled={busy}

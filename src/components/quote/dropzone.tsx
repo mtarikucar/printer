@@ -49,6 +49,60 @@ export function acceptedAccept(formats: readonly QuoteSourceFormat[]): string {
     .join(",");
 }
 
+/** Biçim → müşteriye gösterilen ad. */
+const FORMAT_LABELS: Record<QuoteSourceFormat, string> = {
+  stl: "STL",
+  obj: "OBJ",
+  "3mf": "3MF",
+  step: "STEP",
+};
+
+/**
+ * "STL, OBJ, 3MF ve STEP" — biçim listesinin CÜMLE hâli.
+ *
+ * Neden sabit bir cümle DEĞİL: kabul edilen liste bayrağa bağlıdır
+ * (`catalog.acceptedFormats`). "yalnız STL, OBJ, 3MF ve STEP dosyaları
+ * yüklenebilir" cümlesini sabit yazmak, `quote_step_enabled` kapalıyken
+ * müşteriye STEP'i REDDEDEN cümlenin içinde STEP'in kabul edildiğini
+ * söylerdi. Liste tek yerden türer, cümle de onu okur.
+ *
+ * Bağlaç KALIPTAN gelir (`{rest} ve {last}` / `{rest} and {last}`): bağlaç
+ * dile aittir ve sözlükte durur, burada değil. "ve" ile "veya" ayrı
+ * kalıplardır — ret cümlesi "ve", ipucu cümlesi "veya" der.
+ */
+export function formatNames(
+  formats: readonly QuoteSourceFormat[],
+  pattern: string
+): string {
+  const names = formats.map((format) => FORMAT_LABELS[format]);
+  const last = names[names.length - 1] ?? "";
+  if (names.length < 2) return last;
+  return fill(pattern, { rest: names.slice(0, -1).join(", "), last });
+}
+
+/**
+ * Uçtaki red KODU → müşteri cümlesi; eşleme yoksa `null`.
+ *
+ * Uçlar `{error, code}` döner (global kısıt) ve istemci bugün ucun cümlesini
+ * birebir gösteriyor. Bir red müşteriye NE YAPACAĞINI söylüyorsa o cümle
+ * sözlüğe aittir (tr + en kuralı): STEP'in ISO 10303 kabuğu eksikse müşteriyi
+ * AP203/AP214 ihracatına yönlendiren cümle buradan gelir ve iki yükleme yeri
+ * (çalışma alanı + açılış sayfası) onu aynı yerden okur.
+ *
+ * Eşlenmeyen kod `null` döner — tablo ucun kod kümesini ÇOĞALTMAK zorunda
+ * değildir; yeni bir kod sessizce ucun cümlesiyle gösterilir.
+ */
+export function uploadCodeMessage(
+  code: string | null | undefined,
+  file: string,
+  d: Dictionary
+): string | null {
+  if (code === "step_not_iso") {
+    return fill(d["instantQuote.upload.stepInvalid"], { file });
+  }
+  return null;
+}
+
 export interface QuoteFileCheck {
   accepted: File[];
   /** Müşteriye gösterilecek Türkçe cümleler (dosya adıyla). */
@@ -90,7 +144,14 @@ export function validateQuoteFiles(
   for (const file of files) {
     const extension = extensionOf(file.name);
     if (!allowed.has(extension)) {
-      errors.push(fill(d["instantQuote.upload.invalidFormat"], { file: file.name }));
+      // Cümledeki liste KABUL EDİLEN listedir: bayrak kapalıyken reddin
+      // içinde STEP'i anmak, reddettiğimiz biçimi kabul ediyoruz demek olurdu.
+      errors.push(
+        fill(d["instantQuote.upload.invalidFormat"], {
+          file: file.name,
+          formats: formatNames(acceptedFormats, d["instantQuote.upload.formatListAnd"]),
+        })
+      );
       continue;
     }
     // STEP'in tavanı genel tavandan AYRI ve daha düşük (16 MiB): aynı bayt
@@ -130,15 +191,20 @@ export interface QuoteUploadState {
 
 export function QuoteDropzone({
   maxFileBytes,
-  accept,
+  acceptedFormats,
   uploads,
   errors,
   disabled,
   onFiles,
 }: {
   maxFileBytes: number;
-  /** `acceptedAccept(catalog.acceptedFormats)` — sabit DEĞİL, bayrağa bağlı. */
-  accept: string;
+  /**
+   * `catalog.acceptedFormats` — sabit DEĞİL, bayrağa bağlı. Dosya seçicinin
+   * `accept` dizesi DE alanın altındaki ipucu cümlesi DE bu tek prop'tan
+   * türer: ikisini ayrı ayrı geçirmek, seçicinin süzdüğü liste ile müşteriye
+   * söylenen listenin ayrışabileceği yerdi.
+   */
+  acceptedFormats: readonly QuoteSourceFormat[];
   uploads: QuoteUploadState[];
   errors: string[];
   disabled?: boolean;
@@ -178,7 +244,7 @@ export function QuoteDropzone({
           ref={inputRef}
           type="file"
           multiple
-          accept={accept}
+          accept={acceptedAccept(acceptedFormats)}
           className="hidden"
           disabled={disabled}
           onChange={(e) => {
@@ -190,7 +256,10 @@ export function QuoteDropzone({
           {d["instantQuote.upload.cta"]}
         </p>
         <p className="mt-1 text-xs text-text-muted">
-          {fill(d["instantQuote.upload.hint"], { maxMb: megabytes(maxFileBytes) })}
+          {fill(d["instantQuote.upload.hint"], {
+            formats: formatNames(acceptedFormats, d["instantQuote.upload.formatListOr"]),
+            maxMb: megabytes(maxFileBytes),
+          })}
         </p>
         <button
           type="button"

@@ -1312,10 +1312,17 @@ const en = {
   "instantQuote.upload.cta": "Add parts to the quote",
   "instantQuote.upload.drop": "Drop your files here",
   "instantQuote.upload.failed": "{file} could not be uploaded. Please try again.",
-  "instantQuote.upload.hint": "STL, OBJ, 3MF or STEP · up to {maxMb} MB",
-  "instantQuote.upload.invalidFormat":
-    "{file}: only STL, OBJ, 3MF and STEP files can be uploaded.",
+  // The format list arrives as a sentence fragment (`{formats}`), never
+  // hard-coded: the accepted list depends on the flag
+  // (`catalog.acceptedFormats`), and a fixed sentence would claim STEP is
+  // accepted inside the very sentence rejecting it while the flag is off.
+  "instantQuote.upload.formatListAnd": "{rest} and {last}",
+  "instantQuote.upload.formatListOr": "{rest} or {last}",
+  "instantQuote.upload.hint": "{formats} · up to {maxMb} MB",
+  "instantQuote.upload.invalidFormat": "{file}: only {formats} files can be uploaded.",
   "instantQuote.upload.processing": "Processing…",
+  "instantQuote.upload.stepInvalid":
+    "{file}: this is not a valid STEP file (no ISO 10303 header). Re-export it from your CAD program as AP203/AP214.",
   "instantQuote.upload.stepTooLarge":
     "{file}: STEP files can be at most {maxMb} MB — a STEP file carries far more geometry at the same size. Split the part or send it as STL.",
   "instantQuote.upload.tooLarge": "{file}: the file is over the {maxMb} MB limit.",

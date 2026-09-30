@@ -46,7 +46,8 @@ export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
  */
 export const ANALYSIS_GIVE_UP_ERROR = "stuck_retry_limit";
 
-export const QUOTE_SOURCE_FORMATS = ["stl", "obj", "3mf"] as const;
+/** `.step` ve `.stp` uzantılarının İKİSİ de bu tek anahtara düşer (eşleme: `quote-model-validation.ts`). */
+export const QUOTE_SOURCE_FORMATS = ["stl", "obj", "3mf", "step"] as const;
 export type QuoteSourceFormat = (typeof QUOTE_SOURCE_FORMATS)[number];
 
 export const INVOICE_TYPES = ["individual", "corporate"] as const;

@@ -4006,6 +4006,10 @@ export const quoteParts = pgTable("quote_parts", {
   check("quote_parts_source_format_chk", sql`${t.sourceFormat} IN (${quoteInList(QUOTE_SOURCE_FORMATS)})`),
   check("quote_parts_analysis_status_chk", sql`${t.analysisStatus} IN (${quoteInList(ANALYSIS_STATUSES)})`),
   check("quote_parts_units_chk", sql`${t.units} IN (${quoteInList(QUOTE_UNITS)})`),
+  // STEP dosyası kendi birimini KENDİ taşır ve çekirdek onu mm'ye uygular; birim
+  // müşteriye açık kalsaydı "cm" seçmek parçayı 10× büyütür, hacmi 1000× şişirir
+  // ve fiyatı 1000× yanlışlardı. Kilit bu yüzden veritabanında durur (0070).
+  check("quote_parts_step_units_chk", sql`${t.sourceFormat} <> 'step' OR ${t.units} = 'mm'`),
   check("quote_parts_quantity_chk", sql`${t.quantity} BETWEEN 1 AND 100000`),
   check("quote_parts_scale_chk", sql`${t.scale} > 0.0099 AND ${t.scale} < 100.01`),
 ]);

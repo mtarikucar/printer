@@ -34,12 +34,11 @@
 -- dosyadan sonra 0055'in yeniden uygulanabilmesi için KAYDININ da silinmesi
 -- gerekir. 0050-0054'ten kopyalanan tarif "en son eklenen satırı sil" diyordu
 -- (ORDER BY created_at DESC LIMIT 1) ve o tarif BURADA YANLIŞTIR: 0055 artık
--- en yeni migration değil, ÜSTÜNDE 0056–0062 ile 0064, 0065 ve 0066 var. O tarif en yeninin
--- (bugün 0066'nın) satırını siler, 0055'in kaydı yerinde kalır ve 0055 BİR DAHA
--- ASLA uygulanmaz — migrate "başarılı" der, kolon düşük kalır ve üreticinin
--- her QC fotoğrafı yüklemesi
--- 42703 ile boş gövdeli 500 döner (qc-photos rotası INSERT'te `model_revision`
--- kolonunu adıyla yazar).
+-- en yeni migration değil, ÜSTÜNDE 0056–0062 ile 0064, 0065, 0066, 0067 ve 0070
+-- var. O tarif en yeninin (bugün 0070'in) satırını siler, 0055'in kaydı yerinde
+-- kalır ve 0055 BİR DAHA ASLA uygulanmaz — migrate "başarılı" der, kolon düşük
+-- kalır ve üreticinin her QC fotoğrafı yüklemesi 42703 ile boş gövdeli 500 döner
+-- (qc-photos rotası INSERT'te `model_revision` kolonunu adıyla yazar).
 --
 -- Bu yüzden satır KENDİ ETİKETİYLE silinir. Etiketin kimliği `created_at`tir:
 -- drizzle oraya journal'daki `when` değerini yazar
@@ -51,10 +50,14 @@
 -- SIRA ÖNEMLİ — TEK BAŞINA BU SİLME YETMEZ. Migrator yalnız EN YENİ kaydın
 -- `created_at`ine bakar (drizzle-orm/pg-core/dialect.js: "order by created_at
 -- desc limit 1" + `lastDbMigration.created_at < migration.folderMillis`), yani
--- 0055'ten SONRA kaydedilmiş bir satır (0056, …, 0062, 0064, 0065, 0066) dururken 0055
--- yeniden uygulanmaz. 0055'i gerçekten geri almak için önce ÜSTÜNDEKİLER — EN
--- YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi satırlarıyla geri
--- alınır, sonra bu dosya çalıştırılır:
+-- 0055'ten SONRA kaydedilmiş bir satır (0056, …, 0062, 0064, 0065, 0066, 0067,
+-- 0070) dururken 0055 yeniden uygulanmaz. 0055'i gerçekten geri almak için önce
+-- ÜSTÜNDEKİLER — EN YENİDEN ESKİYE doğru — kendi down dosyalarıyla ve kendi
+-- satırlarıyla geri alınır, sonra bu dosya çalıştırılır:
+--   \i drizzle/0070_step_format.down.sql
+--   -- 0070'in down'ı KENDİ kaydını (created_at = 1790787200000) siler.
+--   -- Yalnız iki CHECK'i eski hâline döndürür; `source_format='step'` satırı
+--   -- varsa VERİ SİLMEDEN DURUR (daraltılmış CHECK o satırlarla kurulamaz).
 --   \i drizzle/0067_holidays_2028.down.sql
 --   -- 0067'nin down'ı KENDİ kaydını (created_at = 1790693512063) siler.
 --   -- Yalnız 2028 tatillerini listeden çıkarır; operatörün eklediği tarihlere

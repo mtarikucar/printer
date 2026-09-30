@@ -67,6 +67,7 @@ import {
   PrintServiceLanding,
   landingFaq,
 } from "../src/app/3d-baski/sections";
+import { LandingUploader } from "../src/app/3d-baski/landing-uploader";
 import {
   anchorSentence,
   catalogAnchorKurus,
@@ -98,6 +99,7 @@ import {
   type PresentedPart,
   type PresentedQuote,
   type PricingSnapshot,
+  type QuoteSourceFormat,
   type QuoteTotals,
   type QuoteViewer,
 } from "../src/lib/config/quote-types";
@@ -1737,6 +1739,27 @@ test("bayrak kapalıyken yükleyici yok ama SEO yüzeyi duruyor", () => {
   assert.doesNotMatch(html, /type="file"/, "kapalı bayrakta dosya girişi çizildi");
   // Katalog rakamları kalır: bayrak, arama motorunun okuduğu sayfayı kapatmaz.
   assert.ok(html.includes("₺74'ten başlayan"));
+});
+
+test("açılış yükleyicisi de biçim listesini PROP'tan alır", () => {
+  // İkinci çağrı yeri: `/3d-baski` yükleyicisi çalışma alanından AYRI bir
+  // bileşen ve `accept` dizesini kendisi üretmiyor — sayfa bayraktan türetip
+  // veriyor (`quoteAcceptedFormats`). Bu test o zincirin istemci ucunu tutar.
+  const render = (formats: QuoteSourceFormat[]) =>
+    inLocale(
+      createElement(LandingUploader, {
+        maxFileBytes: SEED_SNAPSHOT.settings.maxFileBytes,
+        maxPartsPerQuote: SEED_SNAPSHOT.settings.maxPartsPerQuote,
+        acceptedFormats: formats,
+      })
+    );
+  const closed = render(MESH_FORMATS);
+  assert.match(tagOf(closed, /<input type="file"[^>]*>/), /accept="\.stl,\.obj,\.3mf"/);
+  assert.ok(!closed.includes(".step"), "bayrak kapalıyken açılış sayfası .step seçtiriyor");
+  assert.match(
+    tagOf(render(ALL_FORMATS), /<input type="file"[^>]*>/),
+    /accept="\.stl,\.obj,\.3mf,\.step,\.stp"/
+  );
 });
 
 test("malzeme kütüphanesi her malzemeye çapa, özellik ve renk verir", () => {

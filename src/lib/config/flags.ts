@@ -60,6 +60,13 @@ export const FLAG_KEYS = [
   // DEĞİL: kapatmak ekrandaki ikinci kolonu kaldırır, veritabanındaki kuru
   // silmez (açılınca müşteri aynı rakamı yeniden görür).
   "quote_fx_display_enabled",
+  // Çerçeve siparişler (planlı parti teslimi). Kapsamı DAR ve sınırı bilinçli:
+  // kapattığı şey YENİ ANLAŞMA KURMA ve PARTİ SERBEST BIRAKMA yüzeyleridir.
+  // Serbest bırakılmış bir partinin klon teklifi ödenmeye DEVAM eder — o
+  // sıradan bir `quotes` satırıdır ve `/teklif/[number]/odeme` yolundan geçer.
+  // Geri dönüşün en değerli özelliği bu: bayrağı kapatmak ödenmiş ya da
+  // ödenecek bir partiyi ASLA tuzağa düşürmez.
+  "framework_orders_enabled",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -102,6 +109,10 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   // alınacak bir karardır (D3/D4). Kod yayına girmekle müşteriye açılmak aynı
   // olay olmamalı.
   quote_fx_display_enabled: false,
+  // Çerçeve de KAPALI doğar: bir anlaşma fiyatı AYLARCA bağlar ve ilk partinin
+  // serbest bırakılması ödenebilir bir sipariş yaratır. Kodu yayına almak ile
+  // müşteriye taahhüt kabul etmek aynı olay olmamalı.
+  framework_orders_enabled: false,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -120,6 +131,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   quote_gift_card_enabled: "Teklif ödemesinde hediye kartı",
   quote_step_enabled: "Teklifte STEP/STP dosyaları",
   quote_fx_display_enabled: "Teklifte döviz gösterimi (TCMB kuru)",
+  framework_orders_enabled: "Çerçeve siparişler (planlı parti teslimi)",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -178,6 +190,12 @@ export const FEATURE_FLAG_KEYS = [
   // (sipariş yönlendirmiyor). Cevapladığı soru tek: "ikinci kolon müşteriye
   // açık mı".
   "quote_fx_display_enabled",
+  // Çerçeve siparişler de ürün yüzeyi. AI_SPEND DEĞİL: kill switch bir PARA
+  // musluğudur ve çalışan bir satış yüzeyini kapatmak kaybı azaltmaz, satışı
+  // durdurur. AUTO_ASSIGN DEĞİL: çerçeve hiçbir siparişi yönlendirmez — parti
+  // serbest bırakılınca doğan sipariş bugünkü atama kapılarından geçer
+  // (`assignManufacturerToOrder` kendi kapılarını uygular).
+  "framework_orders_enabled",
 ] as const satisfies readonly FlagKey[];
 
 /**

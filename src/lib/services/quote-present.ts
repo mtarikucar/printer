@@ -26,6 +26,7 @@ import type {
   PresentedQuote,
   PricingPartInput,
   PricingSnapshot,
+  QuoteSourceFormat,
   QuoteViewer,
   Vec3,
 } from "@/lib/config/quote-types";
@@ -82,6 +83,24 @@ export function presentPublicCatalog(
   stepEnabled: boolean
 ): PresentedCatalog {
   return presentCatalog(snapshot, false, stepEnabled);
+}
+
+/**
+ * Müşteriye SEÇTİRİLECEK biçimler — bayrak → liste kuralının TEK yeri.
+ *
+ * Liste `QUOTE_SOURCE_FORMATS`ten türer, elle yazılmaz: beşinci bir biçim
+ * geldiğinde kopyalanmış bir liste sessizce eksik kalırdı. Hem teklif
+ * kataloğu (`PresentedCatalog.acceptedFormats`) hem açılış sayfasının
+ * yükleyicisi buradan besleniyor — ikisi ayrışırsa açılış sayfası müşteriye
+ * `.step` seçtirip uç 400 verirdi.
+ *
+ * Bir KOLAYLIK üretir, güvenlik sınırı değil: kural sunucuda, parçayı yazan
+ * tek yerde durur (`addPartFromUpload`).
+ */
+export function quoteAcceptedFormats(stepEnabled: boolean): QuoteSourceFormat[] {
+  return stepEnabled
+    ? [...QUOTE_SOURCE_FORMATS]
+    : QUOTE_SOURCE_FORMATS.filter((format) => format !== "step");
 }
 
 /**
@@ -148,11 +167,7 @@ function presentCatalog(
     leadTiers: snapshot.settings.leadTiers.map((t) => ({ key: t.key, name: t.name })),
     maxPartsPerQuote: snapshot.settings.maxPartsPerQuote,
     maxFileBytes: snapshot.settings.maxFileBytes,
-    // Biçim listesi TEK kaynaktan (`QUOTE_SOURCE_FORMATS`) türer; elle yazılmış
-    // bir kopya, beşinci bir biçim geldiğinde sessizce eksik kalırdı.
-    acceptedFormats: stepEnabled
-      ? [...QUOTE_SOURCE_FORMATS]
-      : QUOTE_SOURCE_FORMATS.filter((format) => format !== "step"),
+    acceptedFormats: quoteAcceptedFormats(stepEnabled),
   };
 }
 

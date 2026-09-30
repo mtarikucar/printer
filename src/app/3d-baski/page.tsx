@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
-import { QUOTE_SOURCE_FORMATS } from "@/lib/config/quote-types";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { buildPrintServiceJsonLd } from "@/lib/seo/service";
 import { isFlagEnabled } from "@/lib/services/flags";
 import { isAdminSession } from "@/lib/services/quote-access";
+import { quoteAcceptedFormats } from "@/lib/services/quote-present";
 import { loadLandingSnapshot } from "./catalog";
 import { LandingUploader } from "./landing-uploader";
 import { anchorSentence, formatAnchorPrice, technologyAnchorKurus } from "./pricing-anchors";
@@ -56,11 +56,11 @@ export default async function PrintServicePage() {
   const adminSession = flagEnabled ? false : await isAdminSession();
   const uploaderVisible = flagEnabled || adminSession;
   // Müşteriye NE seçtirileceği (dropzone `accept` + istemci doğrulaması).
-  // Bayrak kapalı + admin oturumu = iç test hâli; sıradan ziyaretçi `.step`i
-  // hiç göremez, yani seçtirip sonra uçta 400 vermemiz imkânsız.
-  const acceptedFormats = stepFlagEnabled || adminSession
-    ? [...QUOTE_SOURCE_FORMATS]
-    : QUOTE_SOURCE_FORMATS.filter((format) => format !== "step");
+  // Liste teklif kataloğuyla AYNI işlevden gelir: ayrışırsa bu sayfa müşteriye
+  // `.step` seçtirip uç 400 verirdi. Bayrak kapalı + admin oturumu = iç test
+  // hâli (`stepUploadsEnabled` ile aynı kural); sıradan ziyaretçi `.step`i hiç
+  // göremez.
+  const acceptedFormats = quoteAcceptedFormats(stepFlagEnabled || adminSession);
 
   return (
     <main className="min-h-screen bg-bg-base">

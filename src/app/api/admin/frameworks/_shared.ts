@@ -38,7 +38,7 @@ import type { FrameworkPlanRefusal } from "@/lib/config/quote-framework";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Bayrak kapalıyken ve kimlik tanınmadığında AYNI cevap: "yok". */
-export const FRAMEWORK_NOT_FOUND = "Çerçeve anlaşma bulunamadı.";
+const FRAMEWORK_NOT_FOUND = "Çerçeve anlaşma bulunamadı.";
 
 export function frameworkNotFound(): NextResponse {
   return NextResponse.json(
@@ -57,7 +57,7 @@ const MONEY_FIELD_RE = /kurus$/i;
 const DECLARED_AMOUNT_FIELDS = new Set(["expectedAmountKurus"]);
 
 /** Gövdede bir para alanı var mı — iç içe nesnelerde de aranır. */
-export function bodyMoneyFields(value: unknown, path = ""): string[] {
+function bodyMoneyFields(value: unknown, path = ""): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((item, index) => bodyMoneyFields(item, `${path}[${index}]`));
   }
@@ -191,7 +191,7 @@ export async function runFrameworkService<T>(
 }
 
 /** Servisin BEKLENEN reddi → cevabı (Türkçe cümle + kod); değilse `null`. */
-export function serviceRefusal(e: unknown): NextResponse | null {
+function serviceRefusal(e: unknown): NextResponse | null {
   if (!(e instanceof QuoteServiceError)) return null;
   return NextResponse.json(
     { error: e.message, ...(e.code ? { code: e.code } : {}) },

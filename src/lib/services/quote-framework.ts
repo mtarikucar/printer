@@ -442,7 +442,7 @@ export type CreateFrameworkOutcome =
  *
  * SIRA KURALIN PARÇASI: dönen ilk ret, ucun fırlattığı rettir.
  */
-export interface FrameworkEntryRefusal {
+interface FrameworkEntryRefusal {
   code: string;
   message: string;
   status: number;

@@ -200,7 +200,7 @@ export function priceUnitAuto(args: {
  * (`FrozenQuotePart`) de geometri olmadan bu üçünü taşıyor ve çerçeve
  * anlaşmanın serbest bırakma penceresi tam olarak onu okuyor.
  */
-export type LeadDaysConfig =
+type LeadDaysConfig =
   | PartConfig
   | Pick<PartConfig, "technologyKey" | "materialKey" | "finishKey">;
 

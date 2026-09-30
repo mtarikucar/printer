@@ -6,6 +6,13 @@
  * oturumu yoktur — çünkü erişim matrisi testle çivilenebilir olmalı; DB ve
  * çerez okuması ince bir kabukta (`resolveQuoteAccess`) durur.
  *
+ * TEK BİLİNÇLİ İSTİSNA: `src/app/api/realtime/quote/[id]/route.ts` kendi dar
+ * sorgusunu ve kendi `allowed` ifadesini taşır. Buradan DAHA SIKIDIR — admin'i
+ * ve paylaşım token'ını KASITLI olarak dışarıda bırakır (canlı akış "şu parça
+ * hazır oldu" der; paylaşım görünümü durağandır) — yani bir hak sızdırmaz.
+ * Ama bir yandan da buraya eklenen yeni bir HAK SAHİBİ o uca KENDİLİĞİNDEN
+ * ULAŞMAZ: matrise dal ekleyen, o rotayı da elden geçirmek zorundadır.
+ *
  * T-numarası ERİŞİM VERMEZ: numaralar sıradandır (`T-000123`), tahmin
  * edilebilir. Numara yalnız satırı BULUR; hakkı oturum, anonim çerez ya da
  * paylaşım token'ı verir.

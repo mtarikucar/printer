@@ -136,9 +136,16 @@ after exporting it:
 ```bash
 psql "$DATABASE_URL" -c "\copy print_catalog_changes TO 'print_catalog_changes-$(date +%F).csv' CSV HEADER"
 psql "$DATABASE_URL" -c "DELETE FROM print_catalog_changes;"   # audit trail only; the seed lives in the catalogue tables
-# Newer migrations first, each deleting its OWN ledger row. Skipping 0066/0065 here would leave
-# their rows (created_at 1790689912063 / 1790686312063) behind as the watermark, and a re-applied
-# 0064 would be skipped silently forever.
+# Newer migrations first, each deleting its OWN ledger row. Skipping ANY of them would leave
+# its row behind as the watermark, and a re-applied 0064 would be skipped silently forever.
+#
+# THIS CHAIN GOES STALE EVERY TIME A MIGRATION LANDS. The authoritative, test-enforced copy
+# is the recipe at the TOP of `drizzle/0055_qc_photo_model_revision.down.sql`
+# (`scripts/test-qc-photo-revision.ts` fails if a journal entry above idx 55 is missing from
+# it). Read that file, not this block, and treat what follows as the shape — not the list.
+psql "$DATABASE_URL" -f drizzle/0071_fx_rates.down.sql
+psql "$DATABASE_URL" -f drizzle/0070_step_format.down.sql
+psql "$DATABASE_URL" -f drizzle/0067_holidays_2028.down.sql
 psql "$DATABASE_URL" -f drizzle/0066_print_catalog_checks.down.sql
 psql "$DATABASE_URL" -f drizzle/0065_quote_files_attached_at.down.sql
 psql "$DATABASE_URL" -f drizzle/0064_instant_quotes.down.sql

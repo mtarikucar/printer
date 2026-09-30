@@ -465,6 +465,47 @@ export interface FrozenQuoteAddon {
   kurus: number;
 }
 
+// ─── Döviz GÖSTERİMİ (0071) ─────────────────────────────────────────────────
+//
+// GÖSTERİM, yalnız gösterim: bağlayıcı her tutar ve tahsil edilen her kuruş
+// Türk lirasıdır (gerekçe `quote-currency.ts` dosya başlığında). Bu bloktaki
+// hiçbir alan kuruş TAŞIMAZ ve hiçbir adı `…Kurus` ile BİTMEZ — `…Minor`,
+// `…Micro`, `…PerUnit` kullanılır (sebebi: `quote-present.ts`in fiyat kapısı
+// `key.endsWith("Kurus")` ile uygulanıyor).
+
+export const FX_CURRENCIES = ["EUR", "USD", "GBP"] as const;
+export type FxCurrency = (typeof FX_CURRENCIES)[number];
+
+/** Ekranda seçilebilen gösterimler; BAŞTAKİ eleman bağlayıcı olandır. */
+export const DISPLAY_CURRENCIES = ["TRY", ...FX_CURRENCIES] as const;
+export type DisplayCurrency = (typeof DISPLAY_CURRENCIES)[number];
+
+export interface FrozenFxRate {
+  currency: FxCurrency;
+  /** 1 birim döviz = kaç mikro-TRY (TCMB döviz alış / `Unit`, ×1e6, tamsayı). */
+  microTryPerUnit: number;
+}
+
+/**
+ * Teklifin DONDURDUĞU kur kümesi (`quotes.fx_snapshot`); null = döviz
+ * gösterimi yok. `PricingSnapshot`ın İÇİNE girmez: o sürümlenmiş bir KATALOG
+ * sözleşmesidir, kur ise bir gün sabitidir.
+ */
+export interface QuoteFxSnapshot {
+  version: 1;
+  source: "tcmb";
+  /** TCMB bülteninin KENDİ tarihi, YYYY-MM-DD (İstanbul) — müşteriye AYNEN gösterilir. */
+  bulletinDate: string;
+  takenAt: string;
+  rates: FrozenFxRate[];
+}
+
+/** `PresentedQuote.display` — yalnız `canSeePrices` && bayrak açık iken VAR. */
+export interface PresentedFxDisplay {
+  snapshot: QuoteFxSnapshot;
+  currencies: DisplayCurrency[];
+}
+
 // ─── Görünüm (tek serileştirici `presentQuote` çıktısı) ─────────────────────
 
 export interface QuoteViewer {
@@ -615,6 +656,12 @@ export interface PresentedQuote {
   readiness: { canCheckout: boolean; blockers: string[] };
   /** YALNIZ `viewer.canSeePrices` iken var. */
   totals?: QuoteTotals | null;
+  /**
+   * Döviz GÖSTERİMİ: YALNIZ `viewer.canSeePrices` VE bayrak
+   * (`quote_fx_display_enabled`) açık iken var. Kur bir fiyattır — fiyat
+   * kapısının arkasında durur.
+   */
+  display?: PresentedFxDisplay | null;
 }
 
 // ─── Müşteri listeleri (hesap sayfaları) ────────────────────────────────────

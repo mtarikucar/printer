@@ -368,7 +368,17 @@ export function QuoteSummary({
               kırılması). */}
           {viewer.canSeePrices && !canCheckoutQuote(viewer, quote.team ?? null) && (
             <p className="text-center text-xs text-text-muted">
-              {d["instantQuote.summary.ownerOnlyCheckout"]}
+              {/* CÜMLE TAKIM HÂLİNE GÖRE AYRILIR (0072). Koşul T-4'te
+                  `canCheckoutQuote`a çevrilince bu satır ödeme yetkisi olmayan
+                  TAKIM ÜYESİNE de gösterilmeye başladı — ve ona "ödemeyi teklif
+                  sahibi yapar" demek yanlış: teklifi onun takımı açtı, eksik
+                  olan şey SAHİPLİK değil YETKİ. Takımsız izleyici bugünkü
+                  cümleyi okumaya devam eder (metin DEĞİŞMEDİ); iki anahtar, tek
+                  koşul. Tek anahtarı genelleştirmek kişisel teklifteki cümleyi
+                  de değiştirirdi. */}
+              {viewer.isTeam
+                ? d["instantQuote.team.quote.noCheckoutPermission"]
+                : d["instantQuote.summary.ownerOnlyCheckout"]}
             </p>
           )}
         </div>

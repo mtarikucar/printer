@@ -85,6 +85,13 @@ import {
   technologyAnchorKurus,
 } from "../src/app/3d-baski/pricing-anchors";
 import { QuoteListTable } from "../src/app/account/teklifler/quotes-client";
+import {
+  TeamClient,
+  type TeamMemberView,
+  type TeamProfileView,
+} from "../src/app/account/takim/team-client";
+import { QuoteTeamBadge } from "../src/components/quote/team-badge";
+import { TEAM_ROLES, type TeamRole } from "../src/lib/config/quote-team";
 import { PartLibraryGrid } from "../src/app/account/parcalar/parts-client";
 import {
   displayRate,
@@ -338,6 +345,47 @@ test("çalışma alanı noindex, açılış sayfası indexlenebilir", () => {
   assert.ok(isNoindexPath("/teklif/T-000001/belge"));
   assert.ok(!isNoindexPath("/3d-baski"));
   assert.ok(!isNoindexPath("/3d-baski/malzemeler"));
+});
+
+/**
+ * `/takim` YENİ bir KÖK önektir (0072) ve davet sayfası TEK KULLANIMLIK bir
+ * token taşıyor: `/takim/davet/<token>`. Şekli `/atolye/katil/<token>` ile
+ * birebir aynı — herkese açık bir karşılama sayfası, adresinde bir sır.
+ *
+ * `/account/takim` zaten `/account` önekiyle kapanıyor, AMA davet sayfası
+ * kapanMIYORDU: önek `NOINDEX_PREFIXES`te yoktu ve `robots.ts` disallow
+ * listesinde de yoktu, yani sayfa yazıldığı an indekslenebilir olarak canlıya
+ * çıkardı. Hiçbir mevcut test bunu zorlamıyordu (`scripts/test-robots.ts`
+ * disallow listesinin yalnız beş sabit önekini pinliyor), bu yüzden iddia
+ * BURADA duruyor: bu dosya `isNoindexPath`i ve `robots`u zaten import ediyor.
+ *
+ * MUTASYON SINAVI: `NOINDEX_PREFIXES`ten `"/takim"`i çıkar → ilk iki iddia
+ * KIRMIZI; `robots.ts`in `DISALLOW` listesinden `"/takim/"`i çıkar → son iddia
+ * KIRMIZI.
+ */
+test("takım davet sayfası noindex VE taranamaz (token'lı adres aramaya düşmez)", () => {
+  assert.ok(isNoindexPath("/takim"), "/takim öneki noindex listesinde yok");
+  assert.ok(
+    isNoindexPath("/takim/davet/abc123"),
+    "token'lı davet adresi noindex almıyor"
+  );
+  assert.ok(isNoindexPath("/account/takim"), "/account/takim noindex almıyor");
+  // Karşı vaka: pazarlama sayfası yanlışlıkla kapatılmadı.
+  assert.ok(!isNoindexPath("/3d-baski"));
+
+  // robots.txt: hem `*` hem RETRIEVAL kuralı aynı listeyi paylaşıyor, yani
+  // ikisini de ölçmek listenin paylaşıldığını da doğrular.
+  const rules = robots().rules;
+  const list = Array.isArray(rules) ? rules : [rules];
+  const closing = list.filter((r) => r.allow !== undefined);
+  assert.ok(closing.length >= 2, "beklenen iki tarama kuralı yok");
+  for (const rule of closing) {
+    const disallow = Array.isArray(rule.disallow) ? rule.disallow : [rule.disallow ?? ""];
+    assert.ok(
+      disallow.includes("/takim/"),
+      `${String(rule.userAgent)}: /takim/ engellenmemiş`
+    );
+  }
 });
 
 // ─── Fiyat kapısı modalı ────────────────────────────────────────────────────
@@ -1665,14 +1713,55 @@ test("takım admini `member_can_checkout` KAPALI olsa da ödeyebilir — ve cüm
 test("`member_can_checkout` kapalı iken `member` rolü: düğme YOK, sebep VAR", () => {
   const closed = plain(renderSummary(teamQuote("member", false)));
   assert.doesNotMatch(closed, CHECKOUT_LINK);
+  // CÜMLE TAKIM ÜYESİNE ÖZGÜ (T-5): T-4 bu satırın koşulunu
+  // `canCheckoutQuote`a çevirdiğinde cümle ödeme yetkisi olmayan ÜYEYE de
+  // gösterilmeye başladı — ona "ödemeyi teklif SAHİBİ yapar" demek yanlıştı.
   assert.ok(
-    closed.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    closed.includes(tr["instantQuote.team.quote.noCheckoutPermission"]),
     "kapalı düğmenin sebebi yazılmamış"
+  );
+  assert.ok(
+    !closed.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    "takım üyesine 'sahip öder' cümlesi basılmış"
   );
   // Ayar AÇIKKEN aynı rol ödeyebilir ve cümle düşer: tek ayarın iki yüzeyi.
   const open = plain(renderSummary(teamQuote("member", true)));
   assert.match(open, CHECKOUT_LINK, "ayar açıkken member ödeyemiyor");
+  assert.ok(!open.includes(tr["instantQuote.team.quote.noCheckoutPermission"]));
   assert.ok(!open.includes(tr["instantQuote.summary.ownerOnlyCheckout"]));
+});
+
+/**
+ * CÜMLE AYRIMININ KARŞI YARISI: TAKIMSIZ izleyici bugünkü cümleyi okur.
+ *
+ * Koşul tek (`!canCheckoutQuote`), anahtar iki. Tek anahtarı genelleştirmek
+ * kişisel teklifteki cümleyi de değiştirirdi — ve o cümleye bakan iddialar bu
+ * dosyada zaten var.
+ */
+test("takımsız izleyicinin kapalı ödeme düğmesinin sebebi DEĞİŞMEDİ", () => {
+  // Paylaşım izleyicisi: fiyatı görür (girişli), ödeyemez, takımı yok.
+  const shared = plain(
+    renderSummary(
+      pricedQuote({
+        viewer: {
+          canSeePrices: true,
+          canEdit: false,
+          isOwner: false,
+          isShare: true,
+          isAdmin: false,
+          isTeam: false,
+          teamRole: null,
+        },
+        readiness: { canCheckout: true, blockers: [] },
+      })
+    )
+  );
+  assert.doesNotMatch(shared, CHECKOUT_LINK);
+  assert.ok(
+    shared.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    "takımsız izleyicinin cümlesi değişmiş"
+  );
+  assert.ok(!shared.includes(tr["instantQuote.team.quote.noCheckoutPermission"]));
 });
 
 test("sohbet YAZMA alanı `canChatOnQuote`a bağlı: panel açılır, yazma kapanır", () => {
@@ -4608,4 +4697,312 @@ test("ÇERÇEVE: hesap listesindeki parti teklifi ROZETLE anlaşmaya bağlanır"
   // Parti olmayan satırda rozet HİÇ çizilmez.
   const plainRow = plain(inLocale(createElement(QuoteListTable, { items: [QUOTE_ROW] })));
   assert.ok(!plainRow.includes("Çerçeve"), "sıradan teklifte de rozet çiziliyor");
+});
+
+// ─── TAKIM ÇALIŞMA ALANI: /account/takim, rozet ve kolonlar (0072 · T-5) ────
+//
+// Sorulan soru tek: YETKİ MATRİSİ ekranda da uygulanıyor mu, ve takımı olmayan
+// müşterinin ekranı bit bit aynı mı kaldı.
+
+const TEAM_PROFILE: TeamProfileView = {
+  id: "88888888-8888-4888-8888-888888888888",
+  name: "QA Mühendislik A.Ş.",
+  invoiceType: "corporate",
+  companyName: "QA Mühendislik A.Ş.",
+  taxId: "1234567890",
+  taxIdType: "vkn",
+  taxOffice: "Kadıköy",
+  billingAddress: null,
+  shippingAddress: null,
+  memberCanCheckout: false,
+};
+
+const SELF_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const OTHER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+/**
+ * Ekranı BİR ROLÜN gözünden çizer. Rol SUNUCUDAN prop olarak geliyor
+ * (`page.tsx`), yani bu fikstür gerçek yolun aynısıdır — istemci rolü kendi
+ * türetmiyor.
+ */
+function renderTeamClient(role: TeamRole): string {
+  const self: TeamMemberView = {
+    userId: SELF_ID,
+    name: "Can Üye",
+    email: "can@qa.test",
+    role,
+    joinedAt: "2026-09-02T09:00:00.000Z",
+  };
+  const other: TeamMemberView = {
+    userId: OTHER_ID,
+    name: "Ayşe Sahip",
+    email: "ayse@qa.test",
+    // "Takım başına tek sahip" DB kısıtı: sahip rolünü oynayan izleyicinin
+    // yanına ikinci bir `owner` konmaz.
+    role: role === "owner" ? "member" : "owner",
+    joinedAt: "2026-09-01T09:00:00.000Z",
+  };
+  return plain(
+    inLocale(
+      createElement(TeamClient, {
+        team: TEAM_PROFILE,
+        role,
+        members: [other, self],
+        invites: [
+          {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            email: "davet@qa.test",
+            role: "member",
+            expiresAt: "2026-10-01T09:00:00.000Z",
+          },
+        ],
+        sessionUserId: SELF_ID,
+      })
+    )
+  );
+}
+
+test("TAKIM EKRANI: `viewer` rolünde davet, rol seçici ve profil formu YOK", () => {
+  const html = renderTeamClient("viewer");
+  assert.ok(!html.includes(tr["instantQuote.team.invite.submit"]), "davet formu çizildi");
+  assert.ok(!html.includes(tr["instantQuote.team.invite.title"]), "davet bölümü çizildi");
+  // Rol seçici VE profil formunun TEK seçicisi: salt okunur rolde ekranda
+  // HİÇBİR `<select>` olmamalı.
+  assert.doesNotMatch(html, /<select/, "salt okunur rolde seçici çizildi");
+  assert.ok(!html.includes(tr["instantQuote.team.profile.title"]), "profil formu çizildi");
+  assert.ok(
+    !html.includes(tr["instantQuote.team.profile.memberCanCheckout"]),
+    "`member_can_checkout` anahtarı salt okunur role çizildi"
+  );
+  assert.ok(!html.includes(tr["instantQuote.team.profile.deleteTeam"]), "takımı sil çizildi");
+  assert.ok(!html.includes(tr["instantQuote.team.member.remove"]), "üye çıkarma çizildi");
+  // Okuma yolu AÇIK: üye listesi, teklifler ve siparişler dört rolün hepsinde.
+  assert.ok(html.includes("ayse@qa.test"), "üye listesi yok");
+  assert.ok(html.includes(tr["instantQuote.team.quote.listTitle"]), "teklif listesi yok");
+  assert.ok(html.includes(tr["instantQuote.team.orders.title"]), "sipariş listesi yok");
+});
+
+test("TAKIM EKRANI: `member` rolünde davet formu YOK ama teklif listesi VAR", () => {
+  const html = renderTeamClient("member");
+  assert.ok(!html.includes(tr["instantQuote.team.invite.submit"]), "üyeye davet formu çizildi");
+  assert.ok(!html.includes(tr["instantQuote.team.profile.title"]), "üyeye profil formu çizildi");
+  assert.ok(
+    !html.includes(tr["instantQuote.team.profile.memberCanCheckout"]),
+    "üyeye `member_can_checkout` anahtarı çizildi"
+  );
+  assert.ok(html.includes(tr["instantQuote.team.quote.listTitle"]), "teklif listesi yok");
+  assert.ok(html.includes(tr["instantQuote.team.orders.title"]), "sipariş listesi yok");
+});
+
+test("TAKIM EKRANI: `admin` rolünde davet formu VAR, 'takımı sil' YOK", () => {
+  const html = renderTeamClient("admin");
+  assert.ok(html.includes(tr["instantQuote.team.invite.submit"]), "yöneticide davet formu yok");
+  assert.ok(html.includes(tr["instantQuote.team.profile.title"]), "yöneticide profil formu yok");
+  assert.ok(
+    html.includes(tr["instantQuote.team.profile.memberCanCheckout"]),
+    "yöneticide `member_can_checkout` anahtarı yok"
+  );
+  assert.ok(
+    !html.includes(tr["instantQuote.team.profile.deleteTeam"]),
+    "yöneticiye 'takımı sil' çizildi"
+  );
+});
+
+test("TAKIM EKRANI: `owner` rolünde hepsi VAR", () => {
+  const html = renderTeamClient("owner");
+  for (const key of [
+    "instantQuote.team.invite.submit",
+    "instantQuote.team.profile.title",
+    "instantQuote.team.profile.memberCanCheckout",
+    "instantQuote.team.profile.deleteTeam",
+    "instantQuote.team.member.remove",
+    "instantQuote.team.member.transfer",
+    "instantQuote.team.quote.listTitle",
+    "instantQuote.team.orders.title",
+  ] as const) {
+    assert.ok(html.includes(tr[key]), `sahipte ${key} yok`);
+  }
+  // Sahip AYRILAMAZ (önce devretmeli): düğme hiçbir rolde ölü durmaz.
+  assert.ok(!html.includes(tr["instantQuote.team.member.leave"]), "sahibe 'ayrıl' çizildi");
+});
+
+test("TAKIM EKRANI: üye satırı YALNIZ ad + e-posta + rol taşır", () => {
+  // Telefon ve kişisel adres takımla PAYLAŞILMAZ; ekranın onları isteyecek bir
+  // alanı da yok (prop tipi taşımıyor, bu yüzden iddia metne bakar).
+  const html = renderTeamClient("owner");
+  assert.ok(html.includes(tr["instantQuote.team.member.privacyNote"]), "gizlilik notu yok");
+  for (const forbidden of [/telefon:/i, /\+90/, /adres defteri/i]) {
+    assert.doesNotMatch(html, forbidden, `üye listesinde yasak alan: ${forbidden}`);
+  }
+});
+
+test("TAKIM EKRANI: siparişler SALT OKUNUR olduğunu YAZAR", () => {
+  for (const role of TEAM_ROLES) {
+    assert.ok(
+      renderTeamClient(role).includes(tr["instantQuote.team.orders.readOnly"]),
+      `${role}: salt okunur cümlesi yok`
+    );
+  }
+});
+
+test("TAKIM EKRANI: teslimat adresinin yalnız ÖN DOLDURDUĞU yazılı", () => {
+  // `quotes`ta `shipping_address` kolonu YOK; adres ödeme sırasında alınıp
+  // doğrudan taslağa yazılıyor. Ekran bunu söylemezse müşteri adresi burada
+  // değiştirip siparişin oraya gideceğini sanır.
+  const html = renderTeamClient("owner");
+  assert.ok(html.includes(tr["instantQuote.team.profile.shippingNote"]), "ön doldurma notu yok");
+  assert.ok(html.includes(tr["instantQuote.team.profile.invoiceNote"]), "fatura notu yok");
+});
+
+test("TAKIM EKRANI: takımı olmayan müşteri 'takım kur' formu görür", () => {
+  const html = plain(
+    inLocale(
+      createElement(TeamClient, {
+        team: null,
+        role: null,
+        members: [],
+        invites: [],
+        sessionUserId: SELF_ID,
+      })
+    )
+  );
+  assert.ok(html.includes(tr["instantQuote.team.create.submit"]), "kurma formu yok");
+  // KVKK onayı ZORUNLU ve varsayılan olarak KAPALI (onayın kanıtı eylemdir).
+  assert.ok(html.includes(tr["instantQuote.team.create.kvkk"]), "KVKK cümlesi yok");
+  assert.doesNotMatch(
+    html,
+    /type="checkbox"[^>]*checked/,
+    "onay kutusu varsayılan olarak işaretli"
+  );
+  // Takımı olmayan ekranda üye/davet/sipariş bölümleri HİÇ çizilmez.
+  assert.ok(
+    !html.includes(tr["instantQuote.team.orders.title"]),
+    "takımsız ekranda sipariş bölümü"
+  );
+});
+
+test("TAKIM EKRANI: ekranda para aritmetiği YOK", () => {
+  const raw = fs.readFileSync(path.resolve("src/app/account/takim/team-client.tsx"), "utf8");
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  const moneyArithmetic = code.match(/\w*[Kk]urus\w*\s*[*/%+-][^>=]|[*/%+-]\s*\w*[Kk]urus\w*/g);
+  assert.equal(moneyArithmetic, null, `tutar üzerinde aritmetik: ${moneyArithmetic?.join(", ")}`);
+  for (const conversion of [/\/\s*100\b/, /toFixed\(/]) {
+    assert.doesNotMatch(code, conversion, "ekranda para çevrimi var");
+  }
+});
+
+// ─── Takım rozeti ───────────────────────────────────────────────────────────
+
+function renderTeamBadge(quote: PresentedQuote): string {
+  return plain(inLocale(createElement(QuoteTeamBadge, { quote, onQuoteChanged: noop })));
+}
+
+test("ROZET: takımsız teklifte HİÇ çizilmez (tek <div> bile yok)", () => {
+  // Birincil kısıt: `team` anahtarı olmayan gövdede rozet yoktur. Sondanın
+  // cevabı da gelmediği için "kendi takımım" sorusu hiç sorulmaz.
+  const quote = pricedQuote();
+  assert.equal("team" in quote, false, "takımsız fikstüre `team` anahtarı girmiş");
+  assert.equal(renderTeamBadge(quote), "", "takımsız teklifte rozet çizildi");
+});
+
+test("ROZET: takım teklifinde ad yazılır ve 'ayır' düğmesi çizilir", () => {
+  const html = renderTeamBadge(teamQuote("admin", false));
+  assert.ok(
+    html.includes(fill(tr["instantQuote.team.quote.badge"], { team: "QA Mühendislik A.Ş." })),
+    "rozet takımın adını yazmıyor"
+  );
+  assert.ok(html.includes(tr["instantQuote.team.quote.detach"]), "'ayır' düğmesi yok");
+  // Teklif ZATEN bağlı: "bağla" düğmesi çizilmez.
+  assert.ok(
+    !html.includes(tr["instantQuote.team.quote.attach"]),
+    "bağlı teklifte 'bağla' düğmesi"
+  );
+});
+
+test("ROZET: `viewer` rolünde düğme YOK, ad VAR", () => {
+  const html = renderTeamBadge(teamQuote("viewer", false));
+  assert.ok(html.includes("QA Mühendislik A.Ş."), "salt okunur üye takımın adını görmüyor");
+  assert.ok(
+    !html.includes(tr["instantQuote.team.quote.detach"]),
+    "salt okunur rolde 'ayır' düğmesi"
+  );
+  assert.ok(
+    !html.includes(tr["instantQuote.team.quote.attach"]),
+    "salt okunur rolde 'bağla' düğmesi"
+  );
+});
+
+test("ROZET: `member` yalnız KENDİ açtığı teklifi ayırır", () => {
+  // Kendi açtığı teklif: erişim KİŞİSEL SAHİPLİKTEN gelir (`isOwner`), yani
+  // "kendi işi" kuralı tutar.
+  const own = teamQuote("member", false, {
+    viewer: {
+      canSeePrices: true,
+      canEdit: true,
+      isOwner: true,
+      isShare: false,
+      isAdmin: false,
+      isTeam: true,
+      teamRole: "member",
+    },
+  });
+  assert.ok(
+    renderTeamBadge(own).includes(tr["instantQuote.team.quote.detach"]),
+    "üye kendi teklifini ayıramıyor"
+  );
+  // Meslektaşının teklifi: erişim yalnız ÜYELİKTEN gelir → düğme YOK.
+  assert.ok(
+    !renderTeamBadge(teamQuote("member", false)).includes(
+      tr["instantQuote.team.quote.detach"]
+    ),
+    "üye başkasının teklifini ayırabiliyor"
+  );
+});
+
+// ─── "Takım" ve "Açan" kolonları ────────────────────────────────────────────
+
+test("KOLON: takımsız listede tablo bugünküyle BİREBİR aynı (yedi <th>)", () => {
+  const html = inLocale(createElement(QuoteListTable, { items: [QUOTE_ROW] }));
+  assert.equal(QUOTE_ROW.teamName, null);
+  assert.equal(QUOTE_ROW.ownerName, null);
+  assert.equal((html.match(/<th\b/g) ?? []).length, 7, "kolon sayısı değişmiş");
+  assert.ok(
+    !html.includes(tr["instantQuote.account.quotes.column.team"]),
+    "Takım kolonu çizildi"
+  );
+  assert.ok(
+    !html.includes(tr["instantQuote.account.quotes.column.owner"]),
+    "Açan kolonu çizildi"
+  );
+});
+
+test("KOLON: HERHANGİ bir satırda veri varsa iki kolon daha çizilir", () => {
+  // Ölçü "ilk satır" DEĞİL "herhangi bir satır": takıma bağlı tek teklifi olan
+  // müşteride de kolon görünmeli.
+  const html = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [
+          QUOTE_ROW,
+          {
+            ...QUOTE_ROW,
+            id: "22222222-2222-4222-8222-222222222222",
+            number: "T-000456",
+            teamName: "QA Mühendislik A.Ş.",
+            ownerName: "Ayşe Sahip",
+          },
+        ],
+      })
+    )
+  );
+  assert.equal((html.match(/<th\b/g) ?? []).length, 9, "iki kolon eklenmemiş");
+  assert.ok(html.includes(tr["instantQuote.account.quotes.column.team"]), "Takım başlığı yok");
+  assert.ok(html.includes(tr["instantQuote.account.quotes.column.owner"]), "Açan başlığı yok");
+  assert.ok(html.includes("QA Mühendislik A.Ş."), "takım adı satıra yazılmamış");
+  assert.ok(html.includes("Ayşe Sahip"), "açan kişi satıra yazılmamış");
 });

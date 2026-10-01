@@ -56,8 +56,20 @@ export function QuoteListTable({
   currency?: DisplayCurrency;
 }): JSX.Element {
   const d = useDictionary();
-  const c = (key: "number" | "title" | "parts" | "status" | "total" | "expiry") =>
-    d[`instantQuote.account.quotes.column.${key}`];
+  const c = (
+    key: "number" | "title" | "parts" | "status" | "total" | "expiry" | "team" | "owner"
+  ) => d[`instantQuote.account.quotes.column.${key}`];
+
+  // TAKIM KOLONLARI YALNIZ VERİ VARSA ÇİZİLİR (0072) ve ölçü "listedeki
+  // herhangi bir satır"dır, "ilk satır" değil: takıma bağlı tek bir teklifi
+  // olan müşteride de kolon görünmeli. Takımı OLMAYAN müşteride ikisi de
+  // listenin TAMAMINDA null olur ve tablo bugünküyle birebir aynı kalır —
+  // yedi `<th>`, aynı sıra (birincil kısıt).
+  //
+  // İki kolonun kapısı AYRI: "Açan" yalnız takım satırlarında dolu olduğu için
+  // tek başına da boş kalabilir ve boş bir kolon çizmenin anlamı yok.
+  const showTeam = items.some((item) => item.teamName !== null);
+  const showOwner = items.some((item) => item.ownerName !== null);
 
   return (
     <div className="overflow-x-auto">
@@ -66,6 +78,12 @@ export function QuoteListTable({
           <tr className="border-b border-border-default text-xs text-text-muted">
             <th scope="col" className="py-3 pr-4 font-medium">{c("number")}</th>
             <th scope="col" className="py-3 pr-4 font-medium">{c("title")}</th>
+            {showTeam && (
+              <th scope="col" className="py-3 pr-4 font-medium">{c("team")}</th>
+            )}
+            {showOwner && (
+              <th scope="col" className="py-3 pr-4 font-medium">{c("owner")}</th>
+            )}
             <th scope="col" className="py-3 pr-4 font-medium">{c("parts")}</th>
             <th scope="col" className="py-3 pr-4 font-medium">{c("status")}</th>
             <th scope="col" className="py-3 pr-4 font-medium">{c("total")}</th>
@@ -100,6 +118,12 @@ export function QuoteListTable({
                   )}
                 </td>
                 <td className="py-3 pr-4 text-text-secondary">{item.title ?? "—"}</td>
+                {showTeam && (
+                  <td className="py-3 pr-4 text-text-secondary">{item.teamName ?? "—"}</td>
+                )}
+                {showOwner && (
+                  <td className="py-3 pr-4 text-text-secondary">{item.ownerName ?? "—"}</td>
+                )}
                 <td className="py-3 pr-4 text-text-secondary">
                   {fill(d["instantQuote.summary.parts"], {
                     parts: item.partCount,

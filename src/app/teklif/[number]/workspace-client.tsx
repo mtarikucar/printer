@@ -25,6 +25,7 @@ import { PriceGateModal } from "@/components/quote/price-gate-modal";
 import { QuoteBanners } from "@/components/quote/quote-banners";
 import { QuoteChatPanel } from "@/components/quote/quote-chat-panel";
 import { QuoteHeader } from "@/components/quote/quote-header";
+import { QuoteTeamBadge } from "@/components/quote/team-badge";
 import { QuoteSummary } from "@/components/quote/quote-summary";
 import { QuoteReviewDialog } from "@/components/quote/review-request-dialog";
 import { QuoteShareDialog } from "@/components/quote/share-dialog";
@@ -524,6 +525,13 @@ export function QuoteWorkspaceClient({
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-5">
           <QuoteBanners quote={quote} shareToken={shareToken} onQuoteChanged={apply} />
+
+          {/* TAKIM ROZETİ (0072): takımsız teklifte HİÇ çizilmez (bileşenin
+              kendi kapısı) — takımı olmayan müşterinin ekranı bugünküyle bit
+              bit aynı kalır. Bantların ALTINDA duruyor çünkü bir DURUM değil
+              bir SAHİPLİK bilgisi: teklifin süresi dolduysa müşterinin önce
+              onu okuması gerekir. */}
+          <QuoteTeamBadge quote={quote} onQuoteChanged={apply} />
 
           {readOnly && (
             <p className="rounded-xl border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-ink-2">

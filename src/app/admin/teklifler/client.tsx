@@ -76,6 +76,10 @@ export function QuoteQueueClient({
   const router = useRouter();
   const [search, setSearch] = useState(q);
 
+  // Ölçü "herhangi bir satır"dır, "ilk satır" değil: tek bir takım teklifi
+  // olan sayfada da kolon görünmeli.
+  const showTeam = items.some((row) => row.teamName !== null);
+
   const submitSearch = (e: React.FormEvent) => {
     e.preventDefault();
     router.push(href(tab, 1, search.trim()));
@@ -149,6 +153,13 @@ export function QuoteQueueClient({
               <tr>
                 <th className="px-4 py-3">Teklif</th>
                 <th className="px-4 py-3">Müşteri</th>
+                {/* TAKIM KOLONU YALNIZ VERİ VARSA (0072): aynı firmanın üç
+                    mühendisinden gelen üç teklifi "üç ayrı müşteri" diye
+                    okumak, manuel fiyatlamada yanlış kararın en kısa yolu.
+                    Takım teklifi OLMAYAN bir kuyruk sayfasında tablo
+                    bugünküyle birebir aynı kalır (müşteri tarafıyla aynı
+                    kural). */}
+                {showTeam && <th className="px-4 py-3">Takım</th>}
                 <th className="px-4 py-3">Durum</th>
                 <th className="px-4 py-3 text-right">Parça / Adet</th>
                 <th className="px-4 py-3 text-right">Tutar</th>
@@ -183,6 +194,11 @@ export function QuoteQueueClient({
                       </>
                     )}
                   </td>
+                  {showTeam && (
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {row.teamName ?? "—"}
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_TONES[row.status]}`}

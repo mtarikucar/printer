@@ -1750,6 +1750,262 @@ async function main() {
       }
     });
 
+
+    // ─── T-5 · TAKIM SİPARİŞLERİ (SALT OKUNUR) ──────────────────────────────
+    //
+    // SIRA BİR KURALDIR: bu bölüm "PARA HATTINA DOKUNULMADI" vakasından SONRA
+    // duruyor. O vaka takım YAZMA yolunun hiçbir taslak/sipariş satırı
+    // üretmediğini sayarak kanıtlıyor; aşağıdaki satırlar ise FİKSTÜRDÜR ve
+    // doğrudan `admin.query` ile yazılıyor (uygulama kodundan değil). Önce
+    // yazılsalar o sayım kırmızıya düşer ve kanıt kaybolurdu.
+    //
+    // Ölçülen şey TÜRETİLMİŞ GÖRÜNÜRLÜK: `quotes.team_id` ⋈ `quotes.order_id`.
+    // `orders` tablosuna hiçbir kolon eklenmedi (tasarım §0), yani bağ bu iki
+    // kolondan başka hiçbir yerde yazılı değil.
+    const teamOrdersRoute = await import("../src/app/api/customer/team/orders/route");
+    const teamOrderDetailRoute = await import(
+      "../src/app/api/customer/team/orders/[orderNumber]/route"
+    );
+
+    const payer = await makeUser("odeyen");
+    const PAYER_NAME = "QA Ödeyen Kişi";
+    const PAYER_ADDRESS = {
+      adres: "Gizli Mahalle 1. Sokak No 2 Daire 3",
+      mahalle: "Gizli",
+      ilce: "Kadıköy",
+      il: "İstanbul",
+      postaKodu: "34000",
+      telefon: "+905551112233",
+    };
+
+    /**
+     * Bir teklifi ÖDENMİŞ siparişe çevirir — gerçek kolonlarla, gerçek bağla.
+     *
+     * `order_drafts` satırı zorunlu çünkü `quote_checkouts.draft_id` NOT NULL:
+     * parça listesinin kaynağı ödeme anında donan `parts_snapshot` ve o satır
+     * taslağa bağlı. Bağ yine `quotes.order_id`tir — bu yüzden fikstür de onu
+     * yazıyor, uydurma bir kolon değil.
+     */
+    async function makePaidOrder(args: {
+      quoteId: string;
+      orderNumber: string;
+      amountKurus: number;
+      partName: string;
+    }): Promise<void> {
+      const draftId = (
+        await admin.query(
+          `INSERT INTO order_drafts (reference, user_id, email, customer_name, shipping_address,
+             payment_method, amount_kurus)
+           VALUES ($1, $2, $3, $4, $5::jsonb, 'card', $6) RETURNING id`,
+          [
+            `QA-DRAFT-${args.orderNumber}`,
+            payer.userId,
+            payer.email,
+            PAYER_NAME,
+            JSON.stringify(PAYER_ADDRESS),
+            args.amountKurus,
+          ]
+        )
+      ).rows[0].id as string;
+      const orderId = (
+        await admin.query(
+          `INSERT INTO orders (order_number, user_id, draft_id, email, customer_name,
+             shipping_address, payment_method, amount_kurus, status, tracking_number)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'card', $7, 'printing', 'QA-TRACK-1')
+           RETURNING id`,
+          [
+            args.orderNumber,
+            payer.userId,
+            draftId,
+            payer.email,
+            PAYER_NAME,
+            JSON.stringify(PAYER_ADDRESS),
+            args.amountKurus,
+          ]
+        )
+      ).rows[0].id as string;
+      await admin.query(
+        `INSERT INTO quote_checkouts (quote_id, draft_id, quote_version, amount_kurus,
+           parts_snapshot, lead_days)
+         VALUES ($1, $2, 1, $3, $4::jsonb, 5)`,
+        [
+          args.quoteId,
+          draftId,
+          args.amountKurus,
+          JSON.stringify([
+            {
+              partId: randomUUID(),
+              position: 1,
+              name: args.partName,
+              fileName: "gizli-dosya-adi.stl",
+              sourceFormat: "stl",
+              canonicalStlKey: "quotes/qa/gizli-anahtar.stl",
+              thumbnailKey: null,
+              drawingKey: null,
+              drawingName: null,
+              scaleFactor: 1,
+              technologyKey: "fdm",
+              technologyName: "FDM",
+              materialKey: "pla",
+              materialName: "PLA",
+              colorName: "Siyah",
+              colorHex: "#000000",
+              finishKey: "standard",
+              finishName: "Standart",
+              layerUm: 200,
+              infillPct: 20,
+              quantity: 2,
+              dimensionsMm: { x: 40, y: 30, z: 20 },
+              volumeCm3: 12,
+              tessellationMm: null,
+              unitKurus: 7400,
+              lineKurus: 14800,
+              note: null,
+              dfmWarnings: [],
+            },
+          ]),
+        ]
+      );
+      await admin.query("UPDATE quotes SET order_id = $1, status = 'ordered' WHERE id = $2", [
+        orderId,
+        args.quoteId,
+      ]);
+    }
+
+    const listTeamOrders = () =>
+      teamOrdersRoute.GET(req("/api/customer/team/orders"));
+    const readTeamOrder = (orderNumber: string) =>
+      teamOrderDetailRoute.GET(
+        req(`/api/customer/team/orders/${encodeURIComponent(orderNumber)}`),
+        { params: Promise.resolve({ orderNumber }) }
+      );
+
+    // Bağ takımının İKİ teklifi: biri siparişe döndü, biri dönmedi.
+    const orderedQuoteId = await personalQuote(bindOwner);
+    await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [
+      bindTeamId,
+      orderedQuoteId,
+    ]);
+    await makePaidOrder({
+      quoteId: orderedQuoteId,
+      orderNumber: "FIG-QA-TEAM-1",
+      amountKurus: 14800,
+      partName: "Takım kalıbı",
+    });
+    const pendingQuoteId = await personalQuote(bindOwner);
+    await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [
+      bindTeamId,
+      pendingQuoteId,
+    ]);
+    // BAŞKA takımın siparişi (ilk takım, `QA Mühendislik A.Ş.`).
+    await makePaidOrder({
+      quoteId: created.id,
+      orderNumber: "FIG-QA-OTHER-1",
+      amountKurus: 99900,
+      partName: "Yabancı takımın parçası",
+    });
+
+    await test("LİSTE: üye yalnız KENDİ takımının siparişe dönmüş tekliflerini görür", async () => {
+      session = bindOwner;
+      const response = await listTeamOrders();
+      assert.equal(response.status, 200);
+      const rows = (await body(response)).orders as Array<Record<string, unknown>>;
+      const numbers = rows.map((r) => r.orderNumber);
+      assert.deepEqual(numbers, ["FIG-QA-TEAM-1"], `beklenmeyen liste: ${numbers.join(", ")}`);
+      // Siparişi OLMAYAN takım teklifi listede yok (türetilmiş görünürlük:
+      // `order_id IS NULL` satır üretmez).
+      assert.equal(
+        (await admin.query("SELECT order_id FROM quotes WHERE id = $1", [pendingQuoteId]))
+          .rows[0].order_id,
+        null
+      );
+      // Tutar UÇTAN gelir ve kuruştur; ekran yalnız basar.
+      assert.equal(rows[0].amountKurus, 14800);
+      assert.equal(rows[0].trackingNumber, "QA-TRACK-1");
+      assert.equal(rows[0].status, "printing");
+    });
+
+    await test("LİSTE/DETAY: BAŞKA takımın siparişi ne listede ne detayda", async () => {
+      session = bindOwner;
+      const rows = (await body(await listTeamOrders())).orders as Array<Record<string, unknown>>;
+      assert.ok(
+        !rows.some((r) => r.orderNumber === "FIG-QA-OTHER-1"),
+        "başka takımın siparişi listeye girdi"
+      );
+      // Numarayı BİLMEK hak vermiyor: görünürlük tek `WHERE`de, takım
+      // kimliğiyle birlikte.
+      await refusal(await readTeamOrder("FIG-QA-OTHER-1"), 404, "quote_not_found");
+    });
+
+    await test("DETAY: parça listesi `parts_snapshot`tan gelir; ÖDEYEN ve ADRES YOK", async () => {
+      session = bindOwner;
+      const response = await readTeamOrder("FIG-QA-TEAM-1");
+      assert.equal(response.status, 200);
+      const payload = await body(response);
+      const order = payload.order as Record<string, unknown>;
+      assert.equal(order.orderNumber, "FIG-QA-TEAM-1");
+      assert.equal(order.amountKurus, 14800);
+      assert.equal(order.trackingNumber, "QA-TRACK-1");
+      const parts = order.parts as Array<Record<string, unknown>>;
+      assert.equal(parts.length, 1, "donmuş parça listesi gelmedi");
+      assert.equal(parts[0].name, "Takım kalıbı");
+      assert.equal(parts[0].quantity, 2);
+      assert.equal(parts[0].lineKurus, 14800);
+
+      // DEĞİŞMEZ 4 — CANLI KANIT: gövdenin HİÇBİR yerinde ödeyenin adı,
+      // e-postası, telefonu, teslimat adresi ya da depolama anahtarı yok.
+      const wire = JSON.stringify(payload);
+      for (const secret of [
+        PAYER_NAME,
+        payer.email,
+        PAYER_ADDRESS.adres,
+        PAYER_ADDRESS.telefon,
+        PAYER_ADDRESS.postaKodu,
+        "gizli-anahtar.stl",
+        "gizli-dosya-adi.stl",
+      ]) {
+        assert.ok(!wire.includes(secret), `cevapta sızan alan: ${secret}`);
+      }
+    });
+
+    await test("DETAY: `viewer` rolü de OKUR (takım yalnız okur, ama HEPSİ okur)", async () => {
+      session = bindViewer;
+      const list = (await body(await listTeamOrders())).orders as Array<Record<string, unknown>>;
+      assert.deepEqual(list.map((r) => r.orderNumber), ["FIG-QA-TEAM-1"]);
+      const detail = await readTeamOrder("FIG-QA-TEAM-1");
+      assert.equal(detail.status, 200, "salt okunur rol siparişi okuyamadı");
+    });
+
+    await test("ÇIKARILAN ÜYE: bir sonraki istekte liste BOŞ, detay 404", async () => {
+      const exMember = await makeUser("eski-uye");
+      await admin.query(
+        "INSERT INTO customer_team_members (team_id, user_id, role) VALUES ($1, $2, 'member')",
+        [bindTeamId, exMember.userId]
+      );
+      session = exMember;
+      assert.equal((await readTeamOrder("FIG-QA-TEAM-1")).status, 200, "üye okuyamadı");
+
+      // Üyelik SATIRI silinir — önbellek yok, gecikme yok.
+      await admin.query("DELETE FROM customer_team_members WHERE team_id = $1 AND user_id = $2", [
+        bindTeamId,
+        exMember.userId,
+      ]);
+      const list = (await body(await listTeamOrders())).orders as unknown[];
+      assert.deepEqual(list, [], "çıkarılan üye listeyi hâlâ görüyor");
+      await refusal(await readTeamOrder("FIG-QA-TEAM-1"), 404, "quote_not_found");
+    });
+
+    await test("BAYRAK KAPALI: takım sipariş uçları 404 (403 DEĞİL)", async () => {
+      await setFlag("quote_teams_enabled", false, "qa");
+      try {
+        session = bindOwner;
+        await refusal(await listTeamOrders(), 404, "team_not_found");
+        await refusal(await readTeamOrder("FIG-QA-TEAM-1"), 404, "team_not_found");
+      } finally {
+        await setFlag("quote_teams_enabled", true, "qa");
+      }
+    });
+
     console.log(`${checks} quote team DB checks passed`);
   } finally {
     await pool?.end();

@@ -136,6 +136,48 @@ export default async function PrivacyPage() {
                 gerçekleşmiş aktarımları etkilemez.
               </p>
 
+              {/* TAKIM ÇALIŞMA ALANI — §5'in ALT BAŞLIĞI olarak duruyor, yeni
+                  bir §numarası AÇMADAN: aşağıdaki bütün başlıkları kaydırmak
+                  gereksiz bir metin değişikliği olurdu.
+
+                  BU PARAGRAF BAYRAK KAPISININ ARKASINDA DEĞİL ve bu bilinçli
+                  tek istisnadır: aydınlatma metni bir PAZARLAMA cümlesi değil,
+                  bir yükümlülüktür. Özellik bayrak arkasında olsa da iç test
+                  gerçek satır üretiyor ve paylaşım ilişkisi o anda doğuyor.
+                  Paragraf bir özelliği İLAN ETMEZ, bir işlemeyi AÇIKLAR —
+                  bu yüzden sözlükte de değil, sayfanın kendisinde durur. */}
+              <h3>5.1 Takım Çalışma Alanı</h3>
+              <p>
+                Kurumsal müşteriler, 3B baskı tekliflerini bir <strong>takım</strong> altında birlikte
+                yürütebilir. Takıma bir kişi ancak açık bir davetle ve kendisi kabul ettikten sonra
+                katılır; e-posta alan adını paylaşan herkesin otomatik olarak katıldığı bir yöntem
+                YOKTUR.
+              </p>
+              <p>Bir teklifi takıma bağladığınızda takımın üyeleriyle <strong>paylaşılan</strong> veriler:</p>
+              <ul>
+                <li>O teklife yüklediğiniz 3B model dosyaları ve teknik resimler</li>
+                <li>Teklifin fiyatları, tutarları ve teslim süresi</li>
+                <li>Takımın paylaşılan firma fatura bilgileri (unvan, VKN/TCKN, vergi dairesi, fatura adresi)</li>
+                <li>Üye listesinde yalnızca <strong>ad soyad, e-posta adresi ve rol</strong></li>
+                <li>Takıma bağlı tekliflerden doğan siparişlerin durumu, tutarı, parça listesi ve kargo takip numarası</li>
+              </ul>
+              <p>Takımla <strong>paylaşılMAYAN</strong> veriler:</p>
+              <ul>
+                <li>Üyelerin telefon numaraları ve kişisel adresleri</li>
+                <li>Hesabınızdaki adres defteri (takımın teslimat adresi ayrıdır ve takım düzeyinde girilir)</li>
+                <li>Ödeme araçlarınız, kart bilgileri ve hediye kartı bakiyeniz</li>
+                <li>Bir siparişin teslimat adresi ile ödemeyi yapan kişinin adı ve iletişim bilgileri</li>
+              </ul>
+              <p>
+                Takım üyeliği sona erdiğinde (ayrılma ya da çıkarılma) <strong>erişim anında kesilir</strong>:
+                bir sonraki istekte takıma bağlı teklifler ve siparişler o kişiye görünmez. Kendi açtığı
+                teklifler ise kişisel olarak erişilebilir kalır. Takım siparişleri üyeler için
+                <strong> yalnızca görüntülenebilir</strong>; iade, anlaşmazlık, fatura ve yeniden sipariş gibi
+                işlemler mesafeli satış sözleşmesinin tarafı olan, yani ödemeyi yapan kişinin hakkıdır.
+                Davet, rol değişikliği ve çıkarma e-postaları <strong>işlem bildirimidir</strong>; ticari
+                elektronik ileti değildir ve takıma katılmak ticari ileti onayı üretmez.
+              </p>
+
               <h2>6. Verilerin Saklanma Süresi</h2>
               <ul>
                 <li><strong>Hesap bilgileri:</strong> Hesap aktif olduğu sürece</li>
@@ -325,6 +367,37 @@ export default async function PrivacyPage() {
                 you give via the checkbox at checkout (Article 9 of the KVKK) and is made solely to produce your order.
                 Without that consent, custom figurine production cannot technically be provided; you may withdraw your
                 consent at any time by writing to info@figurunica.com — withdrawal does not affect transfers already made.
+              </p>
+
+              <h3>5.1 Team Workspace</h3>
+              <p>
+                Business customers can run their 3D-printing quotes together under a <strong>team</strong>.
+                Someone joins a team only through an explicit invitation that they accept themselves;
+                there is NO mechanism by which everyone sharing an email domain joins automatically.
+              </p>
+              <p>When you attach a quote to a team, the following is <strong>shared</strong> with its members:</p>
+              <ul>
+                <li>The 3D model files and technical drawings you uploaded to that quote</li>
+                <li>The quote&apos;s prices, totals and lead time</li>
+                <li>The team&apos;s shared company invoice details (name, tax number, tax office, billing address)</li>
+                <li>In the member list, only <strong>full name, email address and role</strong></li>
+                <li>The status, amount, part list and tracking number of orders arising from the team&apos;s quotes</li>
+              </ul>
+              <p>The following is <strong>NOT</strong> shared with the team:</p>
+              <ul>
+                <li>Members&apos; phone numbers and personal addresses</li>
+                <li>Your account address book (the team&apos;s delivery address is separate and entered at team level)</li>
+                <li>Your payment instruments, card details and gift-card balance</li>
+                <li>An order&apos;s delivery address, and the name and contact details of the person who paid</li>
+              </ul>
+              <p>
+                When team membership ends (by leaving or being removed) <strong>access is cut immediately</strong>:
+                on the next request the team&apos;s quotes and orders are no longer visible to that person. Quotes
+                they opened themselves remain accessible to them personally. Team orders are
+                <strong> view-only</strong> for members; refunds, disputes, invoices and reorders are the right of
+                the party to the distance-selling contract, that is, the person who paid. Invitation, role-change
+                and removal emails are <strong>transactional notifications</strong>, not commercial electronic
+                messages, and joining a team does not create marketing consent.
               </p>
 
               <h2>6. Data Retention Period</h2>

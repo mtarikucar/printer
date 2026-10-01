@@ -134,23 +134,53 @@ const EXPECTED_CHECKS: Record<string, string[]> = {
     "quote_framework_batch_lines_unit_chk",
   ],
 };
-/** Hepsi `restrict` olmak ZORUNDA: anlaşma bir sözleşmedir, öksüz kalmaz. */
-const EXPECTED_FKS: Record<string, string[]> = {
-  quote_frameworks: [
-    "quote_frameworks_preferred_manufacturer_id_manufacturers_id_fk",
-    "quote_frameworks_quote_id_quotes_id_fk",
-    "quote_frameworks_user_id_users_id_fk",
-  ],
-  quote_framework_batches: [
-    "quote_framework_batches_draft_id_order_drafts_id_fk",
-    "quote_framework_batches_framework_id_quote_frameworks_id_fk",
-    "quote_framework_batches_order_id_orders_id_fk",
-    "quote_framework_batches_quote_id_quotes_id_fk",
-  ],
-  quote_framework_batch_lines: [
-    "quote_framework_batch_lines_batch_id_fk",
-    "quote_framework_batch_lines_framework_id_quote_frameworks_id_fk",
-  ],
+/** up'ın kurduğu adlandırılmış UNIQUE kısıtları (indeks DEĞİL, kısıt). */
+const EXPECTED_UNIQUES: Record<string, string[]> = {
+  quote_frameworks: ["quote_frameworks_number_unique", "quote_frameworks_seq_unique"],
+  // Bileşik FK'nin HEDEFİ. `id` birincil anahtar olduğu için mantıksal olarak
+  // bedava; yazılması ZORUNLU, çünkü Postgres bileşik bir FK'yi ancak hedef
+  // kolonları tekil bir kısıt/indeks kapsıyorsa kabul eder.
+  quote_framework_batches: ["quote_framework_batches_id_framework_id_unique"],
+  quote_framework_batch_lines: [],
+};
+/**
+ * up'ın kurduğu FK'ler: adı → veritabanındaki TANIMI (`pg_get_constraintdef`).
+ * Ad YETMEZ, hedef de pinlenir — kolon ya da hedef kayması adı değiştirmez ve
+ * bu dosyanın konusu tam olarak bir FK'nin HEDEFİ. Hepsi `restrict` olmak
+ * ZORUNDA: anlaşma bir sözleşmedir, öksüz kalmaz. Anahtarlar ALFABETİK, çünkü
+ * ad listesi veritabanının sıralı çıktısıyla karşılaştırılıyor.
+ */
+const EXPECTED_FKS: Record<string, Record<string, string>> = {
+  quote_frameworks: {
+    quote_frameworks_preferred_manufacturer_id_manufacturers_id_fk:
+      "FOREIGN KEY (preferred_manufacturer_id) REFERENCES manufacturers(id) ON DELETE RESTRICT",
+    quote_frameworks_quote_id_quotes_id_fk:
+      "FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE RESTRICT",
+    quote_frameworks_user_id_users_id_fk:
+      "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT",
+  },
+  quote_framework_batches: {
+    quote_framework_batches_draft_id_order_drafts_id_fk:
+      "FOREIGN KEY (draft_id) REFERENCES order_drafts(id) ON DELETE RESTRICT",
+    quote_framework_batches_framework_id_quote_frameworks_id_fk:
+      "FOREIGN KEY (framework_id) REFERENCES quote_frameworks(id) ON DELETE RESTRICT",
+    quote_framework_batches_order_id_orders_id_fk:
+      "FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT",
+    quote_framework_batches_quote_id_quotes_id_fk:
+      "FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE RESTRICT",
+  },
+  quote_framework_batch_lines: {
+    // PARA OKUMASININ KAPISI: satırın çerçevesi, satırın PARTİSİNİN
+    // çerçevesidir. Tek kolonluk bir `framework_id` → `quote_frameworks(id)`
+    // FK'si bunu söylemiyordu — satır, partisinin ait OLMADIĞI bir çerçeveyi
+    // iddia edebiliyor ve parça başına döküm
+    // (`quote_framework_batch_lines_fw_part_idx` üzerinden okunan) sessizce
+    // kayıyordu.
+    quote_framework_batch_lines_batch_framework_fk:
+      "FOREIGN KEY (batch_id, framework_id) REFERENCES quote_framework_batches(id, framework_id) ON DELETE RESTRICT",
+    quote_framework_batch_lines_batch_id_fk:
+      "FOREIGN KEY (batch_id) REFERENCES quote_framework_batches(id) ON DELETE RESTRICT",
+  },
 };
 
 let checks = 0;
@@ -402,6 +432,14 @@ for (const [label, values] of [
     `up'taki liste ${label} ile aynı değil`,
   );
 }
+check(
+  "0073'ün HER FK'si `on delete restrict` (anlaşma bir SÖZLEŞMEDİR, öksüz kalmaz)",
+  Object.values(EXPECTED_FKS)
+    .flatMap((table) => Object.entries(table))
+    .filter(([, def]) => !def.endsWith("ON DELETE RESTRICT"))
+    .map(([name]) => name),
+  [],
+);
 const schemaSrc = fs.readFileSync(path.join(root, "src/lib/db/schema.ts"), "utf8");
 for (const constraint of Object.values(EXPECTED_CHECKS).flat()) {
   ok(
@@ -410,6 +448,45 @@ for (const constraint of Object.values(EXPECTED_CHECKS).flat()) {
     `schema.ts'te ${constraint} yok — drizzle-kit bir sonraki turda kısıdı düşürür`,
   );
 }
+// `quote_frameworks`ın iki tekili kolon düzeyindeki `.unique()`ten doğuyor ve
+// adlarını drizzle türetiyor; bileşik olan ADIYLA yazılmak ZORUNDA (hedef
+// kolonları tekil bir kısıt kapsamazsa bileşik FK hiç kurulamaz).
+ok(
+  "schema.ts quote_framework_batches_id_framework_id_unique kısıdını adıyla tanımlar",
+  /unique\(\s*"quote_framework_batches_id_framework_id_unique"\s*\)\.on\(t\.id, t\.frameworkId\)/.test(schemaSrc),
+  "schema.ts'te bileşik tekil kısıt yok — drizzle-kit bir sonraki turda onu düşürür ve bileşik FK'yi de alır",
+);
+ok(
+  "schema.ts bileşik FK'yi (batch_id, framework_id) adıyla tanımlar",
+  /name: "quote_framework_batch_lines_batch_framework_fk",\s*columns: \[t\.batchId, t\.frameworkId\]/.test(schemaSrc),
+  "schema.ts'te bileşik FK yok — drizzle-kit bir sonraki turda kısıdı düşürür",
+);
+ok(
+  "schema.ts'te `framework_id` ARTIK tek kolonluk bir FK taşımaz",
+  !/frameworkId: uuid\("framework_id"\)\.notNull\(\)\.references\(\(\) => quoteFrameworks\.id/.test(
+    schemaSrc.slice(schemaSrc.indexOf('pgTable("quote_framework_batch_lines"')),
+  ),
+  "batch_lines.framework_id hâlâ `quote_frameworks`a BAĞIMSIZ bir FK ile bağlı",
+);
+/**
+ * 0073'ün ADLANDIRDIĞI her kısıt/indeks. Postgres kimlikleri 63 BAYTA SESSİZCE
+ * kırpar; kırpılmış ad up'taki `conname = '<tam ad>'` kontrolüyle hiç eşleşmez
+ * ve up İKİNCİ koşuda kısıdı yeniden eklemeye kalkıp "already exists" ile
+ * düşer. 0061'de duran latent hata tam budur:
+ * `gift_credit_returns_refund_allocation_id_order_refund_allocations_id_fk`
+ * 71 karakter. Yeni kısıtlar da aynı özeni görmek ZORUNDA.
+ */
+const namedIdentifiers = [upRaw, downRaw].flatMap((sql) => [
+  ...sql.matchAll(/(?:ADD\s+)?CONSTRAINT\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?"?([a-z0-9_]+)"?/g),
+  ...sql.matchAll(/conname\s*=\s*'([a-z0-9_]+)'/g),
+  ...sql.matchAll(/INDEX\s+IF\s+NOT\s+EXISTS\s+"([a-z0-9_]+)"/g),
+]).map((m) => m[1]!);
+ok("0073 kısıt/indeks adlarını açıkça yazar", namedIdentifiers.length >= 25, `${namedIdentifiers.length} ad bulundu`);
+check(
+  "0073'ün adlandırdığı hiçbir kısıt/indeks 63 BAYTI aşmaz",
+  namedIdentifiers.filter((name) => Buffer.byteLength(name, "utf8") > 63).sort(),
+  [],
+);
 check("journal girdisi kayıt defterinin sayılarını taşır", [entry.idx, entry.when, entry.version], [IDX, WHEN, "7"]);
 ok("0073'ün `when`i üretim watermark'ının ÜSTÜNDE", entry.when > PRODUCTION_WATERMARK,
   `${entry.when} <= ${PRODUCTION_WATERMARK}: migrate 0073'ü sessizce atlar`);
@@ -481,13 +558,15 @@ async function main() {
     for (const [table, expected] of Object.entries(EXPECTED_CHECKS)) {
       check(`up ${table} CHECK'lerini kurar`, await constraintNames(`${ns}.${table}`, "c"), expected);
     }
+    for (const [table, expected] of Object.entries(EXPECTED_UNIQUES)) {
+      check(`up ${table} UNIQUE kısıtlarını kurar`, await constraintNames(`${ns}.${table}`, "u"), expected);
+    }
     for (const [table, expected] of Object.entries(EXPECTED_FKS)) {
-      check(`up ${table} FK'lerini kurar`, await constraintNames(`${ns}.${table}`, "f"), expected);
-      const deleteRules = (await rows(
-        "SELECT conname, confdeltype FROM pg_constraint WHERE conrelid = to_regclass($1) AND contype = 'f' ORDER BY conname",
-        [`${ns}.${table}`],
-      )).map((r) => r.confdeltype as string);
-      check(`${table}: her FK "on delete restrict"`, deleteRules, expected.map(() => "r"));
+      check(`up ${table} FK'lerini kurar`, await constraintNames(`${ns}.${table}`, "f"), Object.keys(expected));
+      // Ad DEĞİL, TANIM: kolonlar, hedef tablo/kolonlar ve `on delete` birlikte.
+      for (const [name, def] of Object.entries(expected)) {
+        check(`${name}: kolonları ve HEDEFİ`, await constraintDef(`${ns}.${table}`, name), def);
+      }
     }
     check("up denetim listesini ONBEŞ değere çıkarır", await adminActionsInDb(), [...QUOTE_ADMIN_ACTIONS]);
 
@@ -525,6 +604,33 @@ async function main() {
       "parti tutarı tek ödeme tavanını (₺2M) AŞAMAZ",
       batchColumns({ framework_id: first.id, position: 9, amount_kurus: 200_000_001 }),
       { code: "23514", constraint: "quote_framework_batches_amount_chk" },
+    );
+
+    // ─── SATIRIN ÇERÇEVESİ, PARTİSİNİN ÇERÇEVESİDİR ────────────────────────
+    //
+    // Bileşik FK `(batch_id, framework_id)` → `batches(id, framework_id)`.
+    // Tek kolonluk bir `framework_id` FK'si yalnız "var olan BİR çerçeve"
+    // diyordu; bileşik FK "partinin ait OLDUĞU çerçeve" diyor. Parça başına
+    // döküm `(framework_id, part_id)` üzerinden okunuyor: yanlış çerçeveyi
+    // iddia eden bir satır, taahhüdün ne kadarının tüketildiğini sessizce
+    // kaydırırdı.
+    await rejects(
+      "satır, partisinin ait OLMADIĞI çerçeveyi iddia edemez (23503)",
+      lineColumns({ batch_id: batch.id, framework_id: second.id }),
+      { code: "23503", constraint: "quote_framework_batch_lines_batch_framework_fk" },
+    );
+    await rejects(
+      "satırı olan parti BAŞKA çerçeveye taşınamaz (23503)",
+      { sql: "UPDATE quote_framework_batches SET framework_id = $1 WHERE id = $2", params: [second.id, batch.id] },
+      { code: "23503", constraint: "quote_framework_batch_lines_batch_framework_fk" },
+    );
+    const linesBefore = (await rows(`SELECT count(*)::int AS n FROM ${LINES}`))[0]!.n;
+    const sameFramework = lineColumns({ batch_id: batch.id, framework_id: first.id, position: 2 });
+    await client.query(sameFramework.sql, sameFramework.params);
+    check(
+      "doğru çerçeveyi taşıyan satır KABUL edilir (regresyon)",
+      (await rows(`SELECT count(*)::int AS n FROM ${LINES}`))[0]!.n,
+      linesBefore + 1,
     );
 
     // ─── "Klonsuz serbest bırakma" hâli DB'de doğmaz ───────────────────────

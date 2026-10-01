@@ -38,14 +38,37 @@
 -- sipariş — hiçbiri cascade DEĞİL. Anlaşma bir SÖZLEŞMEDİR; öksüz kalması
 -- detay sayfasında 500 demektir.
 --
+-- ─── PARTİ SATIRININ ÇERÇEVESİ, PARTİSİNİN ÇERÇEVESİDİR ───────────────────
+--
+-- `quote_framework_batch_lines.framework_id` `quote_frameworks`a BAĞIMSIZ bir
+-- FK ile BAĞLANMAZ. Böyle bir FK yalnız "var olan BİR çerçeve" derdi ve hiçbir
+-- kısıt "bu satırın çerçevesi, satırın PARTİSİNİN çerçevesiyle aynı olmalı"
+-- demezdi: bir satır, partisinin ait OLMADIĞI bir çerçeveyi iddia edebilir ve
+-- parça başına döküm (`quote_framework_batch_lines_fw_part_idx` üzerinden
+-- `(framework_id, part_id)` ile okunan) sessizce kayardı. O döküm taahhüdün ne
+-- kadarının TÜKETİLDİĞİNİ söyleyen PARA okumasıdır.
+--
+-- Bu yüzden bağ BİLEŞİKtir: `(batch_id, framework_id)` →
+-- `quote_framework_batches(id, framework_id)`, hedefi
+-- `quote_framework_batches_id_framework_id_unique` tekil kısıdı (yukarıdaki
+-- CREATE TABLE'da; `id` birincil anahtar olduğu için mantıksal olarak bedava
+-- ama bileşik FK'nin kurulabilmesi için YAZILMASI ZORUNLU). `quote_frameworks`a
+-- bütünlük transitif olarak durur: parti satırın çerçevesini, parti de
+-- çerçeveyi `restrict` ile tutar. Yan fayda: satırı olan bir parti BAŞKA bir
+-- çerçeveye taşınamaz (`ON UPDATE no action`).
+--
 -- ─── FK ADLARI 63 KARAKTERİ AŞMAZ ─────────────────────────────────────────
 --
--- `quote_framework_batch_lines_batch_id_fk` bilerek KISA yazıldı. Drizzle'ın
--- türeteceği ad 66 karakter olurdu; Postgres kimlikleri 63 bayta SESSİZCE
--- kırpar ve kırpılmış ad aşağıdaki `conname = '<tam ad>'` kontrolüyle hiç
--- eşleşmezdi — up ikinci koşuda kısıdı yeniden eklemeye kalkar ve "already
--- exists" ile düşerdi (0061'de duran latent hata tam budur). `schema.ts` aynı
--- adı `foreignKey({ name: ... })` ile yazıyor.
+-- `quote_framework_batch_lines_batch_id_fk` (39 bayt) ve
+-- `quote_framework_batch_lines_batch_framework_fk` (46 bayt) bilerek KISA
+-- yazıldı. Drizzle'ın türeteceği adlar 66 ve 91 karakter olurdu; Postgres
+-- kimlikleri 63 bayta SESSİZCE kırpar ve kırpılmış ad aşağıdaki
+-- `conname = '<tam ad>'` kontrolüyle hiç eşleşmezdi — up ikinci koşuda kısıdı
+-- yeniden eklemeye kalkar ve "already exists" ile düşerdi (0061'de duran latent
+-- hata tam budur: `gift_credit_returns_refund_allocation_id_order_refund_allocations_id_fk`,
+-- 71 karakter). `schema.ts` aynı adları `foreignKey({ name: ... })` ile yazıyor
+-- ve `scripts/test-framework-migration-db.ts` bu dosyadaki her kısıt/indeks
+-- adının baytını SAYIYOR.
 --
 -- ─── NEDEN pg enum DEĞİL ──────────────────────────────────────────────────
 --
@@ -131,6 +154,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_framework_batches" (
 	"note" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "quote_framework_batches_id_framework_id_unique" UNIQUE("id","framework_id"),
 	CONSTRAINT "quote_framework_batches_status_chk" CHECK ("quote_framework_batches"."status" IN ('planned', 'released', 'cancelled')),
 	CONSTRAINT "quote_framework_batches_position_chk" CHECK ("quote_framework_batches"."position" >= 1),
 	CONSTRAINT "quote_framework_batches_units_chk" CHECK ("quote_framework_batches"."units" > 0),
@@ -210,8 +234,8 @@ END $$;
 --> statement-breakpoint
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.quote_framework_batch_lines'::regclass AND conname = 'quote_framework_batch_lines_framework_id_quote_frameworks_id_fk') THEN
-    ALTER TABLE "public"."quote_framework_batch_lines" ADD CONSTRAINT "quote_framework_batch_lines_framework_id_quote_frameworks_id_fk" FOREIGN KEY ("framework_id") REFERENCES "public"."quote_frameworks"("id") ON DELETE restrict ON UPDATE no action;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.quote_framework_batch_lines'::regclass AND conname = 'quote_framework_batch_lines_batch_framework_fk') THEN
+    ALTER TABLE "public"."quote_framework_batch_lines" ADD CONSTRAINT "quote_framework_batch_lines_batch_framework_fk" FOREIGN KEY ("batch_id","framework_id") REFERENCES "public"."quote_framework_batches"("id","framework_id") ON DELETE restrict ON UPDATE no action;
   END IF;
 END $$;
 --> statement-breakpoint

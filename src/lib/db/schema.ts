@@ -4286,6 +4286,11 @@ export const quoteFrameworkBatches = pgTable("quote_framework_batches", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
+  // Bileşik FK'nin HEDEFİ: `quote_framework_batch_lines` satırın çerçevesini
+  // PARTİSİNİN çerçevesine çiviler. `id` birincil anahtar olduğu için bu tekil
+  // kısıt mantıksal olarak bedava, ama yazılması ZORUNLU — Postgres bileşik bir
+  // FK'yi ancak hedef kolonları tekil bir kısıt/indeks kapsıyorsa kabul eder.
+  unique("quote_framework_batches_id_framework_id_unique").on(t.id, t.frameworkId),
   uniqueIndex("quote_framework_batches_fw_pos_uq").on(t.frameworkId, t.position),
   // YARIŞ KAPISI: iki admin aynı partiyi serbest bırakırsa İKİNCİ klon
   // veritabanında reddedilir (bir klon teklif = bir parti).
@@ -4317,10 +4322,20 @@ export const quoteFrameworkBatchLines = pgTable("quote_framework_batch_lines", {
    * hata tam budur). Kısa ve açık ad bu tuzağı kapatır.
    */
   batchId: uuid("batch_id").notNull(),
-  /** Toplama için denormalize: kırılım sorgusunun tek GROUP BY'ı. */
-  frameworkId: uuid("framework_id").notNull().references(() => quoteFrameworks.id, {
-    onDelete: "restrict",
-  }),
+  /**
+   * Toplama için denormalize: kırılım sorgusunun tek GROUP BY'ı.
+   *
+   * FK'si BAĞIMSIZ DEĞİL: aşağıdaki BİLEŞİK FK `(batch_id, framework_id)`
+   * çiftini `quote_framework_batches(id, framework_id)`a bağlar. Tek kolonluk
+   * bir `framework_id` → `quote_frameworks(id)` FK'si yalnız "var olan BİR
+   * çerçeve" derdi; satır, partisinin ait OLMADIĞI bir çerçeveyi iddia
+   * edebilirdi ve parça başına döküm (`(framework_id, part_id)` üzerinden
+   * okunuyor) sessizce kayardı. O döküm taahhüdün ne kadarının tüketildiğini
+   * söyleyen PARA okumasıdır. `quote_frameworks`a bütünlük transitif olarak
+   * duruyor: parti satırın çerçevesini, parti de çerçeveyi `restrict` ile
+   * tutuyor.
+   */
+  frameworkId: uuid("framework_id").notNull(),
   /** `parts_snapshot[].partId`; FK YOK — `quote_parts` yumuşak silinebilir. */
   partId: uuid("part_id").notNull(),
   position: integer("position").notNull(),
@@ -4333,6 +4348,15 @@ export const quoteFrameworkBatchLines = pgTable("quote_framework_batch_lines", {
     name: "quote_framework_batch_lines_batch_id_fk",
     columns: [t.batchId],
     foreignColumns: [quoteFrameworkBatches.id],
+  }).onDelete("restrict"),
+  // SATIRIN ÇERÇEVESİ, PARTİSİNİN ÇERÇEVESİDİR. Adı 46 bayt; drizzle'ın bileşik
+  // FK için türeteceği ad 91 bayt olurdu ve Postgres'in 63 baytlık sınırında
+  // SESSİZCE kırpılırdı (0061'in `gift_credit_returns_...` adında duran latent
+  // hata). Hedefi `quote_framework_batches_id_framework_id_unique`.
+  foreignKey({
+    name: "quote_framework_batch_lines_batch_framework_fk",
+    columns: [t.batchId, t.frameworkId],
+    foreignColumns: [quoteFrameworkBatches.id, quoteFrameworkBatches.frameworkId],
   }).onDelete("restrict"),
   uniqueIndex("quote_framework_batch_lines_batch_part_uq").on(t.batchId, t.partId),
   index("quote_framework_batch_lines_fw_part_idx").on(t.frameworkId, t.partId),

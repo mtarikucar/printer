@@ -14072,7 +14072,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "quote_framework_batches_id_framework_id_unique": {
+          "name": "quote_framework_batches_id_framework_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "framework_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "quote_framework_batches_status_chk": {
@@ -14210,15 +14219,17 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "quote_framework_batch_lines_framework_id_quote_frameworks_id_fk": {
-          "name": "quote_framework_batch_lines_framework_id_quote_frameworks_id_fk",
+        "quote_framework_batch_lines_batch_framework_fk": {
+          "name": "quote_framework_batch_lines_batch_framework_fk",
           "tableFrom": "quote_framework_batch_lines",
-          "tableTo": "quote_frameworks",
+          "tableTo": "quote_framework_batches",
           "columnsFrom": [
+            "batch_id",
             "framework_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "framework_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"

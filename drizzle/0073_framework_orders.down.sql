@@ -49,6 +49,12 @@
 --
 -- Yalnız up'ın EKLEDİĞİ tablolara ve kısıda dokunur; `quote_admin_actions`ın
 -- satırları, teklifler, siparişler ve operatör verisi YERİNDE KALIR.
+--
+-- Parti satırının çerçevesini partisine çivileyen BİLEŞİK FK ile onun hedefi
+-- olan tekil kısıt, düşen üç tablonun İÇİNDEdir: ayrıca geri alınacak bir şey
+-- yok, `DROP TABLE` ikisini de alır. DROP sırası (satırlar → partiler →
+-- anlaşmalar) o bağın yönüyle zaten uyumlu. Tur (up → down → up)
+-- `scripts/test-framework-migration-db.ts` tarafından koşturuluyor.
 -- `IF EXISTS` sayesinde tekrar çalıştırılabilir; kilit, ret kontrolü, DDL ve
 -- journal satırının silinmesi tek işlemde atomiktir.
 --

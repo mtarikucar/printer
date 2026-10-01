@@ -381,7 +381,7 @@ async function refusesDown(label: string, expected: RegExp) {
 // katalog dışı bir değer yazmaya kalkar ve veritabanı 23514 ile reddeder: boş
 // gövdeli 500. Aşağısı o ayrışmayı kaynak üzerinden yakalar; davranış kanıtı
 // veritabanı bölümünde.
-check("denetim listesi 14 değer taşır", QUOTE_ADMIN_ACTIONS.length, 14);
+check("denetim listesi 15 değer taşır", QUOTE_ADMIN_ACTIONS.length, 15);
 ok(
   "up'ın denetim CHECK'i tip sözleşmesiyle BİREBİR aynı",
   upRaw.includes(`action IN (${QUOTE_ADMIN_ACTIONS.map((a) => `'${a}'`).join(", ")})`),
@@ -489,7 +489,7 @@ async function main() {
       )).map((r) => r.confdeltype as string);
       check(`${table}: her FK "on delete restrict"`, deleteRules, expected.map(() => "r"));
     }
-    check("up denetim listesini ONDÖRT değere çıkarır", await adminActionsInDb(), [...QUOTE_ADMIN_ACTIONS]);
+    check("up denetim listesini ONBEŞ değere çıkarır", await adminActionsInDb(), [...QUOTE_ADMIN_ACTIONS]);
 
     // ─── Numara üretimi ────────────────────────────────────────────────────
     const quote = await insertQuote();
@@ -580,10 +580,17 @@ async function main() {
       "INSERT INTO quote_admin_actions (quote_id, action, admin_email, reason) VALUES ($1, 'framework_batch_release', 'admin@figurunica.com', 'parti 2 serbest bırakıldı')",
       [quote.id],
     );
+    // PATCH ucunun satırı (not + çapalı atölye). Kümenin sekizinci çerçeve
+    // değeri BURADA ölçülüyor: CHECK genişlemediyse servis bu INSERT'te 23514
+    // yer ve gerekçe hiçbir yere yazılmaz.
+    await client.query(
+      "INSERT INTO quote_admin_actions (quote_id, action, admin_email, reason) VALUES ($1, 'framework_update', 'admin@figurunica.com', 'çapalı atölye değişti')",
+      [quote.id],
+    );
     check(
-      "quote_admin_actions'a framework_batch_release YAZILABİLİR",
+      "quote_admin_actions'a framework_batch_release ve framework_update YAZILABİLİR",
       (await rows("SELECT action FROM quote_admin_actions ORDER BY created_at")).map((r) => r.action),
-      ["framework_batch_release"],
+      ["framework_batch_release", "framework_update"],
     );
     await rejects(
       "framework_bogus REDDEDİLİR (liste hâlâ kapalı)",
@@ -659,7 +666,7 @@ async function main() {
     for (const relation of [FRAMEWORKS, BATCHES, LINES]) {
       ok(`tur: up ${relation.split(".")[1]} tablosunu yeniden kurar`, await tableExists(relation));
     }
-    check("tur: denetim listesi yeniden ONDÖRT değer", await adminActionsInDb(), [...QUOTE_ADMIN_ACTIONS]);
+    check("tur: denetim listesi yeniden ONBEŞ değer", await adminActionsInDb(), [...QUOTE_ADMIN_ACTIONS]);
     const again = await insertFramework({ quote_id: quote.id, user_id: userId });
     ok("tur sonunda yeni anlaşma yine kurulabilir", /^C-\d{6}$/.test(again.number), again.number);
 

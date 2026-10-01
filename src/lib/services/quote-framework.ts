@@ -220,7 +220,8 @@ async function audit(
       | "framework_batch_release"
       | "framework_batch_cancel"
       | "framework_cancel"
-      | "framework_extend";
+      | "framework_extend"
+      | "framework_update";
     adminEmail: string;
     reason: string;
     before?: Record<string, unknown>;
@@ -1727,18 +1728,19 @@ export async function loadManufacturerPlannedBatches(
  * atamanın İLK ADAYINI değiştirir (`framework-placement.ts`) ve kapıların
  * hiçbirini atlamaz.
  *
- * ─── DENETİM SATIRI YAZILMIYOR — BİLEREK ───────────────────────────────────
+ * ─── DENETİM SATIRI: `framework_update`, İŞLEMİN İÇİNDE ────────────────────
  *
- * `quote_admin_actions.action` KAPALI bir CHECK kümesidir (`QUOTE_ADMIN_ACTIONS`)
- * ve çerçeve için yedi değer taşıyor: create / activate / batch_plan /
- * batch_release / batch_cancel / cancel / extend. Bu ucun karşılığı olan bir
- * değer YOK ve bu tur migration ÜRETMİYOR. Var olan bir eylemin adıyla satır
- * yazmak (ör. `framework_extend`) izi YALANLAMAK olurdu; kümenin dışına yazmayı
- * denemek ise veritabanının 23514 ile reddettiği bir INSERT.
+ * Gerekçe (≥10 karakter, `frameworkPatchSchema`) İSTENİYORSA bir yere YAZILMAK
+ * zorundadır: istenip atılan bir gerekçe, admin'e denetim izi sözü verip
+ * tutmamaktır. `quote_admin_actions.action` KAPALI bir CHECK kümesi
+ * (`QUOTE_ADMIN_ACTIONS`) olduğu için sekizinci değer (`framework_update`)
+ * kümeye ve 0073'ün CHECK listesine girdi — var olan bir eylemin adıyla
+ * (ör. `framework_extend`) yazmak izi YALANLARDI, kümenin dışına yazmak ise
+ * 23514 ile reddedilen bir INSERT olurdu.
  *
- * Bu yüzden değişiklik SATIRIN KENDİSİNDE görünür kalır (`admin_note`,
- * `preferred_manufacturer_id`, `updated_at`) ve gerekçe İSTENİR — ama iz için
- * `framework_update` CHECK değeri bir sonraki migration turunun borcudur.
+ * Satır İŞİN KENDİSİYLE AYNI işlemde yazılır (ev kuralı: işlem dışı denetim
+ * satırı yok), `before`/`after` yalnız bu ucun dokunabildiği iki alanı taşır —
+ * para alanı taşımaz, çünkü bu uç paraya DOKUNMAZ.
  *
  * Yalnız `draft` ve `active` anlaşmada çalışır: iptal edilmiş ya da tamamlanmış
  * bir anlaşmanın çapasını değiştirmek hiçbir partiyi etkilemez, yalnız kaydı
@@ -1785,6 +1787,8 @@ export async function setFrameworkPreferences(args: {
       args.preferredManufacturerId === undefined
         ? framework.preferredManufacturerId
         : args.preferredManufacturerId;
+    const nextNote =
+      args.adminNote === undefined ? framework.adminNote : args.adminNote?.trim() || null;
     await tx
       .update(quoteFrameworks)
       .set({
@@ -1795,6 +1799,29 @@ export async function setFrameworkPreferences(args: {
         updatedAt: now,
       })
       .where(eq(quoteFrameworks.id, framework.id));
+    // Denetim satırı AYNI işlemde: yukarıdaki UPDATE geri sarılırsa iz de geri
+    // sarılır. `touched` istekte GERÇEKTEN gelen alanları söyler — `undefined`
+    // (dokunma) ile `null` (kaldır) aynı satırda ayrılabilsin diye.
+    await audit(tx, {
+      quoteId: framework.quoteId,
+      action: "framework_update",
+      adminEmail: args.adminEmail,
+      reason: args.reason,
+      before: {
+        frameworkId: framework.id,
+        adminNote: framework.adminNote,
+        preferredManufacturerId: framework.preferredManufacturerId,
+      },
+      after: {
+        frameworkId: framework.id,
+        adminNote: nextNote,
+        preferredManufacturerId: next,
+        touched: [
+          ...(args.adminNote === undefined ? [] : ["adminNote"]),
+          ...(args.preferredManufacturerId === undefined ? [] : ["preferredManufacturerId"]),
+        ],
+      },
+    });
     return { id: framework.id, preferredManufacturerId: next, userId: framework.userId };
   });
   emitFrameworkChanged({ frameworkId: out.id, userId: out.userId });

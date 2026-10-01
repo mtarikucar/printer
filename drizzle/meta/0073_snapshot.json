@@ -10637,7 +10637,7 @@
       "checkConstraints": {
         "quote_admin_actions_action_chk": {
           "name": "quote_admin_actions_action_chk",
-          "value": "\"quote_admin_actions\".\"action\" IN ('manual_price', 'target_accept', 'target_counter', 'target_reject', 'review_reject', 'extend_expiry', 'reopen', 'framework_create', 'framework_activate', 'framework_batch_plan', 'framework_batch_release', 'framework_batch_cancel', 'framework_cancel', 'framework_extend')"
+          "value": "\"quote_admin_actions\".\"action\" IN ('manual_price', 'target_accept', 'target_counter', 'target_reject', 'review_reject', 'extend_expiry', 'reopen', 'framework_create', 'framework_activate', 'framework_batch_plan', 'framework_batch_release', 'framework_batch_cancel', 'framework_cancel', 'framework_extend', 'framework_update')"
         }
       },
       "isRLSEnabled": false

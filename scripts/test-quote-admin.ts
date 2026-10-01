@@ -103,7 +103,7 @@ function refuses(code: string, why: string, run: () => unknown) {
  *
  * Dört soru, dördü de "kapı gerçekten uçta mı":
  *
- *  1. DENETİM İZİ — yedi çerçeve eylemi `QUOTE_ADMIN_ACTIONS`te ve küme hâlâ
+ *  1. DENETİM İZİ — sekiz çerçeve eylemi `QUOTE_ADMIN_ACTIONS`te ve küme hâlâ
  *     KAPALI. Şemadaki CHECK listesi bu diziden üretiliyor, yani kaçak bir
  *     değer uygulamanın veritabanına 23514 yemesi demektir.
  *  2. BAYRAK — kapalıyken uç YOK gibi davranır: 404, 403 DEĞİL ve gövde
@@ -116,7 +116,7 @@ function refuses(code: string, why: string, run: () => unknown) {
 async function frameworkAdminChecks(): Promise<void> {
   console.log("\n7) Çerçeve sipariş uçları");
 
-  await test("yedi çerçeve eylemi denetim kümesinde ve küme KAPALI (tam 14 değer)", () => {
+  await test("sekiz çerçeve eylemi denetim kümesinde ve küme KAPALI (tam 15 değer)", () => {
     assert.deepEqual(
       [...QUOTE_ADMIN_ACTIONS],
       [
@@ -134,6 +134,10 @@ async function frameworkAdminChecks(): Promise<void> {
         "framework_batch_cancel",
         "framework_cancel",
         "framework_extend",
+        // Sekizinci YAZMA ucu (PATCH `/[id]`: not + çapalı atölye). Gerekçe
+        // isteyip hiçbir yere yazmamak, admin'e tutulmayan bir denetim sözü
+        // vermekti; 0073'ün CHECK listesi bu değerle birlikte kuruluyor.
+        "framework_update",
       ],
       "denetim kümesi değişmiş: CHECK listesi buradan üretiliyor"
     );
@@ -195,6 +199,33 @@ async function frameworkAdminChecks(): Promise<void> {
     // Ve tek INSERT noktası `audit`in kendisi olmalı.
     const inserts = [...service.matchAll(/insert\(quoteAdminActions\)/g)];
     assert.equal(inserts.length, 1, "denetim satırı birden fazla yerden yazılıyor");
+  });
+
+  await test("her çerçeve eylemi GERÇEKTEN yazılıyor (kümede ölü değer yok)", () => {
+    // İki yönlü kapı. (a) Kümedeki her `framework_*` değerinin servis içinde bir
+    // yazıcısı var: olmayan bir değer, uca "iz tutuyorum" dedirtip tutmayan bir
+    // söz olurdu (PATCH ucunun kapatılan boşluğu tam buydu). (b) Servis kümenin
+    // DIŞINDA bir değer yazmıyor: o INSERT veritabanından 23514 yer.
+    const service = read("src/lib/services/quote-framework.ts");
+    const written = new Set(
+      [...service.matchAll(/action: "(framework_[a-z_]+)"/g)].map((m) => m[1])
+    );
+    const declared = QUOTE_ADMIN_ACTIONS.filter((a) => a.startsWith("framework_"));
+    for (const action of declared) {
+      assert.ok(written.has(action), `kümede duran ${action} için yazıcı yok`);
+    }
+    for (const action of written) {
+      assert.ok(
+        (declared as readonly string[]).includes(action),
+        `${action} kümede yok: CHECK bu INSERT'i 23514 ile reddeder`
+      );
+    }
+    // Ve o yazıcıların biri PATCH ucunun servisinde, gerekçeyle birlikte:
+    // gerekçe İSTENİP atılırsa denetim izi yalan söyler.
+    const prefs = service.slice(service.indexOf("export async function setFrameworkPreferences"));
+    const body = prefs.slice(0, prefs.indexOf("\n}\n"));
+    assert.match(body, /action: "framework_update"/, "PATCH servisi denetim satırı yazmıyor");
+    assert.match(body, /reason: args\.reason/, "PATCH denetim satırı gerekçeyi taşımıyor");
   });
 
   // ── Canlı uçlar: bayrak, oturum, gerekçe, para alanı ─────────────────────

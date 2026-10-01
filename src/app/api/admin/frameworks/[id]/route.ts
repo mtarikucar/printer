@@ -5,6 +5,10 @@
  *
  * PATCH parayı DEĞİŞTİRMEZ: ne taahhüt, ne kilitli fiyat, ne parti tutarı.
  * Gövdede tutar alanı gelirse istek 400 ile reddedilir (`_shared.ts`).
+ *
+ * PATCH bir YAZMA ucudur ve kendi denetim satırını düşürür
+ * (`framework_update`, gerekçe ≥10 karakter) — satırı yazan rota değil,
+ * servisin kendi işlemidir (`setFrameworkPreferences`).
  */
 import { NextResponse, type NextRequest } from "next/server";
 import {

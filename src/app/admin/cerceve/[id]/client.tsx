@@ -64,6 +64,7 @@ const ACTION_LABELS: Record<string, string> = {
   framework_batch_cancel: "Parti iptal edildi",
   framework_cancel: "Anlaşma iptal edildi",
   framework_extend: "Fiyat kilidi uzatıldı",
+  framework_update: "Not / çapalı atölye güncellendi",
 };
 
 export interface FrameworkView {

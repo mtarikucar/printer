@@ -83,6 +83,13 @@ export const QUOTE_ADMIN_ACTIONS = [
   "framework_batch_cancel",
   "framework_cancel",
   "framework_extend",
+  // PATCH `/api/admin/frameworks/[id]` — admin notu ve ÇAPALI ATÖLYE. Sekizinci
+  // YAZMA ucu; parayı değiştirmez ama anlaşmanın kime planlandığını değiştirir,
+  // yani gerekçesi ve eski/yeni değeri izde durmak zorunda (brief §F3.2: "her
+  // yazma ucu kendi satırını düşürür"). `framework_extend` gibi var olan bir
+  // adla yazmak izi YALANLARDI, o yüzden listeye kendi değeri girdi ve 0073'ün
+  // CHECK listesi onunla birlikte kuruluyor.
+  "framework_update",
 ] as const;
 export type QuoteAdminAction = (typeof QUOTE_ADMIN_ACTIONS)[number];
 

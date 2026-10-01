@@ -2331,11 +2331,31 @@ async function main() {
       });
       assert.equal(dropped.batchCount, 0, "çapa kalktı ama yük hâlâ sayılıyor");
 
-      // DENETİM SATIRI YAZILMADI — BİLEREK: `quote_admin_actions.action`
-      // kapalı CHECK kümesinde bu ucun karşılığı yok ve bu tur migration
-      // üretmiyor. Var olan bir eylemin adıyla satır yazmak izi yalanlamaktı.
+      // DENETİM SATIRI: PATCH ucu da kendi satırını düşürür
+      // (`framework_update`, kümenin sekizinci çerçeve değeri). Gerekçe
+      // İSTENİYOR (≥10 karakter) ve satırda GERÇEKTEN duruyor; eski/yeni
+      // değerler de orada, çünkü bu uç anlaşmanın kime planlandığını değiştirir.
       const auditAfter = await loadFrameworkAudit(qq.id);
-      assert.equal(auditAfter.length, audit.length, "PATCH denetim satırı yazdı");
+      assert.equal(auditAfter.length, audit.length + 1, "PATCH denetim satırı yazmadı");
+      const updateRow = auditAfter.find((a) => a.action === "framework_update")!;
+      assert.ok(updateRow, "framework_update satırı yok");
+      assert.equal(updateRow.reason, REASON, "gerekçe satıra geçmedi");
+      assert.equal(updateRow.adminEmail, "qa-admin@example.test");
+      assert.equal(
+        (updateRow.before as { preferredManufacturerId?: string | null }).preferredManufacturerId,
+        shop.id,
+        "eski çapa izde yok"
+      );
+      assert.deepEqual(
+        [
+          (updateRow.after as { preferredManufacturerId?: string | null })
+            .preferredManufacturerId,
+          (updateRow.after as { adminNote?: string | null }).adminNote,
+          (updateRow.after as { touched?: string[] }).touched,
+        ],
+        [null, "QA notu", ["adminNote", "preferredManufacturerId"]],
+        JSON.stringify(updateRow.after)
+      );
 
       // Olmayan bir atölye ÇAPA OLAMAZ: yazılsaydı her partide sessizce
       // sıralamaya düşen bir "çapa" kalırdı.
@@ -2349,6 +2369,15 @@ async function main() {
       );
       assert.equal(bad.code, "manufacturer_unavailable", bad.message);
       assert.equal(bad.status, 409);
+      // REDDEDİLEN istek İZ BIRAKMAZ: denetim satırı işin kendisiyle AYNI
+      // işlemde yazıldığı için ret onu da geri sarar (işlem dışı yazılsaydı
+      // hiç olmamış bir değişiklik izde dururdu).
+      const auditAfterRefusal = await loadFrameworkAudit(qq.id);
+      assert.equal(
+        auditAfterRefusal.length,
+        auditAfter.length,
+        "reddedilen PATCH denetim satırı bıraktı"
+      );
     });
 
     await test("pencere PARTİNİN kendi teslim gününü ölçer (çok parçalı anlaşma)", async () => {

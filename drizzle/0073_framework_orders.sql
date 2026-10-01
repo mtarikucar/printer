@@ -1,5 +1,5 @@
 -- Çerçeve siparişler: anlaşma + parti + parti satırı tabloları ve denetim
--- listesinin yedi yeni değeri.
+-- listesinin sekiz yeni değeri.
 --
 -- Üç YENİ tablo kurar, `quote_admin_actions_action_chk` kısıdını yeniden kurar.
 -- Hiçbir satır YAZMAZ, var olan hiçbir kolonu değiştirmez, hiçbir veriyi
@@ -255,5 +255,5 @@ BEGIN
   -- taraması ucuz ve düşme riski yok, o yüzden kısıt DOĞRULANMIŞ eklenir.
   ALTER TABLE public.quote_admin_actions DROP CONSTRAINT IF EXISTS quote_admin_actions_action_chk;
   ALTER TABLE public.quote_admin_actions ADD CONSTRAINT quote_admin_actions_action_chk
-    CHECK (action IN ('manual_price', 'target_accept', 'target_counter', 'target_reject', 'review_reject', 'extend_expiry', 'reopen', 'framework_create', 'framework_activate', 'framework_batch_plan', 'framework_batch_release', 'framework_batch_cancel', 'framework_cancel', 'framework_extend'));
+    CHECK (action IN ('manual_price', 'target_accept', 'target_counter', 'target_reject', 'review_reject', 'extend_expiry', 'reopen', 'framework_create', 'framework_activate', 'framework_batch_plan', 'framework_batch_release', 'framework_batch_cancel', 'framework_cancel', 'framework_extend', 'framework_update'));
 END $$;

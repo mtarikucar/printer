@@ -1436,6 +1436,11 @@ async function main() {
     // 200 / POST 404) ve bir cevabı yalnız uç üretir.
     const quoteTeamRoute = await import("../src/app/api/quotes/[id]/team/route");
     const messagesRoute = await import("../src/app/api/quotes/[id]/messages/route");
+    // Parça kütüphanesinden içe aktarma ucu: salt okunur rolün HEDEF kapısı
+    // (`accessOr404(..., { forEdit: true })`) yalnız uçtan ölçülebilir —
+    // servis katmanı izleyici görmüyor, `test-quote-service-db.ts`in
+    // yardımcısı ise izleyiciyi elle "sahip" olarak üretiyor.
+    const partsImportRoute = await import("../src/app/api/quotes/[id]/parts/import/route");
 
     // Teklif uçlarının ortak bayrağı: kapalıyken `quoteRouteBody` her şeye 404
     // der ve vakalar hiçbir şey kanıtlamazdı.
@@ -1512,6 +1517,14 @@ async function main() {
     });
 
     await test("POST: TAKIMSIZ kullanıcı 403 `not_member` alır", async () => {
+      // SAPMA, KAYITLI: brief bu yola "400" diyor. Kod 403 `not_member`
+      // döndürüyor çünkü üyelik kapısı T-3'ün TEK `requireMembership`i ve onu
+      // 22 takım ucu paylaşıyor (tasarım §8 kod kümesi de `not_member`ı 403
+      // olarak çiviliyor). 400'e çevirmek ya o paylaşılan kapıyı tek uç için
+      // çatallamak ya da T-3'ün sözleşmesini sessizce yanlışlamak olurdu.
+      // Brief'in GEREKÇESİ ("dört ret yolu AYRI olsun") korunuyor: 403
+      // `not_member` / 403 `not_allowed` / 409 `already_in_team_quote` /
+      // 409 `quote_has_order` — dördü de ayrı kod, dördü de bu dosyada ölçülü.
       const id = await personalQuote(loner);
       session = loner;
       await refusal(await attach(id), 403, "not_member");
@@ -1657,6 +1670,72 @@ async function main() {
       assert.equal(ok.status, 200, "düzenleyebilen üye sohbete yazamadı");
       const thread = (await ok.json()) as { messages: Array<{ body: string }> };
       assert.equal(thread.messages.at(-1)?.body, "Takımın mesajı");
+    });
+
+    await test("`viewer` rolü takımın parçasını İÇE AKTARAMAZ (hedef `forEdit` kapısı)", async () => {
+      // KAYNAK kapsamı (T-4) rol SORMUYOR ve bu bilinçli: takımın dört rolü de
+      // kütüphanede takımın parçasını görür (tasarım §4). İçe aktarmayı
+      // durduran şey HEDEF teklife yazma yetkisidir. Vaka tam olarak o kapıyı
+      // ölçüyor ve cevabın KODU ayrımı taşıyor: `quote_not_found` = hedef
+      // kapısı (`accessOr404(..., { forEdit: true })`), kaynak kapsamının kodu
+      // olan `part_not_found` DEĞİL.
+      const sourceQuote = await personalQuote(bindOwner);
+      const targetQuote = await personalQuote(bindOwner);
+      session = bindOwner;
+      assert.equal((await attach(sourceQuote)).status, 200);
+      assert.equal((await attach(targetQuote)).status, 200);
+
+      // Kaynak parça GERÇEK bir dosyaya işaret ediyor: aşağıdaki OLUMLU
+      // KONTROL dosyayı diskten kopyalıyor (`copyPartInto`), yani dosyasız bir
+      // fikstür vakayı "yetki" yüzünden değil ENOENT yüzünden kırmızı yapardı.
+      const partId = randomUUID();
+      const sourceKey = `quote-parts/${partId}/source.stl`;
+      fs.mkdirSync(path.join(uploadDir, "quote-parts", partId), { recursive: true });
+      fs.writeFileSync(path.join(uploadDir, sourceKey), "solid qa\nendsolid qa\n");
+      await admin.query(
+        `INSERT INTO quote_parts
+           (id, quote_id, name, file_name, source_key, source_format, source_bytes, source_sha256,
+            technology_key, material_key, color_key, finish_key)
+         VALUES ($1, $2, 'Takımın parçası', 'braket.stl', $3, 'stl', 2048, $4,
+                 'fdm', 'pla', 'beyaz', 'ham')`,
+        [partId, sourceQuote, sourceKey, "e".repeat(64)]
+      );
+
+      const importInto = (quoteId: string) =>
+        partsImportRoute.POST(
+          req(`/api/quotes/${quoteId}/parts/import`, {
+            method: "POST",
+            body: { sourcePartIds: [partId] },
+          }),
+          { params: Promise.resolve({ id: quoteId }) }
+        );
+      const partCount = async (quoteId: string): Promise<number> =>
+        (
+          await admin.query("SELECT count(*)::int AS n FROM quote_parts WHERE quote_id = $1", [
+            quoteId,
+          ])
+        ).rows[0].n;
+
+      session = bindViewer;
+      const refused = await importInto(targetQuote);
+      assert.equal(refused.status, 404, "salt okunur rol takımın parçasını içe aktardı");
+      assert.equal((await body(refused)).code, "quote_not_found");
+      assert.equal(await partCount(targetQuote), 0, "reddedilen istek hedefe satır yazdı");
+
+      // OLUMLU KONTROL: aynı kaynak, aynı hedef, aynı gövde — yalnız ROL
+      // değişti. `bindAdmin` hedefi KENDİSİ açmadı; yetkisi takım rolünden
+      // geliyor, yani 404'ü üreten şey rolün salt okunur olmasıydı.
+      session = bindAdmin;
+      const allowed = await importInto(targetQuote);
+      assert.equal(allowed.status, 200, "düzenleyebilen rol içe aktaramadı");
+      assert.equal(await partCount(targetQuote), 1, "içe aktarılan parça yazılmadı");
+
+      // Analiz kuyruğu QA Redis'inde PAYLAŞILIYOR: içe aktarılan parça bir iş
+      // doğurdu ve sonraki turlara artık bırakılmaz.
+      const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
+      await getQuoteAnalysisQueue()
+        .obliterate({ force: true })
+        .catch(() => {});
     });
 
     await test("PARA HATTINA DOKUNULMADI: hiç taslak/sipariş yazılmadı", async () => {

@@ -194,6 +194,10 @@ async function main() {
     } = await import("../src/lib/services/chunked-upload");
     const { getQuoteAnalysisQueue } = await import("../src/lib/queue/quote-queues");
     const { setFlag } = await import("../src/lib/services/flags");
+    // Erişim matrisinin SAF çekirdeği: aşağıdaki `loadAccess` yardımcısı
+    // izleyiciyi elle üretiyor (her vakası kişisel teklif), ama `importParts`in
+    // salt okunur rol vakası çekirdeğin GERÇEK cevabını sormak zorunda.
+    const { resolveQuoteViewer } = await import("../src/lib/services/quote-access");
 
     const queue = getQuoteAnalysisQueue();
     // Paylaşılan QA Redis'i: önceki koşuların artıkları bu testin iddialarını
@@ -1823,6 +1827,29 @@ async function main() {
           err instanceof QuoteServiceError && err.status === 404 && err.code === "part_not_found"
       );
       assert.equal((await loadQuoteParts(target.id)).length, 1, "reddedilen istek satır bıraktı");
+
+      // SALT OKUNUR ROL. Kaynak kapsamı rol SORMAZ ve bu bilinçli: takımın her
+      // rolü kütüphanede takımın parçasını görür (tasarım §4 — "dört rol de
+      // OKUR"). İçe aktarmayı durduran şey HEDEF teklife yazma yetkisidir
+      // (`access.viewer.canEdit`, uçta `accessOr404(..., { forEdit: true })`).
+      // Bu dosyanın `loadAccess`ı o kapıyı KURAMAZ (izleyiciyi elle "sahip"
+      // olarak üretiyor), o yüzden burada çekirdeğin GERÇEK cevabı ölçülür:
+      // takım teklifinde `viewer` rolü `canEdit: false` alır, yani uç isteği
+      // servise HİÇ geçirmez. UÇTAN uca ölçüm (gerçek rota, gerçek erişim
+      // kabuğu, 404 `quote_not_found` + hedefte satır YOK)
+      // `scripts/test-quote-team-db.ts`te: "`viewer` rolü takımın parçasını
+      // İÇE AKTARAMAZ".
+      const [targetRow] = await db.select().from(quotes).where(eq(quotes.id, target.id)).limit(1);
+      assert.equal(targetRow.teamId, teamId, "hedef teklif takım teklifi değil: vaka boş ölçüyor");
+      const readOnly = resolveQuoteViewer(targetRow, {
+        sessionUserId: randomUUID(),
+        anonymousId: null,
+        shareToken: null,
+        isAdmin: false,
+        teamRole: "viewer",
+      });
+      assert.equal(readOnly?.isTeam, true, "takım dalı kurulmadı");
+      assert.equal(readOnly?.canEdit, false, "salt okunur rol HEDEFE yazma yetkisi kazandı");
     });
 
     await test("requote yeni teklifi AYNI takımla doğurur (`inheritedQuoteFields`)", async () => {
@@ -1850,6 +1877,45 @@ async function main() {
         .limit(1);
       assert.equal(fresh.teamId, teamId, "yeniden teklif TAKIMDAN DÜŞTÜ");
       assert.equal(fresh.userId, teamOwnerId, "yeni teklifin sahibi değişti");
+    });
+
+    await test("teklif BÖLME de yeni teklifi AYNI takımla doğurur", async () => {
+      // `inheritedQuoteFields`in İKİNCİ yolu. Tek satır iki yolu birden
+      // besliyor (`requote` + `splitByTechnology`), ama iki yol o satırı AYRI
+      // çağrılarla okuyor: brief ikisini birlikte istiyor çünkü bir gün biri
+      // kendi alan listesini kurarsa yalnız diğerinin vakası yeşil kalır ve
+      // bölünen teklif sessizce takımdan düşer.
+      const source = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      await addPartFromUpload(await loadAccess(source.id, teamOwnerId), {
+        uploadId: await stage("takim-bolme-fdm", uploadOwnerKey({ userId: teamOwnerId })),
+        fileName: "fdm-parca.stl",
+      });
+      const sla = await addPartFromUpload(await loadAccess(source.id, teamOwnerId), {
+        uploadId: await stage("takim-bolme-sla", uploadOwnerKey({ userId: teamOwnerId })),
+        fileName: "sla-parca.stl",
+      });
+      await updatePart(await loadAccess(source.id, teamOwnerId), sla.partId, {
+        technologyKey: "sla",
+      });
+
+      const { newQuoteNumbers } = await splitByTechnology(
+        await loadAccess(source.id, teamOwnerId)
+      );
+      assert.equal(newQuoteNumbers.length, 1);
+      const [split] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.number, newQuoteNumbers[0]))
+        .limit(1);
+      assert.equal(split.teamId, teamId, "bölünen teklif TAKIMDAN DÜŞTÜ");
+      assert.equal(split.userId, teamOwnerId, "bölünen teklifin sahibi değişti");
+      // Kaynak teklif de yerinde kalır: bölme bir TAŞIMA değil.
+      const [stayed] = await db.select().from(quotes).where(eq(quotes.id, source.id)).limit(1);
+      assert.equal(stayed.teamId, teamId, "kaynak teklif takımdan düştü");
     });
 
     // Üretimdeki çıkış durumu KAPALI: sonraki turlar bayat bir Redis

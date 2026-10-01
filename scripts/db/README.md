@@ -170,7 +170,10 @@ transaction** (the team, the owner's membership, and a `team_created` audit row)
 window for 0072 closes on the **first team that is ever created** — not on the first invited
 member and not on the first customer. And because `teamsEnabled()` lets an **admin** session
 through the `quote_teams_enabled` gate (same pattern as 0064), an internal walkthrough of
-`/api/customer/team` with the flag off creates that first real team. If 0072 must be rolled back
+`/api/customer/team` with the flag off creates that first real team. **Since T-5 that walkthrough
+has a screen:** `/account/takim` passes the same gate for an admin session and its "create team"
+form writes those three rows on one click — so the 0072 rollback window can now close by
+accident, from a UI click, without anyone touching curl. If 0072 must be rolled back
 after any team exists, the owner has to delete the team through the product first
 (`DELETE /api/customer/team`, which itself refuses while the team has other members, pending
 invites or attached quotes) — the down script never deletes customer data on its own.

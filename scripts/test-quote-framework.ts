@@ -50,6 +50,15 @@ import {
   type FrameworkProgressLine,
   type FrameworkRefusalCode,
 } from "../src/lib/config/quote-framework";
+import {
+  BATCH_STATUS_DICT_KEYS,
+  FRAMEWORK_BUCKET_DICT_KEYS,
+  FRAMEWORK_STATUS_DICT_KEYS,
+} from "../src/app/cerceve/[number]/framework-values";
+import { progressSegments } from "../src/app/admin/cerceve/[id]/framework-values";
+import en from "../src/lib/i18n/dictionaries/en";
+import tr from "../src/lib/i18n/dictionaries/tr";
+import { QUOTE_FRAMEWORK_BATCH_REASON } from "../src/lib/config/quote-policy";
 import { painterLoadUnits } from "../src/lib/config/painter-scoring";
 import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
 import { partPricingKey } from "../src/lib/config/quote-keys";
@@ -828,6 +837,83 @@ test("kapı BRÜT karşılaştırır: tahsilat zinciri bu modüle GİRMEZ", () =
   // ödenemez bir 409'a düşürürdü (G birleşti).
   assert.ok(!/payableKurus|giftCard|havaleDiscount/.test(moduleCode));
   assert.ok(!/quote-tender/.test(moduleCode));
+});
+
+// ─── 7) Ekranın etiketleri: kapalı küme ile sözlük BİREBİR ─────────────────
+//
+// Kovalar DAİMA taahhüde toplanır, yani çubuğun TAMAMI bu yedi etikettir. Bir
+// kova etiketsiz kalırsa ekran, toplamı taahhüde ulaşmayan bir çubuk çizer ve
+// müşteri hangi sayıya güveneceğini bilemez.
+
+console.log("\n7) kova etiketleri ↔ sözlük anahtarları");
+
+test("YEDİ kova, YEDİ sözlük anahtarı — ikisi de kapalı küme", () => {
+  const keys = Object.keys(FRAMEWORK_BUCKET_DICT_KEYS).sort();
+  // Kümenin kendisi saf çekirdekten geliyor: `progressSegments` yedi dilim
+  // üretir ve her dilimin anahtarı eşlemede OLMAK ZORUNDA.
+  const bucketKeys = progressSegments({
+    committedUnits: 0,
+    unplannedUnits: 0,
+    plannedUnits: 0,
+    awaitingPaymentUnits: 0,
+    inProductionUnits: 0,
+    shippedUnits: 0,
+    deliveredUnits: 0,
+    cancelledOrRefundedUnits: 0,
+  })
+    .map((s) => s.key)
+    .sort();
+  assert.equal(bucketKeys.length, 7, "altı kova + ayrık kova beklenir");
+  assert.deepEqual(keys, bucketKeys, "eşleme ile kova kümesi ayrışmış");
+  // Her anahtarın İKİ sözlükte de bir cümlesi var ve boş değil.
+  for (const key of Object.values(FRAMEWORK_BUCKET_DICT_KEYS)) {
+    for (const [name, dict] of [["tr", tr], ["en", en]] as const) {
+      const value = (dict as Record<string, string>)[key];
+      assert.ok(value && value.trim().length > 0, `${name}: ${key} karşılığı yok`);
+    }
+  }
+});
+
+test("anlaşma ve parti durumlarının da TAM karşılığı var", () => {
+  assert.deepEqual(Object.keys(FRAMEWORK_STATUS_DICT_KEYS).sort(), [...FRAMEWORK_STATUSES].sort());
+  assert.deepEqual(Object.keys(BATCH_STATUS_DICT_KEYS).sort(), [...BATCH_STATUSES].sort());
+  for (const key of [
+    ...Object.values(FRAMEWORK_STATUS_DICT_KEYS),
+    ...Object.values(BATCH_STATUS_DICT_KEYS),
+  ]) {
+    assert.ok((tr as Record<string, string>)[key], `tr: ${key} yok`);
+    assert.ok((en as Record<string, string>)[key], `en: ${key} yok`);
+  }
+});
+
+test("etiketler sözlükten GELİR, saf modülde Türkçe cümle yoktur", () => {
+  // Admin tarafı Türkçeyi sabit yazabilir (ev precedent'i); müşteri yüzeyinin
+  // saf katmanı YAZMAZ — yoksa aynı cümle iki yerde ayrışırdı.
+  const customerValues = readFileSync(
+    join(ROOT, "src/app/cerceve/[number]/framework-values.ts"),
+    "utf8"
+  );
+  const code = stripComments(customerValues);
+  for (const label of ["Planlanmamış", "Ödeme bekleyen", "Teslim edilen", "İptal / iade"]) {
+    assert.ok(!code.includes(label), `saf katmanda sabit Türkçe cümle: ${label}`);
+  }
+  // Ve eşlemenin değerlerinin HEPSİ `instantQuote.framework.` önekli.
+  for (const key of Object.values(FRAMEWORK_BUCKET_DICT_KEYS)) {
+    assert.ok(
+      String(key).startsWith("instantQuote.framework."),
+      `${key} müşteri sözlüğünün çerçeve bloğunda değil`
+    );
+  }
+});
+
+test("müşteriye gösterilen `.readOnly` cümlesi POLİTİKANIN cümlesidir", () => {
+  // Ekran, ucun uygulamadığı bir kuralı yazamaz: klon parti teklifinin
+  // düzenlenemez olduğunu söyleyen cümle `quotePermissions`in `blockedReason`u
+  // ile BİREBİR aynı olmak zorunda (f-2 §F2.5).
+  assert.equal(
+    (tr as Record<string, string>)["instantQuote.framework.readOnly"],
+    QUOTE_FRAMEWORK_BATCH_REASON
+  );
 });
 
 console.log(`\n${pass} geçti, ${fail} kaldı`);

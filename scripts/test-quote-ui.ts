@@ -102,6 +102,16 @@ import {
 } from "../src/components/quote/display-currency";
 import { QuoteHeader } from "../src/components/quote/quote-header";
 import { FrameworkSummary } from "../src/components/framework/framework-summary";
+import { FrameworkClient } from "../src/app/cerceve/[number]/client";
+import { FrameworkDocument } from "../src/app/cerceve/[number]/belge/framework-document";
+import {
+  FRAMEWORK_TERMS_VERSION,
+  frameworkProgressBuckets,
+} from "../src/lib/config/quote-framework";
+import { KDV_RATE_BPS } from "../src/lib/config/prices";
+import { computeKdv } from "../src/lib/services/finance";
+import type { FrameworkDetail } from "../src/lib/services/quote-framework";
+import { presentFramework } from "../src/lib/services/quote-framework-present";
 import {
   frameworkNotice,
   planRows,
@@ -127,6 +137,7 @@ import {
   type CustomerQuoteListItem,
   type DisplayCurrency,
   type FrozenFxRate,
+  type FrozenQuotePart,
   type LibraryPart,
   type PresentedFxDisplay,
   type PresentedCatalog,
@@ -1973,6 +1984,7 @@ const QUOTE_ROW: CustomerQuoteListItem = {
   expired: false,
   orderNumber: null,
   fxSnapshot: null,
+  frameworkBatch: null,
 };
 
 test("teklif listesi numarayı, durumu, tutarı ve bağlantıyı yazar", () => {
@@ -3768,4 +3780,527 @@ test("ÇERÇEVE: bayrak kapalıyken admin EKRANLARI 404 (oturum kapıyı AÇMAZ)
     /frameworkEnabled \? displayRead\("serbest bırakılabilir partiler", releasableBatchCount\(\)\) : Promise\.resolve\(0\)/,
     "rozet sayımı bayrak kapalıyken de koşuyor"
   );
+});
+
+// ─── F4: MÜŞTERİ ÇERÇEVE YÜZEYİ ─────────────────────────────────────────────
+//
+// Dört şey kanıtlanıyor ve dördü de aynı kuralın yarısı: EKRANIN SÖYLEDİĞİ,
+// TESTİN KANITLADIĞI ŞEYLE BİREBİR AYNI olmak zorunda.
+//
+//  1. fiyat kapısı çerçevede de TUTAR: `canSeePrices=false` izleyiciye hiçbir
+//     fiyat ANAHTARI gitmez (ad taraması, `…Kurus`),
+//  2. iki toplam AYRI alanlarda ve ekran ikisini AYRI etiketle yazar,
+//  3. üretici görünümü DAR: fiyat ve müşteri kimliği yok,
+//  4. belgenin beş zorunlu cümlesi hem kâğıtta hem SÖZLÜKTE aynen var.
+
+const FW_PART: FrozenQuotePart = {
+  partId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  position: 1,
+  name: "Gövde",
+  fileName: "govde.stl",
+  sourceFormat: "stl",
+  canonicalStlKey: "quote-parts/x/canonical.stl",
+  thumbnailKey: null,
+  drawingKey: null,
+  drawingName: null,
+  scaleFactor: 1,
+  technologyKey: "sla",
+  technologyName: "SLA reçine",
+  materialKey: "std",
+  materialName: "Standart reçine",
+  colorName: "Gri",
+  colorHex: "#888888",
+  finishKey: "raw",
+  finishName: "Ham",
+  layerUm: 50,
+  infillPct: null,
+  quantity: 400,
+  dimensionsMm: { x: 40, y: 30, z: 20 },
+  volumeCm3: 12,
+  tessellationMm: null,
+  unitKurus: 3_000,
+  lineKurus: 1_200_000,
+  note: null,
+  dfmWarnings: ["thin_walls"],
+};
+
+/** `loadFrameworkDetail`in çıktısının şekli — fiyat kapısının girdisi. */
+function frameworkDetail(
+  over: Partial<FrameworkDetail> = {}
+): FrameworkDetail {
+  const batch: FrameworkDetail["batches"][number] = {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    position: 1,
+    status: "released",
+    plannedShipDate: "2026-11-14",
+    units: 100,
+    amountKurus: 300_000,
+    quoteId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    quoteNumber: "T-000777",
+    orderId: null,
+    orderNumber: null,
+    orderStatus: null,
+    paymentStatus: null,
+    commissionRateBps: null,
+    releasedAt: "2026-10-01T09:00:00.000Z",
+    cancelledAt: null,
+    cancelReason: null,
+    note: null,
+    trackingNumber: null,
+    shippedAt: null,
+    deliveredAt: null,
+    releaseWindowOpen: false,
+    shipByDate: "2026-10-15",
+    lines: [{ partId: FW_PART.partId, position: 0, quantity: 100, unitKurus: 3_000, lineKurus: 300_000 }],
+  };
+  return {
+    id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    number: "C-000123",
+    status: "active",
+    title: "Kalıp seti",
+    quoteId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    quoteNumber: "T-000123",
+    userId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    leadTier: "standard",
+    addonKeys: ["rush_pack"],
+    partsSnapshot: [FW_PART],
+    addonsSnapshot: [{ key: "rush_pack", name: "Hızlı paket", kurus: 50_000 }],
+    committedUnits: 400,
+    leadDays: 7,
+    committedTotalKurus: 1_250_000,
+    batchesTotalKurus: 300_000,
+    priceLockedUntil: "2026-12-31T20:59:59.999Z",
+    lockExpired: false,
+    preferredManufacturerId: null,
+    preferredManufacturerName: null,
+    shippingAddress: {
+      adres: "Sanayi Mah. 1. Cadde No 5",
+      ilce: "Çankaya",
+      il: "Ankara",
+      postaKodu: "06100",
+      telefon: "+905551112233",
+    },
+    termsAcceptedAt: "2026-09-30T10:00:00.000Z",
+    termsVersion: FRAMEWORK_TERMS_VERSION,
+    customerNote: null,
+    adminNote: null,
+    activatedAt: "2026-09-30T10:00:00.000Z",
+    activatedByEmail: "admin@example.test",
+    cancelledAt: null,
+    cancelReason: null,
+    createdAt: "2026-09-29T08:00:00.000Z",
+    batches: [batch],
+    progress: frameworkProgressBuckets(
+      [{ partId: FW_PART.partId, quantity: 400, unitKurus: 3_000 }],
+      [
+        {
+          partId: FW_PART.partId,
+          quantity: 100,
+          batchStatus: "released",
+          orderId: null,
+          cancelled: false,
+          paymentStatus: null,
+          shippedAt: null,
+          deliveredAt: null,
+        },
+      ]
+    ),
+    ...over,
+  };
+}
+
+const NOW_FW = new Date("2026-10-05T09:00:00.000Z");
+
+/** Gövdedeki TÜM anahtar adları (iç içe nesneler ve diziler dâhil). */
+function allKeys(value: unknown, out: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value) allKeys(item, out);
+    return out;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      out.push(key);
+      allKeys(child, out);
+    }
+  }
+  return out;
+}
+
+test("ÇERÇEVE: canSeePrices=false izleyiciye HİÇ fiyat anahtarı gitmez", () => {
+  const hidden = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: false, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  // Ad taraması: çerçeve tutarlarının adları `…Kurus` ile BİTMEK ZORUNDA
+  // (f-1 §F1.5), yani tek bir kural bütün gövdeyi tarayabilir.
+  const leaked = allKeys(hidden).filter((k) => /Kurus$/.test(k));
+  assert.deepEqual(leaked, [], `fiyat anahtarı sızdı: ${leaked.join(", ")}`);
+  // `undefined` ATAMAK YETMEZ: anahtarın KENDİSİ yok olmalı (RSC props'unda ve
+  // `Object.keys`te görünürdü).
+  assert.ok(!("committedTotalKurus" in hidden));
+  assert.ok(!("batchesTotalKurus" in hidden));
+  assert.ok(!("kdvRatePercent" in hidden), "KDV oranı da tutarlarla aynı kapıdan geçer");
+  assert.ok(!("unitKurus" in hidden.parts[0]));
+  assert.ok(!("amountKurus" in hidden.batches[0]));
+  assert.ok(!("unitKurus" in hidden.batches[0].lines[0]));
+  assert.ok(!("kurus" in hidden.addons[0]));
+  // Fiyatsız olmayan şeyler YİNE gelir: adetler, tarihler, kova kırılımı.
+  assert.equal(hidden.committedUnits, 400);
+  assert.equal(hidden.progress.total.committedUnits, 400);
+
+  // Kapı AÇIK izleyicide aynı alanlar VAR (test boş bir gövdeyi yeşil saymasın).
+  const shown = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  assert.equal(shown.committedTotalKurus, 1_250_000);
+  assert.equal(shown.batchesTotalKurus, 300_000);
+  assert.equal(shown.parts[0].unitKurus, 3_000);
+  assert.equal(shown.batches[0].amountKurus, 300_000);
+});
+
+test("ÇERÇEVE: İKİ TOPLAM ayrı alanlarda ve KDV hariç taban sunucuda türetilir", () => {
+  const view = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  // İkisi AYNI alan DEĞİL ve biri ötekinin yerine yazılmıyor.
+  assert.notEqual(view.committedTotalKurus, view.batchesTotalKurus);
+  assert.equal(view.committedTotalKurus, 1_250_000, "tek-sevkiyat projeksiyonu");
+  assert.equal(view.batchesTotalKurus, 300_000, "Σ parti tutarı");
+  // KDV hariç taban EKRANDA değil `computeKdv` ile sunucuda hesaplanır.
+  const kdv = computeKdv(1_250_000, KDV_RATE_BPS);
+  assert.equal(view.committedKdvExcludedKurus, kdv.subtotalKurus);
+  assert.equal(view.committedKdvKurus, kdv.kdvKurus);
+  assert.equal(
+    view.committedKdvExcludedKurus! + view.committedKdvKurus!,
+    view.committedTotalKurus,
+    "KDV hariç + KDV = toplam"
+  );
+});
+
+test("ÇERÇEVE: belge İKİ toplamı AYRI etiketle yazar, farkını hesaplamaz", () => {
+  const view = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  const html = plain(
+    renderToStaticMarkup(createElement(FrameworkDocument, { framework: view, d: tr }))
+  );
+  assert.ok(html.includes(formatCurrency(1_250_000, "tr")), "tek-sevkiyat toplamı yok");
+  assert.ok(html.includes(formatCurrency(300_000, "tr")), "Σ parti tutarı yok");
+  assert.ok(html.includes(tr["instantQuote.framework.committedTotal"]), "birinci etiket yok");
+  assert.ok(html.includes(tr["instantQuote.framework.batchesTotal"]), "ikinci etiket yok");
+  assert.ok(
+    !html.includes(formatCurrency(1_250_000 - 300_000, "tr")),
+    "belge iki toplamın FARKINI üçüncü bir sayı olarak yazıyor"
+  );
+});
+
+test("ÇERÇEVE: belgenin BEŞ zorunlu cümlesi kâğıtta ve sözlükte AYNEN var", () => {
+  // Kilidi DOLMUŞ bir anlaşmanın belgesi beş cümlenin HEPSİNİ taşır:
+  // `.priceLockedUntil` (tarih her hâlde yazılır, belge bir kayıttır) ve
+  // `.lockExpired` (yalnız dolmuşken) bir arada ancak bu hâlde görünür.
+  const view = presentFramework({
+    // Kilit DOLMUŞ: `presentFramework` bunu `priceLockedUntil` ile `now`dan
+    // KENDİ türetir (servisin `lockExpired` alanını kopyalamaz), yani hâli
+    // tarih üzerinden kurmak gerekiyor — ekranın ölçüsü `releaseBatch`in
+    // ölçüsüyle aynı kalsın.
+    detail: frameworkDetail({ priceLockedUntil: "2026-09-30T20:59:59.999Z" }),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  const html = plain(
+    renderToStaticMarkup(createElement(FrameworkDocument, { framework: view, d: tr }))
+  );
+
+  const MANDATORY = [
+    "instantQuote.framework.priceLockedUntil",
+    "instantQuote.framework.lockExpired",
+    "instantQuote.framework.tryBindingFxApprox",
+    "instantQuote.framework.perBatchBilling",
+    "instantQuote.framework.warningsPerBatch",
+  ] as const;
+
+  // KAYNAK-SÖZLÜK PİNİ: cümle sözlük DOSYASINDA da aynen duruyor mu.
+  // YORUMLAR SAYMAZ — tam satır `//` ve `/* */` stripleyerek karşılaştırılır,
+  // yoksa yorumdaki bir alıntı pini yeşil tutar (controller'ın `7741a3d`
+  // düzeltmesi).
+  const trSource = fs
+    .readFileSync(path.resolve("src/lib/i18n/dictionaries/tr.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+
+  for (const key of MANDATORY) {
+    const sentence = (tr as Record<string, string>)[key];
+    assert.ok(sentence && sentence.length > 10, `${key} cümlesi yok`);
+    // Kâğıtta: `.priceLockedUntil` parametreli, o yüzden yer tutucusuz
+    // gövdesiyle aranır.
+    const needle = sentence.replace(/\{\w+\}/g, "").trim();
+    const firstHalf = needle.split("  ")[0];
+    assert.ok(
+      html.includes(firstHalf),
+      `${key} belgede YOK: ${firstHalf.slice(0, 48)}…`
+    );
+    assert.ok(
+      trSource.includes(sentence.slice(0, 40)),
+      `${key} sözlük KAYNAĞINDA (yorum dışı) yok`
+    );
+  }
+
+  // Ve kilidi dolmamış bir belge "geçerliliği doldu" DEMEZ.
+  const live = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  const liveHtml = plain(
+    renderToStaticMarkup(createElement(FrameworkDocument, { framework: live, d: tr }))
+  );
+  assert.ok(
+    !liveHtml.includes(tr["instantQuote.framework.lockExpired"]),
+    "yürürlükteki anlaşmanın belgesi süresi dolmuş diyor"
+  );
+});
+
+test("ÇERÇEVE: belge zorunlu HUKUKÎ içeriğin tamamını taşır", () => {
+  const view = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  const html = plain(
+    renderToStaticMarkup(createElement(FrameworkDocument, { framework: view, d: tr }))
+  );
+  for (const key of [
+    "instantQuote.framework.doc.freeCancel",
+    "instantQuote.framework.doc.madeToOrder",
+    "instantQuote.framework.doc.businessDays",
+    "instantQuote.framework.doc.separateInvoice",
+    "instantQuote.summary.kdvLineNote",
+  ] as const) {
+    assert.ok(
+      html.includes((tr as Record<string, string>)[key]),
+      `${key} belgede yok`
+    );
+  }
+  // Taahhüt edilen adet, şart sürümü ve kabul tarihi.
+  assert.ok(html.includes("400"), "taahhüt edilen adet yok");
+  assert.ok(html.includes(FRAMEWORK_TERMS_VERSION), "şartların sürümü yok");
+  assert.ok(html.includes(tr["instantQuote.framework.doc.termsAcceptedAt"]), "kabul tarihi yok");
+  // e-Fatura VAAT EDİLMEZ (tasarım §10 madde 5).
+  assert.doesNotMatch(html, /e-Fatura entegrasyonu(?! vaat edilmez)/);
+});
+
+test("ÇERÇEVE: müşteri client.tsx dosyalarında para aritmetiği YOK", () => {
+  const CLIENTS = [
+    "src/app/cerceve/[number]/client.tsx",
+    "src/app/cerceve/[number]/framework-values.ts",
+    "src/app/cerceve/[number]/belge/framework-document.tsx",
+    "src/app/account/cerceve/frameworks-client.tsx",
+    "src/app/manufacturer/plan/client.tsx",
+  ];
+  for (const rel of CLIENTS) {
+    const raw = fs.readFileSync(path.resolve(rel), "utf8");
+    const code = raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+      .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+      .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+      .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+    const moneyArithmetic = code.match(
+      /\w*[Kk]urus\w*\s*[*/%+-][^>=]|[*/%+-]\s*\w*[Kk]urus\w*/g
+    );
+    assert.equal(
+      moneyArithmetic,
+      null,
+      `${rel}: tutar üzerinde aritmetik var → ${moneyArithmetic?.join(", ")}`
+    );
+    for (const conversion of [/\/\s*100\b/, /toFixed\(/]) {
+      assert.doesNotMatch(code, conversion, `${rel}: ekranda para çevrimi var`);
+    }
+  }
+});
+
+test("ÇERÇEVE: üretici görünümü DAR — fiyat YOK, müşteri kimliği YOK", () => {
+  const strip = (raw: string): string =>
+    raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+
+  // 1. Sipariş sayfasının üreticiye GÖNDERDİĞİ kart bloğu.
+  const page = strip(
+    fs.readFileSync(path.resolve("src/app/manufacturer/orders/[id]/page.tsx"), "utf8")
+  );
+  const block = /framework: frameworkCardRead\s*\?\s*\{([\s\S]*?)\}\s*:\s*null,/.exec(page);
+  assert.ok(block, "üreticiye giden çerçeve kartı bloğu bulunamadı");
+  for (const forbidden of [/Kurus/, /customer/i, /email/i, /phone/i, /amount/i]) {
+    assert.doesNotMatch(block![1], forbidden, `üretici kartında yasak alan: ${forbidden}`);
+  }
+
+  // 2. İstemcinin PROP TİPİ de dar: tip genişlerse sayfa onu doldurabilir.
+  const client = strip(
+    fs.readFileSync(path.resolve("src/app/manufacturer/orders/[id]/client.tsx"), "utf8")
+  );
+  const typeBlock = /framework: \{([\s\S]*?)\n {4}\} \| null;/.exec(client);
+  assert.ok(typeBlock, "üretici kartının prop tipi bulunamadı");
+  for (const forbidden of [/Kurus/, /customer/i, /email/i, /phone/i]) {
+    assert.doesNotMatch(typeBlock![1], forbidden, `üretici prop tipinde yasak alan: ${forbidden}`);
+  }
+
+  // 3. `/manufacturer/plan` satırları da fiyatsız ve müşterisiz.
+  const planClient = strip(
+    fs.readFileSync(path.resolve("src/app/manufacturer/plan/client.tsx"), "utf8")
+  );
+  for (const forbidden of [/Kurus/, /customerName/, /formatCurrency/]) {
+    assert.doesNotMatch(planClient, forbidden, `plan ekranında yasak alan: ${forbidden}`);
+  }
+  // Servis satırının kendisi de tutar taşımıyor (tip düzeyinde kanıt).
+  const service = strip(fs.readFileSync(path.resolve("src/lib/services/quote-framework.ts"), "utf8"));
+  const planType = /export interface ManufacturerPlannedBatch \{([\s\S]*?)\n\}/.exec(service);
+  assert.ok(planType, "ManufacturerPlannedBatch tipi bulunamadı");
+  assert.doesNotMatch(planType![1], /Kurus/, "üreticinin parti satırı tutar taşıyor");
+});
+
+test("ÇERÇEVE: bayrak kapalıyken MÜŞTERİ ve ÜRETİCİ yüzeyleri 404", () => {
+  const strip = (raw: string): string =>
+    raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+      .replace(/\s+/g, " ");
+
+  // MÜŞTERİ yüzeyleri `frameworkSurfacesEnabled` kullanır: admin oturumu iç
+  // test için GEÇER (bu sayfalara admin'in kendi oturumuyla girmesi gerçek bir
+  // iç test, `/admin/**` ile aynı değil).
+  for (const rel of [
+    "src/app/cerceve/[number]/page.tsx",
+    "src/app/cerceve/[number]/belge/page.tsx",
+    "src/app/account/cerceve/page.tsx",
+  ]) {
+    const code = strip(fs.readFileSync(path.resolve(rel), "utf8"));
+    assert.match(
+      code,
+      /if \(!\(await frameworkSurfacesEnabled\(\)\)\) notFound\(\);/,
+      `${rel}: bayrak kapısı yok`
+    );
+    assert.doesNotMatch(code, /\b403\b/, `${rel}: 403 üretiyor`);
+  }
+
+  // UÇLAR da aynı kapıdan geçer ve 404 gövdesi "çerçeve" der (teklif değil).
+  for (const rel of [
+    "src/app/api/customer/frameworks/route.ts",
+    "src/app/api/customer/frameworks/[number]/route.ts",
+  ]) {
+    const code = strip(fs.readFileSync(path.resolve(rel), "utf8"));
+    assert.match(
+      code,
+      /if \(!\(await frameworkSurfacesEnabled\(\)\)\) return frameworkNotFound\(\);/,
+      `${rel}: bayrak kapısı yok`
+    );
+    assert.doesNotMatch(code, /\b403\b/, `${rel}: 403 üretiyor`);
+  }
+  const shared = strip(
+    fs.readFileSync(path.resolve("src/app/api/customer/frameworks/_shared.ts"), "utf8")
+  );
+  assert.match(shared, /status: 404/, "ortak cevap 404 değil");
+  assert.match(shared, /framework_not_found/, "kod alanı yok");
+
+  // ÜRETİCİ ekranı `frameworkScreensEnabled` kullanır (admin oturumunun bu
+  // panelde bir karşılığı yok, kapı yalnız bayrak).
+  const plan = strip(fs.readFileSync(path.resolve("src/app/manufacturer/plan/page.tsx"), "utf8"));
+  assert.match(
+    plan,
+    /if \(!\(await frameworkScreensEnabled\(\)\)\) notFound\(\);/,
+    "üretici plan ekranının bayrak kapısı yok"
+  );
+  // Kenar çubuğu satırı da bayrağa bağlı: 404 veren bir ekrana götüren bir
+  // menü maddesi bırakmak üreticiye olmayan bir sayfa söylemekti.
+  const sidebar = strip(fs.readFileSync(path.resolve("src/app/manufacturer/sidebar.tsx"), "utf8"));
+  assert.match(
+    sidebar,
+    /\.\.\.\(frameworkPlanEnabled \? \[ \{ href: "\/manufacturer\/plan"/,
+    "üretici kenar çubuğu satırı bayrak kapalıyken de çiziliyor"
+  );
+});
+
+test("ÇERÇEVE: müşteri ekranı kilit cümlesini ve parti onayını yazar", () => {
+  const view = presentFramework({
+    detail: frameworkDetail(),
+    viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+    now: NOW_FW,
+    sign: (key) => `/signed/${key}`,
+  });
+  const html = plain(inLocale(createElement(FrameworkClient, { initial: view })));
+  assert.ok(html.includes("C-000123"), "anlaşma numarası yok");
+  assert.ok(
+    html.includes(fill(tr["instantQuote.framework.priceLockedUntil"], { date: "31.12.2026" })),
+    "fiyat kilidi cümlesi yok"
+  );
+  assert.ok(html.includes(tr["instantQuote.framework.perBatchBilling"]), "parti başına fatura cümlesi yok");
+  // ADLANDIRILMIŞ ENGELİN TELAFİSİ: "Bu partiyi öde" ÖNCE bir onay adımı
+  // açar; doğrudan ödeme sayfasına giden bir bağlantı DEĞİLDİR, çünkü orada
+  // "Parti 3/8" bağlamı gösterilemiyor.
+  assert.ok(html.includes(tr["instantQuote.framework.payBatch"]), "ödeme düğmesi yok");
+  assert.ok(
+    !html.includes('href="/teklif/T-000777/odeme"'),
+    "ödeme sayfasına ONAYSIZ doğrudan bağlantı var"
+  );
+  const clientSrc = fs.readFileSync(path.resolve("src/app/cerceve/[number]/client.tsx"), "utf8");
+  assert.match(clientSrc, /payConfirmNote/, "onay adımının gerekçe cümlesi yok");
+  assert.match(clientSrc, /\/odeme/, "onaydan sonra ödeme yoluna gitmiyor");
+  // Kilidi dolmuş anlaşmada ekran "yeni fiyat için bize yazın" der.
+  const expiredHtml = plain(
+    inLocale(
+      createElement(FrameworkClient, {
+        initial: presentFramework({
+          // Kilit DOLMUŞ: `presentFramework` bunu `priceLockedUntil` ile `now`dan
+    // KENDİ türetir (servisin `lockExpired` alanını kopyalamaz), yani hâli
+    // tarih üzerinden kurmak gerekiyor — ekranın ölçüsü `releaseBatch`in
+    // ölçüsüyle aynı kalsın.
+    detail: frameworkDetail({ priceLockedUntil: "2026-09-30T20:59:59.999Z" }),
+          viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+          now: NOW_FW,
+          sign: (key) => `/signed/${key}`,
+        }),
+      })
+    )
+  );
+  assert.ok(expiredHtml.includes(tr["instantQuote.framework.lockExpired"]));
+});
+
+test("ÇERÇEVE: hesap listesindeki parti teklifi ROZETLE anlaşmaya bağlanır", () => {
+  const html = plain(
+    inLocale(
+      createElement(QuoteListTable, {
+        items: [
+          {
+            ...QUOTE_ROW,
+            number: "T-000777",
+            frameworkBatch: { number: "C-000123", position: 3 },
+          },
+        ],
+      })
+    )
+  );
+  assert.ok(
+    html.includes(
+      fill(tr["instantQuote.framework.batchBadge"], { number: "C-000123", position: 3 })
+    ),
+    "çerçeve rozeti yok: müşteri listede adsız bir T- satırı görür"
+  );
+  assert.ok(html.includes('href="/cerceve/C-000123"'), "rozet anlaşmaya bağlanmıyor");
+  // Parti olmayan satırda rozet HİÇ çizilmez.
+  const plainRow = plain(inLocale(createElement(QuoteListTable, { items: [QUOTE_ROW] })));
+  assert.ok(!plainRow.includes("Çerçeve"), "sıradan teklifte de rozet çiziliyor");
 });

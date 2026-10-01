@@ -2691,6 +2691,76 @@ test("unknown cancellation flag does not change other record kinds or legacy omi
   }
 });
 
+// ─── ÇERÇEVE REGRESYONU (0073) ──────────────────────────────────────────────
+//
+// Çerçeve anlaşmalar para modelini DEĞİŞTİRMEDİ ve bu test onu kapatıyor.
+// Gerekçe iki katmanlı:
+//
+//  1. `orders` şemasına çerçeve için TEK KOLON eklenmedi (tasarım §2.4):
+//     köprü `quote_framework_batches.order_id`dir. Yani sipariş para
+//     dökümünün girdisinde "bu bir parti mi" sorusunun karşılığı YOKTUR ve
+//     bir dal yazılamaz.
+//  2. Parti ödenirken `quote-checkout.ts` taslağa SIRADAN bir teklif
+//     siparişinin yazdığı üçlüyü yazıyor: `needsPainting:false`,
+//     `paintingPriceKurus: 0`, `productionBaseKurus = amountKurus`. Çerçevede
+//     boyama kalemi YASAK (plan kapısı reddediyor), yani bu üçlü her partide
+//     doğru kalır ve `payouts.ts`in `production + painting = amount`
+//     tripwire'ı hiç tetiklenmez.
+
+test("ÇERÇEVE: parti siparişinin para dökümü sıradan teklif siparişiyle BİREBİR AYNI", () => {
+  // Teklif siparişinin şekli: boyama YOK, üretim tabanı TUTARIN TAMAMI.
+  const quoteShape: Partial<OrderMoneySnapshot> = {
+    orderType: "upload",
+    amountKurus: 300000,
+    productionBaseKurus: 300000,
+    paintingPriceKurus: 0,
+    quantity: 50,
+    manufacturerStatus: "accepted",
+  };
+  const ordinary = deriveOrderMoneyBreakdown(snap(quoteShape));
+  // Parti siparişi AYNI girdiden doğar: ayırt edici bir alan YOK.
+  const batch = deriveOrderMoneyBreakdown(snap(quoteShape));
+  assert.deepEqual(batch, ordinary, "parti siparişi farklı bir döküm üretti");
+
+  // Rakamların kendisi de pinlenir: tautolojik bir deepEqual yetmez.
+  assert.equal(ordinary.totals.amountKurus, 300000);
+  assert.equal(ordinary.shares.length, 1, "boyacı payı doğdu: çerçevede boyama YASAK");
+  const share = ordinary.shares[0];
+  assert.equal(share.party, "manufacturer");
+  assert.equal(share.baseKurus, 300000, "üretici tabanı tutarın TAMAMI olmalı");
+  const expected = computeEarning(300000, 4000);
+  assert.equal(share.expectedCommissionKurus, expected.commissionKurus);
+  assert.equal(share.expectedNetKurus, expected.netKurus);
+  assert.equal(
+    share.expectedCommissionKurus + share.expectedNetKurus,
+    300000,
+    "komisyon + partner net = taban"
+  );
+  assert.equal(ordinary.platform.commissionKurus, expected.commissionKurus);
+});
+
+test("ÇERÇEVE: para modelinde çerçeveye ait HİÇBİR dal yok (kaynak taraması)", () => {
+  // Bir dal YAZILAMADIĞI için ikisi ayrışamaz. Tarama yorumları atar: bir
+  // kuralın yorumda ANILMASI onu yazmak değildir.
+  const strip = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+  for (const rel of [
+    "src/lib/config/order-money.ts",
+    "src/lib/services/order-money.ts",
+    "src/lib/services/earning-base.ts",
+    "src/lib/config/cost-lines.ts",
+  ]) {
+    const code = strip(readSrc(rel));
+    for (const needle of [/framework/i, /cerceve/i, /quote_framework/]) {
+      assert.doesNotMatch(
+        code,
+        needle,
+        `${rel}: para modeli çerçeveyi TANIYOR — iki sipariş ayrışabilir`
+      );
+    }
+  }
+});
+
 test("formatTry Türkçe biçim, eksi başta", () => {
   assert.equal(formatTry(123456), "₺1.234,56");
   assert.equal(formatTry(-500), "−₺5,00");

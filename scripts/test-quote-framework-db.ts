@@ -317,7 +317,11 @@ async function main() {
     const { computeQuote, defaultPartConfig } = await import("../src/lib/config/quote-compute");
     const { partPricingKey } = await import("../src/lib/config/quote-keys");
     const { quotePermissions } = await import("../src/lib/config/quote-policy");
-    const { frameworkBatchDriftCode } = await import("../src/lib/config/quote-framework");
+    const {
+      formatFrameworkNumber,
+      frameworkBatchDriftCode,
+      parseFrameworkNumber,
+    } = await import("../src/lib/config/quote-framework");
     const { loadActiveSnapshot } = await import("../src/lib/services/quote-catalog");
     const { toPricingPartInput } = await import("../src/lib/services/quote-cache");
     const { adminManualPriceKey } = await import("../src/lib/services/quote-admin");
@@ -328,7 +332,13 @@ async function main() {
       repriceQuote,
       updatePart,
     } = await import("../src/lib/services/quote-service");
-    const { resolveQuoteAccess } = await import("../src/lib/services/quote-access");
+    const { resolveFrameworkViewer, resolveQuoteAccess } = await import(
+      "../src/lib/services/quote-access"
+    );
+    const { presentFramework } = await import(
+      "../src/lib/services/quote-framework-present"
+    );
+    const { accrueEarning } = await import("../src/lib/services/payouts");
     const {
       activateFramework,
       cancelBatch,
@@ -341,6 +351,7 @@ async function main() {
       loadFrameworkDetail,
       loadFrameworkEntry,
       loadFrameworkForwardLoad,
+      loadFrameworkUnitsForManufacturer,
       loadManufacturerPlannedBatches,
       loadOrderFrameworkCard,
       planBatches,
@@ -1110,6 +1121,186 @@ async function main() {
         detail.progress.total.deliveredUnits +
         detail.progress.total.cancelledOrRefundedUnits;
       assert.equal(sum, 160, "kovalar DAİMA taahhüde toplanır");
+    });
+
+
+    // ═══ 4b) F4 KAPANIŞI: sevk → hakediş → kova + MÜŞTERİ okuma yüzeyi ═══════
+
+    await test("parti sevk edilince kova SEVK EDİLEN olur, hakediş O PARTİ için doğar", async () => {
+      // SEVKİ ÜRETİMDEKİ UCUN YAPTIĞI GİBİ yaz: damga + takip no, sonra
+      // `accrueEarning` (`.../ship` rotası tam bu üçlüyü yapıyor). Hakediş
+      // PARTİNİN KENDİ siparişi için doğar — "tek sipariş, çok sevkiyat"
+      // modelinde `manufacturer_earnings.order_id` tekilliği bunu
+      // imkânsız kılıyordu (tasarım §8).
+      const [shop] = await db
+        .select({ id: manufacturers.id })
+        .from(manufacturers)
+        .limit(1);
+      const [before] = await db
+        .select({
+          amountKurus: orders.amountKurus,
+          productionBaseKurus: orders.productionBaseKurus,
+        })
+        .from(orders)
+        .where(eq(orders.id, paidOrderId))
+        .limit(1);
+      await db
+        .update(orders)
+        .set({
+          manufacturerId: shop.id,
+          manufacturerStatus: "shipped",
+          commissionRateBps: 4000,
+          shippedAt: new Date(),
+          trackingNumber: "QA-TRK-0001",
+        })
+        .where(eq(orders.id, paidOrderId));
+      const accrual = await accrueEarning(
+        paidOrderId,
+        shop.id,
+        before.productionBaseKurus ?? before.amountKurus
+      );
+      assert.equal(accrual, "accrued", `hakediş yazılmadı: ${accrual}`);
+
+      const detail = (await loadFrameworkDetail(frameworkId))!;
+      const batch = detail.batches.find((b) => b.id === batchIds[0])!;
+      assert.equal(batch.trackingNumber, "QA-TRK-0001", "takip numarası okunmuyor");
+      assert.ok(batch.shippedAt, "sevk damgası okunmuyor");
+      assert.equal(
+        batch.shipByDate,
+        null,
+        "sevk edilmiş partide TAHMİN yazılıyor: gerçek damganın yerine geçemez"
+      );
+      assert.equal(detail.progress.total.shippedUnits, 50, "parti SEVK EDİLEN kovasında değil");
+      assert.equal(detail.progress.total.inProductionUnits, 0, "iki kovaya birden sayıldı");
+      const sum =
+        detail.progress.total.unplannedUnits +
+        detail.progress.total.plannedUnits +
+        detail.progress.total.awaitingPaymentUnits +
+        detail.progress.total.inProductionUnits +
+        detail.progress.total.shippedUnits +
+        detail.progress.total.deliveredUnits +
+        detail.progress.total.cancelledOrRefundedUnits;
+      assert.equal(sum, 160, "kovalar DAİMA taahhüde toplanır");
+    });
+
+    await test("müşteri görünümü: fiyat kapısı GERÇEK veride de tutar", async () => {
+      const detail = (await loadFrameworkDetail(frameworkId))!;
+      const owner = presentFramework({
+        detail,
+        viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+        now: new Date(),
+        sign: (key) => `/signed/${key}`,
+      });
+      assert.equal(owner.number, detail.number);
+      assert.equal(owner.committedTotalKurus, detail.committedTotalKurus);
+      assert.equal(owner.batchesTotalKurus, detail.batchesTotalKurus);
+      assert.notEqual(
+        owner.committedTotalKurus,
+        owner.batchesTotalKurus,
+        "İKİ TOPLAM aynı sayıya düştü: biri ötekinin yerine yazılmış olabilir"
+      );
+      assert.equal(
+        owner.committedKdvExcludedKurus! + owner.committedKdvKurus!,
+        owner.committedTotalKurus,
+        "KDV hariç + KDV = toplam"
+      );
+      // Parti satırları ve ödenebilirlik: sevk edilmiş partide "öde" YOK.
+      const shipped = owner.batches.find((b) => b.id === batchIds[0])!;
+      assert.equal(shipped.payable, false, "siparişe dönmüş parti ödenebilir görünüyor");
+      assert.ok(shipped.quoteNumber, "klon teklif numarası yok");
+
+      // FİYAT KAPISI: adı `…Kurus` ile biten HİÇBİR anahtar gitmiyor.
+      const hidden = presentFramework({
+        detail,
+        viewer: { canSeePrices: false, isOwner: true, isAdmin: false },
+        now: new Date(),
+        sign: (key) => `/signed/${key}`,
+      });
+      const keys: string[] = [];
+      const walk = (value: unknown): void => {
+        if (Array.isArray(value)) {
+          for (const item of value) walk(item);
+          return;
+        }
+        if (value !== null && typeof value === "object") {
+          for (const [key, child] of Object.entries(value)) {
+            keys.push(key);
+            walk(child);
+          }
+        }
+      };
+      walk(hidden);
+      assert.deepEqual(
+        keys.filter((k) => /Kurus$/.test(k)),
+        [],
+        "gerçek veride fiyat anahtarı sızdı"
+      );
+      // Ve adetler/tarihler YİNE gidiyor (boş bir gövde yeşil sayılmasın).
+      assert.equal(hidden.committedUnits, detail.committedUnits);
+      assert.equal(hidden.batches.length, detail.batches.length);
+    });
+
+    await test("erişim: anlaşmayı YALNIZ sahibi (ve admin) açar", async () => {
+      // Numara ERİŞİM VERMEZ: `C-000123` tahmin edilebilir, numara yalnız
+      // satırı BULUR. Başka bir müşteriye 404 ("var ama senin değil" bilgisi
+      // bile sızmaz).
+      const other = await makeUser();
+      const detail = (await loadFrameworkDetail(frameworkId))!;
+      assert.deepEqual(
+        resolveFrameworkViewer({ userId: buyer.id }, { sessionUserId: buyer.id, isAdmin: false }),
+        { canSeePrices: true, isOwner: true, isAdmin: false }
+      );
+      assert.equal(
+        resolveFrameworkViewer({ userId: buyer.id }, { sessionUserId: other.id, isAdmin: false }),
+        null,
+        "başka bir müşteri anlaşmayı açabiliyor"
+      );
+      assert.equal(
+        resolveFrameworkViewer({ userId: buyer.id }, { sessionUserId: null, isAdmin: false }),
+        null,
+        "oturumsuz ziyaretçi anlaşmayı açabiliyor"
+      );
+      // Numara biçimi: `T-` numarası anlaşma diye ARANMAZ.
+      assert.equal(parseFrameworkNumber(detail.number), Number(detail.number.slice(2)));
+      assert.equal(parseFrameworkNumber("T-000123"), null);
+      assert.equal(formatFrameworkNumber(123), "C-000123");
+    });
+
+    await test("üreticiye planlanan toplam: kendi işleri + çapalı planlı partiler", async () => {
+      // "Bu anlaşmada SİZE planlanan toplam N birim" — iki yoldan birine düşen
+      // partiler sayılır: siparişi bu atölyeye atanmış olanlar ve anlaşmanın
+      // ÇAPASI bu atölyeyken hâlâ `planned` duranlar. Sayı GÖSTERİMDİR,
+      // hiçbir yerde atama reddetmez.
+      const [shop] = await db
+        .select({ id: manufacturers.id })
+        .from(manufacturers)
+        .limit(1);
+      const mine = await loadFrameworkUnitsForManufacturer({
+        frameworkId,
+        manufacturerId: shop.id,
+      });
+      assert.equal(mine, 50, "sevk edilen partinin adedi sayılmadı");
+      // Başka bir atölyeye SIFIR: bu bir anlaşma toplamı değil, ATÖLYE payı.
+      const [otherShop] = await db
+        .insert(manufacturers)
+        .values({
+          companyName: "QA İkinci Atölye",
+          email: `mfg-second-${randomUUID()}@example.test`,
+          passwordHash: "x",
+          contactPerson: "QA Yetkili",
+          phone: "+905321234501",
+          status: "active",
+          maxConcurrentOrders: 10,
+        })
+        .returning({ id: manufacturers.id });
+      assert.equal(
+        await loadFrameworkUnitsForManufacturer({
+          frameworkId,
+          manufacturerId: otherShop.id,
+        }),
+        0,
+        "işi olmayan atölyeye birim yazıldı"
+      );
     });
 
     // ═══ 5) Hediye kartı: kapı BRÜTÜ karşılaştırıyor ═════════════════════════
@@ -2554,6 +2745,109 @@ async function main() {
         })
       );
       assert.equal(ret.code, "quote_not_quoted", "ekran ile uç AYNI kapıyı okumuyor");
+    });
+
+    // ═══ GERİ DÖNÜŞÜN EN DEĞERLİ ÖZELLİĞİ ═══════════════════════════════════
+
+    await test("BAYRAK KAPALIYKEN serbest bırakılmış partinin klonu ÖDENMEYE DEVAM EDER", async () => {
+      // Bayrağı kapatmak YÜZEYLERİ kapatır (yeni anlaşma kurma + parti serbest
+      // bırakma uçları/ekranları), servisi DEĞİL: serbest bırakılmış bir parti
+      // sıradan bir `quotes` satırıdır ve `/teklif/<no>/odeme` yolundan geçer.
+      // Yani geri dönüş ödenmiş ya da ÖDENECEK bir partiyi ASLA tuzağa
+      // düşürmez — bu, kapatma planının en değerli özelliği ve ancak gerçek
+      // ödeme yoluyla kanıtlanır.
+      const { isFlagEnabled, setFlag } = await import("../src/lib/services/flags");
+      await setFlag("framework_orders_enabled", false, "qa-admin@example.test");
+      assert.equal(
+        await isFlagEnabled("framework_orders_enabled"),
+        false,
+        "bayrak kapalı olmalı: testin kurduğu hâl bu"
+      );
+
+      const buyer2 = await makeUser();
+      const source = await makeQuote(buyer2.id, [{ name: "Gövde", quantity: 60 }]);
+      const created = await createFrameworkFromQuote({
+        quoteId: source.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        priceLockedUntil: LOCK_UNTIL,
+        shippingAddress: address,
+      });
+      assert.equal(created.ok, true, "bayrak kapalıyken SERVİS çalışmalı (kapı uçlarda)");
+      if (!created.ok) return;
+      await activateFramework({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+      const plan = await planBatches({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        batches: [
+          {
+            plannedShipDate: shipDate(base.computed.totals.leadDays ?? 7),
+            lines: [{ partId: source.partIds[0], quantity: 60 }],
+          },
+        ],
+      });
+      assert.equal(plan.ok, true, JSON.stringify(plan));
+      if (!plan.ok) return;
+      const released = await releaseBatch({
+        frameworkId: created.id,
+        batchId: plan.batches[0].id!,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+
+      // KLON ÖDENEBİLİR: erişim, izinler ve ödeme ucu bayrağa BAKMADAN çalışır.
+      // Oturum taklidi YALNIZ çerez okumasıdır (bkz. dosya başı); erişim
+      // çözümü gerçek koddan geçiyor.
+      session = { userId: buyer2.id, email: buyer2.email };
+      const access = await resolveQuoteAccess(released.quoteNumber);
+      assert.ok(access, "klon teklif açılamıyor");
+      const state = await computeOf(released.quoteId);
+      assert.equal(
+        state.computed.totals.totalKurus,
+        released.amountKurus,
+        "klonun brütü kilitli tutardan saptı"
+      );
+      const permissions = quotePermissions(
+        {
+          status: state.quote.status,
+          expiresAt: state.quote.expiresAt,
+          orderId: state.quote.orderId,
+        },
+        {
+          hasLiveDraft: false,
+          now: new Date(),
+          isFrameworkBatch: true,
+          hasLiveFramework: false,
+        }
+      );
+      assert.equal(permissions.canCheckout, true, "parti klonu ödenemez hâle düştü");
+      assert.equal(permissions.canEdit, false, "parti klonu DÜZENLENEBİLİR görünüyor");
+
+      const checkout = await createQuoteCheckout({
+        quoteId: released.quoteId,
+        userId: buyer2.id,
+        email: buyer2.email,
+        input: quoteCheckoutSchema.parse({
+          expectedVersion: state.quote.version,
+          expectedTotalKurus: state.computed.totals.totalKurus,
+          shippingAddress: address,
+          paymentMethod: "card" as const,
+          distanceContractConsent: true as const,
+          preliminaryInfoConsent: true as const,
+          invoice: { type: "individual" as const },
+        }),
+        req: fakeRequest({ "idempotency-key": `qa-flagoff-${randomUUID()}` }),
+      });
+      assert.equal(
+        checkout.finalAmountKurus,
+        released.amountKurus,
+        "bayrak kapalıyken tahsil edilen tutar DEĞİŞTİ"
+      );
     });
 
     console.log(`${checks} quote framework DB checks passed`);

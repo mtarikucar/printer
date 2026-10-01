@@ -2417,9 +2417,18 @@ export async function listCustomerQuotes(
       // ek bir okuma yok.
       fxSnapshot: quotes.fxSnapshot,
       orderNumber: orders.orderNumber,
+      // ÇERÇEVE ROZETİ: bu teklif bir anlaşmanın partisi mi? LEFT JOIN, çünkü
+      // teklifler ezici çoğunlukla parti DEĞİLDİR ve bir `exists` yalnız
+      // "evet/hayır" derdi — rozet anlaşma NUMARASINI ve parti SIRASINI
+      // yazıyor. Tekillik `quote_framework_batches_quote_id_uq` ile garanti
+      // (bir klon teklif = bir parti), yani join satır ÇOĞALTMAZ.
+      frameworkNumber: quoteFrameworks.number,
+      frameworkBatchPosition: quoteFrameworkBatches.position,
     })
     .from(quotes)
     .leftJoin(orders, eq(quotes.orderId, orders.id))
+    .leftJoin(quoteFrameworkBatches, eq(quoteFrameworkBatches.quoteId, quotes.id))
+    .leftJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
     .where(eq(quotes.userId, userId))
     .orderBy(desc(quotes.createdAt))
     .limit(PAGE_SIZE + 1)
@@ -2470,6 +2479,12 @@ export async function listCustomerQuotes(
       expired: q.status === "expired" || q.expiresAt.getTime() < now,
       orderNumber: q.orderNumber,
       fxSnapshot: fxDisplayEnabled ? q.fxSnapshot : null,
+      // Rozet ya TAM ya HİÇ: numara ve sıra birlikte gelir (ikisi de aynı
+      // join'den), yarısı dolu bir rozet "Çerçeve · Parti undefined" yazardı.
+      frameworkBatch:
+        q.frameworkNumber !== null && q.frameworkBatchPosition !== null
+          ? { number: q.frameworkNumber, position: q.frameworkBatchPosition }
+          : null,
     })),
     hasNext: rows.length > PAGE_SIZE,
   };

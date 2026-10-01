@@ -67,6 +67,36 @@ export type FrameworkStatus = (typeof FRAMEWORK_STATUSES)[number];
 export const BATCH_STATUSES = ["planned", "released", "cancelled"] as const;
 export type FrameworkBatchStatus = (typeof BATCH_STATUSES)[number];
 
+// ─── Numara: `C-000123` ─────────────────────────────────────────────────────
+
+/**
+ * Biçim `quote_frameworks.number` generated kolonuyla BİREBİR aynı olmak
+ * zorunda (`'C-' || lpad(seq::text, greatest(6, length(seq::text)), '0')`):
+ * 6 hane doldurulur, 7+ hanede KIRPMA YOKTUR. `quote-number.ts`in `T-`
+ * kardeşidir ve ondan AYRI durur — iki sıra ayrı tablolardan geliyor ve tek bir
+ * düzenli ifade, `T-000123` yazan bir adresi anlaşma diye aratırdı.
+ */
+const FRAMEWORK_NUMBER_RE = /^c-(\d{6,})$/;
+
+export function formatFrameworkNumber(seq: number): string {
+  return `C-${String(seq).padStart(6, "0")}`;
+}
+
+/**
+ * Adresten/kullanıcıdan gelen bir anlaşma numarasını sıraya çevirir; geçersizse
+ * null.
+ *
+ * NUMARA ERİŞİM VERMEZ: numaralar sıradandır ve tahmin edilebilir. Numara
+ * yalnız satırı BULUR; hakkı oturum verir (`resolveFrameworkViewer`).
+ */
+export function parseFrameworkNumber(s: string): number | null {
+  const match = FRAMEWORK_NUMBER_RE.exec(s.trim().toLowerCase());
+  if (!match) return null;
+  const seq = Number(match[1]);
+  if (!Number.isSafeInteger(seq) || seq < 1) return null;
+  return seq;
+}
+
 // ─── Sürüm ve tavanlar ──────────────────────────────────────────────────────
 
 /**

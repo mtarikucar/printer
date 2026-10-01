@@ -19,7 +19,11 @@
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { quotes, type Quote } from "@/lib/db/schema";
+import { quoteFrameworks, quotes, type Quote } from "@/lib/db/schema";
+import {
+  formatFrameworkNumber,
+  parseFrameworkNumber,
+} from "@/lib/config/quote-framework";
 import { formatQuoteNumber, parseQuoteNumber } from "@/lib/config/quote-number";
 import type { QuoteViewer } from "@/lib/config/quote-types";
 import { resolveAuthenticatedUploadOwner } from "@/lib/services/chunked-upload";
@@ -215,6 +219,93 @@ export async function frameworkSurfacesEnabled(): Promise<boolean> {
  */
 export async function frameworkScreensEnabled(): Promise<boolean> {
   return isFlagEnabled("framework_orders_enabled");
+}
+
+/**
+ * Çerçeve anlaşmada izleyicinin hakları.
+ *
+ * `QuoteViewer`dan AYRI ve DAHA DAR bir şekil, çünkü matrisin iki dalı burada
+ * HİÇ YOK: anonim çerez (`quote_frameworks.user_id` NOT NULL — anonim çerçeve
+ * YOK) ve paylaşım jetonu (taahhüt kurumsal ve kişiye özeldir; "bu anlaşmayı
+ * herkese açabilirim" diye bir yetki tanımlanmadı). Alanları `QuoteViewer`ın
+ * ADLARINI taşır, böylece fiyat kapısının dili iki yüzeyde aynı okunur.
+ */
+export interface FrameworkViewer {
+  canSeePrices: boolean;
+  isOwner: boolean;
+  isAdmin: boolean;
+}
+
+/**
+ * Erişim matrisi — SAF. `null` = 404 ("var ama senin değil" de bir bilgidir).
+ *
+ * `canSeePrices` İKİ dalda da açıktır (sahip ve admin), çünkü üçüncü bir dal
+ * yok: anlaşmayı açabilen herkes ya taahhüdü imzalayan kişidir ya yöneticidir.
+ * Alan buna rağmen VAR ve sunucu onu uygular — fiyat gizleme bir görünüm ayarı
+ * değil güvenlik sınırıdır ve yarın bir dal eklenirse (ör. müşterinin satın
+ * alma birimine okuma hakkı) kapı YERİNDE olmalı, sonradan hatırlanacak bir iş
+ * olmamalı. `scripts/test-quote-ui.ts` kapıyı `canSeePrices=false` bir
+ * izleyiciyle her koşuda sınıyor.
+ *
+ * Sıra: SAHİPLİK admin'den ÖNCE. Kendi anlaşmasını açan bir yönetici "sahip"
+ * olarak görülür ve `isAdmin` dalına düşüp admin bağlantılarını görmez.
+ */
+export function resolveFrameworkViewer(
+  framework: { userId: string },
+  ctx: { sessionUserId: string | null; isAdmin: boolean }
+): FrameworkViewer | null {
+  if (ctx.sessionUserId !== null && ctx.sessionUserId === framework.userId) {
+    return { canSeePrices: true, isOwner: true, isAdmin: false };
+  }
+  if (ctx.isAdmin) return { canSeePrices: true, isOwner: false, isAdmin: true };
+  return null;
+}
+
+export interface FrameworkAccess {
+  frameworkId: string;
+  number: string;
+  viewer: FrameworkViewer;
+}
+
+/**
+ * `C-000123` (ya da uuid) → anlaşma kimliği + izleyici hakları; erişim yoksa
+ * `null` ve çağıran 404 verir.
+ *
+ * Satır okuması DAR: yalnız kimlik, numara ve sahip. Anlaşmanın gövdesini
+ * (donmuş katalog + parça anlık görüntüsü, onlarca KB jsonb) erişim kapısında
+ * okumak, 404 alacak bir istek için de telden geçirmek olurdu.
+ */
+export async function resolveFrameworkAccess(
+  idOrNumber: string
+): Promise<FrameworkAccess | null> {
+  const value = idOrNumber.trim();
+  let condition;
+  if (UUID_RE.test(value)) {
+    condition = eq(quoteFrameworks.id, value);
+  } else {
+    const seq = parseFrameworkNumber(value);
+    if (seq === null) return null;
+    condition = eq(quoteFrameworks.number, formatFrameworkNumber(seq));
+  }
+
+  const [row] = await db
+    .select({
+      id: quoteFrameworks.id,
+      number: quoteFrameworks.number,
+      userId: quoteFrameworks.userId,
+    })
+    .from(quoteFrameworks)
+    .where(condition)
+    .limit(1);
+  if (!row) return null;
+
+  const [identity, admin] = await Promise.all([requestIdentity(), adminSession()]);
+  const viewer = resolveFrameworkViewer(row, {
+    sessionUserId: identity.sessionUserId,
+    isAdmin: admin !== null,
+  });
+  if (!viewer) return null;
+  return { frameworkId: row.id, number: row.number, viewer };
 }
 
 /**

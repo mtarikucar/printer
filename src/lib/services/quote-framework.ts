@@ -53,8 +53,8 @@
  * ETMEK ZORUNDA (sıradan bir `quotes` satırıdır). Kapıyı uçlara bırakmak, o
  * kapsamı iki yerde birden yanlış kurma riskini kaldırıyor.
  */
-import { and, asc, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
-import { istanbulDateKey } from "@/lib/config/business-days";
+import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
 import { db } from "@/lib/db";
 import {
   manufacturers,
@@ -1311,12 +1311,32 @@ export interface FrameworkBatchView {
   cancelledAt: string | null;
   cancelReason: string | null;
   note: string | null;
+  /** Partinin kargo takip numarası; sevk edilmemiş partide null. */
+  trackingNumber: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
   /**
    * SERBEST BIRAKMA PENCERESİ AÇIK MI — sunucuda ölçülür, ekran kendi
    * takvimini kurmaz (`frameworkReleaseWindowOpen`, plan kapısının 4.
    * kuralının tersi). Yalnız `planned` partide anlamlıdır.
    */
   releaseWindowOpen: boolean;
+  /**
+   * Serbest bırakılmış ve henüz sevk edilmemiş partinin BEKLENEN kargoya
+   * teslim günü (`YYYY-MM-DD`); başka hâllerde null.
+   *
+   * İŞ GÜNÜ aritmetiği BU DOSYADA KALIR: ölçü serbest bırakma GÜNÜNDEN başlar
+   * ve partinin KENDİ parçalarının iş günü sayısını kullanır
+   * (`frameworkBatchLeadDays`) — serbest bırakma penceresinin ölçtüğü kümenin
+   * AYNISI, aynı DONMUŞ tatil listesiyle. Penceresi içinde bırakılan parti
+   * `plannedShipDate`i tutar; geciktirilen parti tarihi KAYDIRIR ve ekran bunu
+   * gizlemez.
+   *
+   * Planlı partide null, çünkü gösterilecek tarih `plannedShipDate`in
+   * kendisidir; sevk edilmiş partide null, çünkü artık GERÇEK bir sevk damgası
+   * var ve bir tahmin onun yerine yazılamaz.
+   */
+  shipByDate: string | null;
   lines: FrameworkBatchLineView[];
 }
 
@@ -1405,6 +1425,7 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
       amountKurus: orders.amountKurus,
       giftCardAmountKurus: orders.giftCardAmountKurus,
       havaleDiscountKurus: orders.havaleDiscountKurus,
+      trackingNumber: orders.trackingNumber,
       shippedAt: orders.shippedAt,
       deliveredAt: orders.deliveredAt,
     })
@@ -1486,6 +1507,15 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
   for (const r of batchRows) {
     const b = r.batch;
     const lines = linesByBatch.get(b.id) ?? [];
+    // PARTİNİN KENDİ teslim süresi: pencere de beklenen sevk günü de bu tek
+    // ölçüden türer (gerekçe `frameworkBatchLeadDays` başlığında).
+    const batchLeadDays = frameworkBatchLeadDays({
+      snapshot: framework.pricingSnapshot,
+      leadTier: framework.leadTier,
+      parts: framework.partsSnapshot,
+      addonKeys: framework.addonKeys,
+      linePartIds: lines.map((l) => l.partId),
+    });
     batches.push({
       id: b.id,
       position: b.position,
@@ -1504,20 +1534,31 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
       cancelledAt: b.cancelledAt?.toISOString() ?? null,
       cancelReason: b.cancelReason,
       note: b.note,
+      trackingNumber: r.trackingNumber ?? null,
+      shippedAt: r.shippedAt?.toISOString() ?? null,
+      deliveredAt: r.deliveredAt?.toISOString() ?? null,
       releaseWindowOpen:
         b.status === "planned" &&
         frameworkReleaseWindowOpen({
           snapshot: framework.pricingSnapshot,
-          leadDays: frameworkBatchLeadDays({
-            snapshot: framework.pricingSnapshot,
-            leadTier: framework.leadTier,
-            parts: framework.partsSnapshot,
-            addonKeys: framework.addonKeys,
-            linePartIds: lines.map((l) => l.partId),
-          }),
+          leadDays: batchLeadDays,
           plannedShipDate: b.plannedShipDate,
           now,
         }),
+      shipByDate:
+        b.status === "released" &&
+        b.releasedAt !== null &&
+        r.shippedAt === null &&
+        batchLeadDays !== null
+          ? istanbulDateKey(
+              addBusinessDays(
+                b.releasedAt,
+                batchLeadDays,
+                framework.pricingSnapshot.settings.holidays,
+                framework.pricingSnapshot.settings.cutoffHour
+              )
+            )
+          : null,
       lines,
     });
     if (b.status !== "cancelled") batchesTotalKurus += b.amountKurus;
@@ -2138,6 +2179,57 @@ export async function loadOrderFrameworkCard(
     .where(eq(quoteFrameworkBatches.orderId, orderId))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Bu anlaşmada BU ATÖLYEYE planlanmış toplam birim — üreticinin salt okunur
+ * kartındaki "bu anlaşmada size planlanan toplam N birim".
+ *
+ * İKİ YOLDAN birine düşen partiler sayılır ve ikisi de "size" cümlesini
+ * doğrular:
+ *  1. partinin SİPARİŞİ bu atölyeye atanmış (iş zaten sizin),
+ *  2. parti hâlâ `planned` ve anlaşmanın ÇAPASI bu atölye (ilk aday sizsiniz).
+ *
+ * İptal edilmiş partiler sayılmaz: hiç yapılmayacak iş.
+ *
+ * ─── BU BİR KAPASİTE SORGUSU DEĞİLDİR ──────────────────────────────────────
+ *
+ * `ACTIVE_MFG_STATUSES` OKUNMAZ ve `count(*)` YAPILMAZ: tezgâhın tek ölçüsü
+ * `manufacturer-capacity.ts`in `loadUnits` KAPISIdır ve buraya ikinci bir sayım
+ * kurmak, depo geneli tarayıcının (`scripts/test-manufacturer-capacity.ts`)
+ * haklı olarak düşürdüğü şey olurdu. Toplanan şey yalnız
+ * `quote_framework_batch_lines.quantity`dir ve sonuç HİÇBİR yerde atama
+ * reddetmez — GÖSTERİM.
+ */
+export async function loadFrameworkUnitsForManufacturer(args: {
+  frameworkId: string;
+  manufacturerId: string;
+}): Promise<number> {
+  const [row] = await db
+    .select({
+      units: sql<number>`coalesce(sum(${quoteFrameworkBatchLines.quantity}), 0)::int`,
+    })
+    .from(quoteFrameworkBatchLines)
+    .innerJoin(
+      quoteFrameworkBatches,
+      eq(quoteFrameworkBatches.id, quoteFrameworkBatchLines.batchId)
+    )
+    .innerJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
+    .leftJoin(orders, eq(orders.id, quoteFrameworkBatches.orderId))
+    .where(
+      and(
+        eq(quoteFrameworkBatchLines.frameworkId, args.frameworkId),
+        ne(quoteFrameworkBatches.status, "cancelled"),
+        or(
+          eq(orders.manufacturerId, args.manufacturerId),
+          and(
+            eq(quoteFrameworkBatches.status, "planned"),
+            eq(quoteFrameworks.preferredManufacturerId, args.manufacturerId)
+          )
+        )
+      )
+    );
+  return row?.units ?? 0;
 }
 
 // ─── Denetim izi ────────────────────────────────────────────────────────────

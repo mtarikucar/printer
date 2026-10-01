@@ -712,6 +712,19 @@ export interface CustomerQuoteListItem {
    * teklifin donmuş kuru kullanılır.
    */
   fxSnapshot: QuoteFxSnapshot | null;
+  /**
+   * Bu teklif bir ÇERÇEVE ANLAŞMANIN PARTİSİ ise rozeti; değilse null.
+   *
+   * Neden var: parti serbest bırakıldığında müşterinin hesabında adsız bir
+   * `T-` satırı doğuyor ve sekiz partili bir anlaşmada liste, müşterinin hiç
+   * kurmadığı sekiz teklifle doluyordu. Rozet o satırın NEREDEN geldiğini
+   * söyler ("Çerçeve C-000123 · Parti 3") ve anlaşmaya bağlar.
+   *
+   * Parti DURUMU taşınmaz: satırın durumu teklifin kendi durumudur (ödendi mi,
+   * süresi doldu mu) ve ikinci bir durum alanı listede iki farklı hikâye
+   * anlatırdı.
+   */
+  frameworkBatch: { number: string; position: number } | null;
 }
 
 /** `/account/parcalar` satırı: aynı dosya (sha256) tek kez listelenir. */

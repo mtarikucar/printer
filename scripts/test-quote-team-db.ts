@@ -426,6 +426,40 @@ async function main() {
       );
       return rows.rows.map((r: { action: string }) => r.action);
     }
+    /** Bir adrese kalan CANLI davet sayısı — `customer_team_invites_live_uq`nin sözü. */
+    async function liveInvites(teamId: string, email: string): Promise<number> {
+      return (
+        await admin.query(
+          `SELECT count(*)::int AS n FROM customer_team_invites
+            WHERE team_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+          [teamId, email]
+        )
+      ).rows[0].n;
+    }
+    /**
+     * Sahnelenen yarışta ucun INSERT'inin GERÇEKTEN indeks kilidinde beklediğini
+     * doğrular.
+     *
+     * Bir `sleep(400)` ile COMMIT etmek testi zamanlamaya bağlardı: yavaş bir
+     * makinede rakip erken biter, uç yenileme yapıp 201 döner ve test yarışı HİÇ
+     * kurmadan yeşil kalır. Burada beklenen durum GÖRÜLEREK ölçülüyor.
+     */
+    async function waitForInviteLockWaiter(timeoutMs = 10_000): Promise<boolean> {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const waiting = (
+          await admin.query(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE datname = current_database()
+                AND wait_event_type = 'Lock'
+                AND query ILIKE '%customer_team_invites%'`
+          )
+        ).rows[0].n;
+        if (waiting > 0) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    }
 
     const founder = await makeUser("kurucu");
     const invited = await makeUser("davetli");
@@ -744,6 +778,59 @@ async function main() {
       ]);
       assert.equal(sentEmails.length, 1);
       assert.equal(sentEmails[0].kind, "removed");
+    });
+
+    await test("BİÇİMİ UUID OLMAYAN yol parçası 404 döner (22P02 → 500 YOK)", async () => {
+      // `[id]`/`[userId]` ham bir yol parçasıdır: biçimi uuid olmayan bir dize
+      // `uuid` kolonuna sorulursa Postgres onu `22P02` ile patlatır, o hata bir
+      // `TeamServiceError` DEĞİLDİR ve rota katmanı onu boş gövdeli bir 500'e
+      // (+ Sentry gürültüsüne) çevirir. Bayat bir davet bağlantısı, bir tarayıcı
+      // eklentisi ya da T-5'in bir yazım hatası bunu bedava tetikliyor; doğru
+      // cevap gövdesinde Türkçe cümle taşıyan bir 404'tür.
+      session = chainOwner;
+      const before = await auditTrail(chainTeamId);
+      await refusal(
+        await inviteIdRoute.DELETE(req("/api/customer/team/invites/abc", { method: "DELETE" }), {
+          params: Promise.resolve({ id: "abc" }),
+        }),
+        404,
+        "invite_not_found"
+      );
+      await refusal(
+        await membersRoute.PATCH(
+          req("/api/customer/team/members/abc", { method: "PATCH", body: { role: "member" } }),
+          { params: Promise.resolve({ userId: "abc" }) }
+        ),
+        404,
+        "not_member"
+      );
+      await refusal(
+        await membersRoute.DELETE(req("/api/customer/team/members/abc", { method: "DELETE" }), {
+          params: Promise.resolve({ userId: "abc" }),
+        }),
+        404,
+        "not_member"
+      );
+      // Ve biçimi DOĞRU olan var olmayan kimlik AYNI cevabı alıyor: ret sebebi
+      // "biçim" değil "yok"tur, yani uç kimlik biçimi saydırmıyor.
+      const ghost = randomUUID();
+      await refusal(
+        await inviteIdRoute.DELETE(
+          req(`/api/customer/team/invites/${ghost}`, { method: "DELETE" }),
+          { params: Promise.resolve({ id: ghost }) }
+        ),
+        404,
+        "invite_not_found"
+      );
+      await refusal(
+        await membersRoute.DELETE(
+          req(`/api/customer/team/members/${ghost}`, { method: "DELETE" }),
+          { params: Promise.resolve({ userId: ghost }) }
+        ),
+        404,
+        "not_member"
+      );
+      assert.deepEqual(await auditTrail(chainTeamId), before, "reddedilen istek satır yazdı");
     });
 
     await test("TOKEN TEK KULLANIMLIK: tüketilmiş token ÇIKARILDIKTAN SONRA da reddedilir", async () => {
@@ -1163,6 +1250,86 @@ async function main() {
         ownerRow.user_id,
         "takım satırı ile üyelik satırı ayrıştı"
       );
+    });
+
+    await test("EŞZAMANLI iki davet: ikinci 409 `invite_renew_race`, 23505 sızmıyor", async () => {
+      // Devir yarışının EŞİ, ama kapıyı tutan şey başka: orada koşullu
+      // UPDATE'in satır kilidi, burada `customer_team_invites_live_uq` kısmi
+      // tekil indeksi. Yenileme UPDATE'i kendi SNAPSHOT'ını gördüğü için iki
+      // eşzamanlı istek de 0 satır kapatır ve ikinci INSERT 23505 alır —
+      // yakalanmazsa (drizzle hatayı sarıyor: `.code` undefined, gerçek kod
+      // `.cause`ta) çift tıklanan bir "yeniden gönder" boş gövdeli bir 500 olur.
+      session = chainOwner;
+
+      // 1) GERÇEK çift tıklama: aynı adrese iki uç çağrısı, aynı anda.
+      const twin = await makeUser("ikiz");
+      const invite = () =>
+        invitesRoute.POST(
+          req("/api/customer/team/invites", {
+            method: "POST",
+            body: { email: twin.email, role: "member" },
+          })
+        );
+      const both = await Promise.all([invite(), invite()]);
+      const statuses = both.map((r) => r.status).sort();
+      // İki MEŞRU sonuç var: ikinci işlem birincisini görebildiyse bu bir
+      // yenilemedir (201), göremediyse indeks onu keser (409). 500 hiçbir hâlde
+      // meşru değil ve 409 Türkçe bir gövde taşımak zorunda.
+      assert.ok(
+        statuses.every((s) => s === 201 || s === 409),
+        `beklenen 201/409, gelen ${statuses.join(",")}`
+      );
+      for (const loser of both.filter((r) => r.status === 409)) {
+        await refusal(loser, 409, "invite_renew_race");
+      }
+      assert.equal(await liveInvites(chainTeamId, twin.email), 1, "adrese iki CANLI davet kaldı");
+
+      // 2) Aynı yarış DETERMİNİST hâliyle — çünkü (1) makineye göre yenilemeye
+      //    de düşebilir ve o hâlde 409 yolu HİÇ ölçülmemiş olur. Ayrı bir DB
+      //    oturumu aynı `(team_id, email)` için CANLI bir davet satırı yazar ve
+      //    COMMIT ETMEZ: ucun yenileme UPDATE'i o satırı GÖREMEZ, INSERT ise
+      //    indekste ona takılıp BEKLER; rakip COMMIT edince 23505 gelir.
+      const solo = await makeUser("tekil");
+      const trailBefore = await auditTrail(chainTeamId);
+      const racer = new pg.Client({ connectionString });
+      await racer.connect();
+      try {
+        await racer.query(`SET search_path TO ${namespace}`);
+        await racer.query("BEGIN");
+        await racer.query(
+          `INSERT INTO customer_team_invites
+             (team_id, email, role, token_hash, invited_by_user_id, expires_at)
+           VALUES ($1, $2, 'member', $3, $4, now() + interval '7 days')`,
+          [
+            chainTeamId,
+            solo.email,
+            createHash("sha256").update(randomUUID()).digest("hex"),
+            chainOwner.userId,
+          ]
+        );
+        const pending = invitesRoute.POST(
+          req("/api/customer/team/invites", {
+            method: "POST",
+            body: { email: solo.email, role: "member" },
+          })
+        );
+        assert.ok(await waitForInviteLockWaiter(), "ucun INSERT'i indekste beklemedi");
+        await racer.query("COMMIT");
+        await refusal(await pending, 409, "invite_renew_race");
+        // İşlem GERİ ALINDI: ne ikinci bir canlı davet ne de bir `invite_sent`
+        // denetim satırı kaldı — 409 "yarıda kalmış bir yazma" bırakmıyor.
+        assert.equal(await liveInvites(chainTeamId, solo.email), 1, "reddedilen davet satır bıraktı");
+        assert.deepEqual(await auditTrail(chainTeamId), trailBefore, "409 denetim satırı yazdı");
+      } finally {
+        await racer.query("ROLLBACK").catch(() => {});
+        await racer
+          .query(`DELETE FROM customer_team_invites WHERE team_id = $1 AND email = $2`, [
+            chainTeamId,
+            solo.email,
+          ])
+          .catch(() => {});
+        await racer.end();
+      }
     });
 
     await test("ÇIKARILAN üyenin takım teklifine erişimi ANINDA 404", async () => {

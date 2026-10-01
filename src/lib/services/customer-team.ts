@@ -77,6 +77,12 @@ import {
   type TeamRole,
 } from "@/lib/config/quote-team";
 import type { InvoiceType, QuoteAccessTeam } from "@/lib/config/quote-types";
+// Tek uuid kalıbı, tek yerden (`quote-access.ts:104`). İkinci bir kopya, bir gün
+// yalnız birinin sıkılaştırıldığı gün demek olurdu — o dosyanın kendi yorumu.
+// Döngüsel import (quote-access → customer-team → quote-access) ZARARSIZ, çünkü
+// `UUID_RE` modül gövdesinde DEĞİL yalnız fonksiyon içinde okunuyor: hangi dosya
+// önce yüklenirse yüklensin, bağ ilk çağrı anında dolu olur.
+import { UUID_RE } from "@/lib/services/quote-access";
 
 /**
  * Kullanıcının BU takımdaki üyeliği + takımın karar veren iki alanı; üyelik
@@ -118,10 +124,15 @@ export async function teamMembershipFor(
  *
  * `code` kümesi tasarım §8'in kapalı listesidir (`not_member`, `not_allowed`,
  * `invite_expired`, `invite_email_mismatch`, `already_in_team`,
- * `owner_must_transfer`) + bu sevkiyatın üç eklemesi (`owner_transfer_race`,
- * `team_not_empty`, `invite_not_found`) ve gövde doğrulama kodları
- * (`invalid_name`, `invalid_body`). Arayüz (T-5) cümleyi doğrudan basabilir;
- * kodu yalnız özel bir ekran davranışı için okur.
+ * `owner_must_transfer`) + bu sevkiyatın dört eklemesi (`owner_transfer_race`,
+ * `invite_renew_race`, `team_not_empty`, `invite_not_found`) ve gövde doğrulama
+ * kodları (`invalid_name`, `invalid_body`). Arayüz (T-5) cümleyi doğrudan
+ * basabilir; kodu yalnız özel bir ekran davranışı için okur.
+ *
+ * İki `*_race` kodu aynı sınıftan: eşzamanlı İKİNCİ yazmanın tekil indekse
+ * çarpması. İkisi de 409'dur ve ikisinin de tek doğru ekran davranışı AYNIDIR
+ * (tazele ve güncel hâli göster), ama ayrı kodlar çünkü cümleleri ayrı: biri
+ * sahipliğin, öbürü davetin yarıştığını söyler.
  */
 export class TeamServiceError extends Error {
   constructor(
@@ -137,6 +148,7 @@ export class TeamServiceError extends Error {
 const NOT_ALLOWED = "Bu işlem için takımdaki yetkiniz yeterli değil.";
 const NOT_MEMBER = "Bir takımda değilsiniz.";
 const MEMBER_NOT_FOUND = "Bu kişi takımın üyesi değil.";
+const INVITE_NOT_FOUND = "Bekleyen böyle bir davet yok.";
 
 /** Saf yüklem `false` dediyse tek cevap vardır; karar burada değil ORADA verilir. */
 function assertAllowed(allowed: boolean): void {
@@ -258,11 +270,21 @@ async function requireMembership(userId: string): Promise<TeamMembership> {
  * (rol değişti / çıkarıldın / sahip oldun) ve rota katmanının adresi ikinci bir
  * sorguyla aramasına gerek yok. Adres yalnız bildirime gider; üye listesinin ne
  * taşıdığı ayrı ve daha dar bir karardır (`listMembers`).
+ *
+ * BİÇİM KAPISI İLK SATIRDADIR: `userId` bir YOL PARÇASINDAN gelir
+ * (`/api/customer/team/members/[userId]`) ve biçimi uuid olmayan bir dize
+ * `uuid` kolonuna sorulursa Postgres onu `22P02` ile patlatır. O hata bir
+ * `TeamServiceError` DEĞİLDİR, yani rota katmanı onu müşteriye boş gövdeli bir
+ * 500 olarak verir ve Sentry'ye gürültü yazar — oysa doğru cevap "bu kişi
+ * takımın üyesi değil" 404'üdür. Kalıp `quote-service.ts`in `loadPart`ı
+ * (`:800`) ile aynıdır ve kuralı da aynı: biçimi uuid OLMAYAN kimlik sorguya
+ * HİÇ gitmez.
  */
 async function requireTeamMember(
   teamId: string,
   userId: string
 ): Promise<{ role: TeamRole; email: string }> {
+  if (!UUID_RE.test(userId)) throw new TeamServiceError(MEMBER_NOT_FOUND, 404, "not_member");
   const [row] = await db
     .select({ role: customerTeamMembers.role, email: users.email })
     .from(customerTeamMembers)
@@ -658,6 +680,25 @@ export interface IssuedInvite {
 }
 
 /**
+ * Eşzamanlı İKİNCİ davetin cevabı: 409 + Türkçe cümle, boş gövdeli 500 DEĞİL.
+ *
+ * NEDEN YENİDEN DENENMİYOR: yarışı kaybeden istek, kazananın AYNI adrese
+ * yazdığı canlı davetin üstüne gelir. Yeniden denemek o canlı daveti
+ * `revoked_at` ile kapatıp yenisini yazmak demektir — yani kazananın gelen
+ * kutuya ÇOKTAN düşmüş e-postasındaki token'ı sessizce geçersiz kılar ve
+ * "yeniden gönder"e iki kez basan yönetici, davet edilenin elinde çalışmayan
+ * bir bağlantı bırakır. 409 bu yüzden daha dürüst: davet YAZILDI, ekranın
+ * yapacağı tek şey tazelemektir.
+ */
+function inviteRenewRace(): TeamServiceError {
+  return new TeamServiceError(
+    "Bu adrese aynı anda başka bir davet yazıldı. Bekleyen davetleri görmek için sayfayı yenileyin.",
+    409,
+    "invite_renew_race"
+  );
+}
+
+/**
  * Davet gönderir ya da YENİLER.
  *
  * `customer_team_invites_live_uq` UNIQUE `(team_id, email) WHERE accepted_at IS
@@ -672,6 +713,19 @@ export interface IssuedInvite {
  *
  * `owner` rolü davetle VERİLMEZ: hem tip (`TeamInviteRole`, owner'ı dışlayan
  * liste) hem DB CHECK'i (`customer_team_invites_role_chk`) aynı listeden kurulu.
+ *
+ * ─── YENİLEMENİN YARIŞI İKİNCİ KATMANDA KESİLİR ────────────────────────────
+ *
+ * Yenileme UPDATE'i kendi SNAPSHOT'ını görür: aynı `(team_id, email)` için iki
+ * eşzamanlı istekte ikisi de 0 satır kapatır (hiçbiri öbürünün henüz
+ * COMMIT'lenmemiş satırını göremez), sonra ikinci INSERT
+ * `customer_team_invites_live_uq` üzerinde `23505` alır. Bu sebeple işlem
+ * `try/catch` içindedir ve `uniqueViolation` onu 409 `invite_renew_race`e
+ * çevirir ([[drizzle-error-wrapping]]: yakalanan hatada `.code` `undefined`,
+ * gerçek kod `.cause`ta). Değişmez 4 "yalnız yakalamaya güvenilmez" der —
+ * ama HİÇ yakalamamak, çift tıklanan bir "yeniden gönder" düğmesini boş gövdeli
+ * bir 500'e çevirirdi ve ÖN KONTROLLE kapatılamayacak tek kapı budur: kontrol
+ * ile INSERT arasındaki pencereyi kapatan şey indeksin kendisidir.
  */
 export async function inviteMember(args: {
   actorUserId: string;
@@ -707,61 +761,81 @@ export async function inviteMember(args: {
   const { raw, hash } = newInviteToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);
-  return db.transaction(async (tx) => {
-    const closed = await tx
-      .update(customerTeamInvites)
-      .set({ revokedAt: now, revokedByUserId: args.actorUserId })
-      .where(
-        and(
-          eq(customerTeamInvites.teamId, membership.teamId),
-          eq(customerTeamInvites.email, email),
-          isNull(customerTeamInvites.acceptedAt),
-          isNull(customerTeamInvites.revokedAt)
+  try {
+    return await db.transaction(async (tx) => {
+      const closed = await tx
+        .update(customerTeamInvites)
+        .set({ revokedAt: now, revokedByUserId: args.actorUserId })
+        .where(
+          and(
+            eq(customerTeamInvites.teamId, membership.teamId),
+            eq(customerTeamInvites.email, email),
+            isNull(customerTeamInvites.acceptedAt),
+            isNull(customerTeamInvites.revokedAt)
+          )
         )
-      )
-      .returning({ id: customerTeamInvites.id });
-    const [invite] = await tx
-      .insert(customerTeamInvites)
-      .values({
+        .returning({ id: customerTeamInvites.id });
+      const [invite] = await tx
+        .insert(customerTeamInvites)
+        .values({
+          teamId: membership.teamId,
+          email,
+          role: args.role,
+          tokenHash: hash,
+          invitedByUserId: args.actorUserId,
+          expiresAt,
+        })
+        .returning({ id: customerTeamInvites.id });
+      const renewedInviteId = closed[0]?.id ?? null;
+      // Denetim izi davet edilen ADRESİ taşır (eylemin konusu o) ama HAM TOKEN'I
+      // taşımaz: izi okuyan yönetici kimin davet edildiğini görür, kimsenin
+      // davetini kabul edemez.
+      await recordTeamAction(tx, {
         teamId: membership.teamId,
+        actorUserId: args.actorUserId,
+        action: "invite_sent",
+        before: renewedInviteId ? { renewedInviteId } : null,
+        after: { inviteId: invite.id, email, role: args.role, expiresAt: expiresAt.toISOString() },
+      });
+      return {
+        inviteId: invite.id,
+        rawToken: raw,
         email,
         role: args.role,
-        tokenHash: hash,
-        invitedByUserId: args.actorUserId,
         expiresAt,
-      })
-      .returning({ id: customerTeamInvites.id });
-    const renewedInviteId = closed[0]?.id ?? null;
-    // Denetim izi davet edilen ADRESİ taşır (eylemin konusu o) ama HAM TOKEN'I
-    // taşımaz: izi okuyan yönetici kimin davet edildiğini görür, kimsenin
-    // davetini kabul edemez.
-    await recordTeamAction(tx, {
-      teamId: membership.teamId,
-      actorUserId: args.actorUserId,
-      action: "invite_sent",
-      before: renewedInviteId ? { renewedInviteId } : null,
-      after: { inviteId: invite.id, email, role: args.role, expiresAt: expiresAt.toISOString() },
+        teamName: membership.team.name,
+        inviterName: inviter?.name ?? membership.team.name,
+        renewedInviteId,
+      };
     });
-    return {
-      inviteId: invite.id,
-      rawToken: raw,
-      email,
-      role: args.role,
-      expiresAt,
-      teamName: membership.team.name,
-      inviterName: inviter?.name ?? membership.team.name,
-      renewedInviteId,
-    };
-  });
+  } catch (e) {
+    // İKİNCİ savunma hattı: yenileme UPDATE'i ile INSERT arasına giren ikinci
+    // bir davet. Boş gövdeli 500 bırakılmaz.
+    if (uniqueViolation(e, "customer_team_invites_live_uq")) throw inviteRenewRace();
+    throw e;
+  }
 }
 
-/** Bekleyen daveti iptal eder. Kabul edilmiş davet iptal EDİLMEZ (üyelik ayrı kapı). */
+/**
+ * Bekleyen daveti iptal eder. Kabul edilmiş davet iptal EDİLMEZ (üyelik ayrı kapı).
+ *
+ * BİÇİM KAPISI yetkiden SONRA, sorgudan ÖNCE: `inviteId` bir YOL PARÇASIDIR
+ * (`/api/customer/team/invites/[id]`) ve biçimi uuid olmayan bir dize `uuid`
+ * kolonuna sorulursa Postgres `22P02` ile patlar; o hata `TeamServiceError`
+ * olmadığı için müşteriye boş gövdeli bir 500 döner (kalıp:
+ * `quote-service.ts:800`). Sıranın yetkiden sonra olması bilinçli: takımda
+ * olmayan birinin sorusu, elindeki kimliğin BİÇİMİNE göre iki farklı cevap
+ * almamalı — o kapı her hâlde `not_member`dır.
+ */
 export async function revokeInvite(args: {
   actorUserId: string;
   inviteId: string;
 }): Promise<{ email: string; role: TeamInviteRole }> {
   const membership = await requireMembership(args.actorUserId);
   assertAllowed(canInvite(membership.role));
+  if (!UUID_RE.test(args.inviteId)) {
+    throw new TeamServiceError(INVITE_NOT_FOUND, 404, "invite_not_found");
+  }
   return db.transaction(async (tx) => {
     const [invite] = await tx
       .update(customerTeamInvites)
@@ -778,7 +852,7 @@ export async function revokeInvite(args: {
       )
       .returning({ email: customerTeamInvites.email, role: customerTeamInvites.role });
     if (!invite) {
-      throw new TeamServiceError("Bekleyen böyle bir davet yok.", 404, "invite_not_found");
+      throw new TeamServiceError(INVITE_NOT_FOUND, 404, "invite_not_found");
     }
     await recordTeamAction(tx, {
       teamId: membership.teamId,

@@ -244,6 +244,28 @@ test("rol CHECK'leri de aynı iki listeden türer", () => {
     /check\(\s*"customer_team_invites_role_chk",\s*sql`\$\{t\.role\} IN \(\$\{quoteInList\(TEAM_INVITE_ROLES\)\}\)`/
   );
 });
+test("`customerTeams.quotes` çok-ilişkisinin TERS `one` ucu DURUYOR", () => {
+  // drizzle `many()`yi KARŞI tablodaki `one()`dan normalize eder. Ters uç
+  // yoksa ilişki ilan edilmiş ama çözülemez olur: ilk `with: { quotes: true }`
+  // çağrısı `There is not enough information to infer relation` ile atar ve uç
+  // nokta boş gövdeli 500 döner. Ne `tsc` (ilişki tipi geçerli) ne `test:unit`
+  // (ilişkisel sorgu yok) bunu görür — ölçüldü: `normalizeRelation` şemanın 161
+  // ilişkisinden yalnız bunun için patlıyordu. İddia METİN üzerinden kurulur,
+  // çünkü bu dosyanın import listesi çivili (başlıktaki gerekçe).
+  const declaresMany = /customerTeamsRelations[\s\S]{0,800}?\bquotes:\s*many\(quotes\)/
+    .test(schemaText);
+  const declaresOne = /quotesRelations[\s\S]{0,2000}?\bteam:\s*one\(\s*customerTeams\s*,\s*\{\s*fields:\s*\[quotes\.teamId\]\s*,\s*references:\s*\[customerTeams\.id\]\s*\}\s*\)/
+    .test(schemaText);
+  assert.equal(
+    declaresMany && !declaresOne,
+    false,
+    "`customerTeams.quotes` ilan edilmiş ama `quotesRelations.team` yok: ilişki çözülemez"
+  );
+  // Bugünkü hâl: ikisi de duruyor. (Biri bilinçli kaldırılırsa yukarıdaki
+  // ima zaten yeşil kalır; bu satır sessiz bir gerilemeyi de yakalar.)
+  assert.equal(declaresMany, true, "`customerTeams.quotes` çok-ilişkisi kayboldu");
+  assert.equal(declaresOne, true, "`quotesRelations.team` ters ucu kayboldu");
+});
 test("ondört eylem, kapalı küme", () => {
   assert.deepEqual([...TEAM_ACTIONS], [
     "team_created",

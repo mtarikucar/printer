@@ -4126,6 +4126,21 @@ export const printFinishesRelations = relations(printFinishes, ({ one }) => ({
 export const quotesRelations = relations(quotes, ({ one, many }) => ({
   user: one(users, { fields: [quotes.userId], references: [users.id] }),
   order: one(orders, { fields: [quotes.orderId], references: [orders.id] }),
+  /**
+   * `customerTeamsRelations.quotes` çok-ilişkisinin TERS ucu (0072).
+   *
+   * drizzle bir `many()`yi ancak KARŞI tablodaki `one()`dan normalize eder. Bu
+   * satır olmazsa ilişki İLAN EDİLMİŞ ama ÇÖZÜLEMEZ kalır:
+   * `db.query.customerTeams.findMany({ with: { quotes: true } })`
+   * `There is not enough information to infer relation "customerTeams.quotes"`
+   * ile ATAR ve uç nokta boş gövdeli 500 döner. Ne `tsc` ne `test:unit` görür —
+   * bu yüzden `scripts/test-quote-team.ts` ters ucu METİNDEN çiviler.
+   *
+   * `customerTeams` BU SATIRDAN SONRA tanımlanıyor; sorun değil, çünkü
+   * `relations()` yapılandırıcı fonksiyonunu TEMBEL çağırır (ilişkisel sorgu
+   * yapılandırması kurulurken, modül değerlendirmesi bittikten sonra).
+   */
+  team: one(customerTeams, { fields: [quotes.teamId], references: [customerTeams.id] }),
   parts: many(quoteParts),
   checkouts: many(quoteCheckouts),
   messages: many(quoteMessages),

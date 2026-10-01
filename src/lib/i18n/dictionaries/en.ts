@@ -1000,8 +1000,12 @@ const en = {
   "instantQuote.account.parts.volumeLabel": "Volume",
   "instantQuote.account.quotes.column.expiry": "Valid until",
   "instantQuote.account.quotes.column.number": "Quote",
+  // The "Team" and "Opened by" columns are drawn ONLY when there is data
+  // (0072): a customer without a team sees exactly today's table.
+  "instantQuote.account.quotes.column.owner": "Opened by",
   "instantQuote.account.quotes.column.parts": "Parts",
   "instantQuote.account.quotes.column.status": "Status",
+  "instantQuote.account.quotes.column.team": "Team",
   "instantQuote.account.quotes.column.title": "Project",
   "instantQuote.account.quotes.column.total": "Total",
   "instantQuote.account.quotes.empty": "You have no quotes yet.",
@@ -1424,6 +1428,137 @@ const en = {
   "instantQuote.summary.targetPrice": "Suggest a target price",
   "instantQuote.summary.title": "Quote summary",
   "instantQuote.summary.total": "Total",
+
+  // instantQuote — team workspace (/account/takim, /takim/davet/<token>)
+  //
+  // EVERY key in this group is drawn behind the `quote_teams_enabled` gate; the
+  // only exception is the /privacy paragraph (a disclosure obligation, not a
+  // feature announcement), whose text lives in the page, not here. Nothing from
+  // this group may reach the marketing page (/3d-baski), the landing sections,
+  // the footer or the FAQ — `scripts/test-customer-team-api.ts` measures that
+  // file by file.
+  //
+  // `error.*` is a CLOSED set: exactly one sentence per `code` the team routes
+  // (and the service they call) can return. A code without a sentence shows the
+  // raw code on screen; a sentence without a code is dead copy. The same test
+  // turns red for both.
+  "instantQuote.team.create.kvkk":
+    "I understand that the people I add to this team will be able to see the files, prices and invoice details of the quotes I attach to it.",
+  "instantQuote.team.create.name": "Team name",
+  "instantQuote.team.create.namePlaceholder": "e.g. Procurement team",
+  "instantQuote.team.create.submit": "Create team",
+  "instantQuote.team.create.title": "Create a team",
+  "instantQuote.team.empty":
+    "You do not have a team yet. Once you create one, the people you invite can see the quotes and orders you attach to it.",
+  "instantQuote.team.error.already_in_team":
+    "You are already in a team. A user can belong to only one team at a time.",
+  "instantQuote.team.error.already_in_team_quote": "This quote is already attached to a team.",
+  "instantQuote.team.error.invalid_body": "The details sent are incomplete or invalid.",
+  "instantQuote.team.error.invalid_name":
+    "A team name must be between 2 and 80 characters.",
+  "instantQuote.team.error.invite_email_mismatch":
+    "This invitation was sent to a different email address. Sign in with that address and try again.",
+  "instantQuote.team.error.invite_expired":
+    "This invitation has expired. Ask a team manager for a new one.",
+  "instantQuote.team.error.invite_not_found": "There is no pending invitation like that.",
+  "instantQuote.team.error.invite_renew_race":
+    "This invitation was updated elsewhere at the same time. Refresh the page and try again.",
+  "instantQuote.team.error.not_allowed": "Your role in this team does not allow this action.",
+  "instantQuote.team.error.not_member": "You are not in a team.",
+  "instantQuote.team.error.not_owner": "Only the quote's owner can attach it to a team.",
+  "instantQuote.team.error.owner_must_transfer":
+    "Transfer ownership to another member before you leave the team.",
+  "instantQuote.team.error.owner_transfer_race":
+    "Ownership was transferred elsewhere at the same time. Refresh the page to see the current state.",
+  "instantQuote.team.error.quote_has_order":
+    "The team link of a quote that became an order cannot be changed.",
+  "instantQuote.team.error.quote_not_found": "Quote not found.",
+  "instantQuote.team.error.rate_limited": "Too many requests. Please try again later.",
+  "instantQuote.team.error.team_not_empty":
+    "The team still has other members. Remove them before deleting the team.",
+  "instantQuote.team.error.team_not_found": "Team not found.",
+  "instantQuote.team.invite.accept": "Accept invitation",
+  "instantQuote.team.invite.acceptHint":
+    "Once you join you will see the files, prices and invoice details of the quotes attached to this team, and the quotes you attach will be visible to the other members.",
+  "instantQuote.team.invite.acceptTitle": "You have been invited to a team",
+  "instantQuote.team.invite.accepted": "You joined the team {team}.",
+  "instantQuote.team.invite.email": "Email",
+  "instantQuote.team.invite.expiresAt": "Valid until",
+  "instantQuote.team.invite.kvkk":
+    "I agree that the files and prices of quotes attached to this team are mutually visible to its members.",
+  "instantQuote.team.invite.none": "No pending invitations.",
+  "instantQuote.team.invite.pending": "Pending invitations",
+  "instantQuote.team.invite.renewed": "The pending invitation to this address was renewed.",
+  "instantQuote.team.invite.revoke": "Revoke",
+  "instantQuote.team.invite.role": "Role",
+  "instantQuote.team.invite.sent": "The invitation was sent to {email}.",
+  "instantQuote.team.invite.submit": "Send invitation",
+  "instantQuote.team.invite.title": "Invite a member",
+  "instantQuote.team.loadFailed": "Team details could not be loaded.",
+  "instantQuote.team.member.joinedAt": "Joined",
+  "instantQuote.team.member.leave": "Leave the team",
+  "instantQuote.team.member.leaveConfirm":
+    "Leave this team? Your access to the quotes attached to it is cut immediately.",
+  "instantQuote.team.member.privacyNote":
+    "The member list shows only name, email and role; phone numbers and personal addresses are never shared with the team.",
+  "instantQuote.team.member.remove": "Remove",
+  "instantQuote.team.member.removeConfirm":
+    "Remove {name} from the team? Their access to the quotes attached to it is cut immediately.",
+  "instantQuote.team.member.title": "Members",
+  "instantQuote.team.member.transfer": "Transfer ownership",
+  "instantQuote.team.member.transferConfirm":
+    "Transfer ownership of the team to {name}? Your own role becomes manager afterwards.",
+  "instantQuote.team.member.you": "(you)",
+  "instantQuote.team.orders.column.order": "Order",
+  "instantQuote.team.orders.column.paidAt": "Paid",
+  "instantQuote.team.orders.column.quote": "Quote",
+  "instantQuote.team.orders.column.status": "Status",
+  "instantQuote.team.orders.column.total": "Amount",
+  "instantQuote.team.orders.column.tracking": "Tracking",
+  "instantQuote.team.orders.empty": "The team has no orders.",
+  "instantQuote.team.orders.loadFailed": "Team orders could not be loaded.",
+  "instantQuote.team.orders.readOnly":
+    "Team orders are read-only: refunds, disputes, invoices and reorders are the right of the person who paid.",
+  "instantQuote.team.orders.title": "Team orders",
+  "instantQuote.team.profile.billingTitle": "Billing address",
+  "instantQuote.team.profile.deleteConfirm":
+    "Delete this team? Only a team with no other members can be deleted.",
+  "instantQuote.team.profile.deleteTeam": "Delete the team",
+  "instantQuote.team.profile.invoiceNote":
+    "These details only prefill the checkout form; the invoice of an already paid quote never changes retroactively.",
+  "instantQuote.team.profile.memberCanCheckout": "Members can check out too",
+  "instantQuote.team.profile.memberCanCheckoutHint":
+    "While this is off, only the team owner and managers can pay for a quote. The viewer role can never check out.",
+  "instantQuote.team.profile.save": "Save",
+  "instantQuote.team.profile.saved": "Saved.",
+  "instantQuote.team.profile.shippingNote":
+    "This address only prefills the checkout form; the delivery address of every order is entered again at checkout.",
+  "instantQuote.team.profile.shippingTitle": "Delivery address",
+  "instantQuote.team.profile.title": "Shared details",
+  "instantQuote.team.quote.attach": "Attach to the team",
+  "instantQuote.team.quote.attachWarning":
+    "Once you attach this quote to the team, every member can see its files and prices.",
+  "instantQuote.team.quote.badge": "Team quote · {team}",
+  "instantQuote.team.quote.detach": "Detach from the team",
+  "instantQuote.team.quote.listEmpty": "No quotes are attached to the team.",
+  "instantQuote.team.quote.listTitle": "Team quotes",
+  "instantQuote.team.quote.noCheckoutPermission":
+    "You cannot check out this quote; the team's owner or one of its managers can.",
+  "instantQuote.team.role.admin": "Manager",
+  "instantQuote.team.role.member": "Member",
+  "instantQuote.team.role.owner": "Owner",
+  "instantQuote.team.role.viewer": "Viewer",
+  "instantQuote.team.roleHint.admin":
+    "Invites members, changes roles, edits the shared details and checks out.",
+  "instantQuote.team.roleHint.member":
+    "Creates and edits quotes; checkout depends on the team setting.",
+  "instantQuote.team.roleHint.owner":
+    "Runs the whole team; can delete it and transfer ownership.",
+  "instantQuote.team.roleHint.viewer":
+    "Only views quotes and prices; cannot change anything and cannot check out.",
+  "instantQuote.team.subtitle":
+    "Your team's members, shared details, attached quotes and orders.",
+  "instantQuote.team.title": "My team",
 
   // instantQuote — upload terms (accepted once, when the quote is created)
   "instantQuote.terms.accept":

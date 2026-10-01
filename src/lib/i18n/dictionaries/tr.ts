@@ -1001,8 +1001,12 @@ const tr: Dictionary = {
   "instantQuote.account.parts.volumeLabel": "Hacim",
   "instantQuote.account.quotes.column.expiry": "Geçerlilik",
   "instantQuote.account.quotes.column.number": "Teklif",
+  // "Takım" ve "Açan" kolonları YALNIZ veri varsa çizilir (0072): takımsız
+  // müşterinin tablosu bugünküyle birebir aynı kalır.
+  "instantQuote.account.quotes.column.owner": "Açan",
   "instantQuote.account.quotes.column.parts": "Parça",
   "instantQuote.account.quotes.column.status": "Durum",
+  "instantQuote.account.quotes.column.team": "Takım",
   "instantQuote.account.quotes.column.title": "Proje",
   "instantQuote.account.quotes.column.total": "Tutar",
   "instantQuote.account.quotes.empty": "Henüz teklifiniz yok.",
@@ -1444,6 +1448,137 @@ const tr: Dictionary = {
   "instantQuote.summary.targetPrice": "Hedef fiyat öner",
   "instantQuote.summary.title": "Teklif özeti",
   "instantQuote.summary.total": "Toplam",
+
+  // instantQuote — takım çalışma alanı (/account/takim, /takim/davet/<token>)
+  //
+  // BU GRUBUN TAMAMI BAYRAK KAPISININ (`quote_teams_enabled`) ARKASINDA
+  // ÇİZİLİR. Tek istisna /privacy paragrafıdır (aydınlatma yükümlülüğü, bir
+  // özellik ilanı değil) ve o metin sözlükte DEĞİL, sayfanın kendisinde durur.
+  // Buradan tek cümle bile pazarlama sayfasına (/3d-baski), açılışa, footer'a
+  // ya da SSS'ye GİRMEZ — S sevkiyatının metin borcu tekrarlanmıyor
+  // (`scripts/test-customer-team-api.ts` bunu dosya dosya ölçüyor).
+  //
+  // `error.*` KAPALI BİR KÜMEDİR: takım uçlarının (ve çağırdıkları servisin)
+  // döndürdüğü her `code` için TAM BİR cümle. Kodu olup cümlesi olmayan bir
+  // hata ekranda ham koda düşer; cümlesi olup kodu olmayan bir anahtar ölü
+  // metindir. İkisi de aynı testte kırmızı olur.
+  "instantQuote.team.create.kvkk":
+    "Takıma eklediğim kişilerin, bu takıma bağladığım tekliflerdeki dosyaları, fiyatları ve fatura bilgilerini görebileceğini biliyorum.",
+  "instantQuote.team.create.name": "Takım adı",
+  "instantQuote.team.create.namePlaceholder": "Örn. Satın alma ekibi",
+  "instantQuote.team.create.submit": "Takımı kur",
+  "instantQuote.team.create.title": "Takım kur",
+  "instantQuote.team.empty":
+    "Henüz bir takımınız yok. Takım kurduğunuzda davet ettiğiniz kişiler, takıma bağladığınız teklifleri ve siparişleri görebilir.",
+  "instantQuote.team.error.already_in_team":
+    "Zaten bir takımdasınız. Bir kullanıcı aynı anda yalnız bir takımda olabilir.",
+  "instantQuote.team.error.already_in_team_quote": "Bu teklif zaten bir takıma bağlı.",
+  "instantQuote.team.error.invalid_body": "Gönderilen bilgiler eksik ya da geçersiz.",
+  "instantQuote.team.error.invalid_name": "Takım adı en az 2, en fazla 80 karakter olmalı.",
+  "instantQuote.team.error.invite_email_mismatch":
+    "Bu davet başka bir e-posta adresine gönderilmiş. Davetin gittiği adresle giriş yapıp tekrar deneyin.",
+  "instantQuote.team.error.invite_expired":
+    "Bu davetin süresi dolmuş. Takım yöneticisinden yeni bir davet isteyin.",
+  "instantQuote.team.error.invite_not_found": "Bekleyen böyle bir davet yok.",
+  "instantQuote.team.error.invite_renew_race":
+    "Bu davet aynı anda başka bir yerden güncellendi. Sayfayı yenileyip tekrar deneyin.",
+  "instantQuote.team.error.not_allowed": "Bu işlem için takımdaki yetkiniz yeterli değil.",
+  "instantQuote.team.error.not_member": "Bir takımda değilsiniz.",
+  "instantQuote.team.error.not_owner": "Teklifi takıma yalnız sahibi bağlayabilir.",
+  "instantQuote.team.error.owner_must_transfer":
+    "Takımdan ayrılmadan önce sahipliği başka bir üyeye devretmeniz gerekir.",
+  "instantQuote.team.error.owner_transfer_race":
+    "Sahiplik aynı anda başka bir yerden devredildi. Sayfayı yenileyip güncel hâli görün.",
+  "instantQuote.team.error.quote_has_order":
+    "Siparişe dönmüş bir teklifin takım bağı değiştirilemez.",
+  "instantQuote.team.error.quote_not_found": "Teklif bulunamadı.",
+  "instantQuote.team.error.rate_limited":
+    "Çok fazla istek gönderildi. Lütfen bir süre sonra tekrar deneyin.",
+  "instantQuote.team.error.team_not_empty":
+    "Takımda başka üyeler var. Takımı silmeden önce üyeleri çıkarın.",
+  "instantQuote.team.error.team_not_found": "Takım bulunamadı.",
+  "instantQuote.team.invite.accept": "Daveti kabul et",
+  "instantQuote.team.invite.acceptHint":
+    "Katıldığınızda takıma bağlı tekliflerin dosyalarını, fiyatlarını ve fatura bilgilerini görebileceksiniz; sizin takıma bağladığınız teklifler de diğer üyelere görünür olacak.",
+  "instantQuote.team.invite.acceptTitle": "Bir takıma davet edildiniz",
+  "instantQuote.team.invite.accepted": "{team} takımına katıldınız.",
+  "instantQuote.team.invite.email": "E-posta",
+  "instantQuote.team.invite.expiresAt": "Son gün",
+  "instantQuote.team.invite.kvkk":
+    "Takıma bağlı tekliflerin dosyalarının ve fiyatlarının üyeler arasında karşılıklı görünür olacağını kabul ediyorum.",
+  "instantQuote.team.invite.none": "Bekleyen davet yok.",
+  "instantQuote.team.invite.pending": "Bekleyen davetler",
+  "instantQuote.team.invite.renewed": "Bu adrese bekleyen davet yenilendi.",
+  "instantQuote.team.invite.revoke": "İptal et",
+  "instantQuote.team.invite.role": "Rol",
+  "instantQuote.team.invite.sent": "Davet {email} adresine gönderildi.",
+  "instantQuote.team.invite.submit": "Davet gönder",
+  "instantQuote.team.invite.title": "Üye davet et",
+  "instantQuote.team.loadFailed": "Takım bilgileri yüklenemedi.",
+  "instantQuote.team.member.joinedAt": "Katılma",
+  "instantQuote.team.member.leave": "Takımdan ayrıl",
+  "instantQuote.team.member.leaveConfirm":
+    "Takımdan ayrılmak istiyor musunuz? Takıma bağlı tekliflere erişiminiz anında kesilir.",
+  "instantQuote.team.member.privacyNote":
+    "Üye listesinde yalnız ad, e-posta ve rol görünür; telefon numaraları ve kişisel adresler takımla paylaşılmaz.",
+  "instantQuote.team.member.remove": "Çıkar",
+  "instantQuote.team.member.removeConfirm":
+    "{name} takımdan çıkarılsın mı? Takıma bağlı tekliflere erişimi anında kesilir.",
+  "instantQuote.team.member.title": "Üyeler",
+  "instantQuote.team.member.transfer": "Sahipliği devret",
+  "instantQuote.team.member.transferConfirm":
+    "Takımın sahipliği {name} kişisine devredilsin mi? Bu işlemden sonra sizin rolünüz yönetici olur.",
+  "instantQuote.team.member.you": "(siz)",
+  "instantQuote.team.orders.column.order": "Sipariş",
+  "instantQuote.team.orders.column.paidAt": "Ödeme",
+  "instantQuote.team.orders.column.quote": "Teklif",
+  "instantQuote.team.orders.column.status": "Durum",
+  "instantQuote.team.orders.column.total": "Tutar",
+  "instantQuote.team.orders.column.tracking": "Kargo takip",
+  "instantQuote.team.orders.empty": "Takımın siparişi yok.",
+  "instantQuote.team.orders.loadFailed": "Takım siparişleri yüklenemedi.",
+  "instantQuote.team.orders.readOnly":
+    "Takım siparişleri yalnız okunur: iade, anlaşmazlık, fatura ve yeniden sipariş gibi işlemler ödemeyi yapan kişinin hakkıdır.",
+  "instantQuote.team.orders.title": "Takım siparişleri",
+  "instantQuote.team.profile.billingTitle": "Fatura adresi",
+  "instantQuote.team.profile.deleteConfirm":
+    "Takım silinsin mi? Yalnız başka üyesi olmayan bir takım silinebilir.",
+  "instantQuote.team.profile.deleteTeam": "Takımı sil",
+  "instantQuote.team.profile.invoiceNote":
+    "Bu bilgiler ödeme formunu yalnız ön doldurur; ödenmiş bir teklifin faturası geçmişe dönük değişmez.",
+  "instantQuote.team.profile.memberCanCheckout": "Üyeler de ödeme yapabilir",
+  "instantQuote.team.profile.memberCanCheckoutHint":
+    "Kapalıyken teklifi yalnız takım sahibi ve yöneticiler ödeyebilir. İzleyici rolü hiçbir durumda ödeme yapamaz.",
+  "instantQuote.team.profile.save": "Kaydet",
+  "instantQuote.team.profile.saved": "Kaydedildi.",
+  "instantQuote.team.profile.shippingNote":
+    "Bu adres ödeme formunu yalnız ön doldurur; her siparişin teslimat adresi ödeme sırasında ayrıca girilir.",
+  "instantQuote.team.profile.shippingTitle": "Teslimat adresi",
+  "instantQuote.team.profile.title": "Paylaşılan bilgiler",
+  "instantQuote.team.quote.attach": "Takıma bağla",
+  "instantQuote.team.quote.attachWarning":
+    "Bu teklifi takıma bağladığınızda dosyaları ve fiyatları takımın bütün üyeleri görebilir.",
+  "instantQuote.team.quote.badge": "Takım teklifi · {team}",
+  "instantQuote.team.quote.detach": "Takımdan ayır",
+  "instantQuote.team.quote.listEmpty": "Takıma bağlı teklif yok.",
+  "instantQuote.team.quote.listTitle": "Takım teklifleri",
+  "instantQuote.team.quote.noCheckoutPermission":
+    "Bu teklifi ödeme yetkiniz yok; takımın sahibi ya da bir yöneticisi ödeyebilir.",
+  "instantQuote.team.role.admin": "Yönetici",
+  "instantQuote.team.role.member": "Üye",
+  "instantQuote.team.role.owner": "Sahip",
+  "instantQuote.team.role.viewer": "İzleyici",
+  "instantQuote.team.roleHint.admin":
+    "Üye davet eder, rolleri değiştirir, paylaşılan bilgileri düzenler ve ödeme yapar.",
+  "instantQuote.team.roleHint.member":
+    "Teklif açar ve düzenler; ödeme yetkisi takım ayarına bağlıdır.",
+  "instantQuote.team.roleHint.owner":
+    "Takımın tamamını yönetir; takımı silebilir ve sahipliği devredebilir.",
+  "instantQuote.team.roleHint.viewer":
+    "Teklifleri ve fiyatları yalnız görür; değişiklik yapamaz, ödeme yapamaz.",
+  "instantQuote.team.subtitle":
+    "Takımınızın üyeleri, paylaşılan bilgileri, takıma bağlı teklifler ve siparişler.",
+  "instantQuote.team.title": "Takımım",
 
   // instantQuote — yükleme onayı (teklif açılışında bir kez)
   "instantQuote.terms.accept":

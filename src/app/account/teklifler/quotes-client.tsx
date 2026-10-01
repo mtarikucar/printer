@@ -82,6 +82,22 @@ export function QuoteListTable({
               <tr key={item.id} className="border-b border-bg-subtle align-middle">
                 <td className="py-3 pr-4 font-mono text-[13px] text-text-primary">
                   {item.number}
+                  {/* ÇERÇEVE ROZETİ: parti serbest bırakıldığında müşterinin
+                      listesinde adsız bir `T-` satırı doğuyor. Sekiz partili
+                      bir anlaşmada liste, müşterinin hiç kurmadığı sekiz
+                      teklifle dolardı; rozet satırın nereden geldiğini söyler
+                      ve anlaşmaya bağlar. */}
+                  {item.frameworkBatch && (
+                    <Link
+                      href={`/cerceve/${encodeURIComponent(item.frameworkBatch.number)}`}
+                      className="mt-1 block font-sans text-[11px] text-text-muted underline-offset-4 hover:underline"
+                    >
+                      {fill(d["instantQuote.framework.batchBadge"], {
+                        number: item.frameworkBatch.number,
+                        position: item.frameworkBatch.position,
+                      })}
+                    </Link>
+                  )}
                 </td>
                 <td className="py-3 pr-4 text-text-secondary">{item.title ?? "—"}</td>
                 <td className="py-3 pr-4 text-text-secondary">

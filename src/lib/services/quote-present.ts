@@ -386,10 +386,11 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
     // olurdu — bu yüzden `invoice`/`shareUrl` ile aynı kapıdan geçerler.
     // `locked` alanı zaten bekleyen ödemeyi (referans vermeden) anlatıyor.
     //
-    // Kapı artık `canSeeOwnerFields` (`src/lib/config/quote-team.ts`): yüklem
-    // bugün `viewer.isOwner`a DENK, yani bu satır davranış DEĞİŞTİRMEZ —
-    // değişen, kapının tek yerde adlandırılmış olması. Takım üyesine açılması
-    // T-4'ün kararı ve o gün bu dosya ikinci kez açılmayacak.
+    // Kapı `canSeeOwnerFields` (`src/lib/config/quote-team.ts`) ve T-4 o
+    // yüklemin takım dalını AÇTI: takım üyesi de bekleyen ödemenin referansını
+    // ve siparişin numarasını görür (meslektaşının başlattığı ödemeyi
+    // bilmeden ne ödeyebilir ne düzenleyebilir). Bu dosya o gün ikinci kez
+    // AÇILMADI — kapının tek yerde adlandırılmış olması tam bunun içindi.
     liveDraftReference: canSeeOwnerFields(viewer) ? input.liveDraftReference : null,
     orderNumber: canSeeOwnerFields(viewer) ? input.orderNumber : null,
     viewer,
@@ -409,8 +410,9 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
   // Fatura bilgisi ve paylaşım bağlantısı YALNIZ sahibe: biri müşterinin vergi
   // kimliği, diğeri "bu teklifi herkese açabilirim" yetkisidir. Kurumsal fatura
   // bilgisi (firma adı / VKN) ise TAKIMIN bilgisidir ve üyesinden saklanmasının
-  // bir anlamı yok — kapı o yüzden `canSeeOwnerFields` adını taşıyor; yüklemin
-  // takım dalını açması T-4'ün kararıdır, bugün `viewer.isOwner`a DENKtir.
+  // bir anlamı yok — kapı o yüzden `canSeeOwnerFields` adını taşıyor ve T-4'te
+  // takım dalı AÇILDI (tasarım §4: "fatura bilgisi TAKIMIN bilgisidir").
+  // Paylaşım izleyicisi iki alanın HİÇBİRİNİ almaya devam ediyor.
   if (canSeeOwnerFields(viewer)) {
     view.invoice = {
       type: quote.invoiceType,
@@ -431,9 +433,11 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
   // kimlik erişim kabuğunun (`QuoteAccessTeam`) işi.
   //
   // Anahtar, teklif gerçekten bir takıma bağlı DEĞİLSE hiç eklenmez — `null`
-  // bile değil (dosyanın açılış kuralı). `isOwner` dalı `isTeam`i açmadığı için
-  // iki yüklem AYRI AYRI aranır; `canSeeOwnerFields` T-4'te ikisini birleştirir.
-  if (input.team !== null && (viewer.isTeam || viewer.isOwner)) {
+  // bile değil (dosyanın açılış kuralı). Kapı `canSeeOwnerFields`: T-2'de bu
+  // ifade elle yazılıydı (`isTeam || isOwner`), T-4 yüklemin takım dalını
+  // açınca ikisi AYNI şey oldu ve kopya düştü — matrisin ikinci bir kopyası
+  // tam olarak ayrışan şeydir.
+  if (input.team !== null && canSeeOwnerFields(viewer)) {
     view.team = {
       name: input.team.name,
       role: input.team.role,

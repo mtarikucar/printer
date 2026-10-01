@@ -276,8 +276,9 @@ export function canCancelCheckout(
 // ─── Teklifi takıma bağlamak / ayırmak ─────────────────────────────────────
 //
 // Aynı kural iki kapı: `member` yalnız KENDİ açtığı teklifi bağlar ya da
-// ayırır. İki ad ayrı durur çünkü T-4 ikisini ayrı uçlara bağlar ve kuralın
-// birinde değişmesi (ör. ayırmayı yalnız admin'e bırakmak) diğerine sızmamalı.
+// ayırır. İki ad ayrı durur çünkü T-4 ikisini AYNI ucun iki yöntemine bağladı
+// (`POST|DELETE /api/quotes/[id]/team`) ve kuralın birinde değişmesi (ör.
+// ayırmayı yalnız admin'e bırakmak) diğerine sızmamalı.
 
 function canMoveOwnWork(
   role: TeamRole,

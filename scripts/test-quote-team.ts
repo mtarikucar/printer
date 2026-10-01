@@ -21,8 +21,13 @@
  *    `quoteInList(TEAM_ACTIONS)` üretir, yani liste tek kaynaktan gelir.
  *
  * Ayrıca: T-1'de `team_id` YAZILIYOR ama hiçbir yerde OKUNMUYORDU; T-2 ilk
- * okumayı ekledi ve aşağıdaki tarama o yüzden DARALDI — "hiç kimse okumuyor"
- * iddiası, "yalnız şu üç uç okuyor" sayımına dönüştü (gerekçesi orada).
+ * okumayı ekledi, T-3 takım YÖNETİM uçlarını ekledi ve aşağıdaki tarama o yüzden
+ * iki kez DARALDI — "hiç kimse okumuyor" iddiası, "yalnız izinli dosyalar
+ * okuyor" sayımına dönüştü (gerekçesi listenin başında).
+ *
+ * Altıncı şey (T-3): DAVET KABULÜNÜN ÖN KOŞULLARI. `inviteAcceptable` altı ret
+ * sebebini kapalı bir kümeden döner ve hiçbiri `null`a çökmez — ret sebebi bir
+ * KVKK kararı olduğu için her birinin ayrı bir satırı var.
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -33,6 +38,7 @@ import { join, sep } from "node:path";
 // iddia sessizce ÖLÜ kalırdı — ölçüldü: `RANK` ihraç edilmiş hâlde de ✓ basıyordu.
 import * as teamCore from "../src/lib/config/quote-team";
 import {
+  INVITE_REJECTIONS,
   INVITE_TTL_MS,
   TEAM_ACTIONS,
   TEAM_INVITE_ROLES,
@@ -52,7 +58,10 @@ import {
   canSeeOwnerFields,
   canShareQuote,
   canTransferOwnership,
+  inviteAcceptable,
   normalizeTeamEmail,
+  type InviteAcceptanceFacts,
+  type InviteRejection,
   type TeamRole,
 } from "../src/lib/config/quote-team";
 import type { QuoteViewer } from "../src/lib/config/quote-types";
@@ -239,6 +248,78 @@ test("tek normalizasyon: trim + küçük harf", () => {
   assert.equal(normalizeTeamEmail("\tALI@EXAMPLE.COM\n"), "ali@example.com");
 });
 
+console.log("\ndavet kabul ön koşulları — RET SEBEBİ KAPALI BİR KÜMEDİR");
+/**
+ * `acceptInvite` (T-3, `customer-team.ts`) altı ön koşulu SIRAYLA sorar ve
+ * hepsi BU yüklemde durur. Neden saf bir yüklemde: ret sebebi bir KVKK
+ * kararıdır (hangi hesap hangi takımın dosyalarını görebilir) ve DB'siz
+ * taranabildiği sürece her sebebin kendi kanıtı olur. Servis bu kodları
+ * müşteriye giden cümleye ve tasarım §8'deki kod kümesine çevirir.
+ */
+const NOW = new Date("2026-10-01T12:00:00.000Z");
+function facts(over: Partial<InviteAcceptanceFacts> = {}): InviteAcceptanceFacts {
+  return {
+    revokedAt: null,
+    acceptedAt: null,
+    expiresAt: new Date(NOW.getTime() + INVITE_TTL_MS),
+    inviteEmail: "ali@example.com",
+    sessionEmail: "ali@example.com",
+    alreadyInTeam: false,
+    ...over,
+  };
+}
+/** Her satır: ne bozuk → hangi kod. `null` = kabul edilebilir. */
+const ACCEPT_TABLE: Array<[string, Partial<InviteAcceptanceFacts>, InviteRejection | null]> = [
+  ["canlı davet, doğru e-posta, takımsız kullanıcı", {}, null],
+  ["iptal edilmiş davet", { revokedAt: NOW }, "invite_revoked"],
+  ["daha önce kabul edilmiş davet (TEK KULLANIMLIK)", { acceptedAt: NOW }, "invite_used"],
+  ["süresi dolmuş davet", { expiresAt: new Date(NOW.getTime() - 1) }, "invite_expired"],
+  ["oturum yok: kabul kimliksiz yapılamaz", { sessionEmail: null }, "invite_no_identity"],
+  [
+    "token'ı ele geçiren BAŞKA hesap",
+    { sessionEmail: "veli@example.com" },
+    "invite_email_mismatch",
+  ],
+  ["zaten bir takımda olan kullanıcı", { alreadyInTeam: true }, "already_in_team"],
+];
+for (const [name, over, want] of ACCEPT_TABLE) {
+  test(`${name} → ${want ?? "KABUL"}`, () => {
+    assert.equal(inviteAcceptable(facts(over), NOW), want);
+  });
+}
+test("altı ret sebebi AYRI kod döner ve hiçbiri null'a çökmez", () => {
+  // MUTASYON SINAVI: e-posta eşleşme kontrolünü kaldır → yukarıdaki
+  // `invite_email_mismatch` satırı KIRMIZI olur ve bu iddia da düşer.
+  const codes = ACCEPT_TABLE.map(([, , code]) => code).filter((c) => c !== null);
+  assert.equal(codes.length, 6, "tablo altı ret vakası taramıyor");
+  assert.equal(new Set(codes).size, 6, "iki ret sebebi aynı kodu paylaşıyor");
+  assert.deepEqual([...codes].sort(), [...INVITE_REJECTIONS].sort(), "ret kümesi ayrıştı");
+});
+test("süre sınırı KAPALI uçtur: `expires_at === now` dolmuş sayılır", () => {
+  // Fail-closed: eşitlikte kabul etmek, TTL'i bir milisaniye de olsa uzatırdı.
+  assert.equal(inviteAcceptable(facts({ expiresAt: NOW }), NOW), "invite_expired");
+});
+test("sıra DETERMİNİST: iptal edilmiş VE süresi dolmuş davet 'iptal' der", () => {
+  // İki sebep birden varsa cevap tek ve aynıdır; yoksa aynı davet iki farklı
+  // cümleyle reddedilir ve destek "hangisi" diye sorar.
+  assert.equal(
+    inviteAcceptable(facts({ revokedAt: NOW, expiresAt: new Date(NOW.getTime() - 1) }), NOW),
+    "invite_revoked"
+  );
+});
+test("normalizasyon İKİ TARAFA da uygulanır", () => {
+  // `customer_team_invites_live_uq` ve bu kapı AYNI normalizasyonu paylaşmak
+  // zorunda: biri küçük harfe indirip diğeri indirmezse davet kabul edilemez.
+  assert.equal(
+    inviteAcceptable(facts({ inviteEmail: "Ali@X.com", sessionEmail: " ali@x.COM " }), NOW),
+    null
+  );
+  assert.equal(
+    inviteAcceptable(facts({ inviteEmail: " ALI@X.COM ", sessionEmail: "ali@x.com" }), NOW),
+    null
+  );
+});
+
 console.log("\neylem listesi tek kaynaktan gelir");
 const schemaText = readFileSync(join(ROOT, "src/lib/db/schema.ts"), "utf8");
 test("denetim CHECK'i listeyi `quoteInList(TEAM_ACTIONS)` ile kurar", () => {
@@ -320,7 +401,21 @@ const SINGLE_FILES = [
   "src/lib/services/quote-access.ts",
   "src/lib/services/quote-present.ts",
 ];
-/** T-2'nin bilerek açtığı üç uç; buraya bir satır EKLEMEK bir karardır. */
+/**
+ * T-2'nin açtığı üç uç + T-3'ün takım YÖNETİM uçları; buraya bir satır EKLEMEK
+ * bir karardır.
+ *
+ * T-3'ün altı dosyası listeye GİRDİ çünkü bu sevkiyatın konusu tam olarak o:
+ * üyelik satırını yazan yol. Üçü de taramanın asıl derdinin DIŞINDA kalıyor —
+ * hiçbiri bir TEKLİF yüzeyi değil (`/api/customer/team/**` takımın kendisini
+ * yönetir, teklif açmaz, fiyat göstermez, parça listelemez) ve hepsinin kendi
+ * kanıtı var: `scripts/test-customer-team-api.ts` (yöntem kümesi, bayrak
+ * kapısı, oran limitleri, KVKK) + `scripts/test-quote-team-db.ts` (davet
+ * yaşam döngüsü, 26 kontrol).
+ *
+ * Taramanın koruduğu şey DEĞİŞMEDİ: 22 `viewer.isOwner` kapısı ve müşteri
+ * TEKLİF ekranları hâlâ takım durumunu okumuyor; o genişleme T-4'ün kararı.
+ */
 const TEAM_READERS_ALLOWED = [
   // Erişim matrisinin takım dalı + bayrak/üyelik kabuğu.
   "src/lib/services/quote-access.ts",
@@ -328,6 +423,13 @@ const TEAM_READERS_ALLOWED = [
   "src/lib/services/quote-present.ts",
   // `resolveQuoteViewer`dan GEÇMEYEN ikinci kapı: canlı akış.
   "src/app/api/realtime/quote/[id]/route.ts",
+  // T-3 · takım yönetim uçları (tasarım §6.1 tablosu) + ortak cevap çevirisi.
+  "src/app/api/customer/team/_shared.ts",
+  "src/app/api/customer/team/route.ts",
+  "src/app/api/customer/team/invites/route.ts",
+  "src/app/api/customer/team/invites/[id]/route.ts",
+  "src/app/api/customer/team/invites/accept/route.ts",
+  "src/app/api/customer/team/members/[userId]/route.ts",
 ];
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -340,7 +442,7 @@ function walk(dir: string): string[] {
 }
 /** Yol ayırıcısı platforma göre değişir; liste tek biçimde yazılır. */
 const posix = (rel: string) => rel.split(sep).join("/");
-test("takım durumunu YALNIZ T-2'nin açtığı üç uç okuyor", () => {
+test("takım durumunu YALNIZ izinli dosyalar okuyor (teklif yüzeyleri DIŞINDA)", () => {
   const allowed = new Set(TEAM_READERS_ALLOWED);
   const leaks: string[] = [];
   for (const rel of [...SURFACES.flatMap(walk), ...SINGLE_FILES]) {
@@ -352,7 +454,7 @@ test("takım durumunu YALNIZ T-2'nin açtığı üç uç okuyor", () => {
   }
   assert.deepEqual(leaks, [], "takım durumunu okuyan YENİ bir yüzey var — T-4'ün işi sızdı");
 });
-test("izin listesi BAYATLAMADI: üç ucun üçü de gerçekten okuyor", () => {
+test("izin listesi BAYATLAMADI: her satır gerçekten okuyor", () => {
   // Liste boşa düşerse tarama sessizce hiçbir şeyi korumaz hâle gelir.
   for (const rel of TEAM_READERS_ALLOWED) {
     assert.ok(

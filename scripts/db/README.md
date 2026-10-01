@@ -162,6 +162,19 @@ Note that an **admin** session passes the flag gate (`src/lib/services/quote-acc
 internal admin walkthrough with the flag off creates real `quotes` rows — not just catalogue
 audit rows. The rollback window closes on the first internal test, not on the first customer.
 
+**The same sentence now applies to 0072 (`customer_teams`), and it closes earlier than you would
+expect.** `drizzle/0072_customer_teams.down.sql` refuses to run while any of `customer_teams`,
+`customer_team_members`, `customer_team_invites` or `customer_team_actions` holds a row, or while
+any quote carries a `team_id`. **Creating one team writes three of those rows in a single
+transaction** (the team, the owner's membership, and a `team_created` audit row), so the rollback
+window for 0072 closes on the **first team that is ever created** — not on the first invited
+member and not on the first customer. And because `teamsEnabled()` lets an **admin** session
+through the `quote_teams_enabled` gate (same pattern as 0064), an internal walkthrough of
+`/api/customer/team` with the flag off creates that first real team. If 0072 must be rolled back
+after any team exists, the owner has to delete the team through the product first
+(`DELETE /api/customer/team`, which itself refuses while the team has other members, pending
+invites or attached quotes) — the down script never deletes customer data on its own.
+
 ## Deploying 0064: operator checklist
 
 **Before the deploy**

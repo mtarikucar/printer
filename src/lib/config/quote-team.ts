@@ -80,6 +80,21 @@ export type TeamAction = (typeof TEAM_ACTIONS)[number];
 /** Davet ömrü: 7 gün. Süresi dolan davet SİLİNMEZ, denetim izinde kalır. */
 export const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
 
+/**
+ * Takım kurma formunda GÖSTERİLEN KVKK bilgilendirmesinin sürümü
+ * (`customer_teams.kvkk_notice_version`).
+ *
+ * Metin değil SÜRÜM saklanır: "kurucu neye onay verdi" sorusunun cevabı, metnin
+ * o günkü hâlidir ve metni kopyalamak satırı şişirip yine de eski bir kopyayı
+ * dondurmaktı. Bilgilendirme METNİ değişirse bu sabit de artırılır — yoksa
+ * farklı iki metne verilen onaylar veritabanında ayırt edilemez hâle gelir.
+ *
+ * Burada duruyor çünkü İKİ taraf da okumak zorunda: onayı yazan uç
+ * (`POST /api/customer/team`) ve metni gösteren form (T-5). Saf modül ikisine de
+ * açıktır (`server-only` yok, DB yok).
+ */
+export const TEAM_KVKK_NOTICE_VERSION = "2026-09-22";
+
 /** İHRAÇ EDİLMEZ (değişmez 3): rütbe bir ayrıntı, karar veren yüklemdir. */
 const RANK: Record<TeamRole, number> = { owner: 3, admin: 2, member: 1, viewer: 0 };
 
@@ -278,4 +293,82 @@ export function canTransferOwnership(role: TeamRole): boolean {
  */
 export function normalizeTeamEmail(raw: string): string {
   return raw.trim().toLowerCase();
+}
+
+// ─── Davet kabulünün SAF ön koşulları ──────────────────────────────────────
+
+/**
+ * Bir davetin reddedilme sebepleri — KAPALI küme.
+ *
+ * Neden burada ve neden saf: ret sebebi bir KVKK kararıdır (hangi hesap hangi
+ * takımın dosyalarını, fiyatlarını ve fatura bilgisini görebilir hâle gelir) ve
+ * altı sebebin her birinin kendi testi ancak DB'siz taranabildiği sürece olur
+ * (`scripts/test-quote-team.ts` tablo testi). Servis katmanı bu kodları
+ * müşteriye giden TÜRKÇE cümleye ve tasarım §8'in kod kümesine çevirir —
+ * `invite_revoked` ile `invite_used` orada `not_allowed` olur, çünkü §8'in
+ * listesi arayüz sözlüğünün anahtar kümesidir; burada ikisi AYRI durur, yoksa
+ * "daveti iptal ettim" ile "bu davet zaten kullanıldı" tek cevaba karışırdı.
+ */
+export const INVITE_REJECTIONS = [
+  "invite_revoked",
+  "invite_used",
+  "invite_expired",
+  "invite_no_identity",
+  "invite_email_mismatch",
+  "already_in_team",
+] as const;
+export type InviteRejection = (typeof INVITE_REJECTIONS)[number];
+
+/**
+ * Kabul kararının TÜM girdisi. Hepsi çağırandan gelir: bu yüklem ne DB'ye ne
+ * saate bakar (`now` de parametre), yani tablo testiyle taranabilir.
+ */
+export interface InviteAcceptanceFacts {
+  revokedAt: Date | null;
+  acceptedAt: Date | null;
+  expiresAt: Date;
+  /** Davetin GİTTİĞİ adres (DB'de `normalizeTeamEmail`den geçmiş hâliyle durur). */
+  inviteEmail: string;
+  /** Kabul etmeye çalışan OTURUMUN adresi; oturum yoksa null. */
+  sessionEmail: string | null;
+  /** Kullanıcının (başka ya da aynı) bir takımda ÜYELİĞİ var mı (karar 6.5). */
+  alreadyInTeam: boolean;
+}
+
+/**
+ * Davet kabul edilebilir mi? `null` = edilebilir, aksi hâlde SEBEP.
+ *
+ * SIRA DETERMİNİSTTİR ve bu bir üslup tercihi değil: iki sebep birden varsa
+ * (iptal edilmiş VE süresi dolmuş) cevap tek ve aynı olmak zorunda, yoksa aynı
+ * davet iki farklı cümleyle reddedilir ve destek "hangisi" diye sorar.
+ *
+ * İKİ KAPI BURADA ÇİVİLİ:
+ *
+ * 1. **E-posta eşleşmesi** — token'ı ele geçiren BAŞKA bir hesap kabul EDEMEZ.
+ *    Karşılaştırmanın iki tarafı da `normalizeTeamEmail`den geçer: tekil indeks
+ *    (`customer_team_invites_live_uq`) ile bu kapı aynı normalizasyonu
+ *    paylaşmak zorunda, yoksa biri küçük harfe indirip diğeri indirmediğinde
+ *    davet hiç kabul edilemez hâle gelir.
+ * 2. **Süre sınırı KAPALI uçtur** (`expiresAt <= now`): eşitlikte kabul etmek
+ *    TTL'i bir milisaniye de olsa uzatırdı.
+ *
+ * `sessionEmail === null` ayrı bir sebeptir (`invite_no_identity`) ve
+ * `invite_email_mismatch`e KATLANMAZ: ikisi aynı kodu dönse, "giriş yapmalısın"
+ * ile "yanlış hesapla giriş yaptın" tek cümleye düşerdi.
+ */
+export function inviteAcceptable(
+  facts: InviteAcceptanceFacts,
+  now: Date
+): InviteRejection | null {
+  if (facts.revokedAt !== null) return "invite_revoked";
+  if (facts.acceptedAt !== null) return "invite_used";
+  if (facts.expiresAt.getTime() <= now.getTime()) return "invite_expired";
+  if (facts.sessionEmail === null || facts.sessionEmail.trim() === "") {
+    return "invite_no_identity";
+  }
+  if (normalizeTeamEmail(facts.inviteEmail) !== normalizeTeamEmail(facts.sessionEmail)) {
+    return "invite_email_mismatch";
+  }
+  if (facts.alreadyInTeam) return "already_in_team";
+  return null;
 }

@@ -1631,6 +1631,79 @@ async function main() {
       assert.equal(onDisk(key), false, "iptal edilmiş anlaşma dosyayı tutuyor");
     });
 
+    await test("R2: kilidi DOLMUŞ (`expired`) anlaşmanın kaynak dosyaları da SİLİNMEZ", async () => {
+      // 9. aşama (`expireFrameworkLocks`) kilidi dolan anlaşmayı `active` →
+      // `expired` yapıyor, ama bu bir KAPANIŞ DEĞİL: `extendFrameworkLock` ona
+      // yeni bir tarih verip YENİDEN `active` yapıyor (desteklenen akış, aynı
+      // dosyada çivili). `expired` korumanın dışında kalsaydı zincir şöyle
+      // işliyordu: kilit doldu → anlaşma `expired` → `expireQuotes` kaynak
+      // teklifi kapattı → `purgeExpiredQuoteFiles` AYNI TURDA dosyaları sildi
+      // → admin kilidi uzattı ve o andan sonra HER `releaseBatch` kalıcı
+      // olarak `files_purged` (409) verdi. İmzalanmış bir anlaşma, kilidi
+      // yenilenebildiği sürece yerine getirilebilir olmak zorunda.
+      const user = await makeUser({ tag: "fw-purge-lock-expired" });
+      const guarded = await makeQuote({
+        userId: user.id,
+        status: "expired",
+        expiresAt: new Date(Date.now() - 200 * DAY),
+      });
+      const plain = await makeQuote({
+        userId: user.id,
+        status: "expired",
+        expiresAt: new Date(Date.now() - 200 * DAY),
+      });
+      const guardedDir = randomUUID();
+      const plainDir = randomUUID();
+      const guardedKey = writeKey(guardedDir, "source.stl");
+      const plainKey = writeKey(plainDir, "source.stl");
+      const guardedPart = await makePart(guarded, { id: guardedDir, sourceKey: guardedKey });
+      const plainPart = await makePart(plain, { id: plainDir, sourceKey: plainKey });
+      await makeFramework({
+        userId: user.id,
+        quoteId: guarded,
+        partId: guardedPart,
+        status: "expired",
+        priceLockedUntil: new Date(Date.now() - DAY),
+        batch: { plannedShipDate: farFutureKey },
+      });
+
+      assert.equal(await purgeExpiredQuoteFiles(new Date()), 1, "yalnız çerçevesiz parça süpürülmeli");
+      assert.equal(
+        onDisk(guardedKey),
+        true,
+        "kilidi dolmuş anlaşmanın kaynak dosyası SİLİNDİ: uzatma sonrası parti bir daha bırakılamaz"
+      );
+      assert.equal(await purgedAt(guardedPart), null, "korunan parça damgalandı");
+      // Kapı FAZLA GENİŞ DEĞİL: aynı hâlde çerçevesiz teklif süpürülüyor.
+      assert.equal(onDisk(plainKey), false, "çerçevesiz teklifin dosyası silinmedi");
+      assert.ok(await purgedAt(plainPart));
+    });
+
+    await test("R2: kilidi dolmuş anlaşmanın kaynak teklifi `expired`a da ÇEKİLMEZ", async () => {
+      // Purge'ün adayı hiç doğmamalı: süresi dolmuş sayılan kaynak teklif
+      // saklama süpürmesinin de adayıdır.
+      const user = await makeUser({ tag: "fw-expire-lock-expired" });
+      const guarded = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() - HOUR),
+      });
+      const partId = await makePart(guarded, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      await makeFramework({
+        userId: user.id,
+        quoteId: guarded,
+        partId,
+        status: "expired",
+        priceLockedUntil: new Date(Date.now() - DAY),
+        batch: { plannedShipDate: farFutureKey },
+      });
+
+      assert.equal(await expireQuotes(new Date()), 0, "kilidi dolmuş anlaşmanın kaynağı kapatıldı");
+      assert.equal(await statusOf(guarded), "quoted");
+    });
+
     await test("R2: aynı hâlde `expireQuotes` kaynak teklifi `expired`a ÇEKMİYOR", async () => {
       // Purge'ün adayı HİÇ DOĞMUYOR: süresi dolmuş sayılan bir kaynak teklif
       // saklama süpürmesinin de adayıdır.

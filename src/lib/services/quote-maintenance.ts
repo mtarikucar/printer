@@ -181,18 +181,32 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /**
  * KAPANMAMIŞ anlaşma durumları: bundan daha fazla parti SERBEST BIRAKILABİLİR.
  *
- * Ölçü bilerek bu kadar DAR: `cancelled` / `expired` / `completed` bir anlaşmada
- * `releaseBatch` zaten reddediyor (`framework_not_active`), yani o anlaşmanın
- * kaynak teklifinden bir daha klon ÜRETİLMEZ ve dosyalarını tutmanın işletme
+ * `expired` DE İÇERDE, ve bu kümenin en önemli satırı o. Kilidi dolan anlaşmayı
+ * 9. aşama (`expireFrameworkLocks`) `active` → `expired` yapıyor, ama bu bir
+ * KAPANIŞ DEĞİL: `extendFrameworkLock` süresi dolmuş bir anlaşmaya yeni bir
+ * tarih verip onu YENİDEN `active` yapıyor (`quote-framework.ts`, desteklenen
+ * akış). Kümeden çıkarsa zincir şöyle işliyordu: kilit doldu → anlaşma
+ * `expired` → koruma düştü → `expireQuotes` kaynak teklifi `expired` yaptı →
+ * `purgeExpiredQuoteFiles` AYNI TURDA dosyaları sildi → admin kilidi uzattı ve
+ * o andan sonra HER `releaseBatch` kalıcı olarak `files_purged` (409) verdi.
+ * İmzalanmış bir anlaşma, kilidi yenilenebildiği sürece yerine getirilebilir
+ * olmak zorunda.
+ *
+ * Ölçü yine de DAR: `cancelled` / `completed` bir anlaşmada `releaseBatch`
+ * zaten reddediyor ve uzatma da reddediyor (`framework_closed`), yani o
+ * kaynak tekliften bir daha klon ÜRETİLMEZ ve dosyalarını tutmanın işletme
  * gerekçesi kalmaz. Kümeyi "her çerçeve" yapmak, iptal edilmiş bir anlaşmanın
- * dosyalarını sonsuza dek diskte tutmak olurdu.
+ * dosyalarını sonsuza dek diskte tutmak olurdu. Kilidi dolmuş bir anlaşmanın
+ * dosyalarının ÇIKIŞ YOLU da burada: admin anlaşmayı iptal eder
+ * (`cancelFramework` `expired` hâlde de çalışıyor), süpürme bir sonraki turda
+ * onu alır.
  *
  * Anlaşmanın KENDİSİNİN ticari defter saklaması bu süpürmeden BAĞIMSIZDIR:
  * taahhüt, kilitli birim fiyatlar ve donmuş katalog `quote_frameworks` satırında
  * (`parts_snapshot` + `pricing_snapshot`) durur ve bu tur ona HİÇ dokunmaz —
  * yalnız parça DOSYALARINI siler.
  */
-const LIVE_FRAMEWORK_STATUSES: FrameworkStatus[] = ["draft", "active"];
+const LIVE_FRAMEWORK_STATUSES: FrameworkStatus[] = ["draft", "active", "expired"];
 
 /**
  * R2'NİN KAPISI: bu teklif, kapanmamış bir çerçeve anlaşmanın KAYNAK teklifi mi?
@@ -1036,6 +1050,11 @@ export async function sendFrameworkReleaseReminders(
  * YAYIN YAPILMAZ: ekranlar `lockExpired`ı `price_locked_until`dan OKUMA ANINDA
  * türetiyor (`loadFrameworkDetail`), yani açık bir sayfa bu turu beklemeden
  * doğru cümleyi gösterir.
+ *
+ * BU GEÇİŞ DOSYA SÜPÜRMESİNİ AÇMAZ: `LIVE_FRAMEWORK_STATUSES` `expired`ı
+ * İÇERİYOR (gerekçe orada). Aksi hâlde bu aşama, kilidi uzatılabilir bir
+ * anlaşmanın kaynak dosyalarını aynı turda sildirir ve uzatmadan sonraki her
+ * `releaseBatch` kalıcı `files_purged` 409'u verirdi.
  */
 export async function expireFrameworkLocks(now: Date): Promise<number> {
   const expired = await db

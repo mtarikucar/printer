@@ -1147,21 +1147,109 @@ const en = {
   "instantQuote.document.validUntil": "This quote is valid until {date}.",
 
   // instantQuote — framework agreement (planned batch delivery)
-  // This round carries ONLY the labels of the pure core's closed sets: the
-  // progress buckets and the price-lock sentence. The buckets ALWAYS add up to
-  // the commitment (`frameworkProgressBuckets`), so these labels together are
-  // the whole bar. Screen and endpoint sentences land in later rounds.
+  //
+  // PAYMENT IS PER BATCH and A FROZEN PRICE IS A PROMISE: the sentences here
+  // write those two rules for the customer. Three of them map EXACTLY onto a
+  // rule in the code and `scripts/test-quote-ui.ts` nails screen and code
+  // together: `.tryBindingFxApprox` (the ₺ freezes, the FX rate does not),
+  // `.perBatchBilling` (`addonLines` multiplies `fixed → 1` PER BATCH) and
+  // `.warningsPerBatch` (`copyPartInto` does not copy `dfm_ack_key`).
+  //
+  // The buckets ALWAYS add up to the commitment: SEVEN buckets, SEVEN keys, and
+  // the mapping in `src/app/cerceve/[number]/framework-values.ts` is a `Record`
+  // type — an eighth bucket is a COMPILE error.
+  "instantQuote.framework.account.column.batches": "Batches",
+  "instantQuote.framework.account.column.lock": "Price lock",
+  "instantQuote.framework.account.column.number": "Agreement",
+  "instantQuote.framework.account.column.status": "Status",
+  "instantQuote.framework.account.column.title": "Project",
+  "instantQuote.framework.account.column.total": "Amount",
+  "instantQuote.framework.account.column.units": "Committed",
+  "instantQuote.framework.account.empty": "You have no framework agreements yet.",
+  "instantQuote.framework.account.loadFailed": "The framework agreements could not be loaded.",
+  "instantQuote.framework.account.open": "Open agreement",
+  "instantQuote.framework.account.subtitle":
+    "Your price-locked commitments and their batch plans.",
+  "instantQuote.framework.account.title": "My framework agreements",
+  "instantQuote.framework.addon": "agreement add-on",
   "instantQuote.framework.awaitingPayment": "Awaiting payment",
+  "instantQuote.framework.batch": "Batch {n}/{total}",
+  "instantQuote.framework.batchBadge": "Framework {number} · Batch {position}",
+  "instantQuote.framework.batchCount": "{count} batches",
+  "instantQuote.framework.batchQuote": "Batch quote",
+  "instantQuote.framework.batchStatus.cancelled": "Cancelled",
+  "instantQuote.framework.batchStatus.planned": "Planned",
+  "instantQuote.framework.batchStatus.released": "Released",
+  "instantQuote.framework.batches": "Batch plan",
+  "instantQuote.framework.batchesEmpty":
+    "No batches planned on this agreement yet; our team sets the plan.",
+  "instantQuote.framework.batchesTotal": "Split into batches — Σ batch amount",
+  "instantQuote.framework.batchesTotalNote":
+    "The sum of the amounts of the batches that are not cancelled. Fixed and per-part add-ons are charged again on every batch, so this can be larger than the figure next to it; both are correct.",
   "instantQuote.framework.cancelledOrRefunded": "Cancelled / refunded",
+  "instantQuote.framework.column.committed": "Committed",
+  "instantQuote.framework.column.config": "Specs",
+  "instantQuote.framework.column.line": "Line",
+  "instantQuote.framework.column.part": "Part",
+  "instantQuote.framework.column.unit": "Locked unit price",
   "instantQuote.framework.committed": "Committed",
+  "instantQuote.framework.committedTotal": "Committed total — in one shipment",
+  "instantQuote.framework.committedTotalNote":
+    "What ALL {units} units would cost if they shipped as a single order. This is NOT the sum of the batches.",
   "instantQuote.framework.delivered": "Delivered",
+  "instantQuote.framework.doc.batchPlan": "Batch plan",
+  "instantQuote.framework.doc.businessDays":
+    "Delivery dates are calculated in BUSINESS DAYS; the public-holiday list and the daily cut-off hour are read from the agreement's frozen calendar, so a holiday announced after signing does not move the plan.",
+  "instantQuote.framework.doc.commitment": "Commitment",
+  "instantQuote.framework.doc.freeCancel":
+    "Batches that have not been released can be cancelled free of charge; the price lock lapses for the cancelled batches.",
+  "instantQuote.framework.doc.madeToOrder":
+    "A released batch is made to order and falls under the withdrawal-right exception.",
+  "instantQuote.framework.doc.number": "Agreement no",
+  "instantQuote.framework.doc.separateInvoice":
+    "A separate invoice is issued for each batch; invoices are issued manually and no e-invoice integration is promised.",
+  "instantQuote.framework.doc.terms": "Framework agreement terms",
+  "instantQuote.framework.doc.termsAcceptedAt": "Terms accepted on",
+  "instantQuote.framework.doc.termsNotAccepted": "The terms have not been accepted yet.",
+  "instantQuote.framework.doc.termsVersion": "Terms version",
+  "instantQuote.framework.document": "Agreement document",
+  "instantQuote.framework.documentTitle": "Framework agreement document",
   "instantQuote.framework.inProduction": "In production",
+  "instantQuote.framework.leadDays": "Lead time",
+  "instantQuote.framework.loadFailed": "The framework agreement could not be loaded.",
   "instantQuote.framework.lockExpired":
     "The price is no longer valid — write to us for a new price",
+  "instantQuote.framework.order": "Order",
+  "instantQuote.framework.payBatch": "Pay this batch",
+  "instantQuote.framework.payConfirm": "Batch {n}/{total} · {amount}",
+  "instantQuote.framework.payConfirmCancel": "Cancel",
+  "instantQuote.framework.payConfirmCta": "I confirm, continue to payment",
+  "instantQuote.framework.payConfirmNote":
+    "The payment page does not show which batch this is, so you confirm the batch number and the amount here BEFORE payment starts.",
+  "instantQuote.framework.perBatchBilling":
+    "Each batch is invoiced and paid separately; the add-ons of each batch are charged on that batch.",
   "instantQuote.framework.planned": "Planned",
+  "instantQuote.framework.plannedShipDate": "Planned shipment",
   "instantQuote.framework.priceLockedUntil": "Price valid until {date}",
+  "instantQuote.framework.readOnly":
+    "This quote is a batch of a framework agreement; it cannot be edited.",
   "instantQuote.framework.shipped": "Shipped",
+  "instantQuote.framework.shippingAddress": "Delivery address",
+  "instantQuote.framework.sourceQuote": "Source quote",
+  "instantQuote.framework.status.active": "Active",
+  "instantQuote.framework.status.cancelled": "Cancelled",
+  "instantQuote.framework.status.completed": "Completed",
+  "instantQuote.framework.status.draft": "Draft",
+  "instantQuote.framework.status.expired": "Expired",
+  "instantQuote.framework.subtitle": "Your commitment, the batch plan and delivery status.",
   "instantQuote.framework.title": "Framework agreement",
+  "instantQuote.framework.trackingNumber": "Tracking no",
+  "instantQuote.framework.tryBindingFxApprox":
+    "The binding amount is in Turkish lira and does not change for the duration of the agreement; the foreign-currency figure beside it is APPROXIMATE and is calculated with the TCMB rate of the release day.",
+  "instantQuote.framework.units": "{units} units",
+  "instantQuote.framework.unplanned": "Unplanned",
+  "instantQuote.framework.warningsPerBatch":
+    "Production warnings are acknowledged again on every batch.",
 
   // instantQuote — foreign-currency DISPLAY (TCMB rate)
   "instantQuote.fx.chargedInTry":

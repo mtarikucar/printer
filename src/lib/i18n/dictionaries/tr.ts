@@ -1163,20 +1163,109 @@ const tr: Dictionary = {
   "instantQuote.document.validUntil": "Bu teklif {date} tarihine kadar geçerlidir.",
 
   // instantQuote — çerçeve anlaşma (planlı parti teslimi)
-  // Bu turda YALNIZ saf çekirdeğin kapalı kümelerinin karşılıkları: ilerleme
-  // kovaları ve fiyat kilidi cümlesi. Kovalar DAİMA taahhüde toplanır
-  // (`frameworkProgressBuckets`), yani bu etiketlerin toplamı çubuğun
-  // tamamıdır. Ekran ve uç cümleleri sonraki turlarda eklenir.
+  //
+  // ÖDEME PARTİ BAŞINADIR ve DONMUŞ FİYAT BİR SÖZDÜR: bu bloğun cümleleri o iki
+  // kuralı müşteriye yazar. Üç cümle AYNEN kodun bir kuralına karşılık gelir ve
+  // `scripts/test-quote-ui.ts` ikisini birlikte çiviliyor:
+  //  - `.tryBindingFxApprox` → ₺ donar, kur DONMAZ (`quote-currency.ts` başlığı:
+  //    32 Sayılı Karar m.4/g + 2008-32/34 m.8; kur serbest bırakma GÜNÜNDEN),
+  //  - `.perBatchBilling` → `addonLines` çarpanı `fixed → 1` PARTİ BAŞINA, yani
+  //    sabit ek hizmet her partide yeniden tahsil edilir (asgari tamamlama da),
+  //  - `.warningsPerBatch` → `copyPartInto` `dfm_ack_key`i KOPYALAMAZ (onay
+  //    müşterinin kaydıdır), yani `checkoutBlockers` her partide yeniden sorar.
+  //
+  // Kovalar DAİMA taahhüde toplanır (`frameworkProgressBuckets`): YEDİ kovanın
+  // YEDİ anahtarı var ve eşleme `src/app/cerceve/[number]/framework-values.ts`
+  // içinde `Record` tiplidir — yeni bir kova DERLEME hatası verir.
+  "instantQuote.framework.account.column.batches": "Parti",
+  "instantQuote.framework.account.column.lock": "Fiyat kilidi",
+  "instantQuote.framework.account.column.number": "Anlaşma",
+  "instantQuote.framework.account.column.status": "Durum",
+  "instantQuote.framework.account.column.title": "Proje",
+  "instantQuote.framework.account.column.total": "Tutar",
+  "instantQuote.framework.account.column.units": "Taahhüt",
+  "instantQuote.framework.account.empty": "Henüz çerçeve anlaşmanız yok.",
+  "instantQuote.framework.account.loadFailed": "Çerçeve anlaşmalar yüklenemedi.",
+  "instantQuote.framework.account.open": "Anlaşmayı aç",
+  "instantQuote.framework.account.subtitle":
+    "Kilitli fiyatlı taahhütleriniz ve parti planlarınız.",
+  "instantQuote.framework.account.title": "Çerçeve anlaşmalarım",
+  "instantQuote.framework.addon": "anlaşma ek hizmeti",
   "instantQuote.framework.awaitingPayment": "Ödeme bekleyen",
+  "instantQuote.framework.batch": "Parti {n}/{total}",
+  "instantQuote.framework.batchBadge": "Çerçeve {number} · Parti {position}",
+  "instantQuote.framework.batchCount": "{count} parti",
+  "instantQuote.framework.batchQuote": "Partinin teklifi",
+  "instantQuote.framework.batchStatus.cancelled": "İptal edildi",
+  "instantQuote.framework.batchStatus.planned": "Planlandı",
+  "instantQuote.framework.batchStatus.released": "Serbest bırakıldı",
+  "instantQuote.framework.batches": "Parti planı",
+  "instantQuote.framework.batchesEmpty":
+    "Bu anlaşmada henüz parti planlanmadı; planı ekibimiz kurar.",
+  "instantQuote.framework.batchesTotal": "Partilere bölündüğünde — Σ parti tutarı",
+  "instantQuote.framework.batchesTotalNote":
+    "İptal edilmemiş partilerin tutar toplamı. Sabit ve parça başı ek hizmetler her partide yeniden tahsil edildiği için yandaki rakamdan büyük olabilir; ikisi de doğrudur.",
   "instantQuote.framework.cancelledOrRefunded": "İptal / iade",
+  "instantQuote.framework.column.committed": "Taahhüt",
+  "instantQuote.framework.column.config": "Özellikler",
+  "instantQuote.framework.column.line": "Satır",
+  "instantQuote.framework.column.part": "Parça",
+  "instantQuote.framework.column.unit": "Kilitli birim fiyat",
   "instantQuote.framework.committed": "Taahhüt edilen",
+  "instantQuote.framework.committedTotal": "Taahhüt toplamı — tek sevkiyatta",
+  "instantQuote.framework.committedTotalNote":
+    "{units} adedin TAMAMI tek siparişte sevk edilseydi ödenecek tutar. Partilerin toplamı DEĞİLDİR.",
   "instantQuote.framework.delivered": "Teslim edilen",
+  "instantQuote.framework.doc.batchPlan": "Parti planı",
+  "instantQuote.framework.doc.businessDays":
+    "Teslim tarihleri İŞ GÜNÜ üzerinden hesaplanır; resmî tatil listesi ve gün kapanış saati anlaşmanın donmuş takviminden okunur, imzadan sonra ilan edilen bir tatil planı kaydırmaz.",
+  "instantQuote.framework.doc.commitment": "Taahhüt",
+  "instantQuote.framework.doc.freeCancel":
+    "Serbest bırakılmamış partiler ücretsiz iptal edilebilir; iptal edilen partiler için fiyat kilidi düşer.",
+  "instantQuote.framework.doc.madeToOrder":
+    "Serbest bırakılmış parti siparişe özel üretimdir ve cayma hakkı istisnasına girer.",
+  "instantQuote.framework.doc.number": "Anlaşma no",
+  "instantQuote.framework.doc.separateInvoice":
+    "Her parti için ayrı fatura düzenlenir; faturalar elden düzenlenir, e-Fatura entegrasyonu vaat edilmez.",
+  "instantQuote.framework.doc.terms": "Çerçeve anlaşma şartları",
+  "instantQuote.framework.doc.termsAcceptedAt": "Şartların kabul tarihi",
+  "instantQuote.framework.doc.termsNotAccepted": "Şartlar henüz kabul edilmedi.",
+  "instantQuote.framework.doc.termsVersion": "Şartlar sürümü",
+  "instantQuote.framework.document": "Anlaşma belgesi",
+  "instantQuote.framework.documentTitle": "Çerçeve anlaşma belgesi",
   "instantQuote.framework.inProduction": "Üretimde",
+  "instantQuote.framework.leadDays": "Teslim süresi",
+  "instantQuote.framework.loadFailed": "Çerçeve anlaşma yüklenemedi.",
   "instantQuote.framework.lockExpired": "Fiyat geçerliliği doldu — yeni fiyat için bize yazın",
+  "instantQuote.framework.order": "Sipariş",
+  "instantQuote.framework.payBatch": "Bu partiyi öde",
+  "instantQuote.framework.payConfirm": "Parti {n}/{total} · {amount}",
+  "instantQuote.framework.payConfirmCancel": "Vazgeç",
+  "instantQuote.framework.payConfirmCta": "Onaylıyorum, ödemeye geç",
+  "instantQuote.framework.payConfirmNote":
+    "Ödeme sayfası hangi parti olduğunu göstermez; bu yüzden parti numarasını ve tutarı ödemeye geçmeden ÖNCE burada onaylıyorsunuz.",
+  "instantQuote.framework.perBatchBilling":
+    "Her parti ayrı faturalandırılır ve ayrı ödenir; her partinin ek hizmetleri o partide ayrıca hesaplanır.",
   "instantQuote.framework.planned": "Planlanan",
+  "instantQuote.framework.plannedShipDate": "Planlanan sevk",
   "instantQuote.framework.priceLockedUntil": "Fiyat {date} tarihine kadar geçerli",
+  "instantQuote.framework.readOnly": "Bu teklif bir çerçeve anlaşmanın partisidir; düzenlenemez.",
   "instantQuote.framework.shipped": "Sevk edilen",
+  "instantQuote.framework.shippingAddress": "Teslim adresi",
+  "instantQuote.framework.sourceQuote": "Kaynak teklif",
+  "instantQuote.framework.status.active": "Aktif",
+  "instantQuote.framework.status.cancelled": "İptal edildi",
+  "instantQuote.framework.status.completed": "Tamamlandı",
+  "instantQuote.framework.status.draft": "Taslak",
+  "instantQuote.framework.status.expired": "Süresi doldu",
+  "instantQuote.framework.subtitle": "Taahhüdünüz, parti planı ve teslim durumu.",
   "instantQuote.framework.title": "Çerçeve anlaşma",
+  "instantQuote.framework.trackingNumber": "Takip no",
+  "instantQuote.framework.tryBindingFxApprox":
+    "Bağlayıcı tutar Türk lirasıdır ve anlaşma süresince değişmez; yanındaki döviz karşılığı YAKLAŞIKTIR ve serbest bırakma günündeki TCMB kuruyla hesaplanır.",
+  "instantQuote.framework.units": "{units} adet",
+  "instantQuote.framework.unplanned": "Planlanmamış",
+  "instantQuote.framework.warningsPerBatch": "Üretim uyarıları her partide yeniden onaylanır.",
 
   // instantQuote — döviz GÖSTERİMİ (TCMB kuru)
   // GÖSTERİM, yalnız gösterim: bağlayıcı her tutar ve tahsil edilen her kuruş

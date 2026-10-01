@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import robots from "../src/app/robots";
+import { isNoindexPath } from "../src/lib/seo/policy";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -74,6 +75,34 @@ test("partner panelleri ve işlemsel URL'ler kapalı", () => {
   for (const p of ["/admin/", "/manufacturer/", "/painter/", "/cart", "/checkout"]) {
     assert.ok(dis.includes(p), `${p} disallow listesinde yok`);
   }
+});
+
+test("çerçeve anlaşma sayfaları İKİ kapalı listede de duruyor", () => {
+  // İKİ AYRI MEKANİZMA, biri ötekinin yerine GEÇMEZ: `robots.ts` TARAMAYI
+  // durdurur, `NOINDEX_PREFIXES` kök düzenin `noindex` direktifini verir.
+  // Google okuyamadığı bir `noindex`i uygulamaz (gerekçe `robots.ts` başlığı),
+  // o yüzden işlemsel/kişiye özel bir URL ikisine de yazılır.
+  const dis = asList(ruleFor("*")!.disallow);
+  assert.ok(dis.includes("/cerceve/"), "/cerceve/ robots disallow listesinde yok");
+  assert.ok(isNoindexPath("/cerceve"), "/cerceve noindex değil");
+  assert.ok(isNoindexPath("/cerceve/C-000123"), "anlaşma sayfası noindex değil");
+  assert.ok(isNoindexPath("/cerceve/C-000123/belge"), "anlaşma belgesi noindex değil");
+  // Prefix eşlemesi fazla geniş olmasın: başka bir yol sessizce kapanmamalı.
+  assert.ok(!isNoindexPath("/cercevem"), "prefix eşlemesi fazla geniş");
+  // Alıntılayıcı botlar da AYNI listeyi görür (tek `DISALLOW` sabiti).
+  for (const ua of RETRIEVAL) {
+    assert.ok(
+      asList(ruleFor(ua)!.disallow).includes("/cerceve/"),
+      `${ua} için /cerceve/ açık kalmış`
+    );
+  }
+  // `/admin/cerceve` ve `/manufacturer/plan` için EK SATIR GEREKMEZ: iki panel
+  // kökü zaten herkese kapalı. Gereksiz satır robots.txt'yi büyütür ve "bu yol
+  // ayrıca kapatıldı" diye okunacak yanlış bir ayrıntı bırakır.
+  assert.ok(dis.includes("/admin/"), "/admin/ kapalı değil");
+  assert.ok(dis.includes("/manufacturer/"), "/manufacturer/ kapalı değil");
+  assert.ok(!dis.includes("/admin/cerceve/"), "/admin/ zaten kapalı, satır gereksiz");
+  assert.ok(!dis.includes("/manufacturer/plan"), "/manufacturer/ zaten kapalı, satır gereksiz");
 });
 
 test("facebookexternalhit asla bloklanmaz", () => {

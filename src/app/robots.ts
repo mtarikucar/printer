@@ -97,6 +97,11 @@ const DISALLOW = [
   // reachable by guessing a T-number. The landing page `/3d-baski` sits on its
   // own prefix precisely so this block cannot reach it.
   "/teklif/",
+  // Framework agreements: one corporate customer's commitment and batch plan,
+  // reachable by guessing a C-number. `/admin/cerceve` and `/manufacturer/plan`
+  // need no line of their own — `/admin/` and `/manufacturer/` above already
+  // close them for everyone.
+  "/cerceve/",
   "/yolculuk/",
   "/atolye/katil/",
   "/reset-password/",

@@ -36,6 +36,12 @@ export const NOINDEX_PREFIXES = [
   // never be indexed. The PUBLIC landing page deliberately lives on a different
   // prefix (`/3d-baski`), so it is unaffected by this entry.
   "/teklif",
+  // Framework agreements. A `/cerceve/C-000123` page is one corporate
+  // customer's commitment, locked prices and batch plan — personal, per
+  // customer and reachable by guessing a C-number. There is NO public landing
+  // copy for the feature (everything it says lives behind the flag on these
+  // pages), so nothing of value is lost by keeping the whole prefix out.
+  "/cerceve",
   "/havale",
   "/pay",
 ] as const;

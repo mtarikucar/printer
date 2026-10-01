@@ -1491,6 +1491,8 @@ const en = {
   "instantQuote.team.invite.renewed": "The pending invitation to this address was renewed.",
   "instantQuote.team.invite.revoke": "Revoke",
   "instantQuote.team.invite.role": "Role",
+  "instantQuote.team.invite.sendKvkk":
+    "I have the right to share the e-mail address I am inviting; I understand that an invitation e-mail will be sent to it and that, once the person joins, their name and e-mail will be visible to the other members.",
   "instantQuote.team.invite.sent": "The invitation was sent to {email}.",
   "instantQuote.team.invite.submit": "Send invitation",
   "instantQuote.team.invite.title": "Invite a member",
@@ -1541,6 +1543,7 @@ const en = {
   "instantQuote.team.quote.badge": "Team quote · {team}",
   "instantQuote.team.quote.detach": "Detach from the team",
   "instantQuote.team.quote.listEmpty": "No quotes are attached to the team.",
+  "instantQuote.team.quote.listMore": "The team has more quotes — see all of them on the My quotes page.",
   "instantQuote.team.quote.listTitle": "Team quotes",
   "instantQuote.team.quote.noCheckoutPermission":
     "You cannot check out this quote; the team's owner or one of its managers can.",

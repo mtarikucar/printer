@@ -263,11 +263,21 @@ function CreateTeamForm({ onDone }: { onDone: () => void }): JSX.Element {
   );
 }
 
-/** Davet formu — Turnstile + alıcı adresi + rol. YALNIZ `canInvite` çizer. */
+/**
+ * Davet formu — Turnstile + alıcı adresi + rol + ZORUNLU KVKK onayı.
+ * YALNIZ `canInvite` çizer.
+ *
+ * Onay kutusu BAŞKASININ kişisel verisi için alınıyor: davet eden kişi,
+ * davet edilenin e-posta adresini bize verip o adrese markalı bir e-posta
+ * gönderilmesini istiyor. Kutu uçta da zorunludur (`kvkkConsentField`,
+ * `z.literal(true)`) — ekran ucun uygulamadığı bir kuralı yazmaz; buradaki
+ * devre dışı düğme o kapının kopyası değil, ekran tarafındaki karşılığıdır.
+ */
 function InviteForm({ onDone }: { onDone: () => void }): JSX.Element {
   const d = useDictionary();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<TeamInviteRole>("member");
+  const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
@@ -284,7 +294,7 @@ function InviteForm({ onDone }: { onDone: () => void }): JSX.Element {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ email, role, turnstileToken: token }),
+        body: JSON.stringify({ email, role, kvkkConsent: consent, turnstileToken: token }),
       });
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
@@ -330,33 +340,54 @@ function InviteForm({ onDone }: { onDone: () => void }): JSX.Element {
           </Select>
         </FormField>
       </div>
+      <label className="flex items-start gap-2 text-xs text-text-secondary">
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={(e) => setConsent(e.target.checked)}
+          required
+          className="mt-0.5"
+        />
+        <span>{d["instantQuote.team.invite.sendKvkk"]}</span>
+      </label>
       {error && <Notice tone="error">{error}</Notice>}
       {sent && <Notice tone="ok">{sent}</Notice>}
       <Turnstile ref={turnstileRef} />
-      <Button type="submit" disabled={busy}>
+      <Button type="submit" disabled={busy || !consent}>
         {d["instantQuote.team.invite.submit"]}
       </Button>
     </form>
   );
 }
 
-/** Takım teklifleri: kişisel listenin AYNI tablosu, takım satırlarıyla. */
+/**
+ * Takım teklifleri: kişisel listenin AYNI tablosu, takım satırlarıyla.
+ *
+ * DARALTMA UÇTA (`?scope=team`), istemcide DEĞİL. Bir süzgeç ("`teamName`
+ * dolu satırları al") sayfalamayı hesaba katmıyordu: liste ucu kişisel ve
+ * takım satırlarını BİRLİKTE, `created_at DESC` sırasıyla ve 20'lik sayfalarla
+ * döndürüyor, yani son 20 teklifi kişisel olan müşteri takımın onlarca teklifi
+ * olsa da boş bir liste okuyordu. Kapsamla sayfa 1 gerçekten TAKIMIN ilk
+ * sayfasıdır; `hasNext` dolduğunda ekran tam listeye yol gösterir (ikinci bir
+ * sayfalama kontrolü bu yüzeyin işi değil, kişisel listede zaten var).
+ */
 function TeamQuotes(): JSX.Element {
   const d = useDictionary();
-  const [items, setItems] = useState<CustomerQuoteListItem[] | null>(null);
+  const [page, setPage] = useState<{ items: CustomerQuoteListItem[]; hasNext: boolean } | null>(
+    null
+  );
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/customer/quotes?page=1", { credentials: "same-origin" });
+        const res = await fetch("/api/customer/quotes?scope=team&page=1", {
+          credentials: "same-origin",
+        });
         if (!res.ok) throw new Error(String(res.status));
-        const body = (await res.json()) as { items: CustomerQuoteListItem[] };
-        // SÜZGEÇ EKRANDA ve bu bilinçli: liste ucu kişisel + takım tekliflerini
-        // birlikte döndürüyor (`teamScope`) ve ikinci bir uç aynı sorgunun
-        // ikinci kopyası olurdu. `teamName` dolu satır = takıma bağlı satır.
-        if (!cancelled) setItems(body.items.filter((item) => item.teamName !== null));
+        const body = (await res.json()) as { items: CustomerQuoteListItem[]; hasNext: boolean };
+        if (!cancelled) setPage({ items: body.items, hasNext: body.hasNext === true });
       } catch {
         if (!cancelled) setFailed(true);
       }
@@ -367,10 +398,21 @@ function TeamQuotes(): JSX.Element {
   }, []);
 
   if (failed) return <Notice tone="error">{d["instantQuote.account.quotes.loadFailed"]}</Notice>;
-  if (items === null) return <div className="skeleton h-12 rounded-xl" aria-busy="true" />;
-  if (items.length === 0)
+  if (page === null) return <div className="skeleton h-12 rounded-xl" aria-busy="true" />;
+  if (page.items.length === 0)
     return <p className="text-sm text-text-secondary">{d["instantQuote.team.quote.listEmpty"]}</p>;
-  return <QuoteListTable items={items} />;
+  return (
+    <>
+      <QuoteListTable items={page.items} />
+      {page.hasNext && (
+        <p className="mt-3 text-xs text-text-muted">
+          <Link href="/account/teklifler" className="underline underline-offset-4">
+            {d["instantQuote.team.quote.listMore"]}
+          </Link>
+        </p>
+      )}
+    </>
+  );
 }
 
 /** Takım siparişleri: SALT OKUNUR. Eylem düğmesi YOK — ve olmayacak. */

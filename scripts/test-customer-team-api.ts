@@ -183,7 +183,7 @@ ok(
   invitesText.indexOf("rateLimitAsync(") < invitesText.indexOf("verifyTurnstileToken(")
 );
 
-console.log("\nR3 · KVKK onayı zorunlu (takım kurma + davet kabulü)");
+console.log("\nR3 · KVKK onayı zorunlu (takım kurma + davet GÖNDERME + davet kabulü)");
 // İddia İKİ ADIMLI: uç paylaşılan alanı kullanıyor VE paylaşılan alan
 // GERÇEKTEN `z.literal(true)`. Tek adımlı bir arama, alan bir gün
 // `z.boolean().optional()`a dönse yeşil kalırdı.
@@ -191,8 +191,12 @@ ok(
   "ortak alan `z.literal(true)` (varsayılan olarak onaylı bir hâl YOK)",
   /export const kvkkConsentField = z\.literal\(true/.test(read(SHARED))
 );
+// Davet GÖNDERME ucu listede ÇÜNKÜ ekranında bir onay kutusu var (brief
+// §T5.2) ve ekran, ucun uygulamadığı bir kuralı yazamaz. MUTASYON SINAVI:
+// `invites/route.ts` şemasından `kvkkConsent`i çıkar → bu iddia KIRMIZI.
 for (const rel of [
   "src/app/api/customer/team/route.ts",
+  "src/app/api/customer/team/invites/route.ts",
   "src/app/api/customer/team/invites/accept/route.ts",
 ]) {
   ok(`${rel}: KVKK onay alanını şemasında taşıyor`, /kvkkConsent: kvkkConsentField/.test(read(rel)));
@@ -349,10 +353,21 @@ function codeOf(rel: string): string {
 for (const row of ORDERS_ROUTE_TABLE) {
   const ids = identifiers(row.rel);
   const code = codeOf(row.rel);
-  // ÖDEYENİN kimliği ve TESLİMAT ADRESİ okunmaz bile: `orders.<alan>` bir
-  // kolon seçimidir ve seçilmeyen kolon gövdeye giremez. (`session.userId`
-  // yasaklanamaz — üyelik sorgusunun girdisi o.)
-  for (const column of ["userId", "shippingAddress", "customerName", "phone", "email"]) {
+  // ÖDEYENİN kimliği, TESLİMAT ADRESİ ve ÖDEME ARACI okunmaz bile:
+  // `orders.<alan>` bir kolon seçimidir ve seçilmeyen kolon gövdeye giremez.
+  // (`session.userId` yasaklanamaz — üyelik sorgusunun girdisi o.)
+  // `paymentMethod` listede ÇÜNKÜ kümesi `card | bank_transfer |
+  // gift_card_full`: alanı göndermek, meslektaşının siparişini HEDİYE KARTI
+  // bakiyesiyle ödediğini söylemek ve `/privacy` §5.1'in "ödeme araçlarınız…
+  // paylaşılmaz" cümlesini yalanlamak olurdu.
+  for (const column of [
+    "userId",
+    "shippingAddress",
+    "customerName",
+    "phone",
+    "email",
+    "paymentMethod",
+  ]) {
     ok(`${row.rel}: \`orders.${column}\` okumuyor`, !code.includes(`orders.${column}`));
   }
   // `users` tablosu HİÇ import edilmiyor: üyenin adı/adresi bu uçların işi değil.
@@ -363,6 +378,25 @@ for (const row of ORDERS_ROUTE_TABLE) {
     ok(`${row.rel}: \`${key}\` sızdırmıyor`, !code.includes(key));
   }
 }
+
+console.log("\nT-5 · parça listesi SİPARİŞİN taslağından okunur (teklifin en yenisinden DEĞİL)");
+// Bir teklifte birden çok dondurma GERÇEK bir hâldir (taslak süresi dolup
+// müşteri yeniden ödemeye başladığında yeni taslak + yeni dondurma yazılır) ve
+// tekillik `quote_checkouts_draft_id_uq` ile `draft_id` üzerindedir. Yanlış
+// dondurma seçilirse satır fiyatları `orders.amount_kurus` ile tutmaz.
+// MUTASYON SINAVI: seçimi `quoteId` + `desc(createdAt)`e çevir → KIRMIZI.
+// Canlı kanıt: `scripts/test-quote-team-db.ts` (iki dondurmalı teklif).
+const DETAIL_REL = "src/app/api/customer/team/orders/[orderNumber]/route.ts";
+const detailCode = codeOf(DETAIL_REL);
+ok(
+  "dondurma `orders.draft_id` ⋈ `quote_checkouts.draft_id` ile seçiliyor",
+  detailCode.includes("eq(quoteCheckouts.draftId, row.draftId)")
+);
+ok(
+  "teklifin EN YENİ dondurması seçilMİYOR (`quoteId` + `desc(createdAt)` yok)",
+  !detailCode.includes("quoteCheckouts.quoteId") &&
+    !detailCode.includes("desc(quoteCheckouts.createdAt)")
+);
 
 console.log("\ndeğişmez 5 · takım sipariş uçları da bayrak kapısının ardında");
 for (const row of ORDERS_ROUTE_TABLE) {

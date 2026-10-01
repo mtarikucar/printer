@@ -1720,6 +1720,74 @@ async function main() {
       assert.ok(!numbers.includes(rival.number), "başka takımın teklifi listeye girdi");
     });
 
+    await test("`scope=team`: kişisel satırlar sayfa 1'i DOLDURSA bile takım teklifi görünür", async () => {
+      // Birleşik liste `PAGE_SIZE = 20` ile ve `created_at DESC` sırasıyla
+      // çalışıyor, yani "sayfa 1'i çek, `teamName` dolu olanları süz" diyen bir
+      // EKRAN, son 20 teklifi kişisel olan müşteride takımın BÜTÜN tekliflerini
+      // sessizce kaybeder. Daraltma bu yüzden sorguda (`scope=team`).
+      // MUTASYON SINAVI: `listScope` dalını kaldır (kapsam her zaman `all`) →
+      // bu vaka KIRMIZI olur.
+      const teamQuote = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      // YİRMİ kişisel teklif, takım teklifinden SONRA. Takımı olan müşterinin
+      // teklifi takım teklifi DOĞDUĞU için bağ fikstürde sökülüyor: ölçülen
+      // şey kapsam, doğuş değil (doğuşun kendi vakası yukarıda).
+      for (let i = 0; i < 20; i += 1) {
+        const personal = await createQuote({
+          userId: teamMemberId,
+          anonymousId: null,
+          termsAccepted: true,
+        });
+        await admin.query("UPDATE quotes SET team_id = NULL WHERE id = $1", [personal.id]);
+      }
+      const all = await listCustomerQuotes(teamMemberId, 1);
+      assert.equal(all.items.length, 20, "fikstür birleşik sayfayı doldurmadı");
+      assert.equal(all.hasNext, true, "fikstür ikinci sayfa üretmedi");
+      assert.equal(
+        all.items.every((q) => q.teamName === null),
+        true,
+        "fikstür sayfa 1'i kişisel bırakmadı"
+      );
+      assert.equal(
+        all.items.some((q) => q.number === teamQuote.number),
+        false,
+        "fikstür takım teklifini sayfa 1'de bıraktı (vaka hiçbir şey ölçmez)"
+      );
+      // KAPSAM: aynı müşteri, aynı sayfa — takım teklifi GÖRÜNÜYOR.
+      const team = await listCustomerQuotes(teamMemberId, 1, "team");
+      assert.equal(
+        team.items.some((q) => q.number === teamQuote.number),
+        true,
+        "takım teklifi kapsamlı listenin ilk sayfasında yok"
+      );
+      // Kapsam DAR: kişisel satır sızmıyor ve her satırın takımı BU takım.
+      assert.equal(
+        team.items.every((q) => q.teamName === "QA Mühendislik A.Ş."),
+        true,
+        "takım kapsamına kişisel ya da yabancı satır girdi"
+      );
+      const rival = await createQuote({
+        userId: otherTeamUserId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      assert.equal(
+        (await listCustomerQuotes(teamMemberId, 1, "team")).items.some(
+          (q) => q.number === rival.number
+        ),
+        false,
+        "başka takımın teklifi kapsamlı listeye girdi"
+      );
+      // TAKIMI OLMAYAN kullanıcıda kapsam BOŞ KÜMEDİR (sorgu hiç açılmaz).
+      assert.deepEqual(await listCustomerQuotes(userId, 1, "team"), {
+        items: [],
+        hasNext: false,
+      });
+    });
+
     await test("TAKIMSIZ kullanıcının listesi bayrak AÇIKKEN de bugünkü hâlinde", async () => {
       // Birincil kısıt: bayrağın açık olması, takımı OLMAYAN müşterinin
       // sonucunu oynatmaz. `userId` yukarıdaki onlarca vakanın sahibidir ve

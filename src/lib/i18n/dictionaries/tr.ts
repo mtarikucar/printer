@@ -1511,6 +1511,8 @@ const tr: Dictionary = {
   "instantQuote.team.invite.renewed": "Bu adrese bekleyen davet yenilendi.",
   "instantQuote.team.invite.revoke": "İptal et",
   "instantQuote.team.invite.role": "Rol",
+  "instantQuote.team.invite.sendKvkk":
+    "Davet ettiğim kişinin e-posta adresini paylaşma hakkına sahibim; bu adrese bir davet e-postası gönderileceğini, kişi katıldığında adının ve e-postasının diğer üyelere görünür olacağını biliyorum.",
   "instantQuote.team.invite.sent": "Davet {email} adresine gönderildi.",
   "instantQuote.team.invite.submit": "Davet gönder",
   "instantQuote.team.invite.title": "Üye davet et",
@@ -1561,6 +1563,7 @@ const tr: Dictionary = {
   "instantQuote.team.quote.badge": "Takım teklifi · {team}",
   "instantQuote.team.quote.detach": "Takımdan ayır",
   "instantQuote.team.quote.listEmpty": "Takıma bağlı teklif yok.",
+  "instantQuote.team.quote.listMore": "Takımın daha fazla teklifi var — tümünü Tekliflerim sayfasında görün.",
   "instantQuote.team.quote.listTitle": "Takım teklifleri",
   "instantQuote.team.quote.noCheckoutPermission":
     "Bu teklifi ödeme yetkiniz yok; takımın sahibi ya da bir yöneticisi ödeyebilir.",

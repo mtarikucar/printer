@@ -8,23 +8,36 @@
  * (`/api/customer/orders/**` ailesi, `orders.userId` ile kilitli). Bu uç o
  * ailenin hiçbir parçasını import etmez; takım yalnız OKUR.
  *
- * ─── PARÇA LİSTESİ DONMUŞ ANDAN OKUNUR ────────────────────────────────────
+ * ─── PARÇA LİSTESİ SİPARİŞİN KENDİ TASLAĞINDAN OKUNUR ─────────────────────
  *
  * Kaynak `quote_checkouts.parts_snapshot` — ödeme anında donan liste. Teklifin
  * BUGÜNKÜ parçaları değil: sipariş o anın işidir ve teklif sonradan
  * düzenlenmiş olabilir. (Teklif siparişe dönünce kilitlenir, ama kaynağın
  * donmuş olması bir varsayıma değil kolona dayanmalı.)
  *
- * ─── CEVAPTA KİŞİSEL VERİ VE DOSYA ANAHTARI YOK ───────────────────────────
+ * SATIR `orders.draft_id` ⋈ `quote_checkouts.draft_id` ile seçilir, "teklifin
+ * EN YENİ dondurması" ile DEĞİL. Bir teklifte birden çok dondurma GERÇEK bir
+ * hâldir: taslak süresi dolup müşteri yeniden ödemeye başladığında yeni bir
+ * taslak + yeni bir dondurma yazılır. `created_at DESC` ile seçmek, siparişe
+ * dönMEYEN bir denemenin satır fiyatlarını bu siparişin yanında göstermek
+ * olurdu (Σ `lineKurus` ≠ `orders.amount_kurus`). `draft_id` üzerinde TEKİL
+ * indeks var (`quote_checkouts_draft_id_uq`), yani eşleşme tam ve tek.
+ *
+ * ─── CEVAPTA KİŞİSEL VERİ, ÖDEME ARACI VE DOSYA ANAHTARI YOK ──────────────
  *
  * Ödeyenin adı / e-postası / telefonu ve TESLİMAT ADRESİ gönderilmez: takımın
  * işi siparişin DURUMU, TUTARI ve parçalarıdır, meslektaşının adresi değil.
- * Parça satırlarından depolama ANAHTARLARI (`canonicalStlKey`, `thumbnailKey`,
- * `drawingKey`) da ayıklanır — imzalı dosya adresi yalnız `getPublicUrl` ile,
- * yalnız dosyayı indirecek yüzeyde üretilir (global kısıt).
+ * `orders.payment_method` de gönderilmez: `card | bank_transfer |
+ * gift_card_full` kümesi, meslektaşının siparişini HEDİYE KARTI bakiyesiyle
+ * ödediğini söyler ve bu `/privacy` §5.1'in "ödeme araçlarınız, kart
+ * bilgileri ve hediye kartı bakiyeniz paylaşılmaz" cümlesinin tam karşıtıdır.
+ * Liste ucu da göndermiyor. Parça satırlarından depolama ANAHTARLARI
+ * (`canonicalStlKey`, `thumbnailKey`, `drawingKey`) ayıklanır — imzalı dosya
+ * adresi yalnız `getPublicUrl` ile, yalnız dosyayı indirecek yüzeyde üretilir
+ * (global kısıt).
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { CUSTOMER_READ_FAILED_ERROR, handleRouteFailure } from "@/lib/api/route-error";
 import { db } from "@/lib/db";
 import { orders, quoteCheckouts, quotes } from "@/lib/db/schema";
@@ -86,7 +99,8 @@ async function handleGET(request: NextRequest, ctx: Ctx): Promise<NextResponse> 
       orderNumber: orders.orderNumber,
       status: orders.status,
       amountKurus: orders.amountKurus,
-      paymentMethod: orders.paymentMethod,
+      // `orders.payment_method` SEÇİLMİYOR: seçilmeyen kolon gövdeye giremez
+      // (dosya başı, `/privacy` §5.1).
       paidAt: orders.paidAt,
       shippedAt: orders.shippedAt,
       deliveredAt: orders.deliveredAt,
@@ -94,7 +108,9 @@ async function handleGET(request: NextRequest, ctx: Ctx): Promise<NextResponse> 
       carrier: orders.carrier,
       quoteNumber: quotes.number,
       quoteTitle: quotes.title,
-      quoteId: quotes.id,
+      // Parça listesinin ANAHTARI: dondurma siparişin KENDİ taslağından
+      // okunacak (dosya başı).
+      draftId: orders.draftId,
     })
     .from(quotes)
     .innerJoin(orders, eq(orders.id, quotes.orderId))
@@ -102,21 +118,24 @@ async function handleGET(request: NextRequest, ctx: Ctx): Promise<NextResponse> 
     .limit(1);
   if (!row) return orderNotFound();
 
-  // Aynı teklifte birden çok tahsilat denemesi olabilir (iptal edilen taslak,
-  // yöntem değişimi); SİPARİŞE dönen en son dondurma okunur.
-  const [checkout] = await db
-    .select({ partsSnapshot: quoteCheckouts.partsSnapshot, leadDays: quoteCheckouts.leadDays })
-    .from(quoteCheckouts)
-    .where(eq(quoteCheckouts.quoteId, row.quoteId))
-    .orderBy(desc(quoteCheckouts.createdAt))
-    .limit(1);
+  // Aynı teklifte birden çok tahsilat denemesi olabilir (süresi dolan taslak,
+  // yöntem değişimi): dondurma SİPARİŞİN TASLAĞIYLA eşleştirilir, teklifin en
+  // yeni satırıyla değil. `orders.draft_id` boşsa (teklif hattının dışında
+  // kurulmuş bir sipariş) sorgu HİÇ açılmaz: `draft_id = NULL` zaten satır
+  // döndürmezdi, ama sormamak niyeti de yazıyor.
+  const [checkout] = row.draftId
+    ? await db
+        .select({ partsSnapshot: quoteCheckouts.partsSnapshot, leadDays: quoteCheckouts.leadDays })
+        .from(quoteCheckouts)
+        .where(eq(quoteCheckouts.draftId, row.draftId))
+        .limit(1)
+    : [];
 
   return NextResponse.json({
     order: {
       orderNumber: row.orderNumber,
       status: row.status,
       amountKurus: row.amountKurus,
-      paymentMethod: row.paymentMethod,
       paidAt: row.paidAt,
       shippedAt: row.shippedAt,
       deliveredAt: row.deliveredAt,

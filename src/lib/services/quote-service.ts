@@ -2472,12 +2472,33 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
   });
 }
 
+/**
+ * Listenin KAPSAMI. `all` bugünkü davranıştır (kişisel + takım satırları
+ * birlikte, `teamScope`); `team` YALNIZ takıma bağlı satırları döndürür.
+ *
+ * `team` neden bir süzgeç DEĞİL de bir kapsam: `/account/takim` ekranı takımın
+ * tekliflerini gösteriyor ve sayfa 1'i istemcide süzmek, son 20 teklifi
+ * kişisel olan müşteride takımın BÜTÜN tekliflerini sessizce kaybediyordu
+ * (`PAGE_SIZE` birleşik listeye uygulanıyor). Daraltma SORGUDA yapılır ki
+ * sayfa 1 gerçekten takımın ilk sayfası olsun ve `hasNext` bir şey ANLATSIN.
+ */
+export type CustomerQuoteListScope = "all" | "team";
+
 export async function listCustomerQuotes(
   userId: string,
-  page: number
+  page: number,
+  listScope: CustomerQuoteListScope = "all"
 ): Promise<{ items: CustomerQuoteListItem[]; hasNext: boolean }> {
   const offset = Math.max(0, page - 1) * PAGE_SIZE;
   const scope = await teamScope(userId);
+  // Takımı OLMAYAN kullanıcıda `team` kapsamı BOŞ kümedir ve sorgu hiç
+  // açılmaz: `eq(teamId, null)` hiçbir satır döndürmezdi, sormamak da aynı
+  // şeyi daha açık söylüyor.
+  if (listScope === "team" && scope.team === null) return { items: [], hasNext: false };
+  const condition =
+    listScope === "team" && scope.team !== null
+      ? eq(quotes.teamId, scope.team.teamId)
+      : scope.condition;
   const rows = await db
     .select({
       id: quotes.id,
@@ -2515,7 +2536,7 @@ export async function listCustomerQuotes(
     .leftJoin(orders, eq(quotes.orderId, orders.id))
     .leftJoin(quoteFrameworkBatches, eq(quoteFrameworkBatches.quoteId, quotes.id))
     .leftJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
-    .where(scope.condition)
+    .where(condition)
     .orderBy(desc(quotes.createdAt))
     .limit(PAGE_SIZE + 1)
     .offset(offset);

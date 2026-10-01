@@ -41,6 +41,7 @@ import { verifyTurnstileToken } from "@/lib/services/turnstile";
 import {
   TEAM_NOT_FOUND,
   inviteEmailRateKey,
+  kvkkConsentField,
   teamRouteBody,
   teamJsonBody,
   teamTooManyRequests,
@@ -53,6 +54,18 @@ const inviteSchema = z.object({
   email: z.string().trim().email("Geçerli bir e-posta adresi girin").max(160),
   // `owner` BİLEREK listede yok: sahiplik davetle verilmez, yalnız devirle.
   role: z.enum(TEAM_INVITE_ROLES, { message: "Geçerli bir rol seçin" }),
+  /**
+   * KVKK onayı (tasarım §8) — burada BAŞKASININ kişisel verisi için alınıyor:
+   * davet eden kişi, davet edilenin e-posta adresini bu daveti göndermek için
+   * paylaştığını ve o adrese markalı bir e-posta gideceğini onaylar. Takımı
+   * KURAN ve daveti KABUL eden kişinin onayı kendi satırına damgalanıyor
+   * (`customer_teams.kvkk_*`, `customer_team_members.kvkk_acknowledged_at`);
+   * davet satırında böyle bir kolon YOK ve bu turda eklenmiyor (`drizzle/**`
+   * kapalı), yani onay burada KAYDEDİLMİYOR, ZORUNLU KILINIYOR. Alanın uçta
+   * durmasının sebebi şu: ekran, ucun uygulamadığı bir kuralı yazamaz
+   * (`z.literal(true)` — "varsayılan olarak onaylı" bir hâl yok).
+   */
+  kvkkConsent: kvkkConsentField,
   turnstileToken: z.string().optional(),
 });
 

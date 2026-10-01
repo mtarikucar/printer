@@ -5018,36 +5018,83 @@ test("TAKIM EKRANI: davet formu Turnstile jetonunu GÖNDERİYOR", () => {
   assert.match(source, /turnstileToken: token/, "jeton gövdeye yazılmıyor");
 });
 
-test("TAKIM: KVKK onay kutusu TAM İKİ yerde — kurma formu ve davet kabulü", () => {
-  // Tasarım §8'in KVKK listesi: (1) takım kurma formu, (2) davet kabul ekranı,
-  // (3) teklifi takıma bağlama UYARISI (onay kutusu değil, `window.confirm`).
-  // DAVET GÖNDERME formunda onay kutusu YOK ve bu bilinçli: `POST
-  // /api/customer/team/invites` şeması `kvkkConsent` ALMIYOR, yani ekrandaki
-  // bir kutu ucun uygulamadığı bir kural olurdu.
-  const surfaces: Array<[string, boolean]> = [
-    ["src/app/account/takim/team-client.tsx", true],
-    ["src/app/takim/davet/[token]/invite-client.tsx", true],
-  ];
-  for (const [rel, expected] of surfaces) {
-    const source = fs.readFileSync(path.resolve(rel), "utf8");
-    assert.equal(
-      /kvkkConsent: consent/.test(source),
-      expected,
-      `${rel}: KVKK onayı gövdeye yazılmıyor`
-    );
-  }
-  // Davet GÖNDERME gövdesi: e-posta + rol + jeton, onay kutusu YOK.
+test("TAKIM: KVKK onay kutusu ÜÇ yerde — kurma, davet GÖNDERME ve davet KABULÜ", () => {
+  // Tasarım §8 + brief §T5.2'nin KVKK listesi: (1) takım kurma formu,
+  // (2) davet GÖNDERME formu, (3) davet kabul ekranı. Dördüncü yer teklifi
+  // takıma bağlama UYARISIDIR ve o bir onay kutusu değil (`window.confirm`).
   const teamClient = fs.readFileSync(
     path.resolve("src/app/account/takim/team-client.tsx"),
     "utf8"
   );
-  const inviteBody = /body: JSON\.stringify\(\{ email, role, turnstileToken: token \}\)/;
+  const inviteClient = fs.readFileSync(
+    path.resolve("src/app/takim/davet/[token]/invite-client.tsx"),
+    "utf8"
+  );
+  // Takım ekranında İKİ form var (kurma + davet), yani İKİ onay gövdesi.
+  assert.equal(
+    (teamClient.match(/kvkkConsent: consent/g) ?? []).length,
+    2,
+    "takım ekranında iki KVKK onayı (kurma + davet) yok"
+  );
+  assert.match(inviteClient, /kvkkConsent: consent/, "davet kabulü onayı göndermiyor");
+  // Davet GÖNDERME gövdesi: e-posta + rol + ONAY + jeton.
+  // MUTASYON SINAVI: gövdeden `kvkkConsent`i çıkar → bu iddia KIRMIZI.
+  const inviteBody =
+    /body: JSON\.stringify\(\{ email, role, kvkkConsent: consent, turnstileToken: token \}\)/;
   assert.match(teamClient, inviteBody, "davet gövdesi beklenen alanları taşımıyor");
+  // Her üç kutu da ZORUNLU: onay verilmeden düğme basılamaz. Ekrandaki kapı
+  // ucun kopyası değil, karşılığıdır — şema iddiası
+  // `test-customer-team-api.ts`te (`kvkkConsent: kvkkConsentField`, üç uç).
+  assert.equal(
+    (teamClient.match(/disabled=\{busy \|\| !consent\}/g) ?? []).length,
+    2,
+    "takım ekranındaki iki düğme de onaya bağlı değil"
+  );
+  assert.match(inviteClient, /disabled=\{busy \|\| !consent\}/, "kabul düğmesi onaya bağlı değil");
+  assert.match(
+    teamClient,
+    /d\["instantQuote\.team\.invite\.sendKvkk"\]/,
+    "davet formunun onay cümlesi çizilmiyor"
+  );
   // Bağlama onayı bir CÜMLEDİR ve rozette duruyor.
   const badge = fs.readFileSync(path.resolve("src/components/quote/team-badge.tsx"), "utf8");
   assert.match(
     badge,
     /window\.confirm\(d\["instantQuote\.team\.quote\.attachWarning"\]\)/,
     "bağlama onayı uyarı cümlesini göstermiyor"
+  );
+});
+
+test("TAKIM EKRANI: takım teklifleri UÇTA daraltılır (`?scope=team`), istemcide süzülmez", () => {
+  // Sayfa-1 süzgeci takım satırlarını SESSİZCE kaybediyordu: liste ucu kişisel
+  // ve takım satırlarını birlikte, 20'lik sayfalarla döndürüyor (PAGE_SIZE),
+  // yani son 20 teklifi kişisel olan müşteri takımın onlarca teklifi olsa da
+  // boş liste okuyordu. Canlı kanıt `scripts/test-quote-service-db.ts`te
+  // (kapsamın gerçek satırlarla ölçümü); buradaki iddia EKRANIN hangi soruyu
+  // sorduğudur.
+  const source = fs.readFileSync(path.resolve("src/app/account/takim/team-client.tsx"), "utf8");
+  assert.match(source, /"\/api\/customer\/quotes\?scope=team&page=1"/, "kapsam sorulmuyor");
+  // MUTASYON SINAVI: istemci süzgecini geri koy → bu iddia KIRMIZI.
+  assert.ok(
+    !/filter\(\(item\) => item\.teamName !== null\)/.test(source),
+    "istemci süzgeci geri gelmiş (uç kapsamı varken ikinci bir kural)"
+  );
+  // Kırpılma SESSİZ değil: uçtan `hasNext` gelirse tam listeye yol gösterilir.
+  assert.match(source, /page\.hasNext && \(/, "`hasNext` okunmuyor");
+  assert.match(
+    source,
+    /d\["instantQuote\.team\.quote\.listMore"\]/,
+    "daha fazla teklif için yol gösterilmiyor"
+  );
+  // Uç kapsamı GERÇEKTEN uyguluyor (şema değil, sorgu): `scope=team` değeri
+  // servise geçiyor ve servis koşulu daraltıyor.
+  const route = fs.readFileSync(path.resolve("src/app/api/customer/quotes/route.ts"), "utf8");
+  assert.match(route, /searchParams\.get\("scope"\) === "team"/, "uç kapsamı okumuyor");
+  assert.match(route, /scopeOf\(request\)/, "kapsam servise geçmiyor");
+  const service = fs.readFileSync(path.resolve("src/lib/services/quote-service.ts"), "utf8");
+  assert.match(
+    service,
+    /listScope === "team" && scope\.team !== null\s*\?\s*eq\(quotes\.teamId, scope\.team\.teamId\)/,
+    "servis kapsamı sorguda daraltmıyor"
   );
 });

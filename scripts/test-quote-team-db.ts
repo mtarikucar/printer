@@ -568,7 +568,7 @@ async function main() {
           method: "POST",
           // Büyük harfli adres BİLEREK: tekillik ve kabul kapısı aynı
           // normalizasyonu paylaşmak zorunda.
-          body: { email: invited.email.toUpperCase(), role: "member" },
+          body: { email: invited.email.toUpperCase(), role: "member", kvkkConsent: true },
         })
       );
       assert.equal(response.status, 201);
@@ -587,6 +587,41 @@ async function main() {
       assert.ok(rawToken.length >= 32, "ham token üretilmedi");
       assert.equal(sentEmails[0].args.teamName, "Zincir Mühendislik");
       assert.deepEqual(await auditTrail(chainTeamId), ["team_created", "invite_sent"]);
+    });
+
+    await test("DAVET: KVKK onayı OLMADAN gönderilemez (ekranın kutusu uçta da zorunlu)", async () => {
+      // Davet GÖNDERME formunda bir onay kutusu var (brief §T5.2) ve ekran,
+      // ucun uygulamadığı bir kuralı yazamaz: şema `z.literal(true)`.
+      // MUTASYON SINAVI: `inviteSchema`dan `kvkkConsent`i çıkar → KIRMIZI.
+      session = founder;
+      const before = sentEmails.length;
+      for (const consent of [undefined, false]) {
+        await refusal(
+          await invitesRoute.POST(
+            req("/api/customer/team/invites", {
+              method: "POST",
+              body:
+                consent === undefined
+                  ? { email: stranger.email, role: "member" }
+                  : { email: stranger.email, role: "member", kvkkConsent: consent },
+            })
+          ),
+          400,
+          "invalid_body"
+        );
+      }
+      // Onaysız istek bir SATIR da bir E-POSTA da üretmedi.
+      assert.equal(sentEmails.length, before, "onaysız davet e-posta gönderdi");
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM customer_team_invites WHERE team_id = $1 AND email = $2",
+            [chainTeamId, stranger.email]
+          )
+        ).rows[0].n,
+        0,
+        "onaysız davet satır yazdı"
+      );
     });
 
     await test("HAM TOKEN DB'DE YOK: yalnız sha256'sı saklanıyor", async () => {
@@ -708,7 +743,7 @@ async function main() {
         await invitesRoute.POST(
           req("/api/customer/team/invites", {
             method: "POST",
-            body: { email: stranger.email, role: "viewer" },
+            body: { email: stranger.email, role: "viewer", kvkkConsent: true },
           })
         ),
         403,
@@ -900,7 +935,7 @@ async function main() {
       await invitesRoute.POST(
         req("/api/customer/team/invites", {
           method: "POST",
-          body: { email: invited.email, role: "viewer" },
+          body: { email: invited.email, role: "viewer", kvkkConsent: true },
         })
       );
       const expiredToken = String(sentEmails[0].args.rawToken);
@@ -933,7 +968,7 @@ async function main() {
             method: "POST",
             // Aynı adrese ikinci CANLI davet YOK: bu bir YENİLEMEDİR
             // (`customer_team_invites_live_uq`), eskisi aynı işlemde kapanır.
-            body: { email: invited.email, role: "member" },
+            body: { email: invited.email, role: "member", kvkkConsent: true },
           })
         )
       );
@@ -973,7 +1008,7 @@ async function main() {
       await invitesRoute.POST(
         req("/api/customer/team/invites", {
           method: "POST",
-          body: { email: rival.email, role: "member" },
+          body: { email: rival.email, role: "member", kvkkConsent: true },
         })
       );
       const token = String(sentEmails[0].args.rawToken);
@@ -1017,7 +1052,7 @@ async function main() {
         await invitesRoute.POST(
           req("/api/customer/team/invites", {
             method: "POST",
-            body: { email: rival.email, role: "member" },
+            body: { email: rival.email, role: "member", kvkkConsent: true },
           })
         ),
         400,
@@ -1033,7 +1068,7 @@ async function main() {
       await invitesRoute.POST(
         req("/api/customer/team/invites", {
           method: "POST",
-          body: { email: heir.email, role: "member" },
+          body: { email: heir.email, role: "member", kvkkConsent: true },
         })
       );
       const token = String(sentEmails[0].args.rawToken);
@@ -1220,7 +1255,7 @@ async function main() {
         await invitesRoute.POST(
           req("/api/customer/team/invites", {
             method: "POST",
-            body: { email: target.email, role: "member" },
+            body: { email: target.email, role: "member", kvkkConsent: true },
           })
         );
         const token = String(sentEmails[0].args.rawToken);
@@ -1294,7 +1329,7 @@ async function main() {
         invitesRoute.POST(
           req("/api/customer/team/invites", {
             method: "POST",
-            body: { email: twin.email, role: "member" },
+            body: { email: twin.email, role: "member", kvkkConsent: true },
           })
         );
       const both = await Promise.all([invite(), invite()]);
@@ -1337,7 +1372,7 @@ async function main() {
         const pending = invitesRoute.POST(
           req("/api/customer/team/invites", {
             method: "POST",
-            body: { email: solo.email, role: "member" },
+            body: { email: solo.email, role: "member", kvkkConsent: true },
           })
         );
         assert.ok(await waitForInviteLockWaiter(), "ucun INSERT'i indekste beklemedi");
@@ -1392,7 +1427,7 @@ async function main() {
         await invitesRoute.POST(
           req("/api/customer/team/invites", {
             method: "POST",
-            body: { email: stranger.email, role: "viewer" },
+            body: { email: stranger.email, role: "viewer", kvkkConsent: true },
           })
         )
       );
@@ -1952,6 +1987,23 @@ async function main() {
       assert.equal(parts[0].quantity, 2);
       assert.equal(parts[0].lineKurus, 14800);
 
+      // ÖDEME ARACI DA YOK: `card | bank_transfer | gift_card_full` kümesi,
+      // meslektaşının siparişini HEDİYE KARTI bakiyesiyle ödediğini söylerdi —
+      // `/privacy` §5.1 "ödeme araçlarınız… paylaşılmaz" diyor. Liste ucu da
+      // göndermiyor. MUTASYON SINAVI: `select`e `paymentMethod`ı geri koy →
+      // bu iddia KIRMIZI (statik eşi `test-customer-team-api.ts`te).
+      assert.ok(
+        !Object.prototype.hasOwnProperty.call(order, "paymentMethod"),
+        "detay cevabı ödeme aracını taşıyor"
+      );
+      const listRow = ((await body(await listTeamOrders())).orders as Array<
+        Record<string, unknown>
+      >)[0];
+      assert.ok(
+        !Object.prototype.hasOwnProperty.call(listRow, "paymentMethod"),
+        "liste cevabı ödeme aracını taşıyor"
+      );
+
       // DEĞİŞMEZ 4 — CANLI KANIT: gövdenin HİÇBİR yerinde ödeyenin adı,
       // e-postası, telefonu, teslimat adresi ya da depolama anahtarı yok.
       const wire = JSON.stringify(payload);
@@ -1966,6 +2018,97 @@ async function main() {
       ]) {
         assert.ok(!wire.includes(secret), `cevapta sızan alan: ${secret}`);
       }
+    });
+
+    await test("DETAY: İKİ dondurmalı teklifte SİPARİŞİN taslağındaki liste gelir", async () => {
+      // Bir teklifte birden çok dondurma GERÇEK bir hâl: taslak süresi dolup
+      // müşteri yeniden ödemeye başladığında yeni taslak + yeni dondurma
+      // yazılır. Tekillik `quote_checkouts_draft_id_uq` ile `draft_id`
+      // üzerinde; `quote_id` üzerinde yalnız indeks var. "Teklifin en yeni
+      // dondurması" ile seçmek, siparişe dönMEYEN denemenin satır fiyatlarını
+      // bu siparişin yanında göstermek olurdu (Σ lineKurus ≠ amount_kurus).
+      // MUTASYON SINAVI: seçimi `quoteId` + `desc(createdAt)`e çevir → KIRMIZI.
+      const orderDraftId = (
+        await admin.query("SELECT draft_id FROM orders WHERE order_number = $1", [
+          "FIG-QA-TEAM-1",
+        ])
+      ).rows[0].draft_id as string;
+      const strayDraftId = (
+        await admin.query(
+          `INSERT INTO order_drafts (reference, user_id, email, customer_name, shipping_address,
+             payment_method, amount_kurus)
+           VALUES ($1, $2, $3, $4, $5::jsonb, 'card', $6) RETURNING id`,
+          [
+            "QA-DRAFT-STRAY-1",
+            payer.userId,
+            payer.email,
+            PAYER_NAME,
+            JSON.stringify(PAYER_ADDRESS),
+            999900,
+          ]
+        )
+      ).rows[0].id as string;
+      assert.notEqual(strayDraftId, orderDraftId, "fikstür aynı taslağı yazdı");
+      // SONRA yazılan ve DAHA YÜKSEK tutarlı dondurma: sıra yanlışsa gövdede
+      // bu satır görünür.
+      await admin.query(
+        `INSERT INTO quote_checkouts (quote_id, draft_id, quote_version, amount_kurus,
+           parts_snapshot, lead_days, created_at)
+         VALUES ($1, $2, 2, $3, $4::jsonb, 99, now() + interval '1 minute')`,
+        [
+          orderedQuoteId,
+          strayDraftId,
+          999900,
+          JSON.stringify([
+            {
+              partId: randomUUID(),
+              position: 1,
+              name: "YANLIŞ DONDURMA",
+              fileName: "yanlis.stl",
+              sourceFormat: "stl",
+              canonicalStlKey: "quotes/qa/yanlis.stl",
+              thumbnailKey: null,
+              drawingKey: null,
+              drawingName: null,
+              scaleFactor: 1,
+              technologyKey: "fdm",
+              technologyName: "FDM",
+              materialKey: "pla",
+              materialName: "PLA",
+              colorName: "Siyah",
+              colorHex: "#000000",
+              finishKey: "standard",
+              finishName: "Standart",
+              layerUm: 200,
+              infillPct: 20,
+              quantity: 10,
+              dimensionsMm: { x: 40, y: 30, z: 20 },
+              volumeCm3: 12,
+              tessellationMm: null,
+              unitKurus: 99990,
+              lineKurus: 999900,
+              note: null,
+              dfmWarnings: [],
+            },
+          ]),
+        ]
+      );
+      session = bindOwner;
+      const order = (await body(await readTeamOrder("FIG-QA-TEAM-1"))).order as Record<
+        string,
+        unknown
+      >;
+      const parts = order.parts as Array<Record<string, unknown>>;
+      assert.equal(parts.length, 1);
+      assert.equal(parts[0].name, "Takım kalıbı", "yanlış dondurmanın parçası geldi");
+      assert.equal(order.leadDays, 5, "yanlış dondurmanın teslim süresi geldi");
+      // PARA TUTARLILIĞI: satırların toplamı siparişin tutarıdır. (Ekranda
+      // aritmetik yok; bu toplam TESTİN kendi ölçümü.)
+      assert.equal(
+        parts.reduce((sum, part) => sum + Number(part.lineKurus), 0),
+        order.amountKurus,
+        "satır fiyatları siparişin tutarıyla tutmuyor"
+      );
     });
 
     await test("DETAY: `viewer` rolü de OKUR (takım yalnız okur, ama HEPSİ okur)", async () => {

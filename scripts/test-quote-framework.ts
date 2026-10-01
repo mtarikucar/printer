@@ -491,6 +491,42 @@ test("önceki partiler taahhüdü tüketir: kalan 30 iken 31 REDDEDİLİR", () =
     ["commitment_exceeded"]
   );
 });
+test("AYNI parça iki satırda → duplicate_part, taahhüt sessizce aşılmaz", () => {
+  // Bu vakanın sebebi: taahhüt kapısı her satırı AYNI `left` değerine karşı
+  // ölçüyor. Tekillik kapısı olmasaydı 100 kalanda 60+60 iki satır olarak
+  // İKİSİ DE geçerdi (60 <= 100) ve parti taahhüdün iki katını planlardı;
+  // `(batch_id, part_id)` tekil indeksi onu yazmazdı ama admin'in gördüğü şey
+  // sebebi söylemeyen bir 23505 olurdu.
+  const dup = goodPlan({
+    lines: [
+      { partId: "P1", quantity: 60, unitKurus: 12_500 },
+      { partId: "P1", quantity: 60, unitKurus: 12_500 },
+    ],
+  });
+  assert.ok(codes(dup).includes("duplicate_part"), "ikinci satır reddedilmeli");
+  assert.ok(dup.length > 0, "toplayıp geçirmek taahhüdü sessizce aşardı");
+});
+test("bozuk satır veritabanına GİTMEZ: adet 0 ve birim fiyat 0 → invalid_line", () => {
+  // `_qty_chk`/`_unit_chk` kısıtları bunu zaten tutuyor, ama INSERT anında:
+  // saf kapı geçirirse admin 23514 görür, hangi satır neden reddedildi
+  // bilgisini değil.
+  assert.ok(
+    codes(goodPlan({ lines: [{ partId: "P1", quantity: 0, unitKurus: 12_500 }] })).includes(
+      "invalid_line"
+    )
+  );
+  assert.ok(
+    codes(goodPlan({ lines: [{ partId: "P1", quantity: 5, unitKurus: 0 }] })).includes(
+      "invalid_line"
+    )
+  );
+  assert.ok(
+    codes(goodPlan({ lines: [{ partId: "P1", quantity: 1.5, unitKurus: 12_500 }] })).includes(
+      "invalid_line"
+    ),
+    "tam sayı olmayan adet de reddedilmeli"
+  );
+});
 test("taahhütte OLMAYAN parça REDDEDİLİR", () => {
   assert.deepEqual(
     codes(goodPlan({ lines: [{ partId: "YOK", quantity: 2, unitKurus: 12_500 }] })),
@@ -904,6 +940,39 @@ test("etiketler sözlükten GELİR, saf modülde Türkçe cümle yoktur", () => 
       `${key} müşteri sözlüğünün çerçeve bloğunda değil`
     );
   }
+});
+
+test("ret cümlesini gösteren her dosya ADMİN altında (fiyat kapısı atlanmasın)", () => {
+  // Ret cümlesi ham kuruş taşıyor ("1999900 < 2000000") ve `quote-present.ts`in
+  // fiyat kapısı yalnız adı `Kurus` ile BİTEN anahtarları ayıklıyor — yani bu
+  // metin bir müşteri yüzeyinde yankılanırsa tutar `canSeePrices`i ATLAR.
+  // Kümeyi kapalı tutmak, o günü imkânsız kılmanın en ucuz yolu.
+  const touchers = execFileSync(
+    "grep",
+    ["-rlE", "FrameworkPlanRefusal|FRAMEWORK_REFUSAL_LABELS_TR|refusals\\??\\.(map|join)", "src"],
+    { cwd: ROOT, encoding: "utf8" }
+  )
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  // Modülün kendisi ve onu ÜRETEN servis yüzey değildir; yüzey olan her şey
+  // admin ağacında durmak zorunda.
+  const ALLOWED_NON_SURFACE = [
+    "src/lib/config/quote-framework.ts",
+    "src/lib/services/quote-framework.ts",
+  ];
+  const offenders = touchers.filter(
+    (file) =>
+      !ALLOWED_NON_SURFACE.includes(file) &&
+      !file.startsWith("src/app/admin/") &&
+      !file.startsWith("src/app/api/admin/")
+  );
+  assert.deepEqual(
+    offenders,
+    [],
+    "ret cümlesi admin DIŞINDA bir dosyaya girmiş: ham kuruş fiyat kapısını atlar"
+  );
+  assert.ok(touchers.length >= 3, "tarama hiçbir şey bulamadıysa kalıp bayatlamıştır");
 });
 
 test("müşteriye gösterilen `.readOnly` cümlesi POLİTİKANIN cümlesidir", () => {

@@ -248,7 +248,9 @@ export type FrameworkRefusalCode =
   | "ship_date_too_early"
   | "batch_limit_reached"
   | "batch_amount_over_cap"
-  | "batch_totals_mismatch";
+  | "batch_totals_mismatch"
+  | "duplicate_part"
+  | "invalid_line";
 
 /** Sebebin admin'e gösterilen Türkçe hâli (cümlenin gövdesi). */
 export const FRAMEWORK_REFUSAL_LABELS_TR: Record<FrameworkRefusalCode, string> = {
@@ -262,11 +264,22 @@ export const FRAMEWORK_REFUSAL_LABELS_TR: Record<FrameworkRefusalCode, string> =
   batch_limit_reached: "Anlaşmanın parti sayısı üst sınırına ulaşıldı",
   batch_amount_over_cap: "Parti tutarı tek ödeme üst sınırını aşıyor",
   batch_totals_mismatch: "Parti toplamı satırlarla uyuşmuyor",
+  duplicate_part: "Aynı parça partide iki kez planlanmış; satırları tek satırda birleştirin",
+  invalid_line: "Parti satırı geçersiz",
 };
 
 export interface FrameworkPlanRefusal {
   code: FrameworkRefusalCode;
-  /** Admin ekranında gösterilecek Türkçe cümle (varsa sayılarla birlikte). */
+  /**
+   * Admin ekranında gösterilecek Türkçe cümle (varsa SAYILARLA birlikte).
+   *
+   * YALNIZ ADMİN. Cümle ham kuruş taşıyabilir (`1999900 < 2000000`) ve
+   * `quote-present.ts`in fiyat kapısı yalnız adı `Kurus` ile BİTEN anahtarları
+   * ayıklar — yani bu metin bir müşteri yüzeyinde yankılanırsa tutar
+   * `canSeePrices`i ATLAR. Tüketici kümesi bu yüzden kapalı tutulur ve
+   * `scripts/test-quote-framework.ts` onu sınar: reddi gösteren her dosya
+   * `/admin` ya da `/api/admin` altında olmak zorunda.
+   */
   message: string;
 }
 
@@ -460,7 +473,35 @@ export function validateBatchPlan(args: {
     );
   }
 
-  // 1. Taahhüt kapısı — parça başına, KALAN üzerinden.
+  // 0. Satır sağlığı — bozuk satır veritabanına HİÇ gitmesin.
+  //
+  // `_qty_chk` ve `_unit_chk` kısıtları adedin ve birim fiyatın pozitif
+  // olmasını zaten zorunlu kılıyor, ama onlar INSERT anında konuşur: saf kapı
+  // bozuk satırı geçirirse admin 23514 ile boş gövdeli bir hata görür, hangi
+  // satırın hangi sebeple reddedildiğini DEĞİL. Kapı burada konuşur.
+  //
+  // Aynı parçanın İKİ satırı da aynı sebeple burada durur: `(batch_id,
+  // part_id)` tekil indeksi onu 23505 ile reddediyor, yani plan hiçbir zaman
+  // yazılamıyor. Toplayıp geçirmek YANLIŞ olurdu — altındaki taahhüt kapısı
+  // her satırı AYNI `left` değerine karşı ölçüyor, yani 100 kalanda 60+60 iki
+  // satır olarak İKİSİ DE geçerdi ve taahhüt sessizce aşılırdı.
+  const seenParts = new Set<string>();
+  for (const line of args.lines) {
+    if (!Number.isInteger(line.quantity) || line.quantity < 1) {
+      refusals.push(refuse("invalid_line", `${line.partId}: adet ${line.quantity}, en az 1 olmalı`));
+    }
+    if (!Number.isInteger(line.unitKurus) || line.unitKurus <= 0) {
+      refusals.push(refuse("invalid_line", `${line.partId}: birim fiyat geçersiz`));
+    }
+    if (seenParts.has(line.partId)) {
+      refusals.push(refuse("duplicate_part", line.partId));
+    }
+    seenParts.add(line.partId);
+  }
+
+  // 1. Taahhüt kapısı — parça başına, KALAN üzerinden. Yukarıdaki tekillik
+  // kapısı sayesinde parça başına EN ÇOK BİR satır vardır, yani tek satırı
+  // `left` ile karşılaştırmak taahhüdün tamamını ölçer.
   const remaining = frameworkCommitmentRemaining(args.commitment, args.ledger);
   for (const line of args.lines) {
     const left = remaining.get(line.partId) ?? 0;

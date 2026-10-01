@@ -486,6 +486,13 @@
       "breakpoints": true
     },
     {
+      "idx": 72,
+      "version": "7",
+      "when": 1790794400000,
+      "tag": "0072_customer_teams",
+      "breakpoints": true
+    },
+    {
       "idx": 73,
       "version": "7",
       "when": 1790798000000,

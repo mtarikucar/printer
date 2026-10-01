@@ -59,6 +59,8 @@ function makeQuote(overrides: Partial<Quote> = {}): Quote {
     number: "T-000001",
     userId: OWNER_ID,
     anonymousId: null,
+    // 0072: kişisel teklif. Takım dalı T-2'de gelir; bugün hiçbir kapı okumaz.
+    teamId: null,
     status: "draft",
     reviewKind: null,
     reviewNote: null,

@@ -17,6 +17,10 @@ import {
   foreignKey,
   unique,
 } from "drizzle-orm/pg-core";
+// İLERİ REFERANS İÇİN: `quotes.team_id` kendisinden SONRA tanımlanan
+// `customer_teams`a bakıyor. Drizzle'ın tavsiye ettiği imza budur — `any` bir
+// dönüş tipi, kolonun kendi tipini de (`uuid` → `string | null`) silerdi.
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { Attribution } from "../analytics/types";
 import type {
@@ -3898,6 +3902,19 @@ export const quotes = pgTable("quotes", {
   userId: uuid("user_id").references(() => users.id, { onDelete: "restrict" }),
   /** Yalnız `user_id IS NULL` iken geçerli; giriş yapınca teklif devralınır. */
   anonymousId: text("anonymous_id"),
+  /**
+   * Teklifin bağlı olduğu takım (0072); null = kişisel teklif.
+   *
+   * `customerTeams` BU TANIMDAN SONRA gelir ve referans TEMBELdir (drizzle
+   * `reference()`ı ancak adlandırma/serileştirme anında çağırır —
+   * `source_quote_id` kendine referansı da bu sayede yazılabiliyor).
+   *
+   * Bu sevkiyatta (T-1) kolon YAZILIR ama OKUNMAZ: ilk okuma T-2'de,
+   * `quote_teams_enabled` bayrağının arkasında gelir.
+   */
+  teamId: uuid("team_id").references((): AnyPgColumn => customerTeams.id, {
+    onDelete: "restrict",
+  }),
   status: text("status").$type<QuoteStatus>().notNull().default("draft"),
   reviewKind: text("review_kind").$type<ReviewKind>(),
   reviewNote: text("review_note"),
@@ -3958,11 +3975,21 @@ export const quotes = pgTable("quotes", {
   index("quotes_user_idx").on(t.userId, t.createdAt.desc()),
   index("quotes_anon_idx").on(t.anonymousId),
   index("quotes_status_idx").on(t.status, t.reviewRequestedAt),
+  // Takım listesinin TEK sorgusu (0072).
+  index("quotes_team_idx").on(t.teamId, t.createdAt.desc()),
   check("quotes_status_chk", sql`${t.status} IN (${quoteInList(QUOTE_STATUSES)})`),
   check("quotes_review_kind_chk", sql`${t.reviewKind} IS NULL OR ${t.reviewKind} IN (${quoteInList(REVIEW_KINDS)})`),
   check("quotes_lead_tier_chk", sql`${t.leadTier} IN (${quoteInList(LEAD_TIER_KEYS)})`),
   check("quotes_invoice_type_chk", sql`${t.invoiceType} IN (${quoteInList(INVOICE_TYPES)})`),
   check("quotes_tax_id_type_chk", sql`${t.taxIdType} IS NULL OR ${t.taxIdType} IN ('vkn', 'tckn')`),
+  // ANONİM TEKLİF ASLA TAKIM TEKLİFİ OLAMAZ (0072).
+  //
+  // T-2'nin dal sırası argümanının DAYANAĞI budur: erişim matrisine eklenecek
+  // takım dalı ile mevcut anonim-çerez dalı DB düzeyinde ÇAKIŞAMAZ, çünkü
+  // takım teklifinde `user_id` daima doludur ve anonim dalın ilk koşulu
+  // (`quote.userId === null`) hiç tutmaz. Çerez kimliğine takım bağlamak,
+  // tarayıcıyı paylaşan iki kişiye takım açmak olurdu.
+  check("quotes_team_requires_user_chk", sql`${t.teamId} IS NULL OR ${t.userId} IS NOT NULL`),
 ]);
 
 export const quoteParts = pgTable("quote_parts", {
@@ -4125,6 +4152,202 @@ export const quoteAdminActionsRelations = relations(quoteAdminActions, ({ one })
 
 export type Quote = typeof quotes.$inferSelect;
 export type QuotePart = typeof quoteParts.$inferSelect;
+
+// ═══ Takım çalışma alanı (0072) ═════════════════════════════════════════════
+//
+// Kurumsal müşterinin teklifi tek kişinin değil: açan mühendis, onaylayan
+// satın alma ve faturayı isteyen muhasebe aynı işi görmek zorunda. Dört tablo
+// (takım, üyelik, davet, denetim) + `quotes.team_id`.
+//
+// ─── SAHİBİN KARARI 6.5: BİR KULLANICI EN FAZLA BİR TAKIMDA ────────────────
+//
+// `customer_team_members_user_uq` UNIQUE `(user_id)` bunun DB düzeyindeki
+// karşılığıdır. Kod tarafındaki "tek takım" varsayımı bir yorum değil bir
+// kısıt olmak zorunda: çok takımlı üyelik, takım seçici ve `?team=` parametresi
+// YOK ve bu kısıt dururken yazılamaz.
+//
+// ─── `orders` VE `order_drafts`a HİÇBİR KOLON EKLENMEZ ─────────────────────
+//
+// Takımın siparişi görmesi `quotes.team_id` + `quotes.order_id` üzerinden
+// TÜRETİLİR. İkinci bir kolon, aynı gerçeğin ikinci bir kopyası olurdu ve
+// ödeme hattı (DEĞİŞTİRİLMEZ dosyalar) açılmadan yazılamaz.
+//
+// ─── TÜM FK'LER `on delete restrict` ───────────────────────────────────────
+//
+// Üyelik ve davet bir PAYLAŞIM İLİŞKİSİNİN kaydıdır; kullanıcı ya da takım
+// silinince sessizce yok olması, kimin neyi gördüğünün izini silmek olurdu.
+//
+// pg enum YOK (gerekçesi 0064 bloğunun başlığında): rol ve eylem kolonları
+// `text` + adlandırılmış CHECK, listeleri tip sözleşmesinden
+// (`src/lib/config/quote-team.ts`) `quoteInList` ile üretilir.
+import { TEAM_ACTIONS, TEAM_INVITE_ROLES, TEAM_ROLES } from "../config/quote-team";
+import type { TeamAction, TeamInviteRole, TeamRole } from "../config/quote-team";
+
+export const customerTeams = pgTable("customer_teams", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** 2..80 karakter; uzunluğu servis doğrular (hata mesajı Türkçe cümledir). */
+  name: text("name").notNull(),
+  ownerUserId: uuid("owner_user_id").notNull().references(() => users.id, {
+    onDelete: "restrict",
+  }),
+  /**
+   * `quotes`taki fatura kardeşlerinin (`invoice_type` … `billing_address`)
+   * birebir kopyası ve YALNIZ ÖN DOLDURUR. Teklifin faturası ödeme anında
+   * `quotes` kolonlarında DONAR (`quote-checkout.ts`), yani takımın bilgisini
+   * sonradan değiştirmek ödenmiş bir teklifin faturasını geçmişe dönük
+   * değiştirmez. Bilerek korunan bir değişmez.
+   */
+  invoiceType: text("invoice_type").$type<InvoiceType>().notNull().default("individual"),
+  companyName: text("company_name"),
+  taxId: text("tax_id"),
+  taxIdType: text("tax_id_type").$type<"vkn" | "tckn">(),
+  taxOffice: text("tax_office"),
+  billingAddress: jsonb("billing_address").$type<TurkishAddress>(),
+  /**
+   * TAKIMIN teslimat adresi; üyenin adres defterinden ASLA türetilmez.
+   *
+   * `quotes`ta kardeşi YOKTUR: teslimat adresi ödeme sırasında müşteriden
+   * alınıp doğrudan taslağa yazılıyor (`quote-checkout.ts` →
+   * `order_drafts.shippingAddress`). Bu kolon bu yüzden ödeme formunu ancak ÖN
+   * DOLDURABİLİR (T-5); bağlayıcı olması `order_drafts` yazımına dokunmak
+   * demektir ve o yol DEĞİŞTİRİLMEZ listesindedir.
+   */
+  shippingAddress: jsonb("shipping_address").$type<TurkishAddress>(),
+  /**
+   * Para kapısı: `member` rolü ödeme başlatabilir mi. KAPALI doğar — takım
+   * kurulduğunda ödemeyi yalnız owner/admin başlatır (`canCheckoutQuote`).
+   */
+  memberCanCheckout: boolean("member_can_checkout").notNull().default(false),
+  /** Kurucuya gösterilen KVKK bilgilendirmesinin sürümü (metin değil sürüm). */
+  kvkkNoticeVersion: text("kvkk_notice_version").notNull(),
+  kvkkConsentAt: timestamp("kvkk_consent_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("customer_teams_invoice_type_chk", sql`${t.invoiceType} IN (${quoteInList(INVOICE_TYPES)})`),
+  check(
+    "customer_teams_tax_id_type_chk",
+    sql`${t.taxIdType} IS NULL OR ${t.taxIdType} IN ('vkn', 'tckn')`
+  ),
+]);
+
+export const customerTeamMembers = pgTable("customer_team_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").notNull().references(() => customerTeams.id, { onDelete: "restrict" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  role: text("role").$type<TeamRole>().notNull(),
+  invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  /** Kabul ekranındaki onay kutusu; kurucuda null (onayı takım satırında). */
+  kvkkAcknowledgedAt: timestamp("kvkk_acknowledged_at", { withTimezone: true }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("customer_team_members_team_user_uq").on(t.teamId, t.userId),
+  // SAHİBİN KARARI 6.5: bir kullanıcı EN FAZLA BİR takımda.
+  uniqueIndex("customer_team_members_user_uq").on(t.userId),
+  // Takım başına TEK sahip. Kısmi tekil indeks deseni
+  // `user_addresses_one_default_idx` (`schema.ts:382`) ile aynıdır ve iki
+  // eşzamanlı "sahipliği devret" çağrısından yalnız birinin yazmasını DB
+  // düzeyinde garanti eder.
+  uniqueIndex("customer_team_members_one_owner_idx")
+    .on(t.teamId)
+    .where(sql`${t.role} = 'owner'`),
+  index("customer_team_members_team_idx").on(t.teamId, t.role),
+  check("customer_team_members_role_chk", sql`${t.role} IN (${quoteInList(TEAM_ROLES)})`),
+]);
+
+export const customerTeamInvites = pgTable("customer_team_invites", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").notNull().references(() => customerTeams.id, { onDelete: "restrict" }),
+  /** `normalizeTeamEmail` ile küçük harfe indirilmiş — tek normalizasyon. */
+  email: text("email").notNull(),
+  /** `owner` davetle verilmez: liste `TEAM_INVITE_ROLES`tir, `TEAM_ROLES` değil. */
+  role: text("role").$type<TeamInviteRole>().notNull(),
+  /** sha256(raw); ham token DB'ye GİRMEZ (parola sıfırlama deseni). */
+  tokenHash: text("token_hash").notNull(),
+  invitedByUserId: uuid("invited_by_user_id").notNull().references(() => users.id, {
+    onDelete: "restrict",
+  }),
+  /** TTL 7 gün — sabit `INVITE_TTL_MS` (`quote-team.ts`). */
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  acceptedUserId: uuid("accepted_user_id").references(() => users.id, { onDelete: "restrict" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("customer_team_invites_token_uq").on(t.tokenHash),
+  // Aynı adrese iki CANLI davet olmaz; ikinci davet tek bir "yenile" işlemidir.
+  // İptal (`revoked_at`) yenilemeyi SERBEST BIRAKIR: kısmi indeks yalnız canlı
+  // satırları kapsıyor.
+  uniqueIndex("customer_team_invites_live_uq")
+    .on(t.teamId, t.email)
+    .where(sql`${t.acceptedAt} IS NULL AND ${t.revokedAt} IS NULL`),
+  index("customer_team_invites_team_idx").on(t.teamId, t.createdAt.desc()),
+  check("customer_team_invites_role_chk", sql`${t.role} IN (${quoteInList(TEAM_INVITE_ROLES)})`),
+]);
+
+export const customerTeamActions = pgTable("customer_team_actions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").notNull().references(() => customerTeams.id, { onDelete: "restrict" }),
+  /** null = SİSTEM (süresi dolan davet): bir kullanıcı adına yazılmaz. */
+  actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "restrict" }),
+  action: text("action").$type<TeamAction>().notNull(),
+  targetUserId: uuid("target_user_id").references(() => users.id, { onDelete: "restrict" }),
+  targetQuoteId: uuid("target_quote_id").references(() => quotes.id, { onDelete: "restrict" }),
+  before: jsonb("before").$type<Record<string, unknown>>(),
+  after: jsonb("after").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // İndeks YOK: `quote_admin_actions` emsali. Denetim izi takım detayında
+  // okunuyor ve satır sayısı takım başına onlarla ölçülür.
+  check("customer_team_actions_action_chk", sql`${t.action} IN (${quoteInList(TEAM_ACTIONS)})`),
+]);
+
+export const customerTeamsRelations = relations(customerTeams, ({ one, many }) => ({
+  owner: one(users, { fields: [customerTeams.ownerUserId], references: [users.id] }),
+  members: many(customerTeamMembers),
+  invites: many(customerTeamInvites),
+  actions: many(customerTeamActions),
+  quotes: many(quotes),
+}));
+
+export const customerTeamMembersRelations = relations(customerTeamMembers, ({ one }) => ({
+  team: one(customerTeams, {
+    fields: [customerTeamMembers.teamId],
+    references: [customerTeams.id],
+  }),
+  user: one(users, { fields: [customerTeamMembers.userId], references: [users.id] }),
+}));
+
+export const customerTeamInvitesRelations = relations(customerTeamInvites, ({ one }) => ({
+  team: one(customerTeams, {
+    fields: [customerTeamInvites.teamId],
+    references: [customerTeams.id],
+  }),
+  invitedBy: one(users, {
+    fields: [customerTeamInvites.invitedByUserId],
+    references: [users.id],
+  }),
+}));
+
+export const customerTeamActionsRelations = relations(customerTeamActions, ({ one }) => ({
+  team: one(customerTeams, {
+    fields: [customerTeamActions.teamId],
+    references: [customerTeams.id],
+  }),
+  actor: one(users, { fields: [customerTeamActions.actorUserId], references: [users.id] }),
+  targetQuote: one(quotes, {
+    fields: [customerTeamActions.targetQuoteId],
+    references: [quotes.id],
+  }),
+}));
+
+export type CustomerTeam = typeof customerTeams.$inferSelect;
+export type CustomerTeamMember = typeof customerTeamMembers.$inferSelect;
+export type CustomerTeamInvite = typeof customerTeamInvites.$inferSelect;
+export type CustomerTeamAction = typeof customerTeamActions.$inferSelect;
 
 // ═══ Döviz gösterimi (0071) ═════════════════════════════════════════════════
 //

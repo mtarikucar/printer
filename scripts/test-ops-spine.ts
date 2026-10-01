@@ -35,7 +35,7 @@ function test(name: string, fn: () => void) {
 }
 
 console.log("flags");
-test("sixteen flags, closed set", () => {
+test("seventeen flags, closed set", () => {
   assert.deepEqual([...FLAG_KEYS].sort(), [
     "auto_assign_cart_platform",
     "auto_assign_custom",
@@ -64,6 +64,9 @@ test("sixteen flags, closed set", () => {
     // yükleyicisine bir dosya biçimi ekliyor (sunucuda `addPartFromUpload`,
     // istemcide `acceptedFormats` → dropzone `accept`).
     "quote_step_enabled",
+    // Takım çalışma alanı (T): kapattığı şey TAKIM ROLÜ OKUMASIdır — kapalıyken
+    // erişim matrisi bugünkü hâline döner ve hiçbir veri silinmez.
+    "quote_teams_enabled",
     "wa_agent_enabled",
     "wa_bot_enabled",
   ]);
@@ -113,6 +116,7 @@ test("a new customer surface ships behind a closed flag", () => {
     "quote_step_enabled",
     "quote_fx_display_enabled",
     "framework_orders_enabled",
+    "quote_teams_enabled",
   ]);
   for (const key of FEATURE_FLAG_KEYS) {
     assert.equal(FLAG_DEFAULTS[key], false, `${key} must ship disabled`);

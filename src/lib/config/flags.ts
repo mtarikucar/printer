@@ -67,6 +67,12 @@ export const FLAG_KEYS = [
   // Geri dönüşün en değerli özelliği bu: bayrağı kapatmak ödenmiş ya da
   // ödenecek bir partiyi ASLA tuzağa düşürmez.
   "framework_orders_enabled",
+  // Takım çalışma alanı (kurumsal ekip hesabı). Kapattığı şey TAKIM ROLÜ
+  // OKUMASIdır: kapalıyken erişim matrisi bugünkü hâline döner, `team_id` dolu
+  // satırlar bile bugünkü matrise düşer (yani teklifi yalnız açan kişi ve admin
+  // görür) ve HİÇBİR VERİ SİLİNMEZ. Geri dönüşün değeri budur: anahtarı
+  // kapatmak bir takımı dağıtmaz, yalnız paylaşımı durdurur.
+  "quote_teams_enabled",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -113,6 +119,11 @@ export const FLAG_DEFAULTS: Record<FlagKey, boolean> = {
   // serbest bırakılması ödenebilir bir sipariş yaratır. Kodu yayına almak ile
   // müşteriye taahhüt kabul etmek aynı olay olmamalı.
   framework_orders_enabled: false,
+  // Takım da KAPALI doğar: bir müşterinin dosyasını ve FİYATINI bir
+  // meslektaşına göstermek, kodu yayına almakla aynı olay olmamalı. Rol
+  // okumasının ilk kapısı (T-2) ve davet yüzeyi (T-3) bu anahtarı kapalı
+  // bulsunlar diye onlardan ÖNCE doğuyor.
+  quote_teams_enabled: false,
 };
 
 export const FLAG_LABELS_TR: Record<FlagKey, string> = {
@@ -132,6 +143,7 @@ export const FLAG_LABELS_TR: Record<FlagKey, string> = {
   quote_step_enabled: "Teklifte STEP/STP dosyaları",
   quote_fx_display_enabled: "Teklifte döviz gösterimi (TCMB kuru)",
   framework_orders_enabled: "Çerçeve siparişler (planlı parti teslimi)",
+  quote_teams_enabled: "Takım çalışma alanı",
 };
 
 export function isFlagKey(value: unknown): value is FlagKey {
@@ -196,6 +208,12 @@ export const FEATURE_FLAG_KEYS = [
   // serbest bırakılınca doğan sipariş bugünkü atama kapılarından geçer
   // (`assignManufacturerToOrder` kendi kapılarını uygular).
   "framework_orders_enabled",
+  // Takım çalışma alanı da ürün yüzeyi. AI_SPEND DEĞİL: dışarıya tek kuruş
+  // harcamıyor — kapattığı şey bir rol okumasıdır. AUTO_ASSIGN DEĞİL: takım
+  // hiçbir siparişi yönlendirmez, takımın ödediği teklif bugünkü atama
+  // kapılarından geçer. Cevapladığı soru tek: "teklifi bir meslektaş da
+  // görebilir mi".
+  "quote_teams_enabled",
 ] as const satisfies readonly FlagKey[];
 
 /**

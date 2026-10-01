@@ -143,6 +143,8 @@ psql "$DATABASE_URL" -c "DELETE FROM print_catalog_changes;"   # audit trail onl
 # is the recipe at the TOP of `drizzle/0055_qc_photo_model_revision.down.sql`
 # (`scripts/test-qc-photo-revision.ts` fails if a journal entry above idx 55 is missing from
 # it). Read that file, not this block, and treat what follows as the shape — not the list.
+psql "$DATABASE_URL" -f drizzle/0073_framework_orders.down.sql
+psql "$DATABASE_URL" -f drizzle/0072_customer_teams.down.sql
 psql "$DATABASE_URL" -f drizzle/0071_fx_rates.down.sql
 psql "$DATABASE_URL" -f drizzle/0070_step_format.down.sql
 psql "$DATABASE_URL" -f drizzle/0067_holidays_2028.down.sql

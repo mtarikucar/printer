@@ -180,12 +180,15 @@ export async function quoteApiEnabled(): Promise<boolean> {
 }
 
 /**
- * Çerçeve sipariş yüzeyleri açık mı (`/admin/cerceve/**`,
- * `/api/admin/frameworks/**`).
+ * Çerçeve sipariş UÇLARI açık mı (`/api/admin/frameworks/**`).
  *
- * `quoteApiEnabled`in birebir deseni ve AYNI gerekçe: bayrak kapalıyken uç ve
- * ekran YOK gibi davranır (404, 403 DEĞİL — kapalı bir özelliğin varlığını
- * duyurmanın anlamı yok), admin oturumu iç test için kapıdan geçer.
+ * `quoteApiEnabled`in birebir deseni ve AYNI gerekçe: bayrak kapalıyken uç YOK
+ * gibi davranır (404, 403 DEĞİL — kapalı bir özelliğin varlığını duyurmanın
+ * anlamı yok), admin oturumu İÇ TEST için kapıdan geçer (spec §F3.2).
+ *
+ * EKRANLAR BU KAPIYI KULLANMAZ, `frameworkScreensEnabled`i kullanır: bu
+ * fonksiyon admin oturumunda DAİMA `true` döner ve admin'den başkasının
+ * giremediği bir sayfada kapı olmaktan çıkar (bkz. orada).
  *
  * KAPSAM YÜZEYLERDİR, servis değil: serbest bırakılmış bir partinin klon
  * teklifi bayrak kapalıyken de ÖDENMEYE DEVAM ETMEK ZORUNDA (sıradan bir
@@ -195,6 +198,23 @@ export async function quoteApiEnabled(): Promise<boolean> {
 export async function frameworkSurfacesEnabled(): Promise<boolean> {
   if (await isFlagEnabled("framework_orders_enabled")) return true;
   return isAdminSession();
+}
+
+/**
+ * Çerçeve sipariş EKRANLARI açık mı (`/admin/cerceve/**`, `/admin/teklifler/[id]`
+ * dönüştürme kartı, kenar çubuğu satırı) — YALNIZ BAYRAK.
+ *
+ * Neden ikinci bir kapı: `frameworkSurfacesEnabled` admin oturumunu iç test
+ * için geçiriyor, ama bu ekranlara ZATEN yalnız admin girebiliyor (panel
+ * düzeni oturumu kontrol edip `/admin/login`e yönlendiriyor). Yani o kapı bir
+ * ekranda hiçbir şeyi kapatmaz: bayrak KAPALIYKEN de dönüştürme kartı her
+ * admin'e çizilir ve anlaşma kurulabilirdi. Spec §F3.4 bunun tersini söylüyor:
+ * **"Bayrak kapalıyken render edilmez."** Ölçü o yüzden burada oturumdan
+ * ARINDIRILIYOR; §F3.2'nin iç test istisnası UÇLARIN kapısında kalıyor (bir
+ * admin bayrak kapalıyken uçları curl/test ile yine sürebilir).
+ */
+export async function frameworkScreensEnabled(): Promise<boolean> {
+  return isFlagEnabled("framework_orders_enabled");
 }
 
 /**

@@ -3683,25 +3683,51 @@ test("ÇERÇEVE: parti tutarı önizlemesi SUNUCUDAN gelir (dryRun), ekran hesap
   assert.match(client, /dryRun: true/, "ön izleme ucu dryRun ile çağrılmıyor");
 });
 
-test("ÇERÇEVE: bayrak kapalıyken admin yüzeyleri 404 (403 değil)", () => {
-  // Kapalı bir özelliğin varlığını duyurmanın anlamı yok: iki sayfa da
-  // `frameworkSurfacesEnabled` → `notFound()` deseniyle kapanıyor ve hiçbir
-  // yerde 403 üretmiyor.
-  for (const rel of ["src/app/admin/cerceve/page.tsx", "src/app/admin/cerceve/[id]/page.tsx"]) {
-    const raw = fs.readFileSync(path.resolve(rel), "utf8");
-    // Yorumlar ÇIKARILIR: başlık "403 DEĞİL" diye yazıyor ve o bir kod değil,
-    // gerekçe.
-    const code = raw
+test("ÇERÇEVE: bayrak kapalıyken admin EKRANLARI 404 (oturum kapıyı AÇMAZ)", () => {
+  // Kapalı bir özelliğin varlığını duyurmanın anlamı yok: her iki sayfa da
+  // `notFound()` ile kapanıyor, hiçbir yerde 403 üretmiyor.
+  //
+  // KAPI `frameworkScreensEnabled` OLMAK ZORUNDA: `frameworkSurfacesEnabled`
+  // admin oturumunu iç test için GEÇİRİYOR ve bu sayfalara yalnız admin
+  // girebildiği için o kapı bir ekranda hiçbir şeyi kapatmaz — bayrak
+  // kapalıyken de ekran çizilir, dönüştürme kartı görünür ve anlaşma
+  // KURULABİLİRDİ (§F3.4 "render edilmez" diyor). Testin adı ancak oturumdan
+  // arınmış bir kapıyla doğru.
+  const strip = (raw: string): string =>
+    raw
       .replace(/\/\*[\s\S]*?\*\//g, " ")
       .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
       .replace(/\s+/g, " ");
+
+  for (const rel of ["src/app/admin/cerceve/page.tsx", "src/app/admin/cerceve/[id]/page.tsx"]) {
+    const code = strip(fs.readFileSync(path.resolve(rel), "utf8"));
     assert.match(
       code,
-      /if \(!\(await frameworkSurfacesEnabled\(\)\)\) notFound\(\);/,
+      /if \(!\(await frameworkScreensEnabled\(\)\)\) notFound\(\);/,
       `${rel}: bayrak kapısı yok`
+    );
+    assert.doesNotMatch(
+      code,
+      /frameworkSurfacesEnabled/,
+      `${rel}: ekran, admin oturumunu geçiren UÇ kapısını kullanıyor`
     );
     assert.doesNotMatch(code, /\b403\b/, `${rel}: 403 üretiyor`);
   }
+
+  // Kapının KENDİSİ: yalnız bayrak okunur, `isAdminSession` HİÇ sorulmaz.
+  const access = strip(fs.readFileSync(path.resolve("src/lib/services/quote-access.ts"), "utf8"));
+  assert.match(
+    access,
+    /export async function frameworkScreensEnabled\(\): Promise<boolean> \{ return isFlagEnabled\("framework_orders_enabled"\); \}/,
+    "ekran kapısı yalnız bayrağı okumuyor"
+  );
+  // Uçların kapısı DEĞİŞMEDİ: iç test istisnası orada kalır (§F3.2).
+  assert.match(
+    access,
+    /export async function frameworkSurfacesEnabled\(\): Promise<boolean> \{ if \(await isFlagEnabled\("framework_orders_enabled"\)\) return true; return isAdminSession\(\); \}/,
+    "uç kapısının iç test istisnası kaybolmuş"
+  );
+
   // Teklif karar ekranındaki dönüştürme düğmesi bayrak kapalıyken HİÇ render
   // EDİLMEZ: kapı sayfada, prop `null` iner.
   const quotePage = fs
@@ -3709,7 +3735,7 @@ test("ÇERÇEVE: bayrak kapalıyken admin yüzeyleri 404 (403 değil)", () => {
     .replace(/\s+/g, " ");
   assert.match(
     quotePage,
-    /if \(await frameworkSurfacesEnabled\(\)\) \{ frameworkEntry = await loadFrameworkEntry/,
+    /if \(await frameworkScreensEnabled\(\)\) \{ frameworkEntry = await loadFrameworkEntry/,
     "dönüştürme kapısı bayrağa bağlı değil"
   );
   const quoteClient = fs.readFileSync(
@@ -3720,5 +3746,26 @@ test("ÇERÇEVE: bayrak kapalıyken admin yüzeyleri 404 (403 değil)", () => {
     quoteClient,
     /\{\(frameworkEntry \|\| frameworkEntryUnreadable\) && \(/,
     "kart bayrak kapalıyken de çizilebiliyor"
+  );
+
+  // KENAR ÇUBUĞU da bayrağa bağlı: 404 veren bir ekrana götüren bir menü
+  // satırı bırakmak admin'e olmayan bir ekran söylemekti.
+  const sidebar = strip(fs.readFileSync(path.resolve("src/app/admin/sidebar.tsx"), "utf8"));
+  assert.match(
+    sidebar,
+    /\.\.\.\(frameworkEnabled \? \[ \{ href: "\/admin\/cerceve"/,
+    "kenar çubuğu satırı bayrak kapalıyken de çiziliyor"
+  );
+  const layout = strip(fs.readFileSync(path.resolve("src/app/admin/layout.tsx"), "utf8"));
+  assert.match(
+    layout,
+    /const frameworkEnabled = await frameworkScreensEnabled\(\);/,
+    "düzen bayrağı okumuyor"
+  );
+  // Rozet sayımı da bayrak kapalıyken koşmaz (satır zaten çizilmiyor).
+  assert.match(
+    layout,
+    /frameworkEnabled \? displayRead\("serbest bırakılabilir partiler", releasableBatchCount\(\)\) : Promise\.resolve\(0\)/,
+    "rozet sayımı bayrak kapalıyken de koşuyor"
   );
 });

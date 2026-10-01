@@ -15,6 +15,7 @@ import {
   NOT_REFUNDED,
 } from "@/lib/services/admin-order-sql";
 import { needsReviewCountQuery } from "@/lib/services/quote-admin";
+import { frameworkScreensEnabled } from "@/lib/services/quote-access";
 import { releasableBatchCount } from "@/lib/services/quote-framework";
 
 /**
@@ -110,6 +111,13 @@ export default async function AdminLayout({
   // Arıza YUTULMAZ: null "0" DEĞİL "BİLİNMİYOR" demektir; rozet sayı yerine "?"
   // gösterir ve şerit hangi sayının bilinmediğini, adminin fiilen BAKTIĞI yerde
   // (her sayfanın en üstünde) yazar.
+  // Çerçeve ekranları bayrağa bağlı (`frameworkScreensEnabled`, YALNIZ bayrak):
+  // kapalıyken /admin/cerceve 404 verir, bu yüzden kenar çubuğunda o satır
+  // çizilMEZ — 404'e götüren bir menü satırı bırakmak admin'e olmayan bir ekran
+  // söylemekti. Okuma hiç fırlatmaz (`isFlagEnabled` arızada derlenmiş
+  // varsayılana düşer), o yüzden `displayRead` sarmalayıcısı gerekmiyor.
+  const frameworkEnabled = await frameworkScreensEnabled();
+
   const [
     awaitingModelRead,
     awaitingManufacturerRead,
@@ -235,12 +243,19 @@ export default async function AdminLayout({
       needsReviewCountQuery()
     ),
     // Çerçeve siparişler: serbest bırakma penceresi AÇILMIŞ planlı partiler.
-    // Rozet "bugün elini değdirmen gereken iş" sayar ve ölçü plan kapısının
-    // iş günü kuralının tersidir (`frameworkReleaseWindowOpen`) — ekranın
-    // kendi eşiği YOKTUR. `orders`a hiç bakmaz: planlı parti tezgâhta yer
-    // kaplamaz. 0073 uygulanmamış bir ortamda bu okuma düşer ve rozet "?"
-    // gösterir — sıfır değil, BİLİNMİYOR.
-    displayRead("serbest bırakılabilir partiler", releasableBatchCount()),
+    // Rozet "bugün elini değdirmen gereken iş" sayar ve ölçü serbest bırakma
+    // ucunun ölçüsüdür (kilidi dolmamış aktif anlaşma + partinin KENDİ teslim
+    // gününün tersi, `frameworkReleaseWindowOpen`) — ekranın kendi eşiği
+    // YOKTUR. `orders`a hiç bakmaz: planlı parti tezgâhta yer kaplamaz. 0073
+    // uygulanmamış bir ortamda bu okuma düşer ve rozet "?" gösterir — sıfır
+    // değil, BİLİNMİYOR.
+    //
+    // BAYRAK KAPALIYSA HİÇ OKUNMAZ: satır da çizilmiyor (ekranlar 404), yani
+    // her admin sayfasında boşuna üç sorgu açmanın (ve her anlaşmanın katalog
+    // JSON'unu telden çekmenin) karşılığı yok.
+    frameworkEnabled
+      ? displayRead("serbest bırakılabilir partiler", releasableBatchCount())
+      : Promise.resolve(0),
   ]);
 
   // null = okunamadı (BİLİNMİYOR); sayı = gerçek sayım.
@@ -323,6 +338,7 @@ export default async function AdminLayout({
             // `countOf` satır kümesi bekliyor; bu okuma doğrudan sayı
             // döndürüyor. `null` YİNE "okunamadı" demektir.
             releasableBatchCount={releasableBatchRead}
+            frameworkEnabled={frameworkEnabled}
           />
         }
       >

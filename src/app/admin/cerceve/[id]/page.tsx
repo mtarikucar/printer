@@ -9,7 +9,7 @@ import {
   loadManufacturerCapacities,
   manufacturerLoadLabel,
 } from "@/lib/services/manufacturer-capacity";
-import { frameworkSurfacesEnabled } from "@/lib/services/quote-access";
+import { frameworkScreensEnabled } from "@/lib/services/quote-access";
 import {
   loadFrameworkAudit,
   loadFrameworkDetail,
@@ -21,8 +21,10 @@ import { FrameworkDetailClient } from "./client";
 /**
  * `/admin/cerceve/[id]` — anlaşmanın karar ekranı.
  *
- * BAYRAK KAPALIYKEN 404 (`quoteApiEnabled` deseni); admin oturumu iç test için
- * geçer. Anlaşmanın KENDİSİ sayfanın çekirdek verisidir: okunamazsa
+ * BAYRAK KAPALIYKEN 404 ve ölçü YALNIZ BAYRAK (`frameworkScreensEnabled`):
+ * bu sayfaya yalnız admin girebildiği için admin oturumunu geçiren bir kapı
+ * hiçbir şeyi kapatmazdı (uçların iç test istisnası uçlarda kalır).
+ * Anlaşmanın KENDİSİ sayfanın çekirdek verisidir: okunamazsa
  * gösterilecek bir şey de yoktur, bu yüzden o okuma korumasızdır (ev kuralı,
  * `CORE_READS`). GÖSTERİM okumaları (para dökümü, tezgâh yükü, denetim izi)
  * korumalıdır ve arıza `null` döner — `null` "boş" değil "BİLİNMİYOR"dur.
@@ -56,7 +58,7 @@ export default async function AdminFrameworkDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  if (!(await frameworkSurfacesEnabled())) notFound();
+  if (!(await frameworkScreensEnabled())) notFound();
 
   const { id } = await params;
   const detail = await loadFrameworkDetail(id);

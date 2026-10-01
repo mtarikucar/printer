@@ -509,12 +509,65 @@ export function frameworkLeadDays(args: {
 }
 
 /**
+ * PARTİNİN teslim süresi (iş günü) — pencerenin TEK ölçüsü.
+ *
+ * Plan kapısı partiyi KENDİ satırlarıyla ölçer (`priceBatch` → `computeQuote`
+ * yalnız o partinin parçalarıyla koşar, kapıya `pricing.leadDays` gider), bu
+ * yüzden pencerenin de aynı kümeyi okuması ZORUNDADIR. Anlaşma geneli
+ * maksimum (`frameworkLeadDays`) kullanıldığında ölçü İKİ FARKLI şey söyler:
+ * `partLeadDaysBase` malzeme ve yüzeyin `leadDaysExtra`sını topladığı için
+ * anlaşma değeri partininkinden her zaman ≥ olur ve yalnız HIZLI parçaları
+ * taşıyan bir parti için pencere `(anlaşmaLead − partiLead)` iş günü ERKEN
+ * açılırdı — rozet "bugün elini değdir" der, uyarı "bugün bıraksanız ancak
+ * yetişir" basar, oysa partinin önünde günler vardır.
+ *
+ * `null` = ÖLÇÜLEMEDİ, yani pencere KAPALI sayılır (fail-closed):
+ *  - partinin satırı anlaşmanın donmuş parça kümesinde olmayan bir parçaya
+ *    bakıyor (kanıtlayamadığımız şey lehe yazılmaz — eksik parçayı atlayıp
+ *    kalanla ölçmek, pencereyi sessizce erken açardı),
+ *  - ya da teslim kademesi donmuş katalogda yok (`frameworkLeadDays`).
+ */
+export function frameworkBatchLeadDays(args: {
+  snapshot: PricingSnapshot;
+  leadTier: LeadTierKey;
+  /** Anlaşmanın DONMUŞ parça kümesi (`parts_snapshot`). */
+  parts: readonly Pick<
+    FrozenQuotePart,
+    "partId" | "technologyKey" | "materialKey" | "finishKey"
+  >[];
+  addonKeys: readonly string[];
+  /** Partinin satırlarının baktığı parça kimlikleri (`batch_lines.part_id`). */
+  linePartIds: readonly string[];
+}): number | null {
+  const byId = new Map(args.parts.map((p) => [p.partId, p]));
+  const batchParts: Pick<FrozenQuotePart, "technologyKey" | "materialKey" | "finishKey">[] = [];
+  for (const partId of args.linePartIds) {
+    const part = byId.get(partId);
+    if (!part) return null;
+    batchParts.push(part);
+  }
+  // Satırı olmayan parti ölçülemez (DB'de doğmaz, ama ölçüsüz bir pencere
+  // açmaktan iyidir).
+  if (batchParts.length === 0) return null;
+  return frameworkLeadDays({
+    snapshot: args.snapshot,
+    leadTier: args.leadTier,
+    parts: batchParts,
+    addonKeys: args.addonKeys,
+  });
+}
+
+/**
  * Bu partinin SERBEST BIRAKMA PENCERESİ açıldı mı?
  *
  * Plan kapısının 4. kuralının TAM TERSİ ve aynı ölçüyle: parti planlanırken
  * `plannedShipDate >= bugün + leadDays iş günü` isteniyordu, yani pencere
  * `leadDays` iş günü ÖNCE açılır. Bugün bırakılan bir parti tarihini ancak
  * yakalıyorsa (ya da çoktan geçtiyse) pencere AÇIKTIR.
+ *
+ * "AYNI ölçü" cümlesi `leadDays`in PARTİNİN kendi parçalarından gelmesine
+ * bağlıdır: çağıran `frameworkBatchLeadDays` kullanır, anlaşma geneli
+ * `frameworkLeadDays`i DEĞİL (gerekçe orada).
  *
  * İkinci bir eşik ya da "kaç gün önce uyar" sabiti YOKTUR: uydurulmuş bir
  * ufuk, admin'e ucun uygulamadığı bir aciliyet söylemekti. Tatil listesi ve
@@ -523,7 +576,7 @@ export function frameworkLeadDays(args: {
  */
 export function frameworkReleaseWindowOpen(args: {
   snapshot: PricingSnapshot;
-  /** `frameworkLeadDays`; `null` ise pencere ÖLÇÜLEMEZ ve `false` döner. */
+  /** `frameworkBatchLeadDays`; `null` ise pencere ÖLÇÜLEMEZ ve `false` döner. */
   leadDays: number | null;
   /** `YYYY-MM-DD`, İstanbul takvimi. */
   plannedShipDate: string;

@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
-import { frameworkSurfacesEnabled } from "@/lib/services/quote-access";
+import { frameworkScreensEnabled } from "@/lib/services/quote-access";
 import { loadAdminQuoteDetail } from "@/lib/services/quote-admin";
 import { loadFrameworkEntry, type FrameworkEntryGate } from "@/lib/services/quote-framework";
 import { QuoteDetailClient } from "./client";
@@ -17,7 +17,11 @@ import { QuoteDetailClient } from "./client";
  *
  * "Çerçeve anlaşmaya dönüştür" düğmesi BAYRAK KAPALIYKEN HİÇ RENDER EDİLMEZ:
  * `frameworkEntry` `null` iner ve ekranda çerçeveye dair tek kelime geçmez
- * (kapalı bir özelliğin varlığını duyurmanın anlamı yok).
+ * (kapalı bir özelliğin varlığını duyurmanın anlamı yok). Kapı
+ * `frameworkScreensEnabled` — YALNIZ bayrak. `frameworkSurfacesEnabled`
+ * olamaz: o, admin oturumunu iç test için geçiriyor ve bu sayfaya yalnız
+ * admin girebildiği için bayrak kapalıyken de kart çizilir, hatta anlaşma
+ * KURULABİLİRDİ (§F3.4 bunun tersini söylüyor).
  *
  * Bayrak açıkken kapı UÇTAKİYLE AYNI kaynaktan gelir (`loadFrameworkEntry` →
  * `entryRefusals` + `validateFrameworkAgreement`): ekran ucun reddettiği bir
@@ -35,7 +39,7 @@ export default async function AdminQuoteDetailPage({
 
   let frameworkEntry: FrameworkEntryGate | null = null;
   let frameworkEntryUnreadable = false;
-  if (await frameworkSurfacesEnabled()) {
+  if (await frameworkScreensEnabled()) {
     frameworkEntry = await loadFrameworkEntry(detail.id).catch((e) => {
       console.error(`[admin/teklifler ${detail.id}] çerçeve giriş kapısı okunamadı`, e);
       frameworkEntryUnreadable = true;

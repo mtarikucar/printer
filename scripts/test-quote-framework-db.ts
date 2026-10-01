@@ -377,7 +377,13 @@ async function main() {
      */
     async function makeQuote(
       userId: string,
-      parts: Array<{ name: string; quantity: number }>,
+      /**
+       * `finishKey` verilmezse hepsi `ham` olur (eski davranış). Verildiğinde
+       * parçalar AYRI yüzeyler taşıyabilir: teslim günü ölçüsü parça başına
+       * `leadDaysExtra` topladığı için "anlaşma geneli gün" ile "partinin kendi
+       * günü" ancak böyle AYRIŞIR.
+       */
+      parts: Array<{ name: string; quantity: number; finishKey?: string }>,
       over: { addonKeys?: string[]; status?: "quoted" | "draft"; fxSnapshot?: unknown } = {}
     ) {
       const now = new Date();
@@ -407,6 +413,16 @@ async function main() {
 
       const partIds: string[] = [];
       for (const [index, spec] of parts.entries()) {
+        const partFinish =
+          spec.finishKey === undefined
+            ? finish
+            : snapshot.finishes.find(
+                (f) =>
+                  f.key === spec.finishKey &&
+                  (f.technologyKey === null || f.technologyKey === tech.key)
+              );
+        assert.ok(partFinish, `donmuş katalogda yüzey yok: ${spec.finishKey}`);
+        assert.notEqual(partFinish.costLineKind, "painting", "çerçevede boyama YASAK");
         const partId = randomUUID();
         const canonicalStlKey = `quote-parts/${partId}/canonical.stl`;
         fs.mkdirSync(path.join(uploadDir, `quote-parts/${partId}`), { recursive: true });
@@ -430,7 +446,7 @@ async function main() {
           technologyKey: tech.key,
           materialKey: material.key,
           colorKey: material.colors[0].key,
-          finishKey: finish.key,
+          finishKey: partFinish.key,
           layerUm: tech.defaultLayerUm,
           infillPct: tech.infillOptionsPct === null ? null : tech.defaultInfillPct,
           quantity: spec.quantity,
@@ -2333,6 +2349,141 @@ async function main() {
       );
       assert.equal(bad.code, "manufacturer_unavailable", bad.message);
       assert.equal(bad.status, 409);
+    });
+
+    await test("pencere PARTİNİN kendi teslim gününü ölçer (çok parçalı anlaşma)", async () => {
+      // KÖR NOKTA KAPATILIYOR: tek parçalı bir anlaşmada "anlaşma geneli gün"
+      // ile "partinin kendi günü" zorunlu olarak ÇAKIŞIR, yani ölçü yanlış
+      // olsa bile görünmez. Burada iki parça İKİ AYRI yüzey taşıyor: `ham`
+      // (+0 iş günü) ve `astar` (+2). `quoteLeadDays` parçaların EN YAVAŞINI
+      // aldığı için anlaşma geneli gün astarlı parçanın günüdür; yalnız hızlı
+      // parçayı taşıyan bir parti DAHA KISA bir gün taşır.
+      //
+      // İki parti de TAM OLARAK anlaşma geneli günün en erken tarihine
+      // planlanıyor. Doğru ölçüyle yalnız astarlı parti "bugün bıraksan ancak
+      // yetişir" der; hızlı partinin önünde hâlâ iki iş günü vardır.
+      const o = await makeUser();
+      const qq = await makeQuote(o.id, [
+        { name: "Hızlı panel", quantity: 60, finishKey: "ham" },
+        { name: "Astarlı panel", quantity: 60, finishKey: "astar" },
+      ]);
+      const st = await computeOf(qq.id);
+      const agreementLead = st.computed.totals.leadDays ?? 5;
+      const created = await createFrameworkFromQuote({
+        quoteId: qq.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        priceLockedUntil: LOCK_UNTIL,
+        shippingAddress: address,
+      });
+      assert.equal(created.ok, true, JSON.stringify(created));
+      if (!created.ok) return;
+      await activateFramework({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+
+      const sameDate = shipDate(agreementLead, 0);
+      const before = await releasableBatchCount();
+      const planned = await planBatches({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        batches: [
+          { plannedShipDate: sameDate, lines: [{ partId: qq.partIds[0], quantity: 20 }] },
+          { plannedShipDate: sameDate, lines: [{ partId: qq.partIds[1], quantity: 20 }] },
+        ],
+      });
+      assert.equal(planned.ok, true, JSON.stringify(planned));
+
+      const detail = (await loadFrameworkDetail(created.id))!;
+      assert.equal(detail.leadDays, agreementLead, "anlaşma geneli gün gösterimde");
+      const fast = detail.batches.find((b) => b.lines[0]?.partId === qq.partIds[0])!;
+      const slow = detail.batches.find((b) => b.lines[0]?.partId === qq.partIds[1])!;
+      assert.equal(
+        slow.releaseWindowOpen,
+        true,
+        "astarlı partinin penceresi KAPALI (kendi günü anlaşmanınkiyle aynı)"
+      );
+      assert.equal(
+        fast.releaseWindowOpen,
+        false,
+        "hızlı parçalı partinin penceresi ANLAŞMA geneli günle erken açıldı"
+      );
+      assert.equal(
+        (await releasableBatchCount()) - before,
+        1,
+        "rozet de anlaşma geneli günü kullanıyor (iki parti saydı)"
+      );
+    });
+
+    await test("rozet: fiyat kilidi DOLMUŞ anlaşmanın partisi SAYILMAZ", async () => {
+      const o = await makeUser();
+      const qq = await makeQuote(o.id, [{ name: "Kapak", quantity: 40 }]);
+      const st = await computeOf(qq.id);
+      const lead = st.computed.totals.leadDays ?? 5;
+      const created = await createFrameworkFromQuote({
+        quoteId: qq.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        priceLockedUntil: LOCK_UNTIL,
+        shippingAddress: address,
+      });
+      assert.equal(created.ok, true, JSON.stringify(created));
+      if (!created.ok) return;
+      await activateFramework({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+      });
+      const before = await releasableBatchCount();
+      const planned = await planBatches({
+        frameworkId: created.id,
+        adminEmail: "qa-admin@example.test",
+        reason: REASON,
+        batches: [
+          { plannedShipDate: shipDate(lead, 0), lines: [{ partId: qq.partIds[0], quantity: 20 }] },
+        ],
+      });
+      assert.equal(planned.ok, true, JSON.stringify(planned));
+      if (!planned.ok) return;
+      assert.equal(
+        (await releasableBatchCount()) - before,
+        1,
+        "penceresi açık parti hiç sayılmadı"
+      );
+
+      // Kilidi GEÇMİŞE çek ama durumu `active` BIRAK: bu depoda çerçeveyi
+      // `expired`a çeken bir bakım işi YOK (`quote-maintenance.ts` çerçeveye
+      // hiç dokunmuyor), yani canlıda oluşan hâl tam olarak budur.
+      await db
+        .update(quoteFrameworks)
+        .set({ priceLockedUntil: new Date(Date.now() - 86_400_000) })
+        .where(eq(quoteFrameworks.id, created.id));
+      const [stillActive] = await db
+        .select({ status: quoteFrameworks.status })
+        .from(quoteFrameworks)
+        .where(eq(quoteFrameworks.id, created.id))
+        .limit(1);
+      assert.equal(stillActive.status, "active", "durum kendiliğinden değişti");
+      assert.equal(
+        await releasableBatchCount(),
+        before,
+        "kilidi dolmuş anlaşmanın partisi rozete eklendi"
+      );
+
+      // ROZET İLE UCUN ÖLÇÜSÜ AYNI: rozetin götürdüğü düğme 409 veriyor.
+      const ret = await refusal(() =>
+        releaseBatch({
+          frameworkId: created.id,
+          batchId: planned.batches[0].id!,
+          adminEmail: "qa-admin@example.test",
+          reason: REASON,
+        })
+      );
+      assert.equal(ret.code, "framework_expired");
+      assert.equal(ret.status, 409);
     });
 
     await test("giriş kapısı: fiyatlı teklif uygun, anlaşması olan teklif DEĞİL", async () => {

@@ -1035,6 +1035,25 @@ async function frameworkAnchorChecks(): Promise<void> {
     "koşul yok: iki atama denemesi üst üste koşabilir"
   );
 
+  // YÖNLENDİRME ANAHTARI: `autoAssignIfEligible`ın uyguladığı tür başına
+  // musluk (`autoAssignRowGate` → `autoAssignFlagFor`) çapa yolunda da
+  // sorulmak ZORUNDA. Doğrudan `assignManufacturerToOrder` çağıran bir yol o
+  // anahtarı okumazsa, sahibi `auto_assign_upload`ı kapattığında çerçeve
+  // partileri yine atanır ve üreticiye 24 saatlik kabul bildirimi yine gider.
+  {
+    const placement = read("src/lib/services/framework-placement.ts");
+    ok(
+      "çapa yolu tür başına yönlendirme anahtarını SORUYOR",
+      /autoAssignRowGate\(/.test(placement) && /autoAssignFlagFor\(/.test(placement),
+      "kapı `config/flags.ts`ten okunmuyor"
+    );
+    ok(
+      "kapı YENİDEN YORUMLANMIYOR (anahtar adı elle yazılmamış)",
+      !/"auto_assign_/.test(placement),
+      "anahtar adı elle yazılmış: iki kaynak"
+    );
+  }
+
   // Denetim gerekçesi ETİKETLİ olmak zorunda: `ASSIGN_SELECTION_BASIS_TR`
   // `Record<AssignSelectionBasis, string>` olduğu için etiketi unutmak DERLEME
   // hatasıdır — ama etiketin ÇERÇEVEDEN bahsettiğini tsc bilmez.
@@ -1103,6 +1122,9 @@ async function frameworkAnchorChecks(): Promise<void> {
   let assignCalls: AssignCall[] = [];
   let assignResult: unknown = { ok: true, order: { id: "o1" } };
   let assignThrows = false;
+  /** `auto_assign_upload` (çerçeve partisi `orderType: "upload"` doğar). */
+  let flagOn = true;
+  const flagReads: string[] = [];
 
   const loader = Module as unknown as {
     _load: (name: string, ...rest: unknown[]) => unknown;
@@ -1110,6 +1132,17 @@ async function frameworkAnchorChecks(): Promise<void> {
   const originalLoad = loader._load;
   loader._load = function (name, ...rest) {
     if (name === "@/lib/db") return { db: fakeDb };
+    // Bayrak okuması taklit edilir: ölçülen şey kapının SORULUP sorulmadığı.
+    if (name === "@/lib/services/flags") {
+      const real = originalLoad.call(this, name, ...rest) as Record<string, unknown>;
+      return {
+        ...real,
+        isFlagEnabled: async (key: string) => {
+          flagReads.push(key);
+          return flagOn;
+        },
+      };
+    }
     if (name === "@/lib/services/manufacturer-assign") {
       const real = originalLoad.call(this, name, ...rest) as Record<string, unknown>;
       return {
@@ -1134,9 +1167,33 @@ async function frameworkAnchorChecks(): Promise<void> {
       assignCalls = [];
       assignResult = { ok: true, order: { id: "o1" } };
       assignThrows = false;
+      flagOn = true;
+      flagReads.length = 0;
     };
+    /**
+     * Çerçeve partisinin SİPARİŞ satırı: onaylı, atanmamış, `upload` türü
+     * (`quote-checkout.ts` parti taslağına bu türü yazıyor), yani otomatik
+     * atamanın satır kapısından geçer ve anahtarı `auto_assign_upload`tır.
+     */
+    const orderRow = (over: Record<string, unknown> = {}) => ({
+      orders: [
+        {
+          status: "approved",
+          paymentStatus: "succeeded",
+          orderType: "upload",
+          manufacturerId: null,
+          manufacturerStatus: null,
+          workshopSessionId: null,
+          attributionChannel: null,
+          productId: null,
+          parentReference: null,
+          ...over,
+        },
+      ],
+      order_items: [],
+    });
     /** Sipariş bir çerçeve partisi ve anlaşmanın çapalı atölyesi var. */
-    const batchRow = () => ({
+    const batchRow = (orderOver: Record<string, unknown> = {}) => ({
       quote_framework_batches: [
         {
           frameworkNumber: "C-000123",
@@ -1146,6 +1203,7 @@ async function frameworkAnchorChecks(): Promise<void> {
         },
       ],
       manufacturers: [{ companyName: "Atölye X" }],
+      ...orderRow(orderOver),
     });
 
     reset();
@@ -1168,6 +1226,11 @@ async function frameworkAnchorChecks(): Promise<void> {
       out
     );
     ok("çapa UYGUN: siparişe not YAZILMAZ", script.noteUpdates.length === 0, script.noteUpdates);
+    ok(
+      "çapa UYGUN: tür başına anahtar OKUNDU (auto_assign_upload)",
+      flagReads.includes("auto_assign_upload"),
+      flagReads
+    );
 
     reset();
     script.rows = batchRow();
@@ -1233,6 +1296,63 @@ async function frameworkAnchorChecks(): Promise<void> {
     ok("çapası olmayan anlaşma: null, atama denenmedi", out === null && assignCalls.length === 0);
 
     reset();
+    // YÖNLENDİRME ANAHTARI KAPALI: operatörün musluğu kapalıyken çapa HİÇ
+    // denenmez. Not da yazılmaz — ortada atölyeyi indikleyen bir ret yok,
+    // atama hiç yapılmıyor; cevabı sıralama yolu verir (`flag_off`).
+    flagOn = false;
+    script.rows = batchRow();
+    out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok("anahtar KAPALI: çapa denenmedi", assignCalls.length === 0, assignCalls);
+    ok("anahtar KAPALI: null döner (sıralama yolu cevabı verir)", out === null, out);
+    ok("anahtar KAPALI: siparişe not yazılmadı", script.noteUpdates.length === 0, script.noteUpdates);
+    ok(
+      "anahtar KAPALI: kapı gerçekten okundu",
+      flagReads.includes("auto_assign_upload"),
+      flagReads
+    );
+
+    reset();
+    // SATIR KAPISI: sipariş başka bir atölyedeyse (ya da onaylı değilse) çapa
+    // denenmez — kapı `autoAssignIfEligible`ınkiyle AYNI kaynaktan okunuyor.
+    script.rows = batchRow({ manufacturerId: "mfg-9", manufacturerStatus: "pending" });
+    out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok(
+      "sipariş ZATEN atanmış: çapa denenmedi, not yazılmadı",
+      out === null && assignCalls.length === 0 && script.noteUpdates.length === 0,
+      { out, assignCalls, noteUpdates: script.noteUpdates }
+    );
+
+    reset();
+    // Sipariş satırı OKUNAMADI (parti satırı var, sipariş yok): fail-closed.
+    script.rows = {
+      quote_framework_batches: [
+        {
+          frameworkNumber: "C-000125",
+          frameworkStatus: "active",
+          preferredManufacturerId: "mfg-1",
+          position: 2,
+        },
+      ],
+      orders: [],
+      order_items: [],
+    };
+    out = await tryFrameworkPreferredPlacement({
+      orderId: "order-1",
+      adminEmail: "sahip@test.invalid",
+    });
+    ok(
+      "sipariş satırı YOK: çapa denenmedi (fail-closed)",
+      out === null && assignCalls.length === 0,
+      { out, assignCalls }
+    );
+
+    reset();
     script.rows = batchRow();
     assignThrows = true;
     let threw = false;
@@ -1263,10 +1383,17 @@ async function frameworkAnchorChecks(): Promise<void> {
   }
 }
 
-void frameworkAnchorChecks().then(() => {
-  console.log(
-    `\n${controls.length} kontrol tarandı, ${hit.size} ayrı uç+yöntem eşleşti` +
-      (failed ? `\n${failed} FAILED` : "\ntümü geçti")
-  );
-  process.exitCode = failed ? 1 : 0;
-});
+void frameworkAnchorChecks()
+  .catch((e) => {
+    // Beklenmeyen bir hata da ÖZETİ bastırmamalı: aksi hâlde koşu "kaç kontrol
+    // koştu"yu hiç söylemeden düşer.
+    console.error("\nçerçeve çapası kontrolleri DÜŞTÜ", e);
+    failed += 1;
+  })
+  .then(() => {
+    console.log(
+      `\n${controls.length} kontrol tarandı, ${hit.size} ayrı uç+yöntem eşleşti` +
+        (failed ? `\n${failed} FAILED` : "\ntümü geçti")
+    );
+    process.exitCode = failed ? 1 : 0;
+  });

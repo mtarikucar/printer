@@ -53,7 +53,7 @@
  * ETMEK ZORUNDA (sıradan bir `quotes` satırıdır). Kapıyı uçlara bırakmak, o
  * kapsamı iki yerde birden yanlış kurma riskini kaldırıyor.
  */
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { istanbulDateKey } from "@/lib/config/business-days";
 import { db } from "@/lib/db";
 import {
@@ -77,6 +77,7 @@ import { computeQuote } from "@/lib/config/quote-compute";
 import {
   FRAMEWORK_PRICE_DRIFT_ERROR,
   frameworkBatchDriftCode,
+  frameworkBatchLeadDays,
   frameworkBatchLoadUnits,
   frameworkBatchTotals,
   frameworkLeadDays,
@@ -1463,8 +1464,13 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
     }
   }
 
-  // Teslim süresi ANLAŞMA BAŞINA bir kez ölçülür (donmuş anlık görüntü +
-  // donmuş parça kümesi), sonra her partinin penceresine uygulanır.
+  // İKİ AYRI ÖLÇÜ, bilerek:
+  //  - `leadDays` ANLAŞMANIN teslim süresi (tüm parçaların en yavaşı) ve
+  //    yalnız GÖSTERİMDİR (ekranda "İş günü" satırı),
+  //  - pencere her partinin KENDİ parçalarıyla ölçülür
+  //    (`frameworkBatchLeadDays`), çünkü plan kapısı da öyle ölçüyor. İkisini
+  //    birbirinin yerine yazmak, hızlı parçalı partinin penceresini günler
+  //    önce açardı.
   const now = new Date();
   const leadDays = frameworkLeadDays({
     snapshot: framework.pricingSnapshot,
@@ -1501,7 +1507,13 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
         b.status === "planned" &&
         frameworkReleaseWindowOpen({
           snapshot: framework.pricingSnapshot,
-          leadDays,
+          leadDays: frameworkBatchLeadDays({
+            snapshot: framework.pricingSnapshot,
+            leadTier: framework.leadTier,
+            parts: framework.partsSnapshot,
+            addonKeys: framework.addonKeys,
+            linePartIds: lines.map((l) => l.partId),
+          }),
           plannedShipDate: b.plannedShipDate,
           now,
         }),
@@ -1877,12 +1889,22 @@ export async function loadFrameworkEntry(quoteId: string): Promise<FrameworkEntr
 /**
  * Serbest bırakma PENCERESİ AÇILMIŞ planlı parti sayısı (kenar çubuğu rozeti).
  *
- * Pencere ölçüsü tek kaynaktan gelir (`frameworkReleaseWindowOpen`, plan
- * kapısının 4. kuralının tersi); ikinci bir "kaç gün önce uyar" eşiği YOKTUR.
+ * Rozetin cümlesi "bugün elini değdir"dir, o yüzden ölçü `releaseBatch`in
+ * ölçüsünün AYNISI olmak zorunda. İki kapı birden okunur:
  *
- * İKİ SORGU, çünkü ölçü ANLAŞMA BAŞINA: donmuş katalog anlık görüntüsü her
- * parti satırında tekrarlansaydı aynı JSON onlarca kez telden geçerdi. Yalnız
- * planlı partisi OLAN anlaşmalar okunur.
+ *  1. anlaşma `active` VE **fiyat kilidi DOLMAMIŞ**. Kilit ölçüsü tarihe
+ *     bakılarak uygulanır, bakım turunun ne zaman koştuğuna bakılarak değil
+ *     (`releaseBatch` de öyle: kilidi dolmuş anlaşma `status='active'` durur ve
+ *     yine 409 `framework_expired` alır — bu depoda çerçeveyi `expired`a çeken
+ *     bir bakım işi de yok). Bu süzgeç olmadan rozet, tıklandığında 409 veren
+ *     partileri sayardı.
+ *  2. pencere AÇIK: ölçü `frameworkReleaseWindowOpen` + **partinin KENDİ**
+ *     teslim süresi (`frameworkBatchLeadDays`, plan kapısının ölçtüğü küme);
+ *     ikinci bir "kaç gün önce uyar" eşiği YOKTUR.
+ *
+ * ÜÇ SORGU, çünkü ölçü ANLAŞMA + PARTİ başına: donmuş katalog anlık görüntüsü
+ * her parti satırında tekrarlansaydı aynı JSON onlarca kez telden geçerdi.
+ * Yalnız planlı partisi OLAN anlaşmalar ve o partilerin satırları okunur.
  *
  * `orders`a HİÇ BAKILMAZ: planlı parti tezgâhta yer kaplamaz (ortada sipariş
  * yok) ve kapasite ölçüsünün tek sahibi `manufacturer-capacity.ts`tir.
@@ -1890,13 +1912,18 @@ export async function loadFrameworkEntry(quoteId: string): Promise<FrameworkEntr
 export async function releasableBatchCount(now = new Date()): Promise<number> {
   const planned = await db
     .select({
+      batchId: quoteFrameworkBatches.id,
       frameworkId: quoteFrameworkBatches.frameworkId,
       plannedShipDate: quoteFrameworkBatches.plannedShipDate,
     })
     .from(quoteFrameworkBatches)
     .innerJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
     .where(
-      and(eq(quoteFrameworks.status, "active"), eq(quoteFrameworkBatches.status, "planned"))
+      and(
+        eq(quoteFrameworks.status, "active"),
+        gte(quoteFrameworks.priceLockedUntil, now),
+        eq(quoteFrameworkBatches.status, "planned")
+      )
     );
   if (planned.length === 0) return 0;
 
@@ -1911,27 +1938,51 @@ export async function releasableBatchCount(now = new Date()): Promise<number> {
     .from(quoteFrameworks)
     .where(inArray(quoteFrameworks.id, [...new Set(planned.map((p) => p.frameworkId))]));
 
+  const lineRows = await db
+    .select({
+      batchId: quoteFrameworkBatchLines.batchId,
+      partId: quoteFrameworkBatchLines.partId,
+    })
+    .from(quoteFrameworkBatchLines)
+    .where(
+      inArray(
+        quoteFrameworkBatchLines.batchId,
+        planned.map((p) => p.batchId)
+      )
+    );
+  const partsByBatch = new Map<string, string[]>();
+  for (const line of lineRows) {
+    const list = partsByBatch.get(line.batchId) ?? [];
+    list.push(line.partId);
+    partsByBatch.set(line.batchId, list);
+  }
+
   const byFramework = new Map(heads.map((h) => [h.id, h]));
+  // Önbellek anahtarı anlaşma + PARÇA KÜMESİ: aynı parçaları taşıyan partiler
+  // aynı teslim gününü paylaşır, farklı parçaları taşıyanlar paylaşmaz.
   const leadCache = new Map<string, number | null>();
   let open = 0;
   for (const batch of planned) {
     const head = byFramework.get(batch.frameworkId);
     if (!head) continue;
-    if (!leadCache.has(head.id)) {
+    const linePartIds = partsByBatch.get(batch.batchId) ?? [];
+    const cacheKey = `${head.id}|${[...new Set(linePartIds)].sort().join(",")}`;
+    if (!leadCache.has(cacheKey)) {
       leadCache.set(
-        head.id,
-        frameworkLeadDays({
+        cacheKey,
+        frameworkBatchLeadDays({
           snapshot: head.pricingSnapshot,
           leadTier: head.leadTier,
           parts: head.partsSnapshot,
           addonKeys: head.addonKeys,
+          linePartIds,
         })
       );
     }
     if (
       frameworkReleaseWindowOpen({
         snapshot: head.pricingSnapshot,
-        leadDays: leadCache.get(head.id) ?? null,
+        leadDays: leadCache.get(cacheKey) ?? null,
         plannedShipDate: batch.plannedShipDate,
         now,
       })

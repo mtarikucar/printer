@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { FRAMEWORK_STATUSES, type FrameworkStatus } from "@/lib/config/quote-framework";
-import { frameworkSurfacesEnabled } from "@/lib/services/quote-access";
+import { frameworkScreensEnabled } from "@/lib/services/quote-access";
 import { listAdminFrameworks } from "@/lib/services/quote-framework";
 import { FrameworkListClient } from "./client";
 
@@ -10,9 +10,11 @@ import { FrameworkListClient } from "./client";
  * `/admin/cerceve` — çerçeve anlaşma listesi.
  *
  * BAYRAK KAPALIYKEN 404 (`notFound`), 403 DEĞİL: kapalı bir özelliğin
- * varlığını duyurmanın anlamı yok. Admin oturumu iç test için kapıdan geçer
- * (`frameworkSurfacesEnabled`, `quoteApiEnabled` deseni) — panelin kendi
- * oturum kapısı düzende zaten uygulanıyor.
+ * varlığını duyurmanın anlamı yok. Ölçü YALNIZ BAYRAK
+ * (`frameworkScreensEnabled`), oturum DEĞİL: bu sayfaya zaten yalnız admin
+ * girebiliyor (panelin oturum kapısı düzende uygulanıyor), yani admin
+ * oturumunu geçiren bir kapı burada hiçbir şeyi kapatmazdı. Uçların iç test
+ * istisnası (`frameworkSurfacesEnabled`) UÇLARDA kalır.
  *
  * Süzgeç ve sayfa numarası SUNUCUDA doğrulanır (teklif kuyruğu deseni):
  * geçersiz bir parametre boş bir listeye değil, sebebini yazan bir kutuya
@@ -24,7 +26,7 @@ export default async function AdminFrameworksPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  if (!(await frameworkSurfacesEnabled())) notFound();
+  if (!(await frameworkScreensEnabled())) notFound();
 
   const params = await searchParams;
   const rawStatus = typeof params.status === "string" ? params.status : "";

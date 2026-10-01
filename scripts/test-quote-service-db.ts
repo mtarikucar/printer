@@ -214,7 +214,15 @@ async function main() {
       assert.ok(quote, "teklif satırı okunabildi");
       // `team: null` → 0072 takım dalı KAPALI: bu dosyanın her vakası kişisel
       // tekliftir ve üyelik okuması erişim kabuğunun işi (`resolveQuoteTeam`).
-      return { quote, viewer: viewerFor(sessionUserId !== null), sessionUserId, team: null };
+      // `teamId` ise SATIRDAN gelir (kabuk da öyle yapıyor): bir hak değil,
+      // yalnız "bu teklif hangi takımın" bilgisi — burada daima `null`.
+      return {
+        quote,
+        viewer: viewerFor(sessionUserId !== null),
+        sessionUserId,
+        teamId: quote.teamId,
+        team: null,
+      };
     }
 
     /** Sahnelenmiş yükleme: dosyayı diske koyar ve sahibini deftere yazar. */

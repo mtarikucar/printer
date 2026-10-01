@@ -201,7 +201,9 @@ async function main() {
         sessionUserId: null,
         // 0072: kişisel teklif, takım yok. Üyeliği erişim kabuğu okur
         // (`resolveQuoteTeam`); bu dosya kabuğu atlayıp servisi doğrudan
-        // çağırdığı için alanı KENDİSİ beyan eder.
+        // çağırdığı için alanları KENDİSİ beyan eder. `teamId` satırdan gelir
+        // (kabuk da öyle yapıyor), `team` ise üyelik olmadığı için `null`.
+        teamId: row.teamId,
         team: null,
       };
     };

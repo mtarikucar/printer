@@ -38,16 +38,25 @@ export interface QuoteAccess {
   viewer: QuoteViewer;
   sessionUserId: string | null;
   /**
-   * Oturum sahibinin BU TEKLİFİN takımındaki üyeliği (0072); `null` = takım
-   * yok, üyelik yok ya da bayrak kapalı.
+   * BU TEKLİFİN takımı (0072, `quotes.team_id`) — SATIRIN gerçeği, isteğin
+   * HAKKI değil. Rota katmanı "bu teklif hangi takımın" sorusunu ikinci bir
+   * sorgu açmadan cevaplayabilsin diye arayüzün yazılı maddesi (tasarım §3.2).
+   *
+   * AŞAĞIDAKİ `team` İLE KARIŞTIRILMAMALI ve bir KAPI olarak OKUNMAMALI:
+   * `teamId` bayrak kapalıyken de, üyelik yokken de, paylaşım izleyicisinde de
+   * DOLUDUR. `teamId !== null` ile yazılmış bir kapı, takım teklifini herkese
+   * açardı. Üyeliği `team`, kararı `viewer.isTeam` söyler.
+   */
+  teamId: string | null;
+  /**
+   * Oturum sahibinin BU TEKLİFİN takımındaki ÜYELİĞİ (0072); `null` = takım
+   * yok, üyelik yok ya da bayrak kapalı. Yani `teamId` dolu + `team` null bir
+   * erişim tamamen olağandır (üstteki uyarı).
    *
    * Rol TEK BAŞINA yetmediği için satırın tamamı taşınıyor: `canCheckoutQuote`
    * takımın `member_can_checkout` anahtarını, müşteri gövdesi takımın ADINI
    * istiyor. Kabuk ikisini zaten TEK sorguda okuyor; burada durmasalar rota
    * katmanı aynı satırı ikinci kez sorardı.
-   *
-   * `teamId` AYRI bir alan olarak EKLENMEDİ: aynı gerçeğin üçüncü kopyası
-   * olurdu — `quote.teamId` (tam satır zaten çekiliyor) ve `team.id` elde.
    */
   team: QuoteAccessTeam | null;
   /**
@@ -578,6 +587,10 @@ export async function resolveQuoteAccess(
     quote,
     viewer,
     sessionUserId: identity.sessionUserId,
+    // Satırın takımı, ÜYELİKTEN bağımsız: devir UPDATE'inden SONRA okunuyor ki
+    // `quote` nesnesi ne ise alan da o olsun (devir `team_id`ye dokunmaz —
+    // devralınan teklif anonimdir, `quotes_team_requires_user_chk`).
+    teamId: quote.teamId,
     team,
     uploadOwnerKeys: keys,
   };

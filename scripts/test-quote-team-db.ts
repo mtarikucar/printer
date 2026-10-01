@@ -9,7 +9,9 @@
  * Burada ölçülen şey, o çekirdeğe gerçeği TAŞIYAN kabuk:
  *
  *   1. Takım teklifi, üye oturumuyla `resolveQuoteAccess`ten FİYATLI dönüyor ve
- *      takımın ADI tek sorguyla geliyor (`access.team`).
+ *      takımın ADI tek sorguyla geliyor (`access.team`). Yanındaki
+ *      `access.teamId` SATIRIN takımıdır, bir HAK değil: paylaşım
+ *      izleyicisinde ve bayrak kapalıyken de DOLU, `team` ise NULL.
  *   2. Üye OLMAYAN 404 alıyor — takımın varlığı kimseye hak vermiyor.
  *   3. Üyelik satırı SİLİNDİĞİ AN erişim kesiliyor (önbellek yok, gecikme yok).
  *   4. `quotes_team_requires_user_chk` GERÇEKTEN duruyor: anonim teklife
@@ -226,6 +228,10 @@ async function main() {
       assert.equal(access.team?.id, team.id);
       assert.equal(access.team?.name, "QA Mühendislik A.Ş.");
       assert.equal(access.team?.memberCanCheckout, false);
+      // `teamId` SATIRIN takımı: rota katmanı ikinci bir sorgu açmasın diye
+      // taşınıyor ve çekilen satırla aynı şeyi söylemek ZORUNDA.
+      assert.equal(access.teamId, team.id);
+      assert.equal(access.teamId, access.quote.teamId);
 
       // Ve bilgi sunum katmanına kadar gidiyor: `view.team` üyeye yazılıyor,
       // kimliği (`id`) gövdeye GİRMİYOR.
@@ -247,6 +253,11 @@ async function main() {
       assert.equal(shared.viewer.isShare, true);
       assert.equal(shared.viewer.isTeam, false);
       assert.equal(shared.team, null);
+      // `teamId` DOLU ama `team` NULL: alanın bir KAPI olmadığının kanıtı.
+      // `teamId !== null` ile yazılmış bir kapı bu izleyiciye takım hakkı
+      // verirdi; hak `team`/`viewer.isTeam` ile ölçülür. (Alan müşteri
+      // gövdesine girmiyor: `view.team` yok, aşağıdaki satır onu ölçüyor.)
+      assert.equal(shared.teamId, team.id);
       assert.equal("team" in (await loadPresentedQuote(shared)), false, "takım adı sızdı");
     });
 
@@ -288,6 +299,15 @@ async function main() {
           "bayrak kapalıyken takım dalı hâlâ açık"
         );
         assert.equal(await openStream(created.id), 404);
+        // Kişisel SAHİP bayrak kapalıyken de açar: `teamId` SATIRIN gerçeği
+        // olduğu için DOLU gelir, `team` ise üyelik hiç okunmadığından NULL.
+        // Yani geri dönüş planı bu alanı bir HAKKA çevirmiyor.
+        session = owner;
+        const ownerClosed = await resolveQuoteAccess(created.id);
+        assert.equal(ownerClosed?.viewer.isTeam, false, "bayrak kapalıyken takım dalı çalıştı");
+        assert.equal(ownerClosed?.teamId, team.id);
+        assert.equal(ownerClosed?.team, null, "bayrak kapalıyken üyelik taşındı");
+        session = member;
         assert.equal(counter.get(), 0, "bayrak kapalıyken üyelik sorgulandı");
       } finally {
         counter.restore();

@@ -18,6 +18,7 @@ import { readFileSync } from "node:fs";
 import Module, { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
+import pg from "pg";
 import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
@@ -444,5 +445,104 @@ test("bayrak kapalıyken uç kataloğu hiç okumaz ve cevabı yalnız tarayıcı
       if (module) requireModule.cache[id] = module;
       else delete requireModule.cache[id];
     }
+  }
+});
+
+// ─── TAKIM BAYRAĞI KAPALI YOLU (0072 · T-2) ─────────────────────────────────
+//
+// Değişmez: **bayrak KAPALIYKEN erişim çözümü üyelik SORGUSUNU HİÇ YAPMAZ.**
+// İki ayrı sebeple sözleşme:
+//   · KAPALI BİR ÖZELLİĞİN BEDELİ SIFIR OLMALI — takımsız müşterinin her teklif
+//     açılışına bir sorgu eklemek, kapatılmış bir özelliğin faturasını canlıya
+//     ödetmek olurdu.
+//   · GERİ DÖNÜŞ PLANI BU — bayrağı kapatmak takım dalını ULAŞILAMAZ yapar
+//     (`teamRole` daima `null` → `team_id` dolu satırlar bile bugünkü matrise
+//     düşer).
+//
+// Kanıt bir SORGU SAYACIdır, bir yorum değil: `stubFetch`in DB karşılığı olarak
+// `pg.Pool.prototype.query` sarılır, her SQL metni kaydedilir ve boş satır
+// kümesiyle cevaplanır (`{ rows: [] }` hem nesne hem dizi kipinde geçerli tek
+// cevap şeklidir). `platform_flags` satırı gelmediği için bayrak DERLENMİŞ
+// varsayılanına düşer — `quote_teams_enabled: false`, yani üretimdeki hâli.
+
+/** `stubFetch`in veritabanı karşılığı: her sorguyu sayar, boş cevap verir. */
+function stubPoolQuery(): { texts: string[]; restore: () => void } {
+  const texts: string[] = [];
+  const original = pg.Pool.prototype.query;
+  (pg.Pool.prototype as unknown as { query: unknown }).query = function stubbed(
+    config: unknown
+  ): Promise<unknown> {
+    texts.push(
+      typeof config === "string" ? config : String((config as { text?: string })?.text ?? "")
+    );
+    return Promise.resolve({ rows: [], rowCount: 0, command: "SELECT", fields: [] });
+  };
+  return {
+    texts,
+    restore: () => {
+      pg.Pool.prototype.query = original;
+    },
+  };
+}
+
+const TEAM_QUOTE = { teamId: "55555555-5555-4555-8555-555555555555" };
+const MEMBER_ID = "66666666-6666-4666-8666-666666666666";
+const QUOTE_OWNER_ID = "77777777-7777-4777-8777-777777777777";
+
+test("bayrak kapalıyken üyelik sorgusu HİÇ yapılmaz (sorgu sayacı)", async () => {
+  // Redis KAPALI tutulur: açık olsa bayrak okuması önbellekten dönebilir ve
+  // sayaç "sorgu yok" derken aslında soruyu hiç ölçmemiş olurdu.
+  const savedRedis = process.env.REDIS_URL;
+  delete process.env.REDIS_URL;
+  const { resolveQuoteTeam, resolveQuoteViewer } = await import(
+    "../src/lib/services/quote-access"
+  );
+  const membershipReads = (texts: string[]) =>
+    texts.filter((t) => t.includes("customer_team_members")).length;
+  const flagReads = (texts: string[]) => texts.filter((t) => t.includes("platform_flags")).length;
+
+  const db = stubPoolQuery();
+  try {
+    // 1. TAKIMSIZ teklif: TEK bir sorgu bile yok — bayrak okuması DAHİL.
+    //    Kısa devrenin sırası budur: `teamId === null` en başta.
+    assert.equal(await resolveQuoteTeam({ teamId: null }, MEMBER_ID, null), null);
+    assert.deepEqual(db.texts, [], "takımsız teklif bir sorgu üretti");
+
+    // 2. Oturumsuz istek: rol ancak girişli kullanıcıya ait olabilir.
+    assert.equal(await resolveQuoteTeam(TEAM_QUOTE, null, null), null);
+    assert.deepEqual(db.texts, [], "oturumsuz istek bir sorgu üretti");
+
+    // 3. Takım teklifi + GERÇEK bir üye oturumu, bayrak KAPALI: bayrak okunur,
+    //    ÜYELİK OKUNMAZ.
+    assert.equal(await resolveQuoteTeam(TEAM_QUOTE, MEMBER_ID, null), null);
+    assert.equal(membershipReads(db.texts), 0, "bayrak kapalıyken üyelik sorgulandı");
+    assert.equal(flagReads(db.texts), 1, "bayrak tam bir kez okunmalı");
+
+    // 4. …ve dönen izleyici bugünkü matrisle BİT BİT aynı: teklifi AÇMAYAN bir
+    //    üye 404 alır, yani "bayrağı kapatmak bugünküne döner" sözü tutuyor.
+    const afterFlagOff = db.texts.length;
+    assert.equal(
+      resolveQuoteViewer(
+        { userId: QUOTE_OWNER_ID, anonymousId: null, shareToken: null, ...TEAM_QUOTE },
+        {
+          sessionUserId: MEMBER_ID,
+          anonymousId: null,
+          shareToken: null,
+          isAdmin: false,
+          teamRole: null,
+        }
+      ),
+      null
+    );
+    assert.equal(db.texts.length, afterFlagOff, "saf çekirdek bir sorgu yaptı");
+
+    // 5. İÇ TEST KAPISI: bayrak kapalı ama ADMIN oturumu var → üyelik SORULUR.
+    //    (Satır gelmediği için cevap yine `null`; ölçülen şey sorunun SORULMASI.)
+    assert.equal(await resolveQuoteTeam(TEAM_QUOTE, MEMBER_ID, { email: "yonetici@test" }), null);
+    assert.equal(membershipReads(db.texts), 1, "admin iç test kapısı üyeliği sormadı");
+  } finally {
+    db.restore();
+    if (savedRedis === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = savedRedis;
   }
 });

@@ -12,6 +12,11 @@
  * yalnız `quote-units.ts` içindeki `scaledGeometry` ile yapılır; birim ya da
  * ölçek değişince worker yeniden çalışmaz.
  */
+// YALNIZ TİP: `quote-team.ts` de buradan `QuoteViewer`ı tip olarak alıyor, yani
+// iki dosya tipte birbirine bakıyor. `import type` derlemede SİLİNDİĞİ için
+// çalışma zamanında döngü YOKTUR; rolleri bu dosyaya kopyalamak ise `TEAM_ROLES`
+// listesini (ve ondan üretilen DB CHECK'ini) ikiye bölmek olurdu.
+import type { TeamRole } from "./quote-team";
 
 export const QUOTE_UNITS = ["mm", "cm", "in"] as const;
 export type QuoteUnits = (typeof QUOTE_UNITS)[number];
@@ -534,9 +539,44 @@ export interface PresentedFxDisplay {
 export interface QuoteViewer {
   canSeePrices: boolean;
   canEdit: boolean;
+  /**
+   * KİŞİSEL sahip (`quotes.user_id` = oturum kullanıcısı) ya da anonim çerezin
+   * sahibi. ANLAMI 0072 ile DEĞİŞMEDİ: takım dalı `isOwner: false` döner, yani
+   * `isTeam` ile BİRBİRİNİ DIŞLARLAR ve bugünkü her `viewer.isOwner` okuması
+   * bugünkü cevabı vermeye devam eder. Takım üyesine açılacak kapılar tek tek,
+   * `src/lib/config/quote-team.ts` yüklemleriyle açılır.
+   */
   isOwner: boolean;
   isShare: boolean;
   isAdmin: boolean;
+  /** Bu izleyici teklifi TAKIM ÜYELİĞİ üzerinden görüyor mu. */
+  isTeam: boolean;
+  /** Üyenin BU TEKLİFİN takımındaki rolü; `null` = takım dalından gelmiyor. */
+  teamRole: TeamRole | null;
+}
+
+/**
+ * Takımın teklif gövdesine giren yüzü — `id` YOK.
+ *
+ * Takım adı bir fiyat değildir (adı `…Kurus` ile bitmez, `publicIssue`
+ * süzgecine takılmaz), ama paylaşım bağlantısını eline geçiren kişiye "bu hangi
+ * firmanın teklifi" demek de gerekmez: kapısı `invoice`/`shareUrl` ile aynıdır.
+ */
+export interface PresentedQuoteTeam {
+  name: string;
+  role: TeamRole;
+  memberCanCheckout: boolean;
+}
+
+/**
+ * Erişim kabuğunun okuduğu üyelik satırı (`QuoteAccess.team`).
+ *
+ * `PresentedQuoteTeam`in üstüne YALNIZ `id` ekler: rota katmanı teklifi takıma
+ * bağlama/ayırma ve yetki kararlarında kimliğe ihtiyaç duyar, müşteri gövdesi
+ * duymaz. Tek sorgudan (`customer_team_members ⋈ customer_teams`) gelir.
+ */
+export interface QuoteAccessTeam extends PresentedQuoteTeam {
+  id: string;
 }
 
 export interface PresentedPartPrice {
@@ -685,6 +725,12 @@ export interface PresentedQuote {
    * kapısının arkasında durur.
    */
   display?: PresentedFxDisplay | null;
+  /**
+   * Teklifin takımı — YALNIZ `viewer.isTeam || viewer.isOwner` iken ve teklif
+   * gerçekten bir takıma bağlıyken var. Paylaşım izleyicisine GİTMEZ
+   * (gerekçe `PresentedQuoteTeam` başlığında).
+   */
+  team?: PresentedQuoteTeam | null;
 }
 
 // ─── Müşteri listeleri (hesap sayfaları) ────────────────────────────────────

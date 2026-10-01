@@ -2392,6 +2392,10 @@ export async function loadPresentedQuote(access: QuoteAccess): Promise<Presented
     fxDisplayEnabled,
     isFrameworkBatch,
     hasLiveFramework,
+    // Takım üyeliği ERİŞİM KABUĞUNDA okundu (`resolveQuoteTeam`); burada
+    // yalnız geçiriliyor. Dördüncü/beşinci bir sorgu EKLENMEDİ: `access.team`
+    // teklifin açılışında zaten elde.
+    team: access.team,
   });
 }
 

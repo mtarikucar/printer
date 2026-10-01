@@ -542,6 +542,8 @@ const OWNER_NO_PRICES: QuoteViewer = {
   isOwner: true,
   isShare: false,
   isAdmin: false,
+  isTeam: false,
+  teamRole: null,
 };
 
 function quoteFixture(over: Partial<PresentedQuote> = {}): PresentedQuote {
@@ -671,6 +673,8 @@ test("paylaşım görünümü salt okunur ve bağlantıları token'ı taşır", 
         isOwner: false,
         isShare: true,
         isAdmin: false,
+        isTeam: false,
+        teamRole: null,
       },
     }),
     "tok123"
@@ -1339,6 +1343,8 @@ test("paylaşım izleyicisine ödeme bağlantısı VERİLMEZ, sebebi yazılır",
           isOwner: false,
           isShare: true,
           isAdmin: false,
+          isTeam: false,
+          teamRole: null,
         },
         readiness: { canCheckout: true, blockers: [] },
       })
@@ -1410,7 +1416,15 @@ test("KDV hariç görünüm satır tutarlarının KDV DAHİL olduğunu söyler",
 test("paylaşım izleyicisi özet üzerinden teklifi değiştiremez", () => {
   const html = renderSummary(
     pricedQuote({
-      viewer: { canSeePrices: true, canEdit: false, isOwner: false, isShare: true, isAdmin: false },
+      viewer: {
+        canSeePrices: true,
+        canEdit: false,
+        isOwner: false,
+        isShare: true,
+        isAdmin: false,
+        isTeam: false,
+        teamRole: null,
+      },
       customerNote: null,
       poNumber: null,
     })
@@ -1556,6 +1570,8 @@ test("teklif sohbeti yalnız sahibine açılır", () => {
           isOwner: false,
           isShare: true,
           isAdmin: false,
+          isTeam: false,
+          teamRole: null,
         },
       })
     ),

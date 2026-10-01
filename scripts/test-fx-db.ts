@@ -189,8 +189,20 @@ async function main() {
       assert.ok(row, "teklif satırı okunabildi");
       return {
         quote: row,
-        viewer: { canSeePrices: true, canEdit: true, isOwner: true, isShare: false, isAdmin: false },
+        viewer: {
+          canSeePrices: true,
+          canEdit: true,
+          isOwner: true,
+          isShare: false,
+          isAdmin: false,
+          isTeam: false,
+          teamRole: null,
+        },
         sessionUserId: null,
+        // 0072: kişisel teklif, takım yok. Üyeliği erişim kabuğu okur
+        // (`resolveQuoteTeam`); bu dosya kabuğu atlayıp servisi doğrudan
+        // çağırdığı için alanı KENDİSİ beyan eder.
+        team: null,
       };
     };
 

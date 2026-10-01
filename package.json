@@ -152,7 +152,8 @@
     "test:quote-framework:db": "npx tsx scripts/test-quote-framework-db.ts",
     "test:framework-migration:db": "npx tsx scripts/test-framework-migration-db.ts",
     "test:quote-team": "npx tsx scripts/test-quote-team.ts",
-    "test:quote-team-migration:db": "npx tsx scripts/test-quote-team-migration-db.ts"
+    "test:quote-team-migration:db": "npx tsx scripts/test-quote-team-migration-db.ts",
+    "test:quote-team:db": "npx tsx scripts/test-quote-team-db.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

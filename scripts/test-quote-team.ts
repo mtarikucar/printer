@@ -2,10 +2,12 @@
  * Takım çalışma alanının SAF yetki çekirdeği. DB yok, Redis yok, ağ yok.
  *
  * İMPORT LİSTESİ ÇİVİLİ: yalnız `src/lib/config/quote-team.ts` import edilir
- * (artı `node:assert` / `node:fs` / `node:path`). `src/lib/db/schema.ts`
- * yalnız METİN olarak okunur — import edilse drizzle zinciri yüklenirdi ve bu
- * dosya `test:unit` zincirinde veritabanı arayan bir teste dönüşürdü. Matrisin
- * testten çivilenebilmesinin tek yolu çekirdeğin saf kalmasıdır.
+ * (artı `node:assert` / `node:fs` / `node:path` ve `quote-types`tan YALNIZ TİP
+ * — `import type` derlemede silinir, yani çalışma zamanında hiçbir modül
+ * eklemez). `src/lib/db/schema.ts` yalnız METİN olarak okunur — import edilse
+ * drizzle zinciri yüklenirdi ve bu dosya `test:unit` zincirinde veritabanı
+ * arayan bir teste dönüşürdü. Matrisin testten çivilenebilmesinin tek yolu
+ * çekirdeğin saf kalmasıdır.
  *
  * Kanıtlanan beş şey:
  *
@@ -18,8 +20,9 @@
  * 5. Eylem listesi iki yerde AYRIŞAMAZ: `schema.ts`teki CHECK listesini
  *    `quoteInList(TEAM_ACTIONS)` üretir, yani liste tek kaynaktan gelir.
  *
- * Ayrıca bu sevkiyatın baş değişmezi: HİÇBİR DAVRANIŞ DEĞİŞMEZ. `team_id`
- * yazılır ama okunmaz; aşağıdaki tarama bunu uygulama yüzeylerinde ölçer.
+ * Ayrıca: T-1'de `team_id` YAZILIYOR ama hiçbir yerde OKUNMUYORDU; T-2 ilk
+ * okumayı ekledi ve aşağıdaki tarama o yüzden DARALDI — "hiç kimse okumuyor"
+ * iddiası, "yalnız şu üç uç okuyor" sayımına dönüştü (gerekçesi orada).
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -50,7 +53,9 @@ import {
   canShareQuote,
   canTransferOwnership,
   normalizeTeamEmail,
+  type TeamRole,
 } from "../src/lib/config/quote-team";
+import type { QuoteViewer } from "../src/lib/config/quote-types";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -65,20 +70,31 @@ function test(name: string, fn: () => void) {
   }
 }
 
-/** Bugünkü `QuoteViewer` — beş alan, hiçbirinin anlamı bu sevkiyatta değişmez. */
+/**
+ * `QuoteViewer` — yedi alan (`isTeam`/`teamRole` T-2'de eklendi, 0072).
+ *
+ * VARSAYILANLAR SÖNÜK: `isTeam: false`, `teamRole: null`. Böylece aşağıdaki
+ * yüklem testleri takım dalı AÇILMADAN ÖNCEKİ cevapları ölçmeye devam eder;
+ * dördünün (`canEditTeamQuote` … `canSeeOwnerFields`) takım dalını açması
+ * T-4'ün kararıdır.
+ */
 function viewerOf(fields: {
   isOwner?: boolean;
   isAdmin?: boolean;
   isShare?: boolean;
   canEdit?: boolean;
   canSeePrices?: boolean;
-}) {
+  isTeam?: boolean;
+  teamRole?: TeamRole | null;
+}): QuoteViewer {
   return {
     canSeePrices: fields.canSeePrices ?? true,
     canEdit: fields.canEdit ?? true,
     isOwner: fields.isOwner ?? false,
     isShare: fields.isShare ?? false,
     isAdmin: fields.isAdmin ?? false,
+    isTeam: fields.isTeam ?? false,
+    teamRole: fields.teamRole ?? null,
   };
 }
 
@@ -285,16 +301,33 @@ test("ondört eylem, kapalı küme", () => {
   ]);
 });
 
-console.log("\nbu sevkiyat DAVRANIŞ DEĞİŞTİRMEZ");
+console.log("\ntakım kolonunu okuyan uçlar SAYILI");
 /**
- * `team_id` YAZILIR ama hiçbir yerde OKUNMAZ. İlk okuma T-2'nin işidir ve o
- * sevkiyat kendi güvenlik testleriyle gelir; bu tarama o sırayı korur.
+ * T-1'de bu tarama "hiçbir yüzey `team_id` okumuyor" diyordu. T-2 o satırı
+ * KASITLA değiştirdi: erişim matrisi artık takım dalını taşıyor. Tarama
+ * silinmedi, DARALTILDI — çünkü asıl risk hiç bitmedi: dalın açtığı hak,
+ * 22 `viewer.isOwner` kapısına ve müşteri ekranlarına T-4'te TEK TEK kararla
+ * girecek. Bugün oraya sızan bir okuma, güvenlik testi olmadan genişletilmiş
+ * bir yüzey demektir.
+ *
+ * Yani liste bir izin değil, bir SAYIMDIR: takım durumunu okuyan uç sayısı
+ * üçtür ve üçünün de kendi kanıtı var (`scripts/test-quote-api.ts` K1/K2/K3,
+ * `scripts/test-quote-team-db.ts`).
  */
-const FORBIDDEN = /team_id|teamRole|customer_team/;
+const TEAM_READERS = /team_id|teamId|teamRole|isTeam|customer[-_]team/;
 const SURFACES = ["src/app", "src/components"];
 const SINGLE_FILES = [
   "src/lib/services/quote-access.ts",
   "src/lib/services/quote-present.ts",
+];
+/** T-2'nin bilerek açtığı üç uç; buraya bir satır EKLEMEK bir karardır. */
+const TEAM_READERS_ALLOWED = [
+  // Erişim matrisinin takım dalı + bayrak/üyelik kabuğu.
+  "src/lib/services/quote-access.ts",
+  // `PresentedQuote.team` (ad + ödeme anahtarı); paylaşım izleyicisine gitmez.
+  "src/lib/services/quote-present.ts",
+  // `resolveQuoteViewer`dan GEÇMEYEN ikinci kapı: canlı akış.
+  "src/app/api/realtime/quote/[id]/route.ts",
 ];
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -305,15 +338,28 @@ function walk(dir: string): string[] {
   }
   return out;
 }
-test("hiçbir uygulama yüzeyi takım kolonunu okumuyor", () => {
+/** Yol ayırıcısı platforma göre değişir; liste tek biçimde yazılır. */
+const posix = (rel: string) => rel.split(sep).join("/");
+test("takım durumunu YALNIZ T-2'nin açtığı üç uç okuyor", () => {
+  const allowed = new Set(TEAM_READERS_ALLOWED);
   const leaks: string[] = [];
   for (const rel of [...SURFACES.flatMap(walk), ...SINGLE_FILES]) {
     // `rel` ZATEN depo köküne göredir; `relative(ROOT, rel)` ikinci argümanı
     // cwd'ye göre çözer ve test başka bir dizinden koşulursa anlamsız bir yol
     // basardı. Hata mesajı okunabilir kalsın.
-    if (FORBIDDEN.test(readFileSync(join(ROOT, rel), "utf8"))) leaks.push(rel);
+    if (!TEAM_READERS.test(readFileSync(join(ROOT, rel), "utf8"))) continue;
+    if (!allowed.has(posix(rel))) leaks.push(posix(rel));
   }
-  assert.deepEqual(leaks, [], "takım kolonunu okuyan yüzey var — T-2'nin işi bu sevkiyata sızdı");
+  assert.deepEqual(leaks, [], "takım durumunu okuyan YENİ bir yüzey var — T-4'ün işi sızdı");
+});
+test("izin listesi BAYATLAMADI: üç ucun üçü de gerçekten okuyor", () => {
+  // Liste boşa düşerse tarama sessizce hiçbir şeyi korumaz hâle gelir.
+  for (const rel of TEAM_READERS_ALLOWED) {
+    assert.ok(
+      TEAM_READERS.test(readFileSync(join(ROOT, rel), "utf8")),
+      `${rel} artık takım durumu okumuyor — izin satırı düşmeli`
+    );
+  }
 });
 
 console.log(

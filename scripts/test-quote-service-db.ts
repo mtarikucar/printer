@@ -206,11 +206,15 @@ async function main() {
       isOwner: true,
       isShare: false,
       isAdmin: false,
+      isTeam: false,
+      teamRole: null,
     });
     async function loadAccess(quoteId: string, sessionUserId: string | null) {
       const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId)).limit(1);
       assert.ok(quote, "teklif satırı okunabildi");
-      return { quote, viewer: viewerFor(sessionUserId !== null), sessionUserId };
+      // `team: null` → 0072 takım dalı KAPALI: bu dosyanın her vakası kişisel
+      // tekliftir ve üyelik okuması erişim kabuğunun işi (`resolveQuoteTeam`).
+      return { quote, viewer: viewerFor(sessionUserId !== null), sessionUserId, team: null };
     }
 
     /** Sahnelenmiş yükleme: dosyayı diske koyar ve sahibini deftere yazar. */
@@ -1296,7 +1300,15 @@ async function main() {
       const added = await addPartFromUpload(
         {
           ...base,
-          viewer: { canSeePrices: true, canEdit: true, isOwner: false, isShare: false, isAdmin: true },
+          viewer: {
+            canSeePrices: true,
+            canEdit: true,
+            isOwner: false,
+            isShare: false,
+            isAdmin: true,
+            isTeam: false,
+            teamRole: null,
+          },
           uploadOwnerKeys: [adminKey],
         },
         { uploadId: staged, fileName: "admin.step" }

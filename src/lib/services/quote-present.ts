@@ -16,6 +16,7 @@
  */
 import { addBusinessDays, istanbulDateKey } from "@/lib/config/business-days";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
+import { canSeeOwnerFields } from "@/lib/config/quote-team";
 import { DISPLAY_CURRENCIES, QUOTE_SOURCE_FORMATS } from "@/lib/config/quote-types";
 import type {
   ComputedQuote,
@@ -26,6 +27,7 @@ import type {
   PresentedQuote,
   PricingPartInput,
   PricingSnapshot,
+  QuoteAccessTeam,
   QuoteSourceFormat,
   QuoteViewer,
   Vec3,
@@ -226,6 +228,15 @@ export interface PresentQuoteInput {
    * (`QUOTE_FRAMEWORK_SOURCE_REASON`).
    */
   hasLiveFramework: boolean;
+  /**
+   * Teklifin takımı (0072); `null` = kişisel teklif ya da bayrak kapalı.
+   *
+   * ZORUNLU bir alan, `optional` DEĞİL — gerekçe `fxDisplayEnabled` ile aynı:
+   * bu dosya SAF ve SENKRONDUR, üyelik satırını kendisi okuyamaz. Okuyan yer
+   * erişim kabuğu (`resolveQuoteTeam` → `QuoteAccess.team`) ve `optional`
+   * bırakmak, testlerin sessizce eski davranışta kalması demekti.
+   */
+  team: QuoteAccessTeam | null;
 }
 
 export function presentQuote(input: PresentQuoteInput): PresentedQuote {
@@ -374,8 +385,13 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
     // alan kişiye bunları vermek hem sahipliği hem fiyat kapısını dolanmak
     // olurdu — bu yüzden `invoice`/`shareUrl` ile aynı kapıdan geçerler.
     // `locked` alanı zaten bekleyen ödemeyi (referans vermeden) anlatıyor.
-    liveDraftReference: viewer.isOwner ? input.liveDraftReference : null,
-    orderNumber: viewer.isOwner ? input.orderNumber : null,
+    //
+    // Kapı artık `canSeeOwnerFields` (`src/lib/config/quote-team.ts`): yüklem
+    // bugün `viewer.isOwner`a DENK, yani bu satır davranış DEĞİŞTİRMEZ —
+    // değişen, kapının tek yerde adlandırılmış olması. Takım üyesine açılması
+    // T-4'ün kararı ve o gün bu dosya ikinci kez açılmayacak.
+    liveDraftReference: canSeeOwnerFields(viewer) ? input.liveDraftReference : null,
+    orderNumber: canSeeOwnerFields(viewer) ? input.orderNumber : null,
     viewer,
     catalog: presentCatalog(snapshot, canSeePrices, input.stepEnabled),
     parts: presentedParts,
@@ -391,8 +407,11 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
   };
 
   // Fatura bilgisi ve paylaşım bağlantısı YALNIZ sahibe: biri müşterinin vergi
-  // kimliği, diğeri "bu teklifi herkese açabilirim" yetkisidir.
-  if (viewer.isOwner) {
+  // kimliği, diğeri "bu teklifi herkese açabilirim" yetkisidir. Kurumsal fatura
+  // bilgisi (firma adı / VKN) ise TAKIMIN bilgisidir ve üyesinden saklanmasının
+  // bir anlamı yok — kapı o yüzden `canSeeOwnerFields` adını taşıyor; yüklemin
+  // takım dalını açması T-4'ün kararıdır, bugün `viewer.isOwner`a DENKtir.
+  if (canSeeOwnerFields(viewer)) {
     view.invoice = {
       type: quote.invoiceType,
       companyName: quote.companyName,
@@ -405,6 +424,22 @@ export function presentQuote(input: PresentQuoteInput): PresentedQuote {
       : null;
   }
   if (canSeePrices) view.totals = computed.totals;
+
+  // Takım: ADI ve ödeme anahtarı, teklifi takım üzerinden GÖREN üyeye ve kişisel
+  // sahibine gider. Paylaşım izleyicisine GİTMEZ — hangi firmanın teklifi olduğu
+  // bağlantıyı eline geçiren herkesin bilgisi değil. `id` gövdeye GİRMEZ:
+  // kimlik erişim kabuğunun (`QuoteAccessTeam`) işi.
+  //
+  // Anahtar, teklif gerçekten bir takıma bağlı DEĞİLSE hiç eklenmez — `null`
+  // bile değil (dosyanın açılış kuralı). `isOwner` dalı `isTeam`i açmadığı için
+  // iki yüklem AYRI AYRI aranır; `canSeeOwnerFields` T-4'te ikisini birleştirir.
+  if (input.team !== null && (viewer.isTeam || viewer.isOwner)) {
+    view.team = {
+      name: input.team.name,
+      role: input.team.role,
+      memberCanCheckout: input.team.memberCanCheckout,
+    };
+  }
 
   // Döviz GÖSTERİMİ: kur bir FİYATTIR ve fiyat kapısının ARKASINDA durur
   // (tasarım R7). Üç kapı birden aranır ve biri kapalıysa `display` anahtarı

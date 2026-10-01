@@ -11,7 +11,9 @@
  * ve paylaşım token'ını KASITLI olarak dışarıda bırakır (canlı akış "şu parça
  * hazır oldu" der; paylaşım görünümü durağandır) — yani bir hak sızdırmaz.
  * Ama bir yandan da buraya eklenen yeni bir HAK SAHİBİ o uca KENDİLİĞİNDEN
- * ULAŞMAZ: matrise dal ekleyen, o rotayı da elden geçirmek zorundadır.
+ * ULAŞMAZ: matrise dal ekleyen, o rotayı da elden geçirmek zorundadır. Takım
+ * dalı (0072) o yüzden orada da elle açıldı ve kapının kendisi — bayrak +
+ * üyelik + kısa devre sırası — tek yerde, `resolveQuoteTeam` içinde durur.
  *
  * T-numarası ERİŞİM VERMEZ: numaralar sıradandır (`T-000123`), tahmin
  * edilebilir. Numara yalnız satırı BULUR; hakkı oturum, anonim çerez ya da
@@ -25,14 +27,29 @@ import {
   parseFrameworkNumber,
 } from "@/lib/config/quote-framework";
 import { formatQuoteNumber, parseQuoteNumber } from "@/lib/config/quote-number";
-import type { QuoteViewer } from "@/lib/config/quote-types";
+import type { TeamRole } from "@/lib/config/quote-team";
+import type { QuoteAccessTeam, QuoteViewer } from "@/lib/config/quote-types";
 import { resolveAuthenticatedUploadOwner } from "@/lib/services/chunked-upload";
+import { teamMembershipFor } from "@/lib/services/customer-team";
 import { isFlagEnabled } from "@/lib/services/flags";
 
 export interface QuoteAccess {
   quote: Quote;
   viewer: QuoteViewer;
   sessionUserId: string | null;
+  /**
+   * Oturum sahibinin BU TEKLİFİN takımındaki üyeliği (0072); `null` = takım
+   * yok, üyelik yok ya da bayrak kapalı.
+   *
+   * Rol TEK BAŞINA yetmediği için satırın tamamı taşınıyor: `canCheckoutQuote`
+   * takımın `member_can_checkout` anahtarını, müşteri gövdesi takımın ADINI
+   * istiyor. Kabuk ikisini zaten TEK sorguda okuyor; burada durmasalar rota
+   * katmanı aynı satırı ikinci kez sorardı.
+   *
+   * `teamId` AYRI bir alan olarak EKLENMEDİ: aynı gerçeğin üçüncü kopyası
+   * olurdu — `quote.teamId` (tam satır zaten çekiliyor) ve `team.id` elde.
+   */
+  team: QuoteAccessTeam | null;
   /**
    * Çağıranın taşıdığı TÜM sahneleme sahiplik anahtarları
    * (`admin:<e-posta>` | `manufacturer:<id>` | `painter:<id>` | `u:<id>`).
@@ -59,6 +76,15 @@ export interface QuoteViewerContext {
   shareToken: string | null;
   /** NextAuth admin oturumu var mı. */
   isAdmin: boolean;
+  /**
+   * Oturum sahibinin BU TEKLİFİN takımındaki rolü (0072).
+   *
+   * Kabuk doldurur; çekirdek sormaz. `null` = takım yok, üyelik yok YA DA
+   * `quote_teams_enabled` kapalı. Üçünün tek bir `null`a indirilmesi bilinçli:
+   * çekirdek "neden rol yok" sorusunu sormaz, matris sade kalır ve bayrağı
+   * kapatmak `team_id` dolu satırları da bugünkü matrise düşürür.
+   */
+  teamRole: TeamRole | null;
 }
 
 /**
@@ -70,6 +96,9 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 /**
  * Erişim matrisi (spec §"Erişim ve fiyat gizleme"). `null` = 404.
+ *
+ * Dallar, SIRASIYLA: kişisel sahip → admin → takım üyeliği → anonim çerez →
+ * paylaşım token'ı → `null`.
  *
  * Sıra önemli: sahiplik paylaşımdan ÖNCE bakılır, yoksa kendi teklifini
  * paylaşım bağlantısıyla açan müşteri kendi teklifinde salt okunur kalırdı.
@@ -84,6 +113,10 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  * Saf koşul: yazma `resolveQuoteAccess` içinde, koşul burada — testten
  * doğrulanabilsin diye. Sahipli teklif (`userId` dolu) asla devredilmez:
  * başka bir hesaba geçmesi teklifin çalınması olurdu.
+ *
+ * Devralan KİŞİSEL sahip olur, takıma BAĞLANMAZ (0072, tasarım §3.3): giriş
+ * yapmak, dosyayı meslektaşlara göstermeye rıza değildir. Teklifi takıma
+ * bağlamak AYRI ve AÇIK bir eylemdir (`canAttachQuote`, T-4).
  */
 export function shouldClaimQuote(
   quote: Pick<Quote, "userId" | "anonymousId">,
@@ -98,17 +131,65 @@ export function shouldClaimQuote(
 }
 
 export function resolveQuoteViewer(
-  quote: Pick<Quote, "userId" | "anonymousId" | "shareToken">,
+  quote: Pick<Quote, "userId" | "anonymousId" | "shareToken" | "teamId">,
   ctx: QuoteViewerContext
 ): QuoteViewer | null {
   if (quote.userId !== null && ctx.sessionUserId === quote.userId) {
-    return { canSeePrices: true, canEdit: true, isOwner: true, isShare: false, isAdmin: false };
+    return {
+      canSeePrices: true,
+      canEdit: true,
+      isOwner: true,
+      isShare: false,
+      isAdmin: false,
+      isTeam: false,
+      teamRole: null,
+    };
   }
   // Admin, anonim çerez dalından ÖNCE gelir: panelde girişli olan sahip, teklifi
   // bir kez de tarayıcısında anonim açmışsa, aşağıdaki dal eşleşip onu fiyatsız
   // bırakıyordu.
   if (ctx.isAdmin) {
-    return { canSeePrices: true, canEdit: true, isOwner: false, isShare: false, isAdmin: true };
+    return {
+      canSeePrices: true,
+      canEdit: true,
+      isOwner: false,
+      isShare: false,
+      isAdmin: true,
+      isTeam: false,
+      teamRole: null,
+    };
+  }
+  // TAKIM (0072). Dalın YERİ üç argümanla seçildi, kopyalanmadı:
+  //
+  // 1. PAYLAŞIMDAN ÖNCE olmak ZORUNLU. Bu, yukarıdaki "sahiplik paylaşımdan
+  //    ÖNCE bakılır" gerekçesinin takım karşılığıdır: dal paylaşımın ALTINA
+  //    konsa, `viewer` olmayan bir üye `?t=`li bir URL ile açtığı KENDİ
+  //    takımının işinde salt okunur kalırdı.
+  // 2. ANONİM dala göre yeri DAVRANIŞI DEĞİŞTİRMEZ: `quotes_team_requires_user_chk`
+  //    (CHECK `team_id IS NULL OR user_id IS NOT NULL`) sayesinde takım
+  //    teklifinde `user_id` daima doludur, yani anonim dalın İLK koşulu
+  //    (`quote.userId === null`) bir takım teklifinde hiç tutmaz. Okunurluk
+  //    için anonim dalın ÜSTÜNE yazıldı; kısıt `scripts/test-quote-team-db.ts`
+  //    içinde 23514 ile ölçülüyor, çünkü argüman ona dayanıyor.
+  // 3. KİŞİSEL SAHİP dalının ÖNÜNE GEÇMEZ: üyelikten çıkarılmış ama teklifi
+  //    kendisi açmış bir kişi erişimini KAYBETMEMELİ (tasarım §3.3) — kendi
+  //    yüklediği dosya, takımdan çıkarıldığı gün kilitlenmez.
+  //
+  // `isOwner: false` döner ve bu KASITLIDIR: `isOwner` "kişisel sahip" demeye
+  // devam eder, böylece bugünkü `viewer.isOwner` okumaları sessizce genişlemez;
+  // her biri `src/lib/config/quote-team.ts` yüklemleriyle tek tek açılır.
+  if (quote.teamId !== null && ctx.teamRole !== null) {
+    return {
+      // Üye GİRİŞ YAPMIŞTIR (rol ancak oturumdan okunur): fiyat kapısının amacı
+      // gizlilik değil müşteri kazanımıdır ve zaten sağlanmıştır.
+      canSeePrices: true,
+      canEdit: ctx.teamRole !== "viewer",
+      isOwner: false,
+      isShare: false,
+      isAdmin: false,
+      isTeam: true,
+      teamRole: ctx.teamRole,
+    };
   }
   if (
     quote.userId === null &&
@@ -120,7 +201,15 @@ export function resolveQuoteViewer(
     // (müşteri kazanımı) sağlanmıştır, fiyat açılır. `resolveQuoteAccess` aynı
     // istekte teklifi hesaba devreder, yoksa teklif "Tekliflerim"de hiç görünmez.
     const known = ctx.sessionUserId !== null;
-    return { canSeePrices: known, canEdit: true, isOwner: true, isShare: false, isAdmin: false };
+    return {
+      canSeePrices: known,
+      canEdit: true,
+      isOwner: true,
+      isShare: false,
+      isAdmin: false,
+      isTeam: false,
+      teamRole: null,
+    };
   }
   if (
     quote.shareToken !== null &&
@@ -135,6 +224,8 @@ export function resolveQuoteViewer(
       isOwner: false,
       isShare: true,
       isAdmin: false,
+      isTeam: false,
+      teamRole: null,
     };
   }
   return null;
@@ -330,6 +421,64 @@ export async function stepUploadsEnabled(viewer: QuoteViewer | null): Promise<bo
 }
 
 /**
+ * Takım çalışma alanı YÜZEYLERİ bu istek için açık mı (0072).
+ *
+ * `stepUploadsEnabled` deseninin birebir kopyası ve aynı gerekçe: bayrak
+ * kapalıyken ekran/uç YOK gibi davranır, admin oturumu iç test için geçer.
+ * `viewer` verildiğinde admin-lik ONDAN da okunur, çünkü erişim çözümü onu bu
+ * istekte zaten sormuştur — ama yetmez: teklifin SAHİBİ olan bir admin
+ * `isOwner` dalına düşer ve `isAdmin` false olur, o yüzden oturum yine sorulur.
+ *
+ * ERİŞİM KABUĞU BU KAPIYI KULLANMAZ, `resolveQuoteTeam` kullanır. Sebebi bir
+ * SIRA TUZAĞI: `teamRole` `resolveQuoteViewer`ın GİRDİSİ olduğu için kabuk
+ * bayrağı `viewer` HESAPLANMADAN ÖNCE okumak zorunda. O noktada `viewer?.isAdmin`
+ * kısayolu yoktur ve buradaki `isAdminSession()` aynı isteğe İKİNCİ bir `auth()`
+ * turu eklerdi (`adminSession` başlığının yasakladığı şey). Kabuk bu yüzden elde
+ * olan `admin` değeriyle aynı kapıyı kendisi kurar.
+ */
+export async function teamsEnabled(viewer: QuoteViewer | null): Promise<boolean> {
+  if (await isFlagEnabled("quote_teams_enabled")) return true;
+  if (viewer?.isAdmin) return true;
+  return isAdminSession();
+}
+
+/**
+ * Teklifin takım üyeliğini okuyan TEK yer. `null` = takım dalı KAPALI.
+ *
+ * KISA DEVRE SIRASI BİR KURALDIR, üslup değil:
+ *
+ *   1. `quote.teamId === null` → hemen çık. Takımsız müşteri için istek başına
+ *      fazladan TEK sorgu bile yok; bayrak okuması (DB/Redis) dahil. Bugünkü
+ *      davranış = bugünkü maliyet.
+ *   2. Oturum yok → çık. Rol ancak girişli bir kullanıcıya ait olabilir
+ *      (anonim teklif zaten takım teklifi olamaz, `quotes_team_requires_user_chk`).
+ *   3. BAYRAK (ya da elde olan admin oturumu) → kapalıysa rol HİÇ OKUNMAZ, yani
+ *      `team_id` dolu satırlar bile bugünkü matrise düşer. **Geri dönüş planı
+ *      budur:** bayrağı kapatmak takım dalını ULAŞILAMAZ yapar.
+ *   4. Üyelik satırı — önbelleksiz, her istekte taze (bkz. `customer-team.ts`).
+ *
+ * Sırayı bozmanın bedeli adım adım AYRIDIR: 3 ile 4'ü takas etmek kapalı bir
+ * özellik için her teklif açılışında bir üyelik sorgusu yakmak (ölçülüyor:
+ * `scripts/test-quote-cutover.ts` sorgu sayacı), 1 ile 3'ü takas etmek TAKIMSIZ
+ * müşteriye bir bayrak okuması eklemek, 3'ü tamamen DÜŞÜRMEK ise bayrağı
+ * anlamsız kılıp fiyatı sessizce açmaktır.
+ *
+ * `admin` PARAMETRE olarak geliyor çünkü çağıranların elinde ZATEN var; burada
+ * `isAdminSession()` çağırmak ikinci bir `auth()` turu demekti. SSE ucu bu
+ * yüzden `null` geçer: o uç admin'i BİLEREK dışarıda bırakıyor (bkz. dosya
+ * başlığı) ve bu kapı o kararı değiştirmemeli.
+ */
+export async function resolveQuoteTeam(
+  quote: Pick<Quote, "teamId">,
+  sessionUserId: string | null,
+  admin: { email: string } | null
+): Promise<QuoteAccessTeam | null> {
+  if (quote.teamId === null || sessionUserId === null) return null;
+  if (!(await isFlagEnabled("quote_teams_enabled")) && admin === null) return null;
+  return teamMembershipFor(sessionUserId, quote.teamId);
+}
+
+/**
  * İstek kimliği: müşteri oturumu + anonim çerez.
  *
  * `customer-auth` TEMBEL yüklenir çünkü `@/lib/env` (ve `next/headers`) ile
@@ -377,10 +526,19 @@ export async function resolveQuoteAccess(
   if (!quote) return null;
 
   const [identity, admin] = await Promise.all([requestIdentity(), adminSession()]);
+  // Üyelik sorgusu YALNIZ takım teklifinde ve YALNIZ bayrak açıkken yapılır;
+  // kısa devre sırasının gerekçesi `resolveQuoteTeam` başlığında. `viewer`
+  // HENÜZ YOK: `teamRole` onun GİRDİSİ, o yüzden kapı elde olan `admin`
+  // değeriyle kuruluyor (`teamsEnabled(viewer)` burada çağrılamaz).
+  const team = await resolveQuoteTeam(quote, identity.sessionUserId, admin);
   const viewer = resolveQuoteViewer(quote, {
     ...identity,
     shareToken: opts.shareToken ?? null,
     isAdmin: admin !== null,
+    // Çekirdeğe yalnız ROL girer: matrisi testle çivileyebilmek için
+    // `resolveQuoteViewer` SAF kalmak zorunda (ad ve ödeme anahtarı
+    // `QuoteAccess.team` ile taşınır, karara girmez).
+    teamRole: team?.role ?? null,
   });
   if (!viewer) return null;
   if (opts.forEdit && !viewer.canEdit) return null;
@@ -420,6 +578,7 @@ export async function resolveQuoteAccess(
     quote,
     viewer,
     sessionUserId: identity.sessionUserId,
+    team,
     uploadOwnerKeys: keys,
   };
 }

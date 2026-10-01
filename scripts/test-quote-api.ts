@@ -17,8 +17,15 @@ import { computeQuote } from "../src/lib/config/quote-compute";
 import { partPricingKey } from "../src/lib/config/quote-keys";
 import { SEED_SNAPSHOT } from "../src/lib/config/quote-seed";
 import { STEP_TESSELLATION } from "../src/lib/config/quote-step";
+import {
+  canChatOnQuote,
+  canCheckoutQuote,
+  canShareQuote,
+  type TeamRole,
+} from "../src/lib/config/quote-team";
 import type {
   PartGeometry,
+  QuoteAccessTeam,
   QuoteFxSnapshot,
   QuoteViewer,
 } from "../src/lib/config/quote-types";
@@ -159,6 +166,7 @@ function present(
     fxDisplayEnabled?: boolean;
     isFrameworkBatch?: boolean;
     hasLiveFramework?: boolean;
+    team?: QuoteAccessTeam | null;
   } = {}
 ) {
   const computed = computeQuote(quote.pricingSnapshot, toPricingInputs(parts), {
@@ -189,6 +197,9 @@ function present(
     isFrameworkBatch: extra.isFrameworkBatch ?? false,
     // Anlaşmanın KAYNAK teklifi ölçüsü de öyle (`quoteHasLiveFramework`).
     hasLiveFramework: extra.hasLiveFramework ?? false,
+    // Takım da PARAMETRE: üyelik satırını erişim kabuğu okur
+    // (`resolveQuoteAccess` → `teamMembershipFor`), sunum katmanı sormaz.
+    team: extra.team ?? null,
   });
 }
 
@@ -198,6 +209,8 @@ const OWNER_VIEW: QuoteViewer = {
   isOwner: true,
   isShare: false,
   isAdmin: false,
+  isTeam: false,
+  teamRole: null,
 };
 const ANON_VIEW: QuoteViewer = {
   canSeePrices: false,
@@ -205,6 +218,8 @@ const ANON_VIEW: QuoteViewer = {
   isOwner: true,
   isShare: false,
   isAdmin: false,
+  isTeam: false,
+  teamRole: null,
 };
 const SHARE_VIEW: QuoteViewer = {
   canSeePrices: false,
@@ -212,6 +227,8 @@ const SHARE_VIEW: QuoteViewer = {
   isOwner: false,
   isShare: true,
   isAdmin: false,
+  isTeam: false,
+  teamRole: null,
 };
 
 const tests: Array<[string, () => void | Promise<void>]> = [];
@@ -225,6 +242,7 @@ test("sahip: oturum kullanıcısı teklifin sahibiyse düzenler ve fiyatı gör�
     anonymousId: null,
     shareToken: null,
     isAdmin: false,
+    teamRole: null,
   });
   assert.deepEqual(viewer, OWNER_VIEW);
 });
@@ -235,6 +253,7 @@ test("anonim çerez: düzenler ama FİYAT GÖRMEZ", () => {
     anonymousId: "anon-1",
     shareToken: null,
     isAdmin: false,
+    teamRole: null,
   });
   assert.deepEqual(viewer, ANON_VIEW);
 });
@@ -245,6 +264,7 @@ test("anonim çerez teklif devralındıktan sonra geçersizdir", () => {
     anonymousId: "anon-1",
     shareToken: null,
     isAdmin: false,
+    teamRole: null,
   });
   assert.equal(viewer, null);
 });
@@ -260,6 +280,7 @@ test("girişli müşteri kendi anonim teklifini açınca FİYAT GÖRÜR", () => 
     anonymousId: "anon-1",
     shareToken: null,
     isAdmin: false,
+    teamRole: null,
   });
   assert.deepEqual(viewer, OWNER_VIEW);
 });
@@ -287,6 +308,7 @@ test("admin, anonim çerezi de eşleşse fiyatı görür", () => {
     anonymousId: "anon-1",
     shareToken: null,
     isAdmin: true,
+    teamRole: null,
   });
   assert.equal(viewer?.canSeePrices, true);
   assert.equal(viewer?.isAdmin, true);
@@ -298,6 +320,7 @@ test("paylaşım token'ı: salt okunur, girişsizken fiyatsız", () => {
     anonymousId: null,
     shareToken: SHARE_TOKEN,
     isAdmin: false,
+    teamRole: null,
   });
   assert.deepEqual(viewer, SHARE_VIEW);
 });
@@ -308,6 +331,7 @@ test("paylaşım token'ı + oturum: fiyat açılır, düzenleme yine kapalı", (
     anonymousId: null,
     shareToken: SHARE_TOKEN,
     isAdmin: false,
+    teamRole: null,
   });
   assert.deepEqual(viewer, { ...SHARE_VIEW, canSeePrices: true });
 });
@@ -318,6 +342,7 @@ test("sahip paylaşım bağlantısıyla gelse de SAHİP kalır", () => {
     anonymousId: null,
     shareToken: SHARE_TOKEN,
     isAdmin: false,
+    teamRole: null,
   });
   assert.deepEqual(viewer, OWNER_VIEW);
 });
@@ -328,6 +353,7 @@ test("yanlış paylaşım token'ı erişim vermez", () => {
     anonymousId: null,
     shareToken: "x".repeat(32),
     isAdmin: false,
+    teamRole: null,
   });
   assert.equal(viewer, null);
 });
@@ -338,6 +364,7 @@ test("teklifte token yokken boş token eşleşmez", () => {
     anonymousId: null,
     shareToken: null,
     isAdmin: false,
+    teamRole: null,
   });
   assert.equal(viewer, null);
 });
@@ -348,6 +375,7 @@ test("yabancı (T-numarası tahmini) erişemez", () => {
     anonymousId: "baska-anon",
     shareToken: null,
     isAdmin: false,
+    teamRole: null,
   });
   assert.equal(viewer, null);
 });
@@ -358,6 +386,7 @@ test("admin oturumu her teklifi görür", () => {
     anonymousId: null,
     shareToken: null,
     isAdmin: true,
+    teamRole: null,
   });
   assert.deepEqual(viewer, {
     canSeePrices: true,
@@ -365,7 +394,285 @@ test("admin oturumu her teklifi görür", () => {
     isOwner: false,
     isShare: false,
     isAdmin: true,
+    isTeam: false,
+    teamRole: null,
   });
+});
+
+// ─── TAKIM DALI (0072 · T-2) — bu sevkiyatın ÜÇ ÇIKIŞ KANITI ────────────────
+//
+// Takım dalı fiyatı KİMİN göreceğini genişletiyor; yani bir güvenlik sınırı.
+// Aşağıdaki üç blok (K1/K2/K3) bu sevkiyatın çıkış koşuludur.
+//
+// DALIN YERİ: kişisel sahip → admin → **TAKIM** → anonim çerez → paylaşım.
+// Üç argümanın her birinin kendi testi var:
+//   · paylaşımdan ÖNCE  → "takım üyesi + doğru token → TAKIM dalı kazanır"
+//   · sahipten SONRA    → "üyelikten çıkarılmış ama teklifi kendisi açmış"
+//   · anonimden önce/sonra FARK ETMEZ → `quotes_team_requires_user_chk`
+//     (takım teklifinde `user_id` daima dolu; kısıtın kendisi
+//     `scripts/test-quote-team-db.ts` içinde 23514 ile ölçülür)
+
+/** Takım kimliği; `makeQuote({ teamId: TEAM_ID })` bir takım teklifi yapar. */
+const TEAM_ID = "55555555-5555-4555-8555-555555555555";
+
+/** K1 tablosundaki hücre kodlarının açılımı — bugünkü beş alan. */
+const CELL: Record<string, Omit<QuoteViewer, "isTeam" | "teamRole"> | null> = {
+  "-": null,
+  O: { canSeePrices: true, canEdit: true, isOwner: true, isShare: false, isAdmin: false },
+  o: { canSeePrices: false, canEdit: true, isOwner: true, isShare: false, isAdmin: false },
+  A: { canSeePrices: true, canEdit: true, isOwner: false, isShare: false, isAdmin: true },
+  S: { canSeePrices: true, canEdit: false, isOwner: false, isShare: true, isAdmin: false },
+  s: { canSeePrices: false, canEdit: false, isOwner: false, isShare: true, isAdmin: false },
+};
+
+/**
+ * (K1) DENKLİK TABLOSU — **T-2'den ÖNCEKİ koddan alındı ve DONDURULDU.**
+ *
+ * Satır anahtarı `<teklif şekli>/<oturum>/<anonim çerez>`; değer, altı hücre:
+ * `shareToken` ∈ {yok, doğru, yanlış} × `isAdmin` ∈ {false, true} sırasıyla.
+ * 3 şekil × 3 oturum × 3 çerez × 3 token × 2 admin = **162 hücre.**
+ *
+ * Tablo bir YORUM değil, ölçülmüş bir çıkıştır: `teamRole: null` verildiğinde
+ * matrisin bugünkü hâlinden kaydığı an bu testten anlaşılır. `takimli/*`
+ * satırlarının `sahipli/*` ile BİREBİR aynı olması birincil kısıtın kanıtıdır
+ * (takımı olmayan — ya da takımı olup rolü okunmayan — müşteri için davranış
+ * bit bit aynı).
+ */
+const TODAY: Record<string, string> = {
+  "sahipli/yok/yok": "-AsA-A",
+  "sahipli/yok/eslesen": "-AsA-A",
+  "sahipli/yok/eslesmeyen": "-AsA-A",
+  "sahipli/sahip/yok": "OOOOOO",
+  "sahipli/sahip/eslesen": "OOOOOO",
+  "sahipli/sahip/eslesmeyen": "OOOOOO",
+  "sahipli/yabanci/yok": "-ASA-A",
+  "sahipli/yabanci/eslesen": "-ASA-A",
+  "sahipli/yabanci/eslesmeyen": "-ASA-A",
+  "anonim/yok/yok": "-AsA-A",
+  "anonim/yok/eslesen": "oAoAoA",
+  "anonim/yok/eslesmeyen": "-AsA-A",
+  "anonim/sahip/yok": "-ASA-A",
+  "anonim/sahip/eslesen": "OAOAOA",
+  "anonim/sahip/eslesmeyen": "-ASA-A",
+  "anonim/yabanci/yok": "-ASA-A",
+  "anonim/yabanci/eslesen": "OAOAOA",
+  "anonim/yabanci/eslesmeyen": "-ASA-A",
+  "takimli/yok/yok": "-AsA-A",
+  "takimli/yok/eslesen": "-AsA-A",
+  "takimli/yok/eslesmeyen": "-AsA-A",
+  "takimli/sahip/yok": "OOOOOO",
+  "takimli/sahip/eslesen": "OOOOOO",
+  "takimli/sahip/eslesmeyen": "OOOOOO",
+  "takimli/yabanci/yok": "-ASA-A",
+  "takimli/yabanci/eslesen": "-ASA-A",
+  "takimli/yabanci/eslesmeyen": "-ASA-A",
+};
+
+/** Bugünkü beş alan; K1 yalnız bunları donmuş tabloyla karşılaştırır. */
+function five(viewer: QuoteViewer | null): Omit<QuoteViewer, "isTeam" | "teamRole"> | null {
+  if (viewer === null) return null;
+  const { canSeePrices, canEdit, isOwner, isShare, isAdmin } = viewer;
+  return { canSeePrices, canEdit, isOwner, isShare, isAdmin };
+}
+
+test("(K1) teamRole null iken 162 hücrenin HİÇBİRİ bugünkü değerinden kaymaz", () => {
+  const shapes = {
+    sahipli: makeQuote(),
+    anonim: makeQuote({ userId: null, anonymousId: "anon-1" }),
+    takimli: makeQuote({ teamId: TEAM_ID }),
+  };
+  const sessions = { yok: null, sahip: OWNER_ID, yabanci: STRANGER_ID };
+  const anons = { yok: null, eslesen: "anon-1", eslesmeyen: "anon-2" };
+  // Yanlış token DOĞRU UZUNLUKTA: matris önce uzunluğu karşılaştırıyor, yani
+  // kısa bir dizgiyle yazılmış bir vaka karşılaştırmanın kendisini sınamazdı.
+  const shares = [null, SHARE_TOKEN, "x".repeat(SHARE_TOKEN.length)];
+
+  let cells = 0;
+  for (const [shapeName, quote] of Object.entries(shapes)) {
+    for (const [sessionName, sessionUserId] of Object.entries(sessions)) {
+      for (const [anonName, anonymousId] of Object.entries(anons)) {
+        const key = `${shapeName}/${sessionName}/${anonName}`;
+        const row = TODAY[key];
+        assert.ok(row, `${key} donmuş tabloda yok`);
+        let column = 0;
+        for (const shareToken of shares) {
+          for (const isAdmin of [false, true]) {
+            const viewer = resolveQuoteViewer(quote, {
+              sessionUserId,
+              anonymousId,
+              shareToken,
+              isAdmin,
+              teamRole: null,
+            });
+            assert.deepEqual(five(viewer), CELL[row[column]], `${key} hücre ${column}`);
+            // Rol okunmadığı için YENİ alanlar da sönük kalır: `team_id` dolu
+            // satırlar bile bugünkü matrise düşer (geri dönüş planı).
+            assert.equal(viewer?.isTeam ?? false, false, `${key} hücre ${column}: isTeam yandı`);
+            assert.equal(viewer?.teamRole ?? null, null, `${key} hücre ${column}: teamRole doldu`);
+            column++;
+            cells++;
+          }
+        }
+      }
+    }
+  }
+  assert.equal(cells, 162, "ızgara küçüldü — bir eksen kaybolmuş");
+
+  // Ve asıl iddia: TAKIMLI teklifin satırları SAHİPLİ teklifin satırlarıyla
+  // bire bir aynı. `team_id` kolonunun varlığı tek bir hücreyi oynatmıyor.
+  for (const sessionName of ["yok", "sahip", "yabanci"]) {
+    for (const anonName of ["yok", "eslesen", "eslesmeyen"]) {
+      assert.equal(
+        TODAY[`takimli/${sessionName}/${anonName}`],
+        TODAY[`sahipli/${sessionName}/${anonName}`],
+        `takimli/${sessionName}/${anonName} sahipli satırından ayrıştı`
+      );
+    }
+  }
+});
+
+test("(K2) takım teklifi YABANCIYA fazladan hiçbir hak vermez", () => {
+  const teamQuote = makeQuote({ teamId: TEAM_ID });
+
+  // Üye OLMAYAN (rolü yok) bir yabancı: 404. "Bu teklif bir takımın" bilgisi
+  // bile sızmaz.
+  assert.equal(
+    resolveQuoteViewer(teamQuote, {
+      sessionUserId: STRANGER_ID,
+      anonymousId: null,
+      shareToken: null,
+      isAdmin: false,
+      teamRole: null,
+    }),
+    null
+  );
+
+  // Aynı teklif + DOĞRU paylaşım token'ı → bugünkü paylaşım izleyicisi, bir
+  // satırı bile değişmemiş hâlde. `isTeam` sönük: token takım hakkı vermez.
+  assert.deepEqual(
+    resolveQuoteViewer(teamQuote, {
+      sessionUserId: null,
+      anonymousId: null,
+      shareToken: SHARE_TOKEN,
+      isAdmin: false,
+      teamRole: null,
+    }),
+    SHARE_VIEW
+  );
+
+  // ÇIKARILMIŞ ÜYE: rol `null`a döndüğü an aynı teklif 404. Önbellek yok, bir
+  // istek sonrası bile gecikme yok (kabuk her istekte üyelik satırına bakar).
+  const member = { sessionUserId: STRANGER_ID, anonymousId: null, shareToken: null, isAdmin: false };
+  assert.equal(
+    resolveQuoteViewer(teamQuote, { ...member, teamRole: "member" })?.isTeam,
+    true,
+    "üye kendi takımının teklifini göremiyor"
+  );
+  assert.equal(resolveQuoteViewer(teamQuote, { ...member, teamRole: null }), null);
+
+  // BAŞKA bir takımın rolü bu teklifte işe yaramaz: dal `quote.teamId`i de
+  // şart koşuyor, yoksa kişisel bir teklif herhangi bir takım üyesine açılırdı.
+  assert.equal(
+    resolveQuoteViewer(makeQuote({ teamId: null, userId: OWNER_ID }), {
+      ...member,
+      teamRole: "owner",
+    }),
+    null
+  );
+});
+
+test("(K3) `viewer` rolü HİÇBİR ŞEYİ değiştiremez", () => {
+  const teamQuote = makeQuote({ teamId: TEAM_ID });
+  const ctx = (teamRole: TeamRole) => ({
+    sessionUserId: STRANGER_ID,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: false,
+    teamRole,
+  });
+
+  const readOnly = resolveQuoteViewer(teamQuote, ctx("viewer"));
+  assert.deepEqual(readOnly, {
+    // Üye GİRİŞ YAPMIŞTIR: fiyat kapısının amacı (müşteri kazanımı) sağlanmış.
+    canSeePrices: true,
+    canEdit: false,
+    // `isOwner` "KİŞİSEL sahip" demeye devam ediyor — takım dalı onu açmaz,
+    // yani bugünkü `viewer.isOwner` okumaları sessizce genişlemez.
+    isOwner: false,
+    isShare: false,
+    isAdmin: false,
+    isTeam: true,
+    teamRole: "viewer",
+  });
+
+  for (const role of ["owner", "admin", "member"] as const) {
+    const viewer = resolveQuoteViewer(teamQuote, ctx(role));
+    assert.equal(viewer?.canEdit, true, `${role} düzenleyemiyor`);
+    assert.equal(viewer?.isTeam, true);
+    assert.equal(viewer?.isOwner, false, `${role} KİŞİSEL sahip sayıldı`);
+    assert.equal(viewer?.teamRole, role);
+  }
+
+  // Salt-okunur rol GERÇEKTEN salt okunur: para, sohbet ve paylaşım kapıları
+  // da kapalı (`src/lib/config/quote-team.ts`, T-1).
+  assert.equal(canCheckoutQuote("viewer", { memberCanCheckout: true }), false);
+  assert.equal(canChatOnQuote(readOnly!), false);
+  assert.equal(canShareQuote(readOnly!), false);
+});
+
+test("takım üyesi PAYLAŞIM bağlantısıyla gelse de kendi işinde salt okunur kalmaz", () => {
+  // `:63-64` gerekçesinin takım karşılığı: dal paylaşımın ALTINA konsa, viewer
+  // olmayan bir üye `?t=`li bir URL ile düzenleme hakkını kaybederdi.
+  const viewer = resolveQuoteViewer(makeQuote({ teamId: TEAM_ID }), {
+    sessionUserId: STRANGER_ID,
+    anonymousId: null,
+    shareToken: SHARE_TOKEN,
+    isAdmin: false,
+    teamRole: "member",
+  });
+  assert.equal(viewer?.isTeam, true, "paylaşım dalı takım dalını yuttu");
+  assert.equal(viewer?.isShare, false);
+  assert.equal(viewer?.canEdit, true);
+});
+
+test("üyelikten çıkarılmış ama teklifi KENDİSİ açmış kişi erişimini KAYBETMEZ", () => {
+  // Kişisel sahip dalı İLK kalır (tasarım §3.3): kendi yüklediği dosyaya
+  // erişimi, takımdan çıkarılması yüzünden kaybetmemeli.
+  const viewer = resolveQuoteViewer(makeQuote({ teamId: TEAM_ID, userId: OWNER_ID }), {
+    sessionUserId: OWNER_ID,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: false,
+    teamRole: null,
+  });
+  assert.deepEqual(viewer, OWNER_VIEW);
+});
+
+test("kendi takımının teklifini açan SAHİP, takım dalına DÜŞMEZ", () => {
+  // Sıra kanıtı: rol dolu olsa bile kişisel sahip dalı önce tutar, yani
+  // `isOwner` kapıları (22 okuma) bu sevkiyatta davranış değiştirmez.
+  const viewer = resolveQuoteViewer(makeQuote({ teamId: TEAM_ID }), {
+    sessionUserId: OWNER_ID,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: false,
+    teamRole: "owner",
+  });
+  assert.deepEqual(viewer, OWNER_VIEW);
+});
+
+test("admin, takım teklifinde de ADMİN kalır", () => {
+  // Admin dalı takım dalından ÖNCE: takımında rolü olan bir yönetici panelde
+  // admin bağlantılarını görmeye devam eder.
+  const viewer = resolveQuoteViewer(makeQuote({ teamId: TEAM_ID, userId: STRANGER_ID }), {
+    sessionUserId: OWNER_ID,
+    anonymousId: null,
+    shareToken: null,
+    isAdmin: true,
+    teamRole: "admin",
+  });
+  assert.equal(viewer?.isAdmin, true);
+  assert.equal(viewer?.isTeam, false, "admin takım dalına düştü");
 });
 
 // ─── Tek serileştirici: fiyat kapısı ────────────────────────────────────────
@@ -495,6 +802,61 @@ test("paylaşım görünümünde ÖDEME REFERANSI ve SİPARİŞ NUMARASI yok", (
   assert.equal(owner.orderNumber, "FIG-000999");
 });
 
+// ─── `PresentedQuote.team` (0072 · T-2) ─────────────────────────────────────
+
+const TEAM: QuoteAccessTeam = {
+  id: TEAM_ID,
+  name: "Acme Mühendislik A.Ş.",
+  role: "member",
+  memberCanCheckout: false,
+};
+
+test("takımsız teklifte `team` ANAHTARI gövdede HİÇ YOK", () => {
+  // Dosyanın açılış kuralı: yokluk `null` ile değil, anahtarın KENDİSİNİN
+  // olmamasıyla anlatılır (`undefined` RSC props'unda ve `Object.keys`te
+  // görünür).
+  const view = present(OWNER_VIEW);
+  assert.equal("team" in view, false);
+});
+
+test("takım adı PAYLAŞIM bağlantısına SIZMAZ", () => {
+  // Takım adı bir fiyat değil, ama bağlantıyı eline geçiren kişiye "bu hangi
+  // firmanın teklifi" demek de gerekmez — `invoice`/`shareUrl` ile aynı kapı.
+  for (const viewer of [SHARE_VIEW, { ...SHARE_VIEW, canSeePrices: true }]) {
+    const view = present(viewer, makeQuote({ teamId: TEAM_ID }), [makePart()], { team: TEAM });
+    assert.equal("team" in view, false);
+    assert.equal(
+      JSON.stringify(view).includes(TEAM.name),
+      false,
+      "takım adı gövdenin bir yerinde geçiyor"
+    );
+  }
+});
+
+test("takım üyesi ve kişisel sahip `team` alanını görür — kimliği GÖRMEZ", () => {
+  const teamViewer: QuoteViewer = {
+    canSeePrices: true,
+    canEdit: true,
+    isOwner: false,
+    isShare: false,
+    isAdmin: false,
+    isTeam: true,
+    teamRole: "member",
+  };
+  for (const viewer of [teamViewer, OWNER_VIEW]) {
+    const view = present(viewer, makeQuote({ teamId: TEAM_ID }), [makePart()], { team: TEAM });
+    assert.deepEqual(view.team, {
+      name: TEAM.name,
+      role: "member",
+      memberCanCheckout: false,
+    });
+    // Takım kimliği erişim kabuğunun işi (`QuoteAccessTeam.id`), ekranın değil:
+    // gövdeye girse paylaşımı olmayan bir uca tahmin edilebilir bir anahtar
+    // taşırdı.
+    assert.equal("id" in (view.team ?? {}), false);
+  }
+});
+
 // ─── Ödeme hazırlığı ve teslim tarihi ───────────────────────────────────────
 
 test("readiness.blockers `checkoutBlockers` cümlelerini aynen taşır", () => {
@@ -536,6 +898,7 @@ test("bekleyen ödeme teklifi kilitler ama ödemeye devam açık kalır", () => 
     fxDisplayEnabled: false,
     isFrameworkBatch: false,
     hasLiveFramework: false,
+    team: null,
   });
   assert.equal(view.locked, true);
   assert.equal(view.liveDraftReference, "FIG-ABCD1234");

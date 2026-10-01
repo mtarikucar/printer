@@ -1,6 +1,6 @@
 /**
- * `/api/customer/team/**` uçlarının SÖZLEŞMESİ — DB yok, sunucu yok, yalnız
- * kaynak ağacı (0072, T-3).
+ * Takım UÇLARININ SÖZLEŞMESİ — DB yok, sunucu yok, yalnız kaynak ağacı
+ * (0072; T-3'te `/api/customer/team/**`, T-4'te `/api/quotes/[id]/team`).
  *
  * NEDEN AYRI BİR TEST (`test-api-contracts.ts` varken): oradaki tarayıcı
  * İSTEMCİDEN uca bakar — `src/app`/`src/components` içindeki her düz
@@ -88,6 +88,13 @@ const ROUTE_TABLE: Array<{ rel: string; methods: string[] }> = [
   { rel: "src/app/api/customer/team/invites/[id]/route.ts", methods: ["DELETE"] },
   { rel: "src/app/api/customer/team/invites/accept/route.ts", methods: ["POST"] },
   { rel: "src/app/api/customer/team/members/[userId]/route.ts", methods: ["PATCH", "DELETE"] },
+  // T-4 · teklifi takıma BAĞLA / AYIR. Tablonun tek `/api/quotes/**` satırı ve
+  // bu BİLİNÇLİ: uç teklif ailesindedir (`quoteRouteBody` ile `instant_quote`
+  // bayrağını da sorar) ama kapıları, cevap çevirisi ve denetim satırı takım
+  // sözleşmesine ait — iki şemsiyenin altında durduğu için iki testle birden
+  // ölçülüyor. `GET` BİLEREK yok: teklifin takımı `PresentedQuote.team` ile
+  // geliyor, ikinci bir okuma ucu aynı gerçeğin ikinci kopyası olurdu.
+  { rel: "src/app/api/quotes/[id]/team/route.ts", methods: ["POST", "DELETE"] },
 ];
 
 const SHARED = "src/app/api/customer/team/_shared.ts";

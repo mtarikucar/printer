@@ -63,6 +63,8 @@ import {
 import {
   INVITE_TTL_MS,
   canAssignRole,
+  canAttachQuote,
+  canDetachQuote,
   canDeleteTeam,
   canEditTeamProfile,
   canInvite,
@@ -1158,5 +1160,147 @@ export async function transferOwnership(args: {
       after: { ownerUserId: args.targetUserId, previousOwnerRole: "admin" },
     });
     return { teamName: membership.team.name, email: target.email, previousRole: target.role };
+  });
+}
+
+// ─── Teklifi takıma bağlamak / ayırmak (T-4) ────────────────────────────────
+
+/**
+ * Bağlama/ayırmanın İKİ ÖN KOŞULU ve ikisinin de kendi cümlesi var.
+ *
+ * `quote_has_order` değişmez 5'tir: `team_id` YALNIZ sipariş öncesi değişir.
+ * Ödenmiş bir işin sahipliğini oynatmak muhasebeyi oynatmaktır — sipariş
+ * dosyaları `quotes.order_id` üzerinden pişiyor (`quote-order.ts` ·
+ * `linkQuoteToOrderTx`) ve iade/anlaşmazlık ödeyene (`orders.userId`) bağlı.
+ */
+const QUOTE_HAS_ORDER =
+  "Siparişe dönmüş bir teklifin takım bağı değiştirilemez.";
+
+/**
+ * Teklifi çağıranın takımına BAĞLAR.
+ *
+ * KAPILAR SIRAYLA: üyelik (`not_member`) → rol + "kendi işi" kuralı
+ * (`canAttachQuote`: `member` yalnız KENDİ açtığını bağlar) → koşullu UPDATE.
+ *
+ * YAZMA KOŞULLUDUR ve koşul bir yorum değil bir KİLİT:
+ * `WHERE id = $1 AND team_id IS NULL AND order_id IS NULL`. İki eşzamanlı
+ * çağrıdan yalnız biri satır günceller; ikincisi 0 satır alır ve "zaten bir
+ * takımda" cevabını okur. Aynı koşul teklifin ÖN OKUMASI ile yazma arasında
+ * açılan pencereyi de kapatıyor (araya giren bir ödeme `order_id`yi doldurmuş
+ * olabilir).
+ *
+ * `quotes.user_id`ye DOKUNULMAZ: teklifi açan kişi açan kişi kalır, takım
+ * bağı ikinci bir görünürlük eksenidir (`quotes_team_requires_user_chk` de
+ * `user_id`nin dolu kalmasını zorunlu tutuyor).
+ */
+export async function attachQuoteToTeam(args: {
+  actorUserId: string;
+  quoteId: string;
+}): Promise<{ teamId: string; teamName: string }> {
+  if (!UUID_RE.test(args.quoteId)) {
+    throw new TeamServiceError("Teklif bulunamadı.", 404, "quote_not_found");
+  }
+  const membership = await requireMembership(args.actorUserId);
+  const [quote] = await db
+    .select({ id: quotes.id, userId: quotes.userId, teamId: quotes.teamId, orderId: quotes.orderId })
+    .from(quotes)
+    .where(eq(quotes.id, args.quoteId))
+    .limit(1);
+  if (!quote) throw new TeamServiceError("Teklif bulunamadı.", 404, "quote_not_found");
+  assertAllowed(canAttachQuote(membership.role, quote.userId, args.actorUserId));
+  if (quote.teamId !== null) {
+    throw new TeamServiceError(
+      quote.teamId === membership.teamId
+        ? "Bu teklif zaten takımınıza bağlı."
+        : "Bu teklif başka bir takıma bağlı.",
+      409,
+      "already_in_team_quote"
+    );
+  }
+  if (quote.orderId !== null) throw new TeamServiceError(QUOTE_HAS_ORDER, 409, "quote_has_order");
+
+  return db.transaction(async (tx) => {
+    const updated = await tx
+      .update(quotes)
+      .set({ teamId: membership.teamId, updatedAt: new Date() })
+      .where(and(eq(quotes.id, quote.id), isNull(quotes.teamId), isNull(quotes.orderId)))
+      .returning({ id: quotes.id });
+    if (updated.length === 0) {
+      // Satır ARAYA GİREN bir istek tarafından değişti: hangi koşulun
+      // düştüğünü uydurmak yerine bağlamanın kendisi reddedilir.
+      throw new TeamServiceError(
+        "Teklifin durumu değişti; sayfayı yenileyip tekrar deneyin.",
+        409,
+        "already_in_team_quote"
+      );
+    }
+    await recordTeamAction(tx, {
+      teamId: membership.teamId,
+      actorUserId: args.actorUserId,
+      action: "quote_attached",
+      targetQuoteId: quote.id,
+      before: { teamId: null },
+      after: { teamId: membership.teamId },
+    });
+    return { teamId: membership.teamId, teamName: membership.team.name };
+  });
+}
+
+/**
+ * Teklifi çağıranın takımından AYIRIR.
+ *
+ * TAKIMLAR ARASINDA TAŞIMA YOK (tasarım §1.2): koşul `team_id = <çağıranın
+ * takımı>`, yani başka bir takımın yetkilisi bu teklife dokunamaz ve cevabı
+ * "senin değil" değil "takımınıza bağlı değil" olur. Bağlamak için ayrı bir
+ * çağrı gerekir ve o çağrı `team_id IS NULL` arar.
+ */
+export async function detachQuoteFromTeam(args: {
+  actorUserId: string;
+  quoteId: string;
+}): Promise<{ teamId: string; teamName: string }> {
+  if (!UUID_RE.test(args.quoteId)) {
+    throw new TeamServiceError("Teklif bulunamadı.", 404, "quote_not_found");
+  }
+  const membership = await requireMembership(args.actorUserId);
+  const [quote] = await db
+    .select({ id: quotes.id, userId: quotes.userId, teamId: quotes.teamId, orderId: quotes.orderId })
+    .from(quotes)
+    .where(eq(quotes.id, args.quoteId))
+    .limit(1);
+  if (!quote) throw new TeamServiceError("Teklif bulunamadı.", 404, "quote_not_found");
+  if (quote.teamId !== membership.teamId) {
+    throw new TeamServiceError("Bu teklif takımınıza bağlı değil.", 404, "quote_not_found");
+  }
+  assertAllowed(canDetachQuote(membership.role, quote.userId, args.actorUserId));
+  if (quote.orderId !== null) throw new TeamServiceError(QUOTE_HAS_ORDER, 409, "quote_has_order");
+
+  return db.transaction(async (tx) => {
+    const updated = await tx
+      .update(quotes)
+      .set({ teamId: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(quotes.id, quote.id),
+          eq(quotes.teamId, membership.teamId),
+          isNull(quotes.orderId)
+        )
+      )
+      .returning({ id: quotes.id });
+    if (updated.length === 0) {
+      throw new TeamServiceError(
+        "Teklifin durumu değişti; sayfayı yenileyip tekrar deneyin.",
+        409,
+        "quote_has_order"
+      );
+    }
+    await recordTeamAction(tx, {
+      teamId: membership.teamId,
+      actorUserId: args.actorUserId,
+      action: "quote_detached",
+      targetQuoteId: quote.id,
+      before: { teamId: membership.teamId },
+      after: { teamId: null },
+    });
+    return { teamId: membership.teamId, teamName: membership.team.name };
   });
 }

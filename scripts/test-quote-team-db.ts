@@ -129,6 +129,33 @@ const sentEmails: Array<{ kind: string; args: Record<string, unknown> }> = [];
   } as NodeJS.Module;
 }
 
+/**
+ * Teklif BİLDİRİMLERİ taklit edilir — tek sebebi SMTP: T-4'ün sohbet vakası
+ * gerçek `createQuoteMessage`i çağırıyor ve o da müşteriye e-posta atmaya
+ * çalışıyor (127.0.0.1:587). Gerçek kod bu hatayı yutup günlüğe yazıyor, yani
+ * vaka yine yeşil kalırdı; taklit edilen şey testi ağa bağlayan ve çıktıyı
+ * kirleten tek satır. Bildirimin KENDİSİ başka bir dosyanın konusu
+ * (`scripts/test-quote-service-db.ts` zili ve gövdeleri ölçüyor).
+ */
+{
+  const filename = require_.resolve("../src/lib/services/quote-notify");
+  const noop = async () => {};
+  require_.cache[filename] = {
+    id: filename,
+    filename,
+    loaded: true,
+    exports: {
+      notifyReviewRequested: noop,
+      notifyManualQuoteReady: noop,
+      notifyTargetDecision: noop,
+      notifyQuoteExpiring: noop,
+      notifyQuoteAbandoned: noop,
+      notifyFrameworkReleaseWindow: noop,
+      notifyQuoteMessage: noop,
+    },
+  } as NodeJS.Module;
+}
+
 const test = async (name: string, run: () => Promise<void>) => {
   await run();
   checks++;
@@ -1400,6 +1427,236 @@ async function main() {
           `${table} satırı kaldı`
         );
       }
+    });
+
+    // ═══ T-4 · TEKLİF ↔ TAKIM BAĞI VE SOHBET ASİMETRİSİ ══════════════════════
+    //
+    // Gerçek uçlardan geçer (`/api/quotes/[id]/team`, `/api/quotes/[id]/messages`):
+    // bu vakaların iddiası bir CEVAP hakkında (409 `quote_has_order`, 403, GET
+    // 200 / POST 404) ve bir cevabı yalnız uç üretir.
+    const quoteTeamRoute = await import("../src/app/api/quotes/[id]/team/route");
+    const messagesRoute = await import("../src/app/api/quotes/[id]/messages/route");
+
+    // Teklif uçlarının ortak bayrağı: kapalıyken `quoteRouteBody` her şeye 404
+    // der ve vakalar hiçbir şey kanıtlamazdı.
+    await setFlag("instant_quote_enabled", true, "qa");
+
+    const bindOwner = await makeUser("bag-sahip");
+    const bindAdmin = await makeUser("bag-yonetici");
+    const bindViewer = await makeUser("bag-izleyici");
+    const loner = await makeUser("takimsiz");
+    const bindTeamId = (
+      await admin.query(
+        `INSERT INTO customer_teams (name, owner_user_id, kvkk_notice_version)
+           VALUES ('Bağ Mühendislik', $1, '2026-09-22') RETURNING id`,
+        [bindAdmin.userId]
+      )
+    ).rows[0].id as string;
+    await admin.query(
+      `INSERT INTO customer_team_members (team_id, user_id, role)
+         VALUES ($1, $2, 'owner'), ($1, $3, 'member'), ($1, $4, 'viewer')`,
+      [bindTeamId, bindAdmin.userId, bindOwner.userId, bindViewer.userId]
+    );
+
+    /** Bu kullanıcının takımsız bir teklifi (bayrak açıkken `createQuote` bağlar). */
+    async function personalQuote(user: { userId: string }): Promise<string> {
+      const created = await createQuote({
+        userId: user.userId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      await db.update(quotes).set({ teamId: null }).where(eq(quotes.id, created.id));
+      return created.id;
+    }
+    const attach = (id: string) =>
+      quoteTeamRoute.POST(req(`/api/quotes/${id}/team`, { method: "POST" }), {
+        params: Promise.resolve({ id }),
+      });
+    const detach = (id: string) =>
+      quoteTeamRoute.DELETE(req(`/api/quotes/${id}/team`, { method: "DELETE" }), {
+        params: Promise.resolve({ id }),
+      });
+    const teamIdOf = async (id: string): Promise<string | null> =>
+      (await admin.query("SELECT team_id FROM quotes WHERE id = $1", [id])).rows[0].team_id;
+
+    await test("POST: teklifin sahibi kendi teklifini TAKIMA bağlar (denetim satırıyla)", async () => {
+      const id = await personalQuote(bindOwner);
+      session = bindOwner;
+      const response = await attach(id);
+      assert.equal(response.status, 200);
+      const payload = await body(response);
+      assert.equal(payload.success, true);
+      // Cevap TAZE gövdedir: ekranın rozeti `PresentedQuote.team`den çizilir.
+      const view = payload.quote as { team?: { name: string; role: string } };
+      assert.equal(view.team?.name, "Bağ Mühendislik");
+      assert.equal(view.team?.role, "member");
+      assert.equal(await teamIdOf(id), bindTeamId);
+      const trail = await admin.query(
+        "SELECT action, target_quote_id, actor_user_id FROM customer_team_actions WHERE team_id = $1 ORDER BY created_at",
+        [bindTeamId]
+      );
+      assert.deepEqual(
+        trail.rows.map((r: { action: string }) => r.action),
+        ["quote_attached"]
+      );
+      assert.equal(trail.rows[0].target_quote_id, id, "denetim satırı teklifi işaret etmiyor");
+      assert.equal(trail.rows[0].actor_user_id, bindOwner.userId);
+    });
+
+    await test("POST: zaten bağlı teklif 409 `already_in_team_quote` alır", async () => {
+      const id = (
+        await admin.query("SELECT id FROM quotes WHERE team_id = $1 LIMIT 1", [bindTeamId])
+      ).rows[0].id as string;
+      session = bindOwner;
+      await refusal(await attach(id), 409, "already_in_team_quote");
+    });
+
+    await test("POST: TAKIMSIZ kullanıcı 403 `not_member` alır", async () => {
+      const id = await personalQuote(loner);
+      session = loner;
+      await refusal(await attach(id), 403, "not_member");
+      assert.equal(await teamIdOf(id), null, "takımsız kullanıcı teklifi bağladı");
+    });
+
+    await test("POST: takımın `viewer` rolü kendi teklifini bile bağlayamaz", async () => {
+      const id = await personalQuote(bindViewer);
+      session = bindViewer;
+      await refusal(await attach(id), 403, "not_allowed");
+      assert.equal(await teamIdOf(id), null);
+    });
+
+    await test("POST: BAŞKASININ teklifi takıma çekilemez (403, satır değişmez)", async () => {
+      // Takımın sahibi bile meslektaşının KİŞİSEL teklifini takıma çekemez:
+      // dosyasını paylaşma kararı sahibinin.
+      const id = await personalQuote(bindOwner);
+      session = bindAdmin;
+      const response = await attach(id);
+      // Erişim kabuğu bu teklifi `bindAdmin`e hiç göstermiyor: cevap 404.
+      assert.equal(response.status, 404);
+      assert.equal(await teamIdOf(id), null);
+    });
+
+    await test("POST/DELETE: SİPARİŞE DÖNMÜŞ teklifte 409 `quote_has_order` (değişmez 5)", async () => {
+      const orderId = randomUUID();
+      await admin.query(
+        `INSERT INTO orders (id, order_number, user_id, email, customer_name, shipping_address,
+                             amount_kurus, payment_method)
+           VALUES ($1, $2, $3, $4, 'QA Müşteri', $5, 10000, 'card')`,
+        [
+          orderId,
+          `QA-${Date.now()}`,
+          bindOwner.userId,
+          bindOwner.email,
+          JSON.stringify({
+            adres: "Atatürk Cad. 1",
+            ilce: "Kadıköy",
+            il: "İstanbul",
+            postaKodu: "34000",
+            telefon: "+905321234567",
+          }),
+        ]
+      );
+      // 1) BAĞLAMA: kişisel teklif siparişe dönmüşse takıma bağlanamaz.
+      const personal = await personalQuote(bindOwner);
+      await db.update(quotes).set({ orderId }).where(eq(quotes.id, personal));
+      session = bindOwner;
+      await refusal(await attach(personal), 409, "quote_has_order");
+      assert.equal(await teamIdOf(personal), null);
+
+      // 2) AYIRMA: ödenmiş bir işin sahipliği de oynatılmaz.
+      const attached = await personalQuote(bindOwner);
+      session = bindOwner;
+      assert.equal((await attach(attached)).status, 200);
+      await db.update(quotes).set({ orderId: null }).where(eq(quotes.id, personal));
+      await db.update(quotes).set({ orderId }).where(eq(quotes.id, attached));
+      await refusal(await detach(attached), 409, "quote_has_order");
+      assert.equal(await teamIdOf(attached), bindTeamId, "siparişli teklif takımdan ayrıldı");
+      await db.update(quotes).set({ orderId: null }).where(eq(quotes.id, attached));
+      // FİKSTÜR TEMİZLENİR: dosyanın kapanış iddiası ("takım yolu para hattına
+      // dokunmadı") `orders` tablosunu SAYIYOR. Bu satırı bırakmak, o iddiayı
+      // takım kodunun yazdığı bir satır sanıp kırmızıya düşürürdü — oysa onu
+      // bu vaka, elle, sipariş koşulunu kurmak için yazdı.
+      await admin.query("DELETE FROM orders WHERE id = $1", [orderId]);
+    });
+
+    await test("DELETE: takımın yetkilisi ayırır, BAŞKA bir takımın yetkilisi AYIRAMAZ", async () => {
+      const id = await personalQuote(bindOwner);
+      session = bindOwner;
+      assert.equal((await attach(id)).status, 200);
+
+      // BAŞKA takımın sahibi (`owner`, en yüksek rütbe) bu teklife hiç
+      // erişemiyor: değişmez 6 — bağlama/ayırma TEK bir takıma göredir.
+      session = owner;
+      assert.equal((await detach(id)).status, 404);
+      assert.equal(await teamIdOf(id), bindTeamId, "başka takımın yetkilisi ayırdı");
+
+      // Takımın yöneticisi, teklifi KENDİSİ açmasa da ayırır.
+      session = bindAdmin;
+      const response = await detach(id);
+      assert.equal(response.status, 200);
+      const payload = await body(response);
+      assert.equal(payload.success, true);
+      // Ayıran kişi teklifi kendisi AÇMADIĞI için erişimini de kaybetti:
+      // `quote: null` bir hata değil, ekranın "tekliften çık" işareti.
+      assert.equal(payload.quote, null);
+      assert.equal(await teamIdOf(id), null);
+      const actions = (
+        await admin.query(
+          "SELECT action FROM customer_team_actions WHERE team_id = $1 AND target_quote_id = $2 ORDER BY created_at",
+          [bindTeamId, id]
+        )
+      ).rows.map((r: { action: string }) => r.action);
+      assert.deepEqual(actions, ["quote_attached", "quote_detached"]);
+    });
+
+    await test("bayrak KAPALIYKEN bağlama ucu 404 (403 DEĞİL) döner", async () => {
+      const id = await personalQuote(bindOwner);
+      await setFlag("quote_teams_enabled", false, "qa");
+      session = bindOwner;
+      const response = await attach(id);
+      assert.equal(response.status, 404);
+      assert.equal((await body(response)).code, "team_not_found");
+      await setFlag("quote_teams_enabled", true, "qa");
+    });
+
+    await test("SOHBET ASİMETRİSİ: `viewer` rolü GET'te 200, POST'ta 404 alır", async () => {
+      const id = await personalQuote(bindOwner);
+      session = bindOwner;
+      assert.equal((await attach(id)).status, 200);
+
+      session = bindViewer;
+      const read = await messagesRoute.GET(req(`/api/quotes/${id}/messages`), {
+        params: Promise.resolve({ id }),
+      });
+      assert.equal(read.status, 200, "salt okunur üye yazışmayı okuyamadı");
+      assert.deepEqual(await read.json(), { messages: [], unreadCount: 0 });
+
+      const write = await messagesRoute.POST(
+        req(`/api/quotes/${id}/messages`, { method: "POST" }),
+        { params: Promise.resolve({ id }) }
+      );
+      // Cevap BİÇİMİ bugünküyle aynı: `quoteNotFound()` — uç hiçbir hakkı
+      // "var ama sana kapalı" diye duyurmaz.
+      assert.equal(write.status, 404);
+      assert.equal((await body(write)).code, "quote_not_found");
+
+      // DÜZENLEYEBİLEN üye yazabilir (`canChatOnQuote`).
+      session = bindAdmin;
+      const ok = await messagesRoute.POST(
+        new NextRequest(`https://qa.example.test/api/quotes/${id}/messages`, {
+          method: "POST",
+          headers: { "x-real-ip": clientIp },
+          body: (() => {
+            const form = new FormData();
+            form.set("body", "Takımın mesajı");
+            return form;
+          })(),
+        }),
+        { params: Promise.resolve({ id }) }
+      );
+      assert.equal(ok.status, 200, "düzenleyebilen üye sohbete yazamadı");
+      const thread = (await ok.json()) as { messages: Array<{ body: string }> };
+      assert.equal(thread.messages.at(-1)?.body, "Takımın mesajı");
     });
 
     await test("PARA HATTINA DOKUNULMADI: hiç taslak/sipariş yazılmadı", async () => {

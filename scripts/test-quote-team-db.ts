@@ -1005,6 +1005,95 @@ async function main() {
       chainOwner = heir;
     });
 
+    await test("PROFİL PATCH: değişen BÖLÜM başına bir denetim satırı", async () => {
+      // `TEAM_ACTIONS` ad / fatura / teslimat için ÜÇ ayrı ad taşıyor çünkü üçü
+      // ayrı bir açıklamadır; hangisinin değiştiğini tek satıra sıkıştırmak izi
+      // yalancı yapardı. Tek çağrıda üçü birden değişiyorsa üç satır yazılır.
+      session = chainOwner;
+      const before = await auditTrail(chainTeamId);
+      const address = {
+        adres: "Organize Sanayi 3. Cadde No 12",
+        ilce: "Nilüfer",
+        il: "Bursa",
+        postaKodu: "16140",
+        telefon: "+905551112233",
+      };
+      const payload = await body(
+        await teamRoute.PATCH(
+          req("/api/customer/team", {
+            method: "PATCH",
+            body: {
+              name: "Zincir Mühendislik A.Ş.",
+              invoiceType: "corporate",
+              companyName: "Zincir Mühendislik Sanayi A.Ş.",
+              taxId: "1234567890",
+              taxIdType: "vkn",
+              taxOffice: "Nilüfer",
+              billingAddress: address,
+              shippingAddress: address,
+              memberCanCheckout: true,
+            },
+          })
+        )
+      );
+      const team = payload.team as Record<string, unknown>;
+      assert.equal(team.name, "Zincir Mühendislik A.Ş.");
+      assert.equal(team.invoiceType, "corporate");
+      assert.equal(team.memberCanCheckout, true);
+      assert.deepEqual(team.shippingAddress, address);
+      // KVKK kaydı müşteri gövdesine GİRMEZ (denetim verisi).
+      assert.equal("kvkkNoticeVersion" in team, false);
+      assert.equal("kvkkConsentAt" in team, false);
+      assert.deepEqual(
+        (await auditTrail(chainTeamId)).slice(before.length).sort(),
+        ["billing_updated", "shipping_updated", "team_renamed"]
+      );
+      const renamed = (
+        await admin.query(
+          `SELECT before->>'name' AS b, after->>'name' AS a FROM customer_team_actions
+            WHERE team_id = $1 AND action = 'team_renamed'`,
+          [chainTeamId]
+        )
+      ).rows[0];
+      assert.equal(renamed.b, "Zincir Mühendislik");
+      assert.equal(renamed.a, "Zincir Mühendislik A.Ş.");
+      // Para kapısının açılması FATURA bölümünde izlenir: `TEAM_ACTIONS`ta ona
+      // ayrı bir ad yok ve listeye ad eklemek migration demek.
+      const billing = (
+        await admin.query(
+          `SELECT before->>'memberCanCheckout' AS b, after->>'memberCanCheckout' AS a
+             FROM customer_team_actions WHERE team_id = $1 AND action = 'billing_updated'`,
+          [chainTeamId]
+        )
+      ).rows[0];
+      assert.equal(billing.b, "false");
+      assert.equal(billing.a, "true");
+
+      // Verilmeyen alan DOKUNULMAZ ve değişmeyen bölüm satır YAZMAZ.
+      const after = await auditTrail(chainTeamId);
+      const only = await body(
+        await teamRoute.PATCH(
+          req("/api/customer/team", { method: "PATCH", body: { taxOffice: "Osmangazi" } })
+        )
+      );
+      assert.equal((only.team as Record<string, unknown>).name, "Zincir Mühendislik A.Ş.");
+      assert.equal((only.team as Record<string, unknown>).taxOffice, "Osmangazi");
+      assert.deepEqual((await auditTrail(chainTeamId)).slice(after.length), ["billing_updated"]);
+
+      // Boş gövde bir işlem DEĞİLDİR: 400 + Türkçe cümle.
+      await refusal(
+        await teamRoute.PATCH(req("/api/customer/team", { method: "PATCH", body: {} })),
+        400,
+        "invalid_body"
+      );
+      // Ve geçersiz ad reddedilir (sınır serviste de duruyor).
+      await refusal(
+        await teamRoute.PATCH(req("/api/customer/team", { method: "PATCH", body: { name: "A" } })),
+        400,
+        "invalid_body"
+      );
+    });
+
     await test("EŞZAMANLI iki devir: yalnız biri yazar, ikincisi 409 `owner_transfer_race`", async () => {
       // Kısmi tekil indeks (`customer_team_members_one_owner_idx`) + düşürme
       // UPDATE'inin `role = 'owner'` KOŞULU yarışı kesiyor. Beklenen: bir 200,

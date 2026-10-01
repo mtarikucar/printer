@@ -108,6 +108,7 @@ import type {
   LeadTierKey,
   PricingPartInput,
   PricingSnapshot,
+  QuoteStatus,
 } from "@/lib/config/quote-types";
 import { emitFrameworkChanged, emitQuoteChanged } from "@/lib/realtime/emit";
 import { loadActiveFxSnapshot } from "@/lib/services/fx-rates";
@@ -1301,6 +1302,21 @@ export interface FrameworkBatchView {
   amountKurus: number;
   quoteId: string | null;
   quoteNumber: string | null;
+  /**
+   * KLON TEKLİFİN KENDİ DURUMU ve GEÇERLİLİĞİ — partiden AYRI bir gerçek.
+   *
+   * Klon sıradan bir `quotes` satırıdır: geçerliliği `min(kilit, bugün +
+   * quoteValidDays)` ile açılır ve bakım turunun `expireQuotes` aşaması onu
+   * `expired`a çekebilir (R2 kapısı yalnız anlaşmanın KAYNAK teklifini
+   * koruyor, klonu değil). Yani "parti serbest bırakıldı" ile "parti BUGÜN
+   * ödenebilir" aynı şey DEĞİL ve ekran ikisini birbirinin yerine
+   * yazmamalı — ucun reddedeceği bir ödemeye çağırmak olurdu
+   * (`quotePermissions`, `quote-policy.ts`).
+   *
+   * Serbest bırakılmamış (`planned`) partide ikisi de null: klon yok.
+   */
+  quoteStatus: QuoteStatus | null;
+  quoteExpiresAt: string | null;
   orderId: string | null;
   orderNumber: string | null;
   orderStatus: string | null;
@@ -1418,6 +1434,10 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
     .select({
       batch: quoteFrameworkBatches,
       quoteNumber: quotes.number,
+      // Klonun ÖDENEBİLİRLİĞİ bu iki kolondan ölçülür (gerekçe
+      // `FrameworkBatchView.quoteStatus`); JOIN zaten kurulu, ek sorgu yok.
+      quoteStatus: quotes.status,
+      quoteExpiresAt: quotes.expiresAt,
       orderNumber: orders.orderNumber,
       orderStatus: orders.status,
       paymentStatus: orders.paymentStatus,
@@ -1525,6 +1545,8 @@ export async function loadFrameworkDetail(frameworkId: string): Promise<Framewor
       amountKurus: b.amountKurus,
       quoteId: b.quoteId,
       quoteNumber: r.quoteNumber ?? null,
+      quoteStatus: r.quoteStatus ?? null,
+      quoteExpiresAt: r.quoteExpiresAt?.toISOString() ?? null,
       orderId: b.orderId,
       orderNumber: r.orderNumber ?? null,
       orderStatus: r.orderStatus ?? null,

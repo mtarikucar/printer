@@ -1368,6 +1368,82 @@ async function main() {
       await setFlag("quote_gift_card_enabled", false, "qa-admin@example.test");
     });
 
+    await test("KLONUN SÜRESİ DOLUNCA 'öde' DÜŞER: ekran ucun reddedeceği yolu çizmez", async () => {
+      // Klon sıradan bir `quotes` satırıdır: geçerliliği `min(kilit, bugün +
+      // quoteValidDays)` ve bakımın `expireQuotes` aşaması onu kapatabilir
+      // (R2 kapısı yalnız anlaşmanın KAYNAK teklifini koruyor). Havalesi
+      // geciken bir kurumsal müşteride tam olarak bu oluyordu ve ekran hâlâ
+      // "Bu partiyi öde" çiziyordu; `/teklif/<no>/odeme` ise
+      // `canCheckout=false` ile reddediyordu.
+      const viewer = { canSeePrices: true, isOwner: true, isAdmin: false };
+      const present = async () => {
+        const detail = (await loadFrameworkDetail(frameworkId))!;
+        const view = presentFramework({
+          detail,
+          viewer,
+          now: new Date(),
+          sign: (key: string) => `/signed/${key}`,
+        });
+        return view.batches.find((b) => b.id === batchIds[1])!;
+      };
+
+      const live = await present();
+      assert.equal(live.payable, true, "serbest bırakılmış, ödenmemiş parti ödenebilir DEĞİL");
+      assert.equal(live.payBlocked, false, "yürürlükteki klonda 'bize yazın' cümlesi çiziliyor");
+
+      const [row] = await db
+        .select({ quoteId: quoteFrameworkBatches.quoteId })
+        .from(quoteFrameworkBatches)
+        .where(eq(quoteFrameworkBatches.id, batchIds[1]))
+        .limit(1);
+      const cloneId = row.quoteId!;
+      const [before] = await db
+        .select({ status: quotes.status, expiresAt: quotes.expiresAt })
+        .from(quotes)
+        .where(eq(quotes.id, cloneId))
+        .limit(1);
+
+      // (a) Bakım turu klonu kapattı.
+      await db
+        .update(quotes)
+        .set({ status: "expired", expiresAt: new Date(Date.now() - 86_400_000) })
+        .where(eq(quotes.id, cloneId));
+      const expiredClone = await present();
+      assert.equal(expiredClone.payable, false, "süresi dolmuş klonda hâlâ 'öde' çiziliyor");
+      assert.equal(
+        expiredClone.payBlocked,
+        true,
+        "müşteriye partinin neden ödenemediği SÖYLENMİYOR"
+      );
+      // Ölçü ucun ölçüsüyle AYNI işlevden geliyor: kapı gerçekten kapalı.
+      assert.equal(
+        quotePermissions(
+          { status: "expired", expiresAt: before.expiresAt, orderId: null },
+          { hasLiveDraft: false, now: new Date(), isFrameworkBatch: true, hasLiveFramework: false }
+        ).canCheckout,
+        false
+      );
+
+      // (b) DAMGA HENÜZ VURULMAMIŞ hâl: tur koşmadı, durum `quoted` ama TARİH
+      // geçmiş. Ekran bu hâlde de düğme çizmemeli — `quotePermissions` tarihi
+      // durumdan BAĞIMSIZ ölçüyor ve ödeme ucu da onu çağırıyor.
+      await db
+        .update(quotes)
+        .set({ status: "quoted" })
+        .where(eq(quotes.id, cloneId));
+      const staleClone = await present();
+      assert.equal(staleClone.payable, false, "tarihi geçmiş klon `quoted` diye ödenebilir sayıldı");
+      assert.equal(staleClone.payBlocked, true);
+
+      // Geri al: sonraki vakalar bu partinin klonunu ÖDENEBİLİR bulmalı.
+      await db
+        .update(quotes)
+        .set({ status: before.status, expiresAt: before.expiresAt })
+        .where(eq(quotes.id, cloneId));
+      const restored = await present();
+      assert.equal(restored.payable, true, "geri alma tutmadı: sonraki vakalar yanlış kurulumda");
+    });
+
     // ═══ 6) İki eşzamanlı serbest bırakma → TEK klon (R4) ════════════════════
 
     await test("iki eşzamanlı releaseBatch: TEK klon, öteki 409", async () => {

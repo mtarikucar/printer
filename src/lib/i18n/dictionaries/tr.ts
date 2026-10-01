@@ -1244,6 +1244,8 @@ const tr: Dictionary = {
   "instantQuote.framework.payConfirmCta": "Onaylıyorum, ödemeye geç",
   "instantQuote.framework.payConfirmNote":
     "Ödeme sayfası hangi parti olduğunu göstermez; bu yüzden parti numarasını ve tutarı ödemeye geçmeden ÖNCE burada onaylıyorsunuz.",
+  "instantQuote.framework.payUnavailable":
+    "Bu partinin ödeme bağlantısı artık geçerli değil — yeni bir bağlantı için bize yazın. Anlaşmadaki kilitli fiyat değişmez.",
   "instantQuote.framework.perBatchBilling":
     "Her parti ayrı faturalandırılır ve ayrı ödenir; her partinin ek hizmetleri o partide ayrıca hesaplanır.",
   "instantQuote.framework.planned": "Planlanan",

@@ -1226,6 +1226,8 @@ const en = {
   "instantQuote.framework.payConfirmCta": "I confirm, continue to payment",
   "instantQuote.framework.payConfirmNote":
     "The payment page does not show which batch this is, so you confirm the batch number and the amount here BEFORE payment starts.",
+  "instantQuote.framework.payUnavailable":
+    "This batch's payment link is no longer valid — write to us for a new one. The price locked in the agreement does not change.",
   "instantQuote.framework.perBatchBilling":
     "Each batch is invoiced and paid separately; the add-ons of each batch are charged on that batch.",
   "instantQuote.framework.planned": "Planned",

@@ -35,6 +35,11 @@ import type {
   FrameworkProgress,
   FrameworkStatus,
 } from "@/lib/config/quote-framework";
+// KLONUN ÖDENEBİLİRLİĞİNİ ÖLÇEN TEK KURAL MOTORU: ekran kendi ölçüsünü
+// kurmaz, ucun kullandığı saf işlevi çağırır (`quote-policy.ts` dosya başlığı:
+// "ekranın uygulamadığı bir kuralı ucun yazması — ya da tersi — buradan
+// imkânsızdır"). Saf modül: DB yok, `server-only` yok.
+import { quotePermissions } from "@/lib/config/quote-policy";
 import type { DfmCode, LeadTierKey, Vec3 } from "@/lib/config/quote-types";
 import type { TurkishAddress } from "@/lib/db/schema";
 import { computeKdv } from "@/lib/services/finance";
@@ -116,14 +121,31 @@ export interface PresentedFrameworkBatch {
   cancelledAt: string | null;
   /**
    * Müşterinin ÖDEMESİ bekleniyor mu: parti serbest bırakılmış, klon teklifi
-   * var ve henüz siparişe dönmemiş.
+   * var, henüz siparişe dönmemiş VE klon teklif bugün hâlâ ödenebilir.
    *
    * Kapı SUNUCUDA ölçülür; ekran "ödenebilir mi" sorusunu kendi kurallarıyla
    * yanıtlamaz. Ödeme yolu klon teklifin KENDİ sayfasıdır
    * (`/teklif/<no>/odeme`) — orada `checkoutBlockers` ve uyarı onayı aynen
-   * çalışır, yani bu alan bir ödeme İZNİ değil bir GÖSTERİM kararıdır.
+   * çalışır, yani bu alan bir ödeme İZNİ değil bir GÖSTERİM kararıdır. Ama
+   * gösterim kararı da ucun ölçüsüyle AYNI ölçüden çıkmak zorunda: klonun
+   * süresi dolmuşken "Bu partiyi öde" çizmek, `canCheckout=false` ile
+   * reddedilecek bir yola çağırmaktı (bkz. `payBlocked`).
    */
   payable: boolean;
+  /**
+   * Serbest bırakılmış, ödenmemiş ama ARTIK ÖDENEMEYEN parti: klon teklifin
+   * süresi doldu ya da teklif iptal edildi.
+   *
+   * Klonun geçerliliği `min(kilit, bugün + quoteValidDays)`tir ve bakımın
+   * `expireQuotes` aşaması onu kapatabilir (R2 kapısı yalnız anlaşmanın KAYNAK
+   * teklifini koruyor). Havalesi geciken bir parti böyle bir hâle düşer; ekran
+   * o zaman düğme yerine `instantQuote.framework.payUnavailable` cümlesini
+   * yazar. ÇIKIŞ YOLU VAR ve cümle onu söylüyor: admin klonun geçerliliğini
+   * uzatır (`extendQuoteExpiry`, tutara DOKUNMAZ, yani anlaşmanın kilitli
+   * fiyatı korunur) — `releaseBatch` partiyi yeniden bırakamaz, çünkü parti
+   * artık `planned` değil.
+   */
+  payBlocked: boolean;
   lines: PresentedFrameworkBatchLine[];
   /** YALNIZ `viewer.canSeePrices` iken var. */
   amountKurus?: number;
@@ -234,6 +256,30 @@ export function presentFramework(input: PresentFrameworkInput): PresentedFramewo
   });
 
   const batches: PresentedFrameworkBatch[] = detail.batches.map((b) => {
+    // KLONUN BUGÜNKÜ ÖDENEBİLİRLİĞİ — ucun ölçüsüyle AYNI işlevden.
+    //
+    // `hasLiveDraft: false` ve `hasLiveFramework: false` verilmesi sonucu
+    // DEĞİŞTİRMEZ: ikisi de `canCheckout: true` dalına gidiyor ve `expired` /
+    // `cancelled` / `ordered` dalları onlardan ÖNCE geliyor (sıra
+    // `quote-policy.ts`te yazılı). `isFrameworkBatch: true` ise bir gerçek:
+    // bu satır bir partinin klonu.
+    //
+    // `orderId` olarak PARTİNİN siparişi verilir: klonun `order_id`i ile
+    // partinin `order_id`i aynı işlemde yazılıyor
+    // (`linkQuoteToOrderTx` + `bridgeFrameworkBatchOrderTx`, `quote-order.ts`),
+    // yani ikinci bir kolonu telden geçirmenin kazancı yok.
+    const clone =
+      b.quoteStatus !== null && b.quoteExpiresAt !== null
+        ? quotePermissions(
+            {
+              status: b.quoteStatus,
+              expiresAt: new Date(b.quoteExpiresAt),
+              orderId: b.orderId,
+            },
+            { hasLiveDraft: false, now, isFrameworkBatch: true, hasLiveFramework: false }
+          )
+        : null;
+    const released = b.status === "released" && b.quoteNumber !== null && b.orderId === null;
     const batch: PresentedFrameworkBatch = {
       id: b.id,
       position: b.position,
@@ -248,7 +294,8 @@ export function presentFramework(input: PresentFrameworkInput): PresentedFramewo
       shippedAt: b.shippedAt,
       deliveredAt: b.deliveredAt,
       cancelledAt: b.cancelledAt,
-      payable: b.status === "released" && b.quoteNumber !== null && b.orderId === null,
+      payable: released && clone?.canCheckout === true,
+      payBlocked: released && clone !== null && !clone.canCheckout,
       lines: b.lines.map((l) => {
         const line: PresentedFrameworkBatchLine = {
           partId: l.partId,

@@ -30,10 +30,12 @@
  *
  * ─── CANLI ─────────────────────────────────────────────────────────────────
  *
- * `emitFrameworkChanged` olayı `topics.customer(userId)`ye de düşüyor, yani
- * sayfa MÜŞTERİ akışına abone olur (`/api/realtime/customer`) ve `kind:
- * "framework"` haberinde anlaşmayı KENDİ YETKİSİYLE yeniden çeker. Kanal fiyat
- * taşımaz; tazelemeyi uç yapar.
+ * Sayfa ÇERÇEVE ODASINA abone olur (`framework:<id>`, uç
+ * `/api/realtime/framework/[id]`) ve `kind: "framework"` haberinde anlaşmayı
+ * KENDİ YETKİSİYLE yeniden çeker. Oda, `emitFrameworkChanged`in HER çağrısını
+ * görür — müşteri akışı yalnız `userId` verilen çağrıları görürdü ve admin'in
+ * kurduğu parti planı açık ekrana hiç düşmezdi. Kanal fiyat taşımaz;
+ * tazelemeyi uç yapar.
  */
 import { useCallback, useState, type JSX } from "react";
 import Link from "next/link";
@@ -214,6 +216,17 @@ function BatchCard({
         >
           {d["instantQuote.framework.payBatch"]}
         </button>
+      )}
+      {/*
+        ÖDENEMEYEN PARTİDE DÜĞME YOKTUR, CÜMLE VAR: klonun süresi dolmuşsa
+        `/teklif/<no>/odeme` `canCheckout=false` ile reddeder, yani düğmeyi
+        çizmek müşteriyi reddedilecek bir yola çağırmak olurdu. Ölçü uçtan
+        geliyor (`payBlocked`), ekran kendi takvimini kurmuyor.
+      */}
+      {batch.payBlocked && (
+        <p className="mt-3 text-sm text-warning-500">
+          {d["instantQuote.framework.payUnavailable"]}
+        </p>
       )}
     </li>
   );

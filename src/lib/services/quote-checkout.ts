@@ -82,6 +82,11 @@ import {
 } from "@/lib/config/quote-framework";
 import { checkoutBlockers, quotePermissions } from "@/lib/config/quote-policy";
 import {
+  teamRoleCanCancelCheckout,
+  teamRoleCanCheckout,
+  type TeamRole,
+} from "@/lib/config/quote-team";
+import {
   computeTender,
   recordedPayableKurus,
   recordedPaymentMethod,
@@ -165,6 +170,51 @@ export interface QuoteCheckoutResult {
   error?: string;
   /** true = yeni taslak açılmadı, bekleyen ödeme geri verildi. */
   reused: boolean;
+}
+
+/**
+ * PARA KAPISININ TAKIM BAĞLAMI (0072) — çağıranın ÇÖZÜP geçirdiği yetki.
+ *
+ * Bu dosya `viewer` GÖRMEZ: erişim matrisi bir istek nesnesine ve oturuma
+ * bakar, servis ise betikten, testten ve (yarın) ikinci bir uçtan da
+ * çağrılabilir. Bu yüzden kimlik + ROL buraya parametre olarak gelir ve kararı
+ * yine SAF yüklem verir (`teamRoleCanCheckout`). Bir `authorized: boolean`
+ * geçmek, kararın NEREDE verildiğini kaybetmek olurdu: kapı o gün çağıranın
+ * dikkatine kalırdı.
+ *
+ * `undefined` = takım bağlamı YOK → kapı yalnız KİŞİSEL sahipliğe açılır, yani
+ * BUGÜNKÜ ifade. Fail-closed olması bilinçli: bağlamı geçirmeyi unutan bir
+ * çağıran üyeye 403 verir (özellik çalışmaz), asla fazladan hak VERMEZ.
+ */
+export interface QuoteCheckoutActor {
+  /** Ödeyenin BU TEKLİFİN takımındaki rolü; `null` = takım dalından gelmiyor. */
+  role: TeamRole | null;
+  /** Takımın `member_can_checkout` anahtarı (`QuoteAccess.team`den). */
+  memberCanCheckout: boolean;
+}
+
+/**
+ * Teklifi ÖDEME yetkisi — iki para kapısının (ön izleme + dondurma) TEK
+ * ifadesi.
+ *
+ * Kişisel sahiplik ölçüsü BUGÜNKÜNÜN BİREBİR KENDİSİDİR (`quote.userId ===
+ * args.userId`) ve takım dalından ÖNCE sorulur: takımı olmayan her teklifte
+ * ifade bugünkü cevabı verir ve tek bir rol okuması bile yapılmaz.
+ */
+function actorMayCheckout(
+  quote: { userId: string | null },
+  args: { userId: string; actor?: QuoteCheckoutActor }
+): boolean {
+  if (quote.userId !== null && quote.userId === args.userId) return true;
+  if (args.actor === undefined || args.actor.role === null) return false;
+  return teamRoleCanCheckout(args.actor.role, {
+    memberCanCheckout: args.actor.memberCanCheckout,
+  });
+}
+
+/** Ödeme kapısının TEK ret cümlesi: iki yüzeyde iki farklı açıklama olmasın. */
+function notAuthorizedToPay(): QuoteServiceError {
+  return new QuoteServiceError("Bu teklifi ödeme yetkiniz yok.", 403, "not_owner");
 }
 
 /** Saatte on ödeme denemesi: PayTR token'ı ve e-posta maliyetli işlerdir. */
@@ -529,6 +579,8 @@ export async function previewQuoteGiftCard(args: {
   userId: string;
   code: string;
   req: NextRequest;
+  /** Takım bağlamı (0072); yoksa kapı yalnız kişisel sahibe açıktır. */
+  actor?: QuoteCheckoutActor;
 }): Promise<QuoteGiftCardPreview> {
   const limited = await rateLimitAsync(
     `quote-gift-preview:user:${args.userId}`,
@@ -548,11 +600,16 @@ export async function previewQuoteGiftCard(args: {
 
   const [quote] = await db.select().from(quotes).where(eq(quotes.id, args.quoteId)).limit(1);
   if (!quote) throw new QuoteServiceError("Teklif bulunamadı.", 404, "quote_not_found");
-  // Sahiplik ucun kapısıdır; burada İKİNCİ kez sorulur çünkü fiyat sunucudan
-  // çıkıyor ve bu servis (test, ileride başka bir uç) ucun dışından da çağrılabilir.
-  if (quote.userId !== args.userId) {
-    throw new QuoteServiceError("Bu teklif hesabınıza bağlı değil.", 403, "not_owner");
-  }
+  // ÖDEME YETKİSİ ucun kapısıdır; burada İKİNCİ kez sorulur çünkü fiyat
+  // sunucudan çıkıyor ve bu servis (test, ileride başka bir uç) ucun dışından
+  // da çağrılabilir.
+  //
+  // KAPI "ÖDEYEBİLEN" İLE AYNI, "GÖREBİLEN" İLE DEĞİL (tasarım §4, T-4 kararı):
+  // bu uç `computeQuote` sonucunu döndürüyor — kart bakiyesi, karşılanan tutar,
+  // havale indirimi — yani bir FİYAT yüzeyidir. Ödeme yetkisi olmayan bir üyeye
+  // (ör. `member_can_checkout` kapalı) kart ön izlemesi göstermenin işlevi yok:
+  // göstereceği tek şey, basamayacağı düğmenin arkasındaki rakamlar olurdu.
+  if (!actorMayCheckout(quote, args)) throw notAuthorizedToPay();
 
   const parts = await db
     .select()
@@ -630,6 +687,7 @@ async function freezeCheckout(args: {
   customerName: string;
   input: QuoteCheckoutInput;
   req: NextRequest;
+  actor?: QuoteCheckoutActor;
 }): Promise<FrozenCheckout | { reused: Draft }> {
   const { input } = args;
   const attribution = attributionFromRequest(args.req);
@@ -654,9 +712,12 @@ async function freezeCheckout(args: {
       .where(eq(quotes.id, args.quoteId))
       .for("update");
     if (!quote) throw new QuoteServiceError("Teklif bulunamadı.", 404, "quote_not_found");
-    if (quote.userId !== args.userId) {
-      throw new QuoteServiceError("Bu teklif hesabınıza bağlı değil.", 403, "not_owner");
-    }
+    // Teklif KİLİTLİ okundu (`FOR UPDATE`), yetki ondan SONRA sorulur: aynı
+    // teklifte iki üyenin ödemesi bu kilitle SIRALANIR (tasarım §5.2) ve
+    // ikincisi aşağıdaki `liveDraftForQuote` dalında birincinin taslağını
+    // görüp `reused` alır — ikinci bir taslak, ikinci bir tahsilat riski
+    // YAZILMAZ.
+    if (!actorMayCheckout(quote, args)) throw notAuthorizedToPay();
 
     // Bekleyen ödeme AYNI referansla geri verilir: ikinci bir taslak, ikinci
     // bir tahsilat riskidir ve teklifin kilidini de ikiye bölerdi.
@@ -924,6 +985,12 @@ async function freezeCheckout(args: {
       .insert(orderDrafts)
       .values({
         reference,
+        // ÖDEYEN KİM İSE SİPARİŞ ONUN (0072 değişmez 3): teklifi açan A,
+        // ödeyen takım üyesi B ise taslak — ve ondan doğacak `orders` satırı —
+        // B'nin. İade (`order-refund.ts`), anlaşmazlık (`dispute-resolution.ts`)
+        // ve hediye kredisi iadesi (`gift-credit-return.ts`,
+        // `redeemedByUserId === order.userId`) BU SATIRA bağlı; `quote.userId`e
+        // çevirmek üçünü birden sessizce yanlışlardı.
         userId: args.userId,
         // Teklif siparişinin modeli `uploaded_models`'ta DEĞİL, parçalarda
         // durur; bağ `quote_checkouts.draft_id` üzerinden kurulur.
@@ -985,6 +1052,10 @@ async function freezeCheckout(args: {
         giftCardId: giftCard.id,
         draftId: draft.id,
         amountKurus: tender.giftCardAmountKurus,
+        // Kullanan = ÖDEYEN (değişmez 3). `gift-credit-return.ts` iadeyi
+        // `redeemedByUserId === order.userId` eşlemesiyle veriyor: takım
+        // teklifinde bu satırı teklifin sahibine yazmak, kartı kullanan üyeye
+        // iade edilemeyen bir bakiye bırakırdı.
         userId: args.userId,
       });
     }
@@ -1039,6 +1110,13 @@ export async function createQuoteCheckout(args: {
   email: string;
   input: QuoteCheckoutInput;
   req: NextRequest;
+  /**
+   * Takım bağlamı (0072). Idempotency anahtarına GİRMEZ: anahtar `args.userId`i
+   * zaten özetliyor ve rol o kullanıcının üyeliğinden TÜRER — anahtarın içine
+   * koymak, rolü değişen bir üyenin dürüst tekrarını yeni bir ödeme denemesine
+   * çevirirdi.
+   */
+  actor?: QuoteCheckoutActor;
 }): Promise<QuoteCheckoutResult> {
   // Anahtar HER ZAMAN türetilir; başlık yalnız bir GİRDİDİR. Başlığı anahtarın
   // KENDİSİ yapmak, hemen altındaki gerekçeyi (teklif kimliği de özete girsin)
@@ -1134,6 +1212,7 @@ async function runCheckout(args: {
   email: string;
   input: QuoteCheckoutInput;
   req: NextRequest;
+  actor?: QuoteCheckoutActor;
 }): Promise<QuoteCheckoutResult> {
   const [user] = await db
     .select({ fullName: users.fullName })
@@ -1189,6 +1268,8 @@ async function runCheckout(args: {
     source: "server",
     reference: draft.reference,
     valueKurus: finalAmountKurus,
+    // Olayın kullanıcısı da ÖDEYEN (değişmez 3): dönüşüm, parayı başlatan
+    // hesaba yazılır — takım teklifinde teklifi açan meslektaşa değil.
     userId: args.userId,
     attribution,
     consent: attribution.consent ?? null,
@@ -1494,6 +1575,15 @@ export async function pendingQuoteCheckout(
 export async function cancelPendingQuoteCheckout(args: {
   quoteId: string;
   userId: string;
+  /**
+   * İptal edenin takımdaki ROLÜ (0072); `null`/yok = takım dalından gelmiyor.
+   *
+   * Takımın ÖDEME AYARI (`member_can_checkout`) BURADA İSTENMEZ ve bu bir
+   * eksiklik değil: `teamRoleCanCancelCheckout` o ayarı hiç sormuyor (gerekçe
+   * orada — ayarı sonradan kapatılan takımda üye kendi taslağını iptal
+   * edemezse hem ödeyemez hem düzenleyemez hâlde kalır).
+   */
+  actorRole?: TeamRole | null;
 }): Promise<{ reference: string }> {
   const reference = await db.transaction(async (tx) => {
     await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
@@ -1504,7 +1594,18 @@ export async function cancelPendingQuoteCheckout(args: {
       .where(eq(quotes.id, args.quoteId))
       .for("update");
     if (!quote) throw new QuoteServiceError("Teklif bulunamadı.", 404, "quote_not_found");
-    if (quote.userId !== args.userId) {
+    // YETKİ İKİ AŞAMALI ve sıra BUGÜNKÜ cevapları korumak için böyle:
+    //
+    //   1. KİŞİSEL SAHİP taslaktan ÖNCE geçer — ifade bugünkünün birebir
+    //      kendisi, yani kişisel tekliflerde ret sırası da (403 → "bekleyen
+    //      ödeme yok" 409) hiç kaymaz.
+    //   2. Takım dalında karar taslağın SAHİBİNE bağlı (`member` yalnız kendi
+    //      başlattığını iptal eder), o yüzden taslak satırı okunduktan SONRA
+    //      verilir. Uç katmanı taslağı okumaz: aynı satırı işlem DIŞINDA bir
+    //      kez daha okumak, iki okuma arasında kapanan bir taslakta yarışırdı.
+    const personalOwner = quote.userId !== null && quote.userId === args.userId;
+    const actorRole = args.actorRole ?? null;
+    if (!personalOwner && actorRole === null) {
       throw new QuoteServiceError("Bu teklif hesabınıza bağlı değil.", 403, "not_owner");
     }
 
@@ -1521,13 +1622,32 @@ export async function cancelPendingQuoteCheckout(args: {
       .from(orderDrafts)
       .where(eq(orderDrafts.id, live.draftId))
       .for("update");
-    if (!draft || !pendingDraftCancellable(draft)) {
-      throw new QuoteServiceError(
+    const notCancellable = () =>
+      new QuoteServiceError(
         "Bu ödeme iptal edilemez; ödeme sayfasından devam edin.",
         409,
         "draft_not_cancellable"
       );
+    if (!draft) throw notCancellable();
+    // Aşama 2: takım dalının kesin kararı. `draft.userId` taslağı BAŞLATAN
+    // kişidir (değişmez 3) — `member` yalnız onu kendisi başlattıysa geçer.
+    //
+    // YETKİ, "iptal edilebilir mi" ÖLÇÜSÜNDEN ÖNCE: yetkisi olmayan birine
+    // taslağın hangi aşamada olduğunu (PayTR ekranı görülmüş mü) söylemenin
+    // gereği yok. Kişisel sahipte SIRA DEĞİŞMEDİ — onun yetkisi taslak
+    // okunmadan, yukarıda belli olmuştu.
+    if (
+      !personalOwner &&
+      actorRole !== null &&
+      !teamRoleCanCancelCheckout(actorRole, draft.userId, args.userId)
+    ) {
+      throw new QuoteServiceError(
+        "Bu bekleyen ödemeyi iptal etme yetkiniz yok.",
+        403,
+        "not_owner"
+      );
     }
+    if (!pendingDraftCancellable(draft)) throw notCancellable();
 
     // Rezervasyon taslak HÂLÂ `pending` iken geri verilir (tasarım §5.3, adım 4):
     // `restoreGiftCreditTx` taslak kapsamında `status ∈ (pending,

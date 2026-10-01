@@ -2,8 +2,8 @@
  * Teknik çizim (PDF): `POST` yükler, `DELETE` kaldırır, `GET` indirir.
  *
  * Çizim üreticiye giden bir belgedir; bu yüzden içerik kontrolü `%PDF` sihirli
- * baytıyla yapılır ve indirme YALNIZ sahibe/admine açıktır — paylaşım
- * bağlantısı teknik çizimi göstermez.
+ * baytıyla yapılır ve indirme sahibe, admine ve TAKIM ÜYELERİNE açıktır (0072)
+ * — paylaşım bağlantısı teknik çizimi göstermez.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import {
@@ -77,7 +77,10 @@ async function handleGET(request: NextRequest, ctx: Ctx): Promise<NextResponse> 
   const found = await accessOr404(request, id);
   if ("response" in found) return found.response;
   const { viewer, quote } = found.access;
-  if (!viewer.isOwner && !viewer.isAdmin) return quoteNotFound();
+  // Teknik resim PARÇANIN tanımıdır: takımın dört rolü de görür (0072).
+  // Paylaşım izleyicisi GÖRMEZ — bugünkü kural korundu: çizim müşterinin
+  // kendi dosyasıdır ve bağlantıyı eline geçiren herkesin işi değil.
+  if (!viewer.isOwner && !viewer.isAdmin && !viewer.isTeam) return quoteNotFound();
 
   const drawing = await drawingKeyFor(quote.id, partId);
   if (!drawing) return quoteNotFound();

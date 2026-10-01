@@ -2,6 +2,7 @@
 
 import { useState, type JSX } from "react";
 import { OrderChat } from "@/components/order-chat";
+import { canChatOnQuote, canSeeOwnerFields } from "@/lib/config/quote-team";
 import type { PresentedQuote } from "@/lib/config/quote-types";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import { QuoteModal } from "./modal-shell";
@@ -17,8 +18,14 @@ import { QuoteModal } from "./modal-shell";
  * İkinci bir sohbet arayüzü yazmak, mesaj balonlarını ve eklenti yüklemeyi
  * iki yerde bakmak demekti.
  *
- * Sohbet YALNIZ SAHİBİNDİR: paylaşım bağlantısıyla gelen ziyaretçi uçtan 404
- * alır (fiyat pazarlığı iki taraf arasındadır), bu yüzden düğme de çıkmaz.
+ * PAYLAŞIM BAĞLANTISI SOHBETE GİRMEZ: ziyaretçi uçtan 404 alır (fiyat
+ * pazarlığı iki taraf arasındadır), bu yüzden düğme de çıkmaz.
+ *
+ * İKİ AYRI KAPI, BİLEREK (0072): panelin KENDİSİ `canSeeOwnerFields`
+ * (takımın dört rolü de yazışmayı okur — uç GET'te 200 der), YAZMA alanı
+ * `canChatOnQuote` (`viewer` rolü yazamaz — uç POST'ta 404 der). Tek yükleme
+ * bağlanırsa iki arızadan biri kesin: ya üye yazma hakkı kazanıp yazacak yer
+ * bulamaz, ya salt okunur üye takımın adına yazmayı dener ve 404 yer.
  *
  * Panel kapalıyken `<OrderChat>` HİÇ bağlanmaz (monte edilmez): yoklaması
  * ancak müşteri sohbeti açtığında başlar.
@@ -27,7 +34,7 @@ export function QuoteChatPanel({ quote }: { quote: PresentedQuote }): JSX.Elemen
   const d = useDictionary();
   const [open, setOpen] = useState(false);
 
-  if (!quote.viewer.isOwner) return null;
+  if (!canSeeOwnerFields(quote.viewer)) return null;
 
   return (
     <>
@@ -49,6 +56,7 @@ export function QuoteChatPanel({ quote }: { quote: PresentedQuote }): JSX.Elemen
           <OrderChat
             basePath={`/api/quotes/${encodeURIComponent(quote.id)}/messages`}
             orderId={quote.id}
+            canSend={canChatOnQuote(quote.viewer)}
           />
         </div>
       </QuoteModal>

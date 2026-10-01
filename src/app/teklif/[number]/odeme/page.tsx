@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { SiteHeader } from "@/components/site-header";
+import { canCheckoutQuote } from "@/lib/config/quote-team";
 import { listAddresses } from "@/lib/services/address-book";
 import { isFlagEnabled } from "@/lib/services/flags";
 import { quoteApiEnabled, resolveQuoteAccess } from "@/lib/services/quote-access";
@@ -15,8 +16,11 @@ import { QuotePendingPaymentClient } from "./pending-payment-client";
  * alanı bile burada doğrulanmaz.
  *
  *   - Bayrak kapalı → sayfa YOK (uçlarla aynı kapı).
- *   - Sahibi olmayan / fiyat kapısını geçmemiş izleyici → çalışma alanına
- *     geri; orada kapıyı açan modal var, burada yalnız kapalı bir form olurdu.
+ *   - ÖDEME YETKİSİ olmayan / fiyat kapısını geçmemiş izleyici → çalışma
+ *     alanına geri; orada kapıyı açan modal var, burada yalnız kapalı bir form
+ *     olurdu. Takım teklifinde yetki `canCheckoutQuote(viewer, team)`dır
+ *     (ucun kapısıyla AYNI yüklem): ödeme yetkisi olmayan üye özet kartındaki
+ *     kapalı düğmeyi ve sebebini görür, bu sayfaya hiç gelmez.
  *   - Bekleyen ödeme varsa → o taslağın KENDİ sayfası (`/pay/<ref>` ya da
  *     `/havale/<ref>`). Teklif o sırada salt okunurdur ve ikinci bir taslak
  *     açmak ikinci bir tahsilat riskidir. Taslak hiç başlamamış bir kart
@@ -51,8 +55,12 @@ export default async function QuoteCheckoutPage({
   if (!access) notFound();
 
   const workspace = `/teklif/${encodeURIComponent(number)}`;
-  const { quote, viewer, sessionUserId } = access;
-  if (!viewer.isOwner || !viewer.canSeePrices || quote.userId !== sessionUserId) {
+  const { quote, viewer } = access;
+  // Kişisel teklifte ifade BUGÜNKÜNE DENK: `isOwner` ancak oturum kullanıcısı
+  // `quotes.user_id` ise true döner, anonim sahipte `canSeePrices` false'tur ve
+  // `quote.userId === null` hâli `canSeePrices` kapısına çarpar. Fiyat kapısı
+  // AYRICA sorulur: ödeyebilmek ile tutarı görebilmek iki ayrı denetimdir.
+  if (!canCheckoutQuote(viewer, access.team) || !viewer.canSeePrices) {
     redirect(workspace);
   }
 
@@ -87,7 +95,15 @@ export default async function QuoteCheckoutPage({
   });
   const giftCardEnabled = await isFlagEnabled("quote_gift_card_enabled");
   // Adres defteri varsayılanı formu doldurur; müşteri her hâlde düzenleyebilir.
-  const saved = (await listAddresses(quote.userId!).catch(() => []))[0] ?? null;
+  //
+  // DEFTER ÖDEYENİN KENDİSİNDEN okunur, teklifin SAHİBİNDEN değil (0072):
+  // `user_addresses` takımda PAYLAŞILMAZ (tasarım §1.2) — meslektaşının ev
+  // adresini bir başkasının ödeme formuna doldurmak, takımın hiç istemediği tek
+  // sızıntı olurdu. Kişisel teklifte ikisi AYNI kişidir, yani ifade bugünküne
+  // denk; `sessionUserId` burada daima dolu (fiyat kapısı oturumsuzu çoktan
+  // çalışma alanına geri yolladı), yedek yalnız tipi kapatıyor.
+  const payerUserId = access.sessionUserId ?? quote.userId!;
+  const saved = (await listAddresses(payerUserId).catch(() => []))[0] ?? null;
 
   return (
     <>

@@ -30,6 +30,7 @@ import {
   uploadCodeMessage,
   validateQuoteFiles,
 } from "../src/components/quote/dropzone";
+import { OrderChat } from "../src/components/order-chat";
 import { QuoteBanners } from "../src/components/quote/quote-banners";
 import { QuoteChatPanel } from "../src/components/quote/quote-chat-panel";
 import {
@@ -1558,6 +1559,156 @@ test("hedef fiyat alanı Türkçe yazılan tutarı kuruşa çevirir", () => {
   assert.equal(parseMoneyInput("0"), null);
 });
 
+// ─── T-4 · TAKIM: 22 kapının EKRAN tarafı ──────────────────────────────────
+//
+// Bu blok dört ekran yüzeyini birlikte ölçüyor, çünkü ikisi tek başına
+// düzeltildiğinde ÖTEKİNİ YALANLIYOR: özet kartındaki ödeme düğmesi
+// (`quote-summary.tsx`) ile hemen altındaki "ödeyemezsin" cümlesi, ve sohbet
+// PANELİ (`quote-chat-panel.tsx`) ile içindeki YAZMA alanı.
+//
+// Takım görünümleri `PresentedQuote.team` üzerinden kurulur: istemci
+// `access.team`i GÖREMEZ (sunucu nesnesi), gövdeye giren şey ad + rol + ödeme
+// anahtarıdır (T-2).
+function teamViewer(
+  teamRole: "owner" | "admin" | "member" | "viewer",
+  over: Partial<QuoteViewer> = {}
+): QuoteViewer {
+  return {
+    canSeePrices: true,
+    canEdit: teamRole !== "viewer",
+    isOwner: false,
+    isShare: false,
+    isAdmin: false,
+    isTeam: true,
+    teamRole,
+    ...over,
+  };
+}
+function teamQuote(
+  teamRole: "owner" | "admin" | "member" | "viewer",
+  memberCanCheckout: boolean,
+  over: Partial<PresentedQuote> = {}
+): PresentedQuote {
+  return pricedQuote({
+    viewer: teamViewer(teamRole),
+    team: { name: "QA Mühendislik A.Ş.", role: teamRole, memberCanCheckout },
+    readiness: { canCheckout: true, blockers: [] },
+    ...over,
+  });
+}
+const chatPanel = (quote: PresentedQuote) => inLocale(createElement(QuoteChatPanel, { quote }));
+const CHECKOUT_LINK = /href="\/teklif\/T-000123\/odeme"/;
+const DOCUMENT_LINK = /href="\/teklif\/T-000123\/belge"/;
+/**
+ * Sohbetin YAZMA alanı `<OrderChat canSend>` ile açılır/kapanır ve panel onu
+ * MODAL'ın içinde çiziyor: kapalı modal hiçbir şey render etmediği için
+ * (`modal-shell.tsx` · `if (!open) return null`) sunucu anlık görüntüsünde
+ * alanın kendisi GÖRÜNMEZ. İddia o yüzden iki parçalı — ortak bileşenin
+ * `canSend` davranışı ÖLÇÜLÜR, panelin o değeri hangi yüklemden aldığı
+ * KAYNAKTAN okunur (aynı kalıp: "KDV hariç görünüm" vakası).
+ */
+const chatPanelSource = fs.readFileSync(
+  path.resolve("src/components/quote/quote-chat-panel.tsx"),
+  "utf8"
+);
+
+test("TAKIMSIZ teklifte dört yüzey de bugünkü hâlinde çizilir (denklik)", () => {
+  // `team` ANAHTARI YOK (takımsız gövdede sunucu onu hiç yazmıyor) + kişisel
+  // sahip: ödeme bağlantısı, sohbet düğmesi + yazma alanı, belge bağlantısı ve
+  // "yeniden teklif" bantları bugünküyle aynı. Denkliğin GERÇEK kanıtı bu
+  // dosyadaki DEĞİŞMEMİŞ onlarca iddianın yeşil kalmasıdır; bu vaka dördünü
+  // tek yerde, tek bakışta okunur hâlde tutuyor.
+  const quote = pricedQuote({ readiness: { canCheckout: true, blockers: [] } });
+  assert.equal("team" in quote, false, "takımsız fikstüre `team` anahtarı girmiş");
+  const summary = plain(renderSummary(quote));
+  assert.match(summary, CHECKOUT_LINK, "sahibin ödeme bağlantısı kaybolmuş");
+  assert.ok(
+    !summary.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    "sahibe 'ödeyemezsin' cümlesi basılmış"
+  );
+  assert.match(chatPanel(quote), /Teklif sohbeti/);
+  assert.match(renderHeader(quote), DOCUMENT_LINK, "sahibin belge bağlantısı gitmiş");
+  assert.match(
+    renderBanners(pricedQuote({ status: "ordered", orderNumber: "FIG-1" })),
+    /Yeniden teklif al/,
+    "sahibin 'yeniden teklif' düğmesi gitmiş"
+  );
+});
+
+test("takımın `viewer` rolü: ödeme YOK, yazma alanı YOK, panel VAR, belge VAR", () => {
+  const quote = teamQuote("viewer", true);
+  const summary = plain(renderSummary(quote));
+  assert.doesNotMatch(summary, CHECKOUT_LINK, "salt okunur role ödeme bağlantısı verilmiş");
+  assert.match(summary, /disabled/, "salt okunur rolde ödeme düğmesi açık kalmış");
+  // PANEL VAR: üye yazışmayı OKUR (uç da GET'te 200 diyor).
+  assert.match(chatPanel(quote), /Teklif sohbeti/, "üyeye sohbet paneli hiç açılmamış");
+  assert.match(renderHeader(quote), DOCUMENT_LINK, "üye belgeye ULAŞAMIYOR");
+  assert.ok(
+    !renderBanners(teamQuote("viewer", true, { status: "ordered", orderNumber: "FIG-1" })).includes(
+      "Yeniden teklif al"
+    ),
+    "salt okunur role yeniden teklif düğmesi verilmiş"
+  );
+});
+
+test("takım admini `member_can_checkout` KAPALI olsa da ödeyebilir — ve cümle YAZILMAZ", () => {
+  // #20 ile #21 BİRLİKTE: düğmeyi açıp cümleyi bırakmak, ödeyebilen admine
+  // "bu teklifi yalnız sahibi ödeyebilir" yazmak olurdu.
+  const html = plain(renderSummary(teamQuote("admin", false)));
+  assert.match(html, CHECKOUT_LINK, "admin üye ödeyemiyor");
+  assert.ok(
+    !html.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    "ödeyebilen üyeye 'ödeyemezsin' cümlesi basılmış"
+  );
+});
+
+test("`member_can_checkout` kapalı iken `member` rolü: düğme YOK, sebep VAR", () => {
+  const closed = plain(renderSummary(teamQuote("member", false)));
+  assert.doesNotMatch(closed, CHECKOUT_LINK);
+  assert.ok(
+    closed.includes(tr["instantQuote.summary.ownerOnlyCheckout"]),
+    "kapalı düğmenin sebebi yazılmamış"
+  );
+  // Ayar AÇIKKEN aynı rol ödeyebilir ve cümle düşer: tek ayarın iki yüzeyi.
+  const open = plain(renderSummary(teamQuote("member", true)));
+  assert.match(open, CHECKOUT_LINK, "ayar açıkken member ödeyemiyor");
+  assert.ok(!open.includes(tr["instantQuote.summary.ownerOnlyCheckout"]));
+});
+
+test("sohbet YAZMA alanı `canChatOnQuote`a bağlı: panel açılır, yazma kapanır", () => {
+  // 1) Ortak bileşenin davranışı: `canSend` kapalıyken ne metin alanı ne
+  //    gönder düğmesi çizilir (kapalı hâlin kendi cümlesi var).
+  const chat = (canSend: boolean) =>
+    inLocale(createElement(OrderChat, { basePath: "/api/quotes/x/messages", canSend }));
+  assert.match(chat(true), new RegExp(tr["chat.send"]), "açık sohbette gönder düğmesi yok");
+  assert.match(chat(true), /<textarea/);
+  assert.ok(!chat(false).includes(tr["chat.send"]), "kapalı sohbette gönder düğmesi var");
+  assert.doesNotMatch(chat(false), /<textarea/, "kapalı sohbette metin alanı var");
+  // 2) Panelin o değeri hangi yüklemden aldığı: PANEL `canSeeOwnerFields`,
+  //    YAZMA alanı `canChatOnQuote`. İkisi aynı yükleme bağlanırsa üye ya
+  //    paneli hiç görmez ya takımın adına yazar.
+  assert.match(
+    chatPanelSource,
+    /if \(!canSeeOwnerFields\(quote\.viewer\)\) return null/,
+    "panel kapısı `canSeeOwnerFields` değil"
+  );
+  assert.match(
+    chatPanelSource,
+    /canSend=\{canChatOnQuote\(quote\.viewer\)\}/,
+    "yazma alanı `canChatOnQuote`a bağlı değil"
+  );
+});
+
+test("takım üyesi `requote`yi görür: düzenleyebilen üç rol, salt okunur rol değil", () => {
+  for (const role of ["owner", "admin", "member"] as const) {
+    assert.match(
+      renderBanners(teamQuote(role, false, { status: "ordered", orderNumber: "FIG-1" })),
+      /Yeniden teklif al/,
+      `${role} rolü yeniden teklif alamıyor`
+    );
+  }
+});
+
 test("teklif sohbeti yalnız sahibine açılır", () => {
   const panel = (quote: PresentedQuote) => inLocale(createElement(QuoteChatPanel, { quote }));
   assert.match(panel(pricedQuote()), /Teklif sohbeti/);
@@ -2001,6 +2152,10 @@ const QUOTE_ROW: CustomerQuoteListItem = {
   orderNumber: null,
   fxSnapshot: null,
   frameworkBatch: null,
+  // 0072: takımsız satır — İKİSİ DE null ve ekran kolonu hiç çizmez (kolonun
+  // kendisi T-5'in işi, bu tur yalnız alanları taşıyor).
+  teamName: null,
+  ownerName: null,
 };
 
 test("teklif listesi numarayı, durumu, tutarı ve bağlantıyı yazar", () => {

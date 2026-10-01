@@ -771,6 +771,25 @@ export interface CustomerQuoteListItem {
    * anlatırdı.
    */
   frameworkBatch: { number: string; position: number } | null;
+  /**
+   * Teklif bir TAKIMA bağlıysa takımın adı (0072); değilse null.
+   *
+   * Kullanıcının takımı YOKSA bu alan listenin TAMAMINDA null olur ve ekran
+   * kolonu hiç çizmez — takımsız müşteri için liste bugünkü hâlinde kalır
+   * (birincil kısıt). Bir kullanıcı en fazla bir takımda olduğu için ad tek
+   * bir satırdan gelir, teklif başına bir JOIN'den değil.
+   */
+  teamName: string | null;
+  /**
+   * "Kim açtı" kolonu: teklifi AÇAN kişinin adı (0072) — takım listesinde
+   * meslektaşların satırlarını ayırt etmenin tek yolu. Takımsız listede null
+   * (herkes kendi satırını okuyor, kolon hiç çizilmez).
+   *
+   * E-POSTA DEĞİL AD: üye listesinin ne taşıdığı ayrı ve daha dar bir karardır
+   * (tasarım §1.2 — üye listesinde ad + e-posta + rol); teklif listesine
+   * kimsenin adresi girmez.
+   */
+  ownerName: string | null;
 }
 
 /** `/account/parcalar` satırı: aynı dosya (sha256) tek kez listelenir. */
@@ -833,6 +852,14 @@ export interface AdminQuoteListItem {
   expiresAt: string;
   expired: boolean;
   orderNumber: string | null;
+  /**
+   * Teklifin bağlı olduğu TAKIMIN adı (0072); kişisel teklifte null.
+   *
+   * Admin kuyruğunda kolon olarak çizilir: aynı firmanın üç mühendisinden gelen
+   * üç teklifi "üç ayrı müşteri" diye okumak, manuel fiyatlamada yanlış kararın
+   * en kısa yoludur. `leftJoin`dir — teklifler ezici çoğunlukla kişiseldir.
+   */
+  teamName: string | null;
 }
 
 /**

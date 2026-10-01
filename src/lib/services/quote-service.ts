@@ -18,7 +18,7 @@
  * modülü worker sürecinden de görebilmeli.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -29,6 +29,7 @@ import {
   quoteFrameworks,
   quoteParts,
   quotes,
+  users,
   type Quote,
   type QuotePart,
 } from "@/lib/db/schema";
@@ -41,6 +42,7 @@ import {
   QUOTE_FRAMEWORK_SOURCE_REASON,
   quotePermissions,
 } from "@/lib/config/quote-policy";
+import { canEditTeamQuote, canShareQuote } from "@/lib/config/quote-team";
 import {
   QUOTE_UNITS,
   REVIEW_KINDS,
@@ -68,7 +70,13 @@ import {
 } from "@/lib/services/chunked-upload";
 import { isFlagEnabled } from "@/lib/services/flags";
 import { loadActiveFxSnapshot } from "@/lib/services/fx-rates";
-import { stepUploadsEnabled, UUID_RE, type QuoteAccess } from "@/lib/services/quote-access";
+import type { TeamMembership } from "@/lib/services/customer-team";
+import {
+  resolveUserTeam,
+  stepUploadsEnabled,
+  UUID_RE,
+  type QuoteAccess,
+} from "@/lib/services/quote-access";
 import { recomputeQuoteCache, type QuoteCacheTx } from "@/lib/services/quote-cache";
 import { catalogUpdatedAt, loadActiveSnapshot } from "@/lib/services/quote-catalog";
 import { validateStagedQuoteModel } from "@/lib/services/quote-model-validation";
@@ -107,6 +115,33 @@ const MAX_NOTE_LENGTH = 2000;
 
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com";
+}
+
+/**
+ * Müşteri OKUMALARININ kapsamı: "benim teklifler" + (varsa) "takımımın
+ * teklifleri" (0072). Üç çağıranı var: `listCustomerQuotes`,
+ * `listCustomerParts` ve `importParts`in KAYNAK sahipliği.
+ *
+ * TAKIMI OLMAYAN KULLANICIDA İFADE BUGÜNKÜNÜN BİREBİR KENDİSİDİR
+ * (`eq(quotes.userId, userId)`) — ikinci dal HİÇ KURULMAZ. Bir `or(…, eq(teamId,
+ * null))` yazmak iki şeyi birden bozardı: SQL'de `team_id = NULL` hiçbir satırı
+ * döndürmez (ve `IS NULL` yazılsa BAŞKA müşterilerin anonim tekliflerini
+ * kapsardı), ayrıca takımsız müşterinin sorgu PLANI da bugünkü kalmak zorunda
+ * (birincil kısıt: "takımı olmayan müşteri için bugünkü davranış bit bit aynı").
+ *
+ * `team` da döner çünkü iki çağıran ADI da istiyor ("Takım" kolonu) ve üyelik
+ * zaten okundu; ikinci bir sorgu açmanın gereği yok.
+ */
+async function teamScope(
+  userId: string
+): Promise<{ team: TeamMembership | null; condition: SQL }> {
+  const team = await resolveUserTeam(userId);
+  const own = eq(quotes.userId, userId);
+  if (team === null) return { team: null, condition: own };
+  // `or` tipi `undefined` de döndürebilir (tüm argümanları undefined olan
+  // çağrı); burada ikisi de dolu. Yedek DARALTAN yönde: kapsamın `undefined`a
+  // düşmesi "WHERE yok" demek olurdu.
+  return { team, condition: or(own, eq(quotes.teamId, team.teamId)) ?? own };
 }
 
 // ─── İşlem iskeleti ─────────────────────────────────────────────────────────
@@ -274,11 +309,22 @@ export async function createQuote(args: {
   // yazmak, ekrana bir gün yanlış kurla çevrilmiş rakam basmak demekti. Tatil
   // listesi teklifin kendi kataloğundan gelir; ikinci bir takvim yok.
   const fxSnapshot = await loadActiveFxSnapshot(snapshot.settings.holidays, now);
+  // TAKIMI OLAN MÜŞTERİNİN AÇTIĞI TEKLİF DOĞRUDAN TAKIM TEKLİFİDİR (tasarım
+  // §1.1.4): kurumsal müşteride işin görünür olması varsayılan, gizli kalması
+  // istisnadır — teklifi her seferinde elle bağlamak, meslektaşın göremediği
+  // bir dosyayı "bağlamayı unuttum" hâlinde bırakırdı.
+  //
+  // Anonim teklif ASLA takıma bağlanmaz (`userId === null` → `resolveUserTeam`
+  // hiç sormaz): `quotes_team_requires_user_chk` zaten reddeder, ama çağrıyı
+  // yapmamak girişsiz ziyaretçinin teklif açma yoluna tek bir sorgu bile
+  // eklememektir. Bayrak KAPALIYSA da hiç sorulmaz ve kolon null kalır.
+  const team = await resolveUserTeam(args.userId);
 
   const [row] = await db
     .insert(quotes)
     .values({
       userId: args.userId,
+      teamId: team?.teamId ?? null,
       // `anonymous_id` YALNIZ sahipsiz teklifte anlamlıdır (şema notu): girişli
       // müşteride çerez kimliği saklamak, teklifi aynı tarayıcıyı kullanan
       // ikinci bir kişiye açardı.
@@ -1431,6 +1477,20 @@ export async function requestReview(access: QuoteAccess, args: ReviewRequest): P
 /** Yeni teklife kopyalanan, teklif düzeyindeki müşteri alanları. */
 function inheritedQuoteFields(quote: Quote) {
   return {
+    /**
+     * TAKIM BAĞI DA DEVRALINIR (0072) ve bu TEK satır üç yolu birden kapatıyor:
+     * `requote`, teklif bölme (`splitByTechnology`) ve çerçeve partisinin
+     * klonu (`cloneQuoteForFrameworkBatch`).
+     *
+     * Unutulması SESSİZ bir erişim hatasıdır: yeniden fiyatlanan teklif
+     * takımdan DÜŞER, üye kendi işini kaybeder ve kimse bir hata görmez — yeni
+     * teklif numarası vardır, sahibi vardır, yalnız meslektaşları yoktur.
+     *
+     * `quotes_team_requires_user_chk` güvende: üç yolun üçü de `userId`yi
+     * kaynaktan (ya da anlaşmanın sahibinden) yazıyor ve takım teklifinde
+     * `user_id` daima dolu.
+     */
+    teamId: quote.teamId,
     title: quote.title,
     customerNote: quote.customerNote,
     poNumber: quote.poNumber,
@@ -1596,9 +1656,11 @@ const SHARE_TOKEN_LENGTH = 32;
 /**
  * Paylaşım token'ını üretir / yeniler / iptal eder.
  *
- * YALNIZ SAHİP: "bu teklifi bağlantısı olan herkese açıyorum" kararı admin'in
+ * MÜŞTERİ TARAFI: "bu teklifi bağlantısı olan herkese açıyorum" kararı admin'in
  * ya da paylaşım izleyicisinin değil, müşterinin kararıdır (sunucu da
- * `shareUrl`'ü yalnız sahibe gönderiyor).
+ * `shareUrl`'ü yalnız `canSeeOwnerFields` geçen izleyiciye gönderiyor).
+ * Takımda bu karar düzenleyebilen üyelerin; salt okunur `viewer` rolü dışarıda
+ * (`canShareQuote`).
  *
  * `requireEdit: false` bilerek: paylaşım bir OKUMA izni verir, düzenleme
  * değil. Süresi dolmuş ya da siparişe dönmüş bir teklifi patronuna göstermek
@@ -1608,9 +1670,9 @@ export async function setShareToken(
   access: QuoteAccess,
   action: "create" | "rotate" | "revoke"
 ): Promise<string | null> {
-  if (!access.viewer.isOwner) {
+  if (!canShareQuote(access.viewer)) {
     throw new QuoteServiceError(
-      "Paylaşım bağlantısını yalnız teklif sahibi yönetebilir.",
+      "Paylaşım bağlantısını yönetme yetkiniz yok.",
       403,
       "not_owner"
     );
@@ -1836,12 +1898,14 @@ export function freezeParts(
  * Kaynak teklifin parçalarıyla BUGÜNÜN kataloğundan yeni bir teklif açar.
  *
  * `repriceQuote`'tan farkı: kaynak teklife dokunulmaz. Siparişe dönmüş ya da
- * süresi dolmuş bir teklif bu yolla tekrar alınabilir — tek koşul sahiplik.
+ * süresi dolmuş bir teklif bu yolla tekrar alınabilir — tek koşul DÜZENLEME
+ * yetkisi (`canEditTeamQuote`: kişisel sahip ya da takımın salt-okunur olmayan
+ * üyesi). Yeni teklif AYNI `team_id` ile doğar (`inheritedQuoteFields`).
  */
 export async function requote(access: QuoteAccess): Promise<{ number: string }> {
-  if (!access.viewer.isOwner) {
+  if (!canEditTeamQuote(access.viewer)) {
     throw new QuoteServiceError(
-      "Yeniden teklif yalnız teklif sahibine açıktır.",
+      "Yeniden teklif alma yetkiniz yok.",
       403,
       "not_owner"
     );
@@ -2247,6 +2311,15 @@ export async function importParts(
     );
   }
 
+  // KAYNAK sahipliği takım tekliflerini de kapsar (0072): üye, meslektaşının
+  // açtığı takım teklifindeki parçayı kendi teklifine aktarabilir — kütüphane
+  // ekranı o parçayı ona ZATEN gösteriyor (`listCustomerParts`) ve
+  // göstermediğini aktaramamak değil, gösterdiğini aktaramamak tutarsızlıktır.
+  //
+  // HEDEF teklife yazma yetkisi BURADAN GELMEZ: `mutateQuote` kilidi ve ucun
+  // `forEdit` kapısı onu ayrıca tutuyor, yani takımın `viewer` rolü içe
+  // aktaramaz.
+  const sourceScope = await teamScope(userId);
   const rows = await db
     .select({ part: quoteParts })
     .from(quoteParts)
@@ -2254,7 +2327,7 @@ export async function importParts(
     .where(
       and(
         inArray(quoteParts.id, wanted),
-        eq(quotes.userId, userId),
+        sourceScope.condition,
         isNull(quoteParts.deletedAt),
         isNull(quoteParts.filesPurgedAt)
       )
@@ -2404,12 +2477,21 @@ export async function listCustomerQuotes(
   page: number
 ): Promise<{ items: CustomerQuoteListItem[]; hasNext: boolean }> {
   const offset = Math.max(0, page - 1) * PAGE_SIZE;
+  const scope = await teamScope(userId);
   const rows = await db
     .select({
       id: quotes.id,
       number: quotes.number,
       status: quotes.status,
       title: quotes.title,
+      // Takım kolonları için JOIN YOK ve olmayacak: bir kullanıcı EN FAZLA BİR
+      // takımda (`customer_team_members_user_uq`), yani adı zaten elde olan
+      // `scope.team`den okunur; satırda sorulacak tek şey hangi satırın o
+      // takıma ait olduğudur. "Kim açtı" ise aşağıda TEK ek sorguyla, yalnız
+      // takımı OLAN kullanıcıda çözülür (`partCounts` deseni) — takımsız
+      // müşterinin sorgusu bugünkünün birebir kendisi kalsın.
+      userId: quotes.userId,
+      teamId: quotes.teamId,
       totalKurus: quotes.totalKurus,
       leadDays: quotes.leadDays,
       createdAt: quotes.createdAt,
@@ -2433,7 +2515,7 @@ export async function listCustomerQuotes(
     .leftJoin(orders, eq(quotes.orderId, orders.id))
     .leftJoin(quoteFrameworkBatches, eq(quoteFrameworkBatches.quoteId, quotes.id))
     .leftJoin(quoteFrameworks, eq(quoteFrameworks.id, quoteFrameworkBatches.frameworkId))
-    .where(eq(quotes.userId, userId))
+    .where(scope.condition)
     .orderBy(desc(quotes.createdAt))
     .limit(PAGE_SIZE + 1)
     .offset(offset);
@@ -2466,6 +2548,20 @@ export async function listCustomerQuotes(
   // ₺'ye döner" sözü buraya da bağlı). `loadPresentedQuote` ile aynı okuma,
   // Redis önbellekli.
   const fxDisplayEnabled = await isFlagEnabled("quote_fx_display_enabled");
+  // "KİM AÇTI" kolonu YALNIZ takımı olan kullanıcıda doldurulur: takımsız
+  // listede kolon hiç çizilmez (tasarım §4) ve bu sorgu da hiç açılmaz.
+  const ownerNames = new Map<string, string | null>();
+  if (scope.team !== null) {
+    const ownerIds = [...new Set(page_.map((q) => q.userId).filter((id): id is string => id !== null))];
+    if (ownerIds.length > 0) {
+      for (const row of await db
+        .select({ id: users.id, fullName: users.fullName })
+        .from(users)
+        .where(inArray(users.id, ownerIds))) {
+        ownerNames.set(row.id, row.fullName);
+      }
+    }
+  }
   const now = Date.now();
   return {
     items: page_.map((q) => ({
@@ -2482,6 +2578,12 @@ export async function listCustomerQuotes(
       expiresAt: q.expiresAt.toISOString(),
       expired: q.status === "expired" || q.expiresAt.getTime() < now,
       orderNumber: q.orderNumber,
+      // Takımsız listede İKİSİ DE null ve ekran kolonu hiç çizmez. Takım adı
+      // satırın takımı GERÇEKTEN okuyanın takımı iken yazılır: bir kullanıcı
+      // tek takımda olduğu için eşitlik yetiyor ve başka bir takımın adı bu
+      // listeye hiçbir yoldan giremez.
+      teamName: scope.team !== null && q.teamId === scope.team.teamId ? scope.team.team.name : null,
+      ownerName: scope.team === null || q.userId === null ? null : ownerNames.get(q.userId) ?? null,
       fxSnapshot: fxDisplayEnabled ? q.fxSnapshot : null,
       // Rozet ya TAM ya HİÇ: numara ve sıra birlikte gelir (ikisi de aynı
       // join'den), yarısı dolu bir rozet "Çerçeve · Parti undefined" yazardı.
@@ -2524,6 +2626,14 @@ export async function listCustomerParts(
   page: number
 ): Promise<{ items: LibraryPart[]; hasNext: boolean }> {
   const offset = Math.max(0, page - 1) * PAGE_SIZE;
+  // HAM SQL: `tsc` burada hiçbir şey ölçmez, kapsam parçası elle yazılır ve
+  // vakası testle çivilenir (`scripts/test-quote-service-db.ts`). Takımı
+  // olmayan kullanıcıda metin BUGÜNKÜNÜN birebir kendisi: `q.user_id = $1`.
+  const { team } = await teamScope(userId);
+  const scopeSql =
+    team === null
+      ? sql`q.user_id = ${userId}`
+      : sql`(q.user_id = ${userId} OR q.team_id = ${team.teamId})`;
   const result = await db.execute<LibraryRow>(sql`
     SELECT * FROM (
       SELECT DISTINCT ON (p.source_sha256)
@@ -2540,7 +2650,7 @@ export async function listCustomerParts(
         count(*) OVER (PARTITION BY p.source_sha256)::int AS use_count
       FROM ${quoteParts} p
       JOIN ${quotes} q ON q.id = p.quote_id
-      WHERE q.user_id = ${userId}
+      WHERE ${scopeSql}
         AND p.deleted_at IS NULL
         AND p.files_purged_at IS NULL
       ORDER BY p.source_sha256, p.created_at DESC

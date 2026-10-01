@@ -3012,6 +3012,361 @@ async function main() {
       session = null;
     });
 
+    // ─── T-4 · TAKIM: PARA KAPISI ──────────────────────────────────────────
+    //
+    // Bu blok TEK bir soruyu ölçüyor: *ödemeyi kim başlatabilir.* Hiçbir tutar,
+    // kalem ya da indirim iddiası burada DEĞİŞMEDİ — yukarıdaki kırk küsur para
+    // vakası (brüt/net, havale indirimi, hediye kartı, `total_mismatch`,
+    // `MAX_AMOUNT_KURUS`) olduğu gibi duruyor ve yeşil kalması, takımın fiyat
+    // zincirine hiç girmediğinin kanıtıdır.
+    //
+    // En sinsi tek regresyon ÖDEYENİN KİMLİĞİDİR: `order_drafts.user_id`
+    // ÖDEYEN üyeyi göstermeye devam etmek zorunda (değişmez 3) — iade,
+    // anlaşmazlık ve hediye kredisi o satıra bağlı.
+    const teamOwner = await makeUser();
+    const teamMember = await makeUser();
+    const teamViewer = await makeUser();
+    let teamRow = { id: "", memberCanCheckout: false };
+
+    const setMemberCanCheckout = async (open: boolean) => {
+      await admin.query("UPDATE customer_teams SET member_can_checkout = $1 WHERE id = $2", [
+        open,
+        teamRow.id,
+      ]);
+      teamRow.memberCanCheckout = open;
+    };
+    /** Ödeme gövdesi: teklifin O ANKİ sürümü ve tutarı. */
+    const payBody = async (quoteId: string, over: Record<string, unknown> = {}) => {
+      const { quote, computed } = await expected(quoteId);
+      return quoteCheckoutSchema.parse(
+        body({
+          expectedVersion: quote.version,
+          expectedTotalKurus: computed.totals.totalKurus,
+          ...over,
+        })
+      );
+    };
+    /** Takım bağlamı: erişim kabuğunun `access.team`inden gelen iki alan. */
+    const actorOf = (role: "owner" | "admin" | "member" | "viewer" | null) => ({
+      role,
+      memberCanCheckout: teamRow.memberCanCheckout,
+    });
+
+    await test("takım fikstürü: teklifi SAHİP açar, takıma bağlanır", async () => {
+      const id = (
+        await admin.query(
+          `INSERT INTO customer_teams (name, owner_user_id, kvkk_notice_version)
+             VALUES ('QA Mühendislik A.Ş.', $1, '2026-09-22') RETURNING id, member_can_checkout`,
+          [teamOwner.id]
+        )
+      ).rows[0];
+      teamRow = { id: id.id as string, memberCanCheckout: id.member_can_checkout as boolean };
+      assert.equal(teamRow.memberCanCheckout, false, "para kapısı DAR doğmalı");
+      await admin.query(
+        `INSERT INTO customer_team_members (team_id, user_id, role)
+           VALUES ($1, $2, 'owner'), ($1, $3, 'member'), ($1, $4, 'viewer')`,
+        [teamRow.id, teamOwner.id, teamMember.id, teamViewer.id]
+      );
+    });
+
+    await test("`member_can_checkout` KAPALI iken member 403 alır, TASLAK YAZILMAZ", async () => {
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      const before = (await admin.query("SELECT count(*)::int AS n FROM order_drafts")).rows[0].n;
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: q.id,
+          userId: teamMember.id,
+          email: teamMember.email,
+          input: await payBody(q.id),
+          req: fakeRequest(),
+          actor: actorOf("member"),
+        }),
+        (err: unknown) => {
+          assert.ok(err instanceof QuoteServiceError, "beklenmeyen hata türü");
+          assert.equal(err.status, 403);
+          // Gövde TÜRKÇE: ekran bunu olduğu gibi basabilir.
+          assert.match(err.message, /[çğıöşüÇĞİÖŞÜ]/, err.message);
+          return true;
+        }
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int AS n FROM order_drafts")).rows[0].n,
+        before,
+        "reddedilen ödeme taslak yazdı"
+      );
+    });
+
+    await test("`viewer` rolü HER KOŞULDA ödeyemez (ayar AÇIK olsa bile)", async () => {
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      await setMemberCanCheckout(true);
+      try {
+        await assert.rejects(
+          createQuoteCheckout({
+            quoteId: q.id,
+            userId: teamViewer.id,
+            email: teamViewer.email,
+            input: await payBody(q.id),
+            req: fakeRequest(),
+            actor: actorOf("viewer"),
+          }),
+          (err: unknown) => err instanceof QuoteServiceError && err.status === 403
+        );
+      } finally {
+        await setMemberCanCheckout(false);
+      }
+    });
+
+    await test("ayar AÇIKKEN member öder ve `order_drafts.user_id` = ÖDEYEN ÜYE", async () => {
+      // DEĞİŞMEZ 3'ÜN KANITI: teklifi SAHİP açtı, ödemeyi ÜYE yaptı → taslak
+      // (ve ondan doğacak sipariş) ÜYENİN. `quote.userId`e çevirmek iade,
+      // anlaşmazlık ve hediye kredisi akışlarını birden yanlışlardı.
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      await setMemberCanCheckout(true);
+      const { computed } = await expected(q.id);
+      const result = await createQuoteCheckout({
+        quoteId: q.id,
+        userId: teamMember.id,
+        email: teamMember.email,
+        input: await payBody(q.id),
+        req: fakeRequest(),
+        actor: actorOf("member"),
+      });
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, result.reference));
+      assert.equal(draft.userId, teamMember.id, "taslak ÖDEYENİN değil");
+      assert.notEqual(draft.userId, teamOwner.id, "taslak teklifi AÇANA yazıldı");
+      assert.equal(draft.email, teamMember.email, "fiş ödeyene gitmiyor");
+      // Tutar zinciri DEĞİŞMEDİ: brüt teklifin kendi hesabı.
+      assert.equal(draft.amountKurus, computed.totals.totalKurus);
+      assert.equal(result.finalAmountKurus, computed.totals.totalKurus);
+      const [frozen] = await db
+        .select()
+        .from(quoteCheckouts)
+        .where(eq(quoteCheckouts.draftId, draft.id));
+      assert.equal(frozen.amountKurus, computed.totals.totalKurus, "donmuş tutar oynadı");
+      return;
+    });
+
+    await test("İKİNCİ üye aynı teklifte `reused` alır: ikinci taslak YAZILMAZ", async () => {
+      // Tasarım §5.2: `freezeCheckout` teklifi `FOR UPDATE` ile kilitler,
+      // ikinci istek birincinin taslağını görür. İkinci bir tahsilat riski YOK.
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      const first = await createQuoteCheckout({
+        quoteId: q.id,
+        userId: teamMember.id,
+        email: teamMember.email,
+        input: await payBody(q.id),
+        req: fakeRequest(),
+        actor: actorOf("member"),
+      });
+      const second = await createQuoteCheckout({
+        quoteId: q.id,
+        userId: teamOwner.id,
+        email: teamOwner.email,
+        input: await payBody(q.id),
+        req: fakeRequest(),
+        actor: actorOf("owner"),
+      });
+      assert.equal(second.reused, true, "ikinci üye yeni bir taslak açtı");
+      assert.equal(second.reference, first.reference, "ikinci üye başka bir referans aldı");
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM quote_checkouts WHERE quote_id = $1",
+            [q.id]
+          )
+        ).rows[0].n,
+        1,
+        "aynı teklif için İKİ tahsilat satırı yazıldı"
+      );
+      // Taslak hâlâ BİRİNCİNİN: `reused` sahipliği devretmez.
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, first.reference));
+      assert.equal(draft.userId, teamMember.id);
+
+      // YÖNTEM FARKLIYSA 409 `pending_other_method` (bugünkü cevap korunur).
+      await assert.rejects(
+        createQuoteCheckout({
+          quoteId: q.id,
+          userId: teamOwner.id,
+          email: teamOwner.email,
+          input: await payBody(q.id, { paymentMethod: "bank_transfer" }),
+          req: fakeRequest(),
+          actor: actorOf("owner"),
+        }),
+        (err: unknown) =>
+          err instanceof QuoteServiceError &&
+          err.status === 409 &&
+          err.code === "pending_other_method"
+      );
+    });
+
+    await test("iptal: owner HER taslağı, member YALNIZ kendi başlattığını, viewer HİÇ", async () => {
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      const started = await createQuoteCheckout({
+        quoteId: q.id,
+        userId: teamMember.id,
+        email: teamMember.email,
+        input: await payBody(q.id),
+        req: fakeRequest(),
+        actor: actorOf("member"),
+      });
+      const [draft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, started.reference));
+      assert.equal(draft.userId, teamMember.id, "taslağı başlatan üye değil");
+      // İPTAL EDİLEBİLİR taslak: `pendingDraftCancellable` PayTR ekranını hiç
+      // görmemiş kart taslağını geçiriyor. Gerçekçi yolu token'ın reddedilmesi
+      // (yukarıdaki iade vakası onu ölçüyor); burada konu YETKİ matrisi olduğu
+      // için damga doğrudan düşürülüyor.
+      const makeCancellable = async (draftId: string) => {
+        await admin.query("UPDATE order_drafts SET paytr_test_mode = NULL WHERE id = $1", [
+          draftId,
+        ]);
+      };
+      await makeCancellable(draft.id);
+
+      // `viewer` rolü HİÇBİR taslağı iptal etmez.
+      await assert.rejects(
+        cancelPendingQuoteCheckout({
+          quoteId: q.id,
+          userId: teamViewer.id,
+          actorRole: "viewer",
+        }),
+        (err: unknown) => err instanceof QuoteServiceError && err.status === 403
+      );
+      // BAŞKA bir üye (member) kendi başlatmadığı taslağı iptal edemez.
+      const stranger = await makeUser();
+      await admin.query(
+        `INSERT INTO customer_team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+        [teamRow.id, stranger.id]
+      );
+      await assert.rejects(
+        cancelPendingQuoteCheckout({ quoteId: q.id, userId: stranger.id, actorRole: "member" }),
+        (err: unknown) => err instanceof QuoteServiceError && err.status === 403
+      );
+      // Taslak hâlâ CANLI: reddedilen iptal hiçbir şeye dokunmadı.
+      assert.equal(
+        (await db.select().from(orderDrafts).where(eq(orderDrafts.id, draft.id)))[0].status,
+        "pending"
+      );
+      // Taslağı BAŞLATAN üye iptal eder.
+      const cancelled = await cancelPendingQuoteCheckout({
+        quoteId: q.id,
+        userId: teamMember.id,
+        actorRole: "member",
+      });
+      assert.equal(cancelled.reference, started.reference);
+      assert.equal(
+        (await db.select().from(orderDrafts).where(eq(orderDrafts.id, draft.id)))[0].status,
+        "cancelled"
+      );
+
+      // …ve owner BAŞKASININ taslağını iptal edebilir. İkinci ödeme AYRI bir
+      // idempotency anahtarıyla gider: aynı gövde + aynı kullanıcı, iptalden
+      // sonra da aynı anahtara düşer ve saklı cevap TEKRAR OYNATILIRDI (yeni
+      // taslak hiç açılmaz) — ölçüldü.
+      const second = await createQuoteCheckout({
+        quoteId: q.id,
+        userId: teamMember.id,
+        email: teamMember.email,
+        input: await payBody(q.id),
+        req: fakeRequest({ "idempotency-key": "qa-takim-iptal-ikinci" }),
+        actor: actorOf("member"),
+      });
+      const [secondDraft] = await db
+        .select()
+        .from(orderDrafts)
+        .where(eq(orderDrafts.reference, second.reference));
+      await makeCancellable(secondDraft.id);
+      const byOwner = await cancelPendingQuoteCheckout({
+        quoteId: q.id,
+        userId: teamOwner.id,
+        actorRole: "owner",
+      });
+      assert.equal(byOwner.reference, second.reference, "owner üyenin taslağını iptal edemedi");
+    });
+
+    await test("hediye kartı ÖN İZLEMESİ bir FİYAT yüzeyidir: ödeyemeyen üye 403", async () => {
+      // #12 / `previewQuoteGiftCard`: `computeQuote` sonucunu döndürüyor, yani
+      // kapısı "ödeyebilen" ile aynı olmak zorunda.
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      const { computed } = await expected(q.id);
+      const card = await makeGiftCard(Math.floor(computed.totals.totalKurus / 2));
+      await setFlag("quote_gift_card_enabled", true, "qa");
+      await setMemberCanCheckout(false);
+
+      await assert.rejects(
+        previewQuoteGiftCard({
+          quoteId: q.id,
+          userId: teamMember.id,
+          code: card.code,
+          req: fakeRequest(),
+          actor: actorOf("member"),
+        }),
+        (err: unknown) => err instanceof QuoteServiceError && err.status === 403,
+        "ödeme yetkisi olmayan üyeye kart bakiyesi gösterildi"
+      );
+
+      // Yetkisi OLAN üye `totals` alır (ve rakamlar ödeme yoluyla aynı zincirden).
+      await setMemberCanCheckout(true);
+      const preview = await previewQuoteGiftCard({
+        quoteId: q.id,
+        userId: teamMember.id,
+        code: card.code,
+        req: fakeRequest(),
+        actor: actorOf("member"),
+      });
+      assert.equal(preview.valid, true);
+      assert.equal(preview.giftCardAmountKurus, Math.floor(computed.totals.totalKurus / 2));
+      assert.equal(
+        preview.card.payableKurus,
+        computed.totals.totalKurus - preview.giftCardAmountKurus
+      );
+      await setMemberCanCheckout(false);
+    });
+
+    await test("takım bağlamı GEÇİRİLMEZSE kapı KİŞİSEL sahipliğe düşer (fail-closed)", async () => {
+      // `actor` yoksa servis bugünkü ifadeyi uygular: üye 403, teklifin KENDİ
+      // sahibi 200. Bağlamı geçirmeyi unutan bir çağıran fazladan hak VERMEZ.
+      const q = await makeQuote(teamOwner.id, [{ geometry: CUBE }]);
+      await admin.query("UPDATE quotes SET team_id = $1 WHERE id = $2", [teamRow.id, q.id]);
+      await setMemberCanCheckout(true);
+      try {
+        await assert.rejects(
+          createQuoteCheckout({
+            quoteId: q.id,
+            userId: teamMember.id,
+            email: teamMember.email,
+            input: await payBody(q.id),
+            req: fakeRequest(),
+          }),
+          (err: unknown) => err instanceof QuoteServiceError && err.status === 403
+        );
+        const own = await createQuoteCheckout({
+          quoteId: q.id,
+          userId: teamOwner.id,
+          email: teamOwner.email,
+          input: await payBody(q.id),
+          req: fakeRequest(),
+        });
+        assert.equal(own.reused, false, "kişisel sahip bağlamsız ödeyemedi");
+      } finally {
+        await setMemberCanCheckout(false);
+      }
+    });
+
     console.log(`${checks} quote checkout DB checks passed`);
   } finally {
     await pool?.end();

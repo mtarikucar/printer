@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, type JSX, type ReactNode } from "react";
+import { canSeeOwnerFields } from "@/lib/config/quote-team";
 import type { DisplayCurrency, PresentedQuote } from "@/lib/config/quote-types";
 import { formatDateLong } from "@/lib/i18n/format";
 import { useDictionary } from "@/lib/i18n/locale-context";
@@ -46,8 +47,12 @@ export function QuoteHeader({
   // buraya da gelir, ama müşteri yazarken üzerine yazılmaz.
   const title = useSyncedField(quote.title ?? "");
   const canEdit = quote.viewer.canEdit;
+  // Belge bağlantısı belgenin KENDİ kapısıyla aynı yüklemi okur
+  // (`belge/page.tsx`): takımın dört rolü de proformaya girebiliyor, yani
+  // bağlantıyı GÖREBİLMEK zorunda — `isOwner` kalsaydı girebilen ama linki
+  // olmayan bir üye kalırdı.
   const showDocument =
-    quote.viewer.isOwner || (quote.viewer.isShare && quote.viewer.canSeePrices);
+    canSeeOwnerFields(quote.viewer) || (quote.viewer.isShare && quote.viewer.canSeePrices);
   // Ölü bir `?kur=` yazılmaz: seçim ancak BELGENİN onu gerçekten çizebildiği
   // hâlde adrese girer. Kapı yüzeyin kapısıdır (`fxSurface`), yalnız kurun
   // varlığı değil: çevrilemeyen bir fişte (gösterim tavanı) belge zaten tek

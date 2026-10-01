@@ -30,7 +30,11 @@ import { formatQuoteNumber, parseQuoteNumber } from "@/lib/config/quote-number";
 import type { TeamRole } from "@/lib/config/quote-team";
 import type { QuoteAccessTeam, QuoteViewer } from "@/lib/config/quote-types";
 import { resolveAuthenticatedUploadOwner } from "@/lib/services/chunked-upload";
-import { teamMembershipFor } from "@/lib/services/customer-team";
+import {
+  loadMembership,
+  teamMembershipFor,
+  type TeamMembership,
+} from "@/lib/services/customer-team";
 import { isFlagEnabled } from "@/lib/services/flags";
 
 export interface QuoteAccess {
@@ -485,6 +489,38 @@ export async function resolveQuoteTeam(
   if (quote.teamId === null || sessionUserId === null) return null;
   if (!(await isFlagEnabled("quote_teams_enabled")) && admin === null) return null;
   return teamMembershipFor(sessionUserId, quote.teamId);
+}
+
+/**
+ * "BU KULLANICININ takımı" — teklif SORMADAN (T-4). `null` = takım dalı KAPALI.
+ *
+ * `resolveQuoteTeam`in kardeşi ve KARŞITI: orada soru "bu izleyici BU TEKLİFİN
+ * takımının neyi", burada "bu kullanıcı hangi takımda". İkincisine teklifin
+ * DOĞUŞU (`createQuote`), LİSTELER (`listCustomerQuotes`, `listCustomerParts`,
+ * `importParts`) ve teklifi takıma BAĞLAMA ucu ihtiyaç duyar — hiçbirinde elde
+ * bir `quotes` satırı yoktur.
+ *
+ * KISA DEVRE SIRASI yine bir kuraldır:
+ *   1. Oturum yok → çık (anonim teklif takım teklifi olamaz,
+ *      `quotes_team_requires_user_chk`). Takımsız/girişsiz yolda bayrak
+ *      okuması bile yok.
+ *   2. BAYRAK kapalı → üyelik HİÇ okunmaz. Bayrağı kapatmak listeleri ve yeni
+ *      teklifleri bugünkü hâline döndürür; geri dönüş planı budur.
+ *   3. Üyelik satırı — önbelleksiz (bkz. `customer-team.ts`).
+ *
+ * `teamsEnabled(viewer)` DEĞİL `isFlagEnabled` okunur ve bu bilinçli: burada
+ * `viewer` YOK ve admin istisnasını kurmak her teklif açılışına ve her liste
+ * sayfasına İKİNCİ bir `auth()` turu eklerdi (`adminSession` başlığının
+ * yasakladığı şey). Bedeli ölçülmüştür: bayrak kapalıyken bir admin kendi
+ * listesinde takım satırlarını göremez — takım YÜZEYLERİNİN iç testi
+ * `teamsEnabled`in arkasındaki uçlarda yapılır.
+ */
+export async function resolveUserTeam(
+  userId: string | null
+): Promise<TeamMembership | null> {
+  if (userId === null) return null;
+  if (!(await isFlagEnabled("quote_teams_enabled"))) return null;
+  return loadMembership(userId);
 }
 
 /**

@@ -26,18 +26,31 @@
  * üzerinde `user_id` TEKİL (`customer_team_members_user_uq`). Çok takımlı
  * üyelik, takım seçici ve `?team=` parametresi YOKTUR.
  *
- * ─── BU SEVKİYATTA HİÇ ÇAĞRILMAZ ───────────────────────────────────────────
+ * ─── KAPILARIN BAĞLANDIĞI YER (T-4) ───────────────────────────────────────
  *
- * `quote_teams_enabled` KAPALI doğar ve `quotes.team_id`yi OKUYAN tek satır
- * yoktur: kapılar T-2'de bağlanır. Dört teklif yüzeyi yüklemi
- * (`canEditTeamQuote`, `canChatOnQuote`, `canShareQuote`, `canSeeOwnerFields`)
- * bu yüzden BUGÜNKÜ ifadelerin birebir karşılığıdır — ölçülen hâl:
- * `quote-service.ts:1611` (`setShareToken`) ve `:1842` (`requote`),
- * `quote-present.ts:377-378` (`liveDraftReference`, `orderNumber`) ve `:395`
- * (`invoice`, `shareUrl`), `api/quotes/[id]/messages/route.ts:27,36`. Hepsi
- * bugün TEK bir koşul okuyor: `viewer.isOwner`. T-2 her birine tek satır
- * (`|| viewer.isTeam`) ekler; bugün o satırı yazmak, güvenlik testleri henüz
- * yokken bir yüzeyi genişletmek olurdu.
+ * T-1 bu dosyayı yazdı ama HİÇBİR yüzey çağırmıyordu; T-2 erişim matrisine
+ * takım dalını ekledi (`QuoteViewer.isTeam`/`teamRole`); T-4 ölçülen 22
+ * `viewer.isOwner` kapısını TEK TEK bu yüklemlere çevirdi. Yani buradaki her
+ * gövde artık canlı bir kapıdır ve bir satırını değiştirmek 22 yüzeyi birden
+ * değiştirir — ölçülen çağrı yerleri:
+ *
+ *   `canEditTeamQuote`  → `quote-service.ts` (`requote`), `quote-banners.tsx`
+ *   `canChatOnQuote`    → `api/quotes/[id]/messages/route.ts` (POST),
+ *                         `quote-chat-panel.tsx` (yazma alanı)
+ *   `canShareQuote`     → `quote-service.ts` (`setShareToken`),
+ *                         `workspace-client.tsx` (paylaş düğmesi)
+ *   `canSeeOwnerFields` → `quote-present.ts` (sahibe giden dört alan),
+ *                         `messages` GET + `messages/read`, `quote-header.tsx`
+ *                         (belge bağlantısı), `workspace-client.tsx`
+ *   `canCheckoutQuote`  → `checkout`/`gift-card` uçları, `odeme/page.tsx`,
+ *                         `quote-summary.tsx` (düğme VE cümlesi)
+ *   `canCancelCheckout` → `checkout` ucunun DELETE'i, `quote-checkout.ts`
+ *
+ * `isOwner`IN ANLAMI DEĞİŞMEDİ (T-2 değişmez 4): her yüklem `isOwner`a EK
+ * olarak takım yüklemini sorar; hiçbiri `isOwner`ı takımı da kapsayacak şekilde
+ * yeniden tanımlamaz. Bayrak (`quote_teams_enabled`) KAPALIYKEN erişim kabuğu
+ * rolü hiç okumaz, yani `isTeam` daima `false` döner ve buradaki her yüklem
+ * bugünkü cevabına düşer — geri dönüş planı budur.
  */
 import type { QuoteViewer } from "./quote-types";
 
@@ -100,64 +113,91 @@ const RANK: Record<TeamRole, number> = { owner: 3, admin: 2, member: 1, viewer: 
 
 // ─── Teklif yüzeyi: `QuoteViewer` alan yüklemler ───────────────────────────
 //
-// Dördü de `QuoteViewer` alır (`TeamRole` değil), çünkü T-2 ve T-4 bunları 22
-// kapıda çağıracak ve `viewer` her kapıda elde. `QuoteViewer` T-2'de
-// `isTeam`/`teamRole` kazanacak; imzalar o gün DEĞİŞMEZ, yalnız gövdeler bir
-// satır uzar.
+// Dördü de `QuoteViewer` alır (`TeamRole` değil), çünkü 22 kapının hepsinde
+// elde olan şey `viewer`dır. `isOwner` dalı HER BİRİNDE ÖNCE sorulur: takım
+// dalı bir EKLEMEDİR, bugünkü cevabın yerine geçen bir şey değil.
+//
+// TAKIM DALININ ÖLÇÜSÜ `viewer.canEdit`tir, `teamRole !== "viewer"` DEĞİL —
+// aynı şeyi söylüyorlar (`resolveQuoteViewer` takım dalında
+// `canEdit: teamRole !== "viewer"` yazıyor) ama rütbe karşılaştırmasını burada
+// tekrarlamak, matrisin İKİNCİ bir kopyasını açmak olurdu. `isOwner` dalında
+// `canEdit` SORULMAZ: kişisel sahip süresi dolmuş ya da siparişe dönmüş
+// teklifte de bu kapılardan geçer (bugünkü ifade).
 
 /**
  * Parça ekleme/silme, yeniden fiyatlama ve yeniden teklif.
  *
- * Bugün `viewer.isOwner`a DENK (`quote-service.ts:1842` · `requote`).
+ * Kişisel sahipte `viewer.isOwner`a DENK (`quote-service.ts` · `requote`).
  * `viewer.canEdit` ile BİRLEŞTİRİLMEZ: `requote` süresi dolmuş ya da siparişe
- * dönmüş bir teklifte de çalışır ve tek koşulu sahipliktir.
- * T-2: `|| (viewer.isTeam && viewer.canEdit)` — takımın `viewer` rolü düzenlemez.
+ * dönmüş bir teklifte de çalışır ve kişisel sahipte tek koşulu sahipliktir.
+ * Takımın `viewer` rolü düzenlemez.
  */
 export function canEditTeamQuote(viewer: QuoteViewer): boolean {
-  return viewer.isOwner;
+  return viewer.isOwner || (viewer.isTeam && viewer.canEdit);
 }
 
 /**
- * Teklif sohbetine MÜŞTERİ olarak yazmak ve okundu damgası.
+ * Teklif sohbetine MÜŞTERİ olarak YAZMAK.
  *
- * Bugün `viewer.isOwner` (`api/quotes/[id]/messages/route.ts:27,36`). Admin
- * BİLEREK dışarıda: admin kendi ucundan yazar (`sender: 'admin'`); bu kapıyı
- * admin'e açmak müşteri adına mesaj yazmak olurdu.
+ * Admin BİLEREK dışarıda: admin kendi ucundan yazar (`sender: 'admin'`); bu
+ * kapıyı admin'e açmak müşteri adına mesaj yazmak olurdu.
+ *
+ * OKUMA bu kapıdan GEÇMEZ, `canSeeOwnerFields`ten geçer: takımın `viewer`
+ * rolü yazışmayı okur ama yazmaz (`messages` GET 200, POST 404). İki ucun
+ * ayrı yüklem okuması tam da bu asimetri içindir.
  */
 export function canChatOnQuote(viewer: QuoteViewer): boolean {
-  return viewer.isOwner;
+  return viewer.isOwner || (viewer.isTeam && viewer.canEdit);
 }
 
 /**
- * Paylaşım bağlantısı üretmek / döndürmek / iptal etmek.
- * Bugün `viewer.isOwner` (`quote-service.ts:1611` · `setShareToken`).
+ * Paylaşım bağlantısı üretmek / döndürmek / iptal etmek
+ * (`quote-service.ts` · `setShareToken`).
+ *
+ * "Bu teklifi bağlantısı olan HERKESE açıyorum" kararı salt okunur bir üyenin
+ * kararı değildir: takımın `viewer` rolü dışarıda.
  */
 export function canShareQuote(viewer: QuoteViewer): boolean {
-  return viewer.isOwner;
+  return viewer.isOwner || (viewer.isTeam && viewer.canEdit);
 }
 
 /**
  * Yalnız sahibe giden alanlar: `liveDraftReference`, `orderNumber`, `invoice`,
- * `shareUrl` (`quote-present.ts:377-378` ve `:395`).
+ * `shareUrl` (`quote-present.ts`) + sohbetin OKUNMASI ve belge bağlantısı.
  *
- * Bugün `viewer.isOwner`. Paylaşım izleyicisine bu alanlar GİTMEZ: hangi
- * firmanın teklifi olduğu ve hangi siparişe döndüğü, bağlantıyı eline geçiren
- * herkesin bilgisi değildir.
+ * Takımın DÖRT rolü de geçer (`canEdit` SORULMAZ): bu alanlar bir OKUMADIR ve
+ * tasarım §4 fatura bilgisini TAKIMIN bilgisi sayıyor (firma/VKN, kişisel veri
+ * değil). Kapıyı `canEdit` ile daraltmak, belgeye girebilen bir üyenin
+ * bağlantıyı GÖREMEDİĞİ hâli üretirdi — "yetkisi var ama ekranı yok".
+ *
+ * Paylaşım izleyicisine bu alanlar GİTMEZ: hangi firmanın teklifi olduğu ve
+ * hangi siparişe döndüğü, bağlantıyı eline geçiren herkesin bilgisi değildir.
  */
 export function canSeeOwnerFields(viewer: QuoteViewer): boolean {
-  return viewer.isOwner;
+  return viewer.isOwner || viewer.isTeam;
 }
 
 // ─── Para kapıları: rol + takım ayarı ──────────────────────────────────────
+//
+// Para kapısının İKİ GİRİŞİ var ve ikisi de AYNI çekirdeği okur:
+//
+//   • `canCheckoutQuote(viewer, team)` — rota, sayfa ve ekran (izleyici elde).
+//   • `teamRoleCanCheckout(role, team)` — SERVİS katmanı (`quote-checkout.ts`),
+//     çünkü orada `viewer` YOK: servis bir istek nesnesi ve oturum görmez,
+//     kimliği çağırandan alır.
+//
+// Çekirdeğin ayrı bir adı olması bir tercih değil zorunluluk: iki girişin tek
+// gövdeyi paylaşmaması, "member ödeyebilir mi" sorusunun uçta ve serviste iki
+// farklı cevap alabileceği gün demekti.
 
 /**
- * Teklifi ÖDEMEK. Varsayılan olarak DAR: `member_can_checkout` KAPALI doğar,
- * yani takım kurulduğunda ödemeyi yalnız owner/admin başlatabilir.
+ * Teklifi ÖDEMEK — ROL düzeyi. Varsayılan olarak DAR: `member_can_checkout`
+ * KAPALI doğar, yani takım kurulduğunda ödemeyi yalnız owner/admin başlatabilir.
  *
  * `viewer` HİÇBİR hâlde ödeyemez — takım ayarı açık olsa bile. Ayar `member`
  * rolü için bir anahtardır, bütün takım için değil.
  */
-export function canCheckoutQuote(
+export function teamRoleCanCheckout(
   role: TeamRole,
   team: { memberCanCheckout: boolean }
 ): boolean {
@@ -167,17 +207,44 @@ export function canCheckoutQuote(
 }
 
 /**
- * Bekleyen bir ödemeyi (açık taslağı) İPTAL etmek.
+ * Teklifi ÖDEMEK — İZLEYİCİ düzeyi; 22 kapının çağırdığı ifade.
+ *
+ * `team === null` (takımsız teklif, ya da üyeliği okunmamış istek) iken ifade
+ * BUGÜNKÜNE DENK: yalnız kişisel sahip ödeyebilir. `team`in ZORUNLU olması
+ * fail-closed bir karardır — rolü okuyup takım satırını okumamış bir çağıran
+ * `member_can_checkout`u varsayılanıyla uydurmuş olurdu.
+ *
+ * ANONİM sahip bu kapıdan geçer ama uç katmanı onu ayrıca durdurur
+ * (`quote_unclaimed`, 409): ödediği siparişin bağlanacağı bir hesabı yok.
+ * Kapının kendisi bunu bilmez; hesabın varlığı bir SATIR gerçeğidir
+ * (`quotes.user_id`), izleyicinin hakkı değil.
+ */
+export function canCheckoutQuote(
+  viewer: QuoteViewer,
+  team: { memberCanCheckout: boolean } | null
+): boolean {
+  if (viewer.isOwner) return true;
+  if (!viewer.isTeam || viewer.teamRole === null || team === null) return false;
+  return teamRoleCanCheckout(viewer.teamRole, team);
+}
+
+/**
+ * Bekleyen bir ödemeyi (açık taslağı) İPTAL etmek — ROL düzeyi.
  *
  * `member` yalnız KENDİ başlattığını iptal eder: bir meslektaşın havale
  * dekontunu beklediği taslağı iptal etmek, ödenmiş bir işi yarıda kesmek
  * olabilir. owner/admin her taslağı iptal eder (takımın parasının sorumlusu
  * onlar), `viewer` hiçbirini.
  *
+ * `member_can_checkout` BU KAPIDA SORULMAZ ve imza takımı hiç ALMAZ: ayar
+ * ödeme BAŞLATMANIN anahtarıdır. Ayarı sonradan kapatılan bir takımda, kendi
+ * taslağını iptal edemeyen bir üye hem ödeyemez hem düzenleyemez hâlde kalırdı
+ * (teklif bekleyen taslak dururken salt okunurdur).
+ *
  * `draftUserId` null = taslağı kim başlattığı bilinmiyor → `member` için kapı
  * KAPALI (fail-closed).
  */
-export function canCancelCheckout(
+export function teamRoleCanCancelCheckout(
   role: TeamRole,
   draftUserId: string | null,
   actorUserId: string
@@ -185,6 +252,25 @@ export function canCancelCheckout(
   if (role === "owner" || role === "admin") return true;
   if (role !== "member") return false;
   return draftUserId !== null && draftUserId === actorUserId;
+}
+
+/**
+ * Bekleyen ödemeyi İPTAL etmek — İZLEYİCİ düzeyi.
+ *
+ * Kişisel sahip bugün olduğu gibi geçer (taslak onun teklifinde açıldı);
+ * takım dalında karar taslağın SAHİBİNE bağlı, o yüzden `draftUserId`
+ * zorunludur. Uç katmanı taslağı okumadan KABA bir kapı tutar ve kesin karar
+ * `quote-checkout.ts`in İÇİNDE, taslak satırı AYNI işlemde okunduktan sonra
+ * verilir (gerekçe orada).
+ */
+export function canCancelCheckout(
+  viewer: QuoteViewer,
+  draftUserId: string | null,
+  actorUserId: string
+): boolean {
+  if (viewer.isOwner) return true;
+  if (!viewer.isTeam || viewer.teamRole === null) return false;
+  return teamRoleCanCancelCheckout(viewer.teamRole, draftUserId, actorUserId);
 }
 
 // ─── Teklifi takıma bağlamak / ayırmak ─────────────────────────────────────

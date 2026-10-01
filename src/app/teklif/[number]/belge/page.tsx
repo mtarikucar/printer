@@ -14,11 +14,16 @@ import "./belge.css";
 /**
  * Teklif belgesi — `/teklif/T-000123/belge`.
  *
- * Erişim çalışma alanından DAHA DAR: sahip (giriş yapmış ya da anonim) ve
- * paylaşım bağlantısını GİRİŞ YAPARAK açan ziyaretçi. Oturumsuz paylaşım
- * ziyaretçisi çalışma alanına geri gönderilir — belge fiyat kapısının
+ * Erişim çalışma alanından DAHA DAR: sahip (giriş yapmış ya da anonim), TAKIM
+ * ÜYESİ (0072) ve paylaşım bağlantısını GİRİŞ YAPARAK açan ziyaretçi. Oturumsuz
+ * paylaşım ziyaretçisi çalışma alanına geri gönderilir — belge fiyat kapısının
  * arkasındaki tek çıktıdır ve fiyatsız bir "proforma" kimseye bir şey
  * anlatmaz; çalışma alanında ise kapıyı açan modal vardır.
+ *
+ * Takımın DÖRT rolü de girer: proforma teklifin kendisidir ve onu satın alma
+ * birimine götürecek olan üye ona ULAŞMAK zorunda. Bağlantısı da aynı yüklemle
+ * çizilir (`quote-header.tsx` · `canSeeOwnerFields`), yoksa girebilen ama
+ * linki göremeyen bir üye kalırdı.
  *
  * Fiyat kapısı ayrıca aşağıda tekrar UYGULANMAZ: `loadPresentedQuote` fiyat
  * alanlarını zaten ayıklar ve belge onları bulamazsa sütunları hiç çizmez.
@@ -55,7 +60,8 @@ export default async function QuoteDocumentPage({
   const { viewer } = access;
   // Admin de belgeyi görür: teklifi zaten fiyatlarıyla açabiliyor ve manuel
   // fiyatlama sırasında müşterinin eline geçecek çıktıyı okuması gerekir.
-  const allowed = viewer.isOwner || viewer.isAdmin || (viewer.isShare && viewer.canSeePrices);
+  const allowed =
+    viewer.isOwner || viewer.isAdmin || viewer.isTeam || (viewer.isShare && viewer.canSeePrices);
   if (!allowed) {
     redirect(
       `/teklif/${encodeURIComponent(number)}${

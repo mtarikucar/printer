@@ -1,9 +1,14 @@
 /**
  * `GET|POST /api/quotes/[id]/messages` — teklif sohbeti (müşteri tarafı).
  *
- * YALNIZ SAHİP: paylaşım bağlantısını alan kişi sohbeti okuyamaz da yazamaz da
- * — konuşma müşteri ile ekip arasındadır ve içinde fiyat pazarlığı geçer.
+ * PAYLAŞIM BAĞLANTISI SOHBETE GİRMEZ: alan kişi ne okuyabilir ne yazabilir —
+ * konuşma müşteri ile ekip arasındadır ve içinde fiyat pazarlığı geçer.
  * Gönderenin rolü SUNUCUDA sabittir ("customer"); gövdeden rol okunmaz.
+ *
+ * GET ile POST ASİMETRİKTİR (0072): okuma `canSeeOwnerFields`, yazma
+ * `canChatOnQuote`. Takımın salt okunur `viewer` rolü yazışmayı OKUR
+ * (meslektaşının ekiple ne konuştuğunu bilmeden teklifi değerlendiremez) ama
+ * takımın adına YAZAMAZ. İki uçta tek yüklem okunsa bu ayrım yazılamazdı.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import {
@@ -11,6 +16,7 @@ import {
   CUSTOMER_READ_FAILED_ERROR,
   handleRouteFailure,
 } from "@/lib/api/route-error";
+import { canChatOnQuote, canSeeOwnerFields } from "@/lib/config/quote-team";
 import { createQuoteMessage, listQuoteMessages } from "@/lib/services/quote-chat";
 import { QuoteServiceError } from "@/lib/services/quote-service";
 import { extractClientIp, rateLimitAsync } from "@/lib/services/rate-limit";
@@ -24,7 +30,8 @@ async function handleGET(request: NextRequest, ctx: Ctx): Promise<NextResponse> 
   const { id } = await ctx.params;
   const found = await accessOr404(request, id);
   if ("response" in found) return found.response;
-  if (!found.access.viewer.isOwner) return quoteNotFound();
+  // OKUMA: takımın dört rolü de geçer (`canSeeOwnerFields`).
+  if (!canSeeOwnerFields(found.access.viewer)) return quoteNotFound();
 
   return NextResponse.json(await listQuoteMessages(found.access.quote.id, "customer"));
 }
@@ -33,7 +40,10 @@ async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse>
   const { id } = await ctx.params;
   const found = await accessOr404(request, id);
   if ("response" in found) return found.response;
-  if (!found.access.viewer.isOwner) return quoteNotFound();
+  // YAZMA: takımın `viewer` rolü BURADAN GEÇMEZ — cevap biçimi bugünküyle aynı
+  // (404 `quoteNotFound`), yani uç hiçbir hakkı "var ama sana kapalı" diye
+  // duyurmaz.
+  if (!canChatOnQuote(found.access.viewer)) return quoteNotFound();
 
   const limit = await rateLimitAsync(
     `quote:message:ip:${extractClientIp(request)}`,

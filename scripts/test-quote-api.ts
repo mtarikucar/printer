@@ -20,6 +20,7 @@ import { STEP_TESSELLATION } from "../src/lib/config/quote-step";
 import {
   canChatOnQuote,
   canCheckoutQuote,
+  canSeeOwnerFields,
   canShareQuote,
   type TeamRole,
 } from "../src/lib/config/quote-team";
@@ -614,10 +615,15 @@ test("(K3) `viewer` rolü HİÇBİR ŞEYİ değiştiremez", () => {
   }
 
   // Salt-okunur rol GERÇEKTEN salt okunur: para, sohbet ve paylaşım kapıları
-  // da kapalı (`src/lib/config/quote-team.ts`, T-1).
-  assert.equal(canCheckoutQuote("viewer", { memberCanCheckout: true }), false);
+  // da kapalı (`src/lib/config/quote-team.ts`). T-4 bu kapıları canlı
+  // çağrılara bağladı, yani iddia artık GERÇEK ifadeyi ölçüyor — takım ayarı
+  // AÇIK olsa bile `viewer` rolü ödeyemez.
+  assert.equal(canCheckoutQuote(readOnly!, { memberCanCheckout: true }), false);
   assert.equal(canChatOnQuote(readOnly!), false);
   assert.equal(canShareQuote(readOnly!), false);
+  // …ama OKUR: sohbetin GET'i, belge bağlantısı ve sahibe giden alanlar dört
+  // rolde de açık (`canSeeOwnerFields`). "Yazamaz" ile "göremez" ayrı iki şey.
+  assert.equal(canSeeOwnerFields(readOnly!), true);
 });
 
 test("takım üyesi PAYLAŞIM bağlantısıyla gelse de kendi işinde salt okunur kalmaz", () => {

@@ -1600,6 +1600,262 @@ async function main() {
       }
     });
 
+    // ─── T-4 · TAKIM: teklifin doğuşu, listeler ve parça kütüphanesi ───────
+    //
+    // Buradan aşağısı GERÇEK bir takım satırıyla koşar. Yukarıdaki onlarca
+    // liste/`importParts`/`requote` iddiası DEĞİŞMEDEN yeşil kaldı ve bu
+    // tesadüf değil: `quote_teams_enabled` üretimdeki hâliyle (KAPALI) duruyor,
+    // yani `teamScope` ikinci dalı hiç kurmuyor. Birincil kısıtın liste
+    // tarafındaki kanıtı o değişmemiş iddialardır; aşağıdaki vakalar bayrak
+    // AÇIKKEN ne olduğunu ölçüyor.
+    const teamOwnerId = randomUUID();
+    const teamMemberId = randomUUID();
+    const otherTeamUserId = randomUUID();
+    let teamId = "";
+    let otherTeamId = "";
+
+    await test("takım fikstürü: iki üyeli bir takım ve AYRI bir ikinci takım", async () => {
+      for (const [id, label] of [
+        [teamOwnerId, "sahip"],
+        [teamMemberId, "uye"],
+        [otherTeamUserId, "obur"],
+      ] as const) {
+        await admin.query("INSERT INTO users (id, email, full_name) VALUES ($1, $2, $3)", [
+          id,
+          `takim-${label}-${id}@ornek.test`,
+          `QA ${label}`,
+        ]);
+      }
+      teamId = (
+        await admin.query(
+          `INSERT INTO customer_teams (name, owner_user_id, kvkk_notice_version)
+             VALUES ('QA Mühendislik A.Ş.', $1, '2026-09-22') RETURNING id`,
+          [teamOwnerId]
+        )
+      ).rows[0].id as string;
+      otherTeamId = (
+        await admin.query(
+          `INSERT INTO customer_teams (name, owner_user_id, kvkk_notice_version)
+             VALUES ('Rakip Mühendislik', $1, '2026-09-22') RETURNING id`,
+          [otherTeamUserId]
+        )
+      ).rows[0].id as string;
+      await admin.query(
+        `INSERT INTO customer_team_members (team_id, user_id, role)
+           VALUES ($1, $2, 'owner'), ($1, $3, 'member'), ($4, $5, 'owner')`,
+        [teamId, teamOwnerId, teamMemberId, otherTeamId, otherTeamUserId]
+      );
+      assert.ok(teamId && otherTeamId);
+    });
+
+    await test("createQuote: takımı olan müşterinin teklifi TAKIM teklifi doğar", async () => {
+      // Bayrak KAPALIYKEN kolon null kalır: kısa devrenin kanıtı
+      // (`resolveUserTeam` bayrağı üyelikten ÖNCE okuyor).
+      const closed = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      assert.equal(
+        (await admin.query("SELECT team_id FROM quotes WHERE id = $1", [closed.id])).rows[0]
+          .team_id,
+        null,
+        "bayrak kapalıyken teklif takıma bağlandı"
+      );
+
+      await setFlag("quote_teams_enabled", true, "test");
+      const open = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      assert.equal(
+        (await admin.query("SELECT team_id FROM quotes WHERE id = $1", [open.id])).rows[0].team_id,
+        teamId,
+        "takım teklifi takımsız doğdu"
+      );
+
+      // ANONİM teklif takıma BAĞLANMAZ (ve bağlanamaz: CHECK reddeder).
+      const anon = await createQuote({
+        userId: null,
+        anonymousId: randomUUID(),
+        termsAccepted: true,
+      });
+      assert.equal(
+        (await admin.query("SELECT team_id FROM quotes WHERE id = $1", [anon.id])).rows[0].team_id,
+        null
+      );
+    });
+
+    await test("listeler takım satırlarını getirir; `teamName` + `ownerName` dolu", async () => {
+      // Teklifi SAHİP açtı, listeyi ÜYE okuyor: "kim açtı" kolonunun tek
+      // anlamlı vakası budur.
+      const owned = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      const mine = await createQuote({
+        userId: teamMemberId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      const { items } = await listCustomerQuotes(teamMemberId, 1);
+      const numbers = items.map((q) => q.number);
+      assert.ok(numbers.includes(owned.number), "üye takımın teklifini görmüyor");
+      assert.ok(numbers.includes(mine.number), "üye kendi teklifini görmüyor");
+      const row = items.find((q) => q.number === owned.number)!;
+      assert.equal(row.teamName, "QA Mühendislik A.Ş.");
+      assert.equal(row.ownerName, "QA sahip", "kim açtı kolonu boş");
+      // BAŞKA bir takımın teklifi bu listeye GİRMEZ.
+      const rival = await createQuote({
+        userId: otherTeamUserId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      assert.ok(!numbers.includes(rival.number), "başka takımın teklifi listeye girdi");
+    });
+
+    await test("TAKIMSIZ kullanıcının listesi bayrak AÇIKKEN de bugünkü hâlinde", async () => {
+      // Birincil kısıt: bayrağın açık olması, takımı OLMAYAN müşterinin
+      // sonucunu oynatmaz. `userId` yukarıdaki onlarca vakanın sahibidir ve
+      // takımı yok.
+      const before = await listCustomerQuotes(userId, 1);
+      const beforeParts = await listCustomerParts(userId, 1);
+      assert.ok(before.items.length > 0, "fikstür boş: vaka hiçbir şey ölçmez");
+      await setFlag("quote_teams_enabled", false, "test");
+      const after = await listCustomerQuotes(userId, 1);
+      const afterParts = await listCustomerParts(userId, 1);
+      await setFlag("quote_teams_enabled", true, "test");
+      // Satır sayısı, SIRA ve her alan BİREBİR aynı (`deepEqual` tam nesne).
+      assert.deepEqual(after, before, "bayrak takımsız müşterinin listesini oynattı");
+      assert.deepEqual(afterParts, beforeParts, "bayrak takımsız kütüphaneyi oynattı");
+      assert.equal(
+        before.items.every((q) => q.teamName === null && q.ownerName === null),
+        true,
+        "takımsız listede takım kolonları dolu geldi"
+      );
+      // KAPSAM GERÇEKTEN DAR: takımsız kullanıcının listesinde BAŞKASININ
+      // teklifi yok. Önce/sonra karşılaştırması bunu TEK BAŞINA ölçemez (iki
+      // dal da aynı şekilde bozulabilir); `eq(team_id, NULL)` yerine
+      // `IS NULL` yazan bir kapsam, takımsız her teklifi — anonim olanlar ve
+      // başka müşterilerin teklifleri dahil — bu listeye dökerdi.
+      const ownRows = await admin.query(
+        "SELECT number FROM quotes WHERE user_id = $1",
+        [userId]
+      );
+      const ownNumbers = new Set(ownRows.rows.map((r: { number: string }) => r.number));
+      const foreign = before.items.filter((q) => !ownNumbers.has(q.number));
+      assert.deepEqual(foreign, [], "takımsız kullanıcının listesine YABANCI teklif girdi");
+      const foreignParts = beforeParts.items.filter((part) => !ownNumbers.has(part.quoteNumber));
+      assert.deepEqual(foreignParts, [], "takımsız kütüphaneye YABANCI parça girdi");
+    });
+
+    await test("listCustomerParts HAM SQL'i: takımın parçası gelir, rakibin GELMEZ", async () => {
+      // `tsc` bu yolda hiçbir şey ölçmüyor (ham SQL), vaka o yüzden gerçek
+      // satırlarla kuruluyor.
+      const teamQuote = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      const rivalQuote = await createQuote({
+        userId: otherTeamUserId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      // TAKIMIN parçası GERÇEK yoldan eklenir (sahnelenmiş dosya → parça):
+      // `importParts` dosyayı diskten KOPYALIYOR, yani yalnız satır yazmak
+      // vakayı kütüphane okumasının ötesinde taşımazdı.
+      const teamUpload = await stage("takim-parca", uploadOwnerKey({ userId: teamOwnerId }));
+      const { partId: teamPart } = await addPartFromUpload(
+        await loadAccess(teamQuote.id, teamOwnerId),
+        { uploadId: teamUpload, fileName: "takim-braket.stl" }
+      );
+      await admin.query("UPDATE quote_parts SET name = 'Takım parçası' WHERE id = $1", [teamPart]);
+      // RAKİBİN parçası yalnız SATIR olarak durur: olumsuz vaka dosyaya hiç
+      // ulaşmadan, kaynak sahipliği sorgusunda 404 ile düşmek ZORUNDA.
+      await admin.query(
+        `INSERT INTO quote_parts
+           (quote_id, name, file_name, source_key, source_format, source_bytes, source_sha256,
+            technology_key, material_key, color_key, finish_key)
+         VALUES ($1, 'Rakip parçası', 'braket.stl', $2, 'stl', 2048, $3, 'fdm', 'pla', 'beyaz', 'ham')`,
+        [rivalQuote.id, `quote-parts/${"d".repeat(64)}/source.stl`, "d".repeat(64)]
+      );
+
+      const { items } = await listCustomerParts(teamMemberId, 1);
+      assert.ok(
+        items.some((p) => p.partId === teamPart),
+        "üye takım teklifinin parçasını göremiyor"
+      );
+      assert.ok(
+        !items.some((p) => p.name === "Rakip parçası"),
+        "başka takımın parçası kütüphaneye girdi"
+      );
+    });
+
+    await test("importParts: üye takımın parçasını aktarır, RAKİBİN parçasını aktaramaz", async () => {
+      const target = await createQuote({
+        userId: teamMemberId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      const [teamSource] = await db
+        .select({ id: quoteParts.id })
+        .from(quoteParts)
+        .where(eq(quoteParts.name, "Takım parçası"))
+        .limit(1);
+      const [rivalSource] = await db
+        .select({ id: quoteParts.id })
+        .from(quoteParts)
+        .where(eq(quoteParts.name, "Rakip parçası"))
+        .limit(1);
+
+      const imported = await importParts(
+        await loadAccess(target.id, teamMemberId),
+        [teamSource.id],
+        teamMemberId
+      );
+      assert.equal(imported, 1, "üye takımın parçasını aktaramadı");
+      await assert.rejects(
+        importParts(await loadAccess(target.id, teamMemberId), [rivalSource.id], teamMemberId),
+        (err: unknown) =>
+          err instanceof QuoteServiceError && err.status === 404 && err.code === "part_not_found"
+      );
+      assert.equal((await loadQuoteParts(target.id)).length, 1, "reddedilen istek satır bıraktı");
+    });
+
+    await test("requote yeni teklifi AYNI takımla doğurur (`inheritedQuoteFields`)", async () => {
+      // Tek satırın kanıtı: unutulursa yeniden fiyatlanan teklif takımdan
+      // DÜŞER ve kimse bir hata görmez.
+      const source = await createQuote({
+        userId: teamOwnerId,
+        anonymousId: null,
+        termsAccepted: true,
+      });
+      const [sourceRow] = await db.select().from(quotes).where(eq(quotes.id, source.id)).limit(1);
+      assert.equal(sourceRow.teamId, teamId, "kaynak teklif takıma bağlı doğmadı");
+      const uploadId = await stage("takim-requote", uploadOwnerKey({ userId: teamOwnerId }));
+      const { partId } = await addPartFromUpload(await loadAccess(source.id, teamOwnerId), {
+        uploadId,
+        fileName: "braket.stl",
+      });
+      await markAnalyzed(partId);
+
+      const created = await requote(await loadAccess(source.id, teamOwnerId));
+      const [fresh] = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.number, created.number))
+        .limit(1);
+      assert.equal(fresh.teamId, teamId, "yeniden teklif TAKIMDAN DÜŞTÜ");
+      assert.equal(fresh.userId, teamOwnerId, "yeni teklifin sahibi değişti");
+    });
+
+    // Üretimdeki çıkış durumu KAPALI: sonraki turlar bayat bir Redis
+    // önbelleğinden açık bayrak devralmasın.
+    await setFlag("quote_teams_enabled", false, "test");
+
     await queue.obliterate({ force: true }).catch(() => {});
     console.log(`${checks} quote service DB checks passed`);
   } finally {

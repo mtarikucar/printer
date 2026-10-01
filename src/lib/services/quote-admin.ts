@@ -30,6 +30,7 @@
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  customerTeams,
   orders,
   quoteAdminActions,
   quoteParts,
@@ -468,10 +469,15 @@ export async function listAdminQuotes(args: {
       updatedAt: quotes.updatedAt,
       expiresAt: quotes.expiresAt,
       orderNumber: orders.orderNumber,
+      // TAKIM ADI (0072): aynı firmanın üç mühendisinden gelen üç teklifi
+      // birbirine bağlayan tek alan. `leftJoin` çünkü teklifler ezici
+      // çoğunlukla kişiseldir ve `team_id` null satırlar listede KALMALI.
+      teamName: customerTeams.name,
     })
     .from(quotes)
     .leftJoin(users, eq(users.id, quotes.userId))
     .leftJoin(orders, eq(orders.id, quotes.orderId))
+    .leftJoin(customerTeams, eq(customerTeams.id, quotes.teamId))
     .where(where.length > 0 ? and(...where) : undefined)
     // "En son ne oldu" sırası. Düz `review_requested_at DESC` olmaz: Postgres
     // DESC'te NULL'ları ÖNE koyar, yani hiç inceleme istenmemiş taslaklar
@@ -511,6 +517,7 @@ export async function listAdminQuotes(args: {
         expiresAt: r.expiresAt.toISOString(),
         expired: r.expiresAt.getTime() <= now.getTime(),
         orderNumber: r.orderNumber,
+        teamName: r.teamName,
       };
     }),
   };

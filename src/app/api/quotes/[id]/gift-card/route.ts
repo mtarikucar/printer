@@ -6,10 +6,16 @@
  * kodu girmesi bir ödeme yükümlülüğü doğurmaz, bu yüzden bakiyesine de
  * dokunulmaz.
  *
- * Kapılar `checkout` ucunun AYNISI (oturum → sahiplik → gövde) ve para
+ * Kapılar `checkout` ucunun AYNISI (oturum → ÖDEME YETKİSİ → gövde) ve para
  * hesabının tamamı `quote-checkout.ts`tedir: ekranın gördüğü rakam ile tahsil
  * edilen rakamın aynı zincirden çıkması bu özelliğin tek gerçek şartı, ve iki
  * ayrı hesap kopyası onu bir gün bozardı.
+ *
+ * YETKİ ÖLÇÜSÜ "ÖDEYEBİLEN"DİR, "GÖREBİLEN" DEĞİL (0072): bu uç `computeQuote`
+ * sonucunu döndürüyor (bakiye, karşılanan tutar, havale indirimi), yani bir
+ * FİYAT yüzeyidir. Takımda ödeme yetkisi olmayan bir üyeye kart ön izlemesi
+ * göstermenin işlevi yok — göstereceği tek şey, basamayacağı düğmenin
+ * arkasındaki rakamlar olurdu.
  *
  * ÖZELLİK BAYRAĞI (`quote_gift_card_enabled`) kapalıyken uç YOKTUR (404):
  * kapalı bir satış yüzeyinin varlığını duyurmanın anlamı yok. Bayrak kapısı
@@ -20,6 +26,7 @@ import {
   CUSTOMER_PAYMENT_FAILED_ERROR,
   handleRouteFailure,
 } from "@/lib/api/route-error";
+import { canCheckoutQuote } from "@/lib/config/quote-team";
 import { getSessionUser } from "@/lib/services/customer-auth";
 import { isFlagEnabled } from "@/lib/services/flags";
 import { previewQuoteGiftCard } from "@/lib/services/quote-checkout";
@@ -48,11 +55,13 @@ async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse>
   if ("response" in found) return found.response;
   const { quote, viewer } = found.access;
 
-  // Anonim çerez sahibi de "sahip"tir ama fiyat kapısını geçmemiştir: ön izleme
-  // FİYAT döner, yani `checkout` ile aynı sahiplik ölçüsünü ister.
-  if (!viewer.isOwner || quote.userId === null || quote.userId !== session.userId) {
+  // Anonim çerez sahibi de "sahip"tir ama fiyat kapısını geçmemiştir ve ödediği
+  // siparişin bağlanacağı bir hesabı yoktur: ön izleme FİYAT döner, yani
+  // `checkout` ile AYNI ölçüyü ister (`quote.userId === null` dalı orada 409
+  // `quote_unclaimed`; burada ön izlemenin söyleyecek ayrı bir cümlesi yok).
+  if (quote.userId === null || !canCheckoutQuote(viewer, found.access.team)) {
     return NextResponse.json(
-      { error: "Bu teklifi yalnız sahibi ödeyebilir.", code: "not_owner" },
+      { error: "Bu teklifi ödeme yetkiniz yok.", code: "not_owner" },
       { status: 403 }
     );
   }
@@ -67,9 +76,14 @@ async function handlePOST(request: NextRequest, ctx: Ctx): Promise<NextResponse>
 
   const preview = await previewQuoteGiftCard({
     quoteId: quote.id,
+    // Oran limiti ve ödeme yetkisi ÖDEYECEK kişiye bağlıdır (değişmez 3).
     userId: session.userId,
     code: parsed.data.code,
     req: request,
+    actor: {
+      role: found.access.team?.role ?? null,
+      memberCanCheckout: found.access.team?.memberCanCheckout ?? false,
+    },
   });
   return NextResponse.json(preview);
 }

@@ -7,6 +7,7 @@ import type {
   PresentedQuote,
   ReviewKind,
 } from "@/lib/config/quote-types";
+import { canSeeOwnerFields, canShareQuote } from "@/lib/config/quote-team";
 import { track } from "@/lib/analytics/client";
 import { QuoteBulkBar } from "@/components/quote/bulk-bar";
 import {
@@ -58,8 +59,8 @@ import { UploadError } from "@/lib/upload-with-progress";
  * yoktur (`presentQuote`).
  *
  * Canlılık iki kanaldan gelir:
- *  - SSE (`/api/realtime/quote/<id>`) — yalnız SAHİBE açık; paylaşım
- *    bağlantısıyla gelen izleyicinin akışı yoktur (tasarım gereği).
+ *  - SSE (`/api/realtime/quote/<id>`) — sahibe ve TAKIM ÜYELERİNE açık;
+ *    paylaşım bağlantısıyla gelen izleyicinin akışı yoktur (tasarım gereği).
  *  - 3 sn'lik yoklama — analizi süren parça varken, ve paylaşım görünümünde
  *    tek canlılık kaynağı olduğu için orada da. Sekme arka plandayken
  *    yoklama atlanır: kimsenin bakmadığı bir sayfa sunucuyu meşgul etmemeli.
@@ -169,9 +170,14 @@ export function createResponseOrder(): QuoteResponseOrder {
 /**
  * Başlık eylemleri: teklif sohbeti ve paylaşım bağlantısı.
  *
- * İkisi de YALNIZ sahibindir — paylaşım bağlantısıyla gelen ziyaretçi ne
- * yazışmayı okuyabilir ne de bağlantıyı başkasına devredebilir; uçlar da bunu
- * böyle uyguluyor (`messages` sahiplik arar, `share` düzenleme hakkı arar).
+ * Paylaşım bağlantısıyla gelen ziyaretçi ikisini de göremez — ne yazışmayı
+ * okuyabilir ne de bağlantıyı başkasına devredebilir.
+ *
+ * KAPILAR UÇLARLA AYNI YÜKLEMİ OKUR (0072) ve İKİSİ AYNI DEĞİL: yuvanın
+ * kendisi `canSeeOwnerFields` (takımın dört rolü de yazışmayı OKUR), PAYLAŞ
+ * düğmesi `canShareQuote` (salt okunur `viewer` rolü bağlantı üretemez —
+ * `setShareToken` onu 403 ile reddediyor, yani düğmeyi göstermek ölü bir düğme
+ * olurdu).
  */
 function QuoteHeaderActions({
   quote,
@@ -183,24 +189,28 @@ function QuoteHeaderActions({
   const d = useDictionary();
   const [shareOpen, setShareOpen] = useState(false);
 
-  if (!quote.viewer.isOwner) return null;
+  if (!canSeeOwnerFields(quote.viewer)) return null;
 
   return (
     <>
       <QuoteChatPanel quote={quote} />
-      <button
-        type="button"
-        onClick={() => setShareOpen(true)}
-        className="btn-secondary !px-4 !py-2 text-xs"
-      >
-        {d["instantQuote.workspace.share"]}
-      </button>
-      <QuoteShareDialog
-        open={shareOpen}
-        quote={quote}
-        onClose={() => setShareOpen(false)}
-        onQuoteChanged={onQuoteChanged}
-      />
+      {canShareQuote(quote.viewer) && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            className="btn-secondary !px-4 !py-2 text-xs"
+          >
+            {d["instantQuote.workspace.share"]}
+          </button>
+          <QuoteShareDialog
+            open={shareOpen}
+            quote={quote}
+            onClose={() => setShareOpen(false)}
+            onQuoteChanged={onQuoteChanged}
+          />
+        </>
+      )}
     </>
   );
 }
@@ -691,9 +701,12 @@ export function QuoteWorkspaceClient({
         </div>
       )}
 
-      {/* SSE yalnız sahibinde: paylaşım izleyicisi bu uçtan 404 alır ve
-          tarayıcı sonsuza dek yeniden bağlanmaya çalışırdı. */}
-      {viewer.isOwner && (
+      {/* SSE sahibinde ve TAKIM ÜYELERİNDE: paylaşım izleyicisi bu uçtan 404
+          alır ve tarayıcı sonsuza dek yeniden bağlanmaya çalışırdı. Kapı
+          `canSeeOwnerFields`tır çünkü canlı akış ucunun kendi ifadesi de rolü
+          sormuyor (`api/realtime/quote/[id]/route.ts`): "şu parça hazır oldu"
+          bilgisi takımın dört rolünün de işi. */}
+      {canSeeOwnerFields(viewer) && (
         <RealtimeProvider url={quoteRealtimeUrl(quoteId)}>
           <QuoteRealtimeRefresher quoteId={quoteId} onChanged={() => void refresh()} />
         </RealtimeProvider>

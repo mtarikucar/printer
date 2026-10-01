@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSyncExternalStore, type JSX, type ReactNode } from "react";
 import { Card, Textarea } from "@/components/ui";
 import { KDV_RATE_BPS } from "@/lib/config/prices";
+import { canCheckoutQuote } from "@/lib/config/quote-team";
 import type {
   DisplayCurrency,
   PresentedQuote,
@@ -343,7 +344,7 @@ export function QuoteSummary({
             <button type="button" onClick={onRequestPrices} className="btn-primary w-full">
               {d["instantQuote.summary.checkout"]}
             </button>
-          ) : readiness.canCheckout && viewer.isOwner ? (
+          ) : readiness.canCheckout && canCheckoutQuote(viewer, quote.team ?? null) ? (
             <Link
               href={`/teklif/${encodeURIComponent(quote.number)}/odeme`}
               className="btn-primary block w-full text-center"
@@ -358,8 +359,14 @@ export function QuoteSummary({
 
           {/* Sebepsiz kapalı düğme müşteriye yapacak tek şey bırakır: telefon
               etmek. Engeller listesi teklifin kendi sebeplerini zaten yazıyor;
-              burada yazılan izleyiciye özgü olanı. */}
-          {viewer.canSeePrices && !viewer.isOwner && (
+              burada yazılan izleyiciye özgü olanı.
+
+              KOŞUL YUKARIDAKİ DÜĞMEYLE AYNI YÜKLEMİN DEĞİLİDİR ve öyle
+              kalmalı: ikisi ayrışırsa ekran kendi kendini yalanlar — ödeme
+              yetkisi OLAN bir takım admini açık düğmenin altında
+              "ödeyemezsin" cümlesini okur (0072'nin en olası sessiz
+              kırılması). */}
+          {viewer.canSeePrices && !canCheckoutQuote(viewer, quote.team ?? null) && (
             <p className="text-center text-xs text-text-muted">
               {d["instantQuote.summary.ownerOnlyCheckout"]}
             </p>

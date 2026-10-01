@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type JSX, type ReactNode } from "react";
+import { canEditTeamQuote } from "@/lib/config/quote-team";
 import type { PresentedQuote } from "@/lib/config/quote-types";
 import { useDictionary } from "@/lib/i18n/locale-context";
 import {
@@ -172,8 +173,13 @@ export function QuoteBanners({
         key="ordered"
         tone="accent"
         message={d["instantQuote.workspace.banner.ordered"]}
-        // `orderNumber` yalnız sahibin gövdesinde vardır; paylaşım izleyicisi
-        // takip sayfasına (oturumsuz açılır) götürülmez.
+        // `orderNumber` yalnız `canSeeOwnerFields` geçen izleyicinin
+        // gövdesinde vardır; paylaşım izleyicisi takip sayfasına (oturumsuz
+        // açılır) götürülmez.
+        //
+        // "Yeniden teklif al" bir DÜZENLEMEDİR (`canEditTeamQuote`, uçla aynı
+        // yüklem): takımda düzenleyebilen üç rol görür, salt okunur `viewer`
+        // rolü görmez — servis onu 403 ile reddediyor.
         action={actionRow(
           quote.orderNumber
             ? actionLink(
@@ -181,7 +187,7 @@ export function QuoteBanners({
                 `/track/${encodeURIComponent(quote.orderNumber)}`
               )
             : null,
-          quote.viewer.isOwner ? requote() : null
+          canEditTeamQuote(quote.viewer) ? requote() : null
         )}
       />
     );
@@ -205,7 +211,7 @@ export function QuoteBanners({
         message={d["instantQuote.workspace.banner.expired"]}
         action={actionRow(
           quote.viewer.canEdit ? reprice() : null,
-          quote.viewer.isOwner ? requote() : null
+          canEditTeamQuote(quote.viewer) ? requote() : null
         )}
       />
     );

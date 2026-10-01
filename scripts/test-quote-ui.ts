@@ -5006,3 +5006,48 @@ test("KOLON: HERHANGİ bir satırda veri varsa iki kolon daha çizilir", () => {
   assert.ok(html.includes("QA Mühendislik A.Ş."), "takım adı satıra yazılmamış");
   assert.ok(html.includes("Ayşe Sahip"), "açan kişi satıra yazılmamış");
 });
+
+test("TAKIM EKRANI: davet formu Turnstile jetonunu GÖNDERİYOR", () => {
+  // `Turnstile` bileşeni SITE_KEY yokken `null` döner (dev/test), yani markup
+  // üzerinden ölçülemez. Kapı bu yüzden KAYNAKTAN pinlenir — ucun kendi
+  // tarafındaki `verifyTurnstileToken` iddiası `test-customer-team-api.ts`te.
+  const source = fs.readFileSync(path.resolve("src/app/account/takim/team-client.tsx"), "utf8");
+  assert.match(source, /from "@\/components\/turnstile"/, "Turnstile import edilmemiş");
+  assert.match(source, /<Turnstile ref=\{turnstileRef\} \/>/, "Turnstile çizilmemiş");
+  assert.match(source, /turnstileRef\.current\?\.getToken\(\)/, "jeton alınmıyor");
+  assert.match(source, /turnstileToken: token/, "jeton gövdeye yazılmıyor");
+});
+
+test("TAKIM: KVKK onay kutusu TAM İKİ yerde — kurma formu ve davet kabulü", () => {
+  // Tasarım §8'in KVKK listesi: (1) takım kurma formu, (2) davet kabul ekranı,
+  // (3) teklifi takıma bağlama UYARISI (onay kutusu değil, `window.confirm`).
+  // DAVET GÖNDERME formunda onay kutusu YOK ve bu bilinçli: `POST
+  // /api/customer/team/invites` şeması `kvkkConsent` ALMIYOR, yani ekrandaki
+  // bir kutu ucun uygulamadığı bir kural olurdu.
+  const surfaces: Array<[string, boolean]> = [
+    ["src/app/account/takim/team-client.tsx", true],
+    ["src/app/takim/davet/[token]/invite-client.tsx", true],
+  ];
+  for (const [rel, expected] of surfaces) {
+    const source = fs.readFileSync(path.resolve(rel), "utf8");
+    assert.equal(
+      /kvkkConsent: consent/.test(source),
+      expected,
+      `${rel}: KVKK onayı gövdeye yazılmıyor`
+    );
+  }
+  // Davet GÖNDERME gövdesi: e-posta + rol + jeton, onay kutusu YOK.
+  const teamClient = fs.readFileSync(
+    path.resolve("src/app/account/takim/team-client.tsx"),
+    "utf8"
+  );
+  const inviteBody = /body: JSON\.stringify\(\{ email, role, turnstileToken: token \}\)/;
+  assert.match(teamClient, inviteBody, "davet gövdesi beklenen alanları taşımıyor");
+  // Bağlama onayı bir CÜMLEDİR ve rozette duruyor.
+  const badge = fs.readFileSync(path.resolve("src/components/quote/team-badge.tsx"), "utf8");
+  assert.match(
+    badge,
+    /window\.confirm\(d\["instantQuote\.team\.quote\.attachWarning"\]\)/,
+    "bağlama onayı uyarı cümlesini göstermiyor"
+  );
+});

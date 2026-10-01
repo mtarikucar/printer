@@ -120,7 +120,7 @@ import {
   type FrameworkActionKey,
 } from "../src/app/admin/cerceve/[id]/framework-values";
 import { MAX_AMOUNT_KURUS } from "../src/lib/config/prices";
-import { formatCurrency } from "../src/lib/i18n/format";
+import { formatCurrency, formatDateLong } from "../src/lib/i18n/format";
 import type { TenderViews } from "../src/lib/config/quote-tender";
 import type {
   PendingQuoteCheckout,
@@ -3837,6 +3837,10 @@ function frameworkDetail(
     amountKurus: 300_000,
     quoteId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     quoteNumber: "T-000777",
+    // Klon teklif: fiyatlanmış ve geçerliliği SÜRÜYOR (NOW_FW'den sonra), yani
+    // parti bugün ödenebilir. Süresi dolmuş klonun vakası ayrı bir testte.
+    quoteStatus: "quoted",
+    quoteExpiresAt: "2026-10-20T20:59:59.999Z",
     orderId: null,
     orderNumber: null,
     orderStatus: null,
@@ -4023,6 +4027,18 @@ test("ÇERÇEVE: belgenin BEŞ zorunlu cümlesi kâğıtta ve sözlükte AYNEN v
     renderToStaticMarkup(createElement(FrameworkDocument, { framework: view, d: tr }))
   );
 
+  // Parametreli cümlenin BEKLENEN DOLDURULMUŞ hâli: belge tarihi
+  // `formatDateLong` ile basıyor, bu yüzden iddia da aynı biçimlendiriciyle
+  // kurulur. "Yer tutucuyu sil, kalanın ilk yarısını ara" kestirmesi
+  // KULLANILMIYOR: `{date}` silinince ortada ÇİFT BOŞLUK kalıyordu ve
+  // `split("  ")[0]` iddiayı `html.includes("Fiyat")`e indiriyordu — cümle
+  // tamamen değişse bile yeşil kalan bir pin.
+  const FILLS: Partial<Record<string, Record<string, string>>> = {
+    "instantQuote.framework.priceLockedUntil": {
+      date: formatDateLong("2026-09-30T20:59:59.999Z", "tr"),
+    },
+  };
+
   const MANDATORY = [
     "instantQuote.framework.priceLockedUntil",
     "instantQuote.framework.lockExpired",
@@ -4043,14 +4059,15 @@ test("ÇERÇEVE: belgenin BEŞ zorunlu cümlesi kâğıtta ve sözlükte AYNEN v
   for (const key of MANDATORY) {
     const sentence = (tr as Record<string, string>)[key];
     assert.ok(sentence && sentence.length > 10, `${key} cümlesi yok`);
-    // Kâğıtta: `.priceLockedUntil` parametreli, o yüzden yer tutucusuz
-    // gövdesiyle aranır.
-    const needle = sentence.replace(/\{\w+\}/g, "").trim();
-    const firstHalf = needle.split("  ")[0];
+    // Kâğıtta TAM METİN aranır: parametreli cümle fixture'ın tarihiyle
+    // doldurularak, parametresiz cümle olduğu gibi. Böylece cümlenin TEK bir
+    // kelimesi değişse bile iddia kırmızı döner.
+    const needle = FILLS[key] ? fill(sentence, FILLS[key]!) : sentence;
     assert.ok(
-      html.includes(firstHalf),
-      `${key} belgede YOK: ${firstHalf.slice(0, 48)}…`
+      !/\{\w+\}/.test(needle),
+      `${key} doldurulmamış yer tutucu taşıyor: ${needle} (FILLS'e ekle)`
     );
+    assert.ok(html.includes(needle), `${key} belgede YOK: ${needle.slice(0, 64)}…`);
     assert.ok(
       trSource.includes(sentence.slice(0, 40)),
       `${key} sözlük KAYNAĞINDA (yorum dışı) yok`
@@ -4277,6 +4294,123 @@ test("ÇERÇEVE: müşteri ekranı kilit cümlesini ve parti onayını yazar", (
     )
   );
   assert.ok(expiredHtml.includes(tr["instantQuote.framework.lockExpired"]));
+});
+
+test("ÇERÇEVE: KLONUN SÜRESİ dolunca 'öde' düğmesi DÜŞER, cümle YAZILIR", () => {
+  // Parti serbest bırakılmış olması ödenebilir olması DEMEK DEĞİL: klon
+  // sıradan bir `quotes` satırıdır ve bakımın `expireQuotes` aşaması onu
+  // kapatabilir (R2 kapısı yalnız anlaşmanın KAYNAK teklifini koruyor).
+  // Havalesi geciken partide ekran "Bu partiyi öde" çizmeye devam ederse
+  // müşteri `/teklif/<no>/odeme`de `canCheckout=false` ile reddedilir.
+  const base = frameworkDetail();
+  const batchOf = (over: Record<string, unknown>) =>
+    presentFramework({
+      detail: frameworkDetail({ batches: [{ ...base.batches[0], ...over }] }),
+      viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+      now: NOW_FW,
+      sign: (key) => `/signed/${key}`,
+    }).batches[0];
+
+  const live = batchOf({});
+  assert.equal(live.payable, true, "yürürlükteki klonlu parti ödenemez sayıldı");
+  assert.equal(live.payBlocked, false);
+
+  // (a) Bakım turu klonu kapattı.
+  const closed = batchOf({ quoteStatus: "expired", quoteExpiresAt: "2026-10-01T20:59:59.999Z" });
+  assert.equal(closed.payable, false, "süresi dolmuş klonda hâlâ 'öde' çiziliyor");
+  assert.equal(closed.payBlocked, true, "müşteriye partinin neden ödenemediği söylenmiyor");
+
+  // (b) Tur HENÜZ KOŞMADI: durum `quoted`, ama TARİH geçmiş. `quotePermissions`
+  // tarihi durumdan bağımsız ölçüyor ve ödeme ucu da onu çağırıyor.
+  const stale = batchOf({ quoteExpiresAt: "2026-10-01T20:59:59.999Z" });
+  assert.equal(stale.payable, false, "tarihi geçmiş klon `quoted` diye ödenebilir sayıldı");
+  assert.equal(stale.payBlocked, true);
+
+  // (c) İptal edilmiş klon da aynı kapıdan geçer.
+  assert.equal(batchOf({ quoteStatus: "cancelled" }).payBlocked, true);
+
+  // EKRAN: düğme YOK, cümle VAR (ve tersi).
+  const blockedHtml = plain(
+    inLocale(
+      createElement(FrameworkClient, {
+        initial: presentFramework({
+          detail: frameworkDetail({
+            batches: [
+              {
+                ...base.batches[0],
+                quoteStatus: "expired",
+                quoteExpiresAt: "2026-10-01T20:59:59.999Z",
+              },
+            ],
+          }),
+          viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+          now: NOW_FW,
+          sign: (key) => `/signed/${key}`,
+        }),
+      })
+    )
+  );
+  assert.ok(
+    blockedHtml.includes(tr["instantQuote.framework.payUnavailable"]),
+    "ödenemeyen partide müşteriye hiçbir şey söylenmiyor"
+  );
+  assert.ok(
+    !blockedHtml.includes(tr["instantQuote.framework.payBatch"]),
+    "ödenemeyen partide 'Bu partiyi öde' düğmesi hâlâ çiziliyor"
+  );
+  const liveHtml = plain(
+    inLocale(
+      createElement(FrameworkClient, {
+        initial: presentFramework({
+          detail: base,
+          viewer: { canSeePrices: true, isOwner: true, isAdmin: false },
+          now: NOW_FW,
+          sign: (key) => `/signed/${key}`,
+        }),
+      })
+    )
+  );
+  assert.ok(
+    !liveHtml.includes(tr["instantQuote.framework.payUnavailable"]),
+    "ödenebilir partide 'bağlantı geçersiz' cümlesi yazılıyor"
+  );
+});
+
+test("ÇERÇEVE: müşteri ekranı ÇERÇEVE ODASINA abone (framework:<id>)", () => {
+  // Müşteri akışı (`/api/realtime/customer`) YETMEZ: `emitFrameworkChanged`
+  // `topics.customer(userId)`ye yalnız çağıran `userId` verdiğinde düşüyor ve
+  // `planBatches` / `createFrameworkFromQuote` vermiyor — admin parti planını
+  // kurduğunda açık ekran tazelenmezdi. Üstelik o uç MÜŞTERİ oturumu istiyor,
+  // yani anlaşmayı admin oturumuyla açan biri hiç canlı olmazdı.
+  // YORUMLAR SAYMAZ: bir yorumda duran adres pini yeşil tutardı.
+  const strip = (raw: string): string =>
+    raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+      .replace(/\s+/g, " ");
+
+  const page = strip(
+    fs.readFileSync(path.resolve("src/app/cerceve/[number]/page.tsx"), "utf8")
+  );
+  assert.match(
+    page,
+    /RealtimeProvider url=\{`\/api\/realtime\/framework\/\$\{encodeURIComponent\(access\.frameworkId\)\}`\}/,
+    "müşteri ekranı çerçeve odasına abone değil"
+  );
+  assert.doesNotMatch(page, /\/api\/realtime\/customer/, "müşteri akışına abonelik geri geldi");
+
+  const route = strip(
+    fs.readFileSync(path.resolve("src/app/api/realtime/framework/[id]/route.ts"), "utf8")
+  );
+  assert.match(route, /sseResponse\(req, \[topics\.framework\(access\.frameworkId\)\]\)/, "oda konusu yok");
+  // KAPI, sayfanın kapısıyla AYNI iki işlev: ikinci bir erişim matrisi değil.
+  assert.match(
+    route,
+    /if \(!\(await frameworkSurfacesEnabled\(\)\)\) return frameworkNotFound\(\);/,
+    "bayrak kapısı yok"
+  );
+  assert.match(route, /resolveFrameworkAccess\(id\)/, "erişim matrisi okunmuyor");
+  assert.doesNotMatch(route, /\b403\b/, "akış 403 üretiyor (numara varlığını sayar)");
 });
 
 test("ÇERÇEVE: hesap listesindeki parti teklifi ROZETLE anlaşmaya bağlanır", () => {

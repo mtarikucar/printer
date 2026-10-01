@@ -817,11 +817,21 @@ export const FRAMEWORK_REMINDER_BATCH = 100;
  * ─── DAMGA SATIR SATIR, GÖNDERİM DAMGADAN HEMEN SONRA ───────────────────────
  *
  * Damganın satırı ANLAŞMADIR (`quote_frameworks.release_reminder_sent_at`):
- * parti tablosunda damga kolonu yok ve bu tur migration AÇMIYOR. Zaten doğru
- * kapsam da bu — mektup "anlaşmanızın parti zamanı geldi" der, tek bir partiyi
- * saymaz. Damga, kendi kolonunun boş olmasını arayan koşullu bir
- * `UPDATE … RETURNING`tır ve O SATIRIN mektubundan hemen önce yazılır; iki
- * eşzamanlı tur aynı anlaşmayı sahiplenemez.
+ * parti tablosunda damga kolonu yok ve bu tur migration AÇMIYOR. Damga, kendi
+ * kolonunun boş olmasını arayan koşullu bir `UPDATE … RETURNING`tır ve O
+ * SATIRIN mektubundan hemen önce yazılır; iki eşzamanlı tur aynı anlaşmayı
+ * sahiplenemez.
+ *
+ * BUNUN BİLİNEN SINIRI: mektup anlaşma başına BİR KEZ gider — ilk penceresi
+ * açılan parti için. İkinci ve sonraki partilerin penceresi açıldığında
+ * müşteriye yeni bir mektup YAZILMAZ, çünkü damgalanacak ikinci bir kolon
+ * yok. Yanlış olan davranış bu değil, ALTERNATİFİ: damgayı her turda
+ * temizlemek ya da hiç damgalamamak, aynı adrese tur tur (saatte bir) mektup
+ * yağdırırdı. ADMİN tarafında eksik yok — kenar çubuğu rozeti
+ * (`releasableBatchCount`) penceresi açık PARTİLERİ sürekli sayıyor ve bu
+ * aşamanın mektubu admin'e de gidiyor; kaybolan şey yalnız müşteriye giden
+ * TEKRAR bildirimidir. Parti başına bildirim isteniyorsa bir kolon (ve bir
+ * migration) gerekir; o ayrı bir turun işi.
  *
  * PARTİ HÂLİNDE ÖNDEN DAMGALAMAK BUNUN YERİNE GEÇMEZ: turun ortasına düşen bir
  * SIGTERM, damgalanmış ama mektubu yazılmamış anlaşmalar bırakırdı ve damga

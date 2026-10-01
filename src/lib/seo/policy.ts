@@ -42,6 +42,14 @@ export const NOINDEX_PREFIXES = [
   // copy for the feature (everything it says lives behind the flag on these
   // pages), so nothing of value is lost by keeping the whole prefix out.
   "/cerceve",
+  // Team workspace. `/account/takim` is already covered by `/account`, but the
+  // invitation landing page is NOT: `/takim/davet/<token>` carries a
+  // single-use invite token in the URL, exactly like `/atolye/katil/<token>`.
+  // An indexed invite link is an invite handed to whoever reads the search
+  // result, so the whole prefix stays out. The feature has NO public landing
+  // copy (everything it says lives behind the flag on these pages), so nothing
+  // of value is lost.
+  "/takim",
   "/havale",
   "/pay",
 ] as const;

@@ -106,6 +106,12 @@ const DISALLOW = [
   "/atolye/katil/",
   "/reset-password/",
   "/verify-email/",
+  // Team invitations: `/takim/davet/<token>` is a single-use invite token in a
+  // URL — the same shape as `/atolye/katil/` above. It also carries `noindex`
+  // (see `@/lib/seo/policy` → NOINDEX_PREFIXES), and both are needed: robots.txt
+  // stops crawling, but a URL discovered elsewhere can still be indexed without
+  // the meta tag.
+  "/takim/",
   // Account and auth surfaces. Nothing here is useful in a search result or an
   // AI answer, and /account is a private page. They also carry `noindex`
   // metadata: robots.txt stops crawling, but a URL discovered elsewhere can

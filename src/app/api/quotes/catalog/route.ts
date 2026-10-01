@@ -18,7 +18,7 @@
  */
 import { NextResponse } from "next/server";
 import { CUSTOMER_READ_FAILED_ERROR, handleRouteFailure } from "@/lib/api/route-error";
-import { quoteApiEnabled, stepUploadsEnabled } from "@/lib/services/quote-access";
+import { quoteApiEnabled, stepUploadsEnabled, teamsEnabled } from "@/lib/services/quote-access";
 import { loadActiveSnapshot } from "@/lib/services/quote-catalog";
 import { presentPublicCatalog } from "@/lib/services/quote-present";
 import { openQuoteRouteBody } from "../_shared";
@@ -43,11 +43,28 @@ async function handleGET(): Promise<NextResponse> {
   }
   // Bu uçta izleyici YOK (henüz teklif de yok), bu yüzden STEP kapısı oturumdan
   // okunur: bayrak kapalıyken yalnız admin `.step` seçebilir.
-  const [snapshot, stepEnabled] = await Promise.all([
+  //
+  // TAKIM BAYRAĞI DA BURADAN GELİR (0072) ve bu bir tercih değil, S
+  // sevkiyatının precedenti: bayraktan türeyen değer tarayıcı sondasına İKİNCİ
+  // bir istek eklemek yerine katalog GÖVDESİNE giriyor
+  // (`PresentedCatalog.acceptedFormats`in aynı gerekçesi). `/account/takim`
+  // bağlantısı buna tabidir ve `instant_quote_enabled` AÇIK + takım KAPALI
+  // hâli gerçek bir hâldir.
+  //
+  // KAPALI DALA GİRMEZ (yukarıdaki `enabled === false` dönüşü): bu uç
+  // `SiteHeader` yüzünden bayrak kapalıyken de HER genel sayfa açılışında
+  // çağrılıyor ve orada ikinci bir bayrak okuması yakmanın anlamı yok. Takım
+  // bağlantısı o hâlde "bilinmiyor" sayılır ve ÇİZİLMEZ — daraltan yön.
+  const [snapshot, stepEnabled, teams] = await Promise.all([
     loadActiveSnapshot(),
     stepUploadsEnabled(null),
+    teamsEnabled(null),
   ]);
-  return NextResponse.json({ enabled, catalog: presentPublicCatalog(snapshot, stepEnabled) });
+  return NextResponse.json({
+    enabled,
+    catalog: presentPublicCatalog(snapshot, stepEnabled),
+    teamsEnabled: teams,
+  });
 }
 
 export async function GET() {

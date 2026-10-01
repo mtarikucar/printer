@@ -552,6 +552,24 @@ const TEAM_READERS_ALLOWED = [
   "src/components/quote/quote-header.tsx",
   // #20 ödeme düğmesi ve #21 onun NEGATİF cümlesi: ikisi tek yüklemin iki yüzü.
   "src/components/quote/quote-summary.tsx",
+  // ─── T-5 · müşteri yüzeyleri (bayrak kapısının ARKASINDA) ────────────────
+  // Takım sayfasının SUNUCU kapısı: `teamsEnabled` + üyelik/üye/davet okuması.
+  // Rol buradan prop olarak iniyor; istemci (`team-client.tsx`) onu TÜRETMEZ ve
+  // bu yüzden taramaya da takılmaz — okuyan yüzey budur.
+  "src/app/account/takim/page.tsx",
+  // Davet karşılama ekranı. EŞLEŞME BİR YORUM REFERANSIDIR
+  // (`customer_team_members.kvkk_acknowledged_at` — onayın hangi kolona
+  // damgalandığı): dosya takım durumunu OKUMAZ, yalnız token'ı gövdeye koyup
+  // kabul ucunu çağırır. Satır burada çünkü yorum taramayla eşleşiyor ve
+  // listede olmaması testi kırmızıya düşürürdü.
+  "src/app/takim/davet/[token]/invite-client.tsx",
+  // Çalışma alanındaki rozet: `canAttachQuote`/`canDetachQuote` — düğmeyi
+  // gizler, karar yine uçta (`/api/quotes/[id]/team`).
+  "src/components/quote/team-badge.tsx",
+  // Takım SİPARİŞLERİ (salt okunur): görünürlük `quotes.team_id` ⋈
+  // `quotes.order_id` üzerinden TÜRETİLİR; `orders`a kolon eklenmedi.
+  "src/app/api/customer/team/orders/route.ts",
+  "src/app/api/customer/team/orders/[orderNumber]/route.ts",
 ];
 function walk(dir: string): string[] {
   const out: string[] = [];

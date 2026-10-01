@@ -27,6 +27,8 @@ import { LocaleProvider } from "../src/lib/i18n/locale-context";
 import {
   instantQuoteProbeResult,
   probeInstantQuoteEnabled,
+  probeQuoteTeamsEnabled,
+  quoteTeamsProbeResult,
   resetInstantQuoteProbe,
 } from "../src/lib/quote/instant-quote-flag";
 import { QuoteAccountLinks } from "../src/components/quote/account-links";
@@ -544,5 +546,166 @@ test("bayrak kapalıyken üyelik sorgusu HİÇ yapılmaz (sorgu sayacı)", async
     db.restore();
     if (savedRedis === undefined) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = savedRedis;
+  }
+});
+
+// ─── TAKIM BAYRAĞI: İKİ BAYRAK, TEK SONDA (0072 · T-5) ──────────────────────
+//
+// `quote_teams_enabled` AYRI bir bayraktır ve `/account/takim` bağlantısı ona
+// tabidir. Sorulan iki soru: bağlantı DOĞRU bayrağa mı bakıyor, ve ikinci
+// bayrak sondaya İKİNCİ bir istek mi ekledi.
+
+/** Sondayı İKİ bayrağın bilinen cevabıyla doldurur. */
+async function primeFlags(enabled: boolean, teams: boolean): Promise<void> {
+  resetInstantQuoteProbe();
+  const fetchStub = stubFetch(() =>
+    catalogResponse({ enabled, catalog: null, teamsEnabled: teams })
+  );
+  try {
+    await probeInstantQuoteEnabled();
+  } finally {
+    fetchStub.restore();
+  }
+  assert.equal(instantQuoteProbeResult(), enabled, "teklif bayrağı beklendiği gibi dolmadı");
+  assert.equal(quoteTeamsProbeResult(), teams, "takım bayrağı beklendiği gibi dolmadı");
+}
+
+test("İKİ bayrak TEK istekte okunur (sonda maliyeti artmadı)", async () => {
+  resetInstantQuoteProbe();
+  const fetchStub = stubFetch(() =>
+    catalogResponse({ enabled: true, catalog: null, teamsEnabled: true })
+  );
+  try {
+    // Dört yüzey + takım bağlantısı aynı anda mount olur ve İKİ ayrı soru
+    // sorar. MUTASYON SINAVI: takım kapısına ayrı bir `fetch` koy → sayaç
+    // iddiası KIRMIZI olur.
+    const answers = await Promise.all([
+      probeInstantQuoteEnabled(),
+      probeQuoteTeamsEnabled(),
+      probeInstantQuoteEnabled(),
+      probeQuoteTeamsEnabled(),
+    ]);
+    assert.deepEqual(answers, [true, true, true, true]);
+    assert.equal(fetchStub.calls.length, 1, `sonda ${fetchStub.calls.length} kez çağrıldı`);
+    assert.match(fetchStub.calls[0].url, /\/api\/quotes\/catalog/);
+  } finally {
+    fetchStub.restore();
+  }
+});
+
+test("takım bayrağı için de KESİN eşitlik: beklenmedik gövde AÇMAZ", async () => {
+  for (const body of [
+    { enabled: true, catalog: null },
+    { enabled: true, catalog: null, teamsEnabled: "true" },
+    { enabled: true, catalog: null, teamsEnabled: 1 },
+  ]) {
+    resetInstantQuoteProbe();
+    const fetchStub = stubFetch(() => catalogResponse(body));
+    try {
+      assert.equal(
+        await probeQuoteTeamsEnabled(),
+        false,
+        `gövde takımı açtı: ${JSON.stringify(body)}`
+      );
+      // Teklif bayrağı AÇIK kaldı: iki alan birbirini sürüklemiyor.
+      assert.equal(await probeInstantQuoteEnabled(), true);
+    } finally {
+      fetchStub.restore();
+    }
+  }
+});
+
+test("hesap menüsü: teklif bayrağı AÇIK + takım KAPALI ⇒ 'Takımım' YOK", async () => {
+  // Bugün olacak olan hâl bu: motor açılır, takım kapalı kalır.
+  await primeFlags(true, false);
+  for (const variant of ["dropdown", "mobile"] as const) {
+    const html = render(createElement(QuoteAccountLinks, { variant, onNavigate: noop }));
+    assert.match(html, /href="\/account\/teklifler"/, `${variant}: Tekliflerim kayboldu`);
+    assert.match(html, /href="\/account\/parcalar"/, `${variant}: Parça kütüphanem kayboldu`);
+    assert.doesNotMatch(
+      html,
+      /href="\/account\/takim"/,
+      `${variant}: takım bağlantısı KAPALI bayrakta çizildi`
+    );
+    assert.ok(
+      !html.includes(tr["instantQuote.team.title"]),
+      `${variant}: takım metni kapalı bayrakta çizildi`
+    );
+  }
+
+  // İki bayrak da açıkken üçüncü bağlantı gelir.
+  await primeFlags(true, true);
+  for (const variant of ["dropdown", "mobile"] as const) {
+    const html = render(createElement(QuoteAccountLinks, { variant, onNavigate: noop }));
+    assert.match(html, /href="\/account\/takim"/, `${variant}: takım bağlantısı yok`);
+    assert.ok(html.includes(tr["instantQuote.team.title"]));
+  }
+
+  // Teklif bayrağı KAPALI iken hiçbiri çizilmez — takım açık olsa bile
+  // (uç o hâlde `teamsEnabled` alanını hiç göndermiyor).
+  await primeFlags(false, true);
+  for (const variant of ["dropdown", "mobile"] as const) {
+    assert.equal(
+      render(createElement(QuoteAccountLinks, { variant, onNavigate: noop })),
+      "",
+      `${variant}: teklif bayrağı kapalıyken bağlantı çizildi`
+    );
+  }
+});
+
+test("sonda HATASINDA takım bağlantısı çizilmez ve sonuç önbelleğe YAZILMAZ", async () => {
+  resetInstantQuoteProbe();
+  const offline = stubFetch(() => Promise.reject(new TypeError("network")));
+  try {
+    assert.equal(await probeQuoteTeamsEnabled(), false, "hata takımı açtı");
+  } finally {
+    offline.restore();
+  }
+  // "Hata = kapalı DEĞİL, bilinmiyor": iki alan da önbelleğe yazılmadı.
+  assert.equal(instantQuoteProbeResult(), null, "teklif bayrağı hatadan sonra önbelleğe yazıldı");
+  assert.equal(quoteTeamsProbeResult(), null, "takım bayrağı hatadan sonra önbelleğe yazıldı");
+  // Bağlantı da çizilmez (kanca `null`'ı "kapalı" gibi ele alır).
+  assert.equal(
+    render(createElement(QuoteAccountLinks, { variant: "dropdown", onNavigate: noop })),
+    ""
+  );
+
+  // Bir sonraki mount YENİDEN sorar ve açık bayrağı görür.
+  const online = stubFetch(() =>
+    catalogResponse({ enabled: true, catalog: null, teamsEnabled: true })
+  );
+  try {
+    assert.equal(await probeQuoteTeamsEnabled(), true, "sonda yeniden denemedi");
+  } finally {
+    online.restore();
+  }
+});
+
+// ─── BAYRAK KAPALI ⇒ TAKIM SAYFALARI YOK (404, 403 DEĞİL) ──────────────────
+
+test("bayrak kapalıyken `/account/takim` ve `/takim/davet/<token>` 404", () => {
+  const strip = (raw: string): string =>
+    raw
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+      .replace(/\s+/g, " ");
+
+  for (const rel of [
+    "src/app/account/takim/page.tsx",
+    "src/app/takim/davet/[token]/page.tsx",
+  ]) {
+    const code = strip(readFileSync(join(import.meta.dirname, "..", rel), "utf8"));
+    // Kapı `teamsEnabled`DIR, `quoteApiEnabled` DEĞİL: özellik KENDİ bayrağını
+    // taşıyor ve "motor açık, takım kapalı" gerçek bir hâl.
+    assert.match(
+      code,
+      /if \(!\(await teamsEnabled\(null\)\)\) notFound\(\);/,
+      `${rel}: bayrak kapısı yok`
+    );
+    assert.doesNotMatch(code, /\b403\b/, `${rel}: 403 üretiyor`);
+    // Giriş yönlendirmesi `?redirect=` ile (giriş sayfasının okuduğu ad);
+    // `?next=` bu depoda hiçbir yerde okunmuyor.
+    assert.match(code, /\/login\?redirect=/, `${rel}: giriş yönlendirmesi yok`);
+    assert.doesNotMatch(code, /\?next=/, `${rel}: next= kullanıyor`);
   }
 });

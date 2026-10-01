@@ -117,10 +117,19 @@ function json(method: string, payload?: unknown): RequestInit {
  *
  * `catalog` o hâlde `null`'dır ve tip bunu SÖYLER: uç kapalıyken kataloğu hiç
  * okumaz, yani gövdeyi `enabled`e bakmadan kullanan bir çağıran `tsc`de düşsün.
+ *
+ * `teamsEnabled` İSTEĞE BAĞLI (0072) ve tip bunu da SÖYLER: alan yalnız
+ * `enabled: true` dalında geliyor, çünkü kapalı dalda ikinci bir bayrak
+ * okuması her genel sayfa açılışına bir sorgu eklerdi (ucun kendi gerekçesi).
+ * Yani `undefined` = "takım bayrağı sorulmadı" ve tek doğru okuma `=== true`.
  */
 export function fetchQuoteCatalog(
   opts: QuoteRequestOptions = {}
-): Promise<{ enabled: boolean; catalog: PresentedCatalog | null }> {
+): Promise<{
+  enabled: boolean;
+  catalog: PresentedCatalog | null;
+  teamsEnabled?: boolean;
+}> {
   return request("/api/quotes/catalog", { method: "GET" }, opts);
 }
 
@@ -212,6 +221,29 @@ export function splitQuoteByTechnology(
   opts: QuoteRequestOptions = {}
 ): Promise<SplitResult & { quote: PresentedQuote }> {
   return request(`${base(idOrNumber)}/split`, json("POST"), opts);
+}
+
+/**
+ * `POST|DELETE /api/quotes/[id]/team` — teklifi takıma BAĞLA / AYIR (0072).
+ *
+ * Cevap `{ success, quote }` şeklindedir ve `quote` TEK bir hâlde `null` olur:
+ * AYIRAN kişi teklifi kendisi açmamışsa (ör. meslektaşının teklifini ayıran
+ * takım sahibi) ayırma onun erişimini de kapatır — gören göz yalnız takım
+ * üyeliğiydi. O hâl bir hata DEĞİLDİR; ekran bunu "tekliften çık" diye okur.
+ *
+ * Yöntem PARAMETREDİR çünkü iki eylem aynı ucun iki fiili ve çağıranın elinde
+ * tek bir düğme var (rozet, teklifin takımı varsa "ayır" yoksa "bağla" yazar).
+ */
+export function setQuoteTeam(
+  idOrNumber: string,
+  action: "attach" | "detach",
+  opts: QuoteRequestOptions = {}
+): Promise<{ success: boolean; quote: PresentedQuote | null }> {
+  return request(
+    `${base(idOrNumber)}/team`,
+    json(action === "attach" ? "POST" : "DELETE"),
+    opts
+  );
 }
 
 // ─── Parçalar ───────────────────────────────────────────────────────────────

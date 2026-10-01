@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useDictionary } from "@/lib/i18n/locale-context";
-import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
+import { useInstantQuoteEnabled, useQuoteTeamsEnabled } from "@/lib/quote/instant-quote-flag";
 
 /**
- * "Tekliflerim" + "Parça kütüphanem" — anlık teklif motorunun hesap sayfaları.
+ * "Tekliflerim" + "Parça kütüphanem" + "Takımım" — anlık teklif motorunun
+ * hesap sayfaları.
  *
  * İki menüden birden veriliyor (masaüstünde kullanıcı menüsü, mobilde açılır
  * menü) ve ikisinde de AYNI kapıya tabi: `instant_quote_enabled` kapalıyken bu
@@ -16,6 +17,19 @@ import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
  *
  * Bayrak kapalı ve ziyaretçi ADMIN ise sonda `true` döner (uç izleyiciye göre
  * cevap verir), böylece iç test sırasında sayfalara menüden ulaşılır.
+ *
+ * ─── "Takımım" KENDİ BAYRAĞINA TABİ (0072) ─────────────────────────────────
+ *
+ * `/account/takim` sayfasının kapısı `teamsEnabled()`tir, `quoteApiEnabled()`
+ * DEĞİL — özellik kendi bayrağını (`quote_teams_enabled`) taşıyor. Yani
+ * `instant_quote_enabled` AÇIK ama takım KAPALI hâli gerçek bir hâldir (ve
+ * bugün olacak olan hâldir): o hâlde "Tekliflerim"/"Parça kütüphanem" durur,
+ * "Takımım" ÇİZİLMEZ. Üç bağlantının tek bileşende durmasının sebebi bu
+ * dosyanın baştaki gerekçesi; bayrağın İKİ olmasının sebebi ise kapının üç
+ * bağlantı için aynı olmaması.
+ *
+ * Sonda tek `fetch` atmaya devam eder: ikinci bayrak aynı cevabın bir alanıdır
+ * (`instant-quote-flag.ts`).
  */
 const ITEM_CLASS = {
   dropdown:
@@ -44,6 +58,14 @@ const LINKS = [
   },
 ] as const;
 
+/** Kendi bayrağını (`quote_teams_enabled`) taşıyan bağlantı. */
+const TEAM_LINK = {
+  href: "/account/takim",
+  labelKey: "instantQuote.team.title",
+  iconPath:
+    "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z",
+} as const;
+
 interface QuoteAccountLinksProps {
   variant: keyof typeof ITEM_CLASS;
   /** Menüyü kapatmak için (mobil menü ve kullanıcı menüsü açık kalmasın). */
@@ -53,11 +75,15 @@ interface QuoteAccountLinksProps {
 export function QuoteAccountLinks({ variant, onNavigate }: QuoteAccountLinksProps) {
   const d = useDictionary();
   const enabled = useInstantQuoteEnabled();
+  const teamsEnabled = useQuoteTeamsEnabled();
+  // Kancalar koşulsuz çağrılır (React kuralı), kapı ondan SONRA uygulanır.
   if (enabled !== true) return null;
+
+  const links = teamsEnabled === true ? [...LINKS, TEAM_LINK] : LINKS;
 
   return (
     <>
-      {LINKS.map((link) => (
+      {links.map((link) => (
         <Link
           key={link.href}
           href={link.href}

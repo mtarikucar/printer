@@ -26,9 +26,11 @@
  *
  * Çalıştırma: npx tsx scripts/test-customer-team-api.ts
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
+import enDict from "../src/lib/i18n/dictionaries/en";
+import trDict from "../src/lib/i18n/dictionaries/tr";
 
 const ROOT = join(import.meta.dirname, "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
@@ -276,6 +278,207 @@ ok(
   rawTokenLines.length === 1 && rawTokenLines[0].includes("rawToken: invite.rawToken"),
   rawTokenLines
 );
+
+
+// ─── T-5 · SALT OKUNUR TAKIM SİPARİŞİ UÇLARI ────────────────────────────────
+//
+// Bu iki uç ROUTE_TABLE'da DEĞİL ve bu bilinçli: o tablonun döngüsü "para
+// tablolarına dokunmuyor" iddiasını TANIMLAYICI düzeyinde ölçüyor, bu uçlar ise
+// `orders`/`quote_checkouts`u OKUMAK zorunda (görünürlük `quotes.order_id` ⋈
+// `quotes.team_id` üzerinden türetiliyor; tasarım §0, kolon eklenmedi). Ayrı
+// tablo, okumayı yasaklamadan YAZMAYI yasaklamanın tek yolu.
+
+const ORDERS_ROUTE_TABLE: Array<{ rel: string; methods: string[] }> = [
+  { rel: "src/app/api/customer/team/orders/route.ts", methods: ["GET"] },
+  { rel: "src/app/api/customer/team/orders/[orderNumber]/route.ts", methods: ["GET"] },
+];
+
+console.log("\ndeğişmez 3 · takım siparişleri SALT OKUNUR (yalnız GET)");
+for (const row of ORDERS_ROUTE_TABLE) {
+  const exported = exportedMethods(row.rel);
+  // MUTASYON SINAVI: detay ucuna boş bir `POST` ekle → bu iddia KIRMIZI.
+  ok(`${row.rel} → yalnız GET`, same(exported, row.methods), {
+    beklenen: row.methods,
+    gelen: exported,
+  });
+}
+
+console.log("\ndeğişmez 3 · sipariş EYLEM uçları HİÇ açılmadı");
+for (const row of ORDERS_ROUTE_TABLE) {
+  const text = read(row.rel);
+  const ids = identifiers(row.rel);
+  // Yazma fiili YOK: okuma `db.select` ile, `insert`/`update`/`delete` ile
+  // değil. (Sözleşmenin tarafı ödeyendir; takım yalnız okur.)
+  for (const write of ["insert", "update", "delete", "transaction"]) {
+    ok(`${row.rel}: \`${write}\` çağırmıyor`, !ids.has(write));
+  }
+  // `/api/customer/orders/**` ailesinin HİÇBİR parçası import edilmiyor: ayrı
+  // uç olmasının tek sebebi o kapıyı hiç açmamak. İddia İMPORT yollarına bakar,
+  // metne değil — dosyanın kendi gerekçesi ("`order-refund`a dokunmuyoruz") bir
+  // metin aramasıyla kendi testini kırardı.
+  const imports = stringLiterals(row.rel).filter(
+    (lit) => lit.startsWith("@/") || lit.startsWith(".")
+  );
+  for (const forbidden of ["dispute-resolution", "order-refund", "gift-credit-return"]) {
+    ok(
+      `${row.rel}: \`${forbidden}\` import etmiyor`,
+      imports.every((path) => !path.includes(forbidden)),
+      imports.filter((path) => path.includes(forbidden))
+    );
+  }
+  ok(`${row.rel}: ödeme dondurmasına dokunmuyor`, !ids.has("freezeCheckout"));
+  ok(`${row.rel}: taslak tablosuna dokunmuyor`, !ids.has("orderDrafts"));
+}
+
+console.log("\ndeğişmez 4 · cevapta KİŞİSEL VERİ yok");
+/**
+ * Yorumları ve metin sabitlerini SİLMİŞ kaynak.
+ *
+ * Gerekçesini yazan bir dosya ("`shippingAddress` göndermiyoruz") ham bir metin
+ * aramasıyla kendi testini kırardı; aranan şey GERÇEK bir alan okuması.
+ */
+function codeOf(rel: string): string {
+  return read(rel)
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+}
+
+for (const row of ORDERS_ROUTE_TABLE) {
+  const ids = identifiers(row.rel);
+  const code = codeOf(row.rel);
+  // ÖDEYENİN kimliği ve TESLİMAT ADRESİ okunmaz bile: `orders.<alan>` bir
+  // kolon seçimidir ve seçilmeyen kolon gövdeye giremez. (`session.userId`
+  // yasaklanamaz — üyelik sorgusunun girdisi o.)
+  for (const column of ["userId", "shippingAddress", "customerName", "phone", "email"]) {
+    ok(`${row.rel}: \`orders.${column}\` okumuyor`, !code.includes(`orders.${column}`));
+  }
+  // `users` tablosu HİÇ import edilmiyor: üyenin adı/adresi bu uçların işi değil.
+  ok(`${row.rel}: \`users\` tablosuna hiç bakmıyor`, !ids.has("users"));
+  // Depolama ANAHTARLARI ve dosya adı da gitmez: imzalı adres yalnız
+  // `getPublicUrl` ile, yalnız dosyayı indirecek yüzeyde üretilir.
+  for (const key of ["canonicalStlKey", "thumbnailKey", "drawingKey", "fileName"]) {
+    ok(`${row.rel}: \`${key}\` sızdırmıyor`, !code.includes(key));
+  }
+}
+
+console.log("\ndeğişmez 5 · takım sipariş uçları da bayrak kapısının ardında");
+for (const row of ORDERS_ROUTE_TABLE) {
+  const text = read(row.rel);
+  const gates = [...text.matchAll(/teamsEnabled\(null\)/g)];
+  ok(`${row.rel}: her yöntemin KENDİ bayrak kapısı var`, gates.length === row.methods.length, {
+    kapı: gates.length,
+    yöntem: row.methods.length,
+  });
+  let allFourOhFour = gates.length > 0;
+  for (const gate of gates) {
+    const after = text.slice(gate.index ?? 0, (gate.index ?? 0) + 260);
+    if (!/status:\s*404/.test(after) || /status:\s*403/.test(after)) allFourOhFour = false;
+  }
+  ok(`${row.rel}: bayrak kapısı 404 döndürüyor`, allFourOhFour);
+  ok(
+    `${row.rel}: oturum kapısı (401) bayraktan SONRA`,
+    text.indexOf("teamsEnabled") < text.indexOf("teamUnauthorized")
+  );
+}
+
+// ─── T-5 · SÖZLÜK: iki dosya, aynı küme, her kod için bir cümle ─────────────
+
+console.log("\nsözlük · `instantQuote.team.*` iki sözlükte de BİREBİR aynı");
+const TEAM_PREFIX = "instantQuote.team.";
+const teamKeys = (dict: Record<string, string>) =>
+  Object.keys(dict).filter((k) => k.startsWith(TEAM_PREFIX)).sort();
+const trTeam = teamKeys(trDict as Record<string, string>);
+const enTeam = teamKeys(enDict as Record<string, string>);
+ok(`tr.ts ${trTeam.length} anahtar taşıyor`, trTeam.length > 50, trTeam.length);
+ok("iki sözlük AYNI anahtar kümesini taşıyor", same(trTeam, enTeam), {
+  yalnizTr: trTeam.filter((k) => !enTeam.includes(k)),
+  yalnizEn: enTeam.filter((k) => !trTeam.includes(k)),
+});
+ok(
+  "hiçbir yeni anahtar `Kurus` ile bitmiyor (para alanı değil, metin)",
+  trTeam.every((k) => !k.endsWith("Kurus"))
+);
+ok(
+  "her cümle DOLU (iki sözlükte de)",
+  trTeam.every(
+    (k) =>
+      (trDict as Record<string, string>)[k].trim().length > 0 &&
+      (enDict as Record<string, string>)[k].trim().length > 0
+  )
+);
+
+console.log("\nsözlük · her HATA KODUNUN bir cümlesi var (ham kod ekrana düşmez)");
+/**
+ * Takım uçlarının (ve çağırdıkları servisin) döndürebileceği KODLARIN TAMAMI.
+ *
+ * Neden servisi de tarıyor: rota dosyaları yalnız dört kod yazıyor
+ * (`team_not_found`, `not_owner`, `rate_limited`, `invalid_body`); geri kalanı
+ * `TeamServiceError` ile servisten geliyor ve ekrana AYNI gövdede ulaşıyor.
+ * Yalnız rotaları taramak, cümlesi olmayan on dört kodu gözden kaçırırdı.
+ *
+ * `tsc` bu eşleşmeyi YAKALAMAZ: anahtar EKSİKLİĞİNİ yakalar (en.ts tipin
+ * kaynağı), kod ↔ cümle eşleşmesini yakalamaz.
+ */
+function emittedCodes(rels: string[]): string[] {
+  const codes = new Set<string>();
+  for (const rel of rels) {
+    const text = read(rel);
+    for (const m of text.matchAll(/code:\s*"([a-z_]+)"/g)) codes.add(m[1]);
+    // `new TeamServiceError(<cümle>, <durum>, "<kod>")` — çok satırlı hâli de.
+    for (const m of text.matchAll(/,\s*\d{3},\s*\n?\s*"([a-z_]+)"/g)) codes.add(m[1]);
+  }
+  return [...codes].sort();
+}
+
+const codeSources = [...ROUTE_TABLE.map((r) => r.rel), ...ORDERS_ROUTE_TABLE.map((r) => r.rel), SHARED, SERVICE];
+const codes = emittedCodes(codeSources);
+ok(`taranan kod sayısı makul (${codes.length})`, codes.length >= 15, codes);
+const errorKeys = trTeam
+  .filter((k) => k.startsWith(`${TEAM_PREFIX}error.`))
+  .map((k) => k.slice(`${TEAM_PREFIX}error.`.length))
+  .sort();
+// İKİ YÖNLÜ: cümlesi olmayan kod ekranda HAM KOD'a düşer; kodu olmayan cümle
+// ÖLÜ METİNDİR. Küme eşitliği ikisini birden kapatır.
+ok("kod kümesi ile cümle kümesi BİREBİR", same(codes, errorKeys), {
+  cumlesiYok: codes.filter((c) => !errorKeys.includes(c)),
+  koduYok: errorKeys.filter((k) => !codes.includes(k)),
+});
+
+console.log("\ndeğişmez 1 · takım metni PAZARLAMA yüzeylerine GİRMEDİ");
+/**
+ * S sevkiyatının bedeli: `/3d-baski` metinleri bayrağı OKUMADIĞI için müşteriye
+ * olmayan bir özellik ilan edilmişti (kayıt defteri §"STEP (S5) — METİN BORCU").
+ * Takımda aynı hata yapılmıyor: `instantQuote.team.*` anahtarlarının HEPSİ
+ * yalnız bayrak kapısının ARKASINDAKİ yüzeylerde çizilir.
+ *
+ * MUTASYON SINAVI: `3d-baski/sections.tsx`e bir takım cümlesi ekle → KIRMIZI.
+ */
+const MARKETING_SURFACES = [
+  "src/app/3d-baski/sections.tsx",
+  "src/app/3d-baski/page.tsx",
+  "src/app/3d-baski/landing-uploader.tsx",
+  "src/app/3d-baski/pricing-anchors.ts",
+  "src/lib/seo/service.ts",
+  "src/components/figurunica/sections.tsx",
+  "src/components/figurunica/dict.ts",
+];
+for (const rel of MARKETING_SURFACES) {
+  const text = read(rel);
+  const hits = [...text.matchAll(/instantQuote\.team\.[\w.]+/g)].map((m) => m[0]);
+  ok(`${rel}: takım anahtarı HİÇ geçmiyor`, hits.length === 0, hits);
+}
+// Footer da kapalı. Dosya adı DESENLE aranıyor (bugün `site-footer.tsx`):
+// bileşen yeniden adlandırılırsa iddia sessizce boşa düşmesin — bu yüzden
+// listenin BOŞ OLMADIĞI da ölçülüyor.
+const footerFiles = readdirSync(join(ROOT, "src/components")).filter((f) => /footer/i.test(f));
+ok("footer bileşeni bulundu (iddia boşa düşmedi)", footerFiles.length > 0, footerFiles);
+for (const rel of footerFiles) {
+  const hits = [...read(join("src/components", rel)).matchAll(/instantQuote\.team\./g)];
+  ok(`src/components/${rel}: takım anahtarı HİÇ geçmiyor`, hits.length === 0);
+}
 
 console.log(
   failed === 0

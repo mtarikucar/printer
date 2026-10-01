@@ -566,6 +566,10 @@ const TEAM_READERS_ALLOWED = [
   // Çalışma alanındaki rozet: `canAttachQuote`/`canDetachQuote` — düğmeyi
   // gizler, karar yine uçta (`/api/quotes/[id]/team`).
   "src/components/quote/team-badge.tsx",
+  // Ret kodunu ekranın cümlesine çeviren TEK yardımcı. EŞLEŞME bir SÖZLÜK
+  // ANAHTARI şablonudur (`instantQuote.team.error.${code}`); dosya ne üyelik ne
+  // rol okur, ama iki yüzeyin de ham kod göstermemesinin tek sebebi o.
+  "src/components/quote/team-error.ts",
   // Takım SİPARİŞLERİ (salt okunur): görünürlük `quotes.team_id` ⋈
   // `quotes.order_id` üzerinden TÜRETİLİR; `orders`a kolon eklenmedi.
   "src/app/api/customer/team/orders/route.ts",

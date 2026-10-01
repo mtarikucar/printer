@@ -4,7 +4,7 @@ import { useState, type JSX } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui";
 import { fill } from "@/components/quote/format";
-import type { Dictionary } from "@/lib/i18n/dictionaries";
+import { teamErrorText } from "@/components/quote/team-error";
 import { useDictionary } from "@/lib/i18n/locale-context";
 
 /**
@@ -21,17 +21,10 @@ import { useDictionary } from "@/lib/i18n/locale-context";
  *
  * Takımın adı ancak KABULDEN SONRA, ucun cevabından yazılır: kabul etmeden
  * gösterilen bir ad, token'ı bir okuma ucuna çevirirdi.
+ *
+ * Ret cümlesi `teamErrorText` ile çözülür — takım ekranıyla AYNI yardımcı,
+ * çünkü aynı uç ailesinden aynı kodlar geliyor.
  */
-function inviteErrorText(d: Dictionary, body: { error?: unknown; code?: unknown }): string {
-  const code = typeof body.code === "string" ? body.code : null;
-  if (code !== null) {
-    const sentence = d[`instantQuote.team.error.${code}` as keyof Dictionary];
-    if (typeof sentence === "string" && sentence.length > 0) return sentence;
-  }
-  if (typeof body.error === "string" && body.error.length > 0) return body.error;
-  return d["common.error"];
-}
-
 export function InviteAcceptClient({ token }: { token: string }): JSX.Element {
   const d = useDictionary();
   const [consent, setConsent] = useState(false);
@@ -51,7 +44,7 @@ export function InviteAcceptClient({ token }: { token: string }): JSX.Element {
       });
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
-        setError(inviteErrorText(d, body));
+        setError(teamErrorText(d, body));
         return;
       }
       const team = body.team as { name?: unknown } | undefined;

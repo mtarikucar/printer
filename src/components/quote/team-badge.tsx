@@ -92,11 +92,14 @@ export function QuoteTeamBadge({
     };
   }, [askOwnTeam]);
 
-  if (team === null && ownRole === null) return null;
-
   const canAttach = team === null && ownRole !== null && canAttachQuote(ownRole, SELF, SELF);
   const canDetach =
     team !== null && canDetachQuote(team.role, quote.viewer.isOwner ? SELF : null, SELF);
+
+  // BAĞLI OLMAYAN teklifte rozetin tek işi "bağla" düğmesidir: yetkisi olmayan
+  // bir rol (`viewer`) için kutu DA çizilmez. Aksi hâlde salt okunur bir üye,
+  // kişisel teklifinin üstünde hiçbir şey yapamayacağı bir uyarı okurdu.
+  if (team === null && !canAttach) return null;
 
   const run = (action: "attach" | "detach") => {
     setBusy(true);

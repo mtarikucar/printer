@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Select, Textarea, FormField } from "@/components/ui";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { fill } from "@/components/quote/format";
+import { teamErrorText } from "@/components/quote/team-error";
 import { PROVINCES, DISTRICTS } from "@/lib/data/turkey-address";
 import {
   TEAM_INVITE_ROLES,
@@ -99,24 +100,6 @@ interface TeamOrderRow {
   trackingNumber: string | null;
   quoteNumber: string;
   quoteTitle: string | null;
-}
-
-/**
- * Ucun `code`unu EKRANIN cümlesine çevirir.
- *
- * Uçlar zaten Türkçe bir cümle döndürüyor; yine de sözlük ÖNCE sorulur, çünkü
- * ekranın metni ekranın sözleşmesidir (çeviri, tutarlılık). Sözlükte karşılığı
- * olmayan bir kod ucun cümlesine, cümlesi de yoksa ortak hataya düşer — HAM
- * KOD hiçbir dalda ekrana yazılmaz.
- */
-function teamErrorText(d: Dictionary, body: { error?: unknown; code?: unknown }): string {
-  const code = typeof body.code === "string" ? body.code : null;
-  if (code !== null) {
-    const sentence = d[`instantQuote.team.error.${code}` as keyof Dictionary];
-    if (typeof sentence === "string" && sentence.length > 0) return sentence;
-  }
-  if (typeof body.error === "string" && body.error.length > 0) return body.error;
-  return d["common.error"];
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }): JSX.Element {

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { orders, manufacturers } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getManufacturerSession } from "@/lib/services/manufacturer-auth";
+import { frameworkScreensEnabled } from "@/lib/services/quote-access";
 import { ManufacturerSidebar } from "./sidebar";
 import { ManufacturerRealtimeShell } from "./realtime-shell";
 import { PanelShell } from "@/components/panel-shell";
@@ -131,6 +132,12 @@ export default async function ManufacturerLayout({
   );
   // null = okunamadı (BİLİNMİYOR); sayı = gerçek sayım.
   const assignedCount = assignedRead === null ? null : assignedRead[0]?.count ?? 0;
+  // Çerçeve parti planı satırı YALNIZ bayrak açıkken çizilir (sayfanın kendisi
+  // bayrak kapalıyken 404 veriyor). Okuma KORUMALI ve arızada KAPALI tarafa
+  // düşer: bir bayrak okuması panelin açılmasının ön şartı olamaz, ama
+  // "bilmiyorum" da bir menü maddesi çizdirmemeli.
+  const frameworkPlanEnabled =
+    (await displayRead("çerçeve bayrağı", frameworkScreensEnabled())) === true;
   const unreadableAreas = [
     assignedRead === null && "Yeni iş teklifleri",
   ].filter((x): x is string => typeof x === "string");
@@ -141,7 +148,10 @@ export default async function ManufacturerLayout({
         <PanelShell
           title="Figurunica Üretici"
           sidebar={
-            <ManufacturerSidebar newAssignmentCount={assignedCount} />
+            <ManufacturerSidebar
+              newAssignmentCount={assignedCount}
+              frameworkPlanEnabled={frameworkPlanEnabled}
+            />
           }
         >
           <PanelReadNotice areas={unreadableAreas} />

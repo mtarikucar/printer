@@ -162,6 +162,26 @@ interface Props {
         dfmWarnings: string[];
       }[];
     } | null;
+    /**
+     * Bu sipariş bir ÇERÇEVE ANLAŞMANIN PARTİSİ mi — SALT OKUNUR kart.
+     *
+     * FİYAT YOK, MÜŞTERİ KİMLİĞİ YOK ve `…Kurus` ile biten hiçbir alan yok
+     * (kartta tutar hiç geçmiyor): partinin tutarı müşteriyle platform
+     * arasındadır, atölyenin kazancı hakediş kartındadır.
+     *
+     * `null` = bu iş bir parti DEĞİL ya da okuma düştü; ikisi arasındaki ayrım
+     * sayfanın üstündeki arıza şeridinde yazılır (page.tsx), çünkü kartın
+     * görünmemesi "anlaşma yok" diye okunmamalı.
+     */
+    framework: {
+      number: string;
+      batchPosition: number;
+      batchCount: number;
+      plannedShipDate: string;
+      units: number;
+      /** Bu anlaşmada BU atölyeye planlanmış toplam; null = BİLİNMİYOR. */
+      plannedUnitsForYou: number | null;
+    } | null;
     marketplaceProduct: {
       title: string;
       description: string;
@@ -293,7 +313,7 @@ const STATUS_ICONS: Record<string, string> = {
 // ─── Main Component ──────────────────────────────────────────
 
 export function ManufacturerOrderDetailClient({ data, locale }: Props) {
-  const { order, photos, qcPhotos, qcPhotoCap, qcRejectReason, quote, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, productionGateClosed, modelAck, actions } = data;
+  const { order, photos, qcPhotos, qcPhotoCap, qcRejectReason, quote, framework, marketplaceProduct, productSpecs, approvedImageUrl, glbUrl, stlUrl, objUrl, modelFiles, modelFilesRevision, productionGateClosed, modelAck, actions } = data;
   // Çok parçalı iş: tek "STL indir" düğmesi yalnız İLK parçayı verirdi ve
   // üretici 13 parçanın 12'sini hiç görmeden baskıya başlardı.
   const stlParts = modelFiles.filter((f) => f.kind === "stl");
@@ -1205,6 +1225,36 @@ export function ManufacturerOrderDetailClient({ data, locale }: Props) {
               <p className="mt-3 text-xs text-amber-800/70">
                 Bu hizmetlerin bedeli müşteriden tahsil edildi; pakete eklemeniz
                 gerekir.
+              </p>
+            </div>
+          )}
+
+          {/* ─── Çerçeve anlaşma (SALT OKUNUR) ───────────────────────
+              "Bu iş hangi anlaşmadan geldi." FİYAT YOK ve MÜŞTERİ KİMLİĞİ YOK:
+              partinin tutarı müşteriyle platform arasındadır, atölyenin kazancı
+              kendi hakediş kartındadır. Kart hiçbir kararı etkilemez — planlı
+              bir parti tezgâhta yer KAPLAMAZ (ortada sipariş yoktur) ve bu
+              sayılar hiçbir yerde atama reddetmez. */}
+          {framework && (
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Çerçeve anlaşma
+              </h3>
+              <p className="mt-2 text-sm text-gray-800">
+                <span className="font-mono font-semibold">{framework.number}</span>
+                {" · "}
+                Parti {framework.batchPosition}/{framework.batchCount}
+                {" · "}
+                planlanan sevk {formatDate(framework.plannedShipDate, loc)}
+                {" · "}
+                bu parti {framework.units} birim
+              </p>
+              <p className="mt-1 text-xs text-gray-600">
+                {framework.plannedUnitsForYou === null
+                  ? "Bu anlaşmada size planlanan toplam birim şu anda okunamadı (sıfır demek DEĞİL)."
+                  : `Bu anlaşmada size planlanan toplam ${framework.plannedUnitsForYou} birim.`}{" "}
+                Planlanmış partiler tezgâhınızda yer KAPLAMAZ: her parti ödendiğinde
+                kendi siparişi olarak düşer.
               </p>
             </div>
           )}

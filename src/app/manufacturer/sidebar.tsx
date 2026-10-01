@@ -8,6 +8,7 @@ import { useState, type ReactNode } from "react";
 
 export function ManufacturerSidebar({
   newAssignmentCount,
+  frameworkPlanEnabled = false,
 }: {
   /**
    * null = sayı OKUNAMADI (bkz. manufacturer/layout.tsx). 0 ile aynı şey
@@ -15,6 +16,15 @@ export function ManufacturerSidebar({
    * gösterir. Sayının okunamaması artık panelin açılmasını engellemiyor.
    */
   newAssignmentCount: number | null;
+  /**
+   * `framework_orders_enabled` AÇIK mı — çerçeve parti planı satırı.
+   *
+   * BAYRAĞA BAĞLI, çünkü sayfanın kendisi bayrak kapalıyken 404 veriyor: her
+   * zaman çizilen bir bağlantı, üreticiyi "bozuk" bir menü maddesine
+   * yollardı. Varsayılan `false` (kapalı doğar): bayrağı okumayan bir çağrı
+   * yeri satırı ÇİZMEZ, yanlışlıkla açmaz.
+   */
+  frameworkPlanEnabled?: boolean;
 }) {
   const pathname = usePathname();
   const d = useDictionary();
@@ -68,6 +78,25 @@ export function ManufacturerSidebar({
       ),
       badge: 0,
     },
+    // Çerçeve parti planı — YALNIZ GÖSTERİM (hiçbir iş beklemez), o yüzden
+    // rozeti yok: bir sayı, üreticiye yapacak bir iş olduğunu söylerdi.
+    ...(frameworkPlanEnabled
+      ? [
+          {
+            href: "/manufacturer/plan",
+            label: "Çerçeve parti planı",
+            icon: (
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            ),
+            badge: 0,
+          },
+        ]
+      : []),
     {
       href: "/manufacturer/earnings",
       label: d["manufacturer.nav.earnings" as keyof typeof d] || "Earnings",

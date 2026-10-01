@@ -32,6 +32,10 @@ import { readPartnerModelAck } from "@/lib/services/order-model-revision";
 import { currentModelUrl } from "@/lib/config/order-model-presence";
 import { dedupeFileNames } from "@/lib/config/order-model";
 import { qcPhotoCap } from "@/lib/config/qc";
+import {
+  loadFrameworkUnitsForManufacturer,
+  loadOrderFrameworkCard,
+} from "@/lib/services/quote-framework";
 import { loadOrderQuoteParts, quotePartFileName } from "@/lib/services/quote-order";
 import { ManufacturerOrderDetailClient } from "./client";
 
@@ -319,6 +323,35 @@ export default async function ManufacturerOrderDetailPage({
   );
   const quotePartsUnreadable = quoteRead === null;
   const quote = quoteRead?.q ?? null;
+
+  // ─── Çerçeve anlaşma kartı (SALT OKUNUR, GÖSTERİM) ───────────────────────
+  //
+  // "Bu iş hangi anlaşmadan geldi" sorusunun cevabı. FİYAT YOK ve MÜŞTERİ
+  // KİMLİĞİ YOK: partinin tutarı müşteriyle platform arasındadır, atölyenin
+  // kazancı kendi hakediş kartındadır. Köprü `quote_framework_batches.order_id`
+  // (tasarım §2.4: `orders` şemasına kolon eklenmedi).
+  //
+  // Kart hiçbir kararı etkilemez, bu yüzden okuma KORUMALIDIR ve arızası
+  // sayfayı düşürmez; null "anlaşma yok" demek olacağından şeride de yazılır.
+  const frameworkCardRead = await displayRead(
+    "çerçeve anlaşma kartı",
+    id,
+    loadOrderFrameworkCard(order.id)
+  );
+  const frameworkCardUnreadable = frameworkCardRead === null;
+  // "Bu anlaşmada SİZE planlanan toplam" yalnız kart varken ve atölye
+  // biliniyorken sorulur: anlaşması olmayan bir işte sorunun kendisi yok.
+  const frameworkUnitsRead =
+    frameworkCardRead === null
+      ? null
+      : await displayRead(
+          "anlaşmada size planlanan toplam birim",
+          id,
+          loadFrameworkUnitsForManufacturer({
+            frameworkId: frameworkCardRead.frameworkId,
+            manufacturerId: session.manufacturerId,
+          })
+        );
 
   // Yeni bir model sürümü bu atölyeye DUYURULDU mu ve atölye onu onayladı mı.
   // Eski ekran yalnız pasif bir rozet gösteriyordu ("Model güncellendi"), yani
@@ -610,6 +643,8 @@ export default async function ManufacturerOrderDetailPage({
       `Üretim künyesi — dosyalar, malzeme listesi ve adımlar (${specUnknownTitles.join(", ")}): bu kalemlerin künyesi BOŞ değil, BİLİNMİYOR; künye okunana kadar baskı başlatma, baskıyı bitirme ve kalite kontrole gönderme adımları KAPATILDI`,
     quotePartsUnreadable &&
       "Teklif parça listesi (bu sipariş bir teklif siparişi OLABİLİR; parçaların malzemesi, rengi ve adedi bilinmediği için baskı başlatma, baskıyı bitirme ve kalite kontrole gönderme adımları KAPATILDI — liste okunana kadar baskıya başlamayın)",
+    frameworkCardUnreadable &&
+      "Çerçeve anlaşma bilgisi (bu iş bir çerçeve anlaşmanın partisi OLABİLİR; kartın görünmemesi \"anlaşma yok\" anlamına gelmez — yalnız gösterimdir, hiçbir üretim adımını kapatmaz)",
   ].filter((x): x is string => typeof x === "string");
 
   // Üreticinin göreceği parça satırları. FİYAT YOK: teklifin birim ve satır
@@ -802,6 +837,19 @@ export default async function ManufacturerOrderDetailPage({
     qcPhotoCap: qcPhotoCap(quote?.parts.length ?? 0),
     qcRejectReason,
     quote: quoteView,
+    // SALT OKUNUR çerçeve kartı. Alanlar bilerek DAR: fiyat ve müşteri kimliği
+    // taşıyan hiçbir alan YOK ve `…Kurus` ile biten hiçbir ad yok (kartta tutar
+    // hiç yok). `plannedUnitsForYou` null = BİLİNMİYOR, sıfır değil.
+    framework: frameworkCardRead
+      ? {
+          number: frameworkCardRead.frameworkNumber,
+          batchPosition: frameworkCardRead.batchPosition,
+          batchCount: frameworkCardRead.batchCount,
+          plannedShipDate: frameworkCardRead.plannedShipDate,
+          units: frameworkCardRead.units,
+          plannedUnitsForYou: frameworkUnitsRead,
+        }
+      : null,
     marketplaceProduct,
     productSpecs,
     approvedImageUrl: normalizeFileUrl(previewRow?.selectedStyledImageUrl ?? null),

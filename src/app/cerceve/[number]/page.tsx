@@ -28,10 +28,15 @@ import { FrameworkClient } from "./client";
  * `/cerceve/` yolunu taramaya da kapatır: ikisi AYRI iş yapıyor, biri ötekinin
  * yerine geçmez.
  *
- * CANLI: sayfa MÜŞTERİ akışına abone olur (`/api/realtime/customer`).
- * `emitFrameworkChanged` olayı `topics.customer(userId)`ye de düşüyor, yani
- * parti serbest bırakıldığında açık ekran kendini tazeler. Ayrı bir çerçeve SSE
- * ucu AÇILMADI: ikinci bir akış, ikinci bir erişim matrisi demekti.
+ * CANLI: sayfa ÇERÇEVE ODASINA abone olur (`framework:<id>`, uç
+ * `/api/realtime/framework/[id]`). Müşteri akışı (`/api/realtime/customer`)
+ * YETMEZ: `emitFrameworkChanged` `topics.customer(userId)`ye yalnız çağıran
+ * `userId` verdiğinde düşüyor ve `planBatches` / `createFrameworkFromQuote`
+ * vermiyor — admin parti planını kurduğunda açık ekran tazelenmezdi; üstelik o
+ * uç MÜŞTERİ oturumu istiyor, yani anlaşmayı admin oturumuyla açan biri hiç
+ * canlı olmazdı. Oda ucu ikinci bir erişim matrisi KURMUYOR: kapısı bu
+ * sayfanın kapısıyla aynı iki işlev (`frameworkSurfacesEnabled` +
+ * `resolveFrameworkAccess`).
  */
 export const dynamic = "force-dynamic";
 
@@ -73,7 +78,9 @@ export default async function CustomerFrameworkPage({
           <NotificationBell />
         </div>
         <div className="mt-6">
-          <RealtimeProvider url="/api/realtime/customer">
+          <RealtimeProvider
+            url={`/api/realtime/framework/${encodeURIComponent(access.frameworkId)}`}
+          >
             <FrameworkClient initial={framework} />
           </RealtimeProvider>
         </div>

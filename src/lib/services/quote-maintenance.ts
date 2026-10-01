@@ -1,8 +1,17 @@
 /**
  * Anlık teklifin GÖZETİMSİZ yarısı: sahipsiz kalmış hediye kartı
  * rezervasyonları, son tarih işi kaybolmuş ödeme taslakları, süre dolumu, iki
- * hatırlatma, dosya saklama süresi ve yetim dizinler. Saatte bir
- * `quote-maintenance` işi çağırır.
+ * hatırlatma, dosya saklama süresi, yetim dizinler ve çerçeve anlaşmaların iki
+ * aşaması (serbest bırakma penceresi hatırlatması + fiyat kilidinin dolması).
+ * Saatte bir `quote-maintenance` işi çağırır.
+ *
+ * ÇERÇEVE ANLAŞMALARIN TEKLİF TARAFINA ETKİSİ DÖRT KAPIDIR: süre dolumu ve
+ * saklama süpürmesi, kapanmamış bir anlaşmanın KAYNAK teklifine dokunmaz (R2 —
+ * dokunursa `copyPartInto` `files_purged` ile patlar ve planlı partiler bir daha
+ * serbest bırakılamaz); iki hatırlatma da klon PARTİ tekliflerini dışarıda
+ * bırakır (R6 — müşteri o teklifi hiç kurmadı). Dördü de `notExists(...)` ile
+ * SORGUDA kurulur, sorgudan sonra JS'te süzülmez: sayfalama tavanları korunan
+ * satırlarla doldurulup gerçek adayları sessizce kaydırırdı.
  *
  * Üç kural bütün dosyayı biçimlendirir:
  *
@@ -51,6 +60,7 @@ import {
   eq,
   exists,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -66,15 +76,27 @@ import { db } from "@/lib/db";
 import {
   orderDrafts,
   quoteCheckouts,
+  quoteFrameworkBatchLines,
+  quoteFrameworkBatches,
+  quoteFrameworks,
   quoteParts,
   quotePricingSettings,
   quotes,
   users,
 } from "@/lib/db/schema";
 import { CARD_DEADLINE_HOURS } from "@/lib/config/payment";
+import {
+  frameworkBatchLeadDays,
+  frameworkReleaseWindowOpen,
+  type FrameworkStatus,
+} from "@/lib/config/quote-framework";
 import type { QuoteStatus } from "@/lib/config/quote-types";
 import { expireDraft, promoteDraftToOrder } from "@/lib/services/order-draft";
-import { notifyQuoteAbandoned, notifyQuoteExpiring } from "@/lib/services/quote-notify";
+import {
+  notifyFrameworkReleaseWindow,
+  notifyQuoteAbandoned,
+  notifyQuoteExpiring,
+} from "@/lib/services/quote-notify";
 import { deleteFile, deleteStoredDir, listStoredDirs } from "@/lib/services/storage";
 import {
   QUOTE_PART_KEY_PREFIX,
@@ -157,6 +179,73 @@ const ORPHAN_DIR_QUERY_CHUNK = 200;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * KAPANMAMIŞ anlaşma durumları: bundan daha fazla parti SERBEST BIRAKILABİLİR.
+ *
+ * Ölçü bilerek bu kadar DAR: `cancelled` / `expired` / `completed` bir anlaşmada
+ * `releaseBatch` zaten reddediyor (`framework_not_active`), yani o anlaşmanın
+ * kaynak teklifinden bir daha klon ÜRETİLMEZ ve dosyalarını tutmanın işletme
+ * gerekçesi kalmaz. Kümeyi "her çerçeve" yapmak, iptal edilmiş bir anlaşmanın
+ * dosyalarını sonsuza dek diskte tutmak olurdu.
+ *
+ * Anlaşmanın KENDİSİNİN ticari defter saklaması bu süpürmeden BAĞIMSIZDIR:
+ * taahhüt, kilitli birim fiyatlar ve donmuş katalog `quote_frameworks` satırında
+ * (`parts_snapshot` + `pricing_snapshot`) durur ve bu tur ona HİÇ dokunmaz —
+ * yalnız parça DOSYALARINI siler.
+ */
+const LIVE_FRAMEWORK_STATUSES: FrameworkStatus[] = ["draft", "active"];
+
+/**
+ * R2'NİN KAPISI: bu teklif, kapanmamış bir çerçeve anlaşmanın KAYNAK teklifi mi?
+ *
+ * Neden kapı: `releaseBatch` → `cloneQuoteForFrameworkBatch` → `copyPartInto`
+ * dosyaları kaynak parçadan hardlink'liyor. Kaynak teklifin dosyaları silinirse
+ * (ya da teklif `expired`a çekilip süpürmenin adayı yapılırsa) klon
+ * `files_purged` (409) ile patlar ve PLANLI PARTİLER BİR DAHA SERBEST
+ * BIRAKILAMAZ. Yani bu kapı bir saklama tercihi değil, imzalanmış bir
+ * anlaşmanın yerine getirilebilmesinin şartı.
+ *
+ * Kapı SORGUDA kurulur, sorgudan sonra JS'te süzülmez: iki sorgunun da
+ * sayfalama tavanı var (`PURGE_BATCH`) ve sonradan süzmek, korunan satırların
+ * tavanı doldurup arkalarındaki gerçek adayları sessizce kaydırması demekti.
+ */
+function noLiveFrameworkOnQuote(): SQL {
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(quoteFrameworks)
+      .where(
+        and(
+          eq(quoteFrameworks.quoteId, quotes.id),
+          inArray(quoteFrameworks.status, LIVE_FRAMEWORK_STATUSES)
+        )
+      )
+  );
+}
+
+/**
+ * R6'NIN KAPISI: bu teklif bir çerçeve anlaşmanın KLON PARTİSİ mi?
+ *
+ * Klon parti teklifi sıradan bir `quotes` satırıdır, o yüzden iki hatırlatmanın
+ * da adayı olur — ama ikisi de MÜŞTERİYE YANLIŞ HİKÂYEYİ anlatır: "teklifinin
+ * süresi doluyor" dediği şey anlaşmada kilitli bir fiyattır ve müşterinin
+ * yapacağı bir şey yoktur; "teklifini tamamla" dediği şey ise müşterinin hiç
+ * kurmadığı bir teklif (partiyi admin serbest bıraktı). İkincisi üstelik ticari
+ * ileti, yani gereksiz posta + İYS gürültüsü.
+ *
+ * Ölçü partinin DURUMUNA bakmaz: bir parti satırı varsa o teklif bir partidir.
+ * İptal edilmiş bir partinin klonu da müşterinin kendi kurduğu bir teklif
+ * değildir.
+ */
+function notFrameworkBatchQuote(): SQL {
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(quoteFrameworkBatches)
+      .where(eq(quoteFrameworkBatches.quoteId, quotes.id))
+  );
+}
+
+/**
  * Süresi geçen teklifleri kapatır ve kaç tanesinin kapandığını döner.
  *
  * `order_id IS NULL` koşulu, durum süzgecinin üstüne konan İKİNCİ kapıdır:
@@ -165,13 +254,25 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * kapatılmamalı. Ters yön zararsızdır: `linkQuoteToOrderTx` yalnız
  * `order_id IS NULL` arar ve durumu `ordered` yazar, yani bu tur bir ödemeyi
  * kilitleyemez.
+ *
+ * ÜÇÜNCÜ KAPI (R2): kapanmamış bir çerçeve anlaşmanın KAYNAK teklifi `expired`a
+ * ÇEKİLMEZ. İki sebep üst üste: (a) süresi dolmuş sayılan teklif saklama
+ * süpürmesinin de adayı olur ve dosyaları silinince planlı partiler bir daha
+ * serbest bırakılamaz; (b) anlaşmanın geçerliliğini `price_locked_until`
+ * söyler, kaynak teklifin `expires_at`i değil — teklifi kapatmak müşterinin
+ * imzalı anlaşmasını ekranda "süresi doldu" diye göstermekti.
  */
 export async function expireQuotes(now: Date): Promise<number> {
   const expired = await db
     .update(quotes)
     .set({ status: "expired", updatedAt: now })
     .where(
-      and(inArray(quotes.status, EXPIRABLE), isNull(quotes.orderId), lt(quotes.expiresAt, now))
+      and(
+        inArray(quotes.status, EXPIRABLE),
+        isNull(quotes.orderId),
+        lt(quotes.expiresAt, now),
+        noLiveFrameworkOnQuote()
+      )
     )
     .returning({ id: quotes.id });
   return expired.length;
@@ -245,7 +346,9 @@ export async function sendExpiryReminders(now: Date): Promise<number> {
     isNotNull(quotes.totalKurus),
     isNull(quotes.expiryReminderSentAt),
     gt(quotes.expiresAt, now),
-    lte(quotes.expiresAt, horizon)
+    lte(quotes.expiresAt, horizon),
+    // R6: klon parti teklifine "teklifinizin süresi dolmak üzere" yazılmaz.
+    notFrameworkBatchQuote()
   );
   // En yakın vade önce: sınıra takılan teklif, bir sonraki tura kalırken
   // süresini doldurmuş olmasın.
@@ -284,7 +387,11 @@ export async function sendAbandonedReminders(now: Date): Promise<number> {
         .select({ one: sql`1` })
         .from(quoteCheckouts)
         .where(eq(quoteCheckouts.quoteId, quotes.id))
-    )
+    ),
+    // R6: klon parti teklifine "yarım kalan teklifiniz duruyor" YAZILMAZ —
+    // müşteri o teklifi hiç kurmadı (partiyi admin serbest bıraktı) ve bu bir
+    // TİCARİ İLETİ, yani gereksiz posta + İYS gürültüsü.
+    notFrameworkBatchQuote()
   );
   // En uzun süredir bekleyen önce.
   return claimAndSendReminders("abandoned", due, asc(quotes.updatedAt), now);
@@ -347,7 +454,12 @@ export async function purgeExpiredQuoteFiles(now: Date): Promise<number> {
         isNull(quoteParts.filesPurgedAt),
         inArray(quotes.status, PURGEABLE),
         isNull(quotes.orderId),
-        lt(quotes.expiresAt, cutoff)
+        lt(quotes.expiresAt, cutoff),
+        // R2, EN SOMUT RİSK: kapanmamış bir çerçeve anlaşmanın kaynak teklifinin
+        // dosyaları SİLİNMEZ. Silinirse `copyPartInto` `files_purged` (409) ile
+        // patlar ve o anlaşmanın planlı partileri bir daha serbest
+        // bırakılamaz — imzalanmış bir sözleşme yerine getirilemez hâle gelir.
+        noLiveFrameworkOnQuote()
       )
     )
     // En eski vade önce: süresi en çok geçmiş dosya turlarca beklemesin.
@@ -687,6 +799,245 @@ export async function expireStrandedQuoteDrafts(now: Date): Promise<number> {
   return expired;
 }
 
+/**
+ * Bir turda en çok kaç ANLAŞMAYA serbest bırakma hatırlatması gider.
+ *
+ * Tavan hatırlatmalardan düşük (`REMINDER_BATCH` 200): bir anlaşma mektubu İKİ
+ * mektuptur (müşteri + admin) ve bu aşamanın normal yükü SIFIRA yakındır — tur
+ * saatte bir koşuyor, kuyruğa girmiş yüz anlaşma iki yıllık bir plan defterinin
+ * aynı güne yığılması demektir. Artanı bir sonraki tur alır (damga kolonu
+ * sayesinde kaldığı yerden).
+ */
+export const FRAMEWORK_REMINDER_BATCH = 100;
+
+/**
+ * SERBEST BIRAKMA PENCERESİ açılmış planlı partisi olan anlaşmalara hatırlatma;
+ * kaç anlaşmanın sahiplenildiğini döner.
+ *
+ * ─── DAMGA SATIR SATIR, GÖNDERİM DAMGADAN HEMEN SONRA ───────────────────────
+ *
+ * Damganın satırı ANLAŞMADIR (`quote_frameworks.release_reminder_sent_at`):
+ * parti tablosunda damga kolonu yok ve bu tur migration AÇMIYOR. Zaten doğru
+ * kapsam da bu — mektup "anlaşmanızın parti zamanı geldi" der, tek bir partiyi
+ * saymaz. Damga, kendi kolonunun boş olmasını arayan koşullu bir
+ * `UPDATE … RETURNING`tır ve O SATIRIN mektubundan hemen önce yazılır; iki
+ * eşzamanlı tur aynı anlaşmayı sahiplenemez.
+ *
+ * PARTİ HÂLİNDE ÖNDEN DAMGALAMAK BUNUN YERİNE GEÇMEZ: turun ortasına düşen bir
+ * SIGTERM, damgalanmış ama mektubu yazılmamış anlaşmalar bırakırdı ve damga
+ * dolduğu için bir daha da yazılmazdı (dosyanın 1. kuralı).
+ *
+ * GÖNDERİM BAŞARISIZ OLURSA DAMGA GERİ ALINMAZ: `quote-notify` sözleşme gereği
+ * fırlatmaz (kendi `safe` kabuğu var), yani "başarısız" bilgisi buraya normalde
+ * hiç ulaşmaz; ulaştığı gün de geri alınan bir damga SMTP arızasında aynı
+ * adrese tur tur mektup yağdırırdı. Hata YUTULMAZ ama: toplanır ve aşama
+ * SONUNDA fırlatır, `phase(...)` onu tura taşır ve kuyruk işi kırmızıya döner.
+ *
+ * ─── İŞLEMSEL, TİCARİ İLETİ DEĞİL ──────────────────────────────────────────
+ *
+ * `users.marketing_consent` ARANMAZ (`sendExpiryReminders` sınıfı): imzalanmış
+ * bir anlaşmanın parti planında zamanın geldiğini bildirmek bir satış iletisi
+ * değildir. Terk hatırlatması aranır; ikisini karıştırmak ya İYS ihlali ya
+ * gereksiz bir kapı olurdu.
+ *
+ * ─── ÜÇ SORGU VE SIRANIN GEREKÇESİ ─────────────────────────────────────────
+ *
+ * Pencere ölçüsü İŞ GÜNÜ aritmetiğidir ve tatil listesi anlaşmanın DONMUŞ
+ * `pricing_snapshot`ında duruyor, yani SQL'de ölçülemez. Bu yüzden sorgu
+ * ANLAŞMAYI daraltır (aktif + kilidi dolmamış + damgası boş + planlı partisi
+ * var), pencereyi `frameworkReleaseWindowOpen` ölçer. Adaylar EN YAKIN planlı
+ * sevk tarihine göre sıralanır: tavana takılan anlaşma, penceresi açık olma
+ * olasılığı EN DÜŞÜK olandır (penceresi açık bir parti tanımı gereği en yakın
+ * tarihlilerdendir), yani tavan gerçek adayları kaydırmaz.
+ *
+ * Pencere her partinin KENDİ parçalarıyla ölçülür (`frameworkBatchLeadDays`),
+ * anlaşma geneli maksimumla DEĞİL: plan kapısı da öyle ölçüyor ve ikisini
+ * birbirinin yerine yazmak hızlı parçalı bir partinin penceresini günler önce
+ * açardı.
+ */
+export async function sendFrameworkReleaseReminders(
+  now: Date,
+  /**
+   * Mektubu atan işlev. ÜRETİMDE DAİMA varsayılanıdır; parametre yalnız
+   * "gönderim fırlatırsa tur KIRMIZI olur" değişmezinin sınanabilmesi için var
+   * — `quote-notify` sözleşme gereği fırlatmadığı için bu yolu başka hiçbir
+   * şey tetikleyemez ve yutma sessizce geri gelirdi.
+   */
+  notify: (frameworkId: string) => Promise<void> = notifyFrameworkReleaseWindow
+): Promise<number> {
+  const earliestPlanned = sql<string | null>`(
+    SELECT min(${quoteFrameworkBatches.plannedShipDate})
+    FROM ${quoteFrameworkBatches}
+    WHERE ${quoteFrameworkBatches.frameworkId} = ${quoteFrameworks.id}
+      AND ${quoteFrameworkBatches.status} = 'planned'
+  )`;
+  const candidates = await db
+    .select({
+      id: quoteFrameworks.id,
+      number: quoteFrameworks.number,
+      leadTier: quoteFrameworks.leadTier,
+      addonKeys: quoteFrameworks.addonKeys,
+      partsSnapshot: quoteFrameworks.partsSnapshot,
+      pricingSnapshot: quoteFrameworks.pricingSnapshot,
+    })
+    .from(quoteFrameworks)
+    .where(
+      and(
+        eq(quoteFrameworks.status, "active"),
+        // Kilidin süresi TARİHE bakılarak ölçülür, bu turun ne zaman koştuğuna
+        // bakılarak değil: `releaseBatch` de öyle ölçüyor, yani kilidi dolmuş
+        // bir anlaşmanın partisi için "bugün bırak" demek 409 veren bir işe
+        // çağırmak olurdu.
+        gte(quoteFrameworks.priceLockedUntil, now),
+        isNull(quoteFrameworks.releaseReminderSentAt),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(quoteFrameworkBatches)
+            .where(
+              and(
+                eq(quoteFrameworkBatches.frameworkId, quoteFrameworks.id),
+                eq(quoteFrameworkBatches.status, "planned")
+              )
+            )
+        )
+      )
+    )
+    .orderBy(asc(earliestPlanned))
+    .limit(FRAMEWORK_REMINDER_BATCH);
+  if (candidates.length === 0) return 0;
+
+  const ids = candidates.map((c) => c.id);
+  const plannedBatches = await db
+    .select({
+      id: quoteFrameworkBatches.id,
+      frameworkId: quoteFrameworkBatches.frameworkId,
+      plannedShipDate: quoteFrameworkBatches.plannedShipDate,
+    })
+    .from(quoteFrameworkBatches)
+    .where(
+      and(
+        inArray(quoteFrameworkBatches.frameworkId, ids),
+        eq(quoteFrameworkBatches.status, "planned")
+      )
+    )
+    .orderBy(asc(quoteFrameworkBatches.plannedShipDate));
+  const lineRows =
+    plannedBatches.length === 0
+      ? []
+      : await db
+          .select({
+            batchId: quoteFrameworkBatchLines.batchId,
+            partId: quoteFrameworkBatchLines.partId,
+          })
+          .from(quoteFrameworkBatchLines)
+          .where(
+            inArray(
+              quoteFrameworkBatchLines.batchId,
+              plannedBatches.map((b) => b.id)
+            )
+          );
+  const partsByBatch = new Map<string, string[]>();
+  for (const line of lineRows) {
+    const list = partsByBatch.get(line.batchId) ?? [];
+    list.push(line.partId);
+    partsByBatch.set(line.batchId, list);
+  }
+  const batchesByFramework = new Map<string, typeof plannedBatches>();
+  for (const batch of plannedBatches) {
+    const list = batchesByFramework.get(batch.frameworkId) ?? [];
+    list.push(batch);
+    batchesByFramework.set(batch.frameworkId, list);
+  }
+
+  let sent = 0;
+  const failures: string[] = [];
+  for (const framework of candidates) {
+    const open = (batchesByFramework.get(framework.id) ?? []).some((batch) =>
+      frameworkReleaseWindowOpen({
+        snapshot: framework.pricingSnapshot,
+        leadDays: frameworkBatchLeadDays({
+          snapshot: framework.pricingSnapshot,
+          leadTier: framework.leadTier,
+          parts: framework.partsSnapshot,
+          addonKeys: framework.addonKeys,
+          linePartIds: partsByBatch.get(batch.id) ?? [],
+        }),
+        plannedShipDate: batch.plannedShipDate,
+        now,
+      })
+    );
+    if (!open) continue;
+    // `updated_at`e DOKUNULMAZ: o kolon anlaşmanın son GERÇEK değişikliğini
+    // söylüyor ve bir hatırlatma anlaşmayı değiştirmez.
+    const [claimed] = await db
+      .update(quoteFrameworks)
+      .set({ releaseReminderSentAt: now })
+      .where(
+        and(
+          eq(quoteFrameworks.id, framework.id),
+          isNull(quoteFrameworks.releaseReminderSentAt)
+        )
+      )
+      .returning({ id: quoteFrameworks.id });
+    if (!claimed) continue;
+    try {
+      await notify(claimed.id);
+      sent++;
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err);
+      console.error(
+        `[quote-maintenance] ${framework.number} serbest bırakma hatırlatması gönderilemedi`,
+        err
+      );
+      failures.push(`${framework.number}: ${message}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `çerçeve serbest bırakma hatırlatması gönderilemedi — ${failures.join(" | ")}`
+    );
+  }
+  return sent;
+}
+
+/**
+ * Fiyat kilidinin süresi geçen AKTİF anlaşmaları `expired`a çeker; kaç
+ * anlaşmanın kapandığını döner.
+ *
+ * NEDEN AYRI BİR AŞAMA (9.) ve hatırlatmanın yanında değil: bu aşama tek bir
+ * UPDATE'tir, mektup yazmaz ve `phase(...)` hataları TOPLADIĞI için bir SMTP
+ * arızası bu süpürmeyi durdurmamalı. İkisini tek aşamaya koymak, biri
+ * patladığında ötekini de sessizce atlamak demekti.
+ *
+ * SIRA ÖNEMSİZ (ve bu bilinçli): hatırlatma aşamasının kilit kapısı
+ * `price_locked_until >= now` TARİHİNE bakar, anlaşmanın `status`una değil —
+ * yani kilidi dolmuş bir anlaşma, bu aşama henüz koşmamışken de hatırlatma
+ * ALMAZ. `releaseBatch` de aynı tarihi ölçüyor, yani bu tur gecikse bile
+ * kimse kilitli olmayan bir fiyatla parti bırakamaz. Aşamanın işi ekranın ve
+ * listelerin DOĞRU durumu göstermesidir.
+ *
+ * YALNIZ `active` → `expired`: `draft` bir anlaşma hiç yürürlüğe girmedi
+ * (`releaseBatch` onu zaten reddediyor) ve admin ona `extendFrameworkLock` ile
+ * yeni bir tarih verip aktifleştirebilir; onu `expired` yazmak, hiç başlamamış
+ * bir anlaşmayı bitmiş göstermekti. `extendFrameworkLock` süresi dolmuş bir
+ * anlaşmayı uzatmayla yeniden `active` yapar.
+ *
+ * YAYIN YAPILMAZ: ekranlar `lockExpired`ı `price_locked_until`dan OKUMA ANINDA
+ * türetiyor (`loadFrameworkDetail`), yani açık bir sayfa bu turu beklemeden
+ * doğru cümleyi gösterir.
+ */
+export async function expireFrameworkLocks(now: Date): Promise<number> {
+  const expired = await db
+    .update(quoteFrameworks)
+    .set({ status: "expired", updatedAt: now })
+    .where(
+      and(eq(quoteFrameworks.status, "active"), lt(quoteFrameworks.priceLockedUntil, now))
+    )
+    .returning({ id: quoteFrameworks.id });
+  return expired.length;
+}
+
 export interface QuoteMaintenanceOutcome {
   expired: number;
   expiryReminders: number;
@@ -697,6 +1048,10 @@ export interface QuoteMaintenanceOutcome {
   promotedGiftDrafts: number;
   /** Son tarih işi kaybolmuş olduğu için bu turda kapatılan taslak sayısı. */
   expiredStrandedDrafts: number;
+  /** Serbest bırakma penceresi açıldığı için hatırlatılan ANLAŞMA sayısı. */
+  frameworkReleaseReminders: number;
+  /** Fiyat kilidi dolduğu için bu turda `expired`a çekilen anlaşma sayısı. */
+  expiredFrameworks: number;
 }
 
 /**
@@ -723,6 +1078,8 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
     orphanDirs: 0,
     promotedGiftDrafts: 0,
     expiredStrandedDrafts: 0,
+    frameworkReleaseReminders: 0,
+    expiredFrameworks: 0,
   };
   const failures: string[] = [];
 
@@ -768,6 +1125,18 @@ export async function runQuoteMaintenance(now: Date): Promise<QuoteMaintenanceOu
   // dizinler sonra).
   await phase("sweepOrphanQuotePartDirs", async () => {
     outcome.orphanDirs = await sweepOrphanQuotePartDirs(now);
+  });
+  // SIRA: çerçeve aşamaları EN SONDA, çünkü hiçbir önceki aşamaya girdi
+  // vermiyorlar ve ikisi de teklif tarafındaki süzgeçlerden BAĞIMSIZ ölçüyor
+  // (hatırlatmanın kilit kapısı `price_locked_until` TARİHİNE bakar, anlaşmanın
+  // `status`una değil — bkz. `expireFrameworkLocks` başlığı). Bu sıra yalnız
+  // hikâyeyi düzgün anlatıyor: teklif motorunun bakımı önce, anlaşmaların
+  // bakımı sonra.
+  await phase("sendFrameworkReleaseReminders", async () => {
+    outcome.frameworkReleaseReminders = await sendFrameworkReleaseReminders(now);
+  });
+  await phase("expireFrameworkLocks", async () => {
+    outcome.expiredFrameworks = await expireFrameworkLocks(now);
   });
 
   if (failures.length > 0) throw new Error(`bakım turu eksik kaldı — ${failures.join(" | ")}`);

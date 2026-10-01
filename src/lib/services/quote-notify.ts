@@ -16,7 +16,7 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { quotes, users } from "@/lib/db/schema";
+import { quoteFrameworks, quotes, users } from "@/lib/db/schema";
 import { publishRealtime } from "@/lib/realtime/bus";
 import { topics } from "@/lib/realtime/events";
 import { notifyCustomer } from "@/lib/services/customer-notifications";
@@ -259,6 +259,112 @@ export async function notifyQuoteAbandoned(quoteId: string): Promise<void> {
         "Sorularınız için bu e-postayı yanıtlamanız yeterli.",
       ],
     });
+  });
+}
+
+/**
+ * Çerçeve anlaşma + sahibinin iletişim bilgisi.
+ *
+ * Teklifin alıcısından AYRI bir yükleyici, çünkü iki şey ayrışıyor: bağlantı
+ * `/cerceve/<C-numarası>`dır (teklif değil, ANLAŞMA sayfası) ve
+ * `quote_frameworks.user_id` NOT NULL'dur — anonim çerçeve YOK, yani "adresi
+ * olmayan alıcı" hâli bu yüzeyde doğmaz.
+ */
+interface FrameworkRecipient {
+  frameworkId: string;
+  number: string;
+  title: string | null;
+  url: string;
+  userId: string;
+  email: string | null;
+  name: string | null;
+}
+
+async function loadFrameworkRecipient(
+  frameworkId: string
+): Promise<FrameworkRecipient | null> {
+  const [row] = await db
+    .select({
+      id: quoteFrameworks.id,
+      number: quoteFrameworks.number,
+      title: quoteFrameworks.title,
+      userId: quoteFrameworks.userId,
+      email: users.email,
+      name: users.fullName,
+    })
+    .from(quoteFrameworks)
+    .leftJoin(users, eq(users.id, quoteFrameworks.userId))
+    .where(eq(quoteFrameworks.id, frameworkId))
+    .limit(1);
+  if (!row) return null;
+  return {
+    frameworkId: row.id,
+    number: row.number,
+    title: row.title,
+    url: `${appUrl()}/cerceve/${row.number}`,
+    userId: row.userId,
+    email: row.email,
+    name: row.name,
+  };
+}
+
+/**
+ * Bir partinin SERBEST BIRAKMA PENCERESİ açıldı (saatlik bakım işi).
+ *
+ * İŞLEMSELDİR, TİCARİ İLETİ DEĞİL: imzalanmış bir anlaşmanın parti planında
+ * zamanın geldiğini bildirmek bir satış iletisi değildir, bu yüzden
+ * `users.marketing_consent` ARANMAZ (terk hatırlatması aranır —
+ * `notifyQuoteAbandoned`; ikisini karıştırmak ya İYS ihlali ya gereksiz bir
+ * kapı olurdu). Yeni bir İYS onayı da gerekmez (tasarım §10 madde 4).
+ *
+ * İKİ ALICI, iki farklı cümle: serbest bırakma kararı ADMİN'indir (insansız
+ * serbest bırakma yok, tasarım §1), yani eyleme çağıran mektup ona gider;
+ * müşteriye giden mektup yalnız planının zamanının geldiğini söyler ve ona
+ * yapacak bir iş YÜKLEMEZ — ödeme talebi partiyi serbest bıraktığımızda doğar.
+ *
+ * FİYAT YAZILMAZ (dosyanın 2. kuralı): gövde tutar taşımaz, anlaşmaya BAĞLANTI
+ * verir. Anlaşmanın tutarı fiyat kapısının arkasındadır ve e-posta o kapıyı
+ * tanımaz.
+ */
+export async function notifyFrameworkReleaseWindow(frameworkId: string): Promise<void> {
+  await safe("notifyFrameworkReleaseWindow", async () => {
+    const f = await loadFrameworkRecipient(frameworkId);
+    if (!f) return;
+    const label = f.title ? `${f.number} — ${f.title}` : f.number;
+    const quoteLike: QuoteRecipient = {
+      quoteId: f.frameworkId,
+      number: f.number,
+      title: f.title,
+      url: f.url,
+      userId: f.userId,
+      email: f.email,
+      name: f.name,
+      marketingConsent: false,
+    };
+    await tellCustomer(quoteLike, {
+      type: "framework_release_window",
+      subject: "Çerçeve anlaşmanızın parti zamanı geldi",
+      heading: "Çerçeve anlaşmanızın parti zamanı geldi",
+      lines: [
+        "Planladığımız partinin üretim penceresi açıldı: bu partiyi şimdi başlatırsak planlanan sevk tarihine yetişir.",
+        "Ekibimiz partiyi serbest bırakıp ödeme talebini iletecek; anlaşmanızın güncel durumunu aşağıdaki bağlantıdan görebilirsiniz.",
+      ],
+    });
+    await sendRawEmail({
+      to: adminEmail(),
+      subject: `Çerçeve partisi serbest bırakılmayı bekliyor: ${f.number}`,
+      html: emailHtml(
+        "Çerçeve partisi serbest bırakılmayı bekliyor",
+        [
+          `${label} anlaşmasında planlı bir partinin serbest bırakma penceresi açıldı.`,
+          "Bugün bırakılmazsa planlanan sevk tarihi kayar.",
+          f.email ? `Müşteri: ${f.name ?? ""} <${f.email}>` : "Müşteri adresi okunamadı",
+        ],
+        quoteLike
+      ),
+      ...(f.email ? { replyTo: f.email } : {}),
+    });
+    await nudgeAdmin();
   });
 }
 

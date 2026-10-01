@@ -38,7 +38,11 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
-import type { PricingSnapshot, QuoteStatus } from "../src/lib/config/quote-types";
+import type {
+  FrozenQuotePart,
+  PricingSnapshot,
+  QuoteStatus,
+} from "../src/lib/config/quote-types";
 
 const connectionString = process.env.QA_QUOTE_DB_URL;
 if (!connectionString) throw new Error("QA_QUOTE_DB_URL required");
@@ -158,6 +162,9 @@ async function main() {
       orderDrafts,
       orders,
       quoteCheckouts,
+      quoteFrameworkBatchLines,
+      quoteFrameworkBatches,
+      quoteFrameworks,
       quoteParts,
       quotes,
       users,
@@ -175,6 +182,7 @@ async function main() {
       ORPHAN_DIR_BATCH,
       ORPHAN_DIR_GRACE_HOURS,
       STUCK_GIFT_DRAFT_GRACE_MINUTES,
+      expireFrameworkLocks,
       expireQuotes,
       expireStrandedQuoteDrafts,
       promoteStuckGiftCoveredDrafts,
@@ -182,8 +190,15 @@ async function main() {
       runQuoteMaintenance,
       sendAbandonedReminders,
       sendExpiryReminders,
+      sendFrameworkReleaseReminders,
       sweepOrphanQuotePartDirs,
     } = await import("../src/lib/services/quote-maintenance");
+    // Çerçeve servisinden YALNIZ `releaseBatch`: R5'in ikinci yarısı (kilidi
+    // dolmuş anlaşmada parti serbest bırakılamaz) ancak gerçek uçla
+    // kanıtlanır. `istanbulDateKey` pencere tarihlerini İstanbul takviminde
+    // kurar — testin uydurduğu bir gün değil.
+    const { releaseBatch } = await import("../src/lib/services/quote-framework");
+    const { istanbulDateKey } = await import("../src/lib/config/business-days");
 
     const snapshot: PricingSnapshot = await loadActiveSnapshot();
     const address = {
@@ -1138,7 +1153,7 @@ async function main() {
         .where(eq(orderDrafts.id, broken.draftId));
     });
 
-    await test("saatlik tur YEDİ işi de koşar ve sayıları döner", async () => {
+    await test("saatlik tur DOKUZ işi de koşar ve sayıları döner", async () => {
       const now = new Date();
       const user = await makeUser({ marketingConsent: true, tag: "tick" });
       await makeQuote({
@@ -1195,6 +1210,12 @@ async function main() {
         1,
         "sahipsiz taslak aşaması turda GERÇEKTEN koştu"
       );
+      // SEKİZİNCİ ve DOKUZUNCU iş: çerçeve aşamaları. Sayaçların VARLIĞI tek
+      // başına bir şey kanıtlamaz (başlangıç değeri de sıfırdır), o yüzden
+      // aşağıda kendi vakalarıyla ayrıca sınanıyorlar; burada kanıtlanan şey
+      // turun onları ÇAĞIRDIĞI ve sonucu gövdeye yazdığıdır.
+      assert.equal(outcome.frameworkReleaseReminders, 0);
+      assert.equal(outcome.expiredFrameworks, 0);
       const [tickPromoted] = await db
         .select({ status: orderDrafts.status })
         .from(orderDrafts)
@@ -1430,7 +1451,508 @@ async function main() {
         .where(eq(orderDrafts.id, broken.draftId));
     });
 
-    // ─── 8) Kaynak denetimi: iş süreçte gerçekten kayıtlı mı ────────────────
+    // ─── 8) ÇERÇEVE ANLAŞMALAR: iki risk kapısı ve iki yeni aşama ──────────
+    //
+    // R2 (en somut risk): KAPANMAMIŞ bir anlaşmanın KAYNAK teklifinin dosyaları
+    // silinirse `copyPartInto` `files_purged` (409) ile patlar ve o anlaşmanın
+    // PLANLI PARTİLERİ BİR DAHA SERBEST BIRAKILAMAZ — imzalanmış bir sözleşme
+    // yerine getirilemez hâle gelir. R6: klon parti teklifi müşterinin hiç
+    // kurmadığı bir tekliftir, iki hatırlatmanın da adayı OLMAMALI.
+
+    /** Anlaşmanın donmuş parça tanımı — `parts_snapshot`ın tek satırı. */
+    function frozenPart(partId: string): FrozenQuotePart {
+      const tech = snapshot.technologies[0];
+      const material = snapshot.materials.find((m) => m.technologyKey === tech.key)!;
+      const finish = snapshot.finishes.find(
+        (f) => f.technologyKey === null || f.technologyKey === tech.key
+      )!;
+      return {
+        partId,
+        position: 1,
+        name: "Parça",
+        fileName: "part.stl",
+        sourceFormat: "stl",
+        canonicalStlKey: `quote-parts/${partId}/canonical.stl`,
+        thumbnailKey: null,
+        drawingKey: null,
+        drawingName: null,
+        scaleFactor: 1,
+        technologyKey: tech.key,
+        technologyName: tech.name,
+        materialKey: material.key,
+        materialName: material.name,
+        colorName: material.colors[0].name,
+        colorHex: material.colors[0].hex,
+        finishKey: finish.key,
+        finishName: finish.name,
+        layerUm: tech.defaultLayerUm,
+        infillPct: tech.defaultInfillPct,
+        quantity: 100,
+        dimensionsMm: { x: 40, y: 30, z: 20 },
+        volumeCm3: 12,
+        tessellationMm: null,
+        unitKurus: 3_000,
+        lineKurus: 300_000,
+        note: null,
+        dfmWarnings: [],
+      };
+    }
+
+    async function makeFramework(opts: {
+      userId: string;
+      quoteId: string;
+      partId: string;
+      status?: "draft" | "active" | "completed" | "expired" | "cancelled";
+      priceLockedUntil?: Date;
+      releaseReminderSentAt?: Date | null;
+      /** Verilmezse parti YAZILMAZ (yalnız anlaşma satırı). */
+      batch?: {
+        plannedShipDate: string;
+        status?: "planned" | "released" | "cancelled";
+        /** `released` partinin KLON teklifi. */
+        quoteId?: string;
+      };
+    }): Promise<{ id: string; number: string; batchId: string | null }> {
+      const part = frozenPart(opts.partId);
+      const [framework] = await db
+        .insert(quoteFrameworks)
+        .values({
+          quoteId: opts.quoteId,
+          userId: opts.userId,
+          status: opts.status ?? "active",
+          leadTier: "standard",
+          addonKeys: [],
+          partsSnapshot: [part],
+          addonsSnapshot: [],
+          pricingSnapshot: snapshot,
+          committedUnits: part.quantity,
+          committedTotalKurus: part.lineKurus,
+          priceLockedUntil: opts.priceLockedUntil ?? new Date(Date.now() + 90 * DAY),
+          shippingAddress: address,
+          ...(opts.releaseReminderSentAt
+            ? { releaseReminderSentAt: opts.releaseReminderSentAt }
+            : {}),
+        })
+        .returning({ id: quoteFrameworks.id, number: quoteFrameworks.number });
+
+      if (!opts.batch) return { ...framework, batchId: null };
+      const batchStatus = opts.batch.status ?? "planned";
+      const [batch] = await db
+        .insert(quoteFrameworkBatches)
+        .values({
+          frameworkId: framework.id,
+          position: 1,
+          status: batchStatus,
+          plannedShipDate: opts.batch.plannedShipDate,
+          units: part.quantity,
+          amountKurus: part.lineKurus,
+          ...(opts.batch.quoteId ? { quoteId: opts.batch.quoteId } : {}),
+          // `quote_framework_batches_released_chk`: "serbest bırakıldı ama
+          // klonu yok" hâli DB'de doğmaz.
+          ...(batchStatus === "released" ? { releasedAt: new Date() } : {}),
+        })
+        .returning({ id: quoteFrameworkBatches.id });
+      await db.insert(quoteFrameworkBatchLines).values({
+        batchId: batch.id,
+        frameworkId: framework.id,
+        partId: opts.partId,
+        position: 0,
+        quantity: part.quantity,
+        unitKurus: part.unitKurus,
+        lineKurus: part.lineKurus,
+      });
+      return { ...framework, batchId: batch.id };
+    }
+
+    /** Bugün, İstanbul takvimi: penceresi AÇIK bir parti için planlanan sevk. */
+    const todayKey = istanbulDateKey(new Date());
+    /** Penceresi KAPALI bir parti: teslim süresinin çok ötesinde. */
+    const farFutureKey = istanbulDateKey(new Date(Date.now() + 120 * DAY));
+
+    await test("R2: KAPANMAMIŞ anlaşmanın kaynak teklifinin dosyaları SİLİNMEZ", async () => {
+      const user = await makeUser({ tag: "fw-purge" });
+      // Aynı hâlde İKİ teklif: biri anlaşmanın kaynağı, öteki çerçevesiz.
+      const guarded = await makeQuote({
+        userId: user.id,
+        status: "expired",
+        expiresAt: new Date(Date.now() - 200 * DAY),
+      });
+      const plain = await makeQuote({
+        userId: user.id,
+        status: "expired",
+        expiresAt: new Date(Date.now() - 200 * DAY),
+      });
+      const guardedDir = randomUUID();
+      const plainDir = randomUUID();
+      const guardedKey = writeKey(guardedDir, "source.stl");
+      const plainKey = writeKey(plainDir, "source.stl");
+      const guardedPart = await makePart(guarded, { id: guardedDir, sourceKey: guardedKey });
+      const plainPart = await makePart(plain, { id: plainDir, sourceKey: plainKey });
+      await makeFramework({
+        userId: user.id,
+        quoteId: guarded,
+        partId: guardedPart,
+        status: "active",
+        batch: { plannedShipDate: farFutureKey },
+      });
+
+      const purged = await purgeExpiredQuoteFiles(new Date());
+      assert.equal(purged, 1, "yalnız ÇERÇEVESİZ teklifin parçası süpürülmeli");
+      assert.equal(onDisk(guardedKey), true, "aktif anlaşmanın kaynak dosyası SİLİNDİ (R2)");
+      assert.equal(await purgedAt(guardedPart), null, "korunan parça damgalandı");
+      // Kapı FAZLA GENİŞ DEĞİL: çerçevesi olmayan aynı teklif süpürülüyor.
+      assert.equal(onDisk(plainKey), false, "çerçevesiz teklifin dosyası silinmedi");
+      assert.ok(await purgedAt(plainPart));
+    });
+
+    await test("R2: kapı KAPANMIŞ anlaşmada açılır (iptal edilen anlaşma dosyayı tutmaz)", async () => {
+      // Ölçü DAR olmak zorunda: `cancelled` bir anlaşmada `releaseBatch` zaten
+      // reddediyor, yani o kaynak tekliften bir daha klon ÜRETİLMEZ. Kümeyi
+      // "her çerçeve" yapmak, iptal edilmiş bir anlaşmanın dosyalarını sonsuza
+      // dek diskte tutmak olurdu.
+      const user = await makeUser({ tag: "fw-purge-cancelled" });
+      const quoteId = await makeQuote({
+        userId: user.id,
+        status: "expired",
+        expiresAt: new Date(Date.now() - 200 * DAY),
+      });
+      const dir = randomUUID();
+      const key = writeKey(dir, "source.stl");
+      const partId = await makePart(quoteId, { id: dir, sourceKey: key });
+      await makeFramework({
+        userId: user.id,
+        quoteId,
+        partId,
+        status: "cancelled",
+        batch: { plannedShipDate: farFutureKey, status: "cancelled" },
+      });
+
+      assert.equal(await purgeExpiredQuoteFiles(new Date()), 1);
+      assert.equal(onDisk(key), false, "iptal edilmiş anlaşma dosyayı tutuyor");
+    });
+
+    await test("R2: aynı hâlde `expireQuotes` kaynak teklifi `expired`a ÇEKMİYOR", async () => {
+      // Purge'ün adayı HİÇ DOĞMUYOR: süresi dolmuş sayılan bir kaynak teklif
+      // saklama süpürmesinin de adayıdır.
+      const user = await makeUser({ tag: "fw-expire" });
+      const guarded = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() - HOUR),
+      });
+      const plain = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() - HOUR),
+      });
+      const partId = await makePart(guarded, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      await makeFramework({
+        userId: user.id,
+        quoteId: guarded,
+        partId,
+        status: "active",
+        batch: { plannedShipDate: farFutureKey },
+      });
+
+      assert.equal(await expireQuotes(new Date()), 1, "yalnız çerçevesiz teklif kapanmalı");
+      assert.equal(await statusOf(guarded), "quoted", "anlaşmanın kaynak teklifi kapatıldı");
+      assert.equal(await statusOf(plain), "expired");
+    });
+
+    await test("R6: klon parti teklifine İKİ hatırlatmanın hiçbiri gitmez", async () => {
+      const user = await makeUser({ marketingConsent: true, tag: "fw-reminder" });
+      // Klon parti teklifi: iki hatırlatmanın da süzgecine UYUYOR (sahibi var,
+      // fiyatı var, vadesi yakın, 24 saattir dokunulmamış).
+      const clone = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + DAY),
+        updatedAt: new Date(Date.now() - 40 * HOUR),
+      });
+      const sourceQuote = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const partId = await makePart(sourceQuote, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      await makeFramework({
+        userId: user.id,
+        quoteId: sourceQuote,
+        partId,
+        status: "active",
+        batch: { plannedShipDate: farFutureKey, status: "released", quoteId: clone },
+      });
+      // KONTROL: aynı hâlde, partisi OLMAYAN sıradan bir teklif.
+      const ordinaryUser = await makeUser({ marketingConsent: true, tag: "fw-ordinary" });
+      const ordinary = await makeQuote({
+        userId: ordinaryUser.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + DAY),
+        updatedAt: new Date(Date.now() - 40 * HOUR),
+      });
+
+      assert.equal(await sendExpiryReminders(new Date()), 1, "yalnız sıradan teklife gitmeli");
+      assert.equal(await sendAbandonedReminders(new Date()), 1);
+      assert.equal(mailsTo(user.email).length, 0, "klon parti teklifine mektup gitti (R6)");
+      assert.equal(mailsTo(ordinaryUser.email).length, 2, "sıradan teklife iki mektup");
+      // Ve damga da VURULMADI: parti teklifi bir sonraki turda da aday olmaz.
+      const stamps = await reminderStamps(clone);
+      assert.equal(stamps.expiry, null, "klon parti teklifi süre damgası aldı");
+      assert.equal(stamps.abandoned, null, "klon parti teklifi terk damgası aldı");
+      assert.equal(ordinary.length > 0, true);
+    });
+
+    await test("serbest bırakma penceresi açıldı: hatırlatma BİR KEZ gider", async () => {
+      // İzin ARANMAZ: bu bir İŞLEM BİLDİRİMİdir (imzalanmış bir anlaşmanın
+      // parti planında zamanın geldiğini söylüyor), ticari ileti değil. Bu
+      // yüzden müşteri `marketing_consent = false`.
+      const user = await makeUser({ marketingConsent: false, tag: "fw-window" });
+      const sourceQuote = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const partId = await makePart(sourceQuote, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      const framework = await makeFramework({
+        userId: user.id,
+        quoteId: sourceQuote,
+        partId,
+        status: "active",
+        batch: { plannedShipDate: todayKey },
+      });
+
+      assert.equal(await sendFrameworkReleaseReminders(new Date()), 1);
+      assert.equal(
+        mailsTo(user.email).length,
+        1,
+        "izin aranmamalı: işlemsel bildirim, ticari ileti değil"
+      );
+      // İKİNCİ TUR HİÇBİR ŞEY YAPMAZ: damga satırın kendi kolonunda.
+      assert.equal(await sendFrameworkReleaseReminders(new Date()), 0);
+      assert.equal(mailsTo(user.email).length, 1, "ikinci tur ikinci mektubu yazdı");
+      const [stamped] = await db
+        .select({ at: quoteFrameworks.releaseReminderSentAt })
+        .from(quoteFrameworks)
+        .where(eq(quoteFrameworks.id, framework.id));
+      assert.ok(stamped.at, "damga yazılmadı");
+    });
+
+    await test("penceresi AÇILMAMIŞ parti ve kilidi DOLMUŞ anlaşma hatırlatma ALMAZ", async () => {
+      const user = await makeUser({ tag: "fw-window-closed" });
+      const q1 = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const p1 = await makePart(q1, { sourceKey: writeKey(randomUUID(), "source.stl") });
+      await makeFramework({
+        userId: user.id,
+        quoteId: q1,
+        partId: p1,
+        status: "active",
+        batch: { plannedShipDate: farFutureKey },
+      });
+      // Kilidi DOLMUŞ ama penceresi açık: rozet gibi hatırlatma da 409 veren
+      // bir işe çağırmamalı (`releaseBatch` kilidi TARİHE bakarak reddediyor).
+      const expiredUser = await makeUser({ tag: "fw-window-locked" });
+      const q2 = await makeQuote({
+        userId: expiredUser.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const p2 = await makePart(q2, { sourceKey: writeKey(randomUUID(), "source.stl") });
+      await makeFramework({
+        userId: expiredUser.id,
+        quoteId: q2,
+        partId: p2,
+        status: "active",
+        priceLockedUntil: new Date(Date.now() - DAY),
+        batch: { plannedShipDate: todayKey },
+      });
+
+      assert.equal(await sendFrameworkReleaseReminders(new Date()), 0);
+      assert.equal(mailsTo(user.email).length, 0);
+      assert.equal(mailsTo(expiredUser.email).length, 0);
+    });
+
+    await test("gönderim fırlatırsa aşama hatayı YUTMAZ ve damgayı GERİ ALMAZ", async () => {
+      // `quote-notify` sözleşme gereği fırlatmaz (kendi `safe` kabuğu var), bu
+      // yüzden yutma ancak enjekte edilen bir gönderici ile sınanabilir —
+      // sınanmadığı gün "sessiz yutma" geri gelir ve hiçbir gösterge
+      // söylemez. Damga GERİ ALINMAZ: geri alınan damga bir SMTP arızasında
+      // aynı adrese tur tur mektup yağdırırdı.
+      const user = await makeUser({ tag: "fw-notify-fail" });
+      const sourceQuote = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const partId = await makePart(sourceQuote, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      const framework = await makeFramework({
+        userId: user.id,
+        quoteId: sourceQuote,
+        partId,
+        status: "active",
+        batch: { plannedShipDate: todayKey },
+      });
+
+      const logged: unknown[][] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(args);
+      try {
+        await assert.rejects(
+          sendFrameworkReleaseReminders(new Date(), async () => {
+            throw new Error("smtp down");
+          }),
+          (err: unknown) =>
+            err instanceof Error &&
+            err.message.includes(framework.number) &&
+            /smtp down/.test(err.message),
+          "aşama hangi anlaşmanın mektubunun gitmediğini SÖYLER"
+        );
+      } finally {
+        console.error = realError;
+      }
+      assert.ok(
+        logged.some((args) => args.some((arg) => String(arg).includes(framework.number))),
+        "arıza günlüğe anlaşma numarasıyla yazıldı"
+      );
+      const [stamped] = await db
+        .select({ at: quoteFrameworks.releaseReminderSentAt })
+        .from(quoteFrameworks)
+        .where(eq(quoteFrameworks.id, framework.id));
+      assert.ok(stamped.at, "damga GERİ ALINDI: aynı adrese tur tur mektup yağar");
+    });
+
+    await test("çerçeve aşaması fırlarsa tur KIRMIZI olur, öteki aşamalar yine koşar", async () => {
+      // GERÇEK bir arıza: `pricing_snapshot`ı bozulmuş bir anlaşmada iş günü
+      // ölçüsü (`frameworkBatchLeadDays`) fırlar. Sessizce yutulsa pencere
+      // ölçülemeyen her anlaşma SESSİZCE hatırlatmasız kalırdı ve bunu hiçbir
+      // gösterge söylemezdi.
+      const user = await makeUser({ tag: "fw-phase-fail" });
+      const sourceQuote = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const partId = await makePart(sourceQuote, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      const framework = await makeFramework({
+        userId: user.id,
+        quoteId: sourceQuote,
+        partId,
+        status: "active",
+        batch: { plannedShipDate: todayKey },
+      });
+      await admin.query(
+        `UPDATE ${namespace}.quote_frameworks SET pricing_snapshot = '{"version":1}'::jsonb WHERE id = $1`,
+        [framework.id]
+      );
+      // Öteki aşamanın GERÇEKTEN koştuğunun kanıtı: süresi geçmiş bir teklif.
+      const expiring = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() - HOUR),
+      });
+
+      const logged: unknown[][] = [];
+      const realError = console.error;
+      console.error = (...args: unknown[]) => void logged.push(args);
+      try {
+        await assert.rejects(
+          runQuoteMaintenance(new Date()),
+          (err: unknown) =>
+            err instanceof Error && /sendFrameworkReleaseReminders/.test(err.message),
+          "tur hangi aşamanın düştüğünü SÖYLER"
+        );
+      } finally {
+        console.error = realError;
+      }
+      assert.ok(logged.length > 0, "arıza günlüğe yazılmadı");
+      assert.equal(await statusOf(expiring), "expired", "öteki aşamalar koşmadı");
+
+      // Temizlik: bozuk anlaşma bundan sonraki her turu kırmızı yapardı.
+      await db
+        .update(quoteFrameworks)
+        .set({ status: "cancelled" })
+        .where(eq(quoteFrameworks.id, framework.id));
+    });
+
+    await test("R5: kilidi dolmuş AKTİF anlaşma `expired`a çekilir, `releaseBatch` REDDEDER", async () => {
+      const user = await makeUser({ tag: "fw-lock" });
+      const sourceQuote = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const partId = await makePart(sourceQuote, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      const framework = await makeFramework({
+        userId: user.id,
+        quoteId: sourceQuote,
+        partId,
+        status: "active",
+        priceLockedUntil: new Date(Date.now() - DAY),
+        batch: { plannedShipDate: farFutureKey },
+      });
+      // TASLAK anlaşma dokunulmaz: hiç yürürlüğe girmedi ve admin ona yeni bir
+      // tarih verip aktifleştirebilir.
+      const draftQuote = await makeQuote({
+        userId: user.id,
+        status: "quoted",
+        expiresAt: new Date(Date.now() + 90 * DAY),
+      });
+      const draftPart = await makePart(draftQuote, {
+        sourceKey: writeKey(randomUUID(), "source.stl"),
+      });
+      const draft = await makeFramework({
+        userId: user.id,
+        quoteId: draftQuote,
+        partId: draftPart,
+        status: "draft",
+        priceLockedUntil: new Date(Date.now() - DAY),
+      });
+
+      assert.equal(await expireFrameworkLocks(new Date()), 1, "yalnız AKTİF anlaşma kapanmalı");
+      const [closed] = await db
+        .select({ status: quoteFrameworks.status })
+        .from(quoteFrameworks)
+        .where(eq(quoteFrameworks.id, framework.id));
+      assert.equal(closed.status, "expired");
+      const [stillDraft] = await db
+        .select({ status: quoteFrameworks.status })
+        .from(quoteFrameworks)
+        .where(eq(quoteFrameworks.id, draft.id));
+      assert.equal(stillDraft.status, "draft", "taslak anlaşma bitmiş gösterildi");
+      // İkinci tur sessiz.
+      assert.equal(await expireFrameworkLocks(new Date()), 0);
+
+      // Ve kilidi dolmuş anlaşmada parti SERBEST BIRAKILAMAZ (R5).
+      await assert.rejects(
+        releaseBatch({
+          frameworkId: framework.id,
+          batchId: framework.batchId!,
+          adminEmail: "qa-admin@example.test",
+          reason: "QA: kilidi dolmuş anlaşmada serbest bırakma denemesi",
+        }),
+        (err: unknown) =>
+          (err as { code?: string }).code === "framework_expired" &&
+          /kilid/i.test((err as Error).message),
+        "kilidi dolmuş anlaşmada parti serbest bırakılabildi"
+      );
+    });
+
+    // ─── 9) Kaynak denetimi: iş süreçte gerçekten kayıtlı mı ────────────────
 
     syncTest("workers/start.ts bakım işçisini ve SAATLİK zamanlayıcıyı kurar", () => {
       const src = stripComments(fs.readFileSync(path.join(root, "workers/start.ts"), "utf8"));

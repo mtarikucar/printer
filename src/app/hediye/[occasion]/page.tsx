@@ -23,17 +23,29 @@ import {
  * sitemap'i, iç bağlantı bloğunu ve bu rota tablosunu birlikte besliyor, yani
  * üçü ayrışamaz.
  *
- * STATİK ÜRETİLEBİLİR, AMA BUGÜN ÜRETİLMİYOR. Bu sayfanın dinamik olmasını
- * gerektiren hiçbir şey yok: veritabanı okuması, arama parametresi, kişiye
- * özel veri geçmiyor; tek girdi slug'ın kendisi ve sözlük. Yine de 2026-10-02
- * build çıktısında rota `ƒ` (dinamik) görünüyor — ama bu sayfaya özel bir
- * durum DEĞİL: kök düzenin `generateMetadata`sı `headers()` okuyor
- * (`x-pathname` → kanonik + noindex, `app/layout.tsx`) ve bu, sitedeki app
- * rotalarının TAMAMINI dinamiğe çeviriyor (`/figur`, `/nasil-calisir`,
- * `/kargo` dâhil; build listesinde `○` olan tek şey `/opengraph-image`).
- * `generateStaticParams` bu yüzden boşa yazılmış değil: rota tablosunun
- * KAPALI kümesini ilan ediyor ve kök düzenin çerez/başlık okuması bir gün
- * kaldırıldığında altı sayfa kendiliğinden önceden üretilir hâle gelir.
+ * BUGÜN DİNAMİK (`ƒ`) ve prerender'ın önünde İKİ AYRI ENGEL var. Sayfanın
+ * girdisi saf: veritabanı okuması, arama parametresi, kişiye özel veri
+ * geçmiyor; tek girdi slug'ın kendisi ve sözlük. Ama saf girdi tek başına
+ * prerender ettirmiyor:
+ *  (1) Kök düzen `headers()` + `getLocale()` okuyor (`x-pathname` → kanonik +
+ *      noindex; `app/layout.tsx:56,68,98`) ve bu, sitedeki app rotalarının
+ *      TAMAMINI dinamiğe çeviriyor (`/figur`, `/nasil-calisir`, `/kargo`
+ *      dâhil; 2026-10-02 build listesinde `○` olan ÜÇ şey var ve hiçbiri bir
+ *      sayfa değil: `/opengraph-image`, `/robots.txt`, `/sitemap.xml`).
+ *      Yani bu sayfaya özel bir durum değil.
+ *  (2) BU dosyanın kendisi de `getLocale()`i iki kez çağırıyor (aşağıda
+ *      `generateMetadata` ve sayfa gövdesi) ve `getLocale()` bir `cookies()`
+ *      okumasıdır (`lib/i18n/get-locale.ts`) — `cookies()` Dynamic API olduğu
+ *      için rota, kök düzen bir gün temizlense bile KENDİLİĞİNDEN prerender
+ *      OLMAZ. `next.config.ts`te ne PPR ne `dynamicIO` açık; kaçış yolu yok.
+ * İkinci engelin çözümü hazır ama bilerek uygulanmadı: `enabledLocales =
+ * ["tr"]` olduğu sürece `getLocale()` yerine `defaultLocale` kullanmak çıktıyı
+ * değiştirmezdi (aynı gerekçe `last-updated.tsx`in `locale` prop'unda yazılı),
+ * yalnız `en` yeniden açıldığında bu altı sayfa Türkçeye çivilenirdi. (1)
+ * dururken kazancı sıfır, bedeli gerçek olduğu için yapılmadı — prerender
+ * gerçekten istenirse İKİSİ BİRLİKTE kaldırılmalı.
+ * `generateStaticParams` buna rağmen boşa yazılmış değil: rota tablosunun
+ * KAPALI kümesini ilan ediyor ve `dynamicParams = false`un dayanağı o.
  *
  * `dynamicParams = false` + sayfanın kendi `occasionOrNotFound` kapısı:
  * `generateStaticParams`in saymadığı bir slug 404 döner. İki kapı BİRLİKTE

@@ -4,6 +4,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { FigurunicaLanding } from "@/components/figurunica/landing";
 import { pickFigurunicaDict } from "@/components/figurunica/dict";
+import { LastUpdated } from "@/components/last-updated";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -21,6 +22,7 @@ export default async function FigurinePage() {
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
       <FigurunicaLanding d={pickFigurunicaDict(d)} />
+      <LastUpdated path="/figur" locale={locale} />
     </main>
   );
 }

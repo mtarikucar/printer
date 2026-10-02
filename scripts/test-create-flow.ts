@@ -34,7 +34,10 @@ import { SIZE_PRESETS } from "../src/lib/config/sizes";
  */
 
 const ROOT = join(import.meta.dirname, "..");
-const CREATE_PAGE = readFileSync(join(ROOT, "src/app/create/page.tsx"), "utf8");
+// Akışın kendisi 2026-10-02'de `page.tsx`ten `create-client.tsx`e taşındı:
+// `page.tsx` artık ürün gerçeklerini sunucuda çizen SUNUCU bileşeni, akış ise
+// istemcide. Aşağıdaki iddiaların hepsi akışın kodu hakkında.
+const CREATE_PAGE = readFileSync(join(ROOT, "src/app/create/create-client.tsx"), "utf8");
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -42,10 +45,10 @@ function test(name: string, fn: () => void) {
   cases.push([name, fn]);
 }
 
-/** Body of a top-level `const <name> = ... => { ... }` in create/page.tsx. */
+/** Body of a top-level `const <name> = ... => { ... }` in create-client.tsx. */
 function handlerBody(name: string): string {
   const start = CREATE_PAGE.indexOf(`const ${name} = `);
-  assert.notEqual(start, -1, `${name} bulunamadı — create/page.tsx yeniden yazılmış olabilir`);
+  assert.notEqual(start, -1, `${name} bulunamadı — create-client.tsx yeniden yazılmış olabilir`);
   const open = CREATE_PAGE.indexOf("{", CREATE_PAGE.indexOf("=>", start));
   let depth = 0;
   for (let i = open; i < CREATE_PAGE.length; i++) {
@@ -132,7 +135,7 @@ test("restore edilebilen HER stil ya sabit fiyatlı figürdür ya da teklif-only
   }
 });
 
-test("create/page.tsx restore effect'leri isRestorableCreateStyle kullanır", () => {
+test("create-client.tsx restore effect'leri isRestorableCreateStyle kullanır", () => {
   assert.match(
     CREATE_PAGE,
     /import \{[\s\S]*?isRestorableCreateStyle[\s\S]*?\} from "@\/lib\/create\/design-templates";/,

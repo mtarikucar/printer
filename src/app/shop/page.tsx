@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
+import { LastUpdated } from "@/components/last-updated";
 import { ProductGrid } from "@/components/product-grid";
 import { queryShopProducts } from "@/lib/services/shop-query";
 import {
@@ -99,6 +100,7 @@ export default async function ShopPage({
           hasMore={hasMore}
         />
       </section>
+      <LastUpdated path="/shop" locale={locale} />
     </main>
   );
 }

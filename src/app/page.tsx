@@ -2,6 +2,7 @@ import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { categories, manufacturers, products } from "@/lib/db/schema";
 import { SiteHeader } from "@/components/site-header";
+import { LastUpdated } from "@/components/last-updated";
 import { StorefrontHome } from "@/components/marketplace/storefront";
 import { type ProductListItem } from "@/components/product-card";
 import { getPublicImageUrl } from "@/lib/services/storage";
@@ -89,6 +90,11 @@ export default async function HomePage() {
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
       <StorefrontHome products={items} roots={roots} networkMap={networkMap} />
+      {/* `locale` BİLEREK geçilmiyor: bu sayfa `revalidate = 60` ile koşuyor
+          ve `getLocale()` bir çerez okuması — tek bir tarih satırı için
+          anasayfayı her istekte dinamiğe çevirmeye değmez. Tek etkin dil
+          Türkçe olduğu sürece çıktı da aynı. */}
+      <LastUpdated path="" />
     </main>
   );
 }

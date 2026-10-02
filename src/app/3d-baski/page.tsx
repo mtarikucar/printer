@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
+import { LastUpdated } from "@/components/last-updated";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { buildPrintServiceJsonLd } from "@/lib/seo/service";
 import { isFlagEnabled } from "@/lib/services/flags";
@@ -89,6 +90,10 @@ export default async function PrintServicePage() {
           )
         }
       />
+      {/* `locale` BİLEREK geçilmiyor: yukarıdaki gerekçeyle bu sayfa bayrak
+          açıkken HİÇ çerez okumamalı (statik üretilebilirliğinin tek koşulu),
+          `getLocale()` ise bir çerez okumasıdır. */}
+      <LastUpdated path="/3d-baski" />
     </main>
   );
 }

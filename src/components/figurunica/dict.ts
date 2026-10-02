@@ -163,6 +163,16 @@ export const FIGURUNICA_KEYS = [
   "landing.fig.trust.badge.ssl",
   "landing.fig.trust.badge.payment",
   "landing.fig.trust.badge.refund",
+  // ALINTILANABİLİR RAKAMLAR. Bu dört anahtar sözlükte yazılıydı ama izin
+  // listesinde olmadığı için hiçbir yer onları render etmiyordu; sonuç olarak
+  // adı tam bu niyete bakan `/figur` sayfası tek bir ₺ rakamı yayınlamıyordu
+  // (ölçüm 2026-10-02). `trust3` + `pricing.feature1` kahraman şeridinde,
+  // `cta.subtitle` + `box.figurine.desc` anasayfanın fiyat çıpasında çiziliyor;
+  // rakamlar `withProductFacts` ile sabitten dolduruluyor.
+  "landing.hero.trust3",
+  "landing.pricing.feature1",
+  "landing.cta.subtitle",
+  "landing.box.figurine.desc",
 ] as const satisfies ReadonlyArray<keyof Dictionary>;
 
 export type FigurunicaKey = (typeof FIGURUNICA_KEYS)[number];

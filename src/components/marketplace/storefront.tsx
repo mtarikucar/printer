@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useDictionary } from "@/lib/i18n/locale-context";
+import { withProductFacts } from "@/lib/config/product-facts";
 import type { NetworkMapData } from "@/lib/config/network-map";
 import type { ProductListItem } from "@/components/product-card";
 import { HeroCreate } from "./hero-create";
@@ -29,7 +30,36 @@ function rootSegment(categoryPath: string | null): string | null {
   return categoryPath ? categoryPath.split("/")[0] : null;
 }
 
-// The homepage IS the marketplace: category ribbon → promo banner → New
+/**
+ * FİYAT ÇIPASI — anasayfanın tek alıntılanabilir rakamı.
+ *
+ * Ölçüm (2026-10-02): anasayfanın GÖRÜNÜR metni 1.359 karakterdi ve içinde tek
+ * bir ₺ rakamı yoktu; oysa bu sayfa sitemap önceliği 1.0 olan sayfa, yani bir
+ * asistanın ilk okuduğu yer. Aynı gün gerçek bir ChatGPT oturumunda "figür
+ * nerede yaptırabilirim" sorusuna çıkan üç markanın üçünde de bir rakam vardı.
+ *
+ * Çıpa VİTRİNDEN GELMEZ: ürün listesi boş olsa da (yeni kurulum, veritabanı
+ * okunamadı) yazılır — rakamın kaynağı `FIGURINE_PRICE_KURUS`, kataloğun
+ * durumu değil. İki cümle de sözlükte ZATEN duruyordu ve hiçbir yerde render
+ * edilmiyordu; yeni pazarlama metni yazılmadı.
+ */
+function FigurinePriceAnchor() {
+  const d = useDictionary();
+  return (
+    <section className="border-b border-border-default bg-bg-surface">
+      <div className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-5 text-center sm:flex-row sm:items-baseline sm:justify-center sm:gap-3 sm:text-left">
+        <p className="text-sm font-semibold text-text-primary">
+          {withProductFacts(d["landing.cta.subtitle"])}
+        </p>
+        <p className="text-sm text-text-secondary">
+          {withProductFacts(d["landing.box.figurine.desc"])}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// The homepage IS the marketplace: category ribbon → price anchor → New
 // Arrivals → one shelf per populated root category → a secondary custom strip →
 // footer. The marketing story now lives on /figur + /nasil-calisir.
 export function StorefrontHome({
@@ -55,6 +85,7 @@ export function StorefrontHome({
           photo→figurine hero, then the marketplace shelves. */}
       <CategoryRibbon categories={roots} />
       <HeroCreate />
+      <FigurinePriceAnchor />
       <ProductRow
         title={d["store.row.new"]}
         products={newest}

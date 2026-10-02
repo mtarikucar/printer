@@ -96,7 +96,10 @@ const en = {
   "landing.pricing.title": "Pricing",
   "landing.pricing.subtitle": "One-time payment. Everything included.",
   "landing.pricing.select": "Select",
-  "landing.pricing.feature1": "15 cm SLA resin figurine",
+  // `{size}` / `{price}` placeholders are filled by `withProductFacts`
+  // (src/lib/config/product-facts.ts) — the figure comes from
+  // `SIZE_PRESETS[0].heightMm` / `FIGURINE_PRICE_KURUS`, never typed by hand.
+  "landing.pricing.feature1": "{size} SLA resin figurine",
   "landing.pricing.feature2": "Professional hand-painting included",
   "landing.pricing.feature3": "Delivered display-ready",
   "landing.pricing.feature4": "Kraft gift box",
@@ -1989,7 +1992,7 @@ const en = {
   // Landing - Hero Trust Badges
   "landing.hero.trust1": "Free shipping",
   "landing.hero.trust2": "Professional hand-painting",
-  "landing.hero.trust3": "\u20BA3,499 flat",
+  "landing.hero.trust3": "{price} flat",
   "landing.hero.trust4": "Preview before print",
 
   // Landing - Style Showcase
@@ -1998,7 +2001,7 @@ const en = {
   "landing.box.title": "What's in the Box?",
   "landing.box.subtitle": "Display-ready the moment you open the box",
   "landing.box.figurine": "Resin Figurine",
-  "landing.box.figurine.desc": "15 cm, high-detail SLA resin print, hand-painted in our studio.",
+  "landing.box.figurine.desc": "{size}, high-detail SLA resin print, hand-painted in our studio.",
   // NOTE: the paints/brushes/guide key names date from the paint-kit era; the
   // names are kept so component references do not break, the copy is current.
   "landing.box.paints": "Professional Hand-Painting",
@@ -2062,7 +2065,7 @@ const en = {
 
   // Landing - Final CTA
   "landing.cta.title": "Turn Your Photo Into a Figurine",
-  "landing.cta.subtitle": "One flat price: ₺3,499. Professional hand-painting and free shipping included.",
+  "landing.cta.subtitle": "One flat price: {price}. Professional hand-painting and free shipping included.",
   "landing.cta.button": "Get Started Now",
 
   // Gallery Modal - Before/After

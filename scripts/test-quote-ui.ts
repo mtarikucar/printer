@@ -10,6 +10,9 @@
  *
  * Çalıştırma: npx tsx scripts/test-quote-ui.ts
  */
+// İLK import olmak ZORUNDA: CSS modülü import eden bileşenleri (örn. /figur
+// kahramanı) `tsx` altında render edilebilir yapar. Gerekçe stub'ın başlığında.
+import "./support/stub-css-modules";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -116,7 +119,7 @@ import {
   FRAMEWORK_TERMS_VERSION,
   frameworkProgressBuckets,
 } from "../src/lib/config/quote-framework";
-import { KDV_RATE_BPS } from "../src/lib/config/prices";
+import { FIGURINE_PRICE_KURUS, KDV_RATE_BPS } from "../src/lib/config/prices";
 import { computeKdv } from "../src/lib/services/finance";
 import type { FrameworkDetail } from "../src/lib/services/quote-framework";
 import { presentFramework } from "../src/lib/services/quote-framework-present";
@@ -169,6 +172,19 @@ import { serializeJsonLd } from "../src/lib/seo/jsonld";
 import { isNoindexPath } from "../src/lib/seo/policy";
 import { buildPrintServiceJsonLd } from "../src/lib/seo/service";
 import robots from "../src/app/robots";
+// V1 — alıntılanabilir rakamların yayımlandığı yüzeyler.
+import { CreateFactsBand } from "../src/components/create/product-facts";
+import { FigurunicaLanding } from "../src/components/figurunica/landing";
+import { FIGURUNICA_KEYS, pickFigurunicaDict } from "../src/components/figurunica/dict";
+import { StorefrontHome } from "../src/components/marketplace/storefront";
+import { LastUpdated } from "../src/components/last-updated";
+import { PAGE_UPDATED_AT, pageUpdatedAt } from "../src/lib/config/page-updated";
+import {
+  FIGURINE_HEIGHT_LABEL,
+  FIGURINE_PRICE_LABEL,
+  layerHeightLabel,
+  withProductFacts,
+} from "../src/lib/config/product-facts";
 
 const PREFIX = "instantQuote.";
 const trKeys = Object.keys(tr).filter((k) => k.startsWith(PREFIX));
@@ -5109,4 +5125,262 @@ test("TAKIM EKRANI: takım teklifleri UÇTA daraltılır (`?scope=team`), istemc
     /listScope === "team" && scope\.team !== null\s*\?\s*eq\(quotes\.teamId, scope\.team\.teamId\)/,
     "servis kapsamı sorguda daraltmıyor"
   );
+});
+
+// ─── V1: yazılı olup TARAYICIYA GÖRÜNMEYEN rakamlar ─────────────────────────
+//
+// Ölçüm (2026-10-02): gerçek bir ChatGPT oturumunda "figür nerede
+// yaptırabilirim" sorusuna Figurunica ÇIKMADI; çıkan üç markanın üçünde de
+// alıntılanabilir bir RAKAM vardı. Bizim rakamlarımız sözlükte yazılıydı ama
+// tarayıcıya giden HTML'de yoktu. Aşağıdaki nöbetçiler o rakamların TEKRAR
+// kaybolmasını engeller: her biri "sayfa müşteriye/asistana hangi rakamı
+// söylüyor" sorusunu sorar, bir bileşenin var olup olmadığını değil.
+
+/**
+ * Kaynak pinlerinden YORUMLARI ayıklar.
+ *
+ * Bu sevkiyatın dosya başlıkları yasakladıkları kalıpları (`new Date()`,
+ * `force-dynamic`, elle yazılmış "25 µm") GEREKÇE olarak anıyor; nöbetçi kendi
+ * gerekçesini ihlal sanmasın. Ev deseni (bkz. aynı dosyadaki diğer `strip`'ler).
+ */
+function stripComments(raw: string): string {
+  return raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+}
+
+/** `/create`in sunucuda çizilen gerçekler bandı. */
+function renderCreateFactsBand(): string {
+  return plain(
+    inLocale(
+      createElement(CreateFactsBand, {
+        title: tr["create.product.title"],
+        spec: tr["create.product.spec"],
+        included: tr["create.product.included"],
+      })
+    )
+  );
+}
+
+/** `/figur`in tam gövdesi (sayfanın `FigurunicaLanding` dışında gövdesi yok). */
+function renderFigurBody(): string {
+  return plain(inLocale(createElement(FigurunicaLanding, { d: pickFigurunicaDict(tr) })));
+}
+
+/** Anasayfa gövdesi — vitrin ürünsüz de çizilmek ZORUNDA (çıpa oradan gelmez). */
+function renderStorefront(): string {
+  return plain(
+    inLocale(createElement(StorefrontHome, { products: [], roots: [], networkMap: null }))
+  );
+}
+
+test("fiyat ve ölçü ETİKETİ sabitten türer, biçim tek yerde yazılı", () => {
+  // Bu etiket dört yüzeyin (anasayfa, /figur, /create bandı, akışın ürün
+  // kartı) paylaştığı TEK dize. Sabit değişince dördü birlikte değişir.
+  assert.equal(FIGURINE_PRICE_LABEL, "₺3.499");
+  assert.equal(FIGURINE_HEIGHT_LABEL, "15 cm");
+  assert.equal(FIGURINE_PRICE_KURUS, 349900);
+
+  // Etiket KURUŞ KAYBETMEZ: tam liraya oturmayan bir fiyat sessizce
+  // yuvarlanırsa yayımlanan rakam tahsil edilen rakamdan sapar — bu sevkiyatın
+  // tam da engellemeye çalıştığı şey. Kaynak pini, çünkü sabit derleme
+  // zamanında tek değer.
+  const facts = fs.readFileSync(path.resolve("src/lib/config/product-facts.ts"), "utf8");
+  assert.match(
+    facts,
+    /FIGURINE_PRICE_KURUS % 100 === 0/,
+    "kuruş taşıyan fiyat için formatCurrency'ye düşen dal yok"
+  );
+  assert.match(
+    facts,
+    /formatCurrency\(FIGURINE_PRICE_KURUS, "tr"\)/,
+    "yedek dal formatCurrency kullanmıyor"
+  );
+});
+
+test("tanıtım cümlelerindeki rakam ELLE YAZILI DEĞİL, yer tutucudan gelir", () => {
+  // Dört anahtar da bu sevkiyattan önce HİÇBİR YERDE render edilmiyordu ve
+  // rakamı cümlenin içine elle yazılmıştı. Artık render ediliyorlar — ve rakam
+  // sabitten geliyor, yani fiyat değiştiğinde cümle yalan söylemiyor.
+  const expected: Record<string, string> = {
+    "landing.hero.trust3": "₺3.499 tek fiyat",
+    "landing.cta.subtitle":
+      "Tek fiyat ₺3.499. Profesyonel el boyaması ve ücretsiz kargo dahil.",
+    "landing.pricing.feature1": "15 cm SLA reçine figürin",
+    "landing.box.figurine.desc":
+      "15 cm, yüksek detaylı SLA reçine baskı; atölyemizde elle boyanmış.",
+  };
+  for (const [key, sentence] of Object.entries(expected)) {
+    const raw = (tr as Record<string, string>)[key];
+    assert.ok(raw, `${key} sözlükte yok`);
+    assert.doesNotMatch(
+      raw,
+      /\d/,
+      `tr:${key} içinde elle yazılmış bir rakam var — bir gün FIGURINE_PRICE_KURUS'tan ayrışır`
+    );
+    assert.equal(
+      withProductFacts(raw),
+      sentence,
+      `tr:${key} doldurulduğunda eski cümleyi vermiyor`
+    );
+    // İngilizce sözlük `Dictionary` tipinin kaynağı; orada da rakam kalmasın.
+    assert.doesNotMatch((en as Record<string, string>)[key], /\d/, `en:${key} rakam taşıyor`);
+  }
+  // Tip kapısı dördünü tanımalı, yoksa `pickFigurunicaDict` onları taşımaz.
+  for (const key of Object.keys(expected)) {
+    assert.ok(
+      (FIGURUNICA_KEYS as readonly string[]).includes(key),
+      `${key} FIGURUNICA_KEYS'te yok`
+    );
+  }
+});
+
+test("/create'in sunucu bandı fiyatı, ölçüyü ve teslim süresini YAYINLAR", () => {
+  // Brief'in üç gerçeği. Band olmadan /create HTML'inde "3.499" SIFIR kez
+  // geçiyordu (ölçüm 2026-10-02, canlı sunucu HTML'i).
+  const html = renderCreateFactsBand();
+  assert.ok(html.includes("₺3.499"), "fiyat bandda yok");
+  assert.ok(html.includes("15 cm"), "ölçü bandda yok");
+  assert.ok(html.includes("5-7 iş günü"), "üretim süresi bandda yok");
+  assert.ok(html.includes("Ücretsiz kargo dahil"), "kargo taahhüdü bandda yok");
+});
+
+test("/create gerçekler bandı SUSPENSE SINIRININ DIŞINDA ve sunucuda çiziliyor", () => {
+  // MUTASYON SINAVI: bandı yeniden `<Suspense>`in İÇİNE al → bu iddia KIRMIZI.
+  // Sınırın içi, `useSearchParams` yüzünden statik üretimde fallback'e düşen
+  // alt ağaçtır; ayrıca dinamik render'da fallback hiç SERVİS EDİLMEZ, yani
+  // "fallback'e koy" çözümü rakamı hiçbir tarayıcıya ULAŞTIRMAZ.
+  const page = stripComments(fs.readFileSync(path.resolve("src/app/create/page.tsx"), "utf8"));
+  assert.doesNotMatch(
+    page,
+    /^\s*["']use client["']/m,
+    "/create sayfası istemci modülü — gerçekler bandı sunucuda çizilmiyor"
+  );
+  // Rotayı sunucuya bağlayan kaçış yolları YASAK: bu sayfa yüksek trafikli bir
+  // huni, çözüm aynı HTML'i üretmek, her isteği sunucuya bağlamak değil.
+  assert.doesNotMatch(
+    page,
+    /force-dynamic|revalidate\s*=\s*0/,
+    "/create rotası dinamiğe zorlanmış"
+  );
+
+  const closeSuspense = page.indexOf("</Suspense>");
+  const band = page.indexOf("<CreateFactsBand");
+  assert.notEqual(closeSuspense, -1, "/create sayfasında Suspense sınırı yok");
+  assert.notEqual(band, -1, "/create sayfası gerçekler bandını çizmiyor");
+  assert.ok(
+    band > closeSuspense,
+    "<CreateFactsBand> Suspense sınırının İÇİNDE — statik üretimde HTML'den düşer"
+  );
+
+  // Akışın kendisi hâlâ istemcide ve dört sorgu parametresi dalı da duruyor.
+  const client = fs.readFileSync(path.resolve("src/app/create/create-client.tsx"), "utf8");
+  assert.match(client, /^["']use client["']/m, "akış istemci modülü değil");
+  for (const param of ["path", "style", "previewId", "fromOrder"]) {
+    assert.ok(
+      client.includes(`searchParams.get("${param}")`),
+      `?${param}= dalı kaybolmuş — müşteri davranışı değişti`
+    );
+  }
+  // Bandın cümlesi akışın ürün kartıyla AYNI bileşenden gelir, iki kopya değil.
+  assert.match(client, /<CreateProductFacts/, "ürün kartı paylaşılan bileşeni kullanmıyor");
+});
+
+test("/figur ürün gerçeklerini DEKORATİF göstergeden ÖNCE yayınlar", () => {
+  // Ölçüm: atıfların %44,2'si dokümanın ilk %30'undan geliyor. /figur bugüne
+  // kadar HİÇ ₺ rakamı yayınlamıyordu, DOM sırasının başında ise alıntılanamaz
+  // yazıcı göstergesi vardı ("layer 000/420", "27.4°C", "12,480").
+  const html = renderFigurBody();
+  assert.ok(html.includes("₺3.499"), "/figur fiyat yayınlamıyor");
+  assert.ok(html.includes("15 cm"), "/figur ölçü yayınlamıyor");
+  assert.ok(html.includes("5-7"), "/figur üretim süresi yayınlamıyor");
+
+  const facts = Math.max(html.indexOf("₺3.499"), html.indexOf("15 cm"));
+  for (const noise of ["000/420", "27.4", "12,480", "405nm"]) {
+    const at = html.indexOf(noise);
+    assert.notEqual(at, -1, `dekoratif gösterge "${noise}" kaybolmuş — nöbetçi kör kaldı`);
+    assert.ok(
+      facts < at,
+      `ürün gerçekleri dekoratif "${noise}" metninden SONRA geliyor (gerçek ${facts}, gürültü ${at})`
+    );
+  }
+  // Gösterge ekran okuyucuya da okunmaz.
+  const sections = fs.readFileSync(path.resolve("src/components/figurunica/sections.tsx"), "utf8");
+  assert.match(
+    sections,
+    /className=\{s\("hero-printer"\)\}\s*\n\s*aria-hidden="true"/,
+    "yazıcı sahnesi aria-hidden değil"
+  );
+});
+
+test("anasayfa bir FİYAT ÇIPASI yayınlar (vitrin boşken de)", () => {
+  // Anasayfa sitemap önceliği 1.0 olan sayfa ve bugüne kadar görünür
+  // metninde (1.359 karakter) tek bir ₺ rakamı yoktu. Çıpa vitrin
+  // ürünlerinden GELMEZ: ürün listesi boşken de yazılmak zorunda.
+  const html = renderStorefront();
+  assert.ok(html.includes("₺3.499"), "anasayfa fiyat çıpası yayınlamıyor");
+  assert.ok(html.includes("15 cm"), "anasayfa ölçü yayınlamıyor");
+  assert.ok(html.includes("ücretsiz kargo dahil"), "anasayfa kargo taahhüdünü yazmıyor");
+});
+
+test("/nasil-calisir katman yüksekliğini RAKAMLA yazar, elle yazmadan", () => {
+  // Rakip "14K reçine" yazıyor; bizim niteliksel cümlemiz ("katman izi
+  // görünmeyecek kadar ince") alıntılanamaz. Rakam bir dosya ötede duruyordu.
+  assert.equal(layerHeightLabel(tr), "25 µm");
+  assert.equal(layerHeightLabel(en), "25 µm");
+
+  const page = stripComments(
+    fs.readFileSync(path.resolve("src/app/nasil-calisir/page.tsx"), "utf8")
+  );
+  // MUTASYON SINAVI: `25 µm`i sayfaya elle yaz → bu iddia KIRMIZI.
+  assert.doesNotMatch(
+    page,
+    /\b25\s*µm/,
+    "katman yüksekliği sayfaya ELLE yazılmış — /figur kahramanıyla bir gün ayrışır"
+  );
+  assert.match(page, /layerHeightLabel\(/, "katman yüksekliği tek kaynaktan okunmuyor");
+  // Niteliksel cümle SİLİNMEDİ, rakam onun yanına kondu.
+  assert.match(page, /Katman izi görünmeyecek kadar ince/, "niteliksel cümle silinmiş");
+});
+
+test("ticari sayfaların her birinde Son güncelleme satırı var", () => {
+  // Ölçüm: yazar + son güncelleme alanı olmayan sayfaların bir asistanın
+  // kaynak kartına çıkma oranı 2,4 kat düşük.
+  const pages: Array<[string, string]> = [
+    ["", "src/app/page.tsx"],
+    ["/figur", "src/app/figur/page.tsx"],
+    ["/nasil-calisir", "src/app/nasil-calisir/page.tsx"],
+    ["/3d-baski", "src/app/3d-baski/page.tsx"],
+    ["/urunler", "src/app/urunler/page.tsx"],
+    ["/shop", "src/app/shop/page.tsx"],
+  ];
+  for (const [route, file] of pages) {
+    const source = fs.readFileSync(path.resolve(file), "utf8");
+    assert.match(source, /<LastUpdated\b/, `${route || "/"}: Son güncelleme satırı çizilmiyor`);
+    assert.ok(pageUpdatedAt(route), `${route || "/"}: tarihi kayıtlı değil`);
+  }
+  // Kayıt listesinde OLMAYAN bir yol satırı hiç çizmez (uydurma tarih yok).
+  assert.equal(pageUpdatedAt("/admin/dashboard"), null);
+  // "/" ve "" aynı sayfa.
+  assert.equal(pageUpdatedAt("/"), pageUpdatedAt(""));
+});
+
+test("Son güncelleme tarihi `new Date()`ten TÜREMEZ", () => {
+  // MUTASYON SINAVI: tarihi `new Date()` yap → bu iddia KIRMIZI. Her render'da
+  // bugünü göstermek YANLIŞ bir tazelik sinyalidir: içerik altı ay önce
+  // yazılmış olsa bile taze görünür. `sitemap.ts`in bugünkü hatası tam bu.
+  for (const file of ["src/lib/config/page-updated.ts", "src/components/last-updated.tsx"]) {
+    const source = stripComments(fs.readFileSync(path.resolve(file), "utf8"));
+    assert.doesNotMatch(source, /new Date\(\s*\)/, `${file}: tarih saatten okunuyor`);
+    assert.doesNotMatch(source, /Date\.now\(\)/, `${file}: tarih saatten okunuyor`);
+  }
+  // Satır insana Türkçe tarihi, makineye ISO tarihi AYNI düğümden verir.
+  const html = plain(inLocale(createElement(LastUpdated, { path: "/figur", locale: "tr" })));
+  assert.ok(html.includes("Son güncelleme"), "etiket yok");
+  // HTML niteliği büyük/küçük harfe duyarsız; React `<time dateTime>`i olduğu
+  // gibi basıyor, tarayıcı `datetime` olarak okuyor.
+  assert.match(
+    html,
+    new RegExp(`datetime="${PAGE_UPDATED_AT["/figur"]}"`, "i"),
+    `makine okunur tarih yok: ${html}`
+  );
+  assert.ok(html.includes("2 Ekim 2026"), `insan okunur tarih yok: ${html}`);
 });

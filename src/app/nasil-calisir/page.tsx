@@ -8,6 +8,9 @@ import {
   CREATIVE_LAB_PRICES_KURUS,
 } from "@/lib/config/prices";
 import { SIZE_PRESETS, formatCm } from "@/lib/config/sizes";
+import { layerHeightLabel } from "@/lib/config/product-facts";
+import { getDictionary } from "@/lib/i18n/dictionaries";
+import { LastUpdated } from "@/components/last-updated";
 
 // Every number on this page is DERIVED, never typed. This is the page an AI
 // assistant reads when someone asks it "how does Figurunica work?", so a stale
@@ -34,6 +37,11 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function HowItWorksPage() {
   const locale = await getLocale();
   const isTr = locale === "tr";
+  // Katman yüksekliği ("25 µm") sözlükten gelir — /figur kahraman şeridi aynı
+  // anahtarı yayınlıyor, yani baskı çözünürlüğü değişince iki sayfa birlikte
+  // değişir. Rakibin "14K reçine" yazdığı yerde bizim niteliksel cümlemiz
+  // alıntılanamıyordu; rakam bir dosya ötede duruyordu.
+  const LAYER = layerHeightLabel(getDictionary(locale));
 
   return (
     <main className="min-h-screen bg-bg-base">
@@ -76,7 +84,7 @@ export default async function HowItWorksPage() {
               </p>
               <ul>
                 <li><strong>Boyut:</strong> {HEIGHT} yükseklik — satılan tek ölçü.</li>
-                <li><strong>Baskı:</strong> SLA reçine. Katman izi görünmeyecek kadar ince çözünürlük; yüz hatları, saç telleri ve kumaş kıvrımları çıkar.</li>
+                <li><strong>Baskı:</strong> SLA reçine, {LAYER} katman yüksekliği. Katman izi görünmeyecek kadar ince çözünürlük; yüz hatları, saç telleri ve kumaş kıvrımları çıkar.</li>
                 <li><strong>Boyama:</strong> Boyacı partnerimiz figürü fırçayla, elde boyar. Kutudan sergilemeye hazır çıkar; içinde boya kiti <strong>yoktur</strong>.</li>
                 <li><strong>Fiyat:</strong> {PRICE_TR} TL, KDV dahil. Tek fiyat — boyuta, malzemeye veya bitişe göre değişmez.</li>
                 <li><strong>Kargo:</strong> Yurtiçi Kargo ile Türkiye içi <strong>ücretsiz</strong>. Sepet tutarı eşiği yoktur.</li>
@@ -200,7 +208,7 @@ export default async function HowItWorksPage() {
               <p>There is no size, material, or finish package to choose. Everyone gets the same product:</p>
               <ul>
                 <li><strong>Size:</strong> {HEIGHT} tall — the only size we sell.</li>
-                <li><strong>Printing:</strong> SLA resin, at a resolution fine enough to hide layer lines — facial features, strands of hair, and fabric folds come through.</li>
+                <li><strong>Printing:</strong> SLA resin at a {LAYER} layer height, a resolution fine enough to hide layer lines — facial features, strands of hair, and fabric folds come through.</li>
                 <li><strong>Painting:</strong> our painter partner paints it by hand, with a brush. It arrives display-ready; there is <strong>no</strong> paint kit in the box.</li>
                 <li><strong>Price:</strong> {PRICE_EN} TL, VAT included. One price — it does not change with size, material, or finish.</li>
                 <li><strong>Shipping:</strong> <strong>free</strong> within Türkiye via Yurtiçi Kargo. There is no order-value threshold.</li>
@@ -318,6 +326,7 @@ export default async function HowItWorksPage() {
           )}
         </div>
       </div>
+      <LastUpdated path="/nasil-calisir" locale={locale} />
     </main>
   );
 }

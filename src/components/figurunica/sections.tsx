@@ -15,6 +15,7 @@ import {
   buildWhatsAppUrl,
 } from "@/lib/config/contact";
 import { SOCIAL_LINKS } from "@/lib/config/business-identity";
+import { withProductFacts } from "@/lib/config/product-facts";
 import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
 
 const s = (key: string) => (styles as Record<string, string>)[key] ?? "";
@@ -81,6 +82,95 @@ export function HeroIntro({ d }: { d: FigurunicaDict }) {
           style={{ transform: `translate(${mouse.x * 40}px, ${mouse.y * 40}px)` }}
         />
         <div className={s("hero-vignette")} />
+      </div>
+
+      {/* DOM SIRASI BİLEREK BÖYLE: metin (hero-content + hero-ticker) yazıcı
+          sahnesinden ÖNCE geliyor.
+          Ölçüm (2026-10-02): bir asistanın atıflarının %44,2'si dokümanın ilk
+          %30'undan geliyor. Bu bölümün başında eskiden dekoratif gösterge
+          vardı ("layer 000/420", "temp 27.4°C", "verts 12,480") — alıntılanamaz
+          gürültü; sayfanın ilk okunan 250 karakteri oydu.
+          GÖRSEL ÇIKTI DEĞİŞMEDİ: `.hero-printer` ve `.hero-bg` `position:
+          absolute` + açık `z-index` (0/1/3) ile konumlanıyor, `.hero` ise
+          kolon flex — yani ikisi akışta değil ve sıraları yalnız HTML'deki
+          okuma sırasını belirliyor. Bu modülde kardeş seçici (`+`/`~`) de yok
+          (tek istisna `.station + .station`, başka bir bölüm). */}
+      <div className={s("hero-content")}>
+        <div className={s("eyebrow")}>
+          <span className={s("dot")} />
+          {d["landing.fig.hero.eyebrow"]}
+        </div>
+        <h1 className={s("hero-title")}>
+          {d["landing.fig.hero.titleLead"]}
+          <br />
+          <span className={s("italic")}>{d["landing.fig.hero.titleItalic"]} </span>
+          <span className={s("accent")}>{d["landing.fig.hero.titleAccent"]}</span>
+        </h1>
+        <p className={s("hero-sub")}>
+          {d["landing.fig.hero.sub"]} <em>{d["landing.fig.hero.subEm"]}</em>
+        </p>
+
+        {/* ÜRÜN GERÇEKLERİ — ölçü ve fiyat, çağrı düğmesinden ÖNCE.
+            `/figur` bu satır gelene kadar TEK bir ₺ rakamı yayınlamıyordu,
+            oysa kendi sözlük dosyasında fiyatı söyleyen iki cümle duruyordu;
+            ikisi de izin listesinde olmadığı için ölüydü. Rakam sabitten
+            doldurulur (`withProductFacts`), cümle sözlükten gelir — burada
+            yeni pazarlama metni YAZILMADI.
+            Teslim süresi hemen altındaki `hero-stats` şeridinde ("5-7 gün");
+            üçü de dekoratif göstergeden önce okunur. */}
+        <div className={s("hero-meta")}>
+          <span>{withProductFacts(d["landing.pricing.feature1"])}</span>
+          <span className={s("sep")} aria-hidden="true" />
+          <span>{withProductFacts(d["landing.hero.trust3"])}</span>
+        </div>
+
+        <div className={s("hero-ctas")}>
+          <Link href="/create" className={s("btn-primary")}>
+            {d["landing.fig.hero.ctaPrimary"]}
+            <ArrowIcon />
+          </Link>
+          <Link href="/nasil-calisir" className={s("btn-ghost")}>
+            {d["landing.fig.hero.ctaGhost"]}
+          </Link>
+        </div>
+
+        <div className={s("hero-stats")}>
+          <div className={s("stat")}>
+            <div className={s("stat-v")}>
+              {d["landing.fig.hero.stat1.v"]}
+              <span className={s("u")}>{d["landing.fig.hero.stat1.u"]}</span>
+            </div>
+            <div className={s("stat-k")}>{d["landing.fig.hero.stat1.k"]}</div>
+          </div>
+          <div className={s("stat")}>
+            <div className={s("stat-v")}>
+              {d["landing.fig.hero.stat2.v"]}
+              <span className={s("u")}>{d["landing.fig.hero.stat2.u"]}</span>
+            </div>
+            <div className={s("stat-k")}>{d["landing.fig.hero.stat2.k"]}</div>
+          </div>
+          <div className={s("stat")}>
+            <div className={s("stat-v")}>
+              {d["landing.fig.hero.stat3.v"]}
+              <span className={s("u")}>{d["landing.fig.hero.stat3.u"]}</span>
+            </div>
+            <div className={s("stat-k")}>{d["landing.fig.hero.stat3.k"]}</div>
+          </div>
+          <div className={s("stat")}>
+            <div className={s("stat-v")}>{d["landing.fig.hero.stat4.v"]}</div>
+            <div className={s("stat-k")}>{d["landing.fig.hero.stat4.k"]}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className={s("hero-ticker")}>
+        <div className={s("ticker-track")}>
+          {Array.from({ length: 2 }).map((_, k) => (
+            <span key={k} className={s("ticker-chunk")}>
+              <span className={s("t-dot")} /> {d["landing.fig.ticker"]}
+            </span>
+          ))}
+        </div>
       </div>
 
       <div
@@ -285,68 +375,6 @@ export function HeroIntro({ d }: { d: FigurunicaDict }) {
         </div>
       </div>
 
-      <div className={s("hero-content")}>
-        <div className={s("eyebrow")}>
-          <span className={s("dot")} />
-          {d["landing.fig.hero.eyebrow"]}
-        </div>
-        <h1 className={s("hero-title")}>
-          {d["landing.fig.hero.titleLead"]}
-          <br />
-          <span className={s("italic")}>{d["landing.fig.hero.titleItalic"]} </span>
-          <span className={s("accent")}>{d["landing.fig.hero.titleAccent"]}</span>
-        </h1>
-        <p className={s("hero-sub")}>
-          {d["landing.fig.hero.sub"]} <em>{d["landing.fig.hero.subEm"]}</em>
-        </p>
-        <div className={s("hero-ctas")}>
-          <Link href="/create" className={s("btn-primary")}>
-            {d["landing.fig.hero.ctaPrimary"]}
-            <ArrowIcon />
-          </Link>
-          <Link href="/nasil-calisir" className={s("btn-ghost")}>
-            {d["landing.fig.hero.ctaGhost"]}
-          </Link>
-        </div>
-
-        <div className={s("hero-stats")}>
-          <div className={s("stat")}>
-            <div className={s("stat-v")}>
-              {d["landing.fig.hero.stat1.v"]}
-              <span className={s("u")}>{d["landing.fig.hero.stat1.u"]}</span>
-            </div>
-            <div className={s("stat-k")}>{d["landing.fig.hero.stat1.k"]}</div>
-          </div>
-          <div className={s("stat")}>
-            <div className={s("stat-v")}>
-              {d["landing.fig.hero.stat2.v"]}
-              <span className={s("u")}>{d["landing.fig.hero.stat2.u"]}</span>
-            </div>
-            <div className={s("stat-k")}>{d["landing.fig.hero.stat2.k"]}</div>
-          </div>
-          <div className={s("stat")}>
-            <div className={s("stat-v")}>
-              {d["landing.fig.hero.stat3.v"]}
-              <span className={s("u")}>{d["landing.fig.hero.stat3.u"]}</span>
-            </div>
-            <div className={s("stat-k")}>{d["landing.fig.hero.stat3.k"]}</div>
-          </div>
-          <div className={s("stat")}>
-            <div className={s("stat-v")}>{d["landing.fig.hero.stat4.v"]}</div>
-            <div className={s("stat-k")}>{d["landing.fig.hero.stat4.k"]}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className={s("hero-ticker")}>
-        <div className={s("ticker-track")}>
-          {Array.from({ length: 2 }).map((_, k) => (
-            <span key={k} className={s("ticker-chunk")}>
-              <span className={s("t-dot")} /> {d["landing.fig.ticker"]}
-            </span>
-          ))}
-        </div>
-      </div>
     </section>
   );
 }

@@ -98,7 +98,11 @@ const tr: Dictionary = {
   "landing.pricing.title": "Fiyatlandırma",
   "landing.pricing.subtitle": "Tek seferlik ödeme. Her şey dahil.",
   "landing.pricing.select": "Seç",
-  "landing.pricing.feature1": "15 cm SLA reçine figürin",
+  // `{size}` / `{price}` yer tutucuları `withProductFacts` ile doldurulur
+  // (src/lib/config/product-facts.ts): rakamın tek kaynağı
+  // `SIZE_PRESETS[0].heightMm` ve `FIGURINE_PRICE_KURUS`. Cümleye elle rakam
+  // yazılırsa fiyat değiştiği gün bu satır müşteriye yalan söyler.
+  "landing.pricing.feature1": "{size} SLA reçine figürin",
   "landing.pricing.feature2": "Profesyonel el boyaması dahil",
   "landing.pricing.feature3": "Sergilemeye hazır teslim",
   "landing.pricing.feature4": "Kraft hediye kutusu",
@@ -2022,7 +2026,7 @@ const tr: Dictionary = {
   // Landing - Hero Güven Badge'leri
   "landing.hero.trust1": "\u00DCcretsiz kargo",
   "landing.hero.trust2": "Profesyonel el boyamas\u0131",
-  "landing.hero.trust3": "\u20BA3.499 tek fiyat",
+  "landing.hero.trust3": "{price} tek fiyat",
   "landing.hero.trust4": "Bask\u0131 \u00F6ncesi \u00F6nizleme",
 
   // Landing - Stil Vitrini
@@ -2031,7 +2035,7 @@ const tr: Dictionary = {
   "landing.box.title": "Kutuda Neler Var?",
   "landing.box.subtitle": "Kutuyu açtığın anda sergilemeye hazır",
   "landing.box.figurine": "Reçine Figürin",
-  "landing.box.figurine.desc": "15 cm, yüksek detaylı SLA reçine baskı; atölyemizde elle boyanmış.",
+  "landing.box.figurine.desc": "{size}, yüksek detaylı SLA reçine baskı; atölyemizde elle boyanmış.",
   // NOT: paints/brushes/guide anahtar adları eski boyama-kiti dönemindendir;
   // anahtar adları bileşen referanslarını kırmamak için korunuyor, içerik güncel.
   "landing.box.paints": "Profesyonel El Boyaması",
@@ -2095,7 +2099,7 @@ const tr: Dictionary = {
 
   // Landing - Son CTA
   "landing.cta.title": "Fotoğrafını Figürine Dönüştür",
-  "landing.cta.subtitle": "Tek fiyat ₺3.499. Profesyonel el boyaması ve ücretsiz kargo dahil.",
+  "landing.cta.subtitle": "Tek fiyat {price}. Profesyonel el boyaması ve ücretsiz kargo dahil.",
   "landing.cta.button": "Hemen Başla",
 
   // Gallery Modal - Before/After

@@ -26,9 +26,11 @@ export const STATIC_ROUTES: Array<{
 }> = [
   { path: "", changeFrequency: "daily", priority: 1.0 },
   { path: "/shop", changeFrequency: "daily", priority: 0.9 },
-  // /create is a client component with no server-rendered body yet, so it is
-  // deliberately NOT at 0.9 — raise it once the page has a server shell.
-  { path: "/create", changeFrequency: "weekly", priority: 0.5 },
+  // /create artık sunucu bileşeni ve ürün gerçeklerini (ölçü, fiyat, teslim
+  // süresi) Suspense sınırının DIŞINDA yayınlıyor — önceliğin 0.5'te tutulma
+  // gerekçesi (gövdesiz istemci sayfası) 2026-10-02'de ortadan kalktı. Huninin
+  // girişi olduğu için /shop ile aynı kademede.
+  { path: "/create", changeFrequency: "weekly", priority: 0.9 },
   { path: "/figur", changeFrequency: "weekly", priority: 0.8 },
   // Instant 3D-printing quote: the service landing page and its material
   // library. Both are server-rendered with catalogue numbers, which is what

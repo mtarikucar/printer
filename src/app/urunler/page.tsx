@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { Turnstile, type TurnstileRef } from "@/components/turnstile";
 import { SiteHeader } from "@/components/site-header";
+import { LastUpdated } from "@/components/last-updated";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
 import { creativeLabPriceKurus } from "@/lib/config/prices";
 import { SIZE_PRESETS } from "@/lib/config/sizes";
@@ -323,6 +324,7 @@ export default function UrunlerPage() {
 
         <Turnstile ref={turnstileRef} />
       </div>
+      <LastUpdated path="/urunler" locale={locale} />
     </main>
   );
 }

@@ -364,6 +364,10 @@
   display: flex; flex-direction: column; justify-content: flex-start;
 }
 .hero .hero-sub { margin-top: 14px; }
+/* Ürün gerçekleri satırı kahramanın İÇİNDE duruyor (alt bölümlerin altında
+   değil), bu yüzden `.hero-meta`nın 48px'lik nefesi burada kısılıyor:
+   kahraman 100vh'e sığmak zorunda ve çağrı düğmeleri aşağı kaymasın. */
+.hero .hero-meta { margin-top: 18px; }
 
 /* Strong readable plate behind the headline block */
 .hero-content::before {

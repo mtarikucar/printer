@@ -5163,6 +5163,40 @@ function stripComments(raw: string): string {
   return raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
 }
 
+/**
+ * `/create` dal kapısının JSX bloğunu — `{kapı && ( … )}` — METİN olarak ayırır.
+ *
+ * Neden ayrı bir ayıklayıcı: bu kapının arkasında İKİ nöbetçinin birlikte
+ * koruduğu şey var (gerçekler bandı + figürin şeması) ve ikisi de MESAFEYLE
+ * sınanamaz. `{kapı &&[\s\S]{0,300}<Band` gibi bir kalıp kapının KAPANIŞ
+ * süslüsünü umursamadan geçer: korunan düğüm kapının ALTINA, kardeş olmayan
+ * bir yere taşındığında da yeşil kalır — yani "yakınında" demekle "içinde"
+ * demeyi karıştırır. Oysa ihlalin kendisi tam bu: band koşulsuzlaşırsa teklif
+ * dallarında ₺3.499 yayımlanır, şema koşulsuzlaşırsa ekranda görünmeyen bir
+ * `Offer` yayımlanır. Bu yüzden iddia İKİ yönlü kuruluyor — düğüm blokta VAR,
+ * bloğun DIŞINDA yok.
+ *
+ * Süslü sayarak yürümek bu dosya için yeterli: `page.tsx` yorumsuz okunuyor
+ * (yukarıdaki `stripComments`) ve blokta süslü taşıyan dize/şablon yok. Biri
+ * eklenirse ayıklayıcı yanlış yerde durur ve iddia KIRMIZI döner — sessizce
+ * yeşile kaçmaz.
+ */
+function createGateBlock(page: string, gateName: string): { inside: string; outside: string } {
+  const open = page.search(new RegExp(`\\{\\s*${gateName}\\s*&&`));
+  assert.notEqual(open, -1, `/create: \`${gateName}\` bir JSX kapısı olarak çizilmiyor`);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < page.length; i++) {
+    if (page[i] === "{") depth++;
+    else if (page[i] === "}" && --depth === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+  assert.notEqual(end, -1, "/create: dal kapısının süslü parantezi kapanmıyor");
+  return { inside: page.slice(open, end), outside: page.slice(0, open) + page.slice(end) };
+}
+
 /** `/create`in sunucuda çizilen gerçekler bandı. */
 function renderCreateFactsBand(): string {
   return plain(
@@ -5361,12 +5395,18 @@ test("/create bandı YALNIZ sabit fiyatlı dalda çiziliyor, teklif dallarında 
   const page = stripComments(fs.readFileSync(path.resolve("src/app/create/page.tsx"), "utf8"));
   const gate = page.match(/const\s+(\w+)\s*=\s*createUrlSellsFixedPriceFigure\(/);
   assert.ok(gate, "/create sayfası dalı sormuyor — band koşulsuz çiziliyor");
+  // İddia KAPSAMA, mesafe değil: band kapının JSX bloğunun İÇİNDE ve sayfanın
+  // başka hiçbir yerinde çizilmiyor. Bandı kapının ALTINA koşulsuz taşımak da
+  // (kapıyı koruyup kardeşliği bozmak) bu yüzden kırmızı döner.
+  const factsGate = createGateBlock(page, gate[1]);
   assert.match(
-    page,
-    // Kapı ile band arasında yalnız aynı kapıya bağlı kardeşler durabilir
-    // (V2'de figürin JSON-LD'si de aynı kapının arkasına girdi).
-    new RegExp(`\\{\\s*${gate[1]}\\s*&&[\\s\\S]{0,300}<CreateFactsBand`),
-    "<CreateFactsBand> dal kapısının arkasında değil — teklif dallarında da ₺3.499 yayınlar"
+    factsGate.inside,
+    /<CreateFactsBand/,
+    "<CreateFactsBand> dal kapısının İÇİNDE değil — teklif dallarında da ₺3.499 yayınlar"
+  );
+  assert.ok(
+    !factsGate.outside.includes("<CreateFactsBand"),
+    "<CreateFactsBand> kapının DIŞINDA da çiziliyor — teklif dallarında ₺3.499 yayınlanır"
   );
 });
 
@@ -5571,10 +5611,22 @@ test("figürin şeması ÜÇ sayfada da AYNI @id ile yayımlanıyor", () => {
   }
   const gate = create.match(/const\s+(\w+)\s*=\s*createUrlSellsFixedPriceFigure\(/);
   assert.ok(gate, "/create dalı sormuyor");
+  // V1 bandıyla AYNI kapsama iddiası: şema kapının bloğunun içinde, dışında
+  // ise hiç yok. Şemayı kapının bir satır ALTINA taşımak `?path=upload`ta
+  // ekranda görünmeyen bir `Offer` yayınlamak olurdu.
+  //
+  // Aranan şey ÇAĞRI (`…JsonLd(`), yalnız ad değil: `import` satırı zaten
+  // kapının dışında durmak ZORUNDA, yani çıplak adı dışarıda yasaklamak
+  // doğru kodu kırmızı gösterirdi.
+  const schemaGate = createGateBlock(create, gate[1]);
   assert.match(
-    create,
-    new RegExp(`${gate[1]}\\s*&&[\\s\\S]{0,400}buildFigurineProductJsonLd`),
-    "/create figürin şemasını dal kapısının ARKASINDA yayınlamıyor"
+    schemaGate.inside,
+    /buildFigurineProductJsonLd\(/,
+    "/create figürin şemasını dal kapısının İÇİNDE yayınlamıyor"
+  );
+  assert.ok(
+    !schemaGate.outside.includes("buildFigurineProductJsonLd("),
+    "/create figürin şemasını kapının DIŞINDA da yayınlıyor — fiyatsız dalda `Offer` sızar"
   );
 });
 

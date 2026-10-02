@@ -59,17 +59,23 @@ export const FIGURINE_PRICE_LABEL = figurinePriceLabel(FIGURINE_PRICE_KURUS);
 /**
  * Figürünün TESLİM SÜRESİ — üretim ve kargo, iş günü.
  *
- * Neden sabit: bu dört rakam ("5-7" ve "2-3") yayımlanan dört cümlenin
- * İÇİNDE elle yazılıydı (`create.product.included`,
- * `landing.fig.hero.stat2.v`, `landing.faq.a1`, `/nasil-calisir` adımları) ve
- * hiçbir yerde tek bir kaynağı yoktu. Yapısal veri (`Offer.shippingDetails`
- * → `handlingTime`/`transitTime`) bu rakamı MAKİNEYE söylüyor; şemaya beşinci
- * bir kopya yazmak, bir gün sayfanın söylediğinden farklı bir teslim süresi
- * yayınlamak demekti.
+ * Neden sabit: bu dört rakam ("5-7" ve "2-3") yayımlanan cümlelerin İÇİNDE
+ * elle yazılıydı ve hiçbir yerde tek bir kaynağı yoktu — sözlükte
+ * (`create.product.included`, `landing.fig.hero.stat2.v`, `landing.faq.a1`,
+ * iki dilde), `/nasil-calisir` adımlarında, DÖRT hukuk/kargo sayfasında
+ * (`/kargo`, `/mesafeli-satis`, `/on-bilgilendirme`, `/terms`) ve sipariş onay
+ * e-postasında (`email.confirmation.estimate`, ikisinin TOPLAMINI yazar).
+ * Yapısal veri (`Offer.shippingDetails` → `handlingTime`/`transitTime`) bu
+ * rakamı MAKİNEYE söylüyor; şemaya bir kopya daha yazmak, bir gün sayfanın
+ * söylediğinden farklı bir teslim süresi yayınlamak demekti.
  *
- * Dört cümlenin METNİ bu sevkiyatta yer tutucuya ÇEVRİLMEDİ (kapsam: V2 yeni
- * metin yazmıyor); onun yerine `scripts/test-seo-jsonld.ts` her yayımlanan
- * yüzeyi bu sabite PİNLER — biri değişip diğeri kalırsa test kırmızı döner.
+ * O cümlelerin METNİ bu sevkiyatta yer tutucuya ÇEVRİLMEDİ (kapsam: V2 yeni
+ * metin yazmıyor); onun yerine `scripts/test-seo-jsonld.ts` yukarıda sayılan
+ * yüzeylerin hepsini bu sabite PİNLER — biri değişip diğeri kalırsa test
+ * kırmızı döner. Yeni bir yüzey teslim süresi yayımlayacaksa pine de
+ * eklenmeli; sayfalar tarafında pin TERS yönden kurulu (dosyadaki her iş günü
+ * aralığı sabitten türemiş olmak zorunda), yani yeni bir rakam sessizce
+ * geçmez.
  */
 export const FIGURINE_LEAD_DAYS = {
   /** Önizleme onayından sonra üretim: 5-7 iş günü. */

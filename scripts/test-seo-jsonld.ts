@@ -118,11 +118,19 @@ check("üretim ve kargo süresi tek sabitten, elle yazılmadan", () => {
 });
 
 check("iş günü sabiti YAYIMLANAN cümlelerle bire bir aynı", () => {
-  // Deponun teslim süresi sabiti YOKTU: rakam dört cümlenin içinde elle
-  // yazılıydı. Şema artık tek sabitten türüyor; aşağıdaki pinler o sabiti
-  // yayımlanan her yüzeye bağlar, yani biri değişip diğeri kalırsa KIRMIZI.
+  // Deponun teslim süresi sabiti YOKTU: rakam yayımlanan cümlelerin içinde
+  // elle yazılıydı. Şema artık tek sabitten türüyor; aşağıdaki pinler o
+  // sabiti rakamı YAYIMLAYAN her yüzeye bağlar — sözlük cümleleri,
+  // `/nasil-calisir` adımları, dört hukuk/kargo sayfası ve sipariş onay
+  // e-postası — yani biri değişip diğeri kalırsa KIRMIZI.
   const production = `${FIGURINE_LEAD_DAYS.productionMin}-${FIGURINE_LEAD_DAYS.productionMax}`;
   const transit = `${FIGURINE_LEAD_DAYS.transitMin}-${FIGURINE_LEAD_DAYS.transitMax}`;
+  // TOPLAM teslim süresi ("7-10 iş günü") beşinci bir sabit DEĞİL, iki
+  // rakamın toplamı: `/kargo` sayfası bunu zaten "üretim (5-7) + kargo (2-3)"
+  // diye yazıyor, sipariş onay e-postası ise müşteriye yalnız toplamı söylüyor.
+  const total = `${FIGURINE_LEAD_DAYS.productionMin + FIGURINE_LEAD_DAYS.transitMin}-${
+    FIGURINE_LEAD_DAYS.productionMax + FIGURINE_LEAD_DAYS.transitMax
+  }`;
   // `/figur` kahraman şeridi: "5-7 gün".
   assert.equal((tr as Record<string, string>)["landing.fig.hero.stat2.v"], production);
   assert.equal((en as Record<string, string>)["landing.fig.hero.stat2.v"], production);
@@ -132,19 +140,56 @@ check("iş günü sabiti YAYIMLANAN cümlelerle bire bir aynı", () => {
     assert.ok(included.includes(production), `create.product.included ${production} yazmıyor`);
     assert.ok(included.includes(transit), `create.product.included ${transit} yazmıyor`);
   }
-  // `/figur` SSS: "Kargo yurtiçinde ek 2-3 gün sürer."
-  assert.ok(
-    (tr as Record<string, string>)["landing.faq.a1"].includes(production),
-    "landing.faq.a1 üretim süresini yazmıyor"
-  );
-  assert.ok(
-    (tr as Record<string, string>)["landing.faq.a1"].includes(transit),
-    "landing.faq.a1 kargo süresini yazmıyor"
-  );
+  // `/figur` SSS: "Kargo yurtiçinde ek 2-3 gün sürer." İKİ dil de pinli;
+  // İngilizce ikiz atlanırsa `en` sessizce ayrışır (`en.ts` hâlâ `Dictionary`
+  // tipinin kaynağı, yani ölü metin değil).
+  for (const dict of [tr, en] as Array<Record<string, string>>) {
+    assert.ok(dict["landing.faq.a1"].includes(production), "landing.faq.a1 üretim süresini yazmıyor");
+    assert.ok(dict["landing.faq.a1"].includes(transit), "landing.faq.a1 kargo süresini yazmıyor");
+  }
+  // Sipariş onay e-postası: müşteriye GİDEN tek cümle, toplamı yazıyor
+  // (`src/lib/services/email.ts`). Sayfalar 5-7+2-3 derken e-posta 7-10
+  // demeye devam etmeli, yoksa aynı siparişin iki farklı sözü olur.
+  for (const dict of [tr, en] as Array<Record<string, string>>) {
+    assert.ok(
+      dict["email.confirmation.estimate"].includes(total),
+      `email.confirmation.estimate toplam teslim süresini (${total}) yazmıyor`
+    );
+  }
   // `/nasil-calisir` adımları (şemanın türediği aynı kaynak).
   const steps = HOW_IT_WORKS_STEPS.tr.steps.map(stepBodyText).join(" ");
   assert.ok(steps.includes(production), "/nasil-calisir adımları üretim süresini yazmıyor");
   assert.ok(steps.includes(transit), "/nasil-calisir adımları kargo süresini yazmıyor");
+
+  // Hukuk metinleri + kargo politikası AYNI rakamları yayımlıyor ve `/kargo`
+  // deponun TEK yetkili kargo politikası — sözleşme metni sabitten sapınca
+  // taahhüt edilen süre yayımlanan süreden farklı olur.
+  //
+  // İddia "sabit dosyada geçiyor mu" DEĞİL: her dosyada rakamın iki dilde
+  // kopyası var, biri değişip diğeri kalsa arama yine bulurdu. Bu yüzden ters
+  // yönden soruluyor — dosyadaki HER iş günü aralığı üç değerden biri olmak
+  // zorunda, ve üretim+kargo süreleri en az bir kez geçmek zorunda (yoksa
+  // cümle silinmiş, nöbetçi kör kalmış olur).
+  const allowed = new Set([production, transit, total]);
+  for (const file of [
+    "src/app/kargo/page.tsx",
+    "src/app/mesafeli-satis/page.tsx",
+    "src/app/on-bilgilendirme/page.tsx",
+    "src/app/terms/page.tsx",
+  ]) {
+    const src = fs.readFileSync(path.resolve(file), "utf8");
+    const ranges = (src.match(/\d+-\d+ (?:iş gün|business day)/g) ?? []).map(
+      (m) => m.split(" ")[0]
+    );
+    assert.ok(ranges.includes(production), `${file} üretim süresini (${production}) yazmıyor`);
+    assert.ok(ranges.includes(transit), `${file} kargo süresini (${transit}) yazmıyor`);
+    for (const range of ranges) {
+      assert.ok(
+        allowed.has(range),
+        `${file}: "${range} iş günü" sabitten türemiyor (sabit: ${production} / ${transit} / ${total})`
+      );
+    }
+  }
 });
 
 check("Türkiye içi kargo ÜCRETSİZ olarak beyan ediliyor", () => {

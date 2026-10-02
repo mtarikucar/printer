@@ -23,6 +23,13 @@ import type {
  * der ve uyarı hiç görünmeden karar verilebilir. İkinci fayda: kart
  * `renderToStaticMarkup` ile sınanabiliyor (`scripts/test-indexnow.ts`).
  *
+ * "HENÜZ DUYURULMADI" UYARISI BİR GÜVENLİK AĞI. Zamanlayıcının ilk işi ilk
+ * kayıtta HEMEN doğuyor, yani dağıtımdan saniyeler sonra hafızaya temel
+ * tarihler yazılıyor; o yazım bir duyuru DEĞİL. Uyarı bu yüzden hafızanın boş
+ * olmasına değil, `status.baseline`e bakıyor ve servis o alanı ilk BAŞARILI
+ * gönderime kadar `true` tutuyor — aksi hâlde hiçbir şey gönderilmemişken ekran
+ * "bekleyen sayfa yok" der ve bu sevkiyatın amacı sessizce gerçekleşmezdi.
+ *
  * Metinler hardcode Türkçe (ev emsali: admin ekranları sözlük anahtarı açmıyor).
  */
 
@@ -131,9 +138,11 @@ export function IndexNowCard({ status: initial }: IndexNowCardProps) {
 
       {status.baseline && (
         <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <strong>Henüz hiçbir sayfa duyurulmadı.</strong> Otomatik turun ilk koşusu
-          yalnız bugünkü tarihleri temel olarak yazar (bilinmeyen bir geçmişte her
-          şeyi göndermek gürültü olurdu). İlk kaydı{" "}
+          <strong>Henüz hiçbir sayfa duyurulmadı.</strong> Otomatik tur, hafıza
+          boşken yalnız bugünkü tarihleri temel olarak yazar ve{" "}
+          <strong>gönderim yapmaz</strong> (bilinmeyen bir geçmişte her şeyi
+          göndermek gürültü olurdu) — bu uyarı, o temel yazıldıktan sonra da ilk
+          gerçek gönderim olana kadar burada durur. İlk kaydı{" "}
           <strong>“Tümünü gönder”</strong> ile yapın.
         </div>
       )}

@@ -32,6 +32,17 @@
  * susar — ilk kayıt anında ve bir içerik turundan sonra ELLE TETİK
  * (`/admin/ayarlar`) var, zaten tam bunun için.
  *
+ * TEMEL ALMAK "DUYURDUM" DEMEK DEĞİL — DAMGA BU YÜZDEN VAR. Temel turu hafızaya
+ * bugünkü tarihleri yazıyor ve o yazım tek başına GERÇEK bir duyurudan ayırt
+ * edilemez: ekran her satırı "duyuruldu" gösterir, bekleyen sayfa sayısı sıfıra
+ * düşer ve operatörü "Tümünü gönder"e çağıran uyarı kaybolur. Zamanlayıcının ilk
+ * işi İLK KAYITTA HEMEN doğuyor (`workers/start.ts`teki ölçüm), yani bu hâl
+ * dağıtımdan saniyeler sonra oluşur: hiçbir şey gönderilmemişken ekran yapılacak
+ * iş olmadığını söyler ve sevkiyatın amacı (bu sayfaların Bing indeksine
+ * girmesi) sessizce gerçekleşmez. O yüzden hafıza, tarihlerin YANINDA
+ * `@submitted` damgasını taşıyor: damga yalnız BAŞARILI bir gönderimden sonra
+ * yazılır ve yüzey "duyuruldu" iddiasını yalnız damga varken kurar.
+ *
  * `submitToIndexNow`UN SÖZLEŞMESİ DEĞİŞTİRİLMEDİ: host süzgeci, 10.000 URL
  * tavanı, 8 sn zaman aşımı ve sessiz `{ok:false}` dönüşü olduğu gibi duruyor.
  * Bu modül onun ÜSTÜNDE karar veriyor; anahtarın yokluğunu yüzeye taşımak da
@@ -60,8 +71,33 @@ import {
  */
 export const INDEXNOW_PAGE_PATHS: readonly string[] = Object.keys(PAGE_UPDATED_AT);
 
-/** Redis'teki hafıza anahtarı. Tek bir JSON dizgisi tutar (yol → tarih). */
+/**
+ * Redis'teki hafıza anahtarı. Tek bir JSON dizgisi tutar: yol → tarih
+ * çiftleri, artı `SUBMITTED_MARKER_KEY` damgası.
+ */
 export const ANNOUNCED_PAGES_KEY = "indexnow:announced-pages";
+
+/**
+ * Hafızadaki AYRILMIŞ alan: en son BAŞARILI gönderimin ISO damgası.
+ *
+ * Aynı JSON değerinin içinde duruyor (ikinci bir Redis anahtarı değil) çünkü
+ * yazımın ATOMİK kalması gerekiyor: "tarihleri yazdım ama damgayı yazamadım"
+ * hâli, kapatılan deliğin tam kendisi olurdu.
+ *
+ * Yazım bir YOL olamayacak biçimde seçildi — kayıttaki her yol `""` ya da `"/"`
+ * ile başlıyor (`INDEXNOW_PAGE_PATHS`, `sitemap.ts` ile birebir aynı küme), yani
+ * `@` ile başlayan bir anahtar hiçbir sayfayla çarpışamaz.
+ */
+export const SUBMITTED_MARKER_KEY = "@submitted";
+
+/** Hafızanın YOL→TARİH kısmı; damga ayıklanır. */
+function announcedDates(
+  entries: Readonly<Record<string, string>>
+): Record<string, string> {
+  const dates = { ...entries };
+  delete dates[SUBMITTED_MARKER_KEY];
+  return dates;
+}
 
 /**
  * Yolun mutlak hâli.
@@ -170,7 +206,8 @@ export interface AnnounceOptions {
  * Kurallar sırayla: anahtar yoksa hiçbir şey yapma (hafızaya DA dokunma, yoksa
  * anahtar gelmeden "duyurdum" yazılmış olurdu) → elle tetik değilse hafıza
  * zorunlu → hafıza boşsa temel al ve sus → değişen yoksa ağa çıkma → gönder →
- * ancak BAŞARILI gönderimden sonra hafızayı yaz.
+ * ancak BAŞARILI gönderimden sonra hafızayı yaz (ve `@submitted` damgasını
+ * YALNIZ o an bas).
  */
 export async function announceStaticPages(
   options: AnnounceOptions = {}
@@ -192,8 +229,14 @@ export async function announceStaticPages(
 
   let announced: Record<string, string> = {};
   if (scope === "changed" && store) {
-    announced = await store.read();
+    // Damga, "ne değişti" sorusunun dışında: karşılaştırma yalnız tarihlerle
+    // yapılır, yoksa damganın kendisi hafızayı "boş değil" göstermeye yeterdi.
+    announced = announcedDates(await store.read());
     if (Object.keys(announced).length === 0) {
+      // DAMGASIZ yazılır: temel almak bir duyuru değil ve bu satırın tek işi
+      // "bundan sonra neyin değiştiğini bilebilmek". Damga yalnız başarılı
+      // gönderimden sonra doğar; böylece ekran bu hâlde hâlâ "henüz hiçbir
+      // sayfa duyurulmadı" diyebiliyor.
       await store.write(current);
       return { ok: true, kind: "baseline", scope, paths: [] };
     }
@@ -216,7 +259,13 @@ export async function announceStaticPages(
   // hafızadan da düşsün. Gönderilen URL'lerin hepsi `appUrl`den kuruluyor, yani
   // `submitToIndexNow`un host süzgeci hiçbirini düşüremez ve `submitted`
   // sayısı `paths` ile aynı kalır.
-  if (store) await store.write(current);
+  //
+  // DAMGA TAM BURADA: tek yazıldığı yer başarılı gönderimin arkası. Yüzey
+  // "duyuruldu" iddiasını buna dayandırıyor, yani temel alma turu o iddiayı
+  // asla kuramaz.
+  if (store) {
+    await store.write({ ...current, [SUBMITTED_MARKER_KEY]: new Date().toISOString() });
+  }
   return { ok: true, kind: "submitted", scope, paths, submitted: result.submitted };
 }
 
@@ -226,7 +275,13 @@ export interface IndexNowPageRow {
   url: string;
   /** `PAGE_UPDATED_AT`teki tarih — sayfanın BUGÜNKÜ hâli. */
   updatedAt: string;
-  /** En son hangi tarihle duyurulduğu; hiç duyurulmadıysa `null`. */
+  /**
+   * En son hangi tarihle duyurulduğu; hiç duyurulmadıysa `null`.
+   *
+   * Hafızada tarih DURUYOR ama `@submitted` damgası YOKSA bu alan `null` kalır:
+   * o tarihleri yazan şey temel alma turuydu, bir duyuru değil (bkz. dosya
+   * başlığı). Satırın "duyuruldu" demesi, gerçekten gönderilmiş olmasına bağlı.
+   */
   announcedFor: string | null;
   pending: boolean;
 }
@@ -238,7 +293,14 @@ export interface IndexNowPageStatus {
   keyLocation: string;
   /** Redis okunabildi mi; okunamadıysa otomatik tur gönderim yapmaz. */
   storeAvailable: boolean;
-  /** Hafıza boş: bir sonraki otomatik tur yalnız temel alacak. */
+  /**
+   * HİÇ gönderim yapılmadı (`@submitted` damgası yok): hafıza boş da olabilir,
+   * temel alma turunun yazdığı tarihleri de taşıyor olabilir. İkisi de aynı
+   * operatör işini gerektiriyor — "Tümünü gönder" ile ilk kaydı yapmak — ve
+   * ikisinde de uyarı AYAKTA kalmalı. Temel alındığında bu alanın `false`a
+   * düşmesi, hiçbir şey gönderilmemişken ekranın yapılacak iş olmadığını
+   * söylemesi demekti.
+   */
   baseline: boolean;
   pendingCount: number;
   rows: IndexNowPageRow[];
@@ -256,11 +318,11 @@ export async function loadIndexNowPageStatus(
   const store = options.store === undefined ? redisAnnouncedPageStore() : options.store;
   const appUrl = options.appUrl ?? getAppUrl();
 
-  let announced: Record<string, string> = {};
+  let memory: Record<string, string> = {};
   let storeAvailable = store !== null;
   if (store) {
     try {
-      announced = await store.read();
+      memory = await store.read();
     } catch {
       // Redis tıksırsa ekran yine açılsın: satırlar "hiç duyurulmadı" görünür
       // ve yüzey hafızanın okunamadığını söyler.
@@ -268,9 +330,16 @@ export async function loadIndexNowPageStatus(
     }
   }
 
+  // "Duyuruldu" iddiasının TEK dayanağı damga. Damgasız bir hafıza (temel alma
+  // turunun yazdığı tarihler, ya da bu damga eklenmeden önce yazılmış eski bir
+  // kayıt) bekleyen sayfa gösterir: fazladan bir elle gönderim gürültüsü,
+  // gönderilmemiş sayfayı gönderilmiş saymaktan ucuzdur.
+  const everSubmitted = typeof memory[SUBMITTED_MARKER_KEY] === "string";
+  const announced = announcedDates(memory);
+
   const rows: IndexNowPageRow[] = INDEXNOW_PAGE_PATHS.map((path) => {
     const updatedAt = PAGE_UPDATED_AT[path];
-    const announcedFor = announced[path] ?? null;
+    const announcedFor = everSubmitted ? announced[path] ?? null : null;
     return {
       path,
       url: pageAbsoluteUrl(path, appUrl),
@@ -284,7 +353,7 @@ export async function loadIndexNowPageStatus(
     keyConfigured: getIndexNowKey() !== null,
     keyLocation: `${appUrl}${INDEXNOW_KEY_PATH}`,
     storeAvailable,
-    baseline: storeAvailable && Object.keys(announced).length === 0,
+    baseline: storeAvailable && !everSubmitted,
     pendingCount: rows.filter((r) => r.pending).length,
     rows,
   };

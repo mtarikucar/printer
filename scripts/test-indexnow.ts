@@ -37,6 +37,7 @@ import {
 } from "../src/lib/services/indexnow";
 import {
   INDEXNOW_PAGE_PATHS,
+  SUBMITTED_MARKER_KEY,
   announceStaticPages,
   changedPagePaths,
   loadIndexNowPageStatus,
@@ -76,6 +77,21 @@ function memoryStore(seed: Record<string, string> = {}): AnnouncedPageStore & {
     entries: () => ({ ...state }),
   };
   return store;
+}
+
+/**
+ * GERÇEKTEN duyurulmuş bir hafıza: tarihler + `@submitted` damgası.
+ *
+ * Damgasız bir hafıza artık "duyurulmadı" sayılıyor (temel alma turunun yazdığı
+ * tarihlerle gerçek bir duyuru birbirinden böyle ayrılıyor), yani durum
+ * okumasını sınayan tohumların damgayı TAŞIMASI gerekiyor.
+ */
+function submittedSeed(overrides: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...PAGE_UPDATED_AT,
+    ...overrides,
+    [SUBMITTED_MARKER_KEY]: "2026-10-01T09:00:00.000Z",
+  };
 }
 
 interface FetchCapture {
@@ -199,8 +215,10 @@ async function main() {
 
   await check("yalnız tarihi DEĞİŞEN sayfa gönderilir", async () => {
     process.env.INDEXNOW_KEY = "a".repeat(32);
-    // Hafıza bugünkü kayıtla aynı, YALNIZ `/figur`un tarihi eski.
-    const announced = { ...PAGE_UPDATED_AT, "/figur": "2026-01-01" };
+    // Hafıza bugünkü kayıtla aynı, YALNIZ `/figur`un tarihi eski. Tohumda damga
+    // da var: damga bir YOL değil ve farkı etkilememeli (etkilerse tur her
+    // seferinde 26 sayfayı yeniden gönderirdi).
+    const announced = submittedSeed({ "/figur": "2026-01-01" });
     const store = memoryStore(announced);
     const fetchStub = captureFetch();
     try {
@@ -211,7 +229,16 @@ async function main() {
       assert.deepEqual(urls, [pageAbsoluteUrl("/figur", APP_URL)]);
       // Başarılı gönderimden sonra hafıza bugünkü kayda eşitlenir, yoksa aynı
       // sayfa her turda yeniden duyurulurdu.
-      assert.deepEqual(store.entries(), { ...PAGE_UPDATED_AT });
+      const written = store.entries();
+      const stamp = written[SUBMITTED_MARKER_KEY];
+      delete written[SUBMITTED_MARKER_KEY];
+      assert.deepEqual(written, { ...PAGE_UPDATED_AT });
+      // Damga ancak BAŞARILI gönderimde basılır; ekranın "duyuruldu" iddiası
+      // yalnız buna dayanıyor.
+      assert.ok(
+        stamp !== undefined && !Number.isNaN(Date.parse(stamp)),
+        `damga basılmadı: ${String(stamp)}`
+      );
     } finally {
       fetchStub.restore();
     }
@@ -251,9 +278,62 @@ async function main() {
       assert.equal(outcome.kind, "baseline", JSON.stringify(outcome));
       assert.equal(fetchStub.calls.length, 0, "temel alma turunda ağa çıkılmaz");
       assert.deepEqual(store.entries(), { ...PAGE_UPDATED_AT }, "temel yazılmadı");
+      assert.equal(
+        store.entries()[SUBMITTED_MARKER_KEY],
+        undefined,
+        "temel alma turu damga basmamalı — hiçbir şey gönderilmedi"
+      );
     } finally {
       fetchStub.restore();
     }
+  });
+
+  await check("temel alındıktan SONRA da ekran 'henüz duyurulmadı' diyor", async () => {
+    // Bu turun kaçırılması bütün sevkiyatı sessizce boşa çıkarıyordu:
+    // zamanlayıcının ilk işi ilk kayıtta HEMEN doğuyor (`workers/start.ts`teki
+    // ölçüm), yani temel dağıtımdan saniyeler sonra yazılıyor. Temel yazımı
+    // gerçek bir duyurudan ayırt edilemezse ekran "bekleyen: 0" der, her satır
+    // bugünün tarihiyle "duyuruldu" görünür ve operatörü "Tümünü gönder"e
+    // çağıran uyarı kaybolur — 26 sayfa hiç gönderilmemişken.
+    process.env.INDEXNOW_KEY = "a".repeat(32);
+    const store = memoryStore();
+    const fetchStub = captureFetch();
+    try {
+      await announceStaticPages({ scope: "changed", store, appUrl: APP_URL });
+    } finally {
+      fetchStub.restore();
+    }
+
+    const after = await loadIndexNowPageStatus({ store, appUrl: APP_URL });
+    assert.equal(after.baseline, true, "uyarı bayrağı düşmüş");
+    assert.equal(
+      after.pendingCount,
+      INDEXNOW_PAGE_PATHS.length,
+      "gönderilmemiş sayfalar bekleyen listesinden düşmüş"
+    );
+    for (const row of after.rows) {
+      assert.equal(row.announcedFor, null, `${row.path || "/"} duyurulmuş görünüyor`);
+    }
+    // Uyarı metni gerçekten çiziliyor mu — bayrak doğru olup kart susamaz.
+    const html = renderToStaticMarkup(createElement(IndexNowCard, { status: after }));
+    assert.match(html, /Henüz hiçbir sayfa duyurulmadı/);
+
+    // Ve gerçek bir gönderimden sonra iddia kurulur: uyarı düşer, satırlar
+    // tarihi gösterir. Yoksa uyarı hiç kaybolmayan bir gürültüye dönüşürdü.
+    const fetchOk = captureFetch();
+    try {
+      const manual = await announceStaticPages({ scope: "all", store, appUrl: APP_URL });
+      assert.equal(manual.ok, true, JSON.stringify(manual));
+    } finally {
+      fetchOk.restore();
+    }
+    const sent = await loadIndexNowPageStatus({ store, appUrl: APP_URL });
+    assert.equal(sent.baseline, false, "gerçek gönderimden sonra uyarı durmamalı");
+    assert.equal(sent.pendingCount, 0);
+    assert.equal(
+      sent.rows.find((r) => r.path === "/figur")?.announcedFor,
+      PAGE_UPDATED_AT["/figur"]
+    );
   });
 
   await check("gönderim BAŞARISIZ olursa hafıza güncellenmez (tur yeniden dener)", async () => {
@@ -383,7 +463,7 @@ async function main() {
 
     process.env.INDEXNOW_KEY = "a".repeat(32);
     const present = await loadIndexNowPageStatus({
-      store: memoryStore({ ...PAGE_UPDATED_AT }),
+      store: memoryStore(submittedSeed()),
       appUrl: APP_URL,
     });
     assert.equal(present.keyConfigured, true);
@@ -394,7 +474,7 @@ async function main() {
   await check("durum okuması bekleyen sayfaları işaretliyor", async () => {
     process.env.INDEXNOW_KEY = "a".repeat(32);
     const status = await loadIndexNowPageStatus({
-      store: memoryStore({ ...PAGE_UPDATED_AT, "/figur": "2026-01-01" }),
+      store: memoryStore(submittedSeed({ "/figur": "2026-01-01" })),
       appUrl: APP_URL,
     });
     assert.equal(status.pendingCount, 1);

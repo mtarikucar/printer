@@ -19,20 +19,52 @@
  * biçimde değişti mi" sorusunu ne derleyici ne git mtime yanıtlayabilir —
  * biçimsel bir refactor tazelik sinyali DEĞİLDİR.
  *
+ * KAPSAM, V2'de sitemap'in TAMAMINA genişledi: `sitemap.ts` her statik rotanın
+ * `lastModified`ını buradan okuyor (eskiden `new Date()`, yani her render'da
+ * "şimdi" diyen bir gürültü kaynağıydı). Bu yüzden `STATIC_ROUTES`un her yolu
+ * burada BULUNMAK ZORUNDA — `scripts/test-sitemap.ts` eksik yolu kırmızıya
+ * çevirir. Satırın varlığı görünür bir "Son güncelleme" satırı DOĞURMAZ: o
+ * satırı yalnız `<LastUpdated/>` çizdiği sayfalar gösterir.
+ *
+ * Tarihlerin kaynağı:
+ *  - Ticari sayfalar: içeriği son değiştiren sevkiyatın günü.
+ *  - Hukuki sayfalar: sayfanın KENDİ ÜSTÜNDE yazılı "Son güncelleme" tarihi
+ *    (`kargo/page.tsx` "24 Ağustos 2026" gibi). İki yazımın ayrışması
+ *    sitemap'in okuyucuya göründüğünden farklı bir tarih söylemesi demek
+ *    olurdu; `test-sitemap.ts` o ayrışmayı da pinliyor.
+ *  - Hiç dokunulmamış sayfalar: dosyanın son içerik commit'inin günü.
+ *
  * SAF MODÜL: hiçbir import'u yok; `import "server-only"` de yok (bkz.
  * [[worker-server-only-trap]]).
  */
 
 /** ISO (YYYY-MM-DD) — sayfanın içeriğinin son anlamlı değişikliği. */
 export const PAGE_UPDATED_AT: Readonly<Record<string, string>> = {
-  // Bu sevkiyat (V1) altı sayfanın da gövdesine dokundu: fiyat/boyut çıpası,
-  // 25 µm katman yüksekliği ve bu satırın kendisi.
+  // V1 altı sayfanın gövdesine dokundu: fiyat/boyut çıpası, 25 µm katman
+  // yüksekliği ve bu satırın kendisi.
   "": "2026-10-02",
   "/figur": "2026-10-02",
   "/nasil-calisir": "2026-10-02",
   "/3d-baski": "2026-10-02",
   "/urunler": "2026-10-02",
   "/shop": "2026-10-02",
+  // Görünür "Son güncelleme" satırı OLMAYAN, ama sitemap'te duran rotalar.
+  // `/create`in gövdesi de V1'de değişti (gerçekler bandı).
+  "/create": "2026-10-02",
+  "/3d-baski/malzemeler": "2026-09-23",
+  "/toplu-siparis": "2026-08-11",
+  "/anahtarlik-kutusu": "2026-09-16",
+  "/atolye": "2026-07-07",
+  "/contact": "2026-07-07",
+  // Hukuki sayfalar: tarih sayfanın ÜSTÜNDE de yazılı, ikisi aynı olmalı.
+  "/kargo": "2026-08-24",
+  "/iade": "2026-08-24",
+  "/on-bilgilendirme": "2026-08-24",
+  "/mesafeli-satis": "2026-08-28",
+  "/privacy": "2026-08-28",
+  "/cerez": "2026-06-09",
+  "/ticari-ileti": "2026-06-09",
+  "/terms": "2026-03-31",
 };
 
 /**

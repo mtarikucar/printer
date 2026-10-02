@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
+import { pageUpdatedAt } from "@/lib/config/page-updated";
 
 /**
  * Sitemap of the public, indexable surface: the static routes plus every
@@ -55,14 +56,32 @@ export const STATIC_ROUTES: Array<{
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://figurunica.com";
-  const now = new Date();
 
-  const staticEntries: MetadataRoute.Sitemap = STATIC_ROUTES.map((r) => ({
-    url: `${baseUrl}${r.path}`,
-    lastModified: now,
-    changeFrequency: r.changeFrequency,
-    priority: r.priority,
-  }));
+  // `lastModified` SAYFANIN TARİHİDİR, render anının değil.
+  //
+  // Burada eskiden `new Date()` vardı: her istekte "şimdi" diyen bir sitemap
+  // tazelik SİNYALİ değil GÜRÜLTÜDÜR — içerik altı ay önce yazılmış olsa bile
+  // taze görünür, ve arama motorları sürekli "şimdi" diyen bir `lastmod`u
+  // yok saymayı öğrenince gerçek bir güncelleme de duyulmaz olur.
+  //
+  // Tarih `PAGE_UPDATED_AT`ten gelir; yani sayfaların GÖRÜNÜR "Son güncelleme"
+  // satırıyla AYNI kaynak (ikinci bir tarih listesi tutulmuyor). Günün ortası
+  // UTC: tarih yerel saat diliminde (Europe/Istanbul) kaymasın.
+  //
+  // Listede olmayan bir yol için tarih UYDURULMAZ — alan hiç yazılmaz, çünkü
+  // yanlış bir `lastmod` hiç `lastmod` olmamasından kötüdür.
+  // `scripts/test-sitemap.ts` her statik rotanın kayıtlı olmasını zorunlu
+  // kılıyor, yani bu dal pratikte boş; yine de sessiz bir "şimdi"ye düşmek
+  // yerine alanı atlıyor.
+  const staticEntries: MetadataRoute.Sitemap = STATIC_ROUTES.map((r) => {
+    const iso = pageUpdatedAt(r.path);
+    return {
+      url: `${baseUrl}${r.path}`,
+      ...(iso ? { lastModified: new Date(`${iso}T12:00:00Z`) } : {}),
+      changeFrequency: r.changeFrequency,
+      priority: r.priority,
+    };
+  });
 
   // `products.slug` is nullable (`text("slug").unique()`, no `.notNull()`), so a
   // row without one would produce `/shop/null`.

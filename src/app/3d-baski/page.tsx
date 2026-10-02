@@ -36,7 +36,13 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "3D Baskı Servisi — Anlık Teklif",
     description:
-      `STL, OBJ, 3MF veya STEP dosyanızı yükleyin, fiyatı anında görün. ${anchors}` +
+      // STEP burada ANILMAZ: bu metin bayrak OKUMUYOR (metadata üretimi katalog
+      // anlık görüntüsünü alıyor, bayrağı değil), yani `quote_step_enabled`
+      // kapalıyken STEP'ten söz etmek yükleyicinin reddettiği bir şeyi vaat
+      // etmek olur. Bayrak açıldığı turda bu satır ve `sections.tsx`in STEP
+      // metinleri birlikte geri gelir — ya da daha iyisi, ikisi de bayrağı
+      // okuyacak hâle getirilir (bkz. kayıt defteri, B3).
+      `STL, OBJ veya 3MF dosyanızı yükleyin, fiyatı anında görün. ${anchors}` +
       " (20 mm küp, 1 adet, KDV dahil; asgari sipariş" +
       ` ${formatAnchorPrice(snapshot.settings.minOrderKurus)}). Tek teklifte` +
       ` ${snapshot.settings.maxPartsPerQuote} parçaya kadar; Türkiye içi kargo ücretsiz.`,

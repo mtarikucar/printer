@@ -62,7 +62,7 @@ export function buildPrintServiceJsonLd(
     serviceType: "3D baskı hizmeti",
     url,
     description:
-      "STL, OBJ, 3MF veya STEP dosyanızı yükleyin; ölçü, üretilebilirlik kontrolü ve " +
+      "STL, OBJ veya 3MF dosyanızı yükleyin; ölçü, üretilebilirlik kontrolü ve " +
       "fiyat anında çıksın. FDM ve SLA baskı, Türkiye genelinde üretim ortağı ağıyla.",
     provider: { "@id": `${appUrl}/#organization` },
     brand: { "@type": "Brand", name: BUSINESS_LEGAL_NAME },

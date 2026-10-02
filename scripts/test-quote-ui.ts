@@ -2143,27 +2143,39 @@ test("SSS müşterinin ilk sorduklarını RAKAMLA yanıtlar", () => {
   }
 });
 
-test("açılış metni STEP'i doğru anlatır: tavan ve sapma SABİTTEN gelir", () => {
-  // Bu metinler bayrak OKUMAZ, yani yayına çıktıkları anda müşteriye
-  // "STEP kabul ediliyor" derler. O yüzden söyledikleri şey uçtaki kuralla
-  // BİREBİR aynı olmalı: tavan `STEP_MAX_BYTES`, sapma `STEP_TESSELLATION`.
+test("açılış metni, YÜKLEYİCİNİN kabul etmediği bir biçimi VAAT ETMEZ", () => {
+  // Bu nöbetçi bir yanlışın bedelinden doğdu: STEP fazı bütün olarak yayına
+  // çıktığında tanıtım metni canlıya "Evet, .step ve .stp dosyaları doğrudan
+  // yüklenir" diye gitti, oysa `quote_step_enabled` kapalıydı ve yükleyici
+  // dosyayı REDDEDİYORDU. Müşteriye vaat edilen şeyin uçta çalışması gerekir.
+  //
+  // Sebebi yapısal: bu üç yüzey (adım kartı, SSS, hero + `metadata` +
+  // Service JSON-LD) bayrak OKUMUYOR — `landingFaq` ve `PrintServiceLanding`
+  // yalnız katalog anlık görüntüsünü alıyor, `metadata` üretimi de öyle. Oysa
+  // YÜKLEYİCİNİN biçim listesi bayraktan geliyor (`quoteAcceptedFormats`,
+  // src/app/3d-baski/page.tsx). İki taraf ayrı kaynaktan beslendiği sürece
+  // metin susmak zorunda.
+  //
+  // BAYRAĞI AÇAN KİŞİYE: bu iddiayı silmek yerine metni bayrağa bağla
+  // (`landingFaq`/`PrintServiceLanding`/`metadata`/`seo/service.ts` kabul
+  // listesini argüman olarak alsın), sonra bu testi "liste neyi diyorsa metin
+  // onu der" hâline çevir. Kayıt defteri B3 maddesi.
+  // STEP'i KAYNAK biçim olarak anmak serbesttir ve doğrudur ("STEP dosyamı
+  // nasıl dışa aktarırım?" → "STL olarak kaydedin"). Yasak olan şey onu
+  // YÜKLENEBİLİR biçim olarak sunmak; nöbetçi tam o üç kalıbı arar.
   const html = renderLanding();
-  const stepMb = Math.floor(STEP_MAX_BYTES / (1024 * 1024));
-  assert.ok(html.includes(`${stepMb} MB`), "STEP tavanı sayfada yok");
-  assert.ok(
-    html.includes(`${STEP_TESSELLATION.deflectionMm.toLocaleString("tr-TR")} mm`),
-    "sapma değeri sayfada yok"
-  );
-  // Birim hikâyesi: "biz mm varsaydık" DEĞİL, "dosyadan okundu".
-  assert.match(html, /birimini dosyanın kendisinden okuyoruz/);
-  assert.match(html, /mm olarak sabitlenir/);
-  assert.ok(
-    !html.includes("Dönüştüremiyorsanız"),
-    "STEP'i STL'e çevirmeyi öğütleyen eski cümle sayfada kalmış"
-  );
-  // Hero, adım kartı ve SSS: üç yüzeyin üçü de biçim listesini aynı söyler.
-  const listings = html.match(/STL, OBJ,? (?:ve|veya) 3MF/g) ?? [];
-  assert.deepEqual(listings, [], `STEP'siz biçim listesi kalmış: ${listings.join(" | ")}`);
+  const promises = [
+    { pattern: /\.ste?p\b/i, what: "uzantı (.step/.stp) — yüklenebilirlik vaadi" },
+    { pattern: /(?:STL|OBJ|3MF)[^.]{0,40}\bSTEP\b/i, what: "kabul edilen biçim listesinde STEP" },
+    { pattern: /STEP[^.]{0,40}doğrudan yüklen/i, what: '"STEP doğrudan yüklenir" cümlesi' },
+  ];
+  for (const { pattern, what } of promises) {
+    assert.ok(
+      !pattern.test(html),
+      `tanıtım metni STEP'i yüklenebilir gösteriyor (${what}) ama metin bayrak OKUMUYOR: ` +
+        "bayrak kapalıyken yükleyici o dosyayı reddeder ve vaat yalan olur"
+    );
+  }
 });
 
 test("bayrak kapalıyken yükleyici yok ama SEO yüzeyi duruyor", () => {

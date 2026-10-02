@@ -4,20 +4,24 @@ export const CONTACT_PHONE_HREF = "tel:+908508407303";
 export const CONTACT_EMAIL = "info@figurunica.com";
 export const CONTACT_EMAIL_HREF = `mailto:${CONTACT_EMAIL}`;
 
-export const CONTACT_ADDRESS_FULL =
-  "Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32, Etimesgut / Ankara";
+/**
+ * ADRES BURADA DEĞİL: `business-identity.ts`te.
+ *
+ * Burada bir zamanlar `CONTACT_ADDRESS_FULL` / `CONTACT_ADDRESS_LINES` /
+ * `CONTACT_MAPS_URL` vardı ve üçü de posta kodu TAŞIMIYORDU. Sonuç: yasal
+ * sayfalar `06820`li adresi, her ticari sayfanın footer'ı ve `/contact` ise
+ * eksik olanı gösteriyordu — yani bir harita/işletme eşleştiricisinin okuduğu
+ * NAP bloğu (isim-adres-telefon) her yerde eksikti. Üçü de kaldırıldı;
+ * karşılıkları `BUSINESS_ADDRESS_LINES`, `BUSINESS_ADDRESS_FULL` ve
+ * `BUSINESS_MAPS_URL`.
+ *
+ * Bağımlılık yönü bunu zorunlu kılıyor: `business-identity.ts` BU dosyadan
+ * telefon/e-posta alıyor, yani ters yönde bir import döngü olurdu. Adresin
+ * yapısal hâli (`BUSINESS_ADDRESS`, schema.org `PostalAddress`) zaten orada
+ * duruyordu; görünen hâlleri de onun yanına taşındı ki tek kaynak kalsın.
+ */
 
-export const CONTACT_ADDRESS_LINES = [
-  "Şehit Osman Avcı Mahallesi",
-  "Akın 688 Sitesi B32",
-  "Etimesgut / Ankara",
-] as const;
 
-export const CONTACT_MAPS_URL =
-  "https://www.google.com/maps/search/?api=1&query=" +
-  encodeURIComponent(
-    "Şehit Osman Avcı Mahallesi Akın 688 Sitesi B32 Etimesgut Ankara"
-  );
 
 // WhatsApp (customer support + click-to-order). Digits only, E.164 without the
 // leading "+", as wa.me expects. Single source of truth — change it here. Plain

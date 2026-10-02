@@ -9,12 +9,16 @@ import {
   CONTACT_PHONE_HREF,
   CONTACT_EMAIL,
   CONTACT_EMAIL_HREF,
-  CONTACT_ADDRESS_FULL,
-  CONTACT_MAPS_URL,
   WHATSAPP_DISPLAY,
   buildWhatsAppUrl,
 } from "@/lib/config/contact";
-import { SOCIAL_LINKS } from "@/lib/config/business-identity";
+// Adres ve harita bağlantısı kimlik modülünden gelir: footer'daki NAP bloğu
+// yasal sayfalardakiyle AYNI dizgi olmak zorunda (posta kodu dâhil).
+import {
+  BUSINESS_ADDRESS_FULL,
+  BUSINESS_MAPS_URL,
+  SOCIAL_LINKS,
+} from "@/lib/config/business-identity";
 import { withProductFacts } from "@/lib/config/product-facts";
 import { useInstantQuoteEnabled } from "@/lib/quote/instant-quote-flag";
 
@@ -607,7 +611,7 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
           {CONTACT_PHONE_DISPLAY}
         </a>
         <a
-          href={CONTACT_MAPS_URL}
+          href={BUSINESS_MAPS_URL}
           target="_blank"
           rel="noopener noreferrer"
           className={s("footer-link")}
@@ -615,7 +619,7 @@ export function FigFooter({ d }: { d: FigurunicaDict }) {
           <span className={s("footer-label")}>
             {d["landing.fig.footer.addressLabel"]}
           </span>
-          {CONTACT_ADDRESS_FULL}
+          {BUSINESS_ADDRESS_FULL}
         </a>
         <a href={CONTACT_EMAIL_HREF} className={s("footer-link")}>
           <span className={s("footer-label")}>

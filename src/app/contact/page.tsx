@@ -8,11 +8,15 @@ import {
   CONTACT_PHONE_HREF,
   CONTACT_EMAIL,
   CONTACT_EMAIL_HREF,
-  CONTACT_ADDRESS_LINES,
-  CONTACT_MAPS_URL,
   WHATSAPP_DISPLAY,
   buildWhatsAppUrl,
 } from "@/lib/config/contact";
+// Adres kimlik modülünden gelir — footer ve yasal sayfalarla AYNI dizgi
+// (posta kodu dâhil), bkz. `business-identity.ts`.
+import {
+  BUSINESS_ADDRESS_LINES,
+  BUSINESS_MAPS_URL,
+} from "@/lib/config/business-identity";
 import { WhatsAppIcon } from "@/components/whatsapp/whatsapp-button";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -153,14 +157,14 @@ export default async function ContactPage() {
               </span>
             </div>
             <address className="not-italic text-lg md:text-xl text-text-primary leading-relaxed">
-              {CONTACT_ADDRESS_LINES.map((line) => (
+              {BUSINESS_ADDRESS_LINES.map((line) => (
                 <span key={line} className="block">
                   {line}
                 </span>
               ))}
             </address>
             <a
-              href={CONTACT_MAPS_URL}
+              href={BUSINESS_MAPS_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 mt-5 text-sm font-medium text-green-500 hover:text-green-400 transition-colors"

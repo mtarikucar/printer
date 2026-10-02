@@ -27,20 +27,66 @@ export const BUSINESS_TAX_ID = "8841014310";
  * `src/app/mesafeli-satis/page.tsx` içindeki kaldırma notu.
  */
 
+/**
+ * Sokak adresinin iki satırı. ADRESİN ELLE YAZILI TEK YERİ burasıdır; aşağıdaki
+ * her biçim (yapısal adres, tek satır, satır listesi, harita sorgusu) bundan
+ * TÜRÜR. `scripts/test-business-identity.ts` "adres metni depoda TEK yerde
+ * yazılı" iddiasıyla bunu çiviliyor.
+ */
+const ADDRESS_STREET_LINES = [
+  "Şehit Osman Avcı Mahallesi",
+  "Akın 688 Sitesi B32",
+] as const;
+
 export const BUSINESS_ADDRESS = {
-  streetAddress: "Şehit Osman Avcı Mahallesi, Akın 688 Sitesi B32",
+  streetAddress: ADDRESS_STREET_LINES.join(", "),
   addressLocality: "Etimesgut",
   addressRegion: "Ankara",
   postalCode: "06820",
   addressCountry: "TR",
 } as const;
 
+/** Posta kodu + ilçe / il — adresin son satırı. */
+const ADDRESS_LOCALITY_LINE = `${BUSINESS_ADDRESS.postalCode} ${BUSINESS_ADDRESS.addressLocality} / ${BUSINESS_ADDRESS.addressRegion}`;
+
 /**
- * Yasal sayfalarda gösterilen tek satırlık adres — posta kodu DAHİL.
- * `contact.ts`'teki `CONTACT_ADDRESS_FULL` posta kodu içermez ve footer/harita
- * bağlantısı için orada kalır; yasal kimlik blokları bunu kullanır.
+ * Adresin satır satır hâli (`/contact` sayfasındaki `<address>` bloğu).
+ *
+ * 2026-10-02'ye kadar bunun `contact.ts`'te posta kodu TAŞIMAYAN bir ikizi
+ * vardı: yasal sayfalar `06820`li adresi, her sayfanın footer'ı ve `/contact`
+ * ise posta kodsuz olanı gösteriyordu. Bir harita/işletme eşleştiricisinin
+ * okuduğu NAP bloğu (isim-adres-telefon) tam olarak footer'daki o eksik hâldi,
+ * yani site ile işletme kaydının aynı varlık sayılması zorlaşıyordu. İkiz
+ * KALDIRILDI; her yüzey artık aynı dizgiyi basıyor.
  */
-export const BUSINESS_ADDRESS_FULL = `${BUSINESS_ADDRESS.streetAddress}, ${BUSINESS_ADDRESS.postalCode} ${BUSINESS_ADDRESS.addressLocality} / ${BUSINESS_ADDRESS.addressRegion}`;
+export const BUSINESS_ADDRESS_LINES = [
+  ...ADDRESS_STREET_LINES,
+  ADDRESS_LOCALITY_LINE,
+] as const;
+
+/** Tek satırlık adres — yasal sayfalar, belgeler ve footer aynısını basar. */
+export const BUSINESS_ADDRESS_FULL = BUSINESS_ADDRESS_LINES.join(", ");
+
+/**
+ * Haritada "burayı ara" bağlantısı. Sorgu adresin KENDİSİNDEN türüyor (posta
+ * kodu dâhil): elle yazılmış bir sorgu, adres değiştiği gün haritada başka bir
+ * yeri gösterirdi — eski `CONTACT_MAPS_URL` tam olarak böyle posta kodsuz
+ * kalmıştı.
+ *
+ * Sorguda `/` YOK: ilçe ile il virgülle ayrılıyor (`… 06820 Etimesgut, Ankara`),
+ * çünkü bu alan bir coğrafi kodlayıcıya gidiyor ve virgül onun beklediği posta
+ * biçimi. Görüntülenen adres (`BUSINESS_ADDRESS_FULL`) "Etimesgut / Ankara"
+ * yazımını KORUYOR — o yazım sayfalarda bugüne kadar görünen hâl.
+ *
+ * Bu bir ARAMA bağlantısıdır, bir işletme kaydı değil — karşılığında bir Google
+ * Business Profile kaydı YOK (bkz. `BUSINESS_MAPS_PROFILE_URL`).
+ */
+export const BUSINESS_MAPS_URL =
+  "https://www.google.com/maps/search/?api=1&query=" +
+  encodeURIComponent(
+    `${BUSINESS_ADDRESS.streetAddress}, ${BUSINESS_ADDRESS.postalCode} ` +
+      `${BUSINESS_ADDRESS.addressLocality}, ${BUSINESS_ADDRESS.addressRegion}`
+  );
 
 /** Herkese açık sosyal profiller — schema.org `sameAs` bunlardan türetilir. */
 export const SOCIAL_PROFILES = [

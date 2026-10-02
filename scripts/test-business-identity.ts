@@ -4,6 +4,9 @@
  * Bu dosyanın koruduğu şeyler:
  *  - VKN/adres/sosyal profil verilerinin biçimsel geçerliliği (yasal sayfalar ve
  *    schema.org `sameAs` bunlardan türetiliyor),
+ *  - NAP bloğunun EKSİKSİZLİĞİ: footer ve `/contact` adresi, yasal sayfalardaki
+ *    adresle AYNI dizgidir (posta kodu dâhil). Bir harita/işletme eşleştiricisi
+ *    iki farklı adres gördüğünde site ile kaydı aynı varlık saymıyor,
  *  - Google'ın iki bağlayıcı kuralı: Organization altında `aggregateRating`
  *    (self-serving review) ve `WebSite` altında `potentialAction`/`SearchAction`
  *    (2024-11-21'de kapatıldı) OLMAYACAK,
@@ -11,9 +14,18 @@
  *    yorumları ileride bu emitter'dan geçecek; kaçırılmayan bir `</script>`
  *    stored XSS'tir.
  */
+// İLK import olmak ZORUNDA: footer bir CSS modülü import ediyor ve `tsx` onu
+// TypeScript sanıp derlemeye kalkıyor. Gerekçe stub'ın başlığında.
+import "./support/stub-css-modules";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
+  BUSINESS_ADDRESS_LINES,
   BUSINESS_LEGAL_NAME,
+  BUSINESS_MAPS_URL,
   BUSINESS_TAX_ID,
   BUSINESS_ADDRESS,
   BUSINESS_ADDRESS_FULL,
@@ -23,6 +35,9 @@ import {
 } from "../src/lib/config/business-identity";
 import { buildOrganizationJsonLd, getAppUrl } from "../src/lib/seo/organization";
 import { JsonLd, serializeJsonLd } from "../src/lib/seo/jsonld";
+import { FigFooter } from "../src/components/figurunica/sections";
+import { pickFigurunicaDict } from "../src/components/figurunica/dict";
+import tr from "../src/lib/i18n/dictionaries/tr";
 
 let passed = 0;
 const cases: Array<[string, () => void]> = [];
@@ -81,6 +96,112 @@ test("tam adres metni posta kodunu ve mahalleyi içerir", () => {
   assert.ok(BUSINESS_ADDRESS_FULL.includes(BUSINESS_ADDRESS.postalCode));
   assert.ok(BUSINESS_ADDRESS_FULL.includes(BUSINESS_ADDRESS.streetAddress));
   assert.ok(BUSINESS_ADDRESS_FULL.includes(BUSINESS_ADDRESS.addressLocality));
+});
+
+// ------------------------------------------------------------------ NAP bloğu
+
+/** Footer her ticari sayfanın altında duruyor; NAP bloğu orada okunuyor. */
+const footerHtml = renderToStaticMarkup(
+  createElement(FigFooter, { d: pickFigurunicaDict(tr) })
+);
+
+/**
+ * Footer'ın GÖRÜNEN metni — etiketler (ve dolayısıyla `href` nitelikleri)
+ * atılmış hâli.
+ *
+ * Ham HTML üzerinde arama yapmak YANILTICI: harita bağlantısının `href`i adresi
+ * URL-kodlu taşıyor, yani `06820` orada da geçiyor. Ölçüm sırasında bunu
+ * gördüm — footer görünür metninde posta kodu olmasa bile ham HTML iddiası
+ * YEŞİL kalıyordu. Bir tarayıcı/eşleştirici NAP bloğunu metinden okur.
+ */
+const footerText = footerHtml.replace(/<[^>]*>/g, " ");
+
+test("footer'da render edilen adres posta kodunu taşıyor", () => {
+  assert.ok(
+    footerText.includes(BUSINESS_ADDRESS.postalCode),
+    `footer adresinde posta kodu yok (${BUSINESS_ADDRESS.postalCode})`
+  );
+});
+
+test("footer adresi yasal sayfalardaki adresle AYNI dizgi", () => {
+  // Yasal sayfalar `BUSINESS_ADDRESS_FULL`ı doğrudan basıyor (aşağıdaki kaynak
+  // pini). Footer'ın BİREBİR aynı dizgiyi basması, eşleştiricinin iki ayrı
+  // adres görmemesi demek.
+  assert.ok(
+    footerText.includes(BUSINESS_ADDRESS_FULL),
+    `footer adresi yasal adresten farklı: beklenen "${BUSINESS_ADDRESS_FULL}"`
+  );
+});
+
+test("yasal sayfalar ve belgeler adresi aynı sabitten okuyor", () => {
+  // Bu bir KAYNAK pini: yukarıdaki iddianın "aynı dizgi" demesi, ancak yasal
+  // tarafın da bu sabiti okuduğu doğruysa bir şey ifade eder.
+  for (const file of [
+    "src/app/mesafeli-satis/page.tsx",
+    "src/app/on-bilgilendirme/page.tsx",
+    "src/app/ticari-ileti/page.tsx",
+    "src/app/teklif/[number]/belge/quote-document.tsx",
+  ]) {
+    const source = fs.readFileSync(path.join(process.cwd(), file), "utf8");
+    assert.ok(
+      source.includes("BUSINESS_ADDRESS_FULL"),
+      `${file} adresi tek kaynaktan okumuyor`
+    );
+  }
+});
+
+test("adres metni yalnız bilinen iki dosyada yazılı", () => {
+  // İkinci bir elle yazılmış adres, bir gün ayrışacak iki NAP bloğu demek —
+  // posta kodu eksik olan `CONTACT_ADDRESS_FULL` tam olarak böyle doğmuştu.
+  //
+  // Listedeki İKİNCİ dosya bir SÖZLEŞME METNİ: üretici ortaklık sözleşmesi
+  // ("Sürüm 3.1 — Yürürlük tarihi 20 Eylül 2026") tebligat adresini kendi
+  // gövdesinde posta kodsuz yazıyor. Bilerek DOKUNULMADI: ortakların kabul
+  // ettiği bir belgenin metnini sürüm numarası değişmeden düzenlemek, imzalanan
+  // şeyi sessizce değiştirmek olurdu. NAP açısından da bir kaybı yok —
+  // `/manufacturer/**` robots'ta engelli (`scripts/test-sitemap.ts`), yani o
+  // adresi hiçbir tarayıcı okumuyor. ÜÇÜNCÜ bir kopya yine kırmızı döner.
+  const needle = "Akın 688";
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry.name)) {
+        if (fs.readFileSync(full, "utf8").includes(needle)) hits.push(full);
+      }
+    }
+  };
+  walk(path.join(process.cwd(), "src"));
+  assert.deepEqual(
+    hits.map((h) => path.relative(process.cwd(), h)).sort(),
+    [
+      "src/lib/config/business-identity.ts",
+      "src/lib/content/manufacturer-onboarding.ts",
+    ],
+    `adres metni beklenmeyen bir dosyada yazılı: ${hits.join(", ")}`
+  );
+});
+
+test("/contact'ın satır satır adresi de posta kodunu taşıyor", () => {
+  assert.ok(
+    BUSINESS_ADDRESS_LINES.join(" ").includes(BUSINESS_ADDRESS.postalCode),
+    "satırlara bölünmüş adreste posta kodu yok"
+  );
+  // Satırlar ile tek satırlık adres AYNI kaynaktan türüyor: birleştirilmiş
+  // hâlleri birbirinin aynısı olmak zorunda, yoksa `/contact` ile footer iki
+  // farklı adres söylerdi.
+  assert.equal(BUSINESS_ADDRESS_LINES.join(", "), BUSINESS_ADDRESS_FULL);
+});
+
+test("harita bağlantısının sorgusu posta kodunu içeriyor", () => {
+  const query = new URL(BUSINESS_MAPS_URL).searchParams.get("query");
+  assert.ok(query, "harita bağlantısında query yok");
+  assert.ok(
+    query.includes(BUSINESS_ADDRESS.postalCode),
+    `harita sorgusu posta kodu taşımıyor: ${query}`
+  );
+  assert.ok(query.includes(BUSINESS_ADDRESS.addressLocality));
 });
 
 test("sosyal profiller geçerli https URL", () => {

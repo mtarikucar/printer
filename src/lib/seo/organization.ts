@@ -8,6 +8,8 @@
  *  - Tip `OnlineStore` (Organization → OnlineBusiness → OnlineStore).
  *    `LocalBusiness` DEĞİL: o fiziksel bir şube gerektirir ve Google'ın
  *    self-serving review politikası nedeniyle yıldız özelliğine uygun değildir.
+ *    Ayrı bir `LocalBusiness` düğümü ÜRETİLEBİLİR ama bir KAPININ ARKASINDA
+ *    duruyor (`buildLocalBusinessNode`): Maps kaydı gelmeden emitlenmez.
  *  - `aggregateRating` YOK. Google: "If the entity that's being reviewed
  *    controls the reviews about itself, their pages that use LocalBusiness or
  *    any other type of Organization structured data are ineligible for the star
@@ -25,11 +27,14 @@ import {
   BUSINESS_ADDRESS,
   BUSINESS_AREA_SERVED,
   BUSINESS_LEGAL_NAME,
+  BUSINESS_MAPS_PROFILE_URL,
   BUSINESS_TAX_ID,
   CONTACT_EMAIL,
   CONTACT_PHONE_DISPLAY,
-  SOCIAL_PROFILES,
+  businessSameAs,
 } from "@/lib/config/business-identity";
+import { FIGURINE_PRICE_KURUS } from "@/lib/config/prices";
+import { formatCurrency } from "@/lib/i18n/format";
 
 /**
  * Yalnızca doğrulanabilir gerçekler: fotoğraftan kişiye özel 3D figür, SLA
@@ -80,9 +85,38 @@ export interface WebSiteNode {
   inLanguage: string;
 }
 
+/**
+ * Fiziksel işletme düğümü — Maps kaydı GELMEDEN emitlenmez.
+ *
+ * Alan seçimi dar ve bilerek: `openingHours`, `geo`, `logo` ve kuruluş yılı
+ * YOK çünkü hiçbirinin doğrulanmış karşılığı yok. `priceRange` istisnadır —
+ * figürin TEK fiyatlı ve rakam `FIGURINE_PRICE_KURUS`tan geliyor.
+ */
+export interface LocalBusinessNode {
+  "@type": "LocalBusiness";
+  "@id": string;
+  name: string;
+  url: string;
+  description: string;
+  email: string;
+  telephone: string;
+  address: PostalAddressNode;
+  areaServed: string;
+  priceRange: string;
+  /** Maps kaydı dâhil — eşleşmenin site tarafı. */
+  sameAs: string[];
+  /** Aynı ada ve adrese sahip iki düğüm BAĞLANMAZSA iki işletme gibi görünür. */
+  parentOrganization: { "@id": string };
+}
+
 export interface SiteJsonLdGraph {
   "@context": "https://schema.org";
-  "@graph": [OnlineStoreNode, WebSiteNode];
+  /**
+   * Üçüncü düğüm (`LocalBusiness`) KOŞULLU: Maps kaydı yoksa graf iki
+   * düğümlüdür. Tip bunu tuple + yayılım ile söylüyor, yani `[0]`/`[1]`
+   * okumaları hâlâ daralmış tipte kalıyor.
+   */
+  "@graph": [OnlineStoreNode, WebSiteNode, ...LocalBusinessNode[]];
 }
 
 /**
@@ -103,14 +137,67 @@ export function getAppUrl(): string {
 }
 
 /**
+ * `LocalBusiness` düğümü — Maps kaydı YOKSA `null`.
+ *
+ * NEDEN BİR KAPI ARKASINDA. Adresi ve hizmet alanını iddia eden bir
+ * `LocalBusiness`, karşılığında bir işletme kaydı yokken güvenilirlik
+ * kazandırmaz: eşleşecek bir kayıt olmadan "burada bir dükkân var" demek boş
+ * bir iddiadır ve yıldızlı işletme bloğuna da sokmaz (o blok kayıttan gelir,
+ * site metninden değil — `docs/google-business-profile.md`). Kayıt açıldığı gün
+ * `BUSINESS_MAPS_PROFILE_URL` dolar ve düğüm kendiliğinden yayına girer.
+ *
+ * `@id` AYRI (`#localbusiness`): `#organization` ile çakışsaydı iki farklı
+ * tipte tek bir kimlik yayınlanmış olurdu. `parentOrganization` ikisini
+ * bağlıyor, yoksa aynı ada ve adrese sahip iki düğüm iki ayrı işletme gibi
+ * görünür.
+ *
+ * BEKLEYEN ALANLAR (sahipten): kuruluş yılı → `foundingDate`, tam yasal unvan
+ * (`Ltd. Şti.` / `A.Ş.` / şahıs şirketi) → `legalName`. İkisi de
+ * `docs/google-business-profile.md` §1'de "SENDEN" diye işaretli; gelmeden
+ * yazılmaz. Aynı şekilde `openingHours` (atölyenin ziyarete açık saati yok),
+ * `geo` (ölçülmüş koordinat yok) ve `logo` (gerçek dosya yok) de uydurulmaz.
+ */
+export function buildLocalBusinessNode(
+  appUrl: string = getAppUrl(),
+  mapsProfileUrl: string | null = BUSINESS_MAPS_PROFILE_URL
+): LocalBusinessNode | null {
+  if (!mapsProfileUrl) return null;
+
+  return {
+    "@type": "LocalBusiness",
+    "@id": `${appUrl}/#localbusiness`,
+    name: BUSINESS_LEGAL_NAME,
+    url: appUrl,
+    description: BUSINESS_DESCRIPTION,
+    email: CONTACT_EMAIL,
+    telephone: CONTACT_PHONE_DISPLAY,
+    address: { "@type": "PostalAddress", ...BUSINESS_ADDRESS },
+    // Hizmet alanı ÜLKE, şehir değil: kargo Türkiye genelinedir ve kayıt da
+    // "hizmet bölgesi olan işletme" olarak açılıyor. "Ankara'da bir dükkân"
+    // gibi görünmek, Ankara dışındaki sorularda hiç çıkmamak demek.
+    areaServed: BUSINESS_AREA_SERVED,
+    // Tek fiyatlı ürün: aralık değil, fiyatın kendisi. Rakam sabitten gelir ve
+    // biçimlendirme depodaki tek para biçimlendiricisiyle yapılır.
+    priceRange: formatCurrency(FIGURINE_PRICE_KURUS, "tr"),
+    sameAs: businessSameAs(mapsProfileUrl),
+    parentOrganization: { "@id": `${appUrl}/#organization` },
+  };
+}
+
+/**
  * Root layout'ın gömdüğü `@graph`. Node'lar `@id` ile birbirini referanslar, bu
  * sayede ileride eklenecek Product/Breadcrumb node'ları aynı kuruluşa
  * bağlanabilir.
+ *
+ * `mapsProfileUrl` bir PARAMETRE: değer bugün `null` olan bir sabitten gelir ve
+ * kapının açık hâli ancak böyle sınanabilir (bkz. `buildLocalBusinessNode`).
  */
 export function buildOrganizationJsonLd(
-  appUrl: string = getAppUrl()
+  appUrl: string = getAppUrl(),
+  mapsProfileUrl: string | null = BUSINESS_MAPS_PROFILE_URL
 ): SiteJsonLdGraph {
   const organizationId = `${appUrl}/#organization`;
+  const localBusiness = buildLocalBusinessNode(appUrl, mapsProfileUrl);
 
   return {
     "@context": "https://schema.org",
@@ -134,7 +221,7 @@ export function buildOrganizationJsonLd(
           availableLanguage: "Turkish",
           areaServed: BUSINESS_AREA_SERVED,
         },
-        sameAs: [...SOCIAL_PROFILES],
+        sameAs: businessSameAs(mapsProfileUrl),
       },
       {
         "@type": "WebSite",
@@ -144,6 +231,8 @@ export function buildOrganizationJsonLd(
         publisher: { "@id": organizationId },
         inLanguage: "tr-TR",
       },
+      // Koşullu üçüncü düğüm: Maps kaydı yokken liste iki düğümde kalır.
+      ...(localBusiness ? [localBusiness] : []),
     ],
   };
 }

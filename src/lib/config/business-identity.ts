@@ -95,6 +95,39 @@ export const SOCIAL_PROFILES = [
 ] as const;
 
 /**
+ * Google Business Profile (Maps) kaydının herkese açık URL'si — HENÜZ YOK.
+ *
+ * Kaydı işletme sahibi açmak zorunda (hesap onun adına açılıyor, Google
+ * adres/telefon doğrulaması istiyor); doldurma listesi
+ * `docs/google-business-profile.md`. Değer geldiğinde BURAYA yazılır ve iki şey
+ * kendiliğinden olur: `sameAs` kaydı gösterir (`businessSameAs`) ve
+ * `seo/organization.ts` `LocalBusiness` düğümünü emitlemeye başlar.
+ *
+ * BOŞ DİZE YA DA UYDURMA BİR URL YAZILMAZ. `sameAs` bir KİMLİK İDDİASIDIR:
+ * karşılığı olmayan bir URL, site ile işletme kaydının eşleşmesini
+ * kolaylaştırmak yerine bozar. `null` "henüz yok" demenin tek dürüst hâli.
+ *
+ * Tip AÇIKÇA `string | null`: `as const` bırakılsaydı derleyici değeri `null`a
+ * daraltır ve kaydı okuyan her dal "ulaşılamaz" sayılırdı — yani kapının
+ * arkasındaki kod hiç derlenmemiş gibi davranırdı.
+ */
+export const BUSINESS_MAPS_PROFILE_URL: string | null = null;
+
+/**
+ * schema.org `sameAs` listesi: sosyal profiller + (varsa) Maps kaydı.
+ *
+ * Maps kaydı `sameAs`e GİRMELİ, çünkü eşleşmenin iki yönü var — kayıt siteyi,
+ * site de kaydı göstermeli. Kayıt yokken liste sosyal profillerle aynı kalır.
+ */
+export function businessSameAs(
+  mapsProfileUrl: string | null = BUSINESS_MAPS_PROFILE_URL
+): string[] {
+  return mapsProfileUrl
+    ? [...SOCIAL_PROFILES, mapsProfileUrl]
+    : [...SOCIAL_PROFILES];
+}
+
+/**
  * Footer'da gösterilecek sosyal bağlantılar. `sameAs` sinyalinin karşılığı
  * olması için bağlantıların sitede gerçekten görünür olması gerekiyor, bu yüzden
  * etiketler de URL'lerle aynı yerden türetiliyor.

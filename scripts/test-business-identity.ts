@@ -25,6 +25,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   BUSINESS_ADDRESS_LINES,
   BUSINESS_LEGAL_NAME,
+  BUSINESS_MAPS_PROFILE_URL,
   BUSINESS_MAPS_URL,
   BUSINESS_TAX_ID,
   BUSINESS_ADDRESS,
@@ -33,7 +34,13 @@ import {
   CONTACT_EMAIL,
   CONTACT_PHONE_DISPLAY,
 } from "../src/lib/config/business-identity";
-import { buildOrganizationJsonLd, getAppUrl } from "../src/lib/seo/organization";
+import {
+  buildLocalBusinessNode,
+  buildOrganizationJsonLd,
+  getAppUrl,
+} from "../src/lib/seo/organization";
+import { FIGURINE_PRICE_KURUS } from "../src/lib/config/prices";
+import { formatCurrency } from "../src/lib/i18n/format";
 import { JsonLd, serializeJsonLd } from "../src/lib/seo/jsonld";
 import { FigFooter } from "../src/components/figurunica/sections";
 import { pickFigurunicaDict } from "../src/components/figurunica/dict";
@@ -295,6 +302,73 @@ test("uydurma alan yok (kuruluş yılı, çalışan sayısı, sicil no, logo)", 
       `doğrulanmamış alan JSON-LD'ye sızmış: ${forbidden} (logo/image için: gerçek bir dosya eklendiyse bu testi güncelle, bkz. yukarıdaki not)`
     );
   }
+});
+
+// ------------------------------------------------- LocalBusiness (kapı arkası)
+
+test("Maps kaydı YOKKEN LocalBusiness düğümü üretilmiyor", () => {
+  // Gerekçe kayıt defterinde: adresi ve hizmet alanını iddia eden bir
+  // `LocalBusiness`, karşılığında bir işletme kaydı yokken güvenilirlik
+  // kazandırmaz — eşleşecek bir şey olmadan iddia etmek boştur.
+  assert.equal(BUSINESS_MAPS_PROFILE_URL, null, "Maps kaydı henüz YOK (sahipten bekleniyor)");
+  assert.equal(buildLocalBusinessNode(APP_URL, null), null);
+  assert.equal(graph["@graph"].length, 2, "kapalı durumda graf iki düğüm");
+  assert.ok(!JSON.stringify(graph).includes("LocalBusiness"));
+});
+
+test("Maps kaydı GELDİĞİNDE düğüm üretiliyor ve @id çakışmıyor", () => {
+  const maps = "https://maps.app.goo.gl/ornek";
+  const node = buildLocalBusinessNode(APP_URL, maps);
+  assert.ok(node, "Maps URL'si verilince düğüm üretilmeli");
+  assert.equal(node["@type"], "LocalBusiness");
+  assert.equal(node["@id"], `${APP_URL}/#localbusiness`);
+  assert.notEqual(node["@id"], org["@id"], "@id mevcut #organization ile çakışıyor");
+  // İki düğüm aynı ada ve adrese sahip; BAĞLANMAZLARSA iki ayrı işletme gibi
+  // görünürler ve entity çözümlemesi bölünür.
+  assert.deepEqual(node.parentOrganization, { "@id": org["@id"] });
+  assert.ok(node.sameAs.includes(maps), "Maps kaydı sameAs'te yok");
+  assert.deepEqual(node.address, { "@type": "PostalAddress", ...BUSINESS_ADDRESS });
+});
+
+test("Maps kaydı GELDİĞİNDE grafa ÜÇÜNCÜ düğüm olarak giriyor", () => {
+  const maps = "https://maps.app.goo.gl/ornek";
+  const g = buildOrganizationJsonLd(APP_URL, maps);
+  assert.equal(g["@graph"].length, 3);
+  assert.equal(g["@graph"][2]["@id"], `${APP_URL}/#localbusiness`);
+  // `sameAs` de kaydı alır: site ile işletme kaydının aynı varlık olması için
+  // iki yönün de birbirini göstermesi gerekiyor.
+  assert.ok(g["@graph"][0].sameAs.includes(maps), "organization sameAs Maps kaydını almıyor");
+  assert.deepEqual(
+    g["@graph"][0].sameAs,
+    [...SOCIAL_PROFILES, maps],
+    "sameAs sosyal profilleri kaybetmemeli"
+  );
+});
+
+test("LocalBusiness düğümü uydurma alan taşımıyor", () => {
+  const node = buildLocalBusinessNode(APP_URL, "https://maps.app.goo.gl/ornek");
+  for (const forbidden of [
+    "openingHours",
+    "openingHoursSpecification",
+    "geo",
+    "latitude",
+    "longitude",
+    "foundingDate",
+    "numberOfEmployees",
+    "logo",
+    "image",
+    "aggregateRating",
+    "review",
+  ]) {
+    assert.ok(
+      !hasKeyDeep(node, forbidden),
+      `doğrulanmamış alan LocalBusiness'a sızmış: ${forbidden}`
+    );
+  }
+  // `priceRange` BİLİNEN bir gerçek: figürin tek fiyatlı ve rakam sabitten
+  // geliyor (elle yazılmış ikinci bir kopya yok).
+  assert.equal(node?.priceRange, formatCurrency(FIGURINE_PRICE_KURUS, "tr"));
+  assert.ok(node?.priceRange.includes("3.499"), `beklenmeyen fiyat: ${node?.priceRange}`);
 });
 
 test("ETBİS/MERSİS numarası iddia edilmiyor", () => {

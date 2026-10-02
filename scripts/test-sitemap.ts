@@ -43,6 +43,16 @@ test("her herkese açık sayfa sitemap'te", () => {
     "/figur",
     "/urunler",
     "/nasil-calisir",
+    // V3'ün altı özel gün sayfası. Liste BİLEREK elle yazılı: sitemap girişleri
+    // `lib/config/occasions.ts`ten TÜRÜYOR, yani kayıttan okuyan bir iddia
+    // kendi kendini onaylardı. Kayıttan bir özel gün düşerse bu satırlar
+    // kırmızı döner — keşfedilmeyen bir sayfa demek olurdu.
+    "/hediye/dogum-gunu",
+    "/hediye/sevgiliye",
+    "/hediye/evcil-hayvan",
+    "/hediye/oyun-karakteri",
+    "/hediye/aile-hatirasi",
+    "/hediye/mezuniyet",
     "/toplu-siparis",
     "/anahtarlik-kutusu",
     "/atolye",

@@ -255,6 +255,52 @@ export function isQuoteOnlyKind(kind: DesignTemplate["priceKind"]): boolean {
 }
 
 /**
+ * `/create`in VERİLEN URL'inde sabit fiyatlı figürin SATILIYOR mu?
+ *
+ * `page.tsx` ürün gerçekleri bandını (`₺3.499 · 15 cm · 5-7 iş günü`) yalnız
+ * `true` dönen URL'lerde çizer. Gerekçe somut: `CreateRouter` dört dal
+ * döndürüyor ve ÜÇÜ ekranda liste fiyatı OLMADIĞINI söylüyor —
+ *   - `?path=upload` → müşteriye KENDİ hesaplanan teklifi gösteriliyor
+ *     (`formatCurrency(result.priceKurus)`), yani band ikinci bir ₺ rakamı olur;
+ *   - `?path=design` → `create.designFlow.quotePrice`: "Sabit fiyat yok…";
+ *   - `?style=object` / `?path=object` → `create.customDesign.body` +
+ *     `create.customDesign.quoteNext`: "Bu ürünün liste fiyatı yoktur".
+ * Bandı bu dallarda da çizmek, tek sayfada "liste fiyatı yoktur" ile "₺3.499"u
+ * ve o dal için GEÇERSİZ bir teslim taahhüdünü yan yana koymak demekti; ödeme
+ * düğmesi bandın altında olmadığı için yanlış tahsilat olmuyordu, ama yayımlanan
+ * beyan akışın kendi beyanını yalanlıyordu (ve asistanlara `?path=upload` için
+ * yanlış rakamı veriyordu).
+ *
+ * `?previewId=` / `?fromOrder=` de `false`: oradaki `style` ancak istemcideki
+ * bir fetch çözüldüğünde bilinir ve `isRestorableCreateStyle` "object"i BİLEREK
+ * geri yükler — yani sunucu o URL'in figürin mi obje mi olduğunu BİLEMEZ.
+ * Bilinmeyen bir dalda fiyat yayınlamak satmadığımız bir fiyatı vaat etmek olur;
+ * sitemap yalnız çıplak `/create`i taşıdığı ve iki parametre de müşteriye özel
+ * olduğu için susmanın SEO bedeli sıfır.
+ *
+ * Bilinmeyen bir `style` (ör. Creative Lab slug'ı ya da uydurma bir dize)
+ * `true` döner ve bu DOĞRU: istemci onu beyaz listeye almayıp varsayılan figür
+ * şablonuna düşüyor, yani ekranda gerçekten sabit fiyatlı ürün var.
+ */
+export function createUrlSellsFixedPriceFigure(
+  params: Record<string, string | string[] | undefined>,
+): boolean {
+  // `URLSearchParams.get` gibi İLK değeri al: `CreateRouter` istemcide tam
+  // bunu okuyor (`searchParams.get("path")`), yani `?path=upload&path=photo`
+  // gibi tekrar eden bir parametrede band ile akış ayrışmasın.
+  const one = (v: string | string[] | undefined): string | null =>
+    (Array.isArray(v) ? v[0] : v) ?? null;
+
+  const path = one(params.path);
+  if (path === "upload" || path === "design") return false;
+  if (one(params.previewId) || one(params.fromOrder)) return false;
+  // `?style=` yoksa `?path=object` da obje şablonunu seçiyor (create-client.tsx).
+  const style = one(params.style) ?? (path === "object" ? "object" : null);
+  if (style && isQuoteOnlyKind(priceKindForStyle(style))) return false;
+  return true;
+}
+
+/**
  * Whether `/create` may restore `style` from a saved preview (`?previewId=`) or
  * a previous order (`?fromOrder=`).
  *

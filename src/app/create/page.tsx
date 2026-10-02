@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { CreateFactsBand } from "@/components/create/product-facts";
+import { createUrlSellsFixedPriceFigure } from "@/lib/create/design-templates";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getLocale } from "@/lib/i18n/get-locale";
 import { CreateFlowShell, CreateRouter } from "./create-client";
@@ -21,30 +22,50 @@ import { CreateFlowShell, CreateRouter } from "./create-client";
  * Çözüm bu yüzden "gerçekleri Suspense'in fallback'ine koymak" DEĞİL: dinamik
  * render'da fallback hiç servis edilmez, statik üretimde ise hidrasyonda
  * kaybolur. Gerçekler sınırın DIŞINDA, `<CreateFactsBand>` ile çiziliyor —
- * böylece dört dalın (yol seçici, fotoğraf, 2D tasarım, kendi dosyam) hepsinde
- * ve her render biçiminde HTML'de bulunuyorlar.
+ * böylece her render biçiminde HTML'de bulunuyorlar.
  *
- * `force-dynamic` / `revalidate = 0` YOK ve eklenmeyecek: bu sayfa yüksek
- * trafikli bir huni ve her isteği sunucuya bağlamanın bedeli bu kazancın çok
- * üstünde. (Rota bugün yine de dinamik, ama bunun nedeni kök layout'un
- * `getLocale()` → `cookies()` okuması; o gün geldiğinde burası hazır.)
+ * Band KOŞULLU: `CreateRouter`ın dört dalından üçü ekranda liste fiyatı
+ * OLMADIĞINI söylüyor (teklif dalları), yani o URL'lerde "₺3.499 · 5-7 iş günü"
+ * yayınlamak sayfanın kendi beyanını yalanlar. Koşulun kendisi ve her dalın
+ * gerekçesi `createUrlSellsFixedPriceFigure` başlığında; burada iki kopya
+ * tutulmuyor ki bir gün ayrışmasınlar.
+ *
+ * `force-dynamic` / `revalidate = 0` YOK ve eklenmeyecek: ikisi de bütün
+ * segmenti önbelleğin (ve ileride PPR'ın) dışına atar, oysa bu sayfanın
+ * sunucudan istediği tek şey URL'in kendisi. Ama bunun karşılığı dürüstçe
+ * söylenmeli: `searchParams` okuyan bir sayfa statik ÜRETİLEMEZ, yani bu rota
+ * tasarımı gereği dinamiktir — "bir gün statikleşir" iddiası geri çekildi.
+ * Rakamı doğru dalda yayınlamak, rakamı yanlış dalda da yayınlamaya yeğdir.
+ *
+ * `getLocale()` (bir `cookies()` okuması) BİLEREK duruyor: `searchParams` statik
+ * üretimi zaten kapattığı için çerez okumasını kaldırmanın kazancı sıfır,
+ * bedeli ise bandın üç cümlesini Türkçeye çivilemek olurdu. (`/` ve
+ * `/3d-baski` tersini yapıyor çünkü onların TEK sunucu bağımlılığı o çerezdi —
+ * bkz. `components/last-updated.tsx` başlığı.)
  *
  * MÜŞTERİ DAVRANIŞI DEĞİŞMEDİ: yönlendirici, yol seçici ve `?path=`/`?style=`/
  * `?previewId=`/`?fromOrder=` dallarının hepsi aynı dosyada, aynı sırada.
  */
-export default async function CreatePage() {
+export default async function CreatePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const d = getDictionary(await getLocale());
+  const sellsFixedPriceFigure = createUrlSellsFixedPriceFigure(await searchParams);
 
   return (
     <>
       <Suspense fallback={<CreateFlowShell />}>
         <CreateRouter />
       </Suspense>
-      <CreateFactsBand
-        title={d["create.product.title"]}
-        spec={d["create.product.spec"]}
-        included={d["create.product.included"]}
-      />
+      {sellsFixedPriceFigure && (
+        <CreateFactsBand
+          title={d["create.product.title"]}
+          spec={d["create.product.spec"]}
+          included={d["create.product.included"]}
+        />
+      )}
     </>
   );
 }

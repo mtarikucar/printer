@@ -174,6 +174,7 @@ import { buildPrintServiceJsonLd } from "../src/lib/seo/service";
 import robots from "../src/app/robots";
 // V1 — alıntılanabilir rakamların yayımlandığı yüzeyler.
 import { CreateFactsBand } from "../src/components/create/product-facts";
+import { createUrlSellsFixedPriceFigure } from "../src/lib/create/design-templates";
 import { FigurunicaLanding } from "../src/components/figurunica/landing";
 import { FIGURUNICA_KEYS, pickFigurunicaDict } from "../src/components/figurunica/dict";
 import { StorefrontHome } from "../src/components/marketplace/storefront";
@@ -5254,13 +5255,19 @@ test("/create gerçekler bandı SUSPENSE SINIRININ DIŞINDA ve sunucuda çiziliy
     /^\s*["']use client["']/m,
     "/create sayfası istemci modülü — gerçekler bandı sunucuda çizilmiyor"
   );
-  // Rotayı sunucuya bağlayan kaçış yolları YASAK: bu sayfa yüksek trafikli bir
-  // huni, çözüm aynı HTML'i üretmek, her isteği sunucuya bağlamak değil.
+  // İKİ KÜT KAÇIŞ YASAK — ve bu iddia ne söylediğini bilerek söylüyor: rota
+  // zaten dinamik (hem kök layout'un `cookies()` okuması hem de bu sayfanın
+  // `searchParams` okuması yüzünden), yani burada "rotayı sunucuya bağlama"
+  // diye bir koruma MÜMKÜN DEĞİL. Pinlenen şey dar: `force-dynamic` /
+  // `revalidate = 0` bütün segmenti önbelleğin (ve ileride PPR'ın) dışına
+  // atar, oysa bu sayfanın sunucudan istediği tek şey URL'in kendisi.
   assert.doesNotMatch(
     page,
     /force-dynamic|revalidate\s*=\s*0/,
-    "/create rotası dinamiğe zorlanmış"
+    "/create segmenti küt kaçışla önbelleğin dışına atılmış"
   );
+  // Sayfa URL'i gerçekten okuyor: band dalın doğruluğuna bağlı (alttaki iddia).
+  assert.match(page, /searchParams/, "/create sayfası URL'i okumuyor");
 
   const closeSuspense = page.indexOf("</Suspense>");
   const band = page.indexOf("<CreateFactsBand");
@@ -5282,6 +5289,74 @@ test("/create gerçekler bandı SUSPENSE SINIRININ DIŞINDA ve sunucuda çiziliy
   }
   // Bandın cümlesi akışın ürün kartıyla AYNI bileşenden gelir, iki kopya değil.
   assert.match(client, /<CreateProductFacts/, "ürün kartı paylaşılan bileşeni kullanmıyor");
+});
+
+test("/create bandı YALNIZ sabit fiyatlı dalda çiziliyor, teklif dallarında SUSUYOR", () => {
+  // Band koşulsuzken, "bu ürünün liste fiyatı yoktur" diyen üç dalda da
+  // "₺3.499 · 5-7 iş günü" yayınlıyordu; upload dalında ise aynı ekranda İKİ
+  // farklı ₺ rakamı duruyordu (akış müşterinin kendi teklifini yazıyor).
+  // Yayımlanan beyan akışın kendi beyanını yalanlamasın.
+  for (const url of [
+    {},
+    { path: "photo" },
+    { style: "storybook" },
+    { style: "realistic" },
+    // Bilinmeyen/Creative Lab slug'ı: istemci beyaz listeye almayıp varsayılan
+    // figür şablonuna düşüyor, yani ekranda gerçekten sabit fiyatlı ürün var.
+    { style: "keychain" },
+  ]) {
+    assert.equal(
+      createUrlSellsFixedPriceFigure(url),
+      true,
+      `${JSON.stringify(url)} sabit fiyatlı dal, band SUSMAMALI`
+    );
+  }
+  for (const url of [
+    { path: "upload" },
+    { path: "design" },
+    { path: "object" },
+    { style: "object" },
+    { previewId: "pv_1" },
+    { fromOrder: "ord_1" },
+    // Tekrar eden parametrede `URLSearchParams.get` gibi İLK değer kazanır —
+    // `CreateRouter` istemcide tam bunu okuyor, band onunla aynı dalı görmeli.
+    { path: ["upload", "photo"] },
+  ]) {
+    assert.equal(
+      createUrlSellsFixedPriceFigure(url),
+      false,
+      `${JSON.stringify(url)} teklif/bilinmeyen dal, band ₺ rakamı YAYINLAMAMALI`
+    );
+  }
+
+  // O üç dalın ekrandaki cümlesi gerçekten "sabit fiyat yok" diyor; kapının
+  // gerekçesi sözlükten doğrulanıyor, yorumdan değil.
+  for (const key of [
+    "create.designFlow.quotePrice",
+    "create.customDesign.body",
+    "create.customDesign.quoteNext",
+  ]) {
+    const sentence = (tr as Record<string, string>)[key];
+    assert.ok(sentence, `${key} sözlükte yok`);
+    assert.ok(
+      !sentence.includes(FIGURINE_PRICE_LABEL),
+      `tr:${key} teklif dalında liste fiyatı yazıyor`
+    );
+    assert.match(sentence, /fiyat/i, `tr:${key} artık fiyattan söz etmiyor — kapı gerekçesiz`);
+  }
+
+  // MUTASYON SINAVI: `page.tsx`te bandı koşulsuz çiz (ya da kapıyı `true` gibi
+  // sabit bir ifadeye çevir) → bu iddia KIRMIZI. Kapının ADI yukarıdaki
+  // yüklemeye BAĞLANAN değişkenden okunuyor, yoksa `{true && <Band/>}` da
+  // "koşullu" sayılırdı.
+  const page = stripComments(fs.readFileSync(path.resolve("src/app/create/page.tsx"), "utf8"));
+  const gate = page.match(/const\s+(\w+)\s*=\s*createUrlSellsFixedPriceFigure\(/);
+  assert.ok(gate, "/create sayfası dalı sormuyor — band koşulsuz çiziliyor");
+  assert.match(
+    page,
+    new RegExp(`\\{\\s*${gate[1]}\\s*&&\\s*\\(?\\s*<CreateFactsBand`),
+    "<CreateFactsBand> dal kapısının arkasında değil — teklif dallarında da ₺3.499 yayınlar"
+  );
 });
 
 test("/figur ürün gerçeklerini DEKORATİF göstergeden ÖNCE yayınlar", () => {

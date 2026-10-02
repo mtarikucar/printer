@@ -6,8 +6,8 @@ import { FIGURINE_PRICE_LABEL } from "@/lib/config/product-facts";
  * Neden ayrı bir bileşen: bu üç cümle iki yerde çizilir ve İKİSİNDE AYNI
  * olmak zorunda —
  *   1. akışın içindeki ürün kartı (fotoğraf yüklendikten sonra, istemcide),
- *   2. `page.tsx`in sunucuda çizdiği gerçekler bandı (her /create URL'inde,
- *      her dalda, JS çalışmasa da).
+ *   2. `page.tsx`in sunucuda çizdiği gerçekler bandı (sabit fiyatlı figürin
+ *      satan URL'lerde, JS çalışmasa da — bkz. `CreateFactsBand`).
  * (2) olmadan tarayıcıya giden HTML'de hiç ₺ rakamı yoktu: kart
  * `(photoKey || selectedFile)` kapısının arkasında, yani hiçbir sunucu
  * render'ı onu çizemiyor (ölçüm 2026-10-02 — /create HTML'inde "3.499" sıfır
@@ -48,11 +48,18 @@ export function CreateProductFacts({
 /**
  * `page.tsx`in SUSPENSE'İN DIŞINDA çizdiği gerçekler bandı.
  *
- * Suspense'in İÇİ değil, DIŞI: `CreateRouter` `useSearchParams()` çağırıyor ve
- * rota bir gün statik üretilirse o alt ağaç sunucu render'ından düşer — band
- * sınırın dışında durduğu için iki render biçiminde de HTML'de kalır. Aynı
- * nedenle `force-dynamic`/`revalidate = 0` YOK: bu sayfa yüksek trafikli bir
- * huni ve her isteği sunucuya bağlamanın bedeli bu kazancın çok üstünde.
+ * Suspense'in İÇİ değil, DIŞI: sınırın içi, Next alt ağacı sunucu render'ından
+ * düşürdüğünde (`CreateRouter` `useSearchParams()` çağırıyor) fallback'e inen
+ * kısımdır ve dinamik render'da fallback hiç SERVİS EDİLMEZ — yani "fiyatı
+ * fallback'e koy" çözümü rakamı hiçbir tarayıcıya ulaştırmaz. Band sınırın
+ * dışında durduğu için hangi yolla render edilirse edilsin HTML'de kalıyor.
+ * `force-dynamic`/`revalidate = 0` YOK — gerekçenin tamamı `page.tsx`
+ * başlığında.
+ *
+ * Band HER /create URL'inde çizilmez: `page.tsx` onu
+ * `createUrlSellsFixedPriceFigure` kapısının arkasında çiziyor, çünkü teklif
+ * dallarında (`?path=upload`, `?path=design`, `?style=object`) ekran liste
+ * fiyatı OLMADIĞINI söylüyor ve bandın ₺ rakamı o beyanı yalanlar.
  *
  * Bandın yeri akışın ALTI: dört dalın (yol seçici, fotoğraf, 2D tasarım, kendi
  * dosyam) hiçbiri kendi `<main>`ini kaybetmesin, yani müşteri davranışı

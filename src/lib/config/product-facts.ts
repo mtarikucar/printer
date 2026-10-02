@@ -36,13 +36,49 @@ import { formatCurrency } from "@/lib/i18n/format";
 export const FIGURINE_HEIGHT_LABEL = formatCm(SIZE_PRESETS[0].heightMm);
 
 /**
+ * Kuruş → müşteriye gösterilen fiyat etiketi.
+ *
+ * SAF FONKSİYON, sabitin kendisi değil: yapısal veri (V2) şemaya yazdığı
+ * rakamdan sayfadaki etiketi YENİDEN ÜRETİP karşılaştırıyor, yani ayrışmayı
+ * ancak değerle çağrılabilen bir fonksiyon yakalayabilir. Sabit tek bir değer
+ * olduğu sürece kuruşlu dal yalnızca kaynak piniyle korunabiliyordu; artık
+ * ikisi de DEĞERLE sınanıyor (`scripts/test-seo-jsonld.ts`).
+ */
+export function figurinePriceLabel(kurus: number): string {
+  return kurus % 100 === 0
+    ? `₺${(kurus / 100).toLocaleString("tr-TR")}`
+    : formatCurrency(kurus, "tr");
+}
+
+/**
  * Tek fiyatın etiketi — "₺3.499". Tanıtım cümlelerinin `{price}` yer tutucusu
  * bununla doldurulur; `/create` ürün kartı da aynı dizeyi basar.
  */
-export const FIGURINE_PRICE_LABEL =
-  FIGURINE_PRICE_KURUS % 100 === 0
-    ? `₺${(FIGURINE_PRICE_KURUS / 100).toLocaleString("tr-TR")}`
-    : formatCurrency(FIGURINE_PRICE_KURUS, "tr");
+export const FIGURINE_PRICE_LABEL = figurinePriceLabel(FIGURINE_PRICE_KURUS);
+
+/**
+ * Figürünün TESLİM SÜRESİ — üretim ve kargo, iş günü.
+ *
+ * Neden sabit: bu dört rakam ("5-7" ve "2-3") yayımlanan dört cümlenin
+ * İÇİNDE elle yazılıydı (`create.product.included`,
+ * `landing.fig.hero.stat2.v`, `landing.faq.a1`, `/nasil-calisir` adımları) ve
+ * hiçbir yerde tek bir kaynağı yoktu. Yapısal veri (`Offer.shippingDetails`
+ * → `handlingTime`/`transitTime`) bu rakamı MAKİNEYE söylüyor; şemaya beşinci
+ * bir kopya yazmak, bir gün sayfanın söylediğinden farklı bir teslim süresi
+ * yayınlamak demekti.
+ *
+ * Dört cümlenin METNİ bu sevkiyatta yer tutucuya ÇEVRİLMEDİ (kapsam: V2 yeni
+ * metin yazmıyor); onun yerine `scripts/test-seo-jsonld.ts` her yayımlanan
+ * yüzeyi bu sabite PİNLER — biri değişip diğeri kalırsa test kırmızı döner.
+ */
+export const FIGURINE_LEAD_DAYS = {
+  /** Önizleme onayından sonra üretim: 5-7 iş günü. */
+  productionMin: 5,
+  productionMax: 7,
+  /** Kargo: 2-3 iş günü. */
+  transitMin: 2,
+  transitMax: 3,
+} as const;
 
 /**
  * Katman yüksekliği etiketi — "25 µm".

@@ -74,9 +74,12 @@ import {
 import { QuoteApiError } from "../src/lib/quote/client-api";
 import {
   ComingSoonNote,
+  LANDING_FAQ_TITLE,
+  LANDING_STEPS_TITLE,
   MaterialLibrary,
   PrintServiceLanding,
   landingFaq,
+  landingSteps,
 } from "../src/app/3d-baski/sections";
 import { LandingUploader } from "../src/app/3d-baski/landing-uploader";
 import {
@@ -182,10 +185,22 @@ import { LastUpdated } from "../src/components/last-updated";
 import { PAGE_UPDATED_AT, pageUpdatedAt } from "../src/lib/config/page-updated";
 import {
   FIGURINE_HEIGHT_LABEL,
+  FIGURINE_LEAD_DAYS,
   FIGURINE_PRICE_LABEL,
+  figurinePriceLabel,
   layerHeightLabel,
   withProductFacts,
 } from "../src/lib/config/product-facts";
+// V2 — aynı rakamların MAKİNE OKUNUR hâli (yapısal veri).
+import { buildFigurineProductJsonLd } from "../src/lib/seo/figurine";
+import { buildFaqPageJsonLd } from "../src/lib/seo/faq";
+import { buildHowToJsonLd } from "../src/lib/seo/howto";
+import { figurineFaqItems } from "../src/components/figurunica/faq-items";
+import {
+  HOW_IT_WORKS_STEPS,
+  HowItWorksSteps,
+  stepBodyText,
+} from "../src/app/nasil-calisir/steps";
 
 const PREFIX = "instantQuote.";
 const trKeys = Object.keys(tr).filter((k) => k.startsWith(PREFIX));
@@ -5182,19 +5197,13 @@ test("fiyat ve ölçü ETİKETİ sabitten türer, biçim tek yerde yazılı", ()
 
   // Etiket KURUŞ KAYBETMEZ: tam liraya oturmayan bir fiyat sessizce
   // yuvarlanırsa yayımlanan rakam tahsil edilen rakamdan sapar — bu sevkiyatın
-  // tam da engellemeye çalıştığı şey. Kaynak pini, çünkü sabit derleme
-  // zamanında tek değer.
-  const facts = fs.readFileSync(path.resolve("src/lib/config/product-facts.ts"), "utf8");
-  assert.match(
-    facts,
-    /FIGURINE_PRICE_KURUS % 100 === 0/,
-    "kuruş taşıyan fiyat için formatCurrency'ye düşen dal yok"
-  );
-  assert.match(
-    facts,
-    /formatCurrency\(FIGURINE_PRICE_KURUS, "tr"\)/,
-    "yedek dal formatCurrency kullanmıyor"
-  );
+  // tam da engellemeye çalıştığı şey. V1'de bu dal yalnız KAYNAK PİNİYLE
+  // korunabiliyordu (sabit tek bir değer); V2 etiketi saf bir fonksiyona
+  // ayırdı, çünkü yapısal veri şemadaki rakamdan sayfadaki etiketi yeniden
+  // üretip karşılaştırıyor. Artık iki dal da DEĞERLE sınanıyor.
+  assert.equal(figurinePriceLabel(FIGURINE_PRICE_KURUS), FIGURINE_PRICE_LABEL);
+  assert.equal(figurinePriceLabel(349950), "₺3.499,50");
+  assert.equal(figurinePriceLabel(350000), "₺3.500");
 });
 
 test("tanıtım cümlelerindeki rakam ELLE YAZILI DEĞİL, yer tutucudan gelir", () => {
@@ -5354,7 +5363,9 @@ test("/create bandı YALNIZ sabit fiyatlı dalda çiziliyor, teklif dallarında 
   assert.ok(gate, "/create sayfası dalı sormuyor — band koşulsuz çiziliyor");
   assert.match(
     page,
-    new RegExp(`\\{\\s*${gate[1]}\\s*&&\\s*\\(?\\s*<CreateFactsBand`),
+    // Kapı ile band arasında yalnız aynı kapıya bağlı kardeşler durabilir
+    // (V2'de figürin JSON-LD'si de aynı kapının arkasına girdi).
+    new RegExp(`\\{\\s*${gate[1]}\\s*&&[\\s\\S]{0,300}<CreateFactsBand`),
     "<CreateFactsBand> dal kapısının arkasında değil — teklif dallarında da ₺3.499 yayınlar"
   );
 });
@@ -5458,4 +5469,233 @@ test("Son güncelleme tarihi `new Date()`ten TÜREMEZ", () => {
     `makine okunur tarih yok: ${html}`
   );
   assert.ok(html.includes("2 Ekim 2026"), `insan okunur tarih yok: ${html}`);
+});
+
+// ─── V2: yapısal veri — aynı rakamlar MAKİNE OKUNUR ─────────────────────────
+//
+// V1 rakamları tarayıcının gördüğü HTML'e taşıdı; V2 onları işaretliyor. Tek
+// kural: **şemadaki her değer, sayfada GÖRÜNEN değerin birebir aynısı.**
+// Ayrışırsa Google yapısal veriyi yok sayar ("structured data mismatch").
+// Aşağıdaki nöbetçiler şemayı render edilen HTML'le karşılaştırır — yani
+// "şema geçerli mi" değil, "şema sayfanın söylediğini mi söylüyor" sorusu.
+// Şemanın kendi sözleşmesi (alanlar, @id, iade politikası) için bkz.
+// `scripts/test-seo-jsonld.ts`.
+
+/** Yapısal verinin kurulduğu adres ve sabit saat (priceValidUntil yuvarlanır). */
+const SEO_APP_URL = "https://figurunica.com";
+const SEO_NOW = Date.UTC(2026, 9, 2);
+
+/**
+ * Markup'ın GÖRÜNÜR METNİ. Şema metni tek bir dize, ekrandaki karşılığı ise
+ * işaretlemeyle bölünmüş olabilir ("… sonra <strong>5-7 iş günü</strong>
+ * sürer."); karşılaştırma bu yüzden etiketler ve React'in metin düğümleri
+ * arasına koyduğu `<!-- -->` ayraçları ayıklandıktan sonra yapılır.
+ */
+function visibleText(html: string): string {
+  return plain(html.replace(/<[^>]*>/g, ""));
+}
+
+test("figürin şeması /figur ve /create'te GÖRÜNEN rakamların AYNISINI söyler", () => {
+  // MUTASYON SINAVI: şemadaki fiyatı 100 kuruş kaydır → bu iddia KIRMIZI,
+  // çünkü şemadaki rakamdan üretilen etiket ("₺3.500") sayfada YOK.
+  const node = buildFigurineProductJsonLd(tr, SEO_APP_URL, SEO_NOW);
+  const offer = node.offers as Record<string, unknown>;
+  const schemaLabel = figurinePriceLabel(Math.round(Number(offer.price) * 100));
+  const height = node.height as Record<string, unknown>;
+  const delivery = (offer.shippingDetails as Record<string, unknown>)
+    .deliveryTime as Record<string, unknown>;
+  const handling = delivery.handlingTime as Record<string, number>;
+  const transit = delivery.transitTime as Record<string, number>;
+  const production = `${handling.minValue}-${handling.maxValue}`;
+  const shipping = `${transit.minValue}-${transit.maxValue}`;
+
+  // 150 mm → "15 cm": şemanın mm değeri sayfanın bastığı etiketle aynı ölçü.
+  assert.equal(`${Number(height.value) / 10} cm`, FIGURINE_HEIGHT_LABEL);
+
+  for (const [surface, html] of [
+    ["/figur", renderFigurBody()],
+    ["/create", renderCreateFactsBand()],
+  ] as Array<[string, string]>) {
+    assert.ok(
+      html.includes(schemaLabel),
+      `${surface}: şemanın fiyatı (${schemaLabel}) sayfada görünmüyor`
+    );
+    assert.ok(
+      html.includes(FIGURINE_HEIGHT_LABEL),
+      `${surface}: şemanın ölçüsü sayfada görünmüyor`
+    );
+    assert.ok(
+      html.includes(production),
+      `${surface}: şemanın üretim süresi (${production}) sayfada görünmüyor`
+    );
+    assert.ok(
+      html.includes(shipping),
+      `${surface}: şemanın kargo süresi (${shipping}) sayfada görünmüyor`
+    );
+  }
+
+  // Ürün adı ve açıklaması da sözlükten gelir, şemaya elle yazılmaz.
+  assert.equal(node.name, tr["create.product.title"]);
+  assert.ok(
+    String(node.description).includes(tr["create.product.spec"]),
+    "açıklama sayfanın ürün künyesinden türemiyor"
+  );
+  // Sabit sayfanın da, şemanın da kaynağı: ikisi ayrı yazılsa bir gün ayrışır.
+  assert.equal(handling.maxValue, FIGURINE_LEAD_DAYS.productionMax);
+  assert.equal(transit.maxValue, FIGURINE_LEAD_DAYS.transitMax);
+});
+
+test("figürin şeması ÜÇ sayfada da AYNI @id ile yayımlanıyor", () => {
+  // Üç farklı `@id` üç ayrı ürün demek olurdu; aynı `@id` tek ürünün üç
+  // yüzeyi. `/create` kapısı V1'in dal kapısıyla AYNI: liste fiyatı olmayan
+  // dalda şema da yayımlanmaz, yoksa şema sayfanın beyanını yalanlar.
+  const expected = `${SEO_APP_URL}/figur#figurine`;
+  assert.equal(buildFigurineProductJsonLd(tr, SEO_APP_URL, SEO_NOW)["@id"], expected);
+
+  const figur = fs.readFileSync(path.resolve("src/app/figur/page.tsx"), "utf8");
+  const nasil = fs.readFileSync(path.resolve("src/app/nasil-calisir/page.tsx"), "utf8");
+  const create = stripComments(
+    fs.readFileSync(path.resolve("src/app/create/page.tsx"), "utf8")
+  );
+  for (const [name, source] of [
+    ["/figur", figur],
+    ["/nasil-calisir", nasil],
+    ["/create", create],
+  ] as Array<[string, string]>) {
+    assert.match(
+      source,
+      /buildFigurineProductJsonLd\(/,
+      `${name}: figürin şemasını yayınlamıyor`
+    );
+    assert.match(source, /<JsonLd\b/, `${name}: JSON-LD yayıcısını çizmiyor`);
+  }
+  const gate = create.match(/const\s+(\w+)\s*=\s*createUrlSellsFixedPriceFigure\(/);
+  assert.ok(gate, "/create dalı sormuyor");
+  assert.match(
+    create,
+    new RegExp(`${gate[1]}\\s*&&[\\s\\S]{0,400}buildFigurineProductJsonLd`),
+    "/create figürin şemasını dal kapısının ARKASINDA yayınlamıyor"
+  );
+});
+
+test("/figur SSS şeması sayfadaki soru-cevapların AYNISI", () => {
+  // MUTASYON SINAVI: şemaya sayfada OLMAYAN bir cevap ekle → bu iddia KIRMIZI.
+  // Şema sözlükten TÜRETİLİR (`figurineFaqItems`), elle kopyalanmaz: iki kopya
+  // bir gün ayrışır ve Google'ın gördüğü cevap sayfadakinden farklı olur.
+  const d = pickFigurunicaDict(tr);
+  const node = buildFaqPageJsonLd({
+    url: `${SEO_APP_URL}/figur`,
+    name: d["landing.faq.title"],
+    items: figurineFaqItems(d),
+  });
+  assert.ok(node, "/figur SSS şeması üretilmiyor");
+  const text = visibleText(renderFigurBody());
+  const entities = node.mainEntity as Array<Record<string, unknown>>;
+  assert.equal(entities.length, 8, "sekiz soru-cevap bekleniyor");
+  for (const entity of entities) {
+    const q = String(entity.name);
+    const a = String((entity.acceptedAnswer as Record<string, unknown>).text);
+    assert.ok(text.includes(q), `soru sayfada yok: ${q}`);
+    assert.ok(text.includes(a), `cevap sayfada yok: ${q}`);
+  }
+  // Ekrandaki liste de AYNI işlevden gelir (ikinci bir dizi değil).
+  const faq = fs.readFileSync(path.resolve("src/components/figurunica/faq.tsx"), "utf8");
+  assert.match(faq, /figurineFaqItems\(/, "ekran SSS listesi paylaşılan kaynaktan gelmiyor");
+  const page = fs.readFileSync(path.resolve("src/app/figur/page.tsx"), "utf8");
+  assert.match(page, /buildFaqPageJsonLd\(/, "/figur SSS şemasını yayınlamıyor");
+});
+
+test("/3d-baski SSS ve adım şemaları sayfanın KENDİ gövdesinden türüyor", () => {
+  const text = visibleText(renderLanding());
+  const faqNode = buildFaqPageJsonLd({
+    url: `${SEO_APP_URL}/3d-baski`,
+    name: LANDING_FAQ_TITLE,
+    items: landingFaq(SEED_SNAPSHOT),
+  });
+  assert.ok(faqNode, "/3d-baski SSS şeması üretilmiyor");
+  const entities = faqNode.mainEntity as Array<Record<string, unknown>>;
+  assert.equal(entities.length, landingFaq(SEED_SNAPSHOT).length);
+  for (const entity of entities) {
+    const q = String(entity.name);
+    const a = String((entity.acceptedAnswer as Record<string, unknown>).text);
+    assert.ok(text.includes(q), `soru sayfada yok: ${q}`);
+    assert.ok(text.includes(a), `cevap sayfada yok: ${q}`);
+  }
+
+  const howTo = buildHowToJsonLd({
+    url: `${SEO_APP_URL}/3d-baski`,
+    name: LANDING_STEPS_TITLE,
+    steps: landingSteps(SEED_SNAPSHOT).map((s) => ({ name: s.title, text: s.body })),
+  });
+  assert.ok(howTo, "/3d-baski adım şeması üretilmiyor");
+  assert.ok(text.includes(LANDING_STEPS_TITLE), "adım bölümünün başlığı sayfada yok");
+  for (const step of howTo.step as Array<Record<string, unknown>>) {
+    assert.ok(text.includes(String(step.name)), `adım başlığı sayfada yok: ${step.name}`);
+    assert.ok(text.includes(String(step.text)), `adım gövdesi sayfada yok: ${step.name}`);
+  }
+
+  // Sayfa iki şemayı da yayınlıyor; HowTo bayrakla KAPILI (gerekçe page.tsx'te:
+  // motor kapalıyken "dosyanı yükle, ödemeni yap" diyen bir yol haritası
+  // yayınlamak, yükleyicinin reddettiği bir şeyi vaat etmek olur).
+  const page = stripComments(fs.readFileSync(path.resolve("src/app/3d-baski/page.tsx"), "utf8"));
+  assert.match(page, /buildFaqPageJsonLd\(/, "/3d-baski SSS şemasını yayınlamıyor");
+  assert.match(
+    page,
+    /\{\s*flagEnabled\s*&&\s*howTo\s*\?\s*<JsonLd data=\{howTo\}/,
+    "/3d-baski adım şeması bayrak kapısının arkasında değil"
+  );
+  // SSS bayrağa bakmıyor (bölüm iki durumda da ekranda).
+  assert.match(
+    page,
+    /\{\s*faq\s*\?\s*<JsonLd data=\{faq\}/,
+    "/3d-baski SSS şeması bayrakla kapatılmış — bölüm ekranda duruyor"
+  );
+});
+
+test("/nasil-calisir adım şeması render edilen LİSTEYLE birebir", () => {
+  // Altı adım sayfaya ELLE yazılıydı; şemaya kopyalamak iki metin demekti.
+  // Artık tek kaynak `HOW_IT_WORKS_STEPS`: hem `<ol>` hem şema oradan.
+  // MUTASYON SINAVI: şemaya sayfada olmayan bir adım ekle → KIRMIZI.
+  for (const locale of ["tr", "en"] as const) {
+    const section = HOW_IT_WORKS_STEPS[locale];
+    const node = buildHowToJsonLd({
+      url: `${SEO_APP_URL}/nasil-calisir`,
+      name: section.title,
+      steps: section.steps.map((s) => ({ name: s.name, text: stepBodyText(s) })),
+    });
+    assert.ok(node, `${locale}: adım şeması üretilmiyor`);
+    const html = inLocale(createElement(HowItWorksSteps, { steps: section.steps }));
+    const text = visibleText(html);
+    const list = node.step as Array<Record<string, unknown>>;
+    assert.equal(list.length, 6, `${locale}: altı adım bekleniyor`);
+    assert.deepEqual(
+      list.map((s) => s.position),
+      [1, 2, 3, 4, 5, 6],
+      `${locale}: adımlar sıralı değil`
+    );
+    for (const step of list) {
+      assert.ok(
+        text.includes(String(step.name)),
+        `${locale}: adım başlığı listede yok: ${step.name}`
+      );
+      assert.ok(
+        text.includes(String(step.text)),
+        `${locale}: adım gövdesi listede yok: ${step.name}`
+      );
+    }
+    // Kalın yazılan rakamlar ("5-7 iş günü") şemanın metninde DURUYOR.
+    assert.ok(html.includes("<strong>"), `${locale}: liste kalın parçaları kaybetti`);
+  }
+
+  const page = stripComments(
+    fs.readFileSync(path.resolve("src/app/nasil-calisir/page.tsx"), "utf8")
+  );
+  assert.match(page, /<HowItWorksSteps/, "/nasil-calisir listeyi paylaşılan kaynaktan çizmiyor");
+  assert.match(page, /buildHowToJsonLd\(/, "/nasil-calisir adım şemasını yayınlamıyor");
+  // Adım metinleri sayfada İKİNCİ kez yazılı olmasın.
+  assert.doesNotMatch(
+    page,
+    /Fotoğrafı yükle/,
+    "adım metni sayfaya elle yazılmış — şemayla bir gün ayrışır"
+  );
 });

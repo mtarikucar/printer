@@ -103,8 +103,26 @@ function materialFacts(material: SnapshotMaterial): Array<{ label: string; value
 
 // ─── Sıralı adımlar ─────────────────────────────────────────────────────────
 
-/** Dört adım GERÇEKTEN sıralıdır; numaralandırma bu yüzden bilgi taşır. */
-function landingSteps(snapshot: PricingSnapshot): Array<{ title: string; body: string }> {
+/**
+ * Adım bölümünün GÖRÜNEN başlığı.
+ *
+ * Dışa açık, çünkü `page.tsx` aynı dizeyi `HowTo.name` olarak yayınlıyor:
+ * şemadaki ad ekrandaki başlığın birebir aynısı olmak zorunda.
+ */
+export const LANDING_STEPS_TITLE = "Dosyadan üretime dört adım";
+
+/** SSS bölümünün GÖRÜNEN başlığı — `FAQPage.name` aynı dizeyi taşır. */
+export const LANDING_FAQ_TITLE = "Teklif almadan önce";
+
+/**
+ * Dört adım GERÇEKTEN sıralıdır; numaralandırma bu yüzden bilgi taşır.
+ *
+ * Dışa açık, çünkü `page.tsx` AYNI diziden `HowTo` şemasını üretiyor — iki
+ * kopya metin bir gün ayrışır ve şema sayfada olmayan bir adım anlatır.
+ */
+export function landingSteps(
+  snapshot: PricingSnapshot
+): Array<{ title: string; body: string }> {
   const { maxPartsPerQuote, maxFileBytes } = snapshot.settings;
   return [
     {
@@ -423,7 +441,7 @@ function Steps({ snapshot }: { snapshot: PricingSnapshot }): JSX.Element {
     <section className="border-t border-border-default">
       <div className="mx-auto max-w-5xl px-5 py-14 md:py-20">
         <Eyebrow>Nasıl çalışır</Eyebrow>
-        <SectionTitle>Dosyadan üretime dört adım</SectionTitle>
+        <SectionTitle>{LANDING_STEPS_TITLE}</SectionTitle>
         <ol className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
           {landingSteps(snapshot).map((step, index) => (
             <li key={step.title} className="border-t-2 border-ink pt-4">
@@ -473,7 +491,7 @@ function Faq({ snapshot }: { snapshot: PricingSnapshot }): JSX.Element {
     <section className="border-t border-border-default">
       <div className="mx-auto max-w-3xl px-5 py-14 md:py-20">
         <Eyebrow>Sık sorulanlar</Eyebrow>
-        <SectionTitle>Teklif almadan önce</SectionTitle>
+        <SectionTitle>{LANDING_FAQ_TITLE}</SectionTitle>
         <div className="mt-8 divide-y divide-bg-subtle border-y border-bg-subtle">
           {landingFaq(snapshot).map((entry) => (
             <details key={entry.q} className="group py-4">

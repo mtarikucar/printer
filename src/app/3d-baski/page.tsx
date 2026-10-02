@@ -3,13 +3,23 @@ import { SiteHeader } from "@/components/site-header";
 import { LastUpdated } from "@/components/last-updated";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { buildPrintServiceJsonLd } from "@/lib/seo/service";
+import { buildFaqPageJsonLd } from "@/lib/seo/faq";
+import { buildHowToJsonLd } from "@/lib/seo/howto";
+import { getAppUrl } from "@/lib/seo/organization";
 import { isFlagEnabled } from "@/lib/services/flags";
 import { isAdminSession } from "@/lib/services/quote-access";
 import { quoteAcceptedFormats } from "@/lib/services/quote-present";
 import { loadLandingSnapshot } from "./catalog";
 import { LandingUploader } from "./landing-uploader";
 import { anchorSentence, formatAnchorPrice, technologyAnchorKurus } from "./pricing-anchors";
-import { ComingSoonNote, PrintServiceLanding } from "./sections";
+import {
+  ComingSoonNote,
+  LANDING_FAQ_TITLE,
+  LANDING_STEPS_TITLE,
+  PrintServiceLanding,
+  landingFaq,
+  landingSteps,
+} from "./sections";
 
 /**
  * `/3d-baski` — anlık teklif motorunun halka açık yüzü.
@@ -69,6 +79,25 @@ export default async function PrintServicePage() {
   // göremez.
   const acceptedFormats = quoteAcceptedFormats(stepFlagEnabled || adminSession);
 
+  const appUrl = getAppUrl();
+  const url = `${appUrl}/3d-baski`;
+  // SSS ve adım şemaları sayfanın gövdesini çizen AYNI işlevlerden türer
+  // (`landingFaq` / `landingSteps`), elle kopyalanmaz: şemadaki metin ekrandaki
+  // metnin birebir aynısı olmak zorunda.
+  const faq = buildFaqPageJsonLd({
+    url,
+    name: LANDING_FAQ_TITLE,
+    items: landingFaq(snapshot),
+  });
+  const howTo = buildHowToJsonLd({
+    url,
+    name: LANDING_STEPS_TITLE,
+    steps: landingSteps(snapshot).map((step) => ({
+      name: step.title,
+      text: step.body,
+    })),
+  });
+
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
@@ -76,6 +105,15 @@ export default async function PrintServicePage() {
           yayımlanır: "Yakında" diyen bir sayfaya Offer iliştirmek, arama
           motoruna satın alınabilir bir hizmet olduğunu söylemek olurdu. */}
       {flagEnabled ? <JsonLd data={buildPrintServiceJsonLd(snapshot)} /> : null}
+      {/* HowTo da AYNI kapının arkasında: dört adımın sonu "ödemeni yap,
+          teklif siparişe dönüşür" diyor ve motor kapalıyken o yolun sonunda
+          yükleyici yok. Kapalı bir bayrağın özelliğini vaat etmemek bu
+          sevkiyattan önceki turun dersi (`71fb5c6`). */}
+      {flagEnabled && howTo ? <JsonLd data={howTo} /> : null}
+      {/* SSS bayrağa BAKMAZ: bölüm iki durumda da ekranda duruyor ("bayrak bir
+          ÜRÜN kapısıdır, içerik kapısı değil") ve işaretleme satın alınabilir
+          bir şey beyan etmiyor — yalnız görünen soru-cevabı adlandırıyor. */}
+      {faq ? <JsonLd data={faq} /> : null}
       <PrintServiceLanding
         snapshot={snapshot}
         uploader={

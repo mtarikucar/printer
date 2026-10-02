@@ -3,6 +3,8 @@ import { CreateFactsBand } from "@/components/create/product-facts";
 import { createUrlSellsFixedPriceFigure } from "@/lib/create/design-templates";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { getLocale } from "@/lib/i18n/get-locale";
+import { JsonLd } from "@/lib/seo/jsonld";
+import { buildFigurineProductJsonLd } from "@/lib/seo/figurine";
 import { CreateFlowShell, CreateRouter } from "./create-client";
 
 /**
@@ -60,11 +62,19 @@ export default async function CreatePage({
         <CreateRouter />
       </Suspense>
       {sellsFixedPriceFigure && (
-        <CreateFactsBand
-          title={d["create.product.title"]}
-          spec={d["create.product.spec"]}
-          included={d["create.product.included"]}
-        />
+        <>
+          {/* Yapısal veri bandın AYNI kapısının arkasında: band susan bir
+              URL'de ekranda ₺ rakamı yok, yani `Offer` yayınlamak sayfada
+              görünmeyen bir fiyat beyan etmek olurdu ("structured data
+              mismatch"). `@id` `/figur` ve `/nasil-calisir` ile AYNI — tek
+              ürünün üç yüzeyi, üç ayrı ürün değil. */}
+          <JsonLd data={buildFigurineProductJsonLd(d)} />
+          <CreateFactsBand
+            title={d["create.product.title"]}
+            spec={d["create.product.spec"]}
+            included={d["create.product.included"]}
+          />
+        </>
       )}
     </>
   );

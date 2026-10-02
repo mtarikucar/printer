@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FigurunicaDict } from "./dict";
+import { figurineFaqItems } from "./faq-items";
 import styles from "./figurunica.module.css";
 
 const s = (key: string) => (styles as Record<string, string>)[key] ?? "";
@@ -11,16 +12,9 @@ const cx = (...names: Array<string | false | null | undefined>) =>
 export function FaqSection({ d }: { d: FigurunicaDict }) {
   const [open, setOpen] = useState<number | null>(0);
 
-  const items = [
-    { q: d["landing.faq.q1"], a: d["landing.faq.a1"] },
-    { q: d["landing.faq.q2"], a: d["landing.faq.a2"] },
-    { q: d["landing.faq.q3"], a: d["landing.faq.a3"] },
-    { q: d["landing.faq.q4"], a: d["landing.faq.a4"] },
-    { q: d["landing.faq.q5"], a: d["landing.faq.a5"] },
-    { q: d["landing.faq.q6"], a: d["landing.faq.a6"] },
-    { q: d["landing.faq.q7"], a: d["landing.faq.a7"] },
-    { q: d["landing.faq.q8"], a: d["landing.faq.a8"] },
-  ];
+  // Liste `faq-items.ts`ten gelir: sayfanın yayınladığı `FAQPage` JSON-LD'si
+  // AYNI diziyi okuyor, yani şemadaki cevap ekrandaki cevabın birebir aynısı.
+  const items = figurineFaqItems(d);
 
   return (
     <section className={s("faq-section")} id="faq">

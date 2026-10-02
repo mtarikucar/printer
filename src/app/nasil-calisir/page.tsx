@@ -8,9 +8,14 @@ import {
   CREATIVE_LAB_PRICES_KURUS,
 } from "@/lib/config/prices";
 import { SIZE_PRESETS, formatCm } from "@/lib/config/sizes";
-import { layerHeightLabel } from "@/lib/config/product-facts";
+import { FIGURINE_LEAD_DAYS, layerHeightLabel } from "@/lib/config/product-facts";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { LastUpdated } from "@/components/last-updated";
+import { JsonLd } from "@/lib/seo/jsonld";
+import { buildFigurineProductJsonLd } from "@/lib/seo/figurine";
+import { buildHowToJsonLd } from "@/lib/seo/howto";
+import { getAppUrl } from "@/lib/seo/organization";
+import { HOW_IT_WORKS_STEPS, HowItWorksSteps, stepBodyText } from "./steps";
 
 // Every number on this page is DERIVED, never typed. This is the page an AI
 // assistant reads when someone asks it "how does Figurunica work?", so a stale
@@ -22,6 +27,9 @@ const PRICE_TR = (FIGURINE_PRICE_KURUS / 100).toLocaleString("tr-TR");
 const PRICE_EN = (FIGURINE_PRICE_KURUS / 100).toLocaleString("en-US");
 const tr = (kurus: number) => (kurus / 100).toLocaleString("tr-TR");
 const en = (kurus: number) => (kurus / 100).toLocaleString("en-US");
+/** Üretim ve kargo süresi: tek sabit (`Offer.shippingDetails` aynı yerden okur). */
+const PRODUCTION_DAYS = `${FIGURINE_LEAD_DAYS.productionMin}-${FIGURINE_LEAD_DAYS.productionMax}`;
+const TRANSIT_DAYS = `${FIGURINE_LEAD_DAYS.transitMin}-${FIGURINE_LEAD_DAYS.transitMax}`;
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -29,8 +37,8 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: isTr ? "Nasıl Çalışır — Figurunica" : "How It Works — Figurunica",
     description: isTr
-      ? `Fotoğrafından kişiye özel figür: ${HEIGHT}, SLA reçine baskı, profesyonel el boyamalı, ${PRICE_TR} TL (KDV dahil), Türkiye içi kargo ücretsiz. Üretim 5-7, kargo 2-3 iş günü.`
-      : `A custom figurine from your photo: ${HEIGHT}, SLA resin printed, professionally hand-painted, ${PRICE_EN} TL (VAT included), free shipping within Türkiye. 5-7 business days to produce, 2-3 to ship.`,
+      ? `Fotoğrafından kişiye özel figür: ${HEIGHT}, SLA reçine baskı, profesyonel el boyamalı, ${PRICE_TR} TL (KDV dahil), Türkiye içi kargo ücretsiz. Üretim ${PRODUCTION_DAYS}, kargo ${TRANSIT_DAYS} iş günü.`
+      : `A custom figurine from your photo: ${HEIGHT}, SLA resin printed, professionally hand-painted, ${PRICE_EN} TL (VAT included), free shipping within Türkiye. ${PRODUCTION_DAYS} business days to produce, ${TRANSIT_DAYS} to ship.`,
   };
 }
 
@@ -41,11 +49,30 @@ export default async function HowItWorksPage() {
   // anahtarı yayınlıyor, yani baskı çözünürlüğü değişince iki sayfa birlikte
   // değişir. Rakibin "14K reçine" yazdığı yerde bizim niteliksel cümlemiz
   // alıntılanamıyordu; rakam bir dosya ötede duruyordu.
-  const LAYER = layerHeightLabel(getDictionary(locale));
+  const d = getDictionary(locale);
+  const LAYER = layerHeightLabel(d);
+  // Adım listesi ve `HowTo` şeması AYNI kaynaktan: şemadaki metin ekrandaki
+  // metnin birebir aynısı olmak zorunda (bkz. `steps.tsx` başlığı).
+  const steps = HOW_IT_WORKS_STEPS[locale];
+  const appUrl = getAppUrl();
+  const howTo = buildHowToJsonLd({
+    url: `${appUrl}/nasil-calisir`,
+    name: steps.title,
+    steps: steps.steps.map((step) => ({
+      name: step.name,
+      text: stepBodyText(step),
+    })),
+  });
 
   return (
     <main className="min-h-screen bg-bg-base">
       <SiteHeader />
+      {/* Figürün makine okunur künyesi. `@id` üç sayfada AYNI (`/figur`,
+          `/nasil-calisir`, `/create`) — tek ürünün üç yüzeyi. */}
+      <JsonLd data={buildFigurineProductJsonLd(d, appUrl)} />
+      {/* Adımsız bir `HowTo` geçersiz markup olurdu; builder o durumda `null`
+          döner ve hiç `<script>` basılmaz. */}
+      {howTo ? <JsonLd data={howTo} /> : null}
 
       {/* Hero */}
       <section className="relative overflow-hidden border-b border-border-default">
@@ -97,36 +124,8 @@ export default async function HowItWorksPage() {
                 sipariş ekranında görünür.
               </p>
 
-              <h2>Sipariş adım adım</h2>
-              <ol>
-                <li>
-                  <strong>Fotoğrafı yükle.</strong> Yüzün net göründüğü tek bir fotoğraf yeterlidir.
-                  Gerçekçi desende birden fazla fotoğraf (farklı açılar ya da bir çift) yükleyebilirsin.
-                </li>
-                <li>
-                  <strong>Tasarım desenini seç.</strong> Gerçekçi, Masalsı Animasyon, Anime, Chibi,
-                  Vinil Figür ya da Kil Animasyon.
-                </li>
-                <li>
-                  <strong>Önizlemeyi onayla.</strong> Yapay zekâ destekli hattımız fotoğraftan iki stilize
-                  görsel üretir; hangisinin basılacağına sen karar verirsin. Beğenmezsen düzeltiriz —
-                  sen onaylamadan üretim başlamaz.
-                </li>
-                <li>
-                  <strong>Ödemeni yap.</strong> Kredi/banka kartı (PayTR altyapısı, 3D Secure) ya da
-                  havale/EFT. Havalede üretim, ödemenin hesaba geçtiği teyit edildikten sonra başlar.
-                </li>
-                <li>
-                  <strong>3D model + baskı.</strong> Ekibimiz onayladığın görselden baskıya hazır 3D modeli
-                  hazırlar; üretici partnerimiz SLA reçineyle basar, destekleri temizler ve kalite
-                  kontrolünden geçirir. Bu aşama önizleme onayından sonra <strong>5-7 iş günü</strong> sürer.
-                </li>
-                <li>
-                  <strong>El boyama ve kargo.</strong> Figür boyacı partnerimize geçer, elde boyanır ve
-                  Yurtiçi Kargo&apos;ya verilir; teslimat <strong>2-3 iş günü</strong> sürer. Kapıdan kapıya
-                  toplam süre <strong>7-10 iş günü</strong>dür.
-                </li>
-              </ol>
+              <h2>{steps.title}</h2>
+              <HowItWorksSteps steps={steps.steps} />
               <p>
                 Siparişinin hangi aşamada olduğunu hesabından ve her adımda gönderdiğimiz e-postalardan
                 takip edersin; kargoya verildiğinde takip numarası da e-postayla gelir. Kutunun içindeki
@@ -220,36 +219,8 @@ export default async function HowItWorksPage() {
                 shown on the order screen before you pay.
               </p>
 
-              <h2>An order, step by step</h2>
-              <ol>
-                <li>
-                  <strong>Upload the photo.</strong> One photo with a clearly visible face is enough. The
-                  Realistic template also accepts several photos (different angles, or a couple).
-                </li>
-                <li>
-                  <strong>Pick a design template.</strong> Realistic, Storybook, Anime, Chibi, Vinyl, or Claymation.
-                </li>
-                <li>
-                  <strong>Approve the preview.</strong> Our AI-assisted pipeline turns the photo into two
-                  stylized images; you choose which one gets printed. Not happy? We revise it — nothing is
-                  produced until you approve.
-                </li>
-                <li>
-                  <strong>Pay.</strong> Card (via PayTR, 3D Secure) or bank transfer. With a bank transfer,
-                  production starts once we confirm the money has landed.
-                </li>
-                <li>
-                  <strong>3D model + printing.</strong> Our team builds the print-ready 3D model from the
-                  image you approved; our manufacturing partner prints it in SLA resin, removes the
-                  supports, and quality-checks it. This takes <strong>5-7 business days</strong> after
-                  preview approval.
-                </li>
-                <li>
-                  <strong>Hand painting and shipping.</strong> The figurine goes to our painter partner, is
-                  painted by hand, and is handed to Yurtiçi Kargo; delivery takes{" "}
-                  <strong>2-3 business days</strong>. Door to door that is <strong>7-10 business days</strong>.
-                </li>
-              </ol>
+              <h2>{steps.title}</h2>
+              <HowItWorksSteps steps={steps.steps} />
               <p>
                 You follow every stage from your account and from the emails we send at each step; the
                 tracking number arrives by email once it ships. Scanning the QR code in the box opens a

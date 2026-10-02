@@ -22,12 +22,14 @@ import { startQuotePartAnalysisWorker } from "../src/lib/queue/workers/quote-par
 import { startQuoteOrderFilesWorker } from "../src/lib/queue/workers/quote-order-files.worker";
 import { startQuoteMaintenanceWorker } from "../src/lib/queue/workers/quote-maintenance.worker";
 import { startFxRefreshWorker } from "../src/lib/queue/workers/fx-refresh.worker";
+import { startSeoIndexNowWorker } from "../src/lib/queue/workers/seo-indexnow.worker";
 import {
   getFxRefreshQueue,
   getQuoteAnalysisQueue,
   getQuoteMaintenanceQueue,
   getQuoteOrderFilesQueue,
 } from "../src/lib/queue/quote-queues";
+import { getSeoIndexNowQueue } from "../src/lib/queue/seo-queues";
 import {
   getPreviewCleanupQueue,
   getScoringEvaluationsCleanupQueue,
@@ -116,6 +118,12 @@ const quoteMaintenanceWorker = startQuoteMaintenanceWorker();
 // kilit 400 mektup için var, bir HTTP çağrısı için değil. Bayrak kapalıysa
 // (quote_fx_display_enabled) tur ilk satırda çıkar.
 const fxRefreshWorker = startFxRefreshWorker();
+// Arama motoruna haber verme: "son güncelleme" tarihi değişen statik sayfaları
+// IndexNow'a bildirir. ChatGPT'nin kaynak araması Bing indeksinde çalışıyor ve
+// bu yol o indekse girmenin tek etkin aracı; 2026-10-02'ye kadar YALNIZ pazar
+// yeri ürün onayından çağrılıyordu, yani pazarlama ve özel gün sayfaları hiç
+// duyurulmuyordu.
+const seoIndexNowWorker = startSeoIndexNowWorker();
 
 // Schedule repeatable cleanup job (every hour)
 getPreviewCleanupQueue().upsertJobScheduler(
@@ -234,6 +242,27 @@ getFxRefreshQueue().upsertJobScheduler(
   { name: "tick" }
 );
 
+// IndexNow duyurusu: SAATTE BİR.
+//
+// Zamanlama ÖLÇÜLDÜ (`node_modules/bullmq/.../addJobScheduler-11.js`,
+// `getJobSchedulerEveryNextMillis`): zamanlayıcı Redis'e İLK kez yazılırken
+// `nextMillis = now`, yani ilk iş hemen doğar. Sonraki dağıtımlarda (zamanlayıcı
+// zaten kayıtlı) `prevMillis + every` hesaplanıyor, yani tur sıradaki saat
+// dilimini bekler. Pratik sonuç: duyurulması gereken olay bir dağıtımdır ve
+// değişen sayfa dağıtımdan EN ÇOK BİR SAAT sonra duyurulur — bir arama motoru
+// için fazlasıyla hızlı, ve tek bir ağ çağrısını dakikalık bir tura bağlamanın
+// bedeline değmez.
+//
+// Saatlik tekrar aynı zamanda bir AĞ: ağ hatasıyla kaçan duyuru bir sonraki
+// turda yakalanır, çünkü hafıza yalnız BAŞARILI gönderimden sonra yazılıyor.
+// Değişen sayfa yoksa tur ağa HİÇ çıkmaz — fazla tetiğin bedeli bir Redis
+// okumasıdır.
+getSeoIndexNowQueue().upsertJobScheduler(
+  "seo-indexnow-hourly",
+  { every: 3_600_000 },
+  { name: "tick" }
+);
+
 console.log("All workers started:");
 console.log("  - email (concurrency: 5)");
 console.log("  - preview-generation (concurrency: 3)");
@@ -257,6 +286,7 @@ console.log("  - quote-part-analysis (concurrency: 1, python; recovery: every 5m
 console.log("  - quote-order-files (concurrency: 2; recovery: every 5m)");
 console.log("  - quote-maintenance (concurrency: 1; repeatable: every 1h)");
 console.log("  - fx-refresh (concurrency: 1, tcmb; repeatable: every 6h)");
+console.log("  - seo-indexnow (concurrency: 1, bing; repeatable: every 1h)");
 
 async function shutdown() {
   console.log("Shutting down workers...");
@@ -283,6 +313,7 @@ async function shutdown() {
     quoteOrderFilesWorker.close(),
     quoteMaintenanceWorker.close(),
     fxRefreshWorker.close(),
+    seoIndexNowWorker.close(),
   ]);
   console.log("Workers shut down gracefully");
   process.exit(0);

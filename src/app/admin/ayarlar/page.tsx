@@ -2,8 +2,10 @@ export const dynamic = "force-dynamic";
 
 import { killAllEngaged } from "@/lib/config/flags";
 import { getAllFlags } from "@/lib/services/flags";
+import { loadIndexNowPageStatus } from "@/lib/services/indexnow-pages";
 import { FlagsClient } from "./flags-client";
 import { FxClient } from "./fx-client";
+import { IndexNowCard } from "./indexnow-client";
 
 /**
  * `/admin/ayarlar` — özellik bayrakları.
@@ -16,6 +18,11 @@ import { FxClient } from "./fx-client";
  */
 export default async function AdminSettingsPage() {
   const flags = await getAllFlags();
+  // IndexNow durumu SUNUCUDA okunuyor: `INDEXNOW_KEY`in yokluğu ilk HTML'de
+  // görünmek zorunda (mount'ta okunsaydı ekran bir an "yükleniyor" der ve uyarı
+  // hiç görünmeden düğmeye basılabilirdi). Okuma patlarsa kart yerinde kalır ve
+  // "hafıza okunamadı" durumunu gösterir — bayrak ekranını götürmez.
+  const indexNow = await loadIndexNowPageStatus().catch(() => null);
 
   return (
     <div className="p-4 sm:p-8">
@@ -36,6 +43,14 @@ export default async function AdminSettingsPage() {
         bilinçli: kur okuması patlarsa bayrak ekranı ayakta kalır.
       */}
       <FxClient />
+
+      {/*
+        IndexNow kartı: bir bayrak bir KARAR, kur bir DURUM, bu ise bir
+        ARAÇ — "arama motoruna haber ver" düğmesi. Üçünü aynı listeye koymak
+        açılıp kapanan bir anahtarla elle çalıştırılan bir turu karıştırmak
+        olurdu. Durum okunamazsa kart hiç çizilmez; bayrak ekranı ayakta kalır.
+      */}
+      {indexNow && <IndexNowCard status={indexNow} />}
     </div>
   );
 }

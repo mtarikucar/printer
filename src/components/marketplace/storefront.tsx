@@ -10,6 +10,7 @@ import { CategoryRibbon } from "./category-ribbon";
 import { ProductRow } from "./product-row";
 import { RecentlyViewed } from "./recently-viewed";
 import { CustomStrip } from "./custom-strip";
+import { OccasionLinks } from "@/components/occasion-links";
 
 // 81 ilin geometrisi ~47 KB (~20 KB gz). Ayrı chunk'a alınır ki ağ verisi
 // olmayan (bölümün hiç render edilmediği) ziyaretçi bunu indirmesin. SSR AÇIK
@@ -105,6 +106,13 @@ export function StorefrontHome({
       {networkMap && networkMap.partners.length > 0 && (
         <NetworkMapSection data={networkMap} />
       )}
+      {/* ALTI ÖZEL GÜN SAYFASINA İÇ BAĞLANTI. Yalnız sitemap'ten erişilen
+          sayfa zayıftır: keşfedilse de sitenin kendi ağırlığından pay almaz.
+          Bağlantı sitemap önceliği 1.0 olan sayfadan veriliyor. Blok vitrinden
+          BAĞIMSIZ — ürün listesi boş olsa da çizilir, çünkü metni sözlükten
+          geliyor (`landing.useCases.*`, V3'e kadar hiçbir yerde render
+          edilmiyordu). */}
+      <OccasionLinks d={d} />
       <CustomStrip />
     </>
   );

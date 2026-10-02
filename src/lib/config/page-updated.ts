@@ -48,6 +48,17 @@ export const PAGE_UPDATED_AT: Readonly<Record<string, string>> = {
   "/3d-baski": "2026-10-02",
   "/urunler": "2026-10-02",
   "/shop": "2026-10-02",
+  // V3'ün açtığı altı özel gün sayfası (`/hediye/<slug>`). Yollar
+  // `lib/config/occasions.ts`teki slug'larla AYNI yazımda; sitemap o kayıttan
+  // türüyor ve `lastModified`ı buradan okuyor, yani eksik bir satır
+  // `test-sitemap.ts`i kırmızıya çevirir. Tarih yine ELLE yazılır: "içerik
+  // anlamlı biçimde değişti mi" sorusunu ne derleyici ne git mtime yanıtlar.
+  "/hediye/dogum-gunu": "2026-10-02",
+  "/hediye/sevgiliye": "2026-10-02",
+  "/hediye/evcil-hayvan": "2026-10-02",
+  "/hediye/oyun-karakteri": "2026-10-02",
+  "/hediye/aile-hatirasi": "2026-10-02",
+  "/hediye/mezuniyet": "2026-10-02",
   // Görünür "Son güncelleme" satırı OLMAYAN, ama sitemap'te duran rotalar.
   // `/create`in gövdesi de V1'de değişti (gerçekler bandı).
   "/create": "2026-10-02",

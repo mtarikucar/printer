@@ -4,6 +4,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { SiteHeader } from "@/components/site-header";
 import { FigurunicaLanding } from "@/components/figurunica/landing";
 import { pickFigurunicaDict } from "@/components/figurunica/dict";
+import { OccasionLinks } from "@/components/occasion-links";
 import { figurineFaqItems } from "@/components/figurunica/faq-items";
 import { LastUpdated } from "@/components/last-updated";
 import { JsonLd } from "@/lib/seo/jsonld";
@@ -40,6 +41,13 @@ export default async function FigurinePage() {
       <JsonLd data={buildFigurineProductJsonLd(d, appUrl)} />
       {faq ? <JsonLd data={faq} /> : null}
       <FigurunicaLanding d={figurunica} />
+      {/* ALTI ÖZEL GÜN SAYFASINA İÇ BAĞLANTI. Blok `FigurunicaLanding`in
+          DIŞINDA duruyor çünkü metni (`landing.useCases.*`) `FIGURUNICA_KEYS`
+          izin listesinde yok ve bu sayfa sunucu bileşeni: tam sözlüğü doğrudan
+          geçebiliyor, yani on iki anahtar için izin listesini büyütmek
+          gerekmiyor. Aynı blok anasayfada da çiziliyor — yalnız sitemap'ten
+          erişilen sayfa zayıftır. */}
+      <OccasionLinks d={d} />
       <LastUpdated path="/figur" locale={locale} />
     </main>
   );

@@ -3,6 +3,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { products } from "@/lib/db/schema";
 import { pageUpdatedAt } from "@/lib/config/page-updated";
+import { OCCASIONS, occasionPath } from "@/lib/config/occasions";
 
 /**
  * Sitemap of the public, indexable surface: the static routes plus every
@@ -40,6 +41,17 @@ export const STATIC_ROUTES: Array<{
   { path: "/3d-baski/malzemeler", changeFrequency: "monthly", priority: 0.7 },
   { path: "/urunler", changeFrequency: "weekly", priority: 0.7 },
   { path: "/nasil-calisir", changeFrequency: "monthly", priority: 0.7 },
+  // Altı özel gün sayfası. Liste KAYITTAN türüyor (`lib/config/occasions.ts`):
+  // yedinci bir özel gün eklendiğinde buraya elle satır yazılmaz, ve kayıttan
+  // çıkan bir slug sitemap'ten de düşer — iki listenin ayrışması mümkün değil.
+  // `PAGE_UPDATED_AT` her yolu TAŞIMAK ZORUNDA (aşağıdaki `lastModified`
+  // türetmesi oradan okuyor), `scripts/test-sitemap.ts` eksik yolu kırmızıya
+  // çevirir.
+  ...OCCASIONS.map((o) => ({
+    path: occasionPath(o.slug),
+    changeFrequency: "monthly" as const,
+    priority: 0.7,
+  })),
   { path: "/toplu-siparis", changeFrequency: "monthly", priority: 0.6 },
   { path: "/anahtarlik-kutusu", changeFrequency: "monthly", priority: 0.6 },
   { path: "/atolye", changeFrequency: "monthly", priority: 0.5 },
